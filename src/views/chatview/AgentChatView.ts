@@ -269,7 +269,12 @@ function protocolId(prefix: "client" | "conversation"): string {
 }
 
 function titleFromMessage(text: string): string {
-  const firstLine = text.replace(/^\s*#+\s*/, "").split("\n")[0].replace(/\s+/g, " ").trim();
+  // A starter or mention writes [[Note]]; the title reads as plain words.
+  const readable = text.replace(
+    /\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|([^\]]+))?\]\]/g,
+    (_link, target: string, alias?: string) => alias?.trim() || target.split("/").pop()!.replace(/\.md$/i, ""),
+  );
+  const firstLine = readable.replace(/^\s*#+\s*/, "").split("\n")[0].replace(/\s+/g, " ").trim();
   const compact = firstLine.length > 64 ? `${firstLine.slice(0, 61).trimEnd()}…` : firstLine;
   return sanitizeChatTitle(compact) || generateDefaultChatTitle();
 }

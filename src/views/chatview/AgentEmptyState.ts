@@ -23,6 +23,15 @@ const OFFER_ACTIONS = {
   "see-plans": { label: "See plans", testId: "chat.empty.see-plans", tone: "primary" },
 } as const;
 
+/** Appends text whose `backticked` parts are commands, shown as code. */
+function appendWithCode(parent: HTMLElement, text: string): void {
+  text.split("`").forEach((part, index) => {
+    if (!part) return;
+    if (index % 2 === 1) parent.createEl("code", { text: part });
+    else parent.appendText(part);
+  });
+}
+
 const NOTE_ACTIONS = {
   "switch-below": { testId: "chat.empty.switch-below" },
   "back-to-previous": { testId: "chat.empty.back-to-previous" },
@@ -80,7 +89,7 @@ export class AgentEmptyState {
         cls: "systemsculpt-agent-empty-hint",
         attr: { "data-hint": hint.id },
       });
-      line.appendText(`${hint.before} `);
+      appendWithCode(line, `${hint.before} `);
       const detect = line.createEl("button", {
         cls: "systemsculpt-agent-empty-link",
         text: "Detect again",

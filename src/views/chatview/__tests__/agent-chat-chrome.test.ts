@@ -302,8 +302,8 @@ describe("empty states (spec 3.1)", () => {
   it("D2: says how to sign in to an installed agent", () => {
     const empty = presentEmptyState(state({ backend: "systemsculpt", detection: detection(signedOut, signedOut, "systemsculpt") }));
     expect(empty.hints.map((hint) => `${hint.before} Detect again${hint.after}`)).toEqual([
-      "Claude Code is installed but not signed in. Run claude in a terminal and type /login, then Detect again.",
-      "Codex is installed but not signed in. Run codex login in a terminal, then Detect again.",
+      "Claude Code is installed but not signed in. Run `claude` in a terminal and type /login, then Detect again.",
+      "Codex is installed but not signed in. Run `codex login` in a terminal, then Detect again.",
     ]);
   });
 

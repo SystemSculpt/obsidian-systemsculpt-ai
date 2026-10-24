@@ -413,3 +413,13 @@
 .systemsculpt-agent-empty :where(button) {
   pointer-events: auto;
 }
+
+/* View-level banners (spec 4.2): message and its one action share a row. */
+.systemsculpt-agent-workspace > .systemsculpt-agent-banner:not([hidden]) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ss-space-2);
+  width: min(calc(100% - 2 * var(--ss-space-3)), var(--ss-agent-content-width));
+}

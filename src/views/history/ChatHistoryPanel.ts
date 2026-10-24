@@ -141,8 +141,8 @@ export class ChatHistoryPanel extends Component {
       listboxLabel: "Chats",
       initiallyOpen: true,
       bindInputEvents: false,
-      activeMode: "selected",
-      isSelected: (item) => this.options.isCurrent(item.row.chatId),
+      // Only the open chat starts active; otherwise nothing is preselected.
+      activeMode: "none",
       navigation: "clamp",
       selectionFollowsActive: true,
       activeClass: "is-active",
@@ -232,7 +232,11 @@ export class ChatHistoryPanel extends Component {
       }
     }
     if (generation !== this.loadGeneration) return;
-    this.combobox.setItems(this.rows.map((row) => ({ row, group: "" })), { preserveActive: true });
+    const activeChatId = this.combobox.activeItem?.row.chatId;
+    this.combobox.setItems(this.rows.map((row) => ({ row, group: "" })));
+    const keep = activeChatId ?? this.rows.find((row) => this.options.isCurrent(row.chatId))?.chatId;
+    const index = keep ? this.combobox.items.findIndex((item) => item.row.chatId === keep) : -1;
+    if (index >= 0) this.combobox.setActiveIndex(index);
   }
 
   private handleQuery(query: string): void {

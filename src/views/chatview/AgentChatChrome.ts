@@ -456,7 +456,7 @@ export type EmptyStateNote = Readonly<{
 
 export type EmptyStateHint = Readonly<{
   id: "local-hint" | "claude-signed-out" | "codex-signed-out";
-  /** Text before and after the inline Detect again action. */
+  /** Text before and after the inline Detect again action; `backticks` mark commands. */
   before: string;
   after: string;
 }>;
@@ -477,14 +477,14 @@ function localHints(state: AgentChromeState): readonly EmptyStateHint[] {
   if (claude?.installed && !claude.signedIn) {
     hints.push({
       id: "claude-signed-out",
-      before: "Claude Code is installed but not signed in. Run claude in a terminal and type /login, then",
+      before: "Claude Code is installed but not signed in. Run `claude` in a terminal and type /login, then",
       after: ".",
     });
   }
   if (codex?.installed && !codex.signedIn) {
     hints.push({
       id: "codex-signed-out",
-      before: "Codex is installed but not signed in. Run codex login in a terminal, then",
+      before: "Codex is installed but not signed in. Run `codex login` in a terminal, then",
       after: ".",
     });
   }

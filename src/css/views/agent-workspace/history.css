@@ -33,6 +33,13 @@
   font-weight: var(--ss-weight-semibold);
 }
 
+/* In a wide tab the list keeps the conversation's reading width. */
+.systemsculpt-history-panel > :not(.systemsculpt-history-panel-header) {
+  box-sizing: border-box;
+  width: min(100%, var(--ss-agent-content-width));
+  margin-inline: auto;
+}
+
 .systemsculpt-history-panel-search {
   padding: var(--ss-space-2) var(--ss-space-3);
 }
@@ -189,7 +196,7 @@
   text-align: center;
 }
 
-.systemsculpt-history-panel-more {
-  align-self: center;
-  margin: 0 var(--ss-space-3) var(--ss-space-3);
+.systemsculpt-history-panel .systemsculpt-history-panel-more {
+  width: auto;
+  margin-bottom: var(--ss-space-3);
 }
