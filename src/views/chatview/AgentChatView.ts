@@ -806,7 +806,7 @@ export class AgentChatView extends ItemView {
     this.workspace = new AgentWorkspace(this.contentEl, {
       app: this.app,
       sourcePath: () => this.getExpectedChatHistoryFilePath() || "",
-      reducedMotion: () => this.plugin.settings.respectReducedMotion === true,
+      reducedMotion: () => this.plugin.settings.reduceChatMotion === true,
       onSubmit: (submission) => {
         const clientStartedAtMonotonicMs = this.clientMonotonicNow();
         return this.acceptComposerSubmission(
