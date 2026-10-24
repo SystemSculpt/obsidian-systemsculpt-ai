@@ -497,7 +497,6 @@ describe("StudioManagedOutputNodes pending placeholders", () => {
     });
     expect(project.graph.nodes).toHaveLength(2);
 
-    project.graph.layout = { mode: "managed", pinnedNodeIds: [sourceNode.id, "pending_media_0"] };
     sourceNode.parentId = "pending_media_0";
     expect(connectStudioShapes(project, sourceNode.id, "pending_media_0")).toBe(true);
     const removed = removePendingManagedOutputNodes({
@@ -508,7 +507,6 @@ describe("StudioManagedOutputNodes pending placeholders", () => {
 
     expect(removed.changed).toBe(true);
     expect(removed.removedNodeIds).toEqual(["pending_media_0"]);
-    expect(project.graph.layout?.pinnedNodeIds).toEqual([sourceNode.id]);
     expect(sourceNode.parentId).toBeUndefined();
     expect(project.diagram?.arrows).toEqual([]);
     expect(project.graph.nodes).toHaveLength(1);
@@ -546,7 +544,6 @@ describe("StudioManagedOutputNodes pending placeholders", () => {
     expect(project.graph.edges.some((edge) => edge.id === "managed_text_edge_0")).toBe(true);
     expect(project.graph.groups?.[0]?.nodeIds.includes("managed_text_0")).toBe(true);
 
-    project.graph.layout = { mode: "managed", pinnedNodeIds: [sourceNode.id, "managed_text_0"] };
     expect(connectStudioShapes(project, sourceNode.id, "managed_text_0")).toBe(true);
     const removed = removeManagedTextOutputNodes({
       project,
@@ -556,7 +553,6 @@ describe("StudioManagedOutputNodes pending placeholders", () => {
     expect(removed.changed).toBe(true);
     expect(removed.removedNodeIds).toEqual(["managed_text_0"]);
     expect(project.diagram?.arrows).toEqual([]);
-    expect(project.graph.layout?.pinnedNodeIds).toEqual([sourceNode.id]);
     expect(removed.removedEdgeIds).toEqual(["managed_text_edge_0"]);
     expect(project.graph.nodes.some((node) => node.id === "managed_text_0")).toBe(false);
     expect(project.graph.edges.some((edge) => edge.id === "managed_text_edge_0")).toBe(false);

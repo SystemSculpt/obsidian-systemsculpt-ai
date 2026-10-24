@@ -56,7 +56,6 @@ export type StudioGraphInteractionHost = {
   isBusy: () => boolean;
   getCurrentProject: () => StudioProjectV1 | null;
   setError: (error: unknown) => void;
-  recomputeEntryNodes: (project: StudioProjectV1) => void;
   commitProjectMutation: (
     reason: StudioProjectSessionMutationReason,
     mutator: StudioGraphProjectMutator,

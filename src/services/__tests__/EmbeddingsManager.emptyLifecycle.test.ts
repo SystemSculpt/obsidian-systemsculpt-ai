@@ -181,7 +181,6 @@ function harness(initialContent: string) {
   };
   const plugin = {
     settings,
-    emitter: { emit: jest.fn() },
     getManagedCapabilityGraph: jest.fn(() => ({
       embeddingsIndex: indexAdapter,
     })),

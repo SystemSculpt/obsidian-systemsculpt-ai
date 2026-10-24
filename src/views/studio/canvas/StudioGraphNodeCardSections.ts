@@ -44,21 +44,20 @@ export function renderNodeHeader(options: {
   });
 
   const isVisualOnlyNode = isStudioVisualOnlyNodeKind(node.kind);
-  const unavailable = node.kind === 'studio.workflow';
-  if (!["studio.button", "studio.command_center"].includes(node.kind)) createStudioAction(header, {
+  if (!["studio.button", "studio.command_center", "studio.workflow"].includes(node.kind)) createStudioAction(header, {
     className: "ss-studio-node-run",
     label: "Run",
     testId: "studio.node.run",
     ariaLabel: isVisualOnlyNode
       ? "Interactive node (not part of graph execution)"
       : "Run node",
-    title: options.runUnavailableReason || (unavailable ? 'Execution connection unavailable' : isVisualOnlyNode
+    title: options.runUnavailableReason || (isVisualOnlyNode
       ? "Interactive node (not part of graph execution)"
       : "Run node"),
     size: "small",
-    disabled: (options.runLocked ?? interactionLocked) || isVisualOnlyNode || unavailable || Boolean(options.runUnavailableReason),
+    disabled: (options.runLocked ?? interactionLocked) || isVisualOnlyNode || Boolean(options.runUnavailableReason),
     onSelect: () => {
-      if (!isVisualOnlyNode && !unavailable && !options.runUnavailableReason) {
+      if (!isVisualOnlyNode && !options.runUnavailableReason) {
         onRunNode(node.id);
       }
     },
@@ -149,6 +148,8 @@ export function renderNodePorts(options: {
   connectedInputPortIds?: ReadonlySet<string>;
 }): void {
   const { nodeEl, node, definition, graphInteraction, interactionLocked } = options;
+  // Keep anchors for saved workflow connections without offering new wiring.
+  const savedConnectionsOnly = node.kind === "studio.workflow";
   const hidden = options.hiddenInputPortIds;
   const connected = options.connectedInputPortIds;
   const inputPorts = (definition?.inputPorts || []).filter(port => !hidden?.has(port.id) || connected?.has(port.id));
@@ -185,6 +186,7 @@ export function renderNodePorts(options: {
         text: `${port.id}${port.required ? "*" : ""}`,
       });
       graphInteraction.registerPortElement(node.id, "in", port.id, pin);
+      if (savedConnectionsOnly) { pin.disabled = true; continue; }
       pin.addEventListener("click", (event) => {
         event.stopPropagation();
         if (!graphInteraction.getPendingConnection()) {
@@ -216,6 +218,7 @@ export function renderNodePorts(options: {
       pin.dataset.portDirection = "out";
       pin.disabled = interactionLocked;
       graphInteraction.registerPortElement(node.id, "out", port.id, pin);
+      if (savedConnectionsOnly) { pin.disabled = true; continue; }
       pin.addEventListener("pointerdown", (event) => {
         event.stopPropagation();
         graphInteraction.startConnectionDrag(node.id, port.id, event, pin);

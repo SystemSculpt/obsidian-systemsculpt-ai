@@ -93,7 +93,7 @@ function harness(paths: Array<{ path: string; size?: number }>) {
         }),
       },
     },
-    plugin: { settings, emitter: { emit: jest.fn() } },
+    plugin: { settings },
     markPortableIndexChanged: jest.fn(),
     markPortableIndexDestructive: jest.fn(),
     processor: { processFiles: jest.fn(), cancel: jest.fn() },

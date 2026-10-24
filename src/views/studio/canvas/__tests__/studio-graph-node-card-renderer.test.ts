@@ -5,6 +5,7 @@ import type { StudioNodeDefinition, StudioNodeInstance } from "../../../../studi
 import type { StudioNodeRunDisplayState } from "../../StudioRunPresentationState";
 import type { StudioNodeActivity } from "../../activity/StudioActivity";
 import { renderStudioGraphNodeCard } from "../StudioGraphNodeCardRenderer";
+import { workflowNode } from "../../../../studio/nodes/workflowNode";
 import { EditorView } from "@codemirror/view";
 
 const nodeTeardowns: Array<() => void> = [];
@@ -49,6 +50,7 @@ function definitionFields(kind: string): StudioNodeDefinition["configSchema"]["f
 }
 
 function createDefinition(kind: string): StudioNodeDefinition {
+  if (kind === "studio.workflow") return workflowNode;
   return {
     kind,
     version: "1.0.0",
@@ -336,12 +338,27 @@ describe("content-aware Studio cards", () => {
     expect(h.graphInteraction.startConnectionDrag).toHaveBeenCalled();
     expect(h.graphInteraction.startNodeDrag).not.toHaveBeenCalled();
   });
-  it("keeps unavailable workflows inspectable with Run disabled", () => {
-    const nodeEl = renderNodeCard({kind:"studio.workflow",config:{availability:{status:"unavailable"}}});
-    expect(nodeEl.querySelector<HTMLButtonElement>('.ss-studio-node-run')?.disabled).toBe(true);
-    expect(nodeEl.querySelector('.ss-studio-workflow')).not.toBeNull();
+  it("keeps retired workflows inspectable without Run or new connection actions", () => {
+    const config = { description: "Saved objective", lastRunId: "saved-run", pendingRequest: { requestId: "saved-request" }, futureField: "<img src=x>" };
+    const { nodeEl, node, graphInteraction } = renderNodeCardHarness({ kind: "studio.workflow", config });
+    expect(nodeEl.querySelector('.ss-studio-node-run')).toBeNull();
+    expect(nodeEl.querySelector('.ss-studio-workflow')?.textContent).toContain("Retired workflow note");
+    expect(nodeEl.querySelector<HTMLInputElement>('.ss-studio-node-title-input')?.value).toBe(node.title);
+    const pins = nodeEl.querySelectorAll<HTMLButtonElement>('.ss-studio-port-pin');
+    expect(pins).toHaveLength(2);
+    for (const pin of pins) {
+      expect(pin.disabled).toBe(true);
+      pin.click();
+      pin.dispatchEvent(createPointerEvent('pointerdown', { pointerId: 1, clientX: 20, clientY: 20 }));
+    }
+    expect(graphInteraction.beginConnection).not.toHaveBeenCalled();
+    expect(graphInteraction.completeConnection).not.toHaveBeenCalled();
+    expect(graphInteraction.startConnectionDrag).not.toHaveBeenCalled();
     nodeEl.querySelector<HTMLButtonElement>('.ss-studio-node-source-toggle')!.click();
-    expect(nodeEl.querySelector('.ss-studio-source-code')).not.toBeNull();
+    const source = nodeEl.querySelector('.ss-studio-source-code')!;
+    for (const text of ["saved-run", "saved-request", "futureField", "<img src=x>"]) expect(source.textContent).toContain(text);
+    expect(source.querySelector("img")).toBeNull();
+    expect(node.config).toEqual(config);
   });
   it("retains Run and remove actions", () => {
     const run = jest.fn(), remove = jest.fn();

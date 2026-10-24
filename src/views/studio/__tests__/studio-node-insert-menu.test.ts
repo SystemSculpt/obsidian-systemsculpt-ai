@@ -34,6 +34,19 @@ describe("buildNodeInsertMenuItems", () => {
     expect(items.some((item) => item.definition.kind === "studio.terminal")).toBe(false);
   });
 
+  it.each([true, false])("keeps saved workflows as portable, hidden compatibility notes (desktop: %s)", (isDesktopApp) => {
+    platform.isDesktopApp = isDesktopApp;
+    const registry = new StudioNodeRegistry();
+    registerBuiltInStudioNodes(registry);
+
+    expect(registry.get("studio.workflow", "1.0.0")).toMatchObject({
+      hiddenFromInsertMenu: true,
+      requiredHostCapabilities: [],
+      capabilityClass: "local_cpu",
+    });
+    expect(buildNodeInsertMenuItems(registry.list()).some(item => item.definition.kind === "studio.workflow")).toBe(false);
+  });
+
   it("offers the visual text node under the Text display name", () => {
     const items = buildNodeInsertMenuItems(definitions);
     const textItem = items.find((item) => item.definition.kind === "studio.text");
@@ -91,7 +104,7 @@ describe("buildNodeInsertMenuItems", () => {
       "studio.run_collection": [],
       "studio.command_center": [],
       "studio.button": [],
-      "studio.workflow": ["local-cli"],
+      "studio.workflow": [],
       "studio.dataset": ["local-filesystem", "absolute-paths", "local-cli"],
       "studio.image_generation": [],
       "studio.input": [],
