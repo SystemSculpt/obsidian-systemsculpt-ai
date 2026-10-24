@@ -5,6 +5,10 @@ import { ensureVaultFolder } from "../../tools/vault/utils";
 import { sha256HexFromBytesPortable } from "../../utils/sha256";
 import { toSafeVaultFileName } from "../../utils/vaultFileName";
 
+type PhoneCaptureFormat =
+  | { mode: "note" | "transcript"; meetingFrontmatter: null }
+  | { mode: "meeting"; meetingFrontmatter: string };
+
 /** Captures the iPhone app sent to the server, waiting for a vault. */
 export type PhoneCapture = Readonly<{
   id: string;
@@ -13,12 +17,13 @@ export type PhoneCapture = Readonly<{
   markdown: string;
   tags: readonly string[];
   source: string;
-}>;
+} & PhoneCaptureFormat>;
 
 export type PhoneCaptureSettings = Readonly<{
   licenseKey: string;
   enabled: boolean;
   folder: string;
+  meetingsFolder: string;
   askBeforeSaving: boolean;
   /** The account has used the iOS app. Until then the inbox is never polled. */
   linked: boolean;
@@ -56,6 +61,7 @@ export type PhoneCaptureInboxOptions = Readonly<{
 }>;
 
 export const DEFAULT_PHONE_CAPTURE_FOLDER = "SystemSculpt/Inbox";
+export const DEFAULT_PHONE_MEETING_FOLDER = "SystemSculpt/Meetings";
 /** Background polls while Obsidian is open. */
 export const PHONE_CAPTURE_POLL_INTERVAL_MS = 5 * 60_000;
 /** Focus and resume events closer together than this share one sync. */
@@ -67,6 +73,7 @@ const MAX_PAGES_PER_SYNC = 10;
 const CAPTURE_ID = /^[A-Za-z0-9_-]{1,64}$/;
 /** The server transcribes recordings up to 8 hours: about 450,000 characters of speech. */
 const MAX_MARKDOWN_CHARS = 1_000_000;
+const MAX_FRONTMATTER_CHARS = 64 * 1024;
 /**
  * The largest note identity reconciliation reads. A capture note (up to 3
  * UTF-8 bytes per markdown character, plus frontmatter) must fit, or a long
@@ -103,7 +110,25 @@ export function decodePhoneCapture(value: unknown): PhoneCapture | null {
   if (typeof createdAt !== "string" || !Number.isFinite(Date.parse(createdAt))) return null;
   if (typeof markdown !== "string" || markdown.length > MAX_MARKDOWN_CHARS) return null;
   if (value.status !== undefined && value.status !== "ready") return null;
+  let format: PhoneCaptureFormat;
+  if (value.mode === "meeting") {
+    const frontmatter = isRecord(value.meeting) ? value.meeting.frontmatter : null;
+    if (typeof frontmatter !== "string" || !frontmatter.endsWith("\n")
+      || frontmatter.length > MAX_FRONTMATTER_CHARS || /^(?:---|\.\.\.)[ \t]*\r?$/m.test(frontmatter)) return null;
+    try {
+      const parsed: unknown = parseYaml(frontmatter);
+      if (!isRecord(parsed) || parsed.capture_id !== id || parsed.type !== "meeting") return null;
+    } catch {
+      return null;
+    }
+    format = { mode: "meeting", meetingFrontmatter: frontmatter };
+  } else {
+    // Missing mode is the original note contract. Unknown additive modes use
+    // the same portable note representation until the client knows their UI.
+    format = { mode: value.mode === "transcript" ? "transcript" : "note", meetingFrontmatter: null };
+  }
   return {
+    ...format,
     id,
     createdAt,
     title: typeof title === "string" ? title.trim().slice(0, MAX_TITLE_CHARS) : "",
@@ -123,7 +148,9 @@ function localDate(iso: string): string {
 
 /** The note body: frontmatter that identifies the capture, then its markdown. */
 export function renderPhoneCaptureNote(capture: PhoneCapture): string {
-  const frontmatter = stringifyYaml({
+  // Meeting metadata and body are rendered by the server. Keep the canonical
+  // bytes shared with the iPhone export; parsing above validates identity only.
+  const frontmatter = capture.meetingFrontmatter ?? stringifyYaml({
     source: capture.source,
     captured: capture.createdAt,
     tags: [...capture.tags],
@@ -216,7 +243,9 @@ export class PhoneCaptureInbox {
     if (this.upgradeRequired && !manual) return { ...empty, skipped: "unavailable" };
 
     const folder = normalizePath(settings.folder.trim() || DEFAULT_PHONE_CAPTURE_FOLDER);
-    if (!settings.linked && !(await this.detectLink(manual, folder, licenseKey))) return { ...empty, skipped: "not_linked" };
+    const meetingsFolder = normalizePath(settings.meetingsFolder.trim() || DEFAULT_PHONE_MEETING_FOLDER);
+    const destination = (capture: PhoneCapture) => capture.mode === "meeting" ? meetingsFolder : folder;
+    if (!settings.linked && !(await this.detectLink(manual, folder, meetingsFolder, licenseKey))) return { ...empty, skipped: "not_linked" };
     const saved: string[] = [];
     let alreadyInVault = 0;
     let deferred = 0;
@@ -255,7 +284,7 @@ export class PhoneCaptureInbox {
         this.requireCurrentAccount(licenseKey);
         let accepted = pending;
         if (pending.length > 0 && settings.askBeforeSaving
-          && !(await this.options.confirm(pending, folder))) {
+          && !(await this.options.confirm(pending, [...new Set(pending.map(destination))].join(" and ")))) {
           this.requireCurrentAccount(licenseKey);
           for (const capture of pending) this.declined.add(capture.id);
           deferred += pending.length;
@@ -265,7 +294,7 @@ export class PhoneCaptureInbox {
         for (const capture of accepted) {
           try {
             this.requireCurrentAccount(licenseKey);
-            const written = await this.write(capture, folder, identity, licenseKey);
+            const written = await this.write(capture, destination(capture), identity, licenseKey);
             // Reconcile again after create: never acknowledge a deleted/replaced
             // file, and use the actual path if it moved while the write completed.
             const acknowledged = await identity.use(() => {
@@ -303,15 +332,18 @@ export class PhoneCaptureInbox {
       saved, alreadyInVault, deferred, failed, unacknowledged,
       ...(checkFailure ? { skipped: "unavailable" as const } : {}),
     };
-    if (this.isCurrentAccount(licenseKey) && (manual || saved.length > 0)) this.notifyResult(result, folder, checkFailure);
+    if (this.isCurrentAccount(licenseKey) && (manual || saved.length > 0)) this.notifyResult(result, checkFailure);
     return result;
   }
 
-  private notifyResult(result: PhoneCaptureSyncResult, folder: string, checkFailure?: string): void {
+  private notifyResult(result: PhoneCaptureSyncResult, checkFailure?: string): void {
     const { saved, alreadyInVault, deferred, failed, unacknowledged } = result;
     const captures = (count: number) => `${count} iOS capture${count === 1 ? "" : "s"}`;
     const messages: string[] = [];
-    if (saved.length) messages.push(`Saved ${captures(saved.length)} to ${folder}.`);
+    if (saved.length) {
+      const folders = [...new Set(saved.map(path => path.split("/").slice(0, -1).join("/") || "the vault root"))];
+      messages.push(`Saved ${captures(saved.length)} to ${folders.join(" and ")}.`);
+    }
     if (alreadyInVault) {
       messages.push(`${captures(alreadyInVault)} ${alreadyInVault === 1 ? "is" : "are"} already in this vault.`);
     }
@@ -329,7 +361,7 @@ export class PhoneCaptureInbox {
    * capture requests and no notices. The first time the server reports the
    * link, it is remembered and announced once.
    */
-  private async detectLink(manual: boolean, folder: string, licenseKey: string): Promise<boolean> {
+  private async detectLink(manual: boolean, folder: string, meetingsFolder: string, licenseKey: string): Promise<boolean> {
     const now = (this.options.now ?? Date.now)();
     if (!manual && now - this.lastLinkCheckAt < PHONE_CAPTURE_LINK_CHECK_GAP_MS) return false;
     this.lastLinkCheckAt = now;
@@ -341,7 +373,7 @@ export class PhoneCaptureInbox {
       this.options.onError?.("Couldn't check whether the iOS app is linked.", error);
       return false;
     }
-    this.options.notify(`iOS captures will be saved to ${folder}.`);
+    this.options.notify(`iOS captures will be saved to ${folder}; meetings to ${meetingsFolder}.`);
     return true;
   }
 
@@ -536,7 +568,7 @@ class CaptureNoteIndex {
       if (content.length > MAX_IDENTITY_NOTE_BYTES) throw new Error("Capture identity note is too large.");
       // Only parse YAML frontmatter, never capture_id-like text in the body.
       const frontmatter = /^\uFEFF?---\r?\n([\s\S]*?)\r?\n(?:---|\.\.\.)(?:\r?\n|$)/.exec(content)?.[1];
-      if (frontmatter && frontmatter.length > 64 * 1024) throw new Error("Capture frontmatter is too large.");
+      if (frontmatter && frontmatter.length > MAX_FRONTMATTER_CHARS) throw new Error("Capture frontmatter is too large.");
       const parsed: unknown = frontmatter ? parseYaml(frontmatter) : null;
       this.put(file, isRecord(parsed) ? parsed.capture_id : null);
       this.dirty.delete(file);

@@ -186,6 +186,8 @@ export interface SystemSculptSettings {
   phoneCapturesEnabled: boolean;
   /** Vault folder for iPhone captures. Empty means SystemSculpt/Inbox. */
   phoneCapturesFolder: string;
+  /** Vault folder for iPhone meetings. Empty means SystemSculpt/Meetings. */
+  phoneCapturesMeetingsFolder: string;
   /** Ask before saving new iPhone captures. */
   phoneCapturesAskBeforeSaving: boolean;
   /** The account has used the iPhone app; until then the inbox stays hidden and silent. */
@@ -306,6 +308,7 @@ Please:
   workflowEngine: createDefaultWorkflowEngineSettings(),
   phoneCapturesEnabled: true,
   phoneCapturesFolder: "SystemSculpt/Inbox",
+  phoneCapturesMeetingsFolder: "SystemSculpt/Meetings",
   phoneCapturesAskBeforeSaving: false,
   phoneCapturesLinked: false,
 

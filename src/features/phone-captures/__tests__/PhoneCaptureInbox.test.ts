@@ -1,5 +1,10 @@
 import { TFile, TFolder, type App } from "obsidian";
 import YAML from "yaml";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { capture as MEETING } from "../../../../testing/fixtures/managed/meeting-capture/capture.json";
+
+const MEETING_NOTE = readFileSync(resolve(__dirname, "../../../../testing/fixtures/managed/meeting-capture/note.md"), "utf8");
 import {
   PHONE_CAPTURE_LINK_CHECK_GAP_MS,
   PHONE_CAPTURE_MIN_SYNC_GAP_MS,
@@ -119,6 +124,7 @@ function setup(options: Readonly<{
     licenseKey: "lic_test",
     enabled: true,
     folder: "",
+    meetingsFolder: "",
     askBeforeSaving: false,
     linked: true,
     ...options.settings,
@@ -147,6 +153,96 @@ function setup(options: Readonly<{
 }
 
 describe("PhoneCaptureInbox", () => {
+  it("saves the server's golden meeting bytes in Meetings and verifies the receipt", async () => {
+    const h = setup({ captures: [MEETING] });
+    const path = "SystemSculpt/Meetings/Q4 launch sync 2026-10-20.md";
+    expect(await h.inbox.sync()).toMatchObject({ saved: [path], failed: 0 });
+    expect(h.files.get(path)).toBe(MEETING_NOTE);
+    expect(h.vault.read).toHaveBeenCalled();
+    expect(h.server.acks).toEqual([expect.objectContaining({ id: MEETING.id, body: { vault_path: path } })]);
+    expect(h.notify).toHaveBeenCalledWith("Saved 1 iOS capture to SystemSculpt/Meetings.");
+  });
+
+  it("keeps transcript mode in the ordinary inbox with the words unchanged", async () => {
+    const markdown = "First paragraph.\n\nSecond paragraph: 日本語.";
+    const h = setup({ captures: [{ ...CAPTURE, mode: "transcript", meeting: null, markdown }] });
+    const result = await h.inbox.sync();
+    expect(result.saved[0]).toMatch(/^SystemSculpt\/Inbox\//);
+    expect(h.files.get(result.saved[0])).toBe(
+      "---\nsource: ios\ncaptured: 2026-10-14T12:00:00.000Z\ntags:\n  - groceries\n  - errands\ncapture_id: cap_1\n---\n\n" + markdown + "\n",
+    );
+  });
+
+  it("preserves an unformatted meeting's unfolded transcript without inventing a brief", async () => {
+    const markdown = "> [!note]+ Transcript\n> **00:00** Just the words.";
+    const h = setup({ captures: [{ ...MEETING, formatted: false, markdown, meeting: { ...MEETING.meeting, summary: null } }] });
+    const result = await h.inbox.sync();
+    expect(h.files.get(result.saved[0])).toBe(`---\n${MEETING.meeting.frontmatter}---\n\n${markdown}\n`);
+    expect(h.server.acks).toHaveLength(1);
+  });
+
+  it("asks once for a mixed batch with both actual destination folders", async () => {
+    const h = setup({ captures: [CAPTURE, MEETING], settings: {
+      folder: "Notes/Phone", meetingsFolder: "Work/Meetings", askBeforeSaving: true,
+    } });
+    const result = await h.inbox.sync();
+    expect(result.saved).toEqual([
+      "Notes/Phone/Friday oat milk 2026-10-14.md", "Work/Meetings/Q4 launch sync 2026-10-20.md",
+    ]);
+    expect(h.confirm).toHaveBeenCalledTimes(1);
+    expect(h.confirm).toHaveBeenCalledWith(expect.any(Array), "Notes/Phone and Work/Meetings");
+    expect(h.notify).toHaveBeenCalledWith("Saved 2 iOS captures to Notes/Phone and Work/Meetings.");
+  });
+
+  it("reports the vault root when a meeting moves there before verification", async () => {
+    const h = setup({ captures: [MEETING] });
+    const create = h.vault.create.getMockImplementation()!;
+    h.vault.create.mockImplementationOnce(async (path, content) => {
+      const file = await create(path, content);
+      const rootPath = "Meeting.md";
+      h.files.delete(path);
+      h.emit("delete", file);
+      return create(rootPath, content);
+    });
+    expect(await h.inbox.sync()).toMatchObject({ saved: ["Meeting.md"], failed: 0 });
+    expect(h.server.acks[0].body).toEqual({ vault_path: "Meeting.md" });
+    expect(h.notify).toHaveBeenCalledWith("Saved 1 iOS capture to the vault root.");
+  });
+
+  it("reconciles a moved meeting after a lost receipt without rewriting or duplicating it", async () => {
+    const h = setup({ captures: [MEETING], files: { "Archive/Meeting.md": MEETING_NOTE } });
+    h.unindexed.add("Archive/Meeting.md");
+    expect(await h.inbox.sync()).toMatchObject({ saved: [], alreadyInVault: 1, failed: 0 });
+    expect(h.vault.create).not.toHaveBeenCalled();
+    expect(h.server.acks[0].body).toEqual({ vault_path: "Archive/Meeting.md" });
+  });
+
+  it.each([
+    null, {}, { frontmatter: 42 }, { frontmatter: "" },
+    { frontmatter: MEETING.meeting.frontmatter.replace(MEETING.id, "another_capture") },
+    { frontmatter: MEETING.meeting.frontmatter + "---\nInjected body\n" },
+    { frontmatter: "capture_id: [broken\n" },
+    { frontmatter: MEETING.meeting.frontmatter.repeat(300) },
+  ])("does not save or acknowledge a meeting with invalid frontmatter (case %#)", async (meeting) => {
+    const h = setup({ captures: [{ ...MEETING, meeting }] });
+    expect((await h.inbox.sync()).saved).toEqual([]);
+    expect(h.vault.create).not.toHaveBeenCalled();
+    expect(h.server.acks).toEqual([]);
+  });
+
+  it("preserves a meeting at the existing markdown limit and leaves oversized captures pending", async () => {
+    const markdown = "会".repeat(1_000_000);
+    const h = setup({ captures: [{ ...MEETING, markdown }, {
+      ...MEETING, id: "too_long", markdown: markdown + "x",
+      meeting: { ...MEETING.meeting, frontmatter: MEETING.meeting.frontmatter.replace(MEETING.id, "too_long") },
+    }] });
+    const result = await h.inbox.sync();
+    expect(result).toMatchObject({ failed: 0 });
+    expect(result.saved).toHaveLength(1);
+    expect(h.files.get(result.saved[0])).toBe(`---\n${MEETING.meeting.frontmatter}---\n\n${markdown}\n`);
+    expect(h.server.acks.map(ack => ack.id)).toEqual([MEETING.id]);
+  });
+
   it("writes a ready capture as a new note and acknowledges its vault path", async () => {
     const { inbox, files, server, notify } = setup();
 
@@ -633,7 +729,7 @@ describe("PhoneCaptureInbox", () => {
     expect(result?.saved).toEqual(["SystemSculpt/Inbox/Friday oat milk 2026-10-14.md"]);
     expect(onLinked).toHaveBeenCalledTimes(1);
     expect(notify.mock.calls.map(([message]) => message)).toEqual([
-      "iOS captures will be saved to SystemSculpt/Inbox.",
+      "iOS captures will be saved to SystemSculpt/Inbox; meetings to SystemSculpt/Meetings.",
       "Saved 1 iOS capture to SystemSculpt/Inbox.",
     ]);
 
@@ -666,7 +762,7 @@ describe("PhoneCaptureInbox", () => {
     const result = await inbox.linkReported();
     expect(result?.saved).toHaveLength(1);
     expect(onLinked).toHaveBeenCalledTimes(1);
-    expect(notify).toHaveBeenCalledWith("iOS captures will be saved to SystemSculpt/Inbox.");
+    expect(notify).toHaveBeenCalledWith("iOS captures will be saved to SystemSculpt/Inbox; meetings to SystemSculpt/Meetings.");
     expect(inbox.linkReported()).toBeNull();
     expect(server.requests.filter((r) => r.method === "GET")).toHaveLength(1);
   });

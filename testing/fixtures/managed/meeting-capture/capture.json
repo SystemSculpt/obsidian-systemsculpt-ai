@@ -1,0 +1,100 @@
+{
+  "capture": {
+    "id": "3f6c1d2e-8a4b-4c5d-9e7f-0a1b2c3d4e5f",
+    "kind": "text",
+    "origin": "voice",
+    "mode": "meeting",
+    "source": "ios",
+    "status": "ready",
+    "created_at": "2026-10-20T16:00:00.000Z",
+    "received_at": "2026-10-20T16:25:40.000Z",
+    "title": "Q4 launch sync",
+    "markdown": "## Summary\n\nThe team moved the launch to November 19 so the onboarding crash fix can be tested. Pricing stays at \\$4.99 a week, with a new \\$39.99 annual plan. Final App Store screenshots are due Friday.\n\n## Decisions\n\n- Launch on November 19; the Android beta waits until January.\n- Keep \\$4.99 a week and add a \\$39.99 annual plan.\n\n## Action items\n\n- [ ] Fix and test the onboarding crash (Jordan, Tuesday afternoon)\n- [ ] Deliver the final App Store screenshots (Priya, Friday)\n- [ ] Send the launch plan to leadership (Sam)\n- [ ] Book the user interviews (next week)\n\n## Topics\n\n- 00:00 Launch date — An extra week to test the crash fix on older phones.\n- 06:20 Pricing — Weekly price unchanged; an annual plan is added.\n- 12:40 Screenshots — Final set due Friday.\n\n> [!note]- Transcript\n> **00:00** Okay, let's start. Three things today: the launch date, pricing, and screenshots. Jordan, where are we on the onboarding crash? It's the restore after an interrupted setup. I have a fix, it needs testing on older phones.\n>\n> **00:41** Then let's not launch on the twelfth. I'd rather take the extra week. Agreed. We launch on November 19, and the Android beta waits until January.\n>\n> **06:20** On pricing, we keep 4.99 a week and add an annual plan at 39.99.\n>\n> **12:40** Screenshots: Priya, can you have the final set by Friday? Yes, final screenshots Friday.\n>\n> **24:50** Action items. Jordan fixes the crash by Tuesday afternoon. Sam sends the plan to leadership. And someone books the user interviews next week. Thanks, everyone.",
+    "tags": [
+      "meeting",
+      "launch",
+      "pricing"
+    ],
+    "formatted": true,
+    "meeting": {
+      "summary": "The team moved the launch to November 19 so the onboarding crash fix can be tested. Pricing stays at $4.99 a week, with a new $39.99 annual plan. Final App Store screenshots are due Friday.",
+      "decisions": [
+        {
+          "text": "Launch on November 19; the Android beta waits until January.",
+          "at_seconds": 41
+        },
+        {
+          "text": "Keep $4.99 a week and add a $39.99 annual plan.",
+          "at_seconds": 380
+        }
+      ],
+      "action_items": [
+        {
+          "id": "a1",
+          "text": "Fix and test the onboarding crash",
+          "owner": "Jordan",
+          "due": "Tuesday afternoon",
+          "at_seconds": 1490
+        },
+        {
+          "id": "a2",
+          "text": "Deliver the final App Store screenshots",
+          "owner": "Priya",
+          "due": "Friday",
+          "at_seconds": 760
+        },
+        {
+          "id": "a3",
+          "text": "Send the launch plan to leadership",
+          "owner": "Sam",
+          "due": null,
+          "at_seconds": 1490
+        },
+        {
+          "id": "a4",
+          "text": "Book the user interviews",
+          "owner": null,
+          "due": "next week",
+          "at_seconds": 1490
+        }
+      ],
+      "topics": [
+        {
+          "title": "Launch date",
+          "summary": "An extra week to test the crash fix on older phones.",
+          "at_seconds": 0
+        },
+        {
+          "title": "Pricing",
+          "summary": "Weekly price unchanged; an annual plan is added.",
+          "at_seconds": 380
+        },
+        {
+          "title": "Screenshots",
+          "summary": "Final set due Friday.",
+          "at_seconds": 760
+        }
+      ],
+      "attendees": [
+        "Sam Lee",
+        "Priya Patel",
+        "Jordan O'Neil"
+      ],
+      "started_at": "2026-10-20T16:00:00.000Z",
+      "duration_seconds": 1508,
+      "credits_used": 51,
+      "frontmatter": "source: ios\ncaptured: 2026-10-20T16:00:00.000Z\ntags:\n  - meeting\n  - launch\n  - pricing\ncapture_id: 3f6c1d2e-8a4b-4c5d-9e7f-0a1b2c3d4e5f\ntype: meeting\nmeeting_start: 2026-10-20T16:00:00.000Z\nduration: 25 minutes\nattendees:\n  - Sam Lee\n  - Priya Patel\n  - Jordan O'Neil\n"
+    },
+    "marks": [
+      764
+    ],
+    "error": null,
+    "vault_path": null,
+    "delivered_at": null,
+    "delivery": {
+      "state": "unverified",
+      "receipt": null
+    }
+  },
+  "poll_after_ms": null
+}

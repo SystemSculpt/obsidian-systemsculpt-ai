@@ -1,7 +1,7 @@
 import { Notice, Setting } from "obsidian";
 import { SystemSculptSettingTab } from "./SystemSculptSettingTab";
 import { attachFolderSuggester } from "../components/FolderSuggester";
-import { DEFAULT_PHONE_CAPTURE_FOLDER } from "../features/phone-captures/PhoneCaptureInbox";
+import { DEFAULT_PHONE_CAPTURE_FOLDER, DEFAULT_PHONE_MEETING_FOLDER } from "../features/phone-captures/PhoneCaptureInbox";
 
 function validFolder(path: string): boolean {
   return !path.includes("..") && !path.startsWith("/") && !path.startsWith("\\");
@@ -38,32 +38,45 @@ export function displayPhoneCapturesTabContent(containerEl: HTMLElement, tabInst
         await settingsManager.updateSettings({ phoneCapturesAskBeforeSaving: value });
       }));
 
-  const saveFolder = async (value: string) => {
-    if (!validFolder(value)) {
-      new Notice("Use a vault-relative path without '..' or a leading slash.");
-      return;
-    }
-    await settingsManager.updateSettings({ phoneCapturesFolder: value.trim() });
-  };
-
-  new Setting(containerEl)
-    .setName("iOS captures folder")
-    .setDesc("Each capture becomes a new note here. Existing notes are never overwritten.")
-    .addText((text) => {
-      text
-        .setPlaceholder(DEFAULT_PHONE_CAPTURE_FOLDER)
-        .setValue(plugin.settings.phoneCapturesFolder)
-        .onChange(async (value) => {
-          await saveFolder(value);
-        });
-      attachFolderSuggester(
-        text.inputEl,
-        (selectedPath: string) => {
-          text.setValue(selectedPath);
-          void saveFolder(selectedPath);
-        },
-        app,
-      );
-      return text;
-    });
+  const folders = [
+    {
+      key: "phoneCapturesFolder" as const,
+      name: "iOS captures folder",
+      description: "Notes and transcripts become new notes here. Existing notes are never overwritten.",
+      placeholder: DEFAULT_PHONE_CAPTURE_FOLDER,
+    },
+    {
+      key: "phoneCapturesMeetingsFolder" as const,
+      name: "iOS meetings folder",
+      description: "Meeting briefs, action items and transcripts become new notes here.",
+      placeholder: DEFAULT_PHONE_MEETING_FOLDER,
+    },
+  ];
+  for (const folder of folders) {
+    const saveFolder = async (value: string) => {
+      if (!validFolder(value)) {
+        new Notice("Use a vault-relative path without '..' or a leading slash.");
+        return;
+      }
+      await settingsManager.updateSettings({ [folder.key]: value.trim() });
+    };
+    new Setting(containerEl)
+      .setName(folder.name)
+      .setDesc(folder.description)
+      .addText((text) => {
+        text
+          .setPlaceholder(folder.placeholder)
+          .setValue(plugin.settings[folder.key])
+          .onChange(saveFolder);
+        attachFolderSuggester(
+          text.inputEl,
+          (selectedPath: string) => {
+            text.setValue(selectedPath);
+            void saveFolder(selectedPath);
+          },
+          app,
+        );
+        return text;
+      });
+  }
 }

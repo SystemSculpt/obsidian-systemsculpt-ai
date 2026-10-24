@@ -2203,6 +2203,7 @@ export default class SystemSculptPlugin extends Plugin {
         licenseKey: this.settings.licenseKey || "",
         enabled: this.settings.phoneCapturesEnabled,
         folder: this.settings.phoneCapturesFolder,
+        meetingsFolder: this.settings.phoneCapturesMeetingsFolder,
         askBeforeSaving: this.settings.phoneCapturesAskBeforeSaving,
         linked: this.settings.phoneCapturesLinked === true,
       }),
