@@ -239,6 +239,21 @@ describe("lazy settings with the production registry", () => {
     expect(tab.containerEl.querySelector(".ss-search-result")?.textContent).toContain(title);
   });
 
+  it("updates unopened Account metadata after a service refresh without reading credits", () => {
+    plugin.settings.licenseValid = false;
+    plugin.settings.licenseKey = "";
+    tab.display();
+    search("credits balanc");
+    expect(tab.containerEl.querySelector(".ss-search-result")).toBeNull();
+    plugin.settings.licenseValid = true;
+    plugin.settings.licenseKey = "test-license";
+    tab.refreshAccountSection();
+    search("credits balance");
+    expect(tab.containerEl.querySelector(".ss-search-result")?.textContent).toContain("Credits");
+    expect(panel("account").children).toHaveLength(0);
+    expect(readCredits).not.toHaveBeenCalled();
+  });
+
   it("updates an ongoing search after the credits title changes", async () => {
     const balance = deferred<object>();
     readCredits.mockReturnValue(balance.promise);

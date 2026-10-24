@@ -483,6 +483,7 @@ export class SystemSculptSettingTab extends PluginSettingTab {
   }
 
   refreshAccountSection(): void {
+    this.invalidateSearchIndex();
     this.syncPhoneCaptureVisibility();
     const account = this.contentContainerEl?.querySelector<HTMLElement>('[data-settings-section="account-0"]');
     if (account) this.refreshSection(account);
