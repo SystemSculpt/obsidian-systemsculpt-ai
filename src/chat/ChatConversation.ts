@@ -78,6 +78,9 @@ export type AgentReasoningPart = AgentPartBase & Readonly<{
 export type NativeToolMetadata = Readonly<{
   agent: "claude" | "codex";
   workingDirectory: string;
+  /** Presentation roots supplied by Chat, never native permission authority. */
+  vaultRoot?: string;
+  vaultRootAlias?: string;
   requestMethod?: string;
   requestId?: string | number;
   description?: string;

@@ -22,8 +22,8 @@ keep their saved mode; missing or unrecognized saved modes use **Ask**.
 
 These are Claude Code's native modes (`auto`, `manual`, `acceptEdits`, and `plan`);
 **Claude Code settings** leaves the mode to your native configuration. When Claude
-Code asks to use a tool, the plugin dialog shows the tool and its input so you can
-approve once or decline.
+Code asks to use a tool, an inline card in the conversation shows what it wants to
+change, including a diff for edits. The original request is available under **Details**.
 
 If Auto is unavailable, the chat shows **Accept edits · Auto unavailable** and a
 notice explaining that edits are accepted automatically while other actions ask.
@@ -49,7 +49,7 @@ Codex settings inherits your native approval policy, sandbox, permission profile
 and reviewer. When resuming a chat in that mode, the plugin resolves current
 configuration through an ephemeral thread without running a model turn, rather
 than keeping stale permissions from the saved thread. Native approval and question
-requests appear in plugin dialogs.
+requests appear inline in the conversation. Studio retains its native request dialogs.
 
 These Codex chat modes do not change Studio permissions. Studio Codex execution
 continues to inherit your native configuration.
@@ -68,6 +68,21 @@ asking, but move/rename and trash still require approval. Ask pauses before any
 vault mutation. For a pending request, you can deny, allow once, or allow that
 action until the chat closes. Full access also allows moving files or folders to
 Obsidian trash without pausing; choose it only when you intend that access.
+
+## Reviewing inline approvals
+
+All three chat backends use inline approval cards, not pop-up dialogs. Focus a
+pending card and press **Enter** or **⌘/Ctrl+Enter** to approve, or **Esc** to deny.
+Use **↑/↓** to move between pending cards. **⇧⌘/Ctrl+Enter** chooses **Approve all
+in this chat** when the agent offers a session-scoped grant.
+
+A session approval covers only the scope shown by that action; it is not blanket
+permission. Native agents own the grant, and already-pending requests still need
+their own answer. Closing the live chat ends its native session grants.
+
+A new card does not interrupt typing. Use **Approval needed · Review** or
+**⌥/Alt+↑** to move from the composer to the pending card. Resolved cards retain
+their result, and focus moves to the next pending card or back to the composer.
 
 ## Where tools come from
 
@@ -130,4 +145,4 @@ For hosted built-in tools:
 
 - Prefer read/search/list tools before edit/write/move/trash.
 - Deny any unclear destructive request and ask the model for a plan first.
-- Use **Allow until closed** only when you expect the same kind of change repeatedly.
+- Use **Approve all in this chat** only when you expect more actions within its displayed scope.

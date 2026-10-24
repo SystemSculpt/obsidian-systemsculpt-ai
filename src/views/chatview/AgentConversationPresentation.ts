@@ -128,7 +128,7 @@ function phaseFor(snapshot: AgentConversationSnapshot | null, requestPending: bo
   if (snapshot.phase === "settling") return "settling";
   if (snapshot.parts.some((part) =>
     part.kind === "tool"
-    && part.location === "vault"
+    && (part.location === "vault" || part.native)
     && part.state === "approval-required")) {
     return "awaiting-approval";
   }
@@ -163,7 +163,7 @@ function activityStatus(
   if (snapshot?.statusLabel === "Connection interrupted") return "Reconnecting";
   const activeTools = snapshot?.parts.filter((part): part is AgentToolPart =>
     part.kind === "tool" && isActiveAgentToolState(part.state)) ?? [];
-  if (phase === "awaiting-approval") return "Needs approval";
+  if (phase === "awaiting-approval") return "Waiting for your approval";
   if (activeTools.some((part) =>
     part.location === "server" && part.name === "web_search")) {
     return "Searching";

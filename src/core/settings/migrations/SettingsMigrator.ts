@@ -345,12 +345,10 @@ const SETTINGS_MIGRATIONS: readonly SettingsMigrationStep[] = [
     describe: "Detect unchosen desktop chat backends and default native permissions to Auto",
     migrate: (settings) => ({
       ...settings,
-      // Old hosted defaults were indistinguishable from choices. Keep paid
-      // accounts on hosted; a live balance check covers uncached entitlements.
+      // Old hosted defaults were indistinguishable from choices. The live
+      // entitlement check preserves paid accounts; valid starter keys are not paid.
       textExecutionBackendExplicit: settings.textExecutionBackend === "codex"
-        || settings.textExecutionBackend === "claude"
-        || (typeof settings.licenseKey === "string" && !!settings.licenseKey.trim()
-          && (settings.licenseValid === true || settings.subscriptionStatus === "active" || settings.subscriptionStatus === "lifetime")),
+        || settings.textExecutionBackend === "claude",
       claudePermissionMode: settings.claudePermissionMode === "default" ? "auto" : settings.claudePermissionMode,
     }),
   },

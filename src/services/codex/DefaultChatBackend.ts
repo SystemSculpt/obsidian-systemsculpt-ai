@@ -3,7 +3,7 @@ import { hasHostCapability } from '../../platform/hostCapabilities';
 import { detectLocalAgents } from './LocalAgentDetection';
 import { isLocalAgentId, type TextExecutionBackend } from './LocalAgents';
 
-type BackendSettings = Pick<SystemSculptSettings, 'textExecutionBackend' | 'textExecutionBackendExplicit' | 'licenseKey' | 'licenseValid' | 'subscriptionStatus'>;
+type BackendSettings = Pick<SystemSculptSettings, 'textExecutionBackend' | 'textExecutionBackendExplicit' | 'licenseKey'>;
 
 /** Detection is a default, never a replacement for a person's choice or paid hosted chat. */
 export async function resolveDefaultChatBackend(
@@ -17,9 +17,10 @@ export async function resolveDefaultChatBackend(
     return isLocalAgentId(selected) ? selected : 'systemsculpt';
   }
   if (settings.licenseKey?.trim()) {
-    if (settings.licenseValid || settings.subscriptionStatus === 'active' || settings.subscriptionStatus === 'lifetime') return 'systemsculpt';
     try {
-      if ((await readBalance()).includedCreditsEntitled === true) return 'systemsculpt';
+      // Valid starter licenses also look active; only a confirmed lack of
+      // paid entitlement should move an unchosen hosted default to a local agent.
+      if ((await readBalance()).includedCreditsEntitled !== false) return 'systemsculpt';
     } catch {
       // An offline account check is not evidence that a paid plan has ended.
       return 'systemsculpt';
