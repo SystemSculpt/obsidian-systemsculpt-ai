@@ -118,8 +118,8 @@ web-research corpus directory.
 
 ## Vault and image context
 
-Use the files control in the composer to add vault context, including supported
-images. SystemSculpt sends image context as image input, so you can ask about
+Use **+** in the message box, an `@` or `[[` mention, or a drop to add vault notes
+and supported images to a message, or pin them for every message. SystemSculpt sends image context as image input, so you can ask about
 what is visible in a diagram, screenshot, or other supported vault image. The
 supported formats are PNG, JPG, and WebP, with a 10 MB limit per image. The
 semantic vault index remains text-based; adding an image to the current chat is

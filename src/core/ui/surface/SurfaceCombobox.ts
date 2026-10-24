@@ -40,7 +40,8 @@ export interface SurfaceComboboxCommitContext<T> {
 }
 
 export interface SurfaceComboboxOptions<T> {
-  input: HTMLInputElement;
+  /** A text field, or a multi-line message box whose adapter drives the query. */
+  input: HTMLInputElement | HTMLTextAreaElement;
   listbox: HTMLElement;
   getItemKey: (item: T) => string;
   filterItems: (items: readonly T[], query: string) => readonly T[];
@@ -95,7 +96,7 @@ let nextComboboxId = 0;
  * windows never fall back to the plugin's primary browser realm.
  */
 export class SurfaceCombobox<T> {
-  public readonly input: HTMLInputElement;
+  public readonly input: HTMLInputElement | HTMLTextAreaElement;
   public readonly listbox: HTMLElement;
   public readonly listboxId: string;
   public readonly ownerDocument: Document;
