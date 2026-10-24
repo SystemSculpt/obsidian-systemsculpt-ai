@@ -110,7 +110,6 @@ export type RenderStudioGraphNodeCardOptions = {
   /** Toggles in-place editing of this node's image. */
   onOpenImageEditor?: (node: StudioNodeInstance) => void;
   imageBoard?: StudioGraphNodeImageBoardOptions;
-  onEditImageWithAi?: (node: StudioNodeInstance) => void;
   onCopyNodeImageToClipboard?: (node: StudioNodeInstance) => void;
   renderMarkdownPreview?: (
     node: StudioNodeInstance,

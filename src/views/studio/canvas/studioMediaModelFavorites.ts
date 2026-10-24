@@ -1,17 +1,9 @@
 import type SystemSculptPlugin from "../../../main";
 import type { StudioMediaModelKind } from "../../../studio/StudioMediaModelCapabilities";
 
-/**
- * Favorites are stored per media kind so an image model starred in one node
- * never reorders the video picker. Ids are opaque server catalog ids; a
- * retired model simply stops matching and its entry becomes inert.
- */
-function settingsKey(kind: StudioMediaModelKind): "favoriteImageModels" | "favoriteVideoModels" {
-  return kind === "image" ? "favoriteImageModels" : "favoriteVideoModels";
-}
-
-export function readMediaModelFavorites(plugin: SystemSculptPlugin, kind: StudioMediaModelKind): string[] {
-  const stored = plugin.settings[settingsKey(kind)];
+/** Retired catalog IDs remain inert in saved preferences. */
+export function readMediaModelFavorites(plugin: SystemSculptPlugin, _kind: StudioMediaModelKind): string[] {
+  const stored = plugin.settings.favoriteVideoModels;
   return Array.isArray(stored) ? stored.filter((id): id is string => typeof id === "string") : [];
 }
 
@@ -20,6 +12,6 @@ export async function toggleMediaModelFavorite(plugin: SystemSculptPlugin, kind:
   const current = readMediaModelFavorites(plugin, kind);
   const nextState = !current.includes(modelId);
   const updated = nextState ? [...current, modelId] : current.filter(id => id !== modelId);
-  await plugin.getSettingsManager().updateSettings({ [settingsKey(kind)]: updated });
+  await plugin.getSettingsManager().updateSettings({ favoriteVideoModels: updated });
   return nextState;
 }

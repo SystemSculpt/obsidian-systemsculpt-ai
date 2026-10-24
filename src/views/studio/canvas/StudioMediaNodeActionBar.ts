@@ -29,7 +29,6 @@ export interface RenderStudioMediaNodeActionBarOptions {
     options?: StudioGraphNodeMutationOptions
   ) => void;
   onOpenImageEditor?: (node: StudioNodeInstance) => void;
-  onEditImageWithAi?: (node: StudioNodeInstance) => void;
   onCopyNodeImageToClipboard?: (node: StudioNodeInstance) => void;
   pathBrowseOptions?: StudioNodeConfigPathBrowseOptions;
 }
@@ -71,7 +70,6 @@ function resolveActions(
     onRemoveNode,
     onNodeConfigValueChange,
     onOpenImageEditor,
-    onEditImageWithAi,
     onCopyNodeImageToClipboard,
     pathBrowseOptions,
   } = options;
@@ -79,14 +77,6 @@ function resolveActions(
   const actions: MediaBarAction[] = [
     { id: "run", icon: "play", label: "Run node", run: () => onRunNode(node.id) },
   ];
-  if (mediaKind === "image" && onEditImageWithAi) {
-    actions.push({
-      id: "ai-edit",
-      icon: "sparkles",
-      label: "Edit with AI",
-      run: () => onEditImageWithAi(node),
-    });
-  }
   if (mediaKind === "image" && onOpenImageEditor) {
     actions.push({
       id: "edit",

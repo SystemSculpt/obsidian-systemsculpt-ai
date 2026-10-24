@@ -1,13 +1,11 @@
-import { imageGenerationNode } from "../nodes/imageGenerationNode";
 import { videoGenerationNode } from "../nodes/videoGenerationNode";
-import type { StudioImageGenerationInput, StudioImageGenerationRequest, StudioVideoGenerationRequest } from "../types";
+import type { StudioImageInput, StudioVideoGenerationRequest } from "../types";
 
 describe.each([
-  ["image references", imageGenerationNode, "images"],
   ["video frames", videoGenerationNode, "first_frame"],
 ] as const)("Studio %s asset admission", (_label, definition, port) => {
   function fixture(candidate: unknown) {
-    let admitted: StudioImageGenerationInput[] = [];
+    let admitted: StudioImageInput[] = [];
     const bytes = new Uint8Array([1, 2]).buffer;
     const asset = { path: "assets/input.jpg", hash: "a".repeat(64), sizeBytes: 2, mimeType: "image/jpeg" };
     const services = {
@@ -17,10 +15,6 @@ describe.each([
       assertFilesystemPath: jest.fn((_path: string) => {}),
       storeAsset: jest.fn(async () => asset),
       api: {
-        generateImage: jest.fn(async (request: StudioImageGenerationRequest) => {
-          admitted = (await request.buildPayload()).inputImages || [];
-          return { images: [] };
-        }),
         generateVideo: jest.fn(async (request: StudioVideoGenerationRequest) => {
           admitted = (await request.buildPayload()).frameImages || [];
           return { videos: [] };

@@ -1,6 +1,6 @@
 import { Notice } from "obsidian";
 import type { StudioNodeDefinition, StudioNodeInstance } from "../../../studio/types";
-import { isStudioVisualOnlyNodeKind } from "../../../studio/StudioNodeKinds";
+import { isStudioRetiredNodeKind, isStudioVisualOnlyNodeKind } from "../../../studio/StudioNodeKinds";
 import type { StudioGraphInteractionEngine } from "../StudioGraphInteractionEngine";
 import { createStudioAction } from "../StudioAction";
 import type { StudioNodeActivity } from "../activity/StudioActivity";
@@ -38,13 +38,13 @@ export function renderNodeHeader(options: {
     cls: "ss-studio-node-title-input",
   });
   titleInput.value = node.title;
-  titleInput.disabled = interactionLocked;
+  titleInput.disabled = interactionLocked || node.kind === "studio.image_generation";
   titleInput.addEventListener("input", (event) => {
     onNodeTitleInput(node, (event.target as HTMLInputElement).value);
   });
 
   const isVisualOnlyNode = isStudioVisualOnlyNodeKind(node.kind);
-  if (!["studio.button", "studio.command_center", "studio.workflow"].includes(node.kind)) createStudioAction(header, {
+  if (!["studio.button", "studio.command_center"].includes(node.kind) && !isStudioRetiredNodeKind(node.kind)) createStudioAction(header, {
     className: "ss-studio-node-run",
     label: "Run",
     testId: "studio.node.run",
@@ -148,8 +148,8 @@ export function renderNodePorts(options: {
   connectedInputPortIds?: ReadonlySet<string>;
 }): void {
   const { nodeEl, node, definition, graphInteraction, interactionLocked } = options;
-  // Keep anchors for saved workflow connections without offering new wiring.
-  const savedConnectionsOnly = node.kind === "studio.workflow";
+  // Keep anchors for saved retired-node connections without offering new wiring.
+  const savedConnectionsOnly = isStudioRetiredNodeKind(node.kind);
   const hidden = options.hiddenInputPortIds;
   const connected = options.connectedInputPortIds;
   const inputPorts = (definition?.inputPorts || []).filter(port => !hidden?.has(port.id) || connected?.has(port.id));

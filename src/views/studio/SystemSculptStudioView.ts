@@ -73,7 +73,7 @@ import {
   removeNodesFromGroups,
 } from "../../studio/StudioGraphGroupModel";
 import { computeStudioGraphGroupBounds } from "./canvas/StudioGraphGroupBounds";
-import { openStudioMediaPreviewModal, resolveStudioAssetPreviewSrc } from "./canvas/StudioGraphMediaPreviewModal";
+import { openStudioMediaPreviewModal } from "./canvas/StudioGraphMediaPreviewModal";
 import { bindStudioVaultEvents } from "./StudioVaultEventBindings";
 import { StudioAssetPreviewController } from "./StudioAssetPreviewController";
 import type { StudioEditingSnapshot } from "../../core/plugin/StudioReloadState";
@@ -159,10 +159,6 @@ import {
   StudioClipboardAndDropController,
   type StudioCreatedNodesFinalization,
 } from "./systemsculpt-studio-view/StudioClipboardAndDropController";
-import {
-  inferAiImageEditAspectRatio,
-  insertAiImageEditNode,
-} from "./systemsculpt-studio-view/StudioAiImageEditFlow";
 import {
   isTextGenerationOutputLocked,
   resolveTextGenerationOutputSnapshot,
@@ -1745,123 +1741,6 @@ export class SystemSculptStudioView extends ItemView {
     };
   }
 
-  private async editImageWithAiForNode(node: StudioNodeInstance): Promise<void> {
-    if (this.busy || !this.currentProject || !this.currentProjectPath) {
-      return;
-    }
-    if (node.kind !== "studio.media_ingest") {
-      return;
-    }
-
-    const imageGenerationDefinition = this.nodeDefinitions.find(
-      (definition) => definition.kind === "studio.image_generation"
-    );
-    if (!imageGenerationDefinition) {
-      this.setError("Studio image-edit dependencies are unavailable.");
-      return;
-    }
-
-    const aspectRatio = await this.resolveAiImageEditAspectRatioForNode(node);
-    let createdImageGenerationNodeId: string | null = null;
-    const changed = this.commitCurrentProjectMutation("graph.node.create", (project) => {
-      const sourceNode = this.findNode(project, node.id);
-      if (!sourceNode) {
-        return false;
-      }
-      const inserted = insertAiImageEditNode({
-        project,
-        sourceNode,
-        aspectRatio,
-        imageGenerationDefinition,
-        nextNodeId: () => randomId("node"),
-        nextEdgeId: () => randomId("edge"),
-        cloneConfigDefaults: (definition) => cloneConfigDefaults(definition),
-        normalizeNodePosition: (position) => this.normalizeNodePosition(position),
-      });
-      createdImageGenerationNodeId = inserted.imageGenerationNodeId;
-      return true;
-    });
-    if (!changed || !createdImageGenerationNodeId || !this.currentProject) {
-      return;
-    }
-
-    this.graphInteraction.selectOnlyNode(createdImageGenerationNodeId);
-    this.graphInteraction.clearPendingConnection();
-    this.render();
-    this.focusImageGenerationPrompt(createdImageGenerationNodeId);
-  }
-
-  /** After spawning an AI edit node, put the caret straight into its Prompt box. */
-  private focusImageGenerationPrompt(nodeId: string): void {
-    const nodeEl = this.graphInteraction.getNodeElement(nodeId);
-    const promptEl = nodeEl?.querySelector<HTMLTextAreaElement>(
-      ".ss-studio-node-inline-config-field--prompt textarea"
-    );
-    promptEl?.focus();
-  }
-
-  private async resolveAiImageEditAspectRatioForNode(node: StudioNodeInstance): Promise<string> {
-    const ensuredAsset = await this.ensureRenderedImageAssetForNode(node);
-    const nodeRunState = this.runPresentation.getNodeState(node.id);
-    const outputs = (nodeRunState.outputs || {}) as Record<string, unknown>;
-    const candidatePaths = [
-      ensuredAsset?.path || "",
-      typeof outputs.preview_path === "string" ? outputs.preview_path : "",
-      typeof outputs.source_preview_path === "string" ? outputs.source_preview_path : "",
-      typeof outputs.path === "string" ? outputs.path : "",
-      typeof node.config.sourcePath === "string" ? node.config.sourcePath : "",
-    ];
-
-    for (const candidatePath of candidatePaths) {
-      const previewSrc = this.resolveImagePreviewSrcFromPath(candidatePath);
-      if (!previewSrc) {
-        continue;
-      }
-      try {
-        const dimensions = await this.measureImageDimensions(previewSrc);
-        return inferAiImageEditAspectRatio(dimensions.width, dimensions.height);
-      } catch {
-        continue;
-      }
-    }
-
-    return "1:1";
-  }
-
-  private resolveImagePreviewSrcFromPath(path: string): string | null {
-    const normalizedPath = String(path || "").trim();
-    if (!normalizedPath) {
-      return null;
-    }
-    const assetSrc = resolveStudioAssetPreviewSrc(this.app, normalizedPath);
-    if (assetSrc) {
-      return assetSrc;
-    }
-    if (isAbsoluteFilesystemPath(normalizedPath)) {
-      return `file://${encodeURI(normalizedPath)}`;
-    }
-    return null;
-  }
-
-  private measureImageDimensions(src: string): Promise<{ width: number; height: number }> {
-    return new Promise((resolve, reject) => {
-      const ImageCtor = (getStudioOwnerWindow(this.contentEl) as Window & {
-        Image: new () => HTMLImageElement;
-      }).Image;
-      const imageEl = new ImageCtor();
-      imageEl.onload = () => {
-        resolve({
-          width: imageEl.naturalWidth || 1,
-          height: imageEl.naturalHeight || 1,
-        });
-      };
-      imageEl.onerror = () => {
-        reject(new Error("Preview image failed to load."));
-      };
-      imageEl.src = src;
-    });
-  }
-
   /**
    * The picture an image node shows, as a project asset: its edits flattened
    * when it has any, otherwise its own image. A node that has not run is
@@ -3231,9 +3110,6 @@ export class SystemSculptStudioView extends ItemView {
       onOpenImageEditor: (node) => this.toggleImageEditForNode(node),
       imageBoard: this.imageBoardOptions(),
       isImageNodeEditing: (nodeId) => this.imageEditNodeId === nodeId,
-      onEditImageWithAi: (node) => {
-        void this.editImageWithAiForNode(node);
-      },
       onCopyNodeImageToClipboard: (node) => {
         void this.copyImageForNodeToClipboard(node);
       },

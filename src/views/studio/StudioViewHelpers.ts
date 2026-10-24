@@ -16,7 +16,7 @@ const NODE_DESCRIPTION_BY_KIND: Record<string, string> = {
   "studio.note": "Reads selected markdown vault notes and keeps a live read-only preview.",
   "studio.text_output": "Stores editable text and outputs it for downstream nodes.",
   "studio.text_generation": "Calls a text model and returns generated text output.",
-  "studio.image_generation": "Generates one or more images from your prompt.",
+  "studio.image_generation": "Image generation was retired. Saved outputs are preserved.",
   "studio.video_generation": "Generates a video clip from your prompt and optional frame images.",
   "studio.media_ingest": "Stores media files and outputs a reusable media path.",
   "studio.audio_extract": "Extracts an audio track from a media file.",

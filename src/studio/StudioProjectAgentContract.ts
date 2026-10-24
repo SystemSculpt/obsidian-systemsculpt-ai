@@ -26,7 +26,7 @@ const NODE_PURPOSES: Readonly<Record<string, string>> = {
   "studio.audio_extract": "Extract audio from a media asset for downstream transcription or processing.",
   "studio.cli_command": "Run a configured command in an approved filesystem scope on a desktop host.",
   "studio.dataset": "Represent, inspect, and emit structured tabular or record-oriented data.",
-  "studio.image_generation": "Generate or edit images through the managed SystemSculpt API.",
+  "studio.image_generation": "Retired image generation card. Preserve its saved configuration, connections and outputs; never add new instances. It never runs.",
   "studio.input": "Provide a static value or text input to downstream executable nodes.",
   "studio.button": "Reusable explicit button. Set config.label, action (run or focus), and target node ID. Reuses target permissions; graph traversal never presses it.",
   "studio.command_center": "Action panel for explicit run and focus commands targeting existing node IDs. Buttons reuse the target execution and permission path. It is visual-only and never runs from graph traversal.",

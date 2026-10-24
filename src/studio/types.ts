@@ -130,10 +130,6 @@ export type StudioNodeConfigSelectPresentation =
   /** A catalog modal with search, sorting, favorites, and per-model detail. */
   | "model_picker_modal";
 export type StudioNodeConfigDynamicOptionsSource =
-  | "image_models"
-  | "image_sizes"
-  | "image_aspect_ratios"
-  | "image_qualities"
   | "video_generation_models"
   | "video_generation_durations"
   | "video_generation_resolutions"
@@ -429,31 +425,9 @@ export type StudioTextGenerationResult = {
   operation?: StudioManagedOperationRef;
 };
 
-export type StudioImageGenerationInput = {
+export type StudioImageInput = {
   asset: StudioAssetRef;
   load: () => Promise<ArrayBuffer>;
-};
-
-export type StudioImageGenerationRequest = {
-  runId: string;
-  nodeId: string;
-  projectPath: string;
-  signal: AbortSignal;
-  buildPayload: () => Promise<{
-    prompt: string;
-    model?: string;
-    imageSize?: string;
-    quality?: string;
-    count?: number;
-    aspectRatio?: string;
-    inputImages?: StudioImageGenerationInput[];
-  }>;
-  storeOutput: (bytes: ArrayBuffer, mimeType: string) => Promise<StudioAssetRef>;
-};
-
-export type StudioImageGenerationResult = {
-  images: StudioAssetRef[];
-  operation: StudioManagedOperationRef;
 };
 
 export type StudioVideoFrameInput = {
@@ -531,7 +505,6 @@ export type StudioCliExecutionResult = {
 
 export interface StudioApiAdapter {
   generateText(request: StudioTextGenerationRequest): Promise<StudioTextGenerationResult>;
-  generateImage(request: StudioImageGenerationRequest): Promise<StudioImageGenerationResult>;
   generateVideo(request: StudioVideoGenerationRequest): Promise<StudioVideoGenerationResult>;
   transcribeAudio(request: StudioTranscriptionRequest): Promise<StudioTranscriptionResult>;
   beginLocalCommit(operations: readonly StudioManagedOperationRef[], signal?: AbortSignal): Promise<void>;

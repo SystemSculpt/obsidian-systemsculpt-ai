@@ -6,12 +6,13 @@ function plugin(initial: Partial<Record<"favoriteImageModels" | "favoriteVideoMo
   return { settings, getSettingsManager: () => ({ updateSettings }), updateSettings };
 }
 
-it("stores favorites per media kind and reports the new state", async () => {
-  const host = plugin({ favoriteVideoModels: ["maker/clip", 7] });
+it("toggles video favorites without changing retired image preferences", async () => {
+  const host = plugin({ favoriteVideoModels: ["maker/clip", 7], favoriteImageModels: ["saved/image"] });
   expect(readMediaModelFavorites(host as never, "video")).toEqual(["maker/clip"]);
-  await expect(toggleMediaModelFavorite(host as never, "image", "maker/alpha")).resolves.toBe(true);
-  await expect(toggleMediaModelFavorite(host as never, "image", "maker/beta")).resolves.toBe(true);
-  await expect(toggleMediaModelFavorite(host as never, "image", "maker/alpha")).resolves.toBe(false);
-  expect(host.updateSettings).toHaveBeenLastCalledWith({ favoriteImageModels: ["maker/beta"] });
-  expect(readMediaModelFavorites(host as never, "video")).toEqual(["maker/clip"]);
+  await expect(toggleMediaModelFavorite(host as never, "video", "maker/alpha")).resolves.toBe(true);
+  await expect(toggleMediaModelFavorite(host as never, "video", "maker/beta")).resolves.toBe(true);
+  await expect(toggleMediaModelFavorite(host as never, "video", "maker/alpha")).resolves.toBe(false);
+  expect(host.updateSettings).toHaveBeenLastCalledWith({ favoriteVideoModels: ["maker/clip", "maker/beta"] });
+  expect(readMediaModelFavorites(host as never, "video")).toEqual(["maker/clip", "maker/beta"]);
+  expect(host.settings.favoriteImageModels).toEqual(["saved/image"]);
 });
