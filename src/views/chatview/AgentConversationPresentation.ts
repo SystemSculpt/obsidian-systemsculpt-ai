@@ -4,6 +4,7 @@ import type {
   AgentPart,
   AgentToolPart,
 } from "../../chat/ChatConversation";
+import { isPlanAccessError } from "../../utils/errors";
 
 const INTERRUPTED_ERROR_CODE =
   /(?:connection|socket|stream|resume|recover|interrupt|transport)/i;
@@ -111,6 +112,7 @@ export function presentAgentError(
   return {
     heading: interrupted ? "Response interrupted" : "Could not finish",
     message: presentAgentErrorMessage(error.message, interrupted),
+    ...(isPlanAccessError(error) ? { action: "see-plans" as const } : {}),
     ...(reportId ? { reportId } : {}),
   };
 }

@@ -609,28 +609,33 @@ describe.each(["desktop", "mobile"])("a new user's first run in the built bundle
     await expectComposerUsable();
   });
 
-  // Dead end (T-570): a rejected license on the first turn shows the generic
-  // "Could not finish" with no plan or sign-in step, because chat opens the
-  // plan modal only for thrown plan errors, not for a failed run whose code
-  // is license_rejected. The fix makes this an ordinary `it`.
-  it.failing("403 license_rejected: offers the plan step, and syncing the license answers", async () => {
-    await signUpFromChat();
-    rejectLicense();
-    await send(QUESTION);
+  describe.each([false, true])("automatic plan prompt suppression: %s", (suppressLicenseUpgradePrompt) => {
+    it("403 license_rejected: offers the plan step, and syncing the license answers", async () => {
+      await signUpFromChat();
+      await plugin.getSettingsManager().updateSettings({ suppressLicenseUpgradePrompt });
+      const browserOpens = openedUrls.length;
+      rejectLicense();
+      await send(QUESTION);
 
-    control("upgrade-plan.sync").click();
-    await jest.advanceTimersByTimeAsync(3_500);
-    expect(document.querySelector(".ss-upgrade-plan-modal")?.textContent).toContain("You're signed in");
-    control("upgrade-plan.done").click();
-    await jest.advanceTimersByTimeAsync(1_000);
-    await send(QUESTION);
-    expectAnswered(QUESTION);
+      expect(document.querySelectorAll(".ss-upgrade-plan-modal")).toHaveLength(0);
+      expect(openedUrls).toHaveLength(browserOpens);
+      control("chat.turn.see-plans", failure()).click();
+      await jest.advanceTimersByTimeAsync(0);
+      expect(document.querySelectorAll(".ss-upgrade-plan-modal")).toHaveLength(1);
+      expect(openedUrls).toHaveLength(browserOpens);
+      control("upgrade-plan.sync").click();
+      await jest.advanceTimersByTimeAsync(3_500);
+      expect(openedUrls).toHaveLength(browserOpens + 1);
+      expect(document.querySelector(".ss-upgrade-plan-modal")?.textContent).toContain("You're signed in");
+      control("upgrade-plan.done").click();
+      await jest.advanceTimersByTimeAsync(1_000);
+      await send(QUESTION);
+      expectAnswered(QUESTION);
+      expect(plugin.settings.suppressLicenseUpgradePrompt).toBe(suppressLicenseUpgradePrompt);
+    });
   });
 
-  // Lost draft (T-570): once chat knows the balance is zero, Send shows the
-  // out-of-credits banner but returns normally, so the composer clears the
-  // typed message. The fix makes this an ordinary `it`.
-  it.failing("402 out of credits: a second send keeps its typed message", async () => {
+  it("402 out of credits: a second send keeps its typed message", async () => {
     await signUpFromChat();
     server.failNext("/api/plugin/agent/turn", {
       status: 402,
@@ -638,9 +643,23 @@ describe.each(["desktop", "mobile"])("a new user's first run in the built bundle
     });
     server.credits = 0;
     await send(QUESTION);
+    const turnRequests = () => server.requests.filter(({ path }) => path === "/api/plugin/agent/turn");
+    const attempts = turnRequests().length;
     await send("Second try");
 
     expect(control("chat.banner.see-plans", chat()).isConnected).toBe(true);
     expect(composer().value).toBe("Second try");
+    expect(turnRequests()).toHaveLength(attempts);
+    await expectComposerUsable();
+
+    server.credits = 10_000;
+    control("chat.run.detail", chat()).click();
+    await jest.advanceTimersByTimeAsync(1_000);
+    control("modal.close").click();
+    await jest.advanceTimersByTimeAsync(500);
+    control("chat.composer.send", chat()).click();
+    await jest.advanceTimersByTimeAsync(5_000);
+    expect(turns().slice(-2)).toEqual(["user: Second try", `assistant: ${ANSWER}`]);
+    expect(composer().value).toBe("");
   });
 });
