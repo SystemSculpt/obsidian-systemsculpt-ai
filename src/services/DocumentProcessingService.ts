@@ -8,6 +8,8 @@ import type {
   DocumentProcessingStage,
 } from "../types/documentProcessing";
 import { sha256HexFromArrayBuffer, sha256HexFromBytes, sha256HexFromBytesPortable } from "../utils/sha256";
+import { createVaultFileSource } from "../platform/fileSource";
+import { createManagedFileSource } from "./managed/ManagedFileSource";
 import { errorLogger } from "../utils/errorLogger";
 import { base64ToBytes } from "../utils/base64";
 import { toSafeVaultFileName } from "../utils/vaultFileName";
@@ -150,27 +152,17 @@ export class DocumentProcessingService {
 
     try {
       const identity = `vault:${file.path}`;
-      // Hash and upload the same snapshot. An unchanged path alone cannot
-      // establish that bytes retained by a prior operation are still selected.
-      let loaded: Promise<Readonly<{ filename: string; contentType: string; bytes: ArrayBuffer }>> | undefined;
-      const load = () => loaded ??= (async () => {
+      const source = createManagedFileSource(identity, () => {
         throwIfAborted(signal);
         const contentType = getManagedDocumentMimeType(normalizeFileExtension(file.extension));
         if (!contentType) {
           throw new Error(`Managed document processing does not support .${file.extension || "unknown"} files.`);
         }
-        const bytes = await this.app.vault.readBinary(file);
-        throwIfAborted(signal);
-        return { filename: file.name, contentType, bytes };
-      })();
-      let fingerprint: Promise<`sha256:${string}`> | undefined;
+        return { ...createVaultFileSource(this.app, file), filename: file.name, contentType };
+      });
       // Conversions of one file take turns through their local commit, so a
       // second one of the same bytes commits the result the first delivered.
-      const receipt = await this.adapter().processAndCommit({
-        identity,
-        fingerprint: () => fingerprint ??= load().then(async ({ bytes }) => `sha256:${await sha256HexFromArrayBuffer(bytes)}` as const),
-        load,
-      }, {
+      const receipt = await this.adapter().processAndCommit(source, {
         signal,
         // A replacement conversion is a new server job: say so even when the
         // caller shows its own progress instead of notices.

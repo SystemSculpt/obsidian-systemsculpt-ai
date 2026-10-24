@@ -1,3 +1,4 @@
+import type { ManagedFileContent, ManagedFileSource } from "../managed/ManagedFileSource";
 import type { ManagedAdmission } from "../managed/ManagedAdmission";
 import { ManagedJobClient, ManagedJobError } from "../managed/ManagedJobClient";
 import { isRetiredManagedRecoveryRecord, ManagedJobRecoveryStore } from "../managed/ManagedJobRecoveryStore";
@@ -16,7 +17,7 @@ import {
 } from "../managed/ManagedJobObservation";
 
 const CAPABILITY = "transcription" as const;
-const MAX_AUDIO_BYTES = 128 * 1024 * 1024;
+const MAX_AUDIO_BYTES = 500 * 1024 * 1024;
 
 export type ManagedTranscriptionContext = Readonly<{
   operationId?: string;
@@ -30,18 +31,7 @@ export type ManagedTranscriptionContext = Readonly<{
   allowPendingLocalReceipt?: boolean;
 }>;
 
-export type ManagedTranscriptionSource = Readonly<{
-  /** Opaque hashed invocation identity. Must not include raw paths or filenames. */
-  identity: string;
-  fingerprint: () => string | Promise<string>;
-  load: () => Promise<Readonly<{
-    filename: string;
-    contentType: string;
-    bytes: ArrayBuffer;
-  }>>;
-  /** Drop caller-owned references as soon as multipart upload no longer needs them. */
-  release?: () => void;
-}>;
+export type ManagedTranscriptionSource = ManagedFileSource;
 
 export type ManagedTranscriptionResult =
   | Readonly<{
@@ -266,7 +256,7 @@ export class ManagedTranscriptionAdapter {
         ? source
         : {
             identity: record.source.identity,
-            fingerprint: () => source.fingerprint(),
+            fingerprint: (signal?: AbortSignal) => source.fingerprint(signal),
             load: () => source.load(),
             ...(source.release ? { release: () => source.release?.() } : {}),
           };
@@ -677,7 +667,7 @@ export class ManagedTranscriptionAdapter {
     source: ManagedTranscriptionSource,
     signal: AbortSignal,
   ): Promise<string> {
-    const fingerprint = await source.fingerprint();
+    const fingerprint = await source.fingerprint(signal);
     throwIfAborted(signal);
     if (!/^sha256:[a-f0-9]{64}$/.test(fingerprint)) {
       throw new Error("Managed transcription source fingerprint must be SHA-256.");
@@ -799,7 +789,7 @@ export class ManagedTranscriptionAdapter {
       throwIfAborted(signal);
       const jobId = readJobId(created);
       const multipartUpload = this.buildMultipartUploadDescriptor(createRequest, readUpload(created));
-      this.assertLoadedBytesMatchUpload(loaded.bytes.byteLength, multipartUpload);
+      this.assertLoadedBytesMatchUpload(loaded.sizeBytes, multipartUpload);
       record = await this.dependencies.recovery.acknowledgeCreated(
         CAPABILITY,
         record.operationId,
@@ -811,7 +801,7 @@ export class ManagedTranscriptionAdapter {
     }
 
     if (["created", "part_dispatching", "uploading"].includes(record.phase)) {
-      const multipartUpload = await this.requireMultipartUpload(record, loaded.bytes.byteLength);
+      const multipartUpload = await this.requireMultipartUpload(record, loaded.sizeBytes);
       const jobId = record.jobId;
       if (!jobId) throw new Error("Managed transcription recovery record has no acknowledged job ID.");
       const completedParts = new Map(
@@ -821,8 +811,10 @@ export class ManagedTranscriptionAdapter {
         if (completedParts.has(partNumber)) continue;
         throwIfAborted(signal);
         const offset = (partNumber - 1) * multipartUpload.partSizeBytes;
-        const length = Math.min(multipartUpload.partSizeBytes, loaded.bytes.byteLength - offset);
-        const bytes = loaded.bytes.slice(offset, offset + length);
+        const length = Math.min(multipartUpload.partSizeBytes, loaded.sizeBytes - offset);
+        const bytes = await loaded.readSlice(offset, offset + length);
+        throwIfAborted(signal);
+        if (bytes.byteLength !== length) throw new Error("The selected audio changed while it was being read.");
         const replayingPendingPart = record.phase === "part_dispatching"
           && record.pendingDispatch?.partNumber === partNumber;
         if (!replayingPendingPart) {
@@ -875,11 +867,7 @@ export class ManagedTranscriptionAdapter {
     source: ManagedTranscriptionSource,
     context: ManagedTranscriptionContext,
     signal: AbortSignal,
-  ): Promise<Readonly<{
-    filename: string;
-    contentType: string;
-    bytes: ArrayBuffer;
-  }>> {
+  ): Promise<ManagedFileContent> {
     return source.load().then((loaded) => {
       throwIfAborted(signal);
       this.validateLoadedSource(loaded, context.maxAudioBytes ?? MAX_AUDIO_BYTES);
@@ -888,10 +876,10 @@ export class ManagedTranscriptionAdapter {
   }
 
   private validateLoadedSource(
-    loaded: Readonly<{ filename: string; contentType: string; bytes: ArrayBuffer }>,
+    loaded: ManagedFileContent,
     maxAudioBytes: number,
   ): void {
-    if (!(loaded.bytes instanceof ArrayBuffer) || loaded.bytes.byteLength < 1 || loaded.bytes.byteLength > maxAudioBytes) {
+    if (!Number.isSafeInteger(loaded.sizeBytes) || loaded.sizeBytes < 1 || loaded.sizeBytes > maxAudioBytes) {
       throw new Error(`Audio must contain between 1 byte and ${Math.floor(maxAudioBytes / (1024 * 1024))} MiB.`);
     }
     if (!loaded.filename || loaded.filename.length > 512 || !loaded.contentType) {
@@ -901,13 +889,13 @@ export class ManagedTranscriptionAdapter {
 
   private buildCreateRequest(
     sourceIdentity: string,
-    loaded: Readonly<{ filename: string; contentType: string; bytes: ArrayBuffer }>,
+    loaded: ManagedFileContent,
     context: ManagedTranscriptionContext,
   ): ManagedMultipartCreateRequest {
     return {
       filename: this.buildOpaqueUploadFilename(sourceIdentity, loaded.contentType, loaded.filename),
       contentType: loaded.contentType,
-      contentLengthBytes: loaded.bytes.byteLength,
+      contentLengthBytes: loaded.sizeBytes,
       ...(context.timestamped === undefined ? {} : { timestamped: context.timestamped }),
       ...(context.language === undefined ? {} : { language: context.language }),
     };
@@ -1014,7 +1002,7 @@ export class ManagedTranscriptionAdapter {
     try {
       source.release?.();
     } catch {
-      // Releasing caller-owned buffers is best-effort.
+      // Releasing caller-owned readers is best-effort.
     }
   }
 

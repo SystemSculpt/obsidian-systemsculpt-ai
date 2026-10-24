@@ -5,7 +5,11 @@ import {
   TranscriptionResumeRequiredError,
 } from "../ManagedTranscriptionAdapter";
 import { TranscriptionCoordinator } from "../TranscriptionCoordinator";
-import { createLocalCommitReceipt } from "../LocalCommitReceipt";
+import { createLocalCommitReceipt, LocalCommitReceiptMismatchError } from "../LocalCommitReceipt";
+import { createVaultFileSource } from "../../../platform/fileSource";
+import type { ManagedFileSource } from "../../managed/ManagedFileSource";
+
+jest.mock("../../../platform/fileSource", () => ({ createVaultFileSource: jest.fn() }));
 
 const mockClipboardWrite = jest.fn(async () => undefined);
 Object.defineProperty(navigator, "clipboard", {
@@ -39,6 +43,16 @@ interface HarnessOverrides {
   postProcess?: boolean;
 }
 
+async function readAndReleaseSource(source: ManagedFileSource): Promise<void> {
+  try {
+    await source.fingerprint();
+    const loaded = await source.load();
+    await loaded.readSlice(0, Math.min(loaded.sizeBytes, 1024 * 1024));
+  } finally {
+    source.release?.();
+  }
+}
+
 function harness(overrides: HarnessOverrides = {}) {
   const app = new App();
   const file = new TFile({
@@ -52,9 +66,27 @@ function harness(overrides: HarnessOverrides = {}) {
     (path: string) => path === file.path ? file : null,
   );
   (app.vault.getFiles as jest.Mock).mockReturnValue([]);
-  (app.vault as unknown as { readBinary: jest.Mock }).readBinary = jest.fn(
-    async () => new Uint8Array([1, 2, 3, 4]).buffer,
-  );
+  (app.vault as unknown as { readBinary: jest.Mock }).readBinary = jest.fn(async () => {
+    throw new Error("Whole-file audio reads are forbidden.");
+  });
+  const readSlice = jest.fn(async (start: number, end: number) => {
+    if (start < 0 || end > file.stat.size || end < start || end - start > 1024 * 1024) {
+      throw new Error("Expected a bounded audio slice.");
+    }
+    return Uint8Array.from({ length: end - start }, (_, index) => (start + index + 1) % 256).buffer;
+  });
+  const release = jest.fn();
+  jest.mocked(createVaultFileSource).mockImplementation((_app, selected) => {
+    let released = false;
+    return {
+      sizeBytes: selected.stat.size,
+      readSlice: async (start, end) => {
+        if (released) throw new Error("The vault file source was released.");
+        return readSlice(start, end);
+      },
+      release: () => { released = true; release(); },
+    };
+  });
   (app.vault.create as jest.Mock).mockImplementation(async (path: string) => {
     events.push(`write:${path}`);
     return new TFile({ path, name: path.split("/").pop() });
@@ -65,17 +97,19 @@ function harness(overrides: HarnessOverrides = {}) {
   });
 
   const adapter = {
-    transcribe: jest.fn(async (source: {
-      fingerprint(): Promise<string>;
-      load(): Promise<{ bytes: ArrayBuffer }>;
-    }) => {
+    transcribe: jest.fn(async (source: ManagedFileSource) => {
       events.push("remote");
-      await source.fingerprint();
-      await source.load();
+      await readAndReleaseSource(source);
       return { kind: "transcript", operationId: "transcription-op-1", text: "managed transcript" };
     }),
-    resume: jest.fn(async (operationId: string) => ({ kind: "transcript", operationId, text: "managed transcript" })),
-    resumeOrStart: jest.fn(async (operationId: string) => ({ kind: "transcript", operationId, text: "managed transcript" })),
+    resume: jest.fn(async (operationId: string, source: ManagedFileSource) => {
+      await readAndReleaseSource(source);
+      return { kind: "transcript", operationId, text: "managed transcript" };
+    }),
+    resumeOrStart: jest.fn(async (operationId: string, source: ManagedFileSource) => {
+      await readAndReleaseSource(source);
+      return { kind: "transcript", operationId, text: "managed transcript" };
+    }),
     hasRecoveryOperation: jest.fn(async () => true),
     beginLocalCommit: jest.fn(async () => { events.push("commit:begin"); }),
     recordLocalCommitReceipt: jest.fn(async () => { events.push("commit:receipt"); }),
@@ -92,7 +126,7 @@ function harness(overrides: HarnessOverrides = {}) {
     },
   } as any;
   const coordinator = new TranscriptionCoordinator(app, plugin, adapter as any);
-  return { adapter, app, coordinator, events, file };
+  return { adapter, app, coordinator, events, file, readSlice, release };
 }
 
 describe("TranscriptionCoordinator", () => {
@@ -341,21 +375,28 @@ describe("TranscriptionCoordinator", () => {
     expect(adapter.completeLocalCommit).not.toHaveBeenCalled();
   });
 
-  it("hashes the source bytes once and reuses those bytes for upload", async () => {
-    const { adapter, app, coordinator, file } = harness();
-    let fingerprint = "";
-    adapter.transcribe.mockImplementation(async (source: any) => {
-      fingerprint = await source.fingerprint();
-      await source.load();
+  it("caches the exact source fingerprint and verifies upload slices without whole-file reads", async () => {
+    const { adapter, app, coordinator, file, readSlice } = harness();
+    adapter.transcribe.mockImplementation(async (source: ManagedFileSource) => {
+      const fingerprints = await Promise.all([source.fingerprint(), source.fingerprint()]);
+      expect(fingerprints).toEqual([
+        "sha256:9f64a747e1b97f131fabb6b447296c9b6f0201e79fb3c5356e6c77e89b6a806a",
+        "sha256:9f64a747e1b97f131fabb6b447296c9b6f0201e79fb3c5356e6c77e89b6a806a",
+      ]);
+      expect(readSlice.mock.calls).toEqual([[0, 4]]);
+      const loaded = await source.load();
+      expect(loaded).toMatchObject({ filename: file.name, contentType: "audio/webm", sizeBytes: 4 });
+      expect(loaded).not.toHaveProperty("bytes");
+      expect(new Uint8Array(await loaded.readSlice(1, 3))).toEqual(new Uint8Array([2, 3]));
       return { operationId: "transcription-op-1", text: "managed transcript" };
     });
 
     await coordinator.transcribeFile(file, { type: "note" }, async (text) => text);
 
-    expect(fingerprint).toBe(
-      "sha256:9f64a747e1b97f131fabb6b447296c9b6f0201e79fb3c5356e6c77e89b6a806a",
-    );
-    expect(app.vault.readBinary).toHaveBeenCalledTimes(1);
+    expect(createVaultFileSource).toHaveBeenCalledTimes(1);
+    expect(createVaultFileSource).toHaveBeenCalledWith(app, file);
+    expect(readSlice.mock.calls).toEqual([[0, 4], [0, 4]]);
+    expect(app.vault.readBinary).not.toHaveBeenCalled();
   });
 
   it("inserts only the processed body into the editor captured by the initiating surface", async () => {
@@ -410,8 +451,8 @@ describe("TranscriptionCoordinator", () => {
 
   it.each([
     [0, "empty"],
-    [128 * 1024 * 1024 + 1, "too large"],
-  ])("rejects %s-byte audio before reading it into memory", async (size, message) => {
+    [500 * 1024 * 1024 + 1, "too large"],
+  ])("rejects %s-byte audio before opening its source", async (size, message) => {
     const { adapter, app, coordinator, file } = harness();
     file.stat.size = size;
 
@@ -420,23 +461,48 @@ describe("TranscriptionCoordinator", () => {
       destination: "note",
     })).rejects.toThrow(message);
 
+    expect(createVaultFileSource).not.toHaveBeenCalled();
     expect(app.vault.readBinary).not.toHaveBeenCalled();
     expect(adapter.transcribe).not.toHaveBeenCalled();
     expect(adapter.beginLocalCommit).not.toHaveBeenCalled();
   });
 
-  it("rejects audio above 32 MiB on mobile before allocating the file body", async () => {
+  it("rejects audio above 500 MiB on mobile before opening its source", async () => {
     Object.assign(Platform, { isDesktopApp: false, isMobileApp: true });
     const { adapter, app, coordinator, file } = harness();
-    file.stat.size = 32 * 1024 * 1024 + 1;
+    file.stat.size = 500 * 1024 * 1024 + 1;
 
     await expect(coordinator.start({
       filePath: file.path,
       destination: "note",
-    })).rejects.toThrow("mobile transcription limit is 32.0 MiB");
+    })).rejects.toThrow("500.0 MiB");
 
+    expect(createVaultFileSource).not.toHaveBeenCalled();
     expect(app.vault.readBinary).not.toHaveBeenCalled();
     expect(adapter.transcribe).not.toHaveBeenCalled();
+  });
+
+  it.each(["desktop", "mobile"])("admits the 500 MiB boundary on %s without a whole-file allocation", async (host) => {
+    Object.assign(Platform, { isDesktopApp: host === "desktop", isMobileApp: host === "mobile" });
+    const { adapter, app, coordinator, file, readSlice } = harness();
+    file.stat.size = 500 * 1024 * 1024;
+    adapter.transcribe.mockImplementationOnce(async (source: ManagedFileSource) => {
+      const loaded = await source.load();
+      expect(loaded.sizeBytes).toBe(file.stat.size);
+      expect(loaded).not.toHaveProperty("bytes");
+      // Admission and source construction do not eagerly hash or read the file.
+      expect(readSlice).not.toHaveBeenCalled();
+      return { kind: "transcript", operationId: "transcription-op-1", text: "managed transcript" };
+    });
+
+    await expect(coordinator.start({ filePath: file.path, destination: "note" }))
+      .resolves.toMatchObject({ operationId: "transcription-op-1" });
+
+    expect(adapter.transcribe).toHaveBeenCalledWith(expect.any(Object), expect.objectContaining({
+      maxAudioBytes: 500 * 1024 * 1024,
+    }));
+    expect(createVaultFileSource).toHaveBeenCalledWith(app, file);
+    expect(app.vault.readBinary).not.toHaveBeenCalled();
   });
 
   it("returns a durable success with a warning when source cleanup fails", async () => {
@@ -624,6 +690,61 @@ describe("TranscriptionCoordinator", () => {
     expect(adapter.completeLocalCommit).toHaveBeenCalledWith(operationId);
   });
 
+  describe.each(["start", "transcribeFile"] as const)("%s source ownership", (entrypoint) => {
+    it.each(["completed mismatch", "pending receipt", "expired pending receipt"] as const)(
+      "opens a fresh source for each adapter invocation after a %s",
+      async (scenario) => {
+        const { adapter, app, coordinator, file, release } = harness();
+        const operationId = "retained-receipt-operation";
+        const receipt = {
+          kind: "local_receipt",
+          operationId,
+          recoveryPhase: scenario === "completed mismatch" ? "completed" : "local_commit_pending",
+          receipt: createLocalCommitReceipt("Recordings/missing.md", "original transcript"),
+        };
+        const sources: ManagedFileSource[] = [];
+        const consume = async (source: ManagedFileSource) => {
+          sources.push(source);
+          await readAndReleaseSource(source);
+        };
+        adapter.transcribe.mockImplementation(async (source: ManagedFileSource, context: { operationId: string }) => {
+          await consume(source);
+          if (entrypoint === "transcribeFile" && sources.length === 1) return receipt;
+          return { kind: "transcript", operationId: context.operationId, text: "recovered transcript" };
+        });
+        adapter.resume.mockImplementation(async (resumedOperationId, source) => {
+          await consume(source);
+          if (entrypoint === "start" && sources.length === 1) return receipt;
+          if (scenario === "expired pending receipt") {
+            throw new ManagedTranscriptionRetryError(operationId, "restart", "local_commit_pending", new Error("expired"));
+          }
+          return { kind: "transcript", operationId: resumedOperationId, text: "recovered transcript" };
+        });
+
+        if (entrypoint === "start") {
+          await expect(coordinator.start({ filePath: file.path, destination: "note", resumeOperationId: operationId }))
+            .resolves.toMatchObject({ text: "recovered transcript" });
+        } else {
+          await expect(coordinator.transcribeFile(file, {
+            type: "note",
+            recoverLocalCommit: async () => { throw new LocalCommitReceiptMismatchError("Saved output is missing."); },
+          }, async (text) => text)).resolves.toBe("recovered transcript");
+        }
+
+        const expectedCalls = scenario === "expired pending receipt" ? 3 : 2;
+        expect(sources).toHaveLength(expectedCalls);
+        expect(new Set(sources).size).toBe(expectedCalls);
+        expect(new Set(sources.map((source) => source.identity)).size).toBe(1);
+        expect(createVaultFileSource).toHaveBeenCalledTimes(expectedCalls);
+        expect(release).toHaveBeenCalledTimes(expectedCalls);
+        expect(app.vault.readBinary).not.toHaveBeenCalled();
+        for (const source of sources) {
+          await expect(source.load()).rejects.toThrow("released");
+        }
+      },
+    );
+  });
+
   it.each([
     ["edited", "user-edited transcript"],
     ["missing", null],
@@ -639,20 +760,22 @@ describe("TranscriptionCoordinator", () => {
       return null;
     });
     (app.vault.read as jest.Mock).mockResolvedValue(currentContent);
-    adapter.resume.mockResolvedValue({
-      kind: "local_receipt",
-      operationId: oldOperationId,
-      recoveryPhase: "completed",
-      receipt,
+    adapter.resume.mockImplementation(async (_operationId, source) => {
+      await readAndReleaseSource(source);
+      return {
+        kind: "local_receipt",
+        operationId: oldOperationId,
+        recoveryPhase: "completed",
+        receipt,
+      };
     });
     adapter.acknowledgeCompleted.mockImplementation(async () => {
       order.push("ack-old");
     });
-    adapter.transcribe.mockImplementation(async (_source: unknown, context: { operationId: string }) => ({
-      kind: "transcript",
-      operationId: context.operationId,
-      text: "fresh transcript",
-    }));
+    adapter.transcribe.mockImplementation(async (source: ManagedFileSource, context: { operationId: string }) => {
+      await readAndReleaseSource(source);
+      return { kind: "transcript", operationId: context.operationId, text: "fresh transcript" };
+    });
     const onOperationIdChange = jest.fn(async (operationId: string) => {
       order.push(`persist:${operationId}`);
     });
@@ -688,23 +811,23 @@ describe("TranscriptionCoordinator", () => {
     const { adapter, coordinator } = harness();
     const oldOperationId = "expired-local-commit";
     adapter.resume
-      .mockResolvedValueOnce({
-        kind: "local_receipt",
-        operationId: oldOperationId,
-        recoveryPhase: "local_commit_pending",
-        receipt: createLocalCommitReceipt("Recordings/missing.md", "missing"),
+      .mockImplementationOnce(async (_operationId, source) => {
+        await readAndReleaseSource(source);
+        return {
+          kind: "local_receipt",
+          operationId: oldOperationId,
+          recoveryPhase: "local_commit_pending",
+          receipt: createLocalCommitReceipt("Recordings/missing.md", "missing"),
+        };
       })
-      .mockRejectedValueOnce(new ManagedTranscriptionRetryError(
-        oldOperationId,
-        "restart",
-        "local_commit_pending",
-        new Error("expired"),
-      ));
-    adapter.transcribe.mockImplementation(async (_source: unknown, context: { operationId: string }) => ({
-      kind: "transcript",
-      operationId: context.operationId,
-      text: "fresh transcript",
-    }));
+      .mockImplementationOnce(async (_operationId, source) => {
+        await readAndReleaseSource(source);
+        throw new ManagedTranscriptionRetryError(oldOperationId, "restart", "local_commit_pending", new Error("expired"));
+      });
+    adapter.transcribe.mockImplementation(async (source: ManagedFileSource, context: { operationId: string }) => {
+      await readAndReleaseSource(source);
+      return { kind: "transcript", operationId: context.operationId, text: "fresh transcript" };
+    });
     const persisted: string[] = [];
 
     const result = await coordinator.start({
@@ -730,11 +853,10 @@ describe("TranscriptionCoordinator", () => {
   it("replaces a persisted operation ID whose recovery record was never created", async () => {
     const { adapter, coordinator } = harness();
     adapter.hasRecoveryOperation.mockResolvedValue(false);
-    adapter.transcribe.mockImplementation(async (_source: unknown, context: { operationId: string }) => ({
-      kind: "transcript",
-      operationId: context.operationId,
-      text: "fresh transcript",
-    }));
+    adapter.transcribe.mockImplementation(async (source: ManagedFileSource, context: { operationId: string }) => {
+      await readAndReleaseSource(source);
+      return { kind: "transcript", operationId: context.operationId, text: "fresh transcript" };
+    });
     const onOperationIdChange = jest.fn(async () => undefined);
 
     const result = await coordinator.start({

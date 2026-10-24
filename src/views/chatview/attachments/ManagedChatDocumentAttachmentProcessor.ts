@@ -67,7 +67,13 @@ export class ManagedChatDocumentAttachmentProcessor implements ChatDocumentAttac
     return this.managed.processAndCommit({
       identity: sourceIdentity(input.fingerprint),
       fingerprint: () => input.fingerprint,
-      load: async () => ({ filename: input.name, contentType: input.mimeType, bytes: input.bytes }),
+      load: async () => ({
+        filename: input.name,
+        contentType: input.mimeType,
+        sizeBytes: input.bytes.byteLength,
+        readSlice: async (start, end) => input.bytes.slice(start, end),
+        release: () => undefined,
+      }),
     }, {
       signal,
       onNotice: (message) => new Notice(`${input.name}: ${message}`, 10_000),

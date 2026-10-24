@@ -1,9 +1,15 @@
-import { Platform } from "obsidian";
+import { Platform, TFile } from "obsidian";
+import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createHash } from "node:crypto";
+import { transcriptionNode } from "../nodes/transcriptionNode";
+import { textNode } from "../nodes/textNode";
 import { registerBuiltInStudioNodes } from "../StudioBuiltInNodes";
 import { StudioGraphCompiler } from "../StudioGraphCompiler";
 import { StudioNodeRegistry } from "../StudioNodeRegistry";
 import { StudioRuntime } from "../StudioRuntime";
-import type { StudioProjectV1 } from "../types";
+import type { StudioNodeExecutionContext, StudioProjectV1, StudioTranscriptionRequest } from "../types";
 
 function projectFixture(): StudioProjectV1 {
   return {
@@ -254,6 +260,19 @@ describe("StudioRuntime session snapshot runs", () => {
         expect(await services.statVaultFileSize(inputs.asset.path)).toBe(bytes.byteLength);
         preview[0] = 0;
         expect(new Uint8Array(await services.readVaultBinary(inputs.asset.path))).toEqual(bytes);
+        // Transcription can slice a staged asset before any vault file exists.
+        const source = await services.openVaultFileSource(inputs.asset.path);
+        expect(source.sizeBytes).toBe(bytes.byteLength);
+        const slice = new Uint8Array(await source.readSlice(1, 3));
+        expect(slice).toEqual(new Uint8Array([8, 9]));
+        slice[0] = 0;
+        expect(new Uint8Array(await source.readSlice(1, 3))).toEqual(new Uint8Array([8, 9]));
+        await expect(source.readSlice(0, 4)).rejects.toThrow("Invalid file slice");
+        source.release();
+        await expect(source.readSlice(0, 1)).rejects.toThrow("released");
+        await expect(services.openVaultFileSource("Private/audio.wav")).rejects.toThrow("Filesystem permission denied");
+        await expect(services.openVaultFileSource("Studio/Test.systemsculpt-assets/../private.wav")).rejects.toThrow("parent traversal");
+        await expect(services.openLocalFileSource("/tmp/audio.wav")).rejects.toThrow("Obsidian Desktop");
         return { outputs: { size: consumed.byteLength } };
       } },
       inboundEdges: [{ fromNodeId: "producer", fromPortId: "asset", toNodeId: "consumer", toPortId: "asset" }], dependencyNodeIds: ["producer"],
@@ -276,8 +295,113 @@ describe("StudioRuntime session snapshot runs", () => {
     const summary = await runtime.runProjectSnapshot("Studio/Test.systemsculpt", project);
     expect(summary.status).toBe("success");
     expect(assetStore.readArrayBuffer).not.toHaveBeenCalled();
+    expect(app.vault.getAbstractFileByPath).not.toHaveBeenCalled();
+    expect(app.vault.readBinary).not.toHaveBeenCalled();
     expect(projectStore.publishRun).toHaveBeenCalledTimes(1);
     expect(published[0].assets).toEqual([{ contentAddressedPath: `aa/${"a".repeat(64)}.bin`, bytes }]);
+  });
+
+  it.each([false, true])("opens permission-guarded transcription slices through the runtime (desktop=%s)", async (desktop) => {
+    platform.isDesktopApp = desktop;
+    const directory = await mkdtemp(join(tmpdir(), "studio-transcription-test-"));
+    const absolutePath = join(directory, "audio.wav");
+    const bytes = new Uint8Array([7, 8, 9]);
+    await writeFile(absolutePath, bytes);
+    const fileStat = await stat(absolutePath);
+    const file = Object.assign(new TFile(), { path: "Approved/audio.wav", stat: { size: bytes.byteLength, mtime: fileStat.mtimeMs } });
+    const fetchSlice = jest.spyOn(globalThis, "fetch").mockImplementation(async (_url, options) => {
+      expect(options?.headers).toEqual({ Range: "bytes=0-2" });
+      return new Response(bytes, { status: 206, headers: { "Content-Range": "bytes 0-2/3" } });
+    });
+    const app = { vault: {
+      adapter: desktop ? { getFullPath: jest.fn(() => absolutePath) } : {},
+      getAbstractFileByPath: jest.fn((path: string) => path === file.path ? file : null),
+      getResourcePath: jest.fn(() => "app://vault/audio.wav"),
+      readBinary: jest.fn(),
+    } } as any;
+    const plugin = { app, getLogger: () => ({ warn: jest.fn(), error: jest.fn(), debug: jest.fn() }) } as any;
+    const projectStore = {
+      readSupportFile: jest.fn(async () => null),
+      loadPolicy: jest.fn(async () => ({ schema: "studio.policy.v1", version: 1, updatedAt: "2026-03-22T00:00:00.000Z", grants: [{ id: "audio-read", capability: "filesystem", scope: { allowedPaths: ["Approved", directory] }, grantedAt: "2026-03-22T00:00:00.000Z", grantedByUser: true }] })),
+      publishRun: jest.fn(async () => undefined),
+    } as any;
+    const transcribeAudio = jest.fn(async (request: StudioTranscriptionRequest) => {
+      const content = await request.source.load();
+      try {
+        expect(content).toMatchObject({ filename: "audio.wav", contentType: "audio/wav", sizeBytes: 3 });
+        expect(content).not.toHaveProperty("bytes");
+        expect(await request.source.fingerprint()).toBe(`sha256:${createHash("sha256").update(bytes).digest("hex")}`);
+        expect(new Uint8Array(await content.readSlice(0, 3))).toEqual(bytes);
+        return { text: "transcript", operation: { capability: "transcription" as const, operationId: "transcription-test" } };
+      } finally {
+        request.source.release?.();
+        await Promise.resolve();
+        await expect(content.readSlice(0, 1)).rejects.toThrow();
+      }
+    });
+    const registry = new StudioNodeRegistry();
+    registry.register(textNode);
+    registry.register({
+      ...transcriptionNode,
+      execute: async (context: StudioNodeExecutionContext) => {
+        const { services } = context;
+        await expect(services.openVaultFileSource("Private/audio.wav")).rejects.toThrow("Filesystem permission denied");
+        await expect(services.openVaultFileSource("Approved/../private.wav")).rejects.toThrow("parent traversal");
+        expect(app.vault.getAbstractFileByPath).not.toHaveBeenCalled();
+        await expect(services.openVaultFileSource("Approved/missing.wav")).rejects.toThrow("Vault file not found");
+        if (desktop) {
+          await expect(services.openLocalFileSource("")).rejects.toThrow("path is empty");
+          await expect(services.openLocalFileSource("audio.wav")).rejects.toThrow("requires an absolute path");
+          await expect(services.openLocalFileSource("/private/audio.wav")).rejects.toThrow("Filesystem permission denied");
+          await expect(services.openLocalFileSource(`${directory}/../private.wav`)).rejects.toThrow("parent traversal");
+          const local = await services.openLocalFileSource(absolutePath);
+          try {
+            expect(local.sizeBytes).toBe(3);
+            expect(new Uint8Array(await local.readSlice(1, 3))).toEqual(new Uint8Array([8, 9]));
+          } finally { local.release(); }
+          await expect(local.readSlice(0, 1)).rejects.toThrow("released");
+        } else {
+          await expect(services.openLocalFileSource(absolutePath)).rejects.toThrow("Obsidian Desktop");
+        }
+        const result = await transcriptionNode.execute(context);
+        if (desktop) {
+          const changed = await services.openLocalFileSource(absolutePath);
+          await writeFile(absolutePath, new Uint8Array([1, 2, 3, 4]));
+          try { await expect(changed.readSlice(0, 1)).rejects.toThrow("changed while it was being read"); }
+          finally { changed.release(); }
+        }
+        return result;
+      },
+    });
+    const runtime = new StudioRuntime(app, plugin, projectStore, registry, new StudioGraphCompiler(), {} as any, {
+      transcribeAudio,
+      beginLocalCommit: async () => undefined,
+      completeLocalCommit: async () => undefined,
+    } as any);
+    const project = projectFixture();
+    project.graph.nodes = [
+      { id: "path", kind: textNode.kind, version: textNode.version, title: "Audio path", position: { x: 0, y: 0 }, config: { value: file.path } },
+      { id: "transcription", kind: transcriptionNode.kind, version: transcriptionNode.version, title: "Transcription", position: { x: 320, y: 0 }, config: {} },
+    ];
+    project.graph.edges = [{ id: "path-edge", fromNodeId: "path", fromPortId: "text", toNodeId: "transcription", toPortId: "path" }];
+    project.graph.entryNodeIds = ["path"];
+    try {
+      const summary = await runtime.runProjectSnapshot("Studio/Test.systemsculpt", project);
+      expect(summary).toMatchObject({ status: "success", error: null });
+      expect(transcribeAudio).toHaveBeenCalledTimes(1);
+      expect(app.vault.readBinary).not.toHaveBeenCalled();
+      expect(fetchSlice).toHaveBeenCalledTimes(desktop ? 0 : 2);
+      expect(projectStore.publishRun).toHaveBeenCalledWith("Studio/Test.systemsculpt", expect.objectContaining({
+        eventsDocument: expect.any(Uint8Array),
+      }));
+      const events = new TextDecoder().decode(projectStore.publishRun.mock.calls[0][1].eventsDocument);
+      expect(events).toContain('"outputs":{"text":"transcript"}');
+      expect(events).toContain('"managedOperations":[{"capability":"transcription","operationId":"transcription-test"}]');
+    } finally {
+      runtime.dispose();
+      fetchSlice.mockRestore();
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   it("propagates authored and edited minimal text through the real runtime into an image prompt", async () => {

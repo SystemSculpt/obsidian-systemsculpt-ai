@@ -7,6 +7,7 @@ import { App, normalizePath, TFile } from "obsidian";
 import type SystemSculptPlugin from "../main";
 import { desktopHost } from "../platform/desktopOnly";
 import { hasHostCapability } from "../platform/hostCapabilities";
+import { createDeviceFileSource, createLocalFileSource, createVaultFileSource } from "../platform/fileSource";
 import { StudioAssetStore } from "./StudioAssetStore";
 import { StudioGraphCompiler, type StudioCompiledRun } from "./StudioGraphCompiler";
 import { StudioNodeRegistry } from "./StudioNodeRegistry";
@@ -676,6 +677,17 @@ export class StudioRuntime {
               }
               return size;
             },
+            openVaultFileSource: async (vaultPath: string) => {
+              permissions.assertFilesystemPath(vaultPath);
+              const staged = stagedAssetBytesByProjectionPath.get(normalizePath(vaultPath));
+              // stageArrayBuffer owns an ArrayBuffer-backed copy of these bytes.
+              if (staged) return createDeviceFileSource(new Blob([staged as Uint8Array<ArrayBuffer>]));
+              const file = this.app.vault.getAbstractFileByPath(vaultPath);
+              if (!(file instanceof TFile)) {
+                throw new Error(`Vault file not found: ${vaultPath}`);
+              }
+              return createVaultFileSource(this.app, file);
+            },
             readVaultBinary: async (vaultPath: string) => {
               permissions.assertFilesystemPath(vaultPath);
               const staged = stagedAssetBytesByProjectionPath.get(normalizePath(vaultPath));
@@ -706,6 +718,27 @@ export class StudioRuntime {
                 throw new Error(`Unable to determine local file size: ${normalized}`);
               }
               return size;
+            },
+            openLocalFileSource: async (absolutePath: string) => {
+              const normalized = String(absolutePath || "").trim();
+              if (!desktop) {
+                throw new Error("Local filesystem reads require Obsidian Desktop.");
+              }
+              if (!normalized) {
+                throw new Error("Local filesystem read path is empty.");
+              }
+              if (!desktop.path.isAbsolute(normalized)) {
+                throw new Error(
+                  `Local filesystem read requires an absolute path. Received "${normalized}".`
+                );
+              }
+              permissions.assertFilesystemPath(normalized);
+              const stat = await desktop.fs.stat(normalized);
+              const size = Number(stat.size);
+              if (!Number.isFinite(size)) {
+                throw new Error(`Unable to determine local file size: ${normalized}`);
+              }
+              return createLocalFileSource(normalized, size, stat.mtimeMs);
             },
             readLocalFileBinary: async (absolutePath: string, maxBytes?: number) => {
               const normalized = String(absolutePath || "").trim();

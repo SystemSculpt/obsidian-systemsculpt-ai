@@ -5,7 +5,16 @@ import { imageGenerationNode } from "../nodes/imageGenerationNode";
 import { textGenerationNode } from "../nodes/textGenerationNode";
 import { transcriptionNode } from "../nodes/transcriptionNode";
 import { DESKTOP_TRANSCRIPTION_MAX_FILE_SIZE } from "../../services/transcription/TranscriptionCoordinator";
-import type { StudioProjectV1 } from "../types";
+import type { StudioProjectV1, StudioTranscriptionRequest } from "../types";
+import { createHash } from "crypto";
+
+function fileSource(bytes = new Uint8Array([1]).buffer) {
+  return {
+    sizeBytes: bytes.byteLength,
+    readSlice: jest.fn(async (start: number, end: number) => bytes.slice(start, end)),
+    release: jest.fn(),
+  };
+}
 
 function projectWithHttpSecret(): StudioProjectV1 {
   return {
@@ -42,8 +51,10 @@ function services(api: Record<string, unknown>) {
     resolveAbsolutePath: (path: string) => `/vault/${path}`,
     readVaultText: jest.fn(),
     statVaultFileSize: jest.fn(async () => 1),
+    openVaultFileSource: jest.fn(async () => fileSource()),
     readVaultBinary: jest.fn(async () => new Uint8Array([1]).buffer),
     statLocalFileSize: jest.fn(async () => 1),
+    openLocalFileSource: jest.fn(async () => fileSource()),
     readLocalFileBinary: jest.fn(async () => new Uint8Array([1]).buffer),
     writeTempFile: jest.fn(),
     deleteLocalFile: jest.fn(),
@@ -132,29 +143,49 @@ describe("managed-only Studio remote nodes", () => {
     expect(pathReads).toBeGreaterThan(0);
   });
 
-  it("reads mobile-safe vault audio after admission and memoizes the source read", async () => {
+  it.each(["audio.wav", "/mock/audio.wav"])("opens %s lazily and memoizes bounded hashing without a full-file read", async (sourcePath) => {
     const bytesByRun = [
-      new Uint8Array([1, 2, 3]).buffer,
-      new Uint8Array([1, 2, 4]).buffer,
+      new Uint8Array(2 * 1024 * 1024 + 3).fill(1).buffer,
+      new Uint8Array(2 * 1024 * 1024 + 3).fill(2).buffer,
     ];
+    const sources = bytesByRun.map(bytes => fileSource(bytes));
     const events: string[] = [];
     const fingerprints: string[] = [];
+    const identities: string[] = [];
     let runIndex = 0;
-    const statVaultFileSize = jest.fn(async () => {
+    const statFileSize = jest.fn(async () => {
       events.push(`size:${runIndex}`);
       return bytesByRun[runIndex].byteLength;
     });
-    const readVaultBinary = jest.fn(async () => {
-      events.push(`read:${runIndex}`);
-      return bytesByRun[runIndex];
+    const openFileSource = jest.fn(async () => {
+      events.push(`open:${runIndex}`);
+      return sources[runIndex];
     });
-    const transcribeAudio = jest.fn(async request => {
+    const transcribeAudio = jest.fn(async (request: StudioTranscriptionRequest) => {
       events.push(`admission:${runIndex}`);
-      const readsBeforeFingerprint = readVaultBinary.mock.calls.length;
-      const fingerprint = await request.source.fingerprint();
+      const openedBefore = openFileSource.mock.calls.length;
+      identities.push(request.source.identity);
+      expect(openFileSource).toHaveBeenCalledTimes(openedBefore);
       const loaded = await request.source.load();
-      expect(readVaultBinary).toHaveBeenCalledTimes(readsBeforeFingerprint + 1);
-      expect([...new Uint8Array(loaded.bytes)]).toEqual([...new Uint8Array(bytesByRun[runIndex])]);
+      expect(loaded).toMatchObject({ filename: "audio.wav", contentType: "audio/wav", sizeBytes: bytesByRun[runIndex].byteLength });
+      expect(loaded).not.toHaveProperty("bytes");
+      expect(sources[runIndex].readSlice).not.toHaveBeenCalled();
+      const fingerprint = await request.source.fingerprint();
+      expect(fingerprint).toBe(`sha256:${createHash("sha256").update(new Uint8Array(bytesByRun[runIndex])).digest("hex")}`);
+      expect(sources[runIndex].readSlice.mock.calls).toEqual([
+        [0, 1024 * 1024],
+        [1024 * 1024, 2 * 1024 * 1024],
+        [2 * 1024 * 1024, bytesByRun[runIndex].byteLength],
+      ]);
+      expect(await request.source.fingerprint()).toBe(fingerprint);
+      expect(sources[runIndex].readSlice).toHaveBeenCalledTimes(3);
+      expect(await request.source.load()).toMatchObject({ filename: loaded.filename, contentType: loaded.contentType, sizeBytes: loaded.sizeBytes });
+      expect(sources[runIndex].readSlice).toHaveBeenCalledTimes(3);
+      expect(openFileSource).toHaveBeenCalledTimes(openedBefore + 1);
+      expect(new Uint8Array(await loaded.readSlice(1, 3))).toEqual(new Uint8Array(bytesByRun[runIndex].slice(1, 3)));
+      request.source.release?.();
+      await Promise.resolve();
+      expect(sources[runIndex].release).toHaveBeenCalledTimes(1);
       fingerprints.push(fingerprint);
       runIndex += 1;
       return {
@@ -165,27 +196,45 @@ describe("managed-only Studio remote nodes", () => {
 
     const execute = async () => {
       const nodeServices = services({ transcribeAudio });
-      nodeServices.statVaultFileSize = statVaultFileSize;
-      nodeServices.readVaultBinary = readVaultBinary;
-      await transcriptionNode.execute({
+      if (sourcePath.startsWith("/")) {
+        nodeServices.statLocalFileSize = statFileSize;
+        nodeServices.openLocalFileSource = openFileSource;
+      } else {
+        nodeServices.statVaultFileSize = statFileSize;
+        nodeServices.openVaultFileSource = openFileSource;
+      }
+      const result = await transcriptionNode.execute({
         runId: `run-${runIndex}`,
         projectPath: "Studio/Test.systemsculpt",
         signal: new AbortController().signal,
         node: { id: "transcription", kind: transcriptionNode.kind, version: transcriptionNode.version, title: "Transcription", position: { x: 0, y: 0 }, config: {} },
-        inputs: { path: "audio.wav" },
+        inputs: { path: sourcePath },
         services: nodeServices as never,
         log: jest.fn(),
       });
+      expect(result).toEqual({ outputs: { text: "done" }, managedOperations: [{ capability: "transcription", operationId: `transcription-op-${runIndex}` }] });
+      expect(nodeServices.readVaultBinary).not.toHaveBeenCalled();
+      expect(nodeServices.readLocalFileBinary).not.toHaveBeenCalled();
     };
 
     await execute();
     await execute();
 
-    expect(events).toEqual(["admission:0", "size:0", "read:0", "admission:1", "size:1", "read:1"]);
-    expect(fingerprints[0]).toMatch(/^sha256:[a-f0-9]{64}$/);
+    expect(events).toEqual(["admission:0", "size:0", "open:0", "admission:1", "size:1", "open:1"]);
     expect(fingerprints[1]).not.toBe(fingerprints[0]);
-    expect(statVaultFileSize).toHaveBeenCalledTimes(2);
-    expect(readVaultBinary).toHaveBeenCalledTimes(2);
+    const hash = (text: string) => createHash("sha256").update(text).digest("hex");
+    const expectedIdentity = `transcription:${hash(JSON.stringify({
+      schema: "transcription-source-v1",
+      callerScope: "studio/transcription-node",
+      projectHash: hash("Studio/Test.systemsculpt"),
+      nodeId: "transcription",
+      logicalSourceHash: hash(sourcePath),
+    }))}`;
+    expect(identities).toEqual([expectedIdentity, expectedIdentity]);
+    expect(statFileSize).toHaveBeenCalledTimes(2);
+    expect(statFileSize).toHaveBeenCalledWith(sourcePath);
+    expect(openFileSource).toHaveBeenCalledTimes(2);
+    expect(openFileSource).toHaveBeenCalledWith(sourcePath);
   });
 
   it("rejects oversized vault audio before allocating bytes", async () => {
@@ -212,6 +261,7 @@ describe("managed-only Studio remote nodes", () => {
     })).rejects.toThrow("Audio file is too large");
 
     expect(nodeServices.statVaultFileSize).toHaveBeenCalledWith("audio.wav");
+    expect(nodeServices.openVaultFileSource).not.toHaveBeenCalled();
     expect(readVaultBinary).not.toHaveBeenCalled();
   });
 
@@ -239,7 +289,61 @@ describe("managed-only Studio remote nodes", () => {
     })).rejects.toThrow("Audio file is too large");
 
     expect(nodeServices.statLocalFileSize).toHaveBeenCalledWith("/mock/audio.wav");
+    expect(nodeServices.openLocalFileSource).not.toHaveBeenCalled();
     expect(readLocalFileBinary).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["", 1, "requires a path input"],
+    ["notes.md", 1, "only accepts audio paths"],
+    ["audio.wav", 0, "Audio file is empty"],
+    ["audio.wav", -1, "Audio file is empty"],
+    ["audio.wav", NaN, "Audio file is empty"],
+    ["audio.wav", Infinity, "Audio file is empty"],
+  ])("rejects invalid source %s with size %s before opening", async (path, size, message) => {
+    const nodeServices = services({ transcribeAudio: async (request: StudioTranscriptionRequest) => request.source.load() });
+    nodeServices.statVaultFileSize.mockResolvedValue(size);
+    await expect(transcriptionNode.execute({
+      runId: "invalid", projectPath: "Studio/Test.systemsculpt", signal: new AbortController().signal,
+      node: { id: "transcription", kind: transcriptionNode.kind, version: transcriptionNode.version, title: "Transcription", position: { x: 0, y: 0 }, config: {} },
+      inputs: { path }, services: nodeServices as never, log: jest.fn(),
+    })).rejects.toThrow(message);
+    expect(nodeServices.openVaultFileSource).not.toHaveBeenCalled();
+    expect(nodeServices.openLocalFileSource).not.toHaveBeenCalled();
+    expect(nodeServices.readVaultBinary).not.toHaveBeenCalled();
+    expect(nodeServices.readLocalFileBinary).not.toHaveBeenCalled();
+  });
+
+  it("releases an audio source that changed size after validation without reading it", async () => {
+    const content = fileSource(new Uint8Array([1, 2]).buffer);
+    const nodeServices = services({ transcribeAudio: async (request: StudioTranscriptionRequest) => request.source.fingerprint() });
+    nodeServices.openVaultFileSource.mockResolvedValue(content);
+    await expect(transcriptionNode.execute({
+      runId: "changed", projectPath: "Studio/Test.systemsculpt", signal: new AbortController().signal,
+      node: { id: "transcription", kind: transcriptionNode.kind, version: transcriptionNode.version, title: "Transcription", position: { x: 0, y: 0 }, config: {} },
+      inputs: { path: "audio.wav" }, services: nodeServices as never, log: jest.fn(),
+    })).rejects.toThrow("changed while it was being opened");
+    expect(content.readSlice).not.toHaveBeenCalled();
+    expect(content.release).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not touch a denied operation's source, even when the adapter releases it", async () => {
+    const path = jest.fn(() => "audio.wav");
+    const inputs = Object.defineProperty({}, "path", { get: path });
+    const nodeServices = services({ transcribeAudio: async (request: StudioTranscriptionRequest) => {
+      request.source.release?.();
+      throw new Error("Admission denied");
+    } });
+    await expect(transcriptionNode.execute({
+      runId: "denied", projectPath: "Studio/Test.systemsculpt", signal: new AbortController().signal,
+      node: { id: "transcription", kind: transcriptionNode.kind, version: transcriptionNode.version, title: "Transcription", position: { x: 0, y: 0 }, config: {} },
+      inputs, services: nodeServices as never, log: jest.fn(),
+    })).rejects.toThrow("Admission denied");
+    expect(path).not.toHaveBeenCalled();
+    expect(nodeServices.statVaultFileSize).not.toHaveBeenCalled();
+    expect(nodeServices.statLocalFileSize).not.toHaveBeenCalled();
+    expect(nodeServices.openVaultFileSource).not.toHaveBeenCalled();
+    expect(nodeServices.openLocalFileSource).not.toHaveBeenCalled();
   });
 
   it("never caches managed node outputs", () => {

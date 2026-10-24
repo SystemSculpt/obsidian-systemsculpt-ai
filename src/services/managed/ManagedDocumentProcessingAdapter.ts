@@ -1,3 +1,4 @@
+import type { ManagedFileSource } from "./ManagedFileSource";
 import { sha256HexFromBytesPortable } from "../../utils/sha256";
 import type { ManagedAdmission } from "./ManagedAdmission";
 import { ManagedJobClient, ManagedJobError } from "./ManagedJobClient";
@@ -32,15 +33,7 @@ export type ManagedDocumentProcessingContext = Readonly<{
   onNotice?: (message: string) => void;
 }>;
 
-export type ManagedDocumentSource = Readonly<{
-  identity: string;
-  fingerprint: () => string | Promise<string>;
-  load: () => Promise<Readonly<{
-    filename: string;
-    contentType: string;
-    bytes: ArrayBuffer;
-  }>>;
-}>;
+export type ManagedDocumentSource = ManagedFileSource;
 
 export type ManagedDocumentDownloadResult = Readonly<{
   content: unknown[];
@@ -192,7 +185,7 @@ export class ManagedDocumentProcessingAdapter {
       }
       throwIfAborted(signal);
       return commit(result);
-    });
+    }).finally(() => source.release?.());
   }
 
   async resume(
@@ -208,14 +201,14 @@ export class ManagedDocumentProcessingAdapter {
       const record = await this.dependencies.recovery.read(CAPABILITY, operationId);
       throwIfAborted(signal);
       if (context.source) {
-        const fingerprint = await context.source.fingerprint();
+        const fingerprint = await context.source.fingerprint(signal);
         throwIfAborted(signal);
         if (context.source.identity !== record.source.identity || fingerprint !== record.source.fingerprint) {
           throw new Error(UNVERIFIABLE_SOURCE_MESSAGE);
         }
       }
       return this.continueRecord(record, context.source, context, signal);
-    });
+    }).finally(() => context.source?.release?.());
   }
 
   /**
@@ -346,7 +339,7 @@ export class ManagedDocumentProcessingAdapter {
   }
 
   private async readFingerprint(source: ManagedDocumentSource, signal: AbortSignal): Promise<string> {
-    const fingerprint = await source.fingerprint();
+    const fingerprint = await source.fingerprint(signal);
     throwIfAborted(signal);
     if (!/^sha256:[a-f0-9]{64}$/.test(fingerprint)) throw new Error("Managed document source fingerprint must be SHA-256.");
     return fingerprint;
@@ -387,7 +380,7 @@ export class ManagedDocumentProcessingAdapter {
       if (!source) throw new Error("Managed document dispatch is ambiguous without the original source bytes. Retry with the original document.");
       const loaded = await source.load();
       throwIfAborted(signal);
-      if (!(loaded.bytes instanceof ArrayBuffer) || loaded.bytes.byteLength < 1 || loaded.bytes.byteLength > MAX_DOCUMENT_BYTES) {
+      if (!Number.isSafeInteger(loaded.sizeBytes) || loaded.sizeBytes < 1 || loaded.sizeBytes > MAX_DOCUMENT_BYTES) {
         throw new Error("Document must contain between 1 byte and 25 MB.");
       }
       if (!loaded.filename || loaded.filename.length > 512 || !loaded.contentType) {
@@ -400,12 +393,12 @@ export class ManagedDocumentProcessingAdapter {
       const createRequest = record.pendingDispatch?.createRequest ?? record.multipartUpload?.createRequest ?? {
         filename: loaded.filename,
         contentType: loaded.contentType,
-        contentLengthBytes: loaded.bytes.byteLength,
+        contentLengthBytes: loaded.sizeBytes,
       };
       // A recorded request is replayed as sent. The selected bytes match the
       // record's fingerprint, so a copy under another name, such as a renamed
       // chat attachment, continues with the filename it was created with.
-      if (createRequest.contentType !== loaded.contentType || createRequest.contentLengthBytes !== loaded.bytes.byteLength) {
+      if (createRequest.contentType !== loaded.contentType || createRequest.contentLengthBytes !== loaded.sizeBytes) {
         throw new Error("The original document upload metadata does not match the retained source.");
       }
       if (record.phase === "content_ready" || record.phase === "create_dispatching") {
@@ -419,7 +412,7 @@ export class ManagedDocumentProcessingAdapter {
         throwIfAborted(signal);
         const documentId = readDocumentId(created);
         const upload = readUpload(created);
-        if (upload.totalParts !== Math.ceil(loaded.bytes.byteLength / upload.partSize)) {
+        if (upload.totalParts !== Math.ceil(loaded.sizeBytes / upload.partSize)) {
           throw new Error("Managed document multipart layout does not match the document size.");
         }
         record = await this.dependencies.recovery.acknowledgeCreated(CAPABILITY, operationId, record.revision, documentId, {
@@ -432,7 +425,7 @@ export class ManagedDocumentProcessingAdapter {
       if (!upload || !documentId) {
         throw new Error("Managed document cannot resume this upload without its acknowledged multipart metadata.");
       }
-      if (upload.totalParts !== Math.ceil(loaded.bytes.byteLength / upload.partSizeBytes)) {
+      if (upload.totalParts !== Math.ceil(loaded.sizeBytes / upload.partSizeBytes)) {
         throw new Error("Managed document multipart layout does not match the document size.");
       }
       const completedParts = new Map((record.completedParts ?? []).map((part) => [part.partNumber, part]));
@@ -440,7 +433,10 @@ export class ManagedDocumentProcessingAdapter {
         if (completedParts.has(partNumber)) continue;
         throwIfAborted(signal);
         const offset = (partNumber - 1) * upload.partSizeBytes;
-        const bytes = loaded.bytes.slice(offset, Math.min(offset + upload.partSizeBytes, loaded.bytes.byteLength));
+        const end = Math.min(offset + upload.partSizeBytes, loaded.sizeBytes);
+        const bytes = await loaded.readSlice(offset, end);
+        throwIfAborted(signal);
+        if (bytes.byteLength !== end - offset) throw new Error("The selected document changed while it was being read.");
         if (record.phase === "part_dispatching") {
           if (record.pendingDispatch?.partNumber !== partNumber) {
             throw new Error("Managed document pending part does not match the next unacknowledged part.");
