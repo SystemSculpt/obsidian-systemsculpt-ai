@@ -1,6 +1,7 @@
 import type { StudioNodeInstance } from "../../../studio/types";
 import type { StudioGraphInteractionEngine } from "../StudioGraphInteractionEngine";
 import type {
+  RenderStudioGraphNodeCardOptions,
   StudioGraphNodeMutationOptions,
   StudioGraphNodeResizePatch,
 } from "./StudioGraphNodeCardTypes";
@@ -85,12 +86,7 @@ export type RenderTextNodeCardOptions = {
   busy: boolean;
   graphInteraction: StudioGraphInteractionEngine;
   onNodeConfigMutated: (node: StudioNodeInstance) => void;
-  onNodeConfigValueChange?: (
-    nodeId: string,
-    key: string,
-    value: string | number,
-    options?: { mode?: "discrete" | "continuous"; captureHistory?: boolean }
-  ) => void;
+  onNodeConfigValueChange?: RenderStudioGraphNodeCardOptions["onNodeConfigValueChange"];
   onNodeResize?: (
     nodeId: string,
     patch: StudioGraphNodeResizePatch,

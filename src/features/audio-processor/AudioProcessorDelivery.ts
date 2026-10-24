@@ -277,7 +277,11 @@ export class AudioProcessorDelivery {
   ): Promise<TFile> {
     if (signal.aborted) throw abortError();
     const directory = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
-    if (directory) await this.plugin.directoryManager.ensureDirectoryByPath(directory);
+    if (directory) {
+      const directoryManager = this.plugin.directoryManager;
+      if (!directoryManager) throw new Error("Directory manager has not been initialized.");
+      await directoryManager.ensureDirectoryByPath(directory);
+    }
     if (signal.aborted) throw abortError();
 
     try {

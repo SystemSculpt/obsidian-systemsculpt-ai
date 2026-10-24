@@ -101,7 +101,8 @@ export async function displayRecorderTabContent(
         .addOption("meeting_brief", "Meeting brief")
         .addOption("clean_transcript", "Clean transcript")
         .setValue(plugin.settings.audioProcessorOutputPreset)
-        .onChange(async (value: "detailed" | "meeting_brief" | "clean_transcript") => {
+        .onChange(async (value) => {
+          if (value !== "detailed" && value !== "meeting_brief" && value !== "clean_transcript") return;
           await plugin.getSettingsManager().updateSettings({
             audioProcessorOutputPreset: value,
           });
@@ -132,7 +133,8 @@ export async function displayRecorderTabContent(
         .addOption("markdown", "Markdown note (.md)")
         .addOption("srt", "Subtitle file (.srt)")
         .setValue(plugin.settings.transcriptionOutputFormat ?? "markdown")
-        .onChange(async (value: "markdown" | "srt") => {
+        .onChange(async (value) => {
+          if (value !== "markdown" && value !== "srt") return;
           await plugin.getSettingsManager().updateSettings({ transcriptionOutputFormat: value });
         });
     });
