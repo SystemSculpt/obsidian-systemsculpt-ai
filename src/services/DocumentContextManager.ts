@@ -345,11 +345,8 @@ export class DocumentContextManager {
         // Regular file, just add it directly
         const wikiLink = `[[${file.path}]]`;
         
-        // Check if file is already in context
+        // Already pinned: the pinned list already shows it.
         if (context.hasPinnedFile(wikiLink)) {
-          if (showNotices && !signal?.aborted) {
-            new Notice(`${file.basename} is already pinned for every message`, 3000);
-          }
           return false;
         }
         
@@ -360,11 +357,6 @@ export class DocumentContextManager {
       
       // Save changes if requested
       if (saveChanges) await changes.savePending();
-      
-      // Show success notice if requested
-      if (showNotices && !signal?.aborted) {
-        new Notice(`Pinned ${file.basename} for every message`, 3000);
-      }
       
       return true;
     } catch (error) {
@@ -413,7 +405,7 @@ export class DocumentContextManager {
       
       // Pin the file
       const success = await this.pinVaultFile(file, changes.context, {
-        showNotices: false, // We'll handle notices ourselves
+        showNotices: false, // The batch reports only the file limit
         saveChanges: false, // We'll save changes after all files are added
         signal,
       });
@@ -421,10 +413,6 @@ export class DocumentContextManager {
       if (success) {
         successCount++;
         currentContextSize++;
-        
-        if (showNotices && !signal?.aborted) {
-          new Notice(`Pinned ${file.name} for every message (${currentContextSize}/${maxFiles})`, 3000);
-        }
       }
     }
     

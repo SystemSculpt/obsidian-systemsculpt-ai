@@ -7,6 +7,7 @@ import {
 } from "../types/documentProcessing";
 import { formatFileSize } from "../utils/FileValidator";
 import { tryCopyToClipboard } from "../utils/clipboard";
+import { flashButtonResult } from "../core/ui/notifications";
 import { isCreditsRequiredError } from "../utils/errors";
 
 type TimelineStep = "queued" | "uploading" | "processing" | "contextualizing" | "ready";
@@ -91,7 +92,8 @@ export function describeDocumentProcessingFailure(error: unknown): string {
 export interface DocumentProcessingPanelHandle {
   updateProgress(event: DocumentProcessingProgressEvent): void;
   markSuccess(payload: DocumentProcessingSuccessPayload): void;
-  markFailure(payload: DocumentProcessingFailurePayload): void;
+  /** Returns false when the panel was already hidden, so the caller can say it elsewhere. */
+  markFailure(payload: DocumentProcessingFailurePayload): boolean;
   close(): void;
 }
 
@@ -213,9 +215,9 @@ class DocumentProcessingPanel implements DocumentProcessingPanelHandle {
     this.panel.closeAfter(6000);
   }
 
-  markFailure(payload: DocumentProcessingFailurePayload): void {
+  markFailure(payload: DocumentProcessingFailurePayload): boolean {
     if (this.destroyed) {
-      return;
+      return false;
     }
 
     const message = describeDocumentProcessingFailure(payload.error);
@@ -246,18 +248,10 @@ class DocumentProcessingPanel implements DocumentProcessingPanelHandle {
       {
         label: "Copy error",
         testId: "document.progress.copy-error",
-        onClick: () => {
+        onClick: (button) => {
           void tryCopyToClipboard(message, this.panel.element)
-            .then((copied) => {
-              new Notice(
-                copied ? "Error copied to clipboard" : "Unable to copy error (clipboard unavailable).",
-                copied ? 2500 : 4000,
-              );
-            })
-            .catch((error: unknown) => {
-              console.error(error);
-            })
-            .finally(() => this.close());
+            .catch(() => false)
+            .then((copied) => flashButtonResult(button, copied ? "Copied" : "Couldn't copy"));
         },
       },
       {
@@ -267,6 +261,7 @@ class DocumentProcessingPanel implements DocumentProcessingPanelHandle {
         onClick: () => this.close(),
       },
     ]);
+    return true;
   }
 
   close(): void {

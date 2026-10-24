@@ -121,7 +121,7 @@ describe("CommandManager copy-current-file-path command", () => {
     expect(copyCommand).not.toHaveProperty("hotkeys");
   });
 
-  it("copies the active file vault-relative path and shows a success notice", async () => {
+  it("copies the active file vault-relative path without a notice", async () => {
     const consoleLogSpy = jest.spyOn(console, "log").mockImplementation(() => {});
     mockedTryCopyToClipboard.mockResolvedValue(true);
 
@@ -138,7 +138,7 @@ describe("CommandManager copy-current-file-path command", () => {
     await Promise.resolve();
 
     expect(mockedTryCopyToClipboard).toHaveBeenCalledWith("Notes/Inbox.md");
-    expect(consoleLogSpy).toHaveBeenCalledWith("Notice: Vault-relative file path copied to clipboard.");
+    expect(consoleLogSpy).not.toHaveBeenCalled();
     consoleLogSpy.mockRestore();
   });
 
@@ -158,7 +158,7 @@ describe("CommandManager copy-current-file-path command", () => {
     await Promise.resolve();
 
     expect(mockedTryCopyToClipboard).toHaveBeenCalledWith("SystemSculpt/Canvas/Map.canvas");
-    expect(consoleLogSpy).toHaveBeenCalledWith("Notice: Vault-relative file path copied to clipboard.");
+    expect(consoleLogSpy).not.toHaveBeenCalled();
     consoleLogSpy.mockRestore();
   });
 
@@ -178,7 +178,7 @@ describe("CommandManager copy-current-file-path command", () => {
     await Promise.resolve();
 
     expect(mockedTryCopyToClipboard).toHaveBeenCalledWith("Research/Papers/SystemSculpt.pdf");
-    expect(consoleLogSpy).toHaveBeenCalledWith("Notice: Vault-relative file path copied to clipboard.");
+    expect(consoleLogSpy).not.toHaveBeenCalled();
     consoleLogSpy.mockRestore();
   });
 
@@ -198,7 +198,7 @@ describe("CommandManager copy-current-file-path command", () => {
     await Promise.resolve();
 
     expect(mockedTryCopyToClipboard).toHaveBeenCalledWith("SystemSculpt/Chats/2026-03-06 12-42-10.md");
-    expect(consoleLogSpy).toHaveBeenCalledWith("Notice: Vault-relative file path copied to clipboard.");
+    expect(consoleLogSpy).not.toHaveBeenCalled();
     consoleLogSpy.mockRestore();
   });
 
@@ -219,7 +219,7 @@ describe("CommandManager copy-current-file-path command", () => {
     expect(mockedTryCopyToClipboard).toHaveBeenCalledWith(
       "SystemSculpt/Chats/current-chat.md"
     );
-    expect(consoleLogSpy).toHaveBeenCalledWith("Notice: Vault-relative file path copied to clipboard.");
+    expect(consoleLogSpy).not.toHaveBeenCalled();
     consoleLogSpy.mockRestore();
   });
 
@@ -240,7 +240,7 @@ describe("CommandManager copy-current-file-path command", () => {
     expect(mockedTryCopyToClipboard).toHaveBeenCalledWith(
       "SystemSculpt/Studio/Current.systemsculpt"
     );
-    expect(consoleLogSpy).toHaveBeenCalledWith("Notice: Vault-relative file path copied to clipboard.");
+    expect(consoleLogSpy).not.toHaveBeenCalled();
     consoleLogSpy.mockRestore();
   });
 
@@ -259,9 +259,7 @@ describe("CommandManager copy-current-file-path command", () => {
     await Promise.resolve();
 
     expect(mockedTryCopyToClipboard).toHaveBeenCalledWith("Notes/Inbox.md");
-    expect(consoleLogSpy).toHaveBeenCalledWith(
-      "Notice: Vault-relative file path copied to clipboard."
-    );
+    expect(consoleLogSpy).not.toHaveBeenCalled();
     consoleLogSpy.mockRestore();
   });
 
@@ -270,7 +268,7 @@ describe("CommandManager copy-current-file-path command", () => {
     expect(copyCommand.checkCallback(true)).toBe(false);
   });
 
-  it("shows a failure notice instead of a success toast when copying fails", async () => {
+  it("shows a notice only when copying fails", async () => {
     const consoleLogSpy = jest.spyOn(console, "log").mockImplementation(() => {});
     mockedTryCopyToClipboard.mockResolvedValue(false);
     const { copyCommand } = registerCopyPathCommand({

@@ -20,7 +20,7 @@ Source of truth:
 | View plans / buy credits |  | `view-plans` | Opens the plan comparison page |
 | Check for updates |  | `check-for-updates` | Reports whether a newer SystemSculpt release is available; **Open plugin updates** opens Obsidian's plugin page |
 | Reload Obsidian |  | `reload-obsidian` | Reloads app window |
-| Copy Vault-Relative File Path |  | `copy-current-file-path` | Copies the focused note or Studio file's path relative to the vault, with a success notice; assign a shortcut in Obsidian Hotkeys |
+| Copy Vault-Relative File Path |  | `copy-current-file-path` | Copies the focused note or Studio file's path relative to the vault (a notice appears only if copying fails); assign a shortcut in Obsidian Hotkeys |
 
 ## Chat and writing
 

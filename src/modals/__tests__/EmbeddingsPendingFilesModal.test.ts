@@ -313,26 +313,28 @@ describe("EmbeddingsPendingFilesModal", () => {
       });
     });
 
-    it("copies all paths when no filter active", async () => {
+    it("copies all paths when no filter active and says so on the button", async () => {
       await modal.onOpen();
-      await (modal as any).copyPaths();
+      const button = (modal as any).copyButtons[0] as HTMLButtonElement;
+      await (modal as any).copyPaths(button);
 
       const written = (navigator.clipboard.writeText as jest.Mock).mock.calls[0][0];
       expect(written).toContain("notes/machine-learning.md");
       expect(written).toContain("notes/deep-learning.md");
       expect(written).toContain("folder/nested/file.md");
       expect(written).toContain("failed-file.md");
-      expect(mockedNotice).toHaveBeenCalledWith("Copied 4 file paths to the clipboard.");
+      expect(button.textContent).toContain("Copied");
+      expect(mockedNotice).not.toHaveBeenCalled();
     });
 
     it("copies filtered paths when filter active", async () => {
       await modal.onOpen();
       (modal as any).applyFilter("machine");
-      await (modal as any).copyPaths();
+      await (modal as any).copyPaths((modal as any).copyButtons[1]);
 
       const written = (navigator.clipboard.writeText as jest.Mock).mock.calls[0][0];
       expect(written).toBe("notes/machine-learning.md");
-      expect(mockedNotice).toHaveBeenCalledWith("Copied 1 file path to the clipboard.");
+      expect(mockedNotice).not.toHaveBeenCalled();
     });
 
     it("disables Copy and never copies hidden paths when a filter has no matches", async () => {
@@ -340,7 +342,7 @@ describe("EmbeddingsPendingFilesModal", () => {
       (modal as any).applyFilter("nonexistent-xyz");
 
       expect((modal as any).copyButtons.every((button: HTMLButtonElement) => button.disabled)).toBe(true);
-      await (modal as any).copyPaths();
+      await (modal as any).copyPaths((modal as any).copyButtons[0]);
       expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
       expect(mockedNotice).toHaveBeenCalledWith("No pending files to copy.");
     });

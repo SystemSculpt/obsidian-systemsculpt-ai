@@ -586,16 +586,35 @@ describe("DirectoryOperations", () => {
       expect(result.results.every((r) => r.success)).toBe(true);
     });
 
-    it("shows notice after successful moves", async () => {
+    it("moves quietly when every item moves; the tool result lists them", async () => {
       const mockFile = new TFile({ path: "old.md" });
       (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(mockFile);
+      mockedNotice.mockClear();
 
       await dirOps.moveItems({
         items: [{ source: "old.md", destination: "new.md" }],
       });
 
-      // Notice is called but we don't mock it as a spy
       expect(app.fileManager.renameFile).toHaveBeenCalled();
+      expect(mockedNotice).not.toHaveBeenCalled();
+    });
+
+    it("says when only some items moved", async () => {
+      const mockFile = new TFile({ path: "old.md" });
+      (app.vault.getAbstractFileByPath as jest.Mock).mockImplementation((path: string) =>
+        path === "old.md" ? mockFile : null);
+      mockedNotice.mockClear();
+
+      const result = await dirOps.moveItems({
+        items: [
+          { source: "old.md", destination: "new.md" },
+          { source: "missing.md", destination: "elsewhere.md" },
+        ],
+      });
+
+      expect(result.results.map((entry) => entry.success)).toEqual([true, false]);
+      expect(mockedNotice).toHaveBeenCalledTimes(1);
+      expect(mockedNotice).toHaveBeenCalledWith("Moved 1 item (1 failed).");
     });
 
     it("resolves a Folder Notes source path when moving (#154)", async () => {
@@ -658,7 +677,7 @@ describe("DirectoryOperations", () => {
 
       expect(result.results[0].success).toBe(true);
       expect(app.vault.adapter.trashLocal).toHaveBeenCalledWith("delete-me.md");
-      expect(mockedNotice).toHaveBeenCalledWith("Moved 1 item(s) to trash.");
+      expect(mockedNotice).not.toHaveBeenCalled();
     });
 
     it("refuses irreversible deletion of internal SystemSculpt paths", async () => {
@@ -683,7 +702,7 @@ describe("DirectoryOperations", () => {
       expect(result.results.length).toBe(3);
       expect(result.results.every((r) => r.success)).toBe(true);
       expect(app.vault.adapter.trashLocal).toHaveBeenCalledTimes(3);
-      expect(mockedNotice).toHaveBeenCalledWith("Moved 3 item(s) to trash.");
+      expect(mockedNotice).not.toHaveBeenCalled();
     });
 
     it("resolves a Folder Notes path when trashing (#154)", async () => {
@@ -699,7 +718,7 @@ describe("DirectoryOperations", () => {
 
       expect(result.results[0].success).toBe(true);
       expect(app.vault.adapter.trashLocal).toHaveBeenCalledWith("Projects/Projects.md");
-      expect(mockedNotice).toHaveBeenCalledWith("Moved 1 item(s) to trash.");
+      expect(mockedNotice).not.toHaveBeenCalled();
     });
   });
 });

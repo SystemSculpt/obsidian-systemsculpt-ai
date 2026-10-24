@@ -86,9 +86,8 @@ describe("CommandManager open-systemsculpt-studio command", () => {
     expect(activateSystemSculptStudioView).toHaveBeenCalledWith(
       "SystemSculpt/Studio/Fresh Studio.systemsculpt"
     );
-    expect(consoleLogSpy).toHaveBeenCalledWith(
-      "Notice: Created Studio project: Fresh Studio"
-    );
+    // The opened project is the result; no notice.
+    expect(consoleLogSpy).not.toHaveBeenCalled();
     consoleLogSpy.mockRestore();
   });
 });

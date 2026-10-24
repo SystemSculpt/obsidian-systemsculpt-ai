@@ -245,7 +245,7 @@ export class PhoneCaptureInbox {
     const folder = normalizePath(settings.folder.trim() || DEFAULT_PHONE_CAPTURE_FOLDER);
     const meetingsFolder = normalizePath(settings.meetingsFolder.trim() || DEFAULT_PHONE_MEETING_FOLDER);
     const destination = (capture: PhoneCapture) => capture.mode === "meeting" ? meetingsFolder : folder;
-    if (!settings.linked && !(await this.detectLink(manual, folder, meetingsFolder, licenseKey))) return { ...empty, skipped: "not_linked" };
+    if (!settings.linked && !(await this.detectLink(manual, licenseKey))) return { ...empty, skipped: "not_linked" };
     const saved: string[] = [];
     let alreadyInVault = 0;
     let deferred = 0;
@@ -332,13 +332,20 @@ export class PhoneCaptureInbox {
       saved, alreadyInVault, deferred, failed, unacknowledged,
       ...(checkFailure ? { skipped: "unavailable" as const } : {}),
     };
-    if (this.isCurrentAccount(licenseKey) && (manual || saved.length > 0)) this.notifyResult(result, checkFailure);
+    if (this.isCurrentAccount(licenseKey) && (manual || saved.length > 0)) this.notifyResult(result, manual, checkFailure);
     return result;
   }
 
-  private notifyResult(result: PhoneCaptureSyncResult, checkFailure?: string): void {
+  /**
+   * A manual sync always answers. An automatic one stays quiet when every
+   * capture saved, and speaks only when something it saved came with a
+   * failure, so the new notes themselves are the receipt.
+   */
+  private notifyResult(result: PhoneCaptureSyncResult, manual: boolean, checkFailure?: string): void {
     const { saved, alreadyInVault, deferred, failed, unacknowledged } = result;
     const captures = (count: number) => `${count} iOS capture${count === 1 ? "" : "s"}`;
+    const saveFailures = failed - unacknowledged - (checkFailure ? 1 : 0);
+    if (!manual && !saveFailures && !unacknowledged && !checkFailure) return;
     const messages: string[] = [];
     if (saved.length) {
       const folders = [...new Set(saved.map(path => path.split("/").slice(0, -1).join("/") || "the vault root"))];
@@ -347,7 +354,6 @@ export class PhoneCaptureInbox {
     if (alreadyInVault) {
       messages.push(`${captures(alreadyInVault)} ${alreadyInVault === 1 ? "is" : "are"} already in this vault.`);
     }
-    const saveFailures = failed - unacknowledged - (checkFailure ? 1 : 0);
     if (saveFailures) messages.push(`Couldn't save ${captures(saveFailures)}.`);
     if (unacknowledged) messages.push(`Delivery confirmation pending for ${captures(unacknowledged)} already in this vault.`);
     if (deferred) messages.push("iOS captures are waiting to be saved.");
@@ -359,9 +365,9 @@ export class PhoneCaptureInbox {
   /**
    * Until the account has used the iOS app the inbox stays dormant: no
    * capture requests and no notices. The first time the server reports the
-   * link, it is remembered and announced once.
+   * link, it is remembered; the iOS captures settings show where notes go.
    */
-  private async detectLink(manual: boolean, folder: string, meetingsFolder: string, licenseKey: string): Promise<boolean> {
+  private async detectLink(manual: boolean, licenseKey: string): Promise<boolean> {
     const now = (this.options.now ?? Date.now)();
     if (!manual && now - this.lastLinkCheckAt < PHONE_CAPTURE_LINK_CHECK_GAP_MS) return false;
     this.lastLinkCheckAt = now;
@@ -373,7 +379,6 @@ export class PhoneCaptureInbox {
       this.options.onError?.("Couldn't check whether the iOS app is linked.", error);
       return false;
     }
-    this.options.notify(`iOS captures will be saved to ${folder}; meetings to ${meetingsFolder}.`);
     return true;
   }
 

@@ -12,7 +12,8 @@ export interface OperationProgressButton {
   label: string;
   /** Stable `data-testid` identity, e.g. "audio.progress.cancel". */
   testId: string;
-  onClick: () => void;
+  /** Receives the clicked button, e.g. to show "Copied" on it. */
+  onClick: (button: HTMLButtonElement) => void;
   variant?: "primary" | "danger" | "default";
   disabled?: boolean;
 }
@@ -274,7 +275,7 @@ export class OperationProgressPanel {
         disabled: action.disabled,
       });
       button.addClass("systemsculpt-progress-button");
-      this.registerDomEvent(button, "click", action.onClick);
+      this.registerDomEvent(button, "click", () => action.onClick(button));
     });
   }
 

@@ -2,6 +2,7 @@ import { App, Notice, TFile } from "obsidian";
 import type SystemSculptPlugin from "../main";
 import { StandardModal } from "../core/ui/modals/standard/StandardModal";
 import { createUiAction, createUiState } from "../core/ui/surface";
+import { flashButtonResult } from "../core/ui/notifications";
 import { tryCopyToClipboard } from "../utils/clipboard";
 import type {
   PendingEmbeddingFile,
@@ -49,7 +50,7 @@ export class EmbeddingsPendingFilesModal extends StandardModal {
       disabled: true,
     });
     this.registerDomEvent(summaryCopyButton, "click", () => {
-      void this.copyPaths();
+      void this.copyPaths(summaryCopyButton);
     });
     this.copyButtons.push(summaryCopyButton);
 
@@ -64,8 +65,8 @@ export class EmbeddingsPendingFilesModal extends StandardModal {
       title: "Collecting pending files",
     });
 
-    const footerCopyButton = this.addActionButton("embeddings.pending.copy-paths", "Copy file paths", () => {
-      void this.copyPaths();
+    const footerCopyButton: HTMLButtonElement = this.addActionButton("embeddings.pending.copy-paths", "Copy file paths", () => {
+      void this.copyPaths(footerCopyButton);
     }, false, "copy");
     footerCopyButton.disabled = true;
     this.copyButtons.push(footerCopyButton);
@@ -218,7 +219,7 @@ export class EmbeddingsPendingFilesModal extends StandardModal {
     }
   }
 
-  private async copyPaths(): Promise<void> {
+  private async copyPaths(button: HTMLButtonElement): Promise<void> {
     const source = this.filteredFiles;
     if (source.length === 0) {
       new Notice("No pending files to copy.");
@@ -229,10 +230,10 @@ export class EmbeddingsPendingFilesModal extends StandardModal {
     try {
       const copied = await tryCopyToClipboard(text, this.modalEl);
       if (!copied) throw new Error("Clipboard unavailable");
-      new Notice(`Copied ${source.length} file path${source.length === 1 ? "" : "s"} to the clipboard.`);
+      flashButtonResult(button, "Copied");
     } catch (err) {
       console.error("EmbeddingsPendingFilesModal: failed to copy paths", err);
-      new Notice("Failed to copy paths. Please try again.");
+      flashButtonResult(button, "Couldn't copy");
     }
   }
 

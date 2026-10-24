@@ -1,4 +1,4 @@
-import { App, Notice, TAbstractFile, TFile, normalizePath } from "obsidian";
+import { App, TAbstractFile, TFile, normalizePath } from "obsidian";
 import SystemSculptPlugin from "../../main";
 import {
   WorkflowEngineSettings,
@@ -350,10 +350,7 @@ export class InboxTranscriptionService {
         }
 
         try {
-          await this.processSingleFile(pending, {
-            signal,
-            showNotices: !widget,
-          });
+          await this.processSingleFile(pending, { signal });
           completedCount++;
           widget?.markBatchItemComplete(pending.file);
         } catch (error) {
@@ -417,18 +414,17 @@ export class InboxTranscriptionService {
 
   private async processSingleFile(
     pending: PendingFileEvent,
-    options?: { signal?: AbortSignal; showNotices?: boolean }
+    options?: { signal?: AbortSignal }
   ): Promise<void> {
     if (options?.signal?.aborted) {
       throw new DOMException("Aborted", "AbortError");
     }
-    await this.processTranscription(pending.file, options?.signal, options?.showNotices);
+    await this.processTranscription(pending.file, options?.signal);
   }
 
   private async processTranscription(
     file: TFile,
     signal?: AbortSignal,
-    showNotices: boolean = true
   ): Promise<void> {
     const logger = this.plugin.getLogger();
     const transcriptionService = TranscriptionService.getInstance(this.plugin);
@@ -465,7 +461,6 @@ export class InboxTranscriptionService {
           file,
           transcript,
           operationId,
-          showNotices,
         );
         const marker = `managed_operation: ${operationId}`;
         return {
@@ -512,24 +507,17 @@ export class InboxTranscriptionService {
     file: TFile,
     transcript: string,
     operationId: string,
-    showNotices: boolean = true
   ): Promise<Readonly<{ outputPath: string; storedContent: string }>> {
     const folderPath = file.parent?.path ?? "";
     const baseName = file.basename || "transcript";
     const existing = await this.findExistingTranscriptionNote(folderPath, operationId);
     if (existing) {
-      if (showNotices) {
-        new Notice(`Transcribed ${file.name} → ${existing.file.path}`);
-      }
       return { outputPath: existing.file.path, storedContent: existing.storedContent };
     }
     const targetPath = await this.getAvailableNotePath(folderPath, baseName);
     const noteContent = this.buildTranscriptionNote(file.path, transcript, targetPath, operationId);
 
     await this.app.vault.create(targetPath, noteContent);
-    if (showNotices) {
-      new Notice(`Transcribed ${file.name} → ${targetPath}`);
-    }
     return { outputPath: targetPath, storedContent: noteContent };
   }
 

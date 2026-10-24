@@ -688,7 +688,6 @@ export class EmbeddingsView extends ItemView {
 
       if (manager.isCurrentlyProcessing()) {
         this.showProcessingStatus();
-        new Notice('Processing already in progress');
         return;
       }
 

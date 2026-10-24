@@ -1,11 +1,15 @@
 /**
  * @jest-environment jsdom
  */
-import { App, TFile } from "obsidian";
+import { App, Notice, TFile } from "obsidian";
 import {
   BulkTranscriptionConfirmModal,
   BulkTranscriptionProgressWidget,
 } from "../BulkTranscriptionConfirmModal";
+import { tryCopyToClipboard } from "../../utils/clipboard";
+
+jest.mock("obsidian", () => ({ ...jest.requireActual("obsidian"), Notice: jest.fn() }));
+jest.mock("../../utils/clipboard", () => ({ tryCopyToClipboard: jest.fn(async () => true) }));
 
 function createPendingFiles() {
   return [
@@ -103,6 +107,22 @@ describe("BulkTranscriptionConfirmModal", () => {
     expect(toggleButton.getAttribute("aria-expanded")).toBe("false");
     expect(toggleButton.getAttribute("aria-label")).toBe("Expand");
 
+    widget.close();
+  });
+
+  it("shows a copied error on its button and keeps the failed batch visible", async () => {
+    const widget = new BulkTranscriptionProgressWidget({ plugin: { register: jest.fn() } as any, totalFiles: 2 });
+    widget.markFailed({ status: "Transcription stopped", detailLines: ["second.mp3: Upload failed"], copyText: "second.mp3: Upload failed" });
+    const copy = document.querySelector<HTMLButtonElement>('[data-testid="bulk-transcribe.progress.copy-error"]')!;
+
+    copy.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(tryCopyToClipboard).toHaveBeenCalledWith("second.mp3: Upload failed", expect.any(HTMLElement));
+    expect(copy.textContent).toContain("Copied");
+    expect(document.body.textContent).toContain("second.mp3: Upload failed");
+    expect(Notice).not.toHaveBeenCalled();
     widget.close();
   });
 });

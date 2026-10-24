@@ -160,7 +160,8 @@ describe("PhoneCaptureInbox", () => {
     expect(h.files.get(path)).toBe(MEETING_NOTE);
     expect(h.vault.read).toHaveBeenCalled();
     expect(h.server.acks).toEqual([expect.objectContaining({ id: MEETING.id, body: { vault_path: path } })]);
-    expect(h.notify).toHaveBeenCalledWith("Saved 1 iOS capture to SystemSculpt/Meetings.");
+    // A background save is its own receipt: the note is in the vault.
+    expect(h.notify).not.toHaveBeenCalled();
   });
 
   it("keeps transcript mode in the ordinary inbox with the words unchanged", async () => {
@@ -185,7 +186,7 @@ describe("PhoneCaptureInbox", () => {
     const h = setup({ captures: [CAPTURE, MEETING], settings: {
       folder: "Notes/Phone", meetingsFolder: "Work/Meetings", askBeforeSaving: true,
     } });
-    const result = await h.inbox.sync();
+    const result = await h.inbox.sync({ manual: true });
     expect(result.saved).toEqual([
       "Notes/Phone/Friday oat milk 2026-10-14.md", "Work/Meetings/Q4 launch sync 2026-10-20.md",
     ]);
@@ -204,7 +205,7 @@ describe("PhoneCaptureInbox", () => {
       h.emit("delete", file);
       return create(rootPath, content);
     });
-    expect(await h.inbox.sync()).toMatchObject({ saved: ["Meeting.md"], failed: 0 });
+    expect(await h.inbox.sync({ manual: true })).toMatchObject({ saved: ["Meeting.md"], failed: 0 });
     expect(h.server.acks[0].body).toEqual({ vault_path: "Meeting.md" });
     expect(h.notify).toHaveBeenCalledWith("Saved 1 iOS capture to the vault root.");
   });
@@ -265,7 +266,7 @@ describe("PhoneCaptureInbox", () => {
     expect(server.requests[0].headers).toMatchObject({ "x-license-key": "lic_test", "x-plugin-version": "6.12.0" });
     expect(server.acks).toEqual([expect.objectContaining({ id: "cap_1", body: { vault_path: path } })]);
     expect(server.acks[0].headers["Idempotency-Key"]).toMatch(/^ack-cap_1-[0-9a-f]{16}$/);
-    expect(notify).toHaveBeenCalledWith("Saved 1 iOS capture to SystemSculpt/Inbox.");
+    expect(notify).not.toHaveBeenCalled();
   });
 
   it("ignores a previous account's delayed link response and checks the new account immediately", async () => {
@@ -634,6 +635,26 @@ describe("PhoneCaptureInbox", () => {
     }
   });
 
+  it("reports a background save that came with a failure, and only that", async () => {
+    const h = setup({ captures: [CAPTURE, { ...CAPTURE, id: "cap_2", title: "Second" }] });
+    h.vault.create.mockRejectedValueOnce(new Error("Disk full: private detail"));
+
+    expect(await h.inbox.sync()).toMatchObject({ failed: 1, unacknowledged: 0 });
+
+    expect(h.notify).toHaveBeenCalledTimes(1);
+    expect(h.notify).toHaveBeenCalledWith("Saved 1 iOS capture to SystemSculpt/Inbox. Couldn't save 1 iOS capture. Sync again to retry.");
+    expect(h.server.pending.size).toBe(1);
+  });
+
+  it("reports a background save whose delivery confirmation is pending", async () => {
+    const h = setup();
+    h.server.setOverride(input => input.method === "POST" ? { status: 503, body: {} } : null);
+
+    expect(await h.inbox.sync()).toMatchObject({ failed: 1, unacknowledged: 1 });
+
+    expect(h.notify).toHaveBeenCalledWith("Saved 1 iOS capture to SystemSculpt/Inbox. Delivery confirmation pending for 1 iOS capture already in this vault. Sync again to retry.");
+  });
+
   it("keeps the real empty inbox message and stays quiet in the background", async () => {
     const h = setup({ captures: [] });
     await h.inbox.sync();
@@ -714,7 +735,7 @@ describe("PhoneCaptureInbox", () => {
     expect(notify).not.toHaveBeenCalled();
   });
 
-  it("starts saving and announces it once when the account becomes linked", async () => {
+  it("starts saving quietly when the account becomes linked", async () => {
     let linkedOnServer = false;
     const { inbox, server, notify, onLinked, advance } = setup({
       settings: { linked: false },
@@ -728,15 +749,12 @@ describe("PhoneCaptureInbox", () => {
     const result = await inbox.maybeSync();
     expect(result?.saved).toEqual(["SystemSculpt/Inbox/Friday oat milk 2026-10-14.md"]);
     expect(onLinked).toHaveBeenCalledTimes(1);
-    expect(notify.mock.calls.map(([message]) => message)).toEqual([
-      "iOS captures will be saved to SystemSculpt/Inbox; meetings to SystemSculpt/Meetings.",
-      "Saved 1 iOS capture to SystemSculpt/Inbox.",
-    ]);
+    expect(notify).not.toHaveBeenCalled();
 
     advance(PHONE_CAPTURE_MIN_SYNC_GAP_MS);
     await inbox.maybeSync();
     expect(onLinked).toHaveBeenCalledTimes(1);
-    expect(notify).toHaveBeenCalledTimes(2);
+    expect(notify).not.toHaveBeenCalled();
     expect(server.requests.filter((r) => r.method === "GET")).toHaveLength(2);
   });
 
@@ -762,7 +780,7 @@ describe("PhoneCaptureInbox", () => {
     const result = await inbox.linkReported();
     expect(result?.saved).toHaveLength(1);
     expect(onLinked).toHaveBeenCalledTimes(1);
-    expect(notify).toHaveBeenCalledWith("iOS captures will be saved to SystemSculpt/Inbox; meetings to SystemSculpt/Meetings.");
+    expect(notify).not.toHaveBeenCalled();
     expect(inbox.linkReported()).toBeNull();
     expect(server.requests.filter((r) => r.method === "GET")).toHaveLength(1);
   });

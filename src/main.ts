@@ -2228,13 +2228,8 @@ export default class SystemSculptPlugin extends Plugin {
         }
         await monitor.captureManualSample("command");
         const { summary, path } = await monitor.exportSummaryReport();
-        const copied = await tryCopyToClipboard(summary);
-        if (copied) {
-          new Notice("Resource report copied to clipboard.", 4000);
-        } else if (path) {
-          new Notice(`Resource report saved to ${path}.`, 5000);
-        } else {
-          new Notice("Unable to copy the report. See .systemsculpt/diagnostics.", 5000);
+        if (!await tryCopyToClipboard(summary)) {
+          new Notice(path ? `Resource report saved to ${path}.` : "Unable to copy the report. See .systemsculpt/diagnostics.", 5000);
         }
       },
     });

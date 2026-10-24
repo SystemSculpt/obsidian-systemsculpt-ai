@@ -357,8 +357,6 @@ export class CommandManager {
           kind,
         );
       await artifact.open();
-      const label = kind === "summary" ? "Summary" : "Transcript";
-      new Notice(`${label} saved to ${artifact.notePath}.`, 6000);
     } catch (error) {
       const fallback = kind === "summary"
         ? "Unable to save the audio summary."
@@ -521,7 +519,6 @@ export class CommandManager {
                 notice.hide();
                 if (title && title !== chatView.getChatTitle()) {
                   await chatView.setTitle(title);
-                  new Notice("Chat title updated successfully!", 4000);
                 }
               } catch (error) {
                 const errorMessage = error instanceof Error ? error.message : String(error);
@@ -571,10 +568,6 @@ export class CommandManager {
               if (title && title !== activeFile.basename) {
                 try {
                   await this.renameTitleTargetFile(activeFile, title);
-                  const successLabel = activeFile.extension.toLowerCase() === STUDIO_PROJECT_EXTENSION.slice(1)
-                    ? "Studio project"
-                    : "Note";
-                  new Notice(`${successLabel} title updated successfully!`, 4000);
                 } catch (error) {
                   const errorMessage = error instanceof Error ? error.message : String(error);
                   new Notice(`Failed to rename file: ${errorMessage}`, 6000);
@@ -613,8 +606,7 @@ export class CommandManager {
       name: `New ${STUDIO_DISPLAY_NAME} project`,
       callback: async () => {
         try {
-          const project = await this.createAndOpenStudioProject();
-          new Notice(`Created Studio project: ${project.name}`);
+          await this.createAndOpenStudioProject();
         } catch (error: unknown) {
           const message = error instanceof Error ? error.message : String(error);
           new Notice(`Unable to create Studio project: ${message}`);
@@ -638,8 +630,7 @@ export class CommandManager {
               .find((file) => file.extension.toLowerCase() === "systemsculpt");
 
           if (!fallbackStudioFile) {
-            const project = await this.createAndOpenStudioProject();
-            new Notice(`Created Studio project: ${project.name}`);
+            await this.createAndOpenStudioProject();
             return;
           }
 
@@ -663,9 +654,7 @@ export class CommandManager {
             return;
           }
           const result = await studio.runProject(projectPath);
-          if (result.status === "success") {
-            new Notice(`Studio run complete: ${result.runId}`);
-          } else {
+          if (result.status !== "success") {
             new Notice(`Studio run failed: ${result.error || result.runId}`);
           }
         } catch (error: unknown) {
@@ -886,13 +875,9 @@ export class CommandManager {
   }
 
   private async copyActiveFilePathToClipboard(vaultFilePath: string): Promise<void> {
-    const copied = await tryCopyToClipboard(vaultFilePath);
-    if (!copied) {
+    if (!await tryCopyToClipboard(vaultFilePath)) {
       new Notice("Unable to copy file path to clipboard.");
-      return;
     }
-
-    new Notice("Vault-relative file path copied to clipboard.");
   }
 
   private registerEmbeddingsDatabaseCommands() {
@@ -927,7 +912,6 @@ export class CommandManager {
               new Notice('Rebuilding SystemSculpt embeddings…', 4000);
               const manager = this.plugin.getOrCreateEmbeddingsManager();
               await manager.forceRefreshCurrentNamespace();
-              new Notice('Embeddings rebuild complete.', 4000);
             } catch (error: unknown) {
               const message = error instanceof Error ? error.message : String(error);
               new Notice(`Failed to rebuild embeddings: ${message}`, 8000);

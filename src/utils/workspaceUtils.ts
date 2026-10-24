@@ -1,5 +1,4 @@
 import { App, normalizePath, WorkspaceLeaf, TFile } from 'obsidian';
-import { displayNotice } from '../core/ui/notifications';
 
 /**
  * Find an existing leaf for a file path across all windows and tabs.
@@ -77,29 +76,18 @@ export async function openFileInMainWorkspace(
   // Case 1: File is open in the same tab group. Switch to it and give it focus.
   if (existingFileLeaf && currentLeaf && existingFileLeaf.parent === currentLeaf.parent) {
     app.workspace.setActiveLeaf(existingFileLeaf, { focus: true });
-    displayNotice({
-      title: 'Switched to tab',
-      path: normalizedPath
-    });
     return { leaf: existingFileLeaf, action: 'switched_in_pane' };
   }
 
   // Case 2: File is open, but in a different pane/window. Focus it without keyboard focus.
   if (existingFileLeaf) {
     app.workspace.setActiveLeaf(existingFileLeaf, { focus: false });
-    displayNotice({
-      title: 'Focused existing tab',
-      path: normalizedPath,
-      message: 'File is in another pane/window.'
-    });
     return { leaf: existingFileLeaf, action: 'focused_other_pane' };
   }
   
   // Case 3: File is not open. Create a new leaf for it.
   else {
     let targetLeaf: WorkspaceLeaf | null = null;
-    let noticeTitle = '';
-    let noticeMessage = '';
 
     let suitablePane: WorkspaceLeaf | null = null;
     app.workspace.iterateAllLeaves(leaf => {
@@ -111,25 +99,14 @@ export async function openFileInMainWorkspace(
     if (suitablePane) {
       app.workspace.setActiveLeaf(suitablePane, { focus: false });
       targetLeaf = app.workspace.getLeaf('tab');
-      noticeTitle = 'Opened in new tab';
-      noticeMessage = 'Added to an existing pane in the main workspace.';
     } else if (currentLeaf && currentLeaf.getRoot() === app.workspace.rootSplit) {
       targetLeaf = app.workspace.createLeafBySplit(currentLeaf, 'vertical', true);
-      noticeTitle = 'Opened in new split';
-      noticeMessage = 'Created a side-by-side view with the chat.';
     } else {
       targetLeaf = app.workspace.getLeaf(true);
-      noticeTitle = 'Opened in new pane';
-      noticeMessage = 'Created a new pane in the main workspace.';
     }
 
     if (targetLeaf) {
       await targetLeaf.openFile(file);
-      displayNotice({
-        title: noticeTitle,
-        path: normalizedPath,
-        message: noticeMessage
-      });
       return { leaf: targetLeaf, action: 'created_new' };
     }
   }

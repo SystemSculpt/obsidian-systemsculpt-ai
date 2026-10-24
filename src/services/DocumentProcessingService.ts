@@ -199,7 +199,6 @@ export class DocumentProcessingService {
         icon: STAGE_ICONS.ready,
         documentId: meta.documentId,
       }, meta, flow);
-      if (showNotices) new Notice("Document successfully converted to Markdown");
       return receipt;
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") throw error;

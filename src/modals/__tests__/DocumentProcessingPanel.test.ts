@@ -1,8 +1,12 @@
 /** @jest-environment jsdom */
 
-import { TFile } from "obsidian";
+import { Notice, TFile } from "obsidian";
 import { ManagedJobError } from "../../services/managed/ManagedJobClient";
 import { describeDocumentProcessingFailure, launchDocumentProcessingPanel } from "../DocumentProcessingPanel";
+import { tryCopyToClipboard } from "../../utils/clipboard";
+
+jest.mock("obsidian", () => ({ ...jest.requireActual("obsidian"), Notice: jest.fn() }));
+jest.mock("../../utils/clipboard", () => ({ tryCopyToClipboard: jest.fn(async () => true) }));
 
 describe("document processing typed outcomes", () => {
   it.each([
@@ -73,5 +77,34 @@ describe("document processing panel failure actions", () => {
     expect(document.querySelector('[data-testid="document.progress.add-credits"]')).toBeNull();
     expect(document.querySelector('[data-testid="document.progress.copy-error"]')).not.toBeNull();
     expect(document.querySelector('[data-testid="document.progress.close"]')).not.toBeNull();
+  });
+
+  it("tells the caller whether it showed the failure, so a hidden panel's failure is still said once", () => {
+    const shown = launch();
+    expect(shown.panel.markFailure({ error: { code: "document_processing_failed" }, file: shown.file })).toBe(true);
+    document.body.empty();
+
+    const hidden = launch();
+    document.querySelector<HTMLButtonElement>('[data-testid="document.progress.hide"]')!.click();
+    expect(hidden.panel.markFailure({ error: { code: "document_processing_failed" }, file: hidden.file })).toBe(false);
+  });
+
+  it.each([
+    [true, "Copied"],
+    [false, "Couldn't copy"],
+  ])("shows a copy result (%s) on the Copy error button and keeps the failure open", async (copied, label) => {
+    jest.mocked(tryCopyToClipboard).mockResolvedValueOnce(copied);
+    const { panel, file } = launch();
+    panel.markFailure({ error: { code: "local_output_conflict" }, file });
+    const copy = document.querySelector<HTMLButtonElement>('[data-testid="document.progress.copy-error"]')!;
+
+    copy.click();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(tryCopyToClipboard).toHaveBeenCalledWith("Existing output conflicts with this conversion.", expect.any(HTMLElement));
+    expect(copy.textContent).toContain(label);
+    expect(document.body.textContent).toContain("Existing output conflicts with this conversion.");
+    expect(Notice).not.toHaveBeenCalled();
   });
 });
