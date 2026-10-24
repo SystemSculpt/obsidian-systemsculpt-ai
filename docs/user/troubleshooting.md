@@ -12,6 +12,14 @@
 - SystemSculpt may retry around upstream tool or image limitations automatically.
 - Transient upstream rate limits are retried automatically when no assistant output has started yet.
 - Check for notices/footnotes in chat that explain the failure.
+- Hosted chat reconnects automatically after a dropped connection. Repeated
+  attempts back off rather than fetching the conversation every few seconds.
+  Recovery waits while your device is offline and resumes when it comes online.
+  A hidden chat checks less often; returning to it prompts another check.
+- A reconnecting or stalled response keeps its last output visible without a
+  moving progress indicator or elapsed timer. This does not mean the server has
+  stopped the response: you can still use Stop, and new server activity restores
+  the live display.
 
 ## Similar Notes is empty
 
