@@ -437,6 +437,10 @@ function fakeDependencies(options: {
 }
 
 describe("AgentIncidentCoordinator", () => {
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
   it.each([
     ["user-01234567-89ab-4cde-8fab-0123456789ab", true],
     ["user-1700000000-abcde", true],
@@ -724,6 +728,7 @@ describe("AgentIncidentCoordinator", () => {
   });
 
   it("evicts the oldest pending capture after 32 correlations", async () => {
+    jest.useFakeTimers();
     const first = correlation(20);
     const last = correlation(52);
     const { coordinator, recorder } = fakeDependencies();
@@ -742,7 +747,9 @@ describe("AgentIncidentCoordinator", () => {
       { conversationId: last.conversationId, requestId: last.requestId },
       expect.objectContaining({ assistantTextPartCount: 2 }),
     );
-    await coordinator.closeAdmissionAndDrain();
+    const draining = coordinator.closeAdmissionAndDrain();
+    await jest.advanceTimersByTimeAsync(1_000);
+    await draining;
   });
 
   it("drains tracked initialization and save work without rejecting", async () => {
@@ -819,6 +826,7 @@ describe("AgentIncidentCoordinator", () => {
   });
 
   it("contains recorder record and transport attachment failures", async () => {
+    jest.useFakeTimers();
     const ids = correlation(126);
     const { coordinator, recorder } = fakeDependencies({
       finalize: () => fakeReport(126),
@@ -829,18 +837,27 @@ describe("AgentIncidentCoordinator", () => {
     expect(() => coordinator.recordLifecycle(lifecycle(ids, "run_finished_failed", 1))).not.toThrow();
     expect(() => coordinator.recordTransport(transport(ids))).not.toThrow();
     expect(() => coordinator.captureFailure(failure(ids))).not.toThrow();
-    await expect(coordinator.closeAdmissionAndDrain()).resolves.toBeUndefined();
+    const draining = coordinator.closeAdmissionAndDrain();
+    await jest.advanceTimersByTimeAsync(1_000);
+    await expect(draining).resolves.toBeUndefined();
     expect(recorder.finalize).not.toHaveBeenCalled();
   });
 
   it("does not finalize when the failed lifecycle projection is not accepted", async () => {
+    jest.useFakeTimers();
     const ids = correlation(128);
     const { coordinator, recorder, store } = fakeDependencies();
     recorder.record.mockReturnValue(false);
     const receipt = coordinator.captureFailure(failure(ids));
     coordinator.recordLifecycle(lifecycle(ids, "run_finished_failed", 1));
 
-    await coordinator.closeAdmissionAndDrain();
+    let drained = false;
+    const draining = coordinator.closeAdmissionAndDrain().then(() => { drained = true; });
+    await jest.advanceTimersByTimeAsync(999);
+    expect(drained).toBe(false);
+    await jest.advanceTimersByTimeAsync(1);
+    await draining;
+    expect(drained).toBe(true);
     expect(receipt).toEqual({ reportId: `report_${ids.conversationId.slice(-32)}` });
     expect(recorder.finalize).not.toHaveBeenCalled();
     expect(store.save).not.toHaveBeenCalled();
@@ -862,6 +879,7 @@ describe("AgentIncidentCoordinator", () => {
   });
 
   it("does not throw or retain hostile lifecycle, capture, transport, rendering, or provider getters", async () => {
+    jest.useFakeTimers();
     const ids = correlation(122);
     const { coordinator, recorder } = fakeDependencies();
     const throwing = () => { throw new Error("hostile-getter"); };
@@ -874,7 +892,9 @@ describe("AgentIncidentCoordinator", () => {
     expect(() => coordinator.captureFailure(hostileFailure as AgentRunFailureCaptureEvent)).not.toThrow();
     expect(() => coordinator.recordTransport(hostileTransport as AgentChatTransportSegmentSummaryEvent)).not.toThrow();
     expect(() => coordinator.captureFailure(failure(ids), hostileRendering as ReturnType<typeof rendering>)).not.toThrow();
-    await expect(coordinator.closeAdmissionAndDrain()).resolves.toBeUndefined();
+    const draining = coordinator.closeAdmissionAndDrain();
+    await jest.advanceTimersByTimeAsync(1_000);
+    await expect(draining).resolves.toBeUndefined();
     expect(recorder.finalize).not.toHaveBeenCalled();
   });
 

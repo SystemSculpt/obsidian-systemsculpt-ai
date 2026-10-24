@@ -1,4 +1,5 @@
 import type SystemSculptPlugin from "../../main";
+import { sha256HexFromArrayBuffer } from "../../utils/sha256";
 
 const STAGING_DIRECTORY = ".managed-document-staging";
 const MANIFEST_PATTERN = /\/manifest-(\d{6})\.json$/;
@@ -53,7 +54,7 @@ export class ManagedDocumentLocalStaging {
       throw new ManagedDocumentLocalStagingError("invalid_staging_request", "Plugin manifest directory does not match the installed plugin location.");
     }
     this.adapter = plugin.app.vault.adapter;
-    this.digest = testSeam.digest ?? sha256;
+    this.digest = testSeam.digest ?? sha256HexFromArrayBuffer;
     this.root = `${derivedDirectory}/${STAGING_DIRECTORY}`;
   }
 
@@ -236,9 +237,4 @@ function corrupt(message: string): never {
 
 function throwIfAborted(signal?: AbortSignal): void {
   if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
-}
-
-async function sha256(bytes: ArrayBuffer): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }

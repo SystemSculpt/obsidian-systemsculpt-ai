@@ -1,38 +1,11 @@
 /**
- * Jest configuration for embeddings-only tests.
- *
- * Embeddings can be heavier/slower and are intentionally split out of the
- * default `npm test` path so everyday iteration stays fast.
+ * The embeddings service tree has its own focused gate. Embeddings UI and
+ * tool suites outside that tree belong to the ordinary unit gate.
  */
+const base = require('./jest.base.config.cjs');
 
 module.exports = {
-	testEnvironment: 'node',
+	...base,
 	roots: ['<rootDir>/src'],
-	testMatch: [
-		'**/__tests__/**/Embeddings*.test.ts',
-		// Match the whole embeddings tree by path (not just `Embeddings*`-named
-		// files). The previous glob lacked a `<rootDir>` anchor, so it silently
-		// matched nothing and tests like providers/__tests__ went unrun.
-		'<rootDir>/src/services/embeddings/**/__tests__/**/*.test.ts'
-	],
-	moduleNameMapper: {
-		'^obsidian$': '<rootDir>/src/tests/mocks/obsidian.js',
-		'^@/(.*)$': '<rootDir>/src/$1',
-		'^src/(.*)$': '<rootDir>/src/$1'
-	},
-	setupFilesAfterEnv: ['<rootDir>/src/tests/setup.ts'],
-	moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json', 'node'],
-	transform: {
-		'^.+\\.(t|j)sx?$': [
-			'@swc/jest',
-			{
-				jsc: {
-					parser: { syntax: 'typescript', tsx: true, decorators: true },
-					target: 'es2018'
-				},
-				module: { type: 'commonjs' },
-				sourceMaps: 'inline'
-			}
-		]
-	}
+	testMatch: ['<rootDir>/src/services/embeddings/**/__tests__/**/*.test.ts']
 };

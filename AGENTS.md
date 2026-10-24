@@ -177,18 +177,25 @@ npm run check:compat
 - check:ci is the exact exhaustive PR gate. It adds strict-console randomized
   mobile interactions, critical ChatView coverage, the partitioned unit
   remainder, embeddings, already-built integration, and open-handle detection.
-  Focused mobile and ChatView paths are excluded from the unit remainder so
-  they are not run a third time. The release-script contracts (build
+  Each source suite runs exactly once: the mobile CI subset excludes
+  critical-owned suites, and the unit remainder excludes both focused sets
+  and the embeddings service tree. Standalone mobile checks retain all scenarios. The release-script contracts (build
   provenance, build options, artifacts, release-plugin) run inside check:plugin
   and remain available standalone as test:release-script.
 - check:compat is the smaller compatibility contract used on Node 22.18,
   Node 24, macOS, and Windows after the exhaustive Ubuntu/Node 22 job. It runs
-  the same critical ChatView suites without repeating coverage instrumentation.
+  the same critical ChatView suites without repeating coverage instrumentation
+  or OS-independent ESLint. The exhaustive lane still runs every lint pass
+  uncached, since per-file caches cannot see imported type changes.
 - CI is credential-free. It runs check:ci on Ubuntu/Node 22 and check:compat
   across the compatibility matrix. It has no provider or native-device lane.
 - The installed pre-push hook runs check:ci before a push. Hosted CI remains
   authoritative and branch protection must require the stable `required` job,
-  which fails unless every exhaustive and compatibility lane succeeds.
+  which requires every exhaustive and compatibility lane to succeed. A main
+  push may reuse a successful PR/merge-group run only when GitHub job records
+  prove all lanes tested the identical Git tree. Missing proof or API errors
+  run full CI; manual dispatch always runs it. Release publication remains
+  independently triggered by a published release and validates exact tag bytes.
 - Top-level hosted Jest gates record replay-oriented child argv and seed.
   Failed jobs retain those records, ChatView coverage, artifact inspection,
   build provenance, and exact plugin artifact bytes for 14 days.
@@ -239,8 +246,9 @@ manual mobile exploration is performed.
 - Agent detection is cached for the Obsidian session. Refresh with **Detect again**
   or after a native run fails because the agent is missing or signed out; do not
   poll. Usage detection may only list/stat native session-store names and timestamps,
-  never read file contents or credentials. Keep chat controls to a compact execution
-  summary with **Change** and, on desktop, **Detect again**.
+  never read file contents or credentials. Chat states what runs where in one run
+  line under the composer (backend, mode, model or hosted credits), each part a
+  one-click menu; **Detect again** lives in its backend menu on desktop.
 - New Claude Code chats default to **Auto** (`auto`), using Claude Code's native
   safety checks, not permission bypass. Manual choices are **Ask before edits**
   (`manual`), **Accept edits** (`acceptEdits`), **Plan only** (`plan`), and **Claude

@@ -462,8 +462,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
-      onOpenCredits: jest.fn(),
       onViewPlans,
       showPlanOffer: true,
       onCancelQueued: jest.fn(),
@@ -471,19 +469,13 @@ describe("AgentWorkspace", () => {
     });
     workspace.load();
 
-    const plans = parent.querySelector<HTMLButtonElement>('[data-testid="chat.empty.view-plans"]')!;
-    expect(plans.closest("[hidden]")).toBeNull();
-    plans.click();
-    expect(onViewPlans).toHaveBeenCalledTimes(1);
-    workspace.setPlanOfferVisible(false);
-    expect(plans.closest("[hidden]")).not.toBeNull();
-
     expect(workspace.element.matches('.ss-surface[data-ss-surface="view"]')).toBe(true);
     expect(parent.querySelector('[aria-label="Chat history"]')?.classList.contains("ss-button--icon")).toBe(true);
     expect(parent.querySelector('[aria-label="Add files and notes"]')?.classList.contains("ss-button--icon")).toBe(true);
     expect(parent.querySelector('[aria-label="Jump to latest"]')?.classList.contains("ss-button")).toBe(true);
-    expect(parent.querySelector(".systemsculpt-agent-credits")?.textContent).toBe("Credits");
-    for (const label of ["Chat history", "New chat", "Chat settings", "Add files and notes", "Jump to latest"]) {
+    // Credits live in the run line now, and only for hosted chat (spec 4.2).
+    expect(parent.querySelector(".systemsculpt-agent-credits")).toBeNull();
+    for (const label of ["Chat history", "New chat", "More", "Add files and notes", "Jump to latest"]) {
       expect(parent.querySelector(`[aria-label="${label}"]`)?.hasAttribute("title")).toBe(false);
     }
     expect(parent.querySelector(".systemsculpt-agent-header-title")?.getAttribute("role"))
@@ -504,7 +496,7 @@ describe("AgentWorkspace", () => {
     const bannerPlans = parent.querySelector<HTMLButtonElement>('[data-testid="chat.banner.see-plans"]')!;
     expect(bannerPlans.textContent).toBe("See plans");
     bannerPlans.click();
-    expect(onViewPlans).toHaveBeenCalledTimes(2);
+    expect(onViewPlans).toHaveBeenCalledTimes(1);
     workspace.setBanner("Connection failed", "error");
     expect(parent.querySelector('[data-testid="chat.banner.see-plans"]')).toBeNull();
     expect(parent.querySelector(".systemsculpt-agent-banner")?.getAttribute("role"))
@@ -540,116 +532,6 @@ describe("AgentWorkspace", () => {
     expect(firstQueued.querySelector(".systemsculpt-agent-queue-label")?.textContent).toBe("Queued");
     expect(firstQueued.querySelector('[data-queue-action="run-now"]')?.textContent).toBe("Send now");
 
-    workspace.unload();
-  });
-
-  it("presents master auth as Internal QA without implying exhausted credits", () => {
-    const parent = document.body.createDiv();
-    const workspace = new AgentWorkspace(parent, {
-      app: new App(),
-      sourcePath: () => "",
-      onSubmit: jest.fn(),
-      onStop: jest.fn(),
-      onAttach: jest.fn(),
-      onRemoveAttachment: jest.fn(),
-      onApprove: jest.fn(),
-      onOpenArtifact: jest.fn(),
-      onCopyArtifactPath: jest.fn(),
-      onNewChat: jest.fn(),
-      onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
-      onOpenCredits: jest.fn(),
-    });
-    workspace.load();
-    const credits = parent.querySelector<HTMLButtonElement>(
-      ".systemsculpt-agent-credits",
-    )!;
-
-    workspace.setCreditsBalance({
-      includedRemaining: 0,
-      addOnRemaining: 0,
-      totalRemaining: 0,
-      includedPerMonth: 0,
-      usageClass: "master_auth",
-      cycleEndsAt: "2026-08-01T00:00:00.000Z",
-      cycleStartedAt: "2026-07-01T00:00:00.000Z",
-      cycleAnchorAt: "2026-07-01T00:00:00.000Z",
-      turnInFlightUntil: null,
-      purchaseUrl: null,
-    });
-
-    expect(credits.hidden).toBe(false);
-    expect(credits.textContent).toBe("Internal QA");
-    expect(credits.title).toBe("Internal testing mode");
-    expect(credits.getAttribute("aria-label")).toBe("Internal testing mode");
-    expect(credits.classList.contains("is-internal-qa")).toBe(true);
-    expect(credits.classList.contains("is-low")).toBe(false);
-    expect(parent.textContent).not.toContain("Credits: 0");
-
-    workspace.setCreditsBalance({
-      includedRemaining: 500,
-      addOnRemaining: 0,
-      totalRemaining: 500,
-      includedPerMonth: 2000,
-      usageClass: "customer",
-      cycleEndsAt: "2026-08-01T00:00:00.000Z",
-      cycleStartedAt: "2026-07-01T00:00:00.000Z",
-      cycleAnchorAt: "2026-07-01T00:00:00.000Z",
-      turnInFlightUntil: null,
-      purchaseUrl: null,
-    });
-
-    expect(credits.textContent).toBe("500");
-    expect(credits.title).toBe("Credits available: 500");
-    expect(credits.getAttribute("aria-label")).toBe("Credits available: 500");
-    expect(credits.classList.contains("is-internal-qa")).toBe(false);
-    expect(credits.classList.contains("is-low")).toBe(true);
-
-    workspace.setCreditsBalance({
-      includedRemaining: 500,
-      addOnRemaining: 0,
-      totalRemaining: 500,
-      heldInFlight: 500,
-      availableUnreserved: 0,
-      includedPerMonth: 2000,
-      usageClass: "customer",
-      cycleEndsAt: "2026-08-01T00:00:00.000Z",
-      cycleStartedAt: "2026-07-01T00:00:00.000Z",
-      cycleAnchorAt: "2026-07-01T00:00:00.000Z",
-      turnInFlightUntil: null,
-      purchaseUrl: null,
-    });
-
-    expect(credits.textContent).toBe("0 available");
-    expect(credits.title).toContain("500 held in flight");
-    expect(credits.getAttribute("aria-label")).toContain("No credits are available");
-    expect(credits.classList.contains("is-empty")).toBe(false);
-
-    workspace.setCreditsBalance({
-      includedRemaining: 0,
-      addOnRemaining: 0,
-      totalRemaining: 0,
-      includedPerMonth: 2000,
-      usageClass: "customer",
-      cycleEndsAt: "2026-08-01T00:00:00.000Z",
-      cycleStartedAt: "2026-07-01T00:00:00.000Z",
-      cycleAnchorAt: "2026-07-01T00:00:00.000Z",
-      turnInFlightUntil: null,
-      purchaseUrl: null,
-    });
-
-    expect(credits.textContent).toBe("Out of credits");
-    expect(credits.title).toBe("You are out of credits. Add credits to continue.");
-    expect(credits.getAttribute("aria-label")).toBe("Out of credits. Add credits to continue.");
-    expect(credits.classList.contains("is-empty")).toBe(true);
-
-    workspace.setCreditsBalance(null);
-
-    expect(credits.hidden).toBe(true);
-    expect(credits.textContent).toBe("Credits");
-    expect(credits.title).toBe("Credits");
-    expect(credits.getAttribute("aria-label")).toBe("Credits");
-    expect(credits.classList.contains("is-empty")).toBe(false);
     workspace.unload();
   });
 

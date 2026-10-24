@@ -86,6 +86,7 @@ export class CommandManager {
   registerCommands() {
     this.registerToggleAudioRecorder();
     this.registerOpenChat();
+    this.registerChatCommands();
     this.registerOpenSystemSculptHistory();
     this.registerOpenJanitor();
     this.registerTranscribeAudioFile();
@@ -167,6 +168,69 @@ export class CommandManager {
       callback: async () => {
         await this.ribbonManager.openChatView();
       },
+    });
+  }
+
+  /**
+   * The chat's own keys only work while focus is in a chat. These palette
+   * commands reach the active chat, or the most recently opened one, from
+   * anywhere, and ship without default hotkeys.
+   */
+  private registerChatCommands() {
+    const chat = (checking: boolean, act: (view: AgentChatView) => boolean | void): boolean => {
+      const active = this.app.workspace.getActiveViewOfType(AgentChatView);
+      const leaf = active?.leaf ?? this.app.workspace.getLeavesOfType(CHAT_VIEW_TYPE)[0];
+      const view = active ?? (leaf?.view instanceof AgentChatView ? leaf.view : null);
+      if (!view || !leaf) return false;
+      if (checking) return true;
+      void this.app.workspace.revealLeaf(leaf).then(() => act(view));
+      return true;
+    };
+    this.plugin.addCommand({
+      id: "chat-new-chat",
+      name: "Chat: New chat",
+      callback: () => {
+        if (!chat(false, (view) => void view.newChat())) void this.ribbonManager.openChatView();
+      },
+    });
+    this.plugin.addCommand({
+      id: "chat-open-history",
+      name: "Chat: Open chat history",
+      checkCallback: (checking) => chat(checking, (view) => view.openChatHistory()),
+    });
+    this.plugin.addCommand({
+      id: "chat-focus-message-box",
+      name: "Chat: Focus message box",
+      checkCallback: (checking) => chat(checking, (view) => view.focusInput()),
+    });
+    this.plugin.addCommand({
+      id: "chat-stop-response",
+      name: "Chat: Stop response",
+      checkCallback: (checking) => {
+        const view = this.app.workspace.getActiveViewOfType(AgentChatView)
+          ?? this.app.workspace.getLeavesOfType(CHAT_VIEW_TYPE)
+            .map((leaf) => leaf.view)
+            .find((candidate): candidate is AgentChatView =>
+              candidate instanceof AgentChatView && candidate.isWorking());
+        if (!view?.isWorking()) return false;
+        if (!checking) view.stopResponse();
+        return true;
+      },
+    });
+    this.plugin.addCommand({
+      id: "chat-change-mode",
+      name: "Chat: Change mode",
+      checkCallback: (checking) => chat(checking, (view) => view.openModeMenu()),
+    });
+    this.plugin.addCommand({
+      id: "chat-change-backend",
+      name: "Chat: Change backend",
+      checkCallback: (checking) => chat(checking, (view) => view.openBackendMenu()),
+    });
+    this.plugin.addCommand({
+      id: "chat-review-pending-approval",
+      name: "Chat: Review pending approval",
+      checkCallback: (checking) => chat(checking, (view) => view.reviewPendingApproval()),
     });
   }
 

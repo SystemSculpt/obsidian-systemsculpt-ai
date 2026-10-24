@@ -1,5 +1,3 @@
-import { mountCodexExecutionControls } from "../../../services/codex/CodexExecutionControls";
-jest.mock("../../../services/codex/CodexExecutionControls", () => ({ mountCodexExecutionControls: jest.fn(() => () => {}) }));
 import { AgentChatView } from '../AgentChatView';
 import { CodexChatSession } from '../../../services/codex/CodexChatSession';
 import { ClaudeChatSession } from '../../../services/claude/ClaudeChatSession';
@@ -9,8 +7,9 @@ const prototype = AgentChatView.prototype as any;
 function view(backend: 'codex' | 'claude' | 'systemsculpt' = 'codex') {
   return { app: { vault: { adapter: {} } }, plugin: { settings: { textExecutionBackend: backend, licenseKey: '' }, manifest: { version: 'test' } },
     agentBaseUrl: 'https://systemsculpt.com', agentMutationJournal: {}, pendingForkHistory: null,
+    transcript: { snapshot: () => ({ messages: [] }) },
     shouldOfferPlan: prototype.shouldOfferPlan,
-    creditsBalance: { totalRemaining: 0, availableUnreserved: 0 }, workspace: { setPlanOfferVisible: jest.fn(), setCreditsBalance: jest.fn() } } as any;
+    creditsBalance: { totalRemaining: 0, availableUnreserved: 0 }, workspace: { setPlanOfferVisible: jest.fn(), setChrome: jest.fn() } } as any;
 }
 it('creates native sessions for the selected backend and retains saved-chat routing over the default', () => {
   const native = view(); native.agent = prototype.createAgentSession.call(native);
@@ -24,35 +23,34 @@ it('creates native sessions for the selected backend and retains saved-chat rout
   const saved = view('systemsculpt'); saved.chatExecutionBackend = 'codex';
   expect(prototype.createAgentSession.call(saved)).toBeInstanceOf(CodexChatSession);
 });
-it('does not block native chat on SystemSculpt credits or show a subscription reminder', async () => {
+it('does not block native chat on SystemSculpt credits', async () => {
   const native = view(); native.agent = prototype.createAgentSession.call(native);
+  native.syncChrome = jest.fn();
   expect(prototype.hasAuthoritativeUnavailableBalance.call(native)).toBe(false);
-  expect(prototype.planReminderBanner.call(native)).toBeNull();
   await prototype.refreshCreditsBalance.call(native);
-  expect(native.creditsBalance).toBeNull(); expect(native.workspace.setCreditsBalance).toHaveBeenCalledWith(null);
+  expect(native.creditsBalance).toBeNull(); expect(native.syncChrome).toHaveBeenCalled();
   expect(native.workspace.setPlanOfferVisible).toHaveBeenLastCalledWith(true);
   native.plugin.settings.licenseKey = 'test-license';
   await prototype.refreshCreditsBalance.call(native);
   expect(native.workspace.setPlanOfferVisible).toHaveBeenLastCalledWith(false);
 });
 
-it('mounts the active provider after session replacement and opens provider changes in a fresh tab', async () => {
+it('redraws the run line for the backend that each replaced session runs on', async () => {
   for (const backend of ['codex', 'claude', 'systemsculpt'] as const) {
     const current = view(backend);
-    current.plugin.openNewChat = jest.fn(async () => {});
-    current.workspace.composer = { element: {} };
     current.bindAgentSession = jest.fn();
-    current.codexControlsCleanup = jest.fn();
-    const oldCleanup = current.codexControlsCleanup;
+    current.syncChrome = jest.fn();
+    current.loadCodexCatalog = jest.fn();
     current.createAgentSession = () => prototype.createAgentSession.call(current);
     current.agentSessionBinding = { replace: async (create: () => unknown) => create() };
     await prototype.replaceAgentSession.call(current);
-    expect(oldCleanup).toHaveBeenCalledTimes(1);
-    const context = (mountCodexExecutionControls as jest.Mock).mock.calls.at(-1)[2];
-    expect(context.backend).toBe(backend);
-    await context.onProviderChange(); expect(current.plugin.openNewChat).toHaveBeenCalledTimes(1);
+    expect(current.syncChrome).toHaveBeenCalled();
+    expect(current.loadCodexCatalog).toHaveBeenCalledTimes(backend === 'codex' ? 1 : 0);
   }
 });
+
+/** The balance the run line shows, from each chrome render. */
+const shownCredits = (current: any) => current.workspace.setChrome.mock.calls.map(([state]: any[]) => state.credits);
 
 function creditsView() {
   const current = Object.assign(Object.create(prototype), view('systemsculpt'));
@@ -61,6 +59,7 @@ function creditsView() {
   current.bindAgentSession = jest.fn();
   current.agentSessionBinding = { replace: async (create: () => unknown) => create() };
   current.aiService = { readCreditsBalance: jest.fn() };
+  current.loadCodexCatalog = jest.fn();
   current.recordCreditsRefreshLifecycle = jest.fn();
   return current;
 }
@@ -72,7 +71,7 @@ it('clears already displayed managed credits when restoring a native chat', asyn
   await current.replaceAgentSession();
 
   expect(current.creditsBalance).toBeNull();
-  expect(current.workspace.setCreditsBalance).toHaveBeenLastCalledWith(null);
+  expect(shownCredits(current).at(-1)).toEqual(null);
   expect(current.aiService.readCreditsBalance).not.toHaveBeenCalled();
 });
 
@@ -93,7 +92,7 @@ it.each([false, true])('ignores managed balance settlement after native restore 
   await Promise.all([pending, queued]);
 
   expect(current.creditsBalance).toBeNull();
-  expect(current.workspace.setCreditsBalance).toHaveBeenLastCalledWith(null);
+  expect(shownCredits(current).at(-1)).toEqual(null);
   expect(current.aiService.readCreditsBalance).toHaveBeenCalledTimes(1);
 });
 
@@ -115,8 +114,8 @@ it('refreshes managed credits after returning from native without publishing the
 
   expect(current.aiService.readCreditsBalance).toHaveBeenCalledTimes(2);
   expect(current.creditsBalance).toEqual(fresh);
-  expect(current.workspace.setCreditsBalance).not.toHaveBeenCalledWith(expect.objectContaining({ totalRemaining: 70840 }));
-  expect(current.workspace.setCreditsBalance).toHaveBeenLastCalledWith(fresh);
+  expect(shownCredits(current)).not.toContainEqual(expect.objectContaining({ totalRemaining: 70840 }));
+  expect(shownCredits(current).at(-1)).toEqual(fresh);
 });
 
 it.each([false, true])('clears the previous account balance and serializes a fresh read after a license change (failure=%s)', async (failure) => {
@@ -146,7 +145,7 @@ it.each([false, true])('clears the previous account balance and serializes a fre
   const newRefresh = current.refreshCreditsBalance({ reason: 'settings_update' });
 
   expect(current.creditsBalance).toBeNull();
-  expect(current.workspace.setCreditsBalance).toHaveBeenLastCalledWith(null);
+  expect(shownCredits(current).at(-1)).toEqual(null);
   expect(current.aiService.readCreditsBalance).toHaveBeenCalledTimes(2);
   if (failure) rejectOld(new Error('Old account request failed'));
   else resolveOld({ totalRemaining: 99, availableUnreserved: 99 });
@@ -154,14 +153,13 @@ it.each([false, true])('clears the previous account balance and serializes a fre
 
   expect(requestedKeys).toEqual(['test-license', 'test-license', 'new-license']);
   expect(current.creditsBalance).toEqual(freshBalance);
-  expect(current.workspace.setCreditsBalance).not.toHaveBeenCalledWith(expect.objectContaining({ totalRemaining: 99 }));
-  expect(current.workspace.setCreditsBalance).toHaveBeenLastCalledWith(freshBalance);
+  expect(shownCredits(current)).not.toContainEqual(expect.objectContaining({ totalRemaining: 99 }));
+  expect(shownCredits(current).at(-1)).toEqual(freshBalance);
 });
 
 it('creates a Claude Code session for the selected backend and for saved Claude Code chats', () => {
   const native = view('claude'); native.agent = prototype.createAgentSession.call(native);
   expect(native.agent).toBeInstanceOf(ClaudeChatSession); expect(native.agent.agent).toBe('claude');
-  expect(prototype.planReminderBanner.call(native)).toBeNull();
   expect(prototype.hasAuthoritativeUnavailableBalance.call(native)).toBe(false);
   const saved = view('codex'); saved.chatExecutionBackend = 'claude';
   expect(prototype.createAgentSession.call(saved)).toBeInstanceOf(ClaudeChatSession);

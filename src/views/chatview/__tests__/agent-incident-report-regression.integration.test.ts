@@ -22,6 +22,7 @@ import {
   PluginLogger,
   type SupportDiagnosticEvent,
 } from "../../../utils/PluginLogger";
+import { LogLevel } from "../../../utils/errorHandling";
 import { ChatMarkdownSerializer } from "../storage/ChatMarkdownSerializer";
 import { AgentTranscriptRepository } from "../AgentTranscriptRepository";
 import { AgentChatSession } from "../../../chat/managed/ChatSession";
@@ -330,8 +331,8 @@ function createPluginLogger(): Readonly<{
 }> {
   const localLogWrites: string[] = [];
   const plugin = {
-    // Recording on, so the privacy assertions cover lifecycle bytes on disk too.
-    settings: { debugMode: false, logLevel: 0, showDiagnostics: true },
+    // Opt into info logs so privacy assertions cover lifecycle bytes on disk too.
+    settings: { debugMode: false, logLevel: LogLevel.INFO, showDiagnostics: true },
     isPluginUnloading: () => false,
     storage: {
       appendToFile: async (_directory: string, _file: string, data: string) => {

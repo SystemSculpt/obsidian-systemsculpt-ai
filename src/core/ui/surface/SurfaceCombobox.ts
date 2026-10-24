@@ -120,7 +120,7 @@ export class SurfaceCombobox<T> {
   };
 
   private readonly handleKeydown = (event: KeyboardEvent): void => {
-    if (this.destroyed) return;
+    if (this.destroyed || event.defaultPrevented || event.isComposing || event.key === "Process") return;
 
     if (event.key === "Escape") {
       if (!this.open) return;
@@ -132,6 +132,8 @@ export class SurfaceCombobox<T> {
     }
 
     if (!this.open) return;
+    // Modified vertical arrows belong to the host/view, not option navigation.
+    if (event.altKey && (event.key === "ArrowUp" || event.key === "ArrowDown")) return;
 
     if ((this.options.focusMode ?? "input") === "options") {
       if (event.key !== "ArrowDown" || this.visibleItems.length === 0) return;
@@ -203,7 +205,8 @@ export class SurfaceCombobox<T> {
     if (options.bindInputEvents !== false) {
       this.input.addEventListener("input", this.handleInput);
     }
-    this.input.addEventListener("keydown", this.handleKeydown);
+    const inputElement: HTMLElement = this.input;
+    inputElement.addEventListener("keydown", this.handleKeydown);
     this.renderFilteredItems();
   }
 
@@ -349,7 +352,8 @@ export class SurfaceCombobox<T> {
     if (this.options.bindInputEvents !== false) {
       this.input.removeEventListener("input", this.handleInput);
     }
-    this.input.removeEventListener("keydown", this.handleKeydown);
+    const inputElement: HTMLElement = this.input;
+    inputElement.removeEventListener("keydown", this.handleKeydown);
     this.removeOptionListeners();
     if (this.open) {
       this.open = false;

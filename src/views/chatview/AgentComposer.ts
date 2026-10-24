@@ -16,7 +16,7 @@ import type { ChatMessage } from "../../types";
 import {
   CHAT_ATTACHMENT_PICKER_ACCEPT,
   ChatMessageAttachmentCollection,
-  restoreChatMessageDraft,
+  chatMessageDraftText,
   type ChatAttachmentDisplay,
   type ChatDocumentAttachmentProcessor,
   type ChatMessageAttachment,
@@ -25,7 +25,6 @@ import {
 import { AgentComposerMentionPopover, type ComposerMentionTrigger } from "./AgentComposerMentions";
 import { AgentComposerVault } from "./AgentComposerVault";
 import { containsControlCharacters } from "../../utils/characterValidation";
-import { parseChatApprovalMode, type ChatApprovalMode } from "./storage/ChatPersistenceTypes";
 
 export type AgentComposerAttachment = Readonly<{
   id: string;
@@ -52,7 +51,6 @@ export type AgentComposerOptions = Readonly<{
   attachmentLimits?: ThinAgentInputLimits;
   onMic?: () => void | Promise<void>;
   onRemoveAttachment: (attachment: AgentComposerAttachment) => void | Promise<void>;
-  onApprovalModeChange?: (mode: ChatApprovalMode) => void;
   onHeightChange?: () => void;
   /** The vault, for the active-note chip, `@` mentions, the vault picker, and opening chips. */
   app?: App;
@@ -122,7 +120,6 @@ export class AgentComposer extends Component {
   private readonly input: HTMLTextAreaElement;
   private readonly addButton: HTMLButtonElement;
   private readonly filePicker: HTMLInputElement;
-  private readonly approvalMode: HTMLSelectElement;
   private readonly micButton: HTMLButtonElement | null;
   private readonly sendButton: HTMLButtonElement;
   private readonly stopButton: HTMLButtonElement;
@@ -220,15 +217,11 @@ export class AgentComposer extends Component {
         "aria-hidden": "true",
       },
     });
-    this.approvalMode = tools.createEl("select", {
-      cls: "dropdown systemsculpt-agent-approval-mode",
-      attr: { "data-testid": "chat.composer.approval-mode", "aria-label": "Vault changes" },
-    });
-    this.approvalMode.createEl("option", { value: "auto", text: "Auto" });
-    this.approvalMode.createEl("option", { value: "ask", text: "Ask" });
-    this.approvalMode.createEl("option", { value: "full-access", text: "Full access" });
 
-    this.hint = toolbar.createSpan({ cls: "systemsculpt-agent-prompt-hint", attr: { "aria-live": "polite" } });
+    this.hint = toolbar.createSpan({
+      cls: "systemsculpt-agent-prompt-hint",
+      attr: options.announce ? {} : { "aria-live": "polite" },
+    });
 
     const actions = toolbar.createDiv({ cls: "systemsculpt-agent-prompt-actions" });
     this.cancelAttachmentsButton = createButton(
@@ -308,11 +301,6 @@ export class AgentComposer extends Component {
     this.registerDomEvent(parent, "drop", (event) => this.handleDrop(event));
     this.registerDomEvent(parent, "keydown", (event) => this.handleWorkspaceKeydown(event));
     if (this.micButton) this.registerDomEvent(this.micButton, "click", () => void this.options.onMic?.());
-    this.registerDomEvent(this.approvalMode, "change", () => {
-      const mode = parseChatApprovalMode(this.approvalMode.value);
-      this.approvalMode.classList.toggle("is-full-access", mode === "full-access");
-      this.options.onApprovalModeChange?.(mode);
-    });
     this.registerDomEvent(this.sendButton, "click", () => void this.submit());
     this.registerDomEvent(this.stopButton, "click", () => void this.options.onStop());
     this.registerDomEvent(this.cancelAttachmentsButton, "click", () => this.messageAttachments.cancelProcessing());
@@ -401,7 +389,7 @@ export class AgentComposer extends Component {
     const prompts: string[] = [];
     for (const message of messages) {
       if (message.role !== "user") continue;
-      const text = restoreChatMessageDraft(message).text.trim();
+      const text = chatMessageDraftText(message).trim();
       if (text && prompts[prompts.length - 1] !== text) prompts.push(text);
     }
     const browsing = this.recallIndex === null ? null : this.promptHistory[this.recallIndex];
@@ -412,12 +400,6 @@ export class AgentComposer extends Component {
           const index = prompts.lastIndexOf(browsing);
           return index >= 0 ? index : null;
         })();
-  }
-
-  public setApprovalMode(mode: ChatApprovalMode): void {
-    this.approvalMode.value = mode;
-    this.approvalMode.classList.toggle("is-full-access", mode === "full-access");
-    this.element.dispatchEvent(new Event("systemsculpt:approval-mode"));
   }
 
   public setRunning(running: boolean): void {
@@ -881,7 +863,7 @@ export class AgentComposer extends Component {
 
   private handleInputKeydown(event: KeyboardEvent): void {
     // "Process" is what an IME reports for keys it is still composing.
-    if (event.isComposing || event.key === "Process") return;
+    if (event.defaultPrevented || event.isComposing || event.key === "Process") return;
     const modified = event.altKey || event.ctrlKey || event.metaKey;
     if (this.mentions.isOpen()) {
       if (event.key === "Tab" && !event.shiftKey && !modified) {
@@ -1080,7 +1062,10 @@ export class AgentComposer extends Component {
     const readOnly = Boolean(this.readOnlyMessage);
     const status = this.readOnlyMessage
       ?? (this.historyEditing ? "Finish editing the earlier message" : this.attachmentBusy ? this.attachmentBusyLabel : "");
-    if (this.hint.textContent !== status) this.hint.setText(status);
+    if (this.hint.textContent !== status) {
+      this.hint.setText(status);
+      if (status) this.options.announce?.(status);
+    }
     this.hint.toggleAttribute("hidden", !status);
     const placeholder = this.placeholder();
     if (this.input.placeholder !== placeholder) this.input.placeholder = placeholder;
@@ -1102,7 +1087,6 @@ export class AgentComposer extends Component {
     this.cancelAttachmentsButton.toggleAttribute("hidden", !this.attachmentBusy);
     this.addButton.disabled = this.historyEditing || readOnly || this.attachmentBusy;
     this.filePicker.disabled = this.historyEditing || readOnly || this.attachmentBusy;
-    this.approvalMode.disabled = this.historyEditing || readOnly || this.running;
     if (this.micButton) this.micButton.disabled = this.historyEditing || readOnly || this.attachmentBusy;
     this.element.classList.toggle("is-submitting", this.submitting);
     this.element.classList.toggle("is-processing-attachments", this.attachmentBusy);

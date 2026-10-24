@@ -217,7 +217,7 @@ export class ManagementOperations {
           results.push({ 
             path, 
             success: false, 
-            reason: error.message || "Unknown error occurred" 
+            reason: (error instanceof Error ? error.message : typeof error === "string" ? error : "") || "Unknown error occurred"
           });
         }
       }
@@ -263,7 +263,7 @@ export class ManagementOperations {
           results.push({ 
             path, 
             success: false, 
-            reason: error.message || "Unknown error occurred" 
+            reason: (error instanceof Error ? error.message : typeof error === "string" ? error : "") || "Unknown error occurred"
           });
         }
       }

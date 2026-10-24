@@ -1,37 +1,7 @@
 /**
- * Agent workspace state overlays: empty state, jump affordance, and run
- * banners. Queued follow-ups belong to the composer (composer.css).
+ * Agent workspace state overlays: jump affordance and run banners.
+ * Empty states live in shell.css; queued follow-ups in composer.css.
  */
-
-.systemsculpt-agent-empty {
-  position: absolute;
-  inset: 0;
-  z-index: var(--ss-z-raised);
-  display: grid;
-  place-content: center;
-  gap: var(--ss-space-2);
-  min-height: var(--ss-agent-empty-height);
-  color: var(--ss-ink-muted);
-  pointer-events: none;
-  text-align: center;
-}
-
-.systemsculpt-agent-empty strong {
-  color: var(--ss-ink);
-  font-size: var(--ss-text-xl);
-}
-
-.systemsculpt-agent-plan-offer {
-  display: grid;
-  justify-items: center;
-  gap: var(--ss-space-2);
-  max-width: 36ch;
-  margin: var(--ss-space-2) auto 0;
-}
-
-.systemsculpt-agent-plan-offer .ss-button {
-  pointer-events: auto;
-}
 
 .systemsculpt-agent-jump {
   position: absolute;

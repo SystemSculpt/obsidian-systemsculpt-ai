@@ -6,6 +6,13 @@ import { ManagedJobRecoveryStore, type ManagedRecoveryAdapter } from "../../../.
 import { ChatMessageAttachmentCollection } from "../ChatMessageAttachments";
 import { ManagedChatDocumentAttachmentProcessor } from "../ManagedChatDocumentAttachmentProcessor";
 
+// These recovery tests drive fake timers/microtasks, not the native crypto
+// thread pool. The shared hash helper's suite exercises real WebCrypto.
+jest.mock("../../../../utils/sha256", () => {
+  const actual = jest.requireActual("../../../../utils/sha256");
+  return { ...actual, sha256HexFromBytes: async (bytes: Uint8Array) => actual.sha256HexFromBytesPortable(bytes) };
+});
+
 class MemoryRecoveryAdapter implements ManagedRecoveryAdapter {
   readonly storageDomain = "memory:chat-documents";
   readonly capabilities = { read: true, write: true, list: true, mkdir: true, atomicRename: true, remove: true };

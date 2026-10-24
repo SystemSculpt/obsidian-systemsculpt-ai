@@ -30,7 +30,10 @@ const flush = async (): Promise<void> => {
 };
 
 describe("SystemSculptHistoryModal lifecycle", () => {
-  afterEach(() => document.body.empty());
+  afterEach(() => {
+    document.body.empty();
+    jest.restoreAllMocks();
+  });
 
   it("ignores a closed generation and renders only the reopened history request", async () => {
     let resolveStale!: (entries: SystemSculptHistoryEntry[]) => void;
@@ -289,7 +292,7 @@ describe("SystemSculptHistoryModal lifecycle", () => {
     }
   });
 
-  it("renders a page of rows at a time and handles row controls without per-row listeners", async () => {
+  it("renders a page of rows at a time and handles favorites without per-control listeners", async () => {
     const entries = Array.from({ length: 230 }, (_, index) => ({
       ...entry(`chat-${index}`, `Chat ${index}`),
       isFavorite: false,
@@ -303,8 +306,9 @@ describe("SystemSculptHistoryModal lifecycle", () => {
     await flush();
     const listbox = modal.modalEl.querySelector<HTMLElement>(".systemsculpt-history-list")!;
     const showMore = modal.modalEl.querySelector<HTMLButtonElement>("[data-testid='history.show-more']")!;
-    const listeners = () => (modal as unknown as { listeners: unknown[] }).listeners.length;
-    const baseline = listeners();
+    const addListener = jest.spyOn(HTMLElement.prototype, "addEventListener");
+    const favoriteListeners = () => addListener.mock.contexts.filter((element) =>
+      element.matches(".systemsculpt-history-item-favorite"));
 
     expect(listbox.querySelectorAll("[role=option]")).toHaveLength(100);
     expect(showMore.hidden).toBe(false);
@@ -315,7 +319,7 @@ describe("SystemSculptHistoryModal lifecycle", () => {
     showMore.click();
     expect(listbox.querySelectorAll("[role=option]")).toHaveLength(230);
     expect(showMore.hidden).toBe(true);
-    expect(listeners()).toBe(baseline);
+    expect(favoriteListeners()).toHaveLength(0);
 
     listbox.querySelector<HTMLButtonElement>(
       "[role=option] .systemsculpt-history-item-favorite",
@@ -324,7 +328,7 @@ describe("SystemSculptHistoryModal lifecycle", () => {
     expect(entries[0].toggleFavorite).toHaveBeenCalledTimes(1);
     expect(entries[0].openPrimary).not.toHaveBeenCalled();
     expect(entries[0].isFavorite).toBe(true);
-    expect(listeners()).toBe(baseline);
+    expect(favoriteListeners()).toHaveLength(0);
 
     listbox.querySelector<HTMLElement>("[role=option] .systemsculpt-history-item-title")!.click();
     await flush();

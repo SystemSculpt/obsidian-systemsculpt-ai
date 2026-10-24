@@ -146,35 +146,35 @@ function projectPublicSupportResourceSample(sample: unknown): PublicSupportResou
 
 export default class SystemSculptPlugin extends Plugin {
   // Make internalSettings public but indicate it's for manager use only
-  public _internal_settings_systemsculpt_plugin: SystemSculptSettings;
+  public _internal_settings_systemsculpt_plugin: SystemSculptSettings = { ...DEFAULT_SETTINGS };
   // Keep the getter for general readonly access
   get settings(): SystemSculptSettings {
     return this._internal_settings_systemsculpt_plugin;
   }
 
   private _aiService: SystemSculptService | undefined;
-  settingsTab: SystemSculptSettingTab;
+  settingsTab: SystemSculptSettingTab | undefined;
   private recorderService: RecorderService | null = null;
-  private transcriptionService: TranscriptionService;
-  private settingsManager: SettingsManager;
-  private licenseManager: LicenseManager;
+  private transcriptionService: TranscriptionService | undefined;
+  private settingsManager: SettingsManager | undefined;
+  private licenseManager: LicenseManager | undefined;
   private accountConnectService: AccountConnectService | null = null;
   private viewManager: ViewManager | null = null;
-  private commandManager: CommandManager;
+  private commandManager: CommandManager | undefined;
   private fileContextMenuService: FileContextMenuService | null = null;
   private isUnloading = false;
   private unloadPromise: Promise<void> | null = null;
   private failures: string[] = [];
   /** True once a fatal load failure has put the plugin into minimal recovery mode. */
   private safeMode = false;
-  emitter: EventEmitter;
-  directoryManager: DirectoryManager;
-  public resumeChatService: ResumeChatService;
-  public storage: StorageManager;
+  emitter: EventEmitter | undefined;
+  directoryManager: DirectoryManager | undefined;
+  public resumeChatService: ResumeChatService | undefined;
+  public storage: StorageManager | undefined;
   private pluginLogger: PluginLogger | null = null;
   private initializationTracer: InitializationTracer | null = null;
   public embeddingsManager: EmbeddingsManager | null = null;
-  public vaultFileCache: VaultFileCache;
+  public vaultFileCache: VaultFileCache | undefined;
   public embeddingsStatusBar: EmbeddingsStatusBar | null = null;
   private resourceMonitor: ResourceMonitorService | null = null;
   private loadedPluginBuildIdPromise: Promise<`sha256:${string}`> | null = null;
@@ -523,6 +523,7 @@ export default class SystemSculptPlugin extends Plugin {
         // (#343): a layout task runs it when idle. A diagnostics write that
         // comes first starts it, so no -latest file is appended before it.
         const diagnostics = this.getDiagnosticsSessionLifecycle();
+        if (!this.storage) throw new Error("Storage manager has not been initialized.");
         this.storage.setDiagnosticsWriteGate(() => diagnostics.start());
       },
     });
@@ -1885,7 +1886,7 @@ export default class SystemSculptPlugin extends Plugin {
   }
 
   async saveSettings() {
-    await this.settingsManager.saveSettings();
+    await this.getSettingsManager().saveSettings();
   }
 
   public getLogger(): PluginLogger {
@@ -2229,10 +2230,16 @@ export default class SystemSculptPlugin extends Plugin {
   }
 
   getTranscriptionService(): TranscriptionService {
+    if (!this.transcriptionService) {
+      throw new Error("Transcription service has not been initialized.");
+    }
     return this.transcriptionService;
   }
 
   getLicenseManager(): LicenseManager {
+    if (!this.licenseManager) {
+      throw new Error("License manager has not been initialized.");
+    }
     return this.licenseManager;
   }
 
@@ -2244,6 +2251,9 @@ export default class SystemSculptPlugin extends Plugin {
   }
 
   getSettingsManager(): SettingsManager {
+    if (!this.settingsManager) {
+      throw new Error("Settings manager has not been initialized.");
+    }
     return this.settingsManager;
   }
 
@@ -2313,7 +2323,7 @@ export default class SystemSculptPlugin extends Plugin {
           // Activate embeddings view - processing happens automatically
           await this.getViewManager().activateEmbeddingsView();
         } catch (error) {
-          new Notice(`Error finding similar notes: ${error.message}`);
+          new Notice(`Error finding similar notes: ${error instanceof Error ? error.message : String(error)}`);
         }
       },
     });

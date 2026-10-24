@@ -48,11 +48,7 @@ type SettingsSearchViewState = {
 
 export class SystemSculptSettingTab extends PluginSettingTab {
   plugin: SystemSculptPlugin;
-  private listeners: {
-    element: HTMLElement;
-    type: string;
-    listener: EventListener;
-  }[] = [];
+  private listenerCleanups: (() => void)[] = [];
   private renderCleanups = new Set<() => void>();
   private tabContainerEl: HTMLElement | null = null;
   private contentContainerEl: HTMLElement | null = null;
@@ -91,13 +87,13 @@ export class SystemSculptSettingTab extends PluginSettingTab {
     return () => this.renderCleanups.delete(cleanup);
   }
 
-  registerListener(
+  registerListener<K extends keyof HTMLElementEventMap>(
     element: HTMLElement,
-    type: string,
-    listener: EventListener,
+    type: K,
+    listener: (event: HTMLElementEventMap[K]) => void,
   ) {
     element.addEventListener(type, listener);
-    this.listeners.push({ element, type, listener });
+    this.listenerCleanups.push(() => element.removeEventListener(type, listener));
   }
 
   private generateFeedbackUrl(): string {
@@ -238,10 +234,8 @@ export class SystemSculptSettingTab extends PluginSettingTab {
   }
 
   private removeAllListeners() {
-    this.listeners.forEach(({ element, type, listener }) => {
-      element.removeEventListener(type, listener);
-    });
-    this.listeners = [];
+    this.listenerCleanups.forEach((cleanup) => cleanup());
+    this.listenerCleanups = [];
   }
 
   private invalidateRenderCleanups(): void {

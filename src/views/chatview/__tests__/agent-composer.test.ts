@@ -200,7 +200,7 @@ describe("AgentComposer", () => {
       .toBe("View-only saved chat. Start a new chat to continue.");
     expect(query('[aria-label="Send message"]')!.disabled).toBe(true);
     expect(query('[aria-label="Add files and notes"]')!.disabled).toBe(true);
-    expect(parent.querySelector<HTMLSelectElement>('[aria-label="Vault changes"]')!.disabled).toBe(true);
+    expect(parent.querySelector('[aria-label="Vault changes"]')).toBeNull();
     expect(query('[aria-label="Unpin Legacy.md"]')!.disabled).toBe(true);
 
     key(input, { key: "Enter" });
@@ -894,16 +894,10 @@ describe("AgentComposer", () => {
     composer.unload();
   });
 
-  it("offers Auto, Ask and Full access modes in the composer", () => {
-    const onApprovalModeChange = jest.fn();
-    const { composer, parent } = mount({ onApprovalModeChange });
-    const select = parent.querySelector<HTMLSelectElement>('[aria-label="Vault changes"]')!;
-    expect(Array.from(select.options).map((option) => option.text)).toEqual(["Auto", "Ask", "Full access"]);
-    composer.setApprovalMode("full-access");
-    expect(select.value).toBe("full-access");
-    select.value = "ask";
-    select.dispatchEvent(new Event("change"));
-    expect(onApprovalModeChange).toHaveBeenCalledWith("ask");
+  it("leaves mode controls to the run line in its footer", () => {
+    const { composer, parent } = mount();
+    expect(parent.querySelector('[data-testid="chat.composer.approval-mode"]')).toBeNull();
+    expect(composer.element.contains(composer.footerSlot)).toBe(true);
     composer.unload();
   });
 

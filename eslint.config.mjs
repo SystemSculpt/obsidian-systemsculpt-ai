@@ -68,6 +68,8 @@ export default defineConfig(
             "^SystemSculpt/Studio$",
             "^SystemSculpt(?: API)?$",
             "^Finding Claude Code or Codex…$",
+            "^SystemSculpt settings$",
+            "Claude Code",
             "^Show a vim-style line number gutter",
             "^SRT subtitle file",
             "^Keep the Markdown/SRT picker visible",

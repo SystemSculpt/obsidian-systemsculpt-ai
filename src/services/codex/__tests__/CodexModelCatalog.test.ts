@@ -17,11 +17,11 @@ it('reads bounded native pages and excludes hidden safety-helper models from the
   expect(models[0]).toMatchObject({ efforts: ['high'], fastTier: 'priority' });
   expect(request).toHaveBeenNthCalledWith(3, 'model/list', { limit: 100, includeHidden: false, cursor: 'next' });
   expect(close).toHaveBeenCalled();
-  request.mockResolvedValueOnce({ config: { approval_policy: 'untrusted', sandbox_mode: 'read-only' } });
+  request.mockResolvedValueOnce({ config: { approval_policy: 'untrusted', sandbox_mode: 'read-only' } }).mockResolvedValueOnce({ data: [{ model: 'workspace-model' }] });
   const refreshed = await readCodexCatalog('/other-workspace', new AbortController().signal);
   expect(refreshed.permissions).toBe('Ask for untrusted actions · Read only');
-  expect(request).toHaveBeenLastCalledWith('config/read', { cwd: '/other-workspace', includeLayers: false });
-  expect(refreshed.models).toEqual(models);
+  expect(request).toHaveBeenNthCalledWith(4, 'config/read', { cwd: '/other-workspace', includeLayers: false });
+  expect(refreshed.models.map(model => model.model)).toEqual(['workspace-model']);
 });
 it('shares simultaneous catalog reads without letting one picker cancel the others', async () => {
   let resolveConfig!: (value: unknown) => void;
@@ -41,17 +41,50 @@ it('shares simultaneous catalog reads without letting one picker cancel the othe
   await expect(second).resolves.toMatchObject({ permissions: 'Ask for untrusted actions · Read only' });
   expect(close).toHaveBeenCalledTimes(1);
 });
-it('refreshes native permissions on a later same-workspace read while reusing only model data', async () => {
+it('shares the full display catalog until expiry and refreshes it explicitly on reconnect', async () => {
   let approval = 'never';
   const request = jest.fn(async (method: string) => method === 'config/read'
     ? { config: { approval_policy: approval, sandbox_mode: 'read-only' } }
     : { data: [{ model: 'test-model', supportedReasoningEfforts: [] }] });
   jest.mocked(connectCodex).mockResolvedValue({ request, close: jest.fn(), closed: Promise.resolve() });
-  await expect(readCodexCatalog('/changing-config', new AbortController().signal)).resolves.toMatchObject({ permissions: 'Never ask · Read only' });
+  const read = (refresh = false) => readCodexCatalog('/changing-config', new AbortController().signal, refresh);
+  await expect(read()).resolves.toMatchObject({ permissions: 'Never ask · Read only' });
   approval = 'untrusted';
-  await expect(readCodexCatalog('/changing-config', new AbortController().signal)).resolves.toMatchObject({ permissions: 'Ask for untrusted actions · Read only' });
+  await expect(read()).resolves.toMatchObject({ permissions: 'Never ask · Read only' });
+  expect(connectCodex).toHaveBeenCalledTimes(1);
+  const refreshed = await Promise.all([read(true), read(true), read()]);
+  expect(refreshed.every(catalog => catalog.permissions === 'Ask for untrusted actions · Read only')).toBe(true);
   expect(connectCodex).toHaveBeenCalledTimes(2);
-  expect(request.mock.calls.filter(([method]) => method === 'model/list')).toHaveLength(1);
+  expect(request.mock.calls.filter(([method]) => method === 'model/list')).toHaveLength(2);
+  jest.spyOn(Date, 'now').mockReturnValue(now + 60_000);
+  approval = 'never';
+  await expect(read()).resolves.toMatchObject({ permissions: 'Never ask · Read only' });
+  expect(connectCodex).toHaveBeenCalledTimes(3);
+});
+it('does not cache failures and rejects an already-canceled reader even with a warm cache', async () => {
+  const request = jest.fn().mockRejectedValueOnce(new Error('Disconnected'))
+    .mockResolvedValueOnce({ config: {} }).mockResolvedValueOnce({ data: [] });
+  const close = jest.fn(); jest.mocked(connectCodex).mockResolvedValue({ request, close, closed: Promise.resolve() });
+  await expect(readCodexCatalog('/retry', new AbortController().signal)).rejects.toThrow('Disconnected');
+  await expect(readCodexCatalog('/retry', new AbortController().signal)).resolves.toMatchObject({ models: [] });
+  const canceled = new AbortController(); canceled.abort();
+  await expect(readCodexCatalog('/retry', canceled.signal)).rejects.toThrow('canceled');
+  expect(connectCodex).toHaveBeenCalledTimes(2); expect(close).toHaveBeenCalledTimes(2);
+});
+it('does not let an abandoned late result overwrite a newer catalog', async () => {
+  let resolveModels!: (value: unknown) => void;
+  const request = jest.fn().mockResolvedValueOnce({ config: {} })
+    .mockImplementationOnce(() => new Promise(resolve => { resolveModels = resolve; }))
+    .mockResolvedValueOnce({ config: {} }).mockResolvedValueOnce({ data: [{ model: 'new' }] });
+  jest.mocked(connectCodex).mockResolvedValue({ request, close: jest.fn(), closed: Promise.resolve() });
+  const controller = new AbortController(), old = readCodexCatalog('/late', controller.signal);
+  await Promise.resolve(); await Promise.resolve();
+  controller.abort(); await expect(old).rejects.toThrow('canceled');
+  await readCodexCatalog('/late', new AbortController().signal);
+  resolveModels({ data: [{ model: 'old' }] }); await Promise.resolve();
+  const catalog = await readCodexCatalog('/late', new AbortController().signal);
+  expect(catalog.models.map(model => model.model)).toEqual(['new']);
+  expect(connectCodex).toHaveBeenCalledTimes(2);
 });
 it('closes abandoned catalog reads and starts a fresh request for a later picker', async () => {
   jest.mocked(connectCodex).mockImplementation((_cwd, signal) => new Promise((_resolve, reject) => {

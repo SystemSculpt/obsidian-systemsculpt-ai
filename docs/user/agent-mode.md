@@ -4,11 +4,14 @@ SystemSculpt can use tools during chat when the current flow needs them. There i
 
 ## Approval behavior
 
-The compact summary by the composer shows where the chat runs and its current
-mode. Use **Change** to reveal execution controls. New chats default to **Auto**;
-Auto uses the selected backend's safety policy, not permission bypass. Native mode
-changes apply to the next message without starting a new chat. Saved hosted chats
-keep their saved mode; missing or unrecognized saved modes use **Ask**.
+The run line under the composer says who answers and where it runs, the mode, and
+the model (or, for hosted chat, your credits), for example
+`Claude Code on this Mac · Auto · Default`. Each part opens a menu in one click;
+`Mod+.` opens the mode menu while the chat has focus. New chats default to
+**Auto**; Auto uses the selected backend's safety policy, not permission bypass.
+Mode changes apply from the next message, even while a response is running, and
+never start a new chat. Saved hosted chats keep their saved mode; missing or
+unrecognized saved modes use **Ask**.
 
 ### Claude Code (desktop)
 
@@ -81,8 +84,9 @@ permission. Native agents own the grant, and already-pending requests still need
 their own answer. Closing the live chat ends its native session grants.
 
 A new card does not interrupt typing. Use **Approval needed · Review** or
-**⌥/Alt+↑** to move from the composer to the pending card. Resolved cards retain
-their result, and focus moves to the next pending card or back to the composer.
+**⌥/Alt+↑** (also **⌥/Alt+↓**) anywhere in the chat view to focus the first pending
+card. With no card pending, these keys keep their normal behavior. Resolved cards
+retain their result, and focus moves to the next pending card or back to the composer.
 
 ## Where tools come from
 

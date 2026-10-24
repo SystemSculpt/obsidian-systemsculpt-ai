@@ -229,9 +229,11 @@ export async function exerciseBuiltStandardChatIdentity(
   expect(content.querySelector(".systemsculpt-agent-workspace")).not.toBeNull();
   expect(content.querySelector(".systemsculpt-agent-prompt-input")).not.toBeNull();
   expect(content.querySelector(".systemsculpt-chat-identity")).toBeNull();
-  // The composer's add menu is the only popup: no model or provider picker.
-  expect(Array.from(content.querySelectorAll("[aria-haspopup]"), (element) => element.getAttribute("data-testid")))
-    .toEqual(["chat.composer.add"]);
+  // Hosted chat has no model picker: its menus are More, Add files and notes,
+  // and the run line's backend and mode; the third part is credits, not a menu.
+  const menus = Array.from(content.querySelectorAll<HTMLElement>("[aria-haspopup]"), (element) => element.dataset.testid);
+  expect(menus.filter((id) => !["chat.header.more", "chat.composer.add", "chat.run.backend", "chat.run.mode"].includes(id ?? ""))).toEqual([]);
+  expect(content.querySelector('[data-testid="chat.run.detail"][aria-haspopup]')).toBeNull();
   expect(view.getState()).not.toHaveProperty("selectedModelId");
   expect(view).not.toHaveProperty("isLegacyReadOnlyChat");
 

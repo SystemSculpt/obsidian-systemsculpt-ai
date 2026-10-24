@@ -1,4 +1,5 @@
 import type { DataAdapter } from "obsidian";
+import { sha256HexFromBytes } from "../../utils/sha256";
 
 type JournalRecord = Readonly<{
   conversationId: string;
@@ -77,14 +78,8 @@ export function canonicalAgentToolInput(value: unknown): string {
   return canonicalize(value).text;
 }
 
-async function sha256(value: string): Promise<string> {
-  const bytes = new TextEncoder().encode(value);
-  const digest = new Uint8Array(await window.crypto.subtle.digest("SHA-256", bytes));
-  return [...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
 async function fingerprint(name: string, input: unknown): Promise<string> {
-  return sha256(`${name}\n${canonicalAgentToolInput(input)}`);
+  return sha256HexFromBytes(new TextEncoder().encode(`${name}\n${canonicalAgentToolInput(input)}`));
 }
 
 function recordKey(conversationId: string, toolCallId: string): string {
@@ -92,7 +87,7 @@ function recordKey(conversationId: string, toolCallId: string): string {
 }
 
 async function recordFileName(conversationId: string, toolCallId: string): Promise<string> {
-  return `${await sha256(recordKey(conversationId, toolCallId))}.json`;
+  return `${await sha256HexFromBytes(new TextEncoder().encode(recordKey(conversationId, toolCallId)))}.json`;
 }
 
 function parseRecord(value: unknown): JournalRecord {
