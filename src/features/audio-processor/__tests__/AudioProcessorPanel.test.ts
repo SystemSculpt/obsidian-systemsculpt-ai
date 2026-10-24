@@ -159,6 +159,44 @@ describe("AudioProcessorPanel", () => {
     expect(document.querySelector(".systemsculpt-progress-panel")).toBeNull();
   });
 
+  it.each([
+    [true, "Audio processing is continuing on the server. You can close Obsidian and resume later."],
+    [false, "This audio is still being prepared. Keep Obsidian open until server processing begins."],
+  ])("says once, on Hide, whether Obsidian may close (server-owned %s)", (serverOwned, expected) => {
+    const plugin = { register: jest.fn() } as unknown as SystemSculptPlugin;
+    const notices = jest.spyOn(console, "log").mockImplementation(() => undefined);
+    const panel = new AudioProcessorPanel(plugin, "Product sync", jest.fn());
+    panel.update({ stage: serverOwned ? "transcribing" : "uploading", progress: 0.5, message: "Working…", serverOwned });
+
+    actionButton("Hide").click();
+
+    expect(notices.mock.calls.map(([line]) => line)).toEqual([`Notice: ${expected}`]);
+  });
+
+  it.each([
+    [true, "Audio note and transcript saved to SystemSculpt/Audio Notes/Product sync.md."],
+    [false, "Transcript recovered to SystemSculpt/Audio Notes/Product sync — Transcript.md; primary note unavailable."],
+  ])("says once where a hidden job's result went (primary note %s)", (primaryNoteAvailable, expected) => {
+    const plugin = { register: jest.fn() } as unknown as SystemSculptPlugin;
+    const notices = jest.spyOn(console, "log").mockImplementation(() => undefined);
+    const panel = new AudioProcessorPanel(plugin, "Product sync", jest.fn());
+    panel.update({ stage: "transcribing", progress: 0.5, message: "Transcribing…", serverOwned: true });
+    actionButton("Hide").click();
+    notices.mockClear();
+
+    panel.succeed({
+      jobId: "audio_job_123",
+      notePath: "SystemSculpt/Audio Notes/Product sync.md",
+      transcriptPath: "SystemSculpt/Audio Notes/Product sync — Transcript.md",
+      primaryNoteAvailable,
+      open: jest.fn().mockResolvedValue(undefined),
+      saveArtifact: jest.fn(),
+    });
+
+    expect(notices.mock.calls.map(([line]) => line)).toEqual([`Notice: ${expected}`]);
+    expect(document.querySelector(".systemsculpt-progress-panel")).toBeNull();
+  });
+
   it("does not bring a panel back after it was closed by unload", () => {
     const register = jest.fn();
     const plugin = { register, openCreditsBalanceModal: jest.fn() } as unknown as SystemSculptPlugin;

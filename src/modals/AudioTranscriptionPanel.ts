@@ -18,6 +18,7 @@ import {
 } from "../services/transcription/NoteInsertionTarget";
 import { formatFileSize } from "../utils/FileValidator";
 import { tryCopyToClipboard } from "../utils/clipboard";
+import { flashButtonResult } from "../core/ui/notifications";
 import { isCreditsRequiredError } from "../utils/errors";
 
 export interface AudioTranscriptionPanelOptions {
@@ -184,10 +185,10 @@ export class AudioTranscriptionPanel {
         }
       }
       if (this.disposed) return;
-      if (result.warning) new Notice(result.warning, 6000);
 
       if (this.minimized || !this.panel) {
-        new Notice(`Transcript saved to ${result.outputPath}.`, 6000);
+        // Hidden: the opened transcript is the receipt; only a warning needs saying.
+        if (result.warning) new Notice(result.warning, 6000);
         this.finish();
         return;
       }
@@ -196,7 +197,7 @@ export class AudioTranscriptionPanel {
         label: result.warning ? "Transcript saved with a warning" : "Transcript saved",
         icon: result.warning ? "alert-triangle" : "check-circle",
         progress: 100,
-        details: result.outputPath,
+        details: result.warning ? `${result.warning}\n${result.outputPath}` : result.outputPath,
       });
       this.panel.setTimelineState("saving", "complete");
       this.setButtons([
@@ -298,7 +299,7 @@ export class AudioTranscriptionPanel {
         {
           label: "Copy error",
           testId: "transcription.progress.copy-error",
-          onClick: () => void this.copyError(message),
+          onClick: (button) => void this.copyError(message, button),
         },
         {
           label: "Close",
@@ -324,7 +325,7 @@ export class AudioTranscriptionPanel {
     descriptors: Array<{
       label: string;
       testId: string;
-      onClick: () => void;
+      onClick: (button: HTMLButtonElement) => void;
       variant?: "primary" | "default";
     }>,
   ): void {
@@ -364,10 +365,10 @@ export class AudioTranscriptionPanel {
     this.app.workspace.setActiveLeaf(leaf, { focus: true });
   }
 
-  private async copyError(message: string): Promise<void> {
+  private async copyError(message: string, button: HTMLButtonElement): Promise<void> {
     const copied = await tryCopyToClipboard(message, this.panel?.element);
     if (this.disposed) return;
-    new Notice(copied ? "Error copied." : "Clipboard is unavailable.", copied ? 2500 : 4000);
+    flashButtonResult(button, copied ? "Copied" : "Couldn't copy");
   }
 
   private finish(): void {

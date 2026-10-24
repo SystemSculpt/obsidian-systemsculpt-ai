@@ -312,12 +312,92 @@ describe("AudioTranscriptionPanel", () => {
 
     await flushPromises();
 
+    // The panel owns the warning: its status says so and its details name it.
     expect(document.body.textContent).toContain("Transcript saved with a warning");
-    expect(document.body.textContent).toContain(completedResult.outputPath);
+    expect(document.querySelector(".systemsculpt-progress-detail")?.textContent)
+      .toBe(`The source audio could not be moved to trash.\n${completedResult.outputPath}`);
+    expect(mockedNotice).not.toHaveBeenCalled();
+  });
+
+  function hideRunningPanel(options: { openOnComplete?: boolean } = {}) {
+    const running = deferred<any>();
+    mockStart.mockReturnValue({ promise: running.promise, cancel: jest.fn() });
+    const created = createPanel(options);
+    created.panel.open();
+    document.querySelector<HTMLButtonElement>('[data-testid="transcription.progress.hide"]')!.click();
+    mockedNotice.mockClear();
+    return { ...created, running };
+  }
+
+  it("finishes a hidden transcription quietly when the transcript opens", async () => {
+    const { leaf, output, running } = hideRunningPanel({ openOnComplete: true });
+
+    running.resolve(completedResult);
+    await flushPromises();
+
+    expect(leaf.openFile).toHaveBeenCalledWith(output);
+    expect(mockedNotice).not.toHaveBeenCalled();
+  });
+
+  it("says a hidden transcription's warning once", async () => {
+    const { running } = hideRunningPanel({ openOnComplete: true });
+
+    running.resolve({ ...completedResult, warning: "Transcript cleanup was incomplete, so the raw transcript was saved instead." });
+    await flushPromises();
+
+    expect(mockedNotice).toHaveBeenCalledTimes(1);
+    expect(mockedNotice).toHaveBeenCalledWith("Transcript cleanup was incomplete, so the raw transcript was saved instead.", 6000);
+  });
+
+  it("says once where a hidden transcript is when it could not be opened", async () => {
+    const { leaf, running } = hideRunningPanel({ openOnComplete: true });
+    leaf.openFile.mockRejectedValueOnce(new Error("leaf unavailable"));
+
+    running.resolve(completedResult);
+    await flushPromises();
+
+    expect(mockedNotice).toHaveBeenCalledTimes(1);
     expect(mockedNotice).toHaveBeenCalledWith(
-      "The source audio could not be moved to trash.",
+      "Transcript saved to Recordings/test.srt, but Obsidian could not open it automatically.",
       6000,
     );
+  });
+
+  it("keeps an ambiguous dispatch discoverable after the panel was hidden, without retrying", async () => {
+    const { running } = hideRunningPanel();
+
+    running.reject(new ManagedTranscriptionRetryError("ambiguous-op", "blocked", "dispatching", new Error("connection lost")));
+    await flushPromises();
+
+    expect(mockStart).toHaveBeenCalledTimes(1);
+    expect(mockedNotice).toHaveBeenCalledTimes(1);
+    expect(mockedNotice).toHaveBeenCalledWith(
+      "Transcription paused in an ambiguous state. Operation ambiguous-op was preserved to prevent duplicate work. connection lost",
+      7000,
+    );
+  });
+
+  it.each([
+    [true, "Copied"],
+    [false, "Couldn't copy"],
+  ])("shows a copy result (%s) on Copy error and keeps the failure open", async (copied, label) => {
+    const { tryCopyToClipboard } = jest.requireMock("../../utils/clipboard");
+    tryCopyToClipboard.mockResolvedValueOnce(copied);
+    const failed = deferred<typeof completedResult>();
+    mockStart.mockReturnValue({ promise: failed.promise, cancel: jest.fn() });
+    const { panel } = createPanel();
+    panel.open();
+    failed.reject(new Error("managed job failed"));
+    await flushPromises();
+
+    const copy = document.querySelector<HTMLButtonElement>('[data-testid="transcription.progress.copy-error"]')!;
+    copy.click();
+    await flushPromises();
+
+    expect(tryCopyToClipboard).toHaveBeenCalledWith("managed job failed", expect.any(HTMLElement));
+    expect(copy.textContent).toContain(label);
+    expect(document.body.textContent).toContain("managed job failed");
+    expect(mockedNotice).not.toHaveBeenCalled();
   });
 
   it("shows a task failure without deleting or rewriting the source", async () => {

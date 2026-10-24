@@ -550,7 +550,16 @@ describe("RecorderService", () => {
     );
   });
 
-  it("starts another recording while the previous saved audio keeps transcribing", async () => {
+  it.each([
+    ["only saved to a file", {}, ["Notice: Transcript saved to SystemSculpt/Recordings/first - transcript.md."]],
+    ["inserted where recording started", { insertedIntoOrigin: true }, []],
+    ["saved with a warning", {
+      insertedIntoOrigin: false,
+      warning: "The transcript was saved, but the note where transcription started changed or closed, so no text was inserted.",
+    }, [
+      "Notice: The transcript was saved, but the note where transcription started changed or closed, so no text was inserted. Saved to SystemSculpt/Recordings/first - transcript.md.",
+    ]],
+  ])("starts another recording while the previous saved audio keeps transcribing (%s)", async (_label, outcome, finished) => {
     plugin.settings.autoTranscribeRecordings = true;
     const noticeLog = jest.spyOn(console, "log").mockImplementation(() => undefined);
     const firstTranscription = deferred<any>();
@@ -603,6 +612,7 @@ describe("RecorderService", () => {
       outputPath: "SystemSculpt/Recordings/first - transcript.md",
       sourceDisposition: "kept",
       insertedIntoOrigin: false,
+      ...outcome,
     });
     await flush();
 
@@ -610,7 +620,7 @@ describe("RecorderService", () => {
     expect((service as any).transcriptionTasks.size).toBe(0);
     expect(noticeMessages(noticeLog)).toEqual([
       "Notice: The previous recording is still transcribing. Starting a new recording…",
-      "Notice: Transcript saved to SystemSculpt/Recordings/first - transcript.md.",
+      ...finished,
     ]);
   });
 
@@ -1365,6 +1375,27 @@ describe("RecorderService", () => {
     expect(mockTranscriptionAcknowledgeCompleted).toHaveBeenCalledWith("completed-before-crash");
     expect(events).toEqual(["acknowledged", "pending-forgotten"]);
     expect(mockTranscriptionStart).not.toHaveBeenCalled();
+  });
+
+  it("points a waiting saved recording to the transcribe command, not a settings change", async () => {
+    const noticeLog = jest.spyOn(console, "log").mockImplementation(() => undefined);
+    plugin.settings.autoTranscribeRecordings = false;
+    plugin.settings.pendingRecorderCaptures = [{
+      filePath: "SystemSculpt/Recordings/waiting.webm",
+      startedAt: 1_000,
+      durationMs: 3_000,
+      sizeBytes: 24_000,
+      stopReason: "manual",
+      destination: "note",
+    }];
+
+    RecorderService.getInstance(app, plugin).recoverPendingCaptures();
+    await flush();
+
+    expect(mockTranscriptionStart).not.toHaveBeenCalled();
+    expect(noticeMessages(noticeLog)).toEqual([
+      "Notice: A saved recording is waiting for transcription. Run “Transcribe an audio file” to continue.",
+    ]);
   });
 
   it("keeps missing-source pending state when its completion acknowledgment fails", async () => {
