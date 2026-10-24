@@ -1376,7 +1376,7 @@ export class SystemSculptStudioView extends ItemView {
     this.markdownPreviewRequests.set(containerEl, request);
     // The host renderer can finish asynchronously. Keep both success and fallback
     // off the mounted card until the leaf can present them.
-    const staging = createSurfaceElement(containerEl, "div");
+    const staging = createSurfaceElement(containerEl.ownerDocument, "div");
     const noteSourcePath = node.kind === "studio.note" ? normalizePath(readPrimaryStudioNotePath(node.config)) : "";
     const sourcePath = noteSourcePath || this.currentProjectPath || "SystemSculpt Studio";
     try {
