@@ -3,7 +3,7 @@ import { splitToolName } from "../../utils/toolPolicy";
 import { parseUnifiedDiff } from "../../utils/diffUtils";
 import { nativeToolPath } from "./ToolCallPreview";
 
-export type TurnChange = Readonly<{ path: string; label: string; meta?: string }>;
+export type TurnChange = Readonly<{ path: string; label: string; meta?: string; deleted?: true }>;
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
@@ -18,11 +18,11 @@ export function presentTurnChanges(parts: readonly AgentToolPart[]): readonly Tu
     if (part.state !== "succeeded" && part.state !== "failed") continue;
     const input = record(part.input);
     const output = record(part.output?.data);
-    const add = (path: string, meta?: string, label = name(path)) => {
+    const add = (path: string, meta?: string, label = name(path), deleted = false) => {
       const target = part.native ? nativeToolPath(path, part.native.workingDirectory) : { displayPath: path, vaultPath: path };
       // External native changes aren't links into the user's vault.
       if (!target.vaultPath) return;
-      changes.set(target.vaultPath, { path: target.vaultPath, label, ...(meta ? { meta } : {}) });
+      changes.set(target.vaultPath, { path: target.vaultPath, label, ...(meta ? { meta } : {}), ...(deleted ? { deleted: true } : {}) });
     };
     if (part.native) {
       if (part.state !== "succeeded" || output.success === false) continue;
@@ -36,10 +36,10 @@ export function presentTurnChanges(parts: readonly AgentToolPart[]): readonly Tu
           const operation = typeof change.kind === "string" ? change.kind : kind.type;
           const destination = paths(kind.move_path)[0];
           const diff = typeof change.diff === "string" ? parseUnifiedDiff(change.diff) : null;
-          const meta = operation === "add" ? "new" : operation === "delete" ? "deleted"
+          const meta = operation === "add" ? "new" : operation === "delete" ? undefined
             : diff ? `+${diff.stats.additions} −${diff.stats.deletions}` : undefined;
           if (destination) add(destination, undefined, `Moved ${name(path)} → ${nativeToolPath(destination, part.native.workingDirectory).displayPath}`);
-          else add(path, meta, operation === "delete" ? `Deleted ${name(path)}` : name(path));
+          else add(path, meta, operation === "delete" ? `Deleted ${name(path)}` : name(path), operation === "delete");
         }
       }
       continue;
@@ -53,7 +53,7 @@ export function presentTurnChanges(parts: readonly AgentToolPart[]): readonly Tu
         const path = paths(result.path)[0];
         const source = paths(result.source)[0], destination = paths(result.destination)[0];
         if (canonicalName === "move" && source && destination) add(destination, undefined, `Moved ${name(source)} → ${destination}`);
-        else if (path) add(path, canonicalName === "trash" ? "in trash" : undefined, canonicalName === "trash" ? `Deleted ${name(path)}` : name(path));
+        else if (path) add(path, canonicalName === "trash" ? "in trash" : undefined, canonicalName === "trash" ? `Deleted ${name(path)}` : name(path), canonicalName === "trash");
       }
     } else if (part.state !== "succeeded" || output.success === false || Array.isArray(output.results)) {
       continue;
@@ -63,7 +63,7 @@ export function presentTurnChanges(parts: readonly AgentToolPart[]): readonly Tu
         if (source && destination) add(destination, undefined, `Moved ${name(source)} → ${destination}`);
       }
     } else if (canonicalName === "trash") {
-      for (const path of paths(input.paths)) add(path, "in trash", `Deleted ${name(path)}`);
+      for (const path of paths(input.paths)) add(path, "in trash", `Deleted ${name(path)}`, true);
     } else if (canonicalName === "multi_edit") {
       for (const file of rows(input.files)) for (const path of paths(file.path)) add(path);
     } else {

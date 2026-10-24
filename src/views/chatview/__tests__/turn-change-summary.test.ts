@@ -20,7 +20,7 @@ describe("turn change receipts", () => {
       { path: "Notes/Plan.md", label: "Plan.md" },
       { path: "New.md", label: "New.md", meta: "new" },
       { path: "Archive/Old.md", label: "Moved Old.md → Archive/Old.md" },
-      { path: "Discard.md", label: "Deleted Discard.md", meta: "in trash" },
+      { path: "Discard.md", label: "Deleted Discard.md", meta: "in trash", deleted: true },
     ]);
   });
 
@@ -50,6 +50,20 @@ describe("turn change receipts", () => {
     ]);
   });
 
+  it("marks successful trash result rows as deleted without disabling later recreated files", () => {
+    const trashed = part("trash", { paths: ["Gone.md", "Restored.md", "Failed.md"] }, {
+      state: "failed", output: { data: { results: [
+        { path: "Gone.md", success: true },
+        { path: "Restored.md", success: true },
+        { path: "Failed.md", success: false },
+      ] } },
+    });
+    expect(presentTurnChanges([trashed, part("write", { path: "Restored.md" }, { output: { data: { created: true } } })])).toEqual([
+      { path: "Gone.md", label: "Deleted Gone.md", meta: "in trash", deleted: true },
+      { path: "Restored.md", label: "Restored.md", meta: "new" },
+    ]);
+  });
+
   it("never returns external native paths or hosted server payloads as vault links", () => {
     expect(presentTurnChanges([
       part("Edit", { file_path: "/outside/Plan.md" }, claude),
@@ -71,7 +85,7 @@ describe("turn change receipts", () => {
     ] }, codex)])).toEqual([
       { path: "Notes/Plan.md", label: "Plan.md", meta: "+1 −1" },
       { path: "New.md", label: "New.md", meta: "new" },
-      { path: "Gone.md", label: "Deleted Gone.md", meta: "deleted" },
+      { path: "Gone.md", label: "Deleted Gone.md", deleted: true },
       { path: "Archive/Old.md", label: "Moved Old.md → Archive/Old.md" },
     ]);
   });
