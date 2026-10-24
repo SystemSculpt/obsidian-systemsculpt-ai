@@ -1,0 +1,60 @@
+[
+  {
+    "surface": "chat",
+    "theme": "light",
+    "differentPixels": 936,
+    "bounds": [
+      344,
+      119,
+      1279,
+      119
+    ],
+    "width": 1280,
+    "height": 920
+  },
+  {
+    "surface": "chat",
+    "theme": "dark",
+    "differentPixels": 0,
+    "bounds": null,
+    "width": 1280,
+    "height": 920
+  },
+  {
+    "surface": "settings",
+    "theme": "light",
+    "differentPixels": 0,
+    "bounds": null,
+    "width": 1280,
+    "height": 920
+  },
+  {
+    "surface": "settings",
+    "theme": "dark",
+    "differentPixels": 0,
+    "bounds": null,
+    "width": 1280,
+    "height": 920
+  },
+  {
+    "surface": "studio",
+    "theme": "light",
+    "differentPixels": 1,
+    "bounds": [
+      1091,
+      337,
+      1091,
+      337
+    ],
+    "width": 1280,
+    "height": 920
+  },
+  {
+    "surface": "studio",
+    "theme": "dark",
+    "differentPixels": 0,
+    "bounds": null,
+    "width": 1280,
+    "height": 920
+  }
+]
