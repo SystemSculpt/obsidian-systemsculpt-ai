@@ -237,6 +237,7 @@ class AbstractInputSuggest extends Component {
 }
 
 const setIcon = jest.fn();
+const setTooltip = jest.fn((el, tooltip) => { el?.setAttribute?.("aria-label", tooltip); });
 const debounce = (func, _wait) => {
   return (...args) => func(...args);
 };
@@ -882,6 +883,7 @@ module.exports = {
   ExtraButtonComponent,
   Platform,
   setIcon,
+  setTooltip,
   debounce,
   MarkdownRenderer,
   normalizePath: (path) => (path ?? "").replace(/\\/g, "/"),

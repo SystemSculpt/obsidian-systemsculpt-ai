@@ -532,7 +532,7 @@ export function presentAgentTool(part: AgentToolPart): AgentToolPresentation {
   const paths = canonicalName === "multi_edit" || canonicalName === "open" ? objectStrings(input.files, "path")
     : [...strings(input.paths), ...strings(input.path)];
   const targetPath = !serverTool && VAULT_TOOLS_WITH_SAFE_DETAILS.has(canonicalName) && paths.length === 1 ? paths[0] : undefined;
-  const target = targetPath?.split(/[\\/]/u).filter(Boolean).at(-1);
+  const target = targetPath?.split(/[\\/]/u).filter(Boolean).pop();
   const baseLabel = canonicalName === "context" ? contextToolLabel(input)
     : canonicalName === "read" ? (target ? `Read ${target}` : `Read ${paths.length || ""} notes`.replace("  ", " "))
       : canonicalName === "write" ? `Create ${target ?? "file"}`
@@ -543,7 +543,7 @@ export function presentAgentTool(part: AgentToolPart): AgentToolPresentation {
                 : canonicalName === "trash" ? `Move ${target ?? `${paths.length} notes`} to trash`
                   : canonicalName === "move" ? (() => {
                     const sources = objectStrings(input.items, "source"), destinations = objectStrings(input.items, "destination");
-                    return sources.length === 1 && destinations.length === 1 ? `Move ${sources[0].split(/[\\/]/u).at(-1)} → ${destinations[0]}` : `Move ${sources.length || ""} notes`.replace("  ", " ");
+                    return sources.length === 1 && destinations.length === 1 ? `Move ${sources[0].split(/[\\/]/u).pop()} → ${destinations[0]}` : `Move ${sources.length || ""} notes`.replace("  ", " ");
                   })()
                   : canonicalName === "find" || canonicalName === "search"
                     ? counted && counted.items.length > 1 ? countedLabel(counted, "base") : `Search “${firstString(input.patterns) ?? firstString(input.query) ?? firstString(input.pattern) ?? "your vault"}”`

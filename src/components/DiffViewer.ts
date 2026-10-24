@@ -161,8 +161,13 @@ export class DiffViewer {
     if (hunks.length === 0) {
       const notice = content.createDiv({
         cls: 'systemsculpt-diff-no-changes-notice',
-        text: this.emptyExplanation(),
       });
+      // Without the header row, the notice carries the headline itself.
+      if (this.hideHeader) {
+        notice.createEl('strong', { cls: 'systemsculpt-diff-no-changes-headline', text: this.emptyHeadline() });
+        notice.appendText(' ');
+      }
+      notice.appendText(this.emptyExplanation());
       if (this.emptyReason !== 'identical') {
         notice.addClass('systemsculpt-diff-no-changes-notice-blocked');
       }

@@ -50,11 +50,12 @@ describe("inline approval keyboard ownership", () => {
     ui.dispose();
   });
 
+  // Spec 3.5 / product review item 1: the basename titles the card, the folder is the meta line.
   it.each([
-    ["/tmp/vault/Notes/Plan.md", "Notes/Plan.md"],
-    ["/private/tmp/vault/Notes/Plan.md", "Notes/Plan.md"],
-    ["/external/Notes/Plan.md", "/external/Notes/Plan.md (outside vault)"],
-  ])("presents %s consistently without changing the request or approval answer", async (file_path, displayed) => {
+    ["/tmp/vault/Notes/Plan.md", "Plan.md", "Notes"],
+    ["/private/tmp/vault/Notes/Plan.md", "Plan.md", "Notes"],
+    ["/external/Notes/Plan.md", "Plan.md (outside vault)", "/external/Notes"],
+  ])("presents %s consistently without changing the request or approval answer", async (file_path, displayed, folder) => {
     const ui = setup();
     try {
       const part = tool("one", { location: "server", input: { file_path, old_string: "Draft", new_string: "Ready" },
@@ -64,7 +65,8 @@ describe("inline approval keyboard ownership", () => {
       ui.cards.sync([part]);
       const title = `Claude Code wants to edit ${displayed}`;
       expect(card.querySelector(".systemsculpt-agent-approval-copy")?.textContent).toBe(title);
-      expect(ui.root.querySelector('[role="status"]')?.textContent).toBe(title);
+      expect(ui.root.querySelector('[role="status"]')?.textContent).toBe(`${title}. Enter to approve, Escape to deny.`);
+      expect(document.getElementById(card.getAttribute("aria-describedby")!)?.textContent).toBe(folder);
       expect(card.querySelector("details pre")?.textContent).toBe(JSON.stringify(part.input, null, 2));
       expect(JSON.stringify(part)).toBe(original);
       expect(ui.onApprove).not.toHaveBeenCalled();

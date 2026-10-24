@@ -89,4 +89,18 @@ describe("turn change receipts", () => {
       { path: "Archive/Old.md", label: "Moved Old.md → Archive/Old.md" },
     ]);
   });
+
+  it("resolves native receipts from a nested cwd against the vault root and its alias", () => {
+    const native = { agent: "claude" as const, workingDirectory: "/vault/Notes", vaultRoot: "/vault", vaultRootAlias: "/alias/vault" };
+    expect(presentTurnChanges([
+      part("Edit", { file_path: "Plan.md" }, { native }),
+      part("Write", { file_path: "/alias/vault/Ideas.md" }, { native }),
+      part("fileChange", { changes: [{ path: "Old.md", kind: { type: "update", move_path: "../Archive/Old.md" } }] },
+        { native: { ...native, agent: "codex" } }),
+    ])).toEqual([
+      { path: "Notes/Plan.md", label: "Plan.md" },
+      { path: "Ideas.md", label: "Ideas.md", meta: "written" },
+      { path: "Archive/Old.md", label: "Moved Old.md → Archive/Old.md" },
+    ]);
+  });
 });

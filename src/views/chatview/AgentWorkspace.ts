@@ -262,7 +262,6 @@ export class AgentWorkspace extends Component {
     this.renderer = new AgentConversationRenderer(this.viewport, {
       app: options.app,
       sourcePath: options.sourcePath,
-      labelledBy: titleId,
       beginLayoutMutation: (disclosureControl, mutationTarget) => this.unloaded
         ? undefined
         : disclosureControl
