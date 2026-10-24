@@ -121,7 +121,7 @@ export class LocalAgentChatSession implements ChatSession {
           if (part.kind !== 'text') return [part];
           const start = position; position += part.markdown.length;
           if (position <= unchanged) return [part];
-          if (start > unchanged) return [];
+          if (start >= unchanged) return [];
           activeTextId = part.id;
           return [{ ...part, markdown: part.markdown.slice(0, unchanged - start) }];
         });

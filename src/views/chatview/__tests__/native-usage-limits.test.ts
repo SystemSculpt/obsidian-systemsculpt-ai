@@ -24,7 +24,7 @@ const cases = [
 ];
 
 /** Replay public native JSON at stdio; the real transports, sessions and renderer stay connected. */
-function nativeHost(agent: string, code: string, partial: boolean, streamedNotice = false, earlyClose = false) {
+function nativeHost(agent: string, code: string, partial: boolean, options: { streamedNotice?: boolean; earlyClose?: boolean; pendingText?: string } = {}) {
   const child = Object.assign(new EventEmitter(), {
     stdout: Object.assign(new EventEmitter(), { setEncoding: jest.fn() }),
     stderr: Object.assign(new EventEmitter(), { setEncoding: jest.fn() }),
@@ -39,9 +39,11 @@ function nativeHost(agent: string, code: string, partial: boolean, streamedNotic
       if (agent === 'claude' && message.type === 'user') {
         send({ type: 'system', subtype: 'init', session_id: SESSION, permissionMode: 'auto' });
         if (partial) send({ type: 'assistant', session_id: SESSION, message: { content: [{ type: 'text', text: PARTIAL }] } });
-        if (streamedNotice) send({ type: 'stream_event', session_id: SESSION, event: { type: 'content_block_delta', delta: { type: 'text_delta', text: NOTICE } } });
+        for (const text of [options.pendingText, options.streamedNotice ? NOTICE : ''].filter(Boolean)) {
+          send({ type: 'stream_event', session_id: SESSION, event: { type: 'content_block_delta', delta: { type: 'text_delta', text } } });
+        }
         send({ type: 'assistant', session_id: SESSION, parent_tool_use_id: null, error: code, message: { content: [{ type: 'text', text: NOTICE }] } });
-        if (earlyClose) child.emit('close', 1);
+        if (options.earlyClose) child.emit('close', 1);
         else send({ type: 'result', session_id: SESSION, subtype: 'success', is_error: true, result: NOTICE });
       }
       if (message.method === 'initialize') send({ id: message.id, result: {} });
@@ -97,12 +99,26 @@ it.each(cases.flatMap(native => [false, true].map(partial => ({ ...native, parti
   },
 );
 
-it.each(['rate_limit', 'billing_error'])('retracts a streamed %s notice even if Claude exits before its result', async code => {
-  nativeHost('claude', code, true, true, true);
+it.each(['rate_limit', 'billing_error'].flatMap(code => [false, true].map(partial => ({ code, partial }))))(
+  'retracts a streamed $code notice even if Claude exits before its result (partial: $partial)', async ({ code, partial }) => {
+    nativeHost('claude', code, partial, { streamedNotice: true, earlyClose: true });
+    const persistAssistant = jest.fn(async () => {}), session = new ClaudeChatSession(new App(), { persistAssistant });
+    try {
+      await expect(session.start(input)).resolves.toMatchObject({ kind: 'failed', error: { code: 'local_claude_usage_limit', message: NOTICE, retryable: false } });
+      if (partial) expect(persistAssistant).toHaveBeenCalledWith(expect.objectContaining({ content: PARTIAL }));
+      else expect(persistAssistant).not.toHaveBeenCalled();
+      expect(JSON.stringify(persistAssistant.mock.calls)).not.toContain(NOTICE);
+    } finally { await session.detach(); }
+  },
+);
+
+it.each([false, true])('preserves genuine unfinished text before a limit (streamed notice: %s)', async streamedNotice => {
+  const pendingText = 'The second note contains three broken links.';
+  nativeHost('claude', 'rate_limit', true, { pendingText, streamedNotice });
   const persistAssistant = jest.fn(async () => {}), session = new ClaudeChatSession(new App(), { persistAssistant });
   try {
-    await expect(session.start(input)).resolves.toMatchObject({ kind: 'failed', error: { code: 'local_claude_usage_limit', message: NOTICE, retryable: false } });
-    expect(persistAssistant).toHaveBeenCalledWith(expect.objectContaining({ content: PARTIAL }));
+    await expect(session.start(input)).resolves.toMatchObject({ kind: 'failed', error: { code: 'local_claude_usage_limit' } });
+    expect(persistAssistant).toHaveBeenCalledWith(expect.objectContaining({ content: `${PARTIAL}\n\n${pendingText}`, terminalOutcome: 'failed' }));
     expect(JSON.stringify(persistAssistant.mock.calls)).not.toContain(NOTICE);
   } finally { await session.detach(); }
 });

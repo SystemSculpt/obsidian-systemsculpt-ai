@@ -313,8 +313,14 @@ async function runClaudeAttempt(input: ClaudeRequest, signal: AbortSignal, callb
           if (event.error === 'rate_limit' || event.error === 'billing_error') {
             const content = Array.isArray(event.message.content) ? event.message.content : [];
             const notice = content.filter(block => isRecord(block) && block.type === 'text' && typeof block.text === 'string').map(block => String(block.text)).join('\n\n');
-            // The native error can follow streamed text; retract only that uncommitted tail.
-            if (partialLength) { partial = ''; partialLength = 0; if (owner) callbacks.text?.('', textLength); else publish(); }
+            // Retract only text matching the native notice, not genuine unfinished output.
+            const noticeLength = partial && notice
+              ? partialLength === partial.length && notice.startsWith(partial) ? partialLength : partial.endsWith(notice) ? notice.length : 0
+              : 0;
+            if (noticeLength) {
+              partial = partial.slice(0, -noticeLength); partialLength -= noticeLength;
+              if (owner) callbacks.text?.('', textLength + partialLength + (textLength && partialLength ? 2 : 0)); else publish();
+            }
             finish({ error: new LocalAgentUsageLimitError(notice || 'Claude Code reported a usage or billing limit.') });
             return;
           }
