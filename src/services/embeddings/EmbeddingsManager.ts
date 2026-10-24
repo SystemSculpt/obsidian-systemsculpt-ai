@@ -219,7 +219,7 @@ export class EmbeddingsManager {
     if (!this.initializationPromise) {
       this.initializationPromise = this.initializeStorage().catch((error: unknown) => {
         const blocked = error instanceof EmbeddingsStorageBlockedError;
-        // The older connection can still go away (garbage collection); the next caller retries.
+        // The older connection can still go away (garbage collection); the next caller tries again.
         if (blocked) this.initializationPromise = null;
         // Otherwise every status surface would say "Starting" until Obsidian restarts.
         this.lifecycle.update({

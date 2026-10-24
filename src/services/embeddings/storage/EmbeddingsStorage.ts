@@ -56,8 +56,13 @@ export class EmbeddingsStorage {
   /** Root records without their vectors: every reader needs only metadata. */
   private cache: Map<string, EmbeddingRootRecord> = new Map();
   private initialized = false;
-  /** Closed for good: the plugin unloaded or another connection took over. */
+  /** Closed for good: the plugin unloaded. */
   private closed = false;
+  /**
+   * An open still waiting behind another connection. A second open would queue
+   * behind it without its own blocked event, so callers get the error instead.
+   */
+  private blockedOpen = false;
   // Root records only: enough for synchronous freshness and path statistics.
   private pathsSet: Set<string> = new Set();
   /**
@@ -140,6 +145,7 @@ export class EmbeddingsStorage {
   async initialize(): Promise<void> {
     if (this.initialized) return;
     if (this.closed) throw new Error("Embeddings storage is closed.");
+    if (this.blockedOpen) throw new EmbeddingsStorageBlockedError();
 
     await new Promise<void>((resolve, reject) => {
       let settled = false;
@@ -149,24 +155,31 @@ export class EmbeddingsStorage {
         reject(error);
       };
       const request = indexedDB.open(this.dbName, DB_VERSION);
-      request.onerror = () => fail(toError(request.error, "IndexedDB request failed."));
+      request.onerror = () => {
+        this.blockedOpen = false;
+        fail(toError(request.error, "IndexedDB request failed."));
+      };
       // Fired only while another connection refuses to close for an upgrade
-      // (a build without the versionchange handler below). That wait lasts
+      // (a build without the versionchange handler below). It can hold out
       // until Obsidian restarts, so fail now and let the index status say so.
-      request.onblocked = () => fail(new EmbeddingsStorageBlockedError());
+      request.onblocked = () => {
+        this.blockedOpen = true;
+        fail(new EmbeddingsStorageBlockedError());
+      };
       request.onsuccess = () => {
+        this.blockedOpen = false;
         const db = request.result;
-        if (settled || this.closed) {
-          // The blocker let go after this open failed, or the plugin unloaded meanwhile.
+        if (this.closed) {
           db.close();
           fail(new Error("Embeddings storage is closed."));
           return;
         }
         // Step aside when a newer build (after an in-app update) upgrades or deletes the database.
-        db.onversionchange = () => this.close();
-        settled = true;
+        db.onversionchange = () => this.closeConnection();
+        // After a blocked failure this is the late open: the next initialize() finds it ready.
         this.db = db;
         this.initialized = true;
+        settled = true;
         resolve();
       };
       request.onupgradeneeded = (event) => {
@@ -834,13 +847,13 @@ export class EmbeddingsStorage {
     });
   }
 
-  /**
-   * Close the connection for good, on plugin unload or when another connection
-   * needs to upgrade or delete the database. An open still pending closes as
-   * soon as it succeeds.
-   */
+  /** Close for good on plugin unload. An open still pending closes as soon as it succeeds. */
   close(): void {
     this.closed = true;
+    this.closeConnection();
+  }
+
+  private closeConnection(): void {
     this.db?.close();
     this.db = null;
     this.initialized = false;
@@ -851,6 +864,8 @@ export class EmbeddingsStorage {
    * Reset the database
    */
   async reset(): Promise<void> {
+    // The delete would wait silently behind the blocked open.
+    if (this.blockedOpen) throw new EmbeddingsStorageBlockedError();
     if (this.db) {
       this.db.close();
       this.db = null;

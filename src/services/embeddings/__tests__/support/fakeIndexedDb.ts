@@ -4,9 +4,11 @@
  * Covers the surface EmbeddingsStorage uses: versioned open with upgrade,
  * in-line and out-of-line keys, nested-keyPath indexes, get/getAll/getAllKeys
  * with ranges and counts, put/delete/clear/count, and value/key cursors
- * (including "nextunique"), and connection lifecycle: a versioned open or a
- * delete sends versionchange to every other open connection and reports
- * blocked, then waits, while any of them stays open. Transactions run strictly one after another and
+ * (including "nextunique"), and connection lifecycle. Opens and deletes of one
+ * database run one at a time, as in browsers: a later request waits, without
+ * its own blocked event, behind an earlier one. A versioned open or a delete
+ * sends versionchange to every other open connection and reports blocked,
+ * then waits, while any of them stays open. Transactions run strictly one after another and
  * every request settles on a microtask, so tests stay deterministic under
  * fake timers. Values are structured-cloned on the way in and out, which
  * catches callers that accidentally alias stored records.
@@ -429,15 +431,38 @@ export class FakeIndexedDbFactory {
   private readonly connections = new Map<string, Set<FakeDatabase>>();
   /** Upgrades and deletes waiting for other connections to close. */
   private readonly waiting: Array<{ name: string; proceed: () => void }> = [];
+  /** Per-database open/delete requests; the first one runs, the rest wait. */
+  private readonly requestQueues = new Map<string, Array<(done: () => void) => void>>();
+
+  private enqueueRequest(name: string, run: (done: () => void) => void): void {
+    let queue = this.requestQueues.get(name);
+    if (!queue) {
+      queue = [];
+      this.requestQueues.set(name, queue);
+    }
+    queue.push(run);
+    if (queue.length === 1) this.runNextRequest(name);
+  }
+
+  private runNextRequest(name: string): void {
+    const queue = this.requestQueues.get(name);
+    const run = queue?.[0];
+    if (!queue || !run) return;
+    run(() => {
+      queue.shift();
+      if (queue.length > 0) queueMicrotask(() => this.runNextRequest(name));
+    });
+  }
 
   open(name: string, version?: number): FakeRequest {
     const request = new FakeRequest();
-    queueMicrotask(() => {
+    queueMicrotask(() => this.enqueueRequest(name, (done) => {
       const current = this.databases.get(name)?.version ?? 0;
       const target = version ?? Math.max(1, current);
       if (target < current) {
         request.error = new Error("VersionError");
         request.onerror?.({ target: request });
+        done();
         return;
       }
       const proceed = () => {
@@ -458,22 +483,24 @@ export class FakeIndexedDbFactory {
         }
         this.openConnections(name).add(db);
         request.onsuccess?.({ target: request });
+        done();
       };
       if (target > current) this.afterOthersClose(name, request, { oldVersion: current, newVersion: target }, proceed);
       else proceed();
-    });
+    }));
     return request;
   }
 
   deleteDatabase(name: string): FakeRequest {
     const request = new FakeRequest();
-    queueMicrotask(() => {
+    queueMicrotask(() => this.enqueueRequest(name, (done) => {
       const oldVersion = this.databases.get(name)?.version ?? 0;
       this.afterOthersClose(name, request, { oldVersion, newVersion: null }, () => {
         this.databases.delete(name);
         request.onsuccess?.({ target: request });
+        done();
       });
-    });
+    }));
     return request;
   }
 

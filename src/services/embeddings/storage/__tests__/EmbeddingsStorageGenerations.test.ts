@@ -142,7 +142,7 @@ describe("EmbeddingsStorage connections", () => {
       expect(fake.factory.openConnections(name).size).toBe(1);
       expect(fake.factory.rows(name, "embeddings").size).toBe(1);
       await expect(held.countVectors()).rejects.toThrow("Database not initialized");
-      await expect(held.initialize()).rejects.toThrow("Embeddings storage is closed.");
+      await expect(held.initialize()).rejects.toThrow("VersionError");
     } finally {
       upgraded.close();
     }
@@ -160,7 +160,7 @@ describe("EmbeddingsStorage connections", () => {
     expect(fake.factory.openConnections(name).size).toBe(0);
   });
 
-  it("settles a blocked open with a restart error and leaves no connection behind", async () => {
+  it("settles a blocked open with a restart error and keeps the late connection once the blocker goes", async () => {
     const name = "SystemSculptEmbeddings::blocked";
     // A build without a versionchange handler holds an older version open.
     const blocker = await openDatabase(name, 10, (db) => db.createObjectStore("embeddings", { keyPath: "id" }));
@@ -169,18 +169,41 @@ describe("EmbeddingsStorage connections", () => {
     const opening = storage.initialize();
     await expect(opening).rejects.toBeInstanceOf(EmbeddingsStorageBlockedError);
     await expect(opening).rejects.toThrow("Restart Obsidian to finish updating the semantic index.");
+    // A second open or a delete would queue behind the blocked open with no
+    // blocked event of its own; both settle with the same error instead.
+    await expect(storage.initialize()).rejects.toBeInstanceOf(EmbeddingsStorageBlockedError);
+    await expect(storage.reset()).rejects.toBeInstanceOf(EmbeddingsStorageBlockedError);
     expect(storage.size()).toBe(0);
 
-    // Once the blocker finally closes, the upgrade completes and its late connection is closed.
+    // When the blocker finally closes, the pending upgrade completes and its connection is kept.
     blocker.close();
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(fake.factory.databases.get(name)?.version).toBe(11);
-    expect(fake.factory.openConnections(name).size).toBe(0);
+    expect(fake.factory.openConnections(name).size).toBe(1);
 
     await storage.initialize();
     expect(await storage.countVectors()).toBe(0);
     storage.close();
     expect(fake.factory.openConnections(name).size).toBe(0);
+  });
+
+  it("models a second open queued behind a blocked one without its own blocked event", async () => {
+    const name = "SystemSculptEmbeddings::queued";
+    const blocker = await openDatabase(name, 10);
+    const events: string[] = [];
+    const open = (label: string) => {
+      const request = indexedDB.open(name, 11);
+      request.onblocked = () => events.push(`${label} blocked`);
+      request.onsuccess = () => { events.push(`${label} opened`); request.result.close(); };
+    };
+    open("first");
+    open("second");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(events).toEqual(["first blocked"]);
+
+    blocker.close();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(events).toEqual(["first blocked", "first opened", "second opened"]);
   });
 
   it("closes an open that succeeds after the storage was closed", async () => {

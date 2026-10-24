@@ -81,6 +81,7 @@ describe("EmbeddingsManager IndexedDB connection", () => {
 
     // Once the older connection goes away, the next caller finishes initializing.
     blocker.close();
+    await new Promise((resolve) => setTimeout(resolve, 0));
     await manager.awaitReady();
     expect(manager.getLifecycleSnapshot()).toMatchObject({ ready: true, lastError: null });
     expect(fake.factory.databases.get(DB_NAME)?.version).toBe(11);
