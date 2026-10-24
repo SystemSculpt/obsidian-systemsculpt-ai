@@ -215,7 +215,10 @@ export class AgentRunLine extends Component {
     }
     menu.addItem((item) => {
       if (entry.kind === "label") {
-        item.setTitle(entry.title).setIsLabel(true);
+        // Long labels ("Switching starts a new chat…") wrap with the descriptions.
+        item.setTitle(createFragment((fragment) => {
+          fragment.createSpan({ cls: "systemsculpt-agent-menu-label", text: entry.title });
+        })).setIsLabel(true);
         return;
       }
       // Obsidian's menu lives in the main window's realm and adopts its nodes

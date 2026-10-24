@@ -300,6 +300,12 @@
   display: block;
 }
 
+.systemsculpt-agent-menu-label {
+  display: block;
+  max-width: 34ch;
+  white-space: normal;
+}
+
 .systemsculpt-agent-menu-description {
   max-width: 34ch;
   color: var(--ss-ink-muted);

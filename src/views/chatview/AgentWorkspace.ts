@@ -72,6 +72,13 @@ export type AgentWorkspaceOptions = Readonly<{
   onCopyText?: (text: string) => boolean | Promise<boolean>;
   onNewChat: () => void | Promise<void>;
   onOpenHistory: () => void | Promise<void>;
+  /** Error actions in the conversation (spec 3.7): Detect again, Use SystemSculpt instead. */
+  onDetectAgain?: () => void | Promise<void>;
+  onUseHosted?: () => void | Promise<void>;
+  /** "Add credits" in an out-of-credits error: the credits modal. */
+  onOpenCredits?: () => void | Promise<void>;
+  /** Who answers in this chat ("Claude Code", "Codex", "SystemSculpt"). */
+  backendName?: () => string;
   /** Saves a title typed into the header. */
   onRename?: (title: string) => void | Promise<void>;
   /** Fills the header's More menu; the view adds the same items to its pane menu. */
@@ -385,6 +392,19 @@ export class AgentWorkspace extends Component {
     this.register(() => observer.disconnect());
     this.registerDomEvent(ownerWindow, "resize", sync);
     this.registerEvent(this.options.app.workspace.on("layout-change", sync));
+  }
+
+  /**
+   * A one-time info line from the agent (Auto unavailable, session reset).
+   * R3 moves it into the conversation; until then it is the info banner.
+   */
+  public showNotice(text: string): void {
+    this.setBanner(text, "info");
+  }
+
+  /** A saved chat is loading; R3's conversation renderer draws the skeleton. */
+  public setLoading(loading: boolean): void {
+    this.element.classList.toggle("is-loading-chat", loading);
   }
 
   /** Polite announcement for screen readers. */

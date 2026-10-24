@@ -645,11 +645,11 @@ export class AgentChatView extends ItemView {
     const backend = this.chatExecutionBackend ?? defaultTextBackend(this.plugin.settings);
     const forkHistory = () => this.pendingForkHistory?.prefix ?? [];
     if (backend === "codex") {
-      return new CodexChatSession(this.app, { persistAssistant, notice: text => this.workspace?.setBanner(text, "info") }, forkHistory, () => codexOptionsFromSettings(this.plugin.settings));
+      return new CodexChatSession(this.app, { persistAssistant, notice: text => this.workspace?.showNotice(text) }, forkHistory, () => codexOptionsFromSettings(this.plugin.settings));
     }
     if (backend === "claude") {
       return new ClaudeChatSession(this.app, { persistAssistant, notice: (text, reason) => {
-        if (reason !== "auto-unavailable" || !this.claudeAutoUnavailable) this.workspace?.setBanner(text, "info");
+        if (reason !== "auto-unavailable" || !this.claudeAutoUnavailable) this.workspace?.showNotice(text);
         if (reason === "auto-unavailable") {
           this.claudeAutoUnavailable = true;
           this.syncChrome();
@@ -825,6 +825,10 @@ export class AgentChatView extends ItemView {
       onCopyText: (text) => tryCopyToClipboard(text, this.containerEl),
       onNewChat: () => this.newChat(),
       onOpenHistory: () => this.openHistory(),
+      onDetectAgain: () => this.detectAgain(),
+      onUseHosted: () => this.selectBackend("systemsculpt"),
+      onOpenCredits: () => this.openCreditsBalanceModal(),
+      backendName: () => agentName(backendOf(this.agent)),
       onRename: (title) => this.renameFromHeader(title),
       buildMoreMenu: (menu) => this.addChatMenuItems(menu),
       showPlanOffer: this.shouldOfferPlan(),
@@ -959,7 +963,9 @@ export class AgentChatView extends ItemView {
       this.unavailableBackend = null;
       this.titleExplicit = false;
       this.setLegacyHistoryViewOnly(false);
-      this.workspace?.setBanner("Loading chat…");
+      // R3's skeleton shows after a short delay; no banner flashes meanwhile.
+      this.workspace?.setBanner(null);
+      this.workspace?.setLoading?.(true);
       let loaded;
       let executionBackend: TextExecutionBackend = "systemsculpt";
       try {
@@ -1068,6 +1074,7 @@ export class AgentChatView extends ItemView {
       this.updateViewState();
       this.app.workspace.trigger("systemsculpt:chat-loaded", this.chatId);
     } finally {
+      if (this.conversationOriginToken === loadOriginToken) this.workspace?.setLoading?.(false);
       this.finishSubmissionOperation(transition);
       this.promoteDeferredRecoveredCompletion(loadOriginToken);
       if (thinConversationHydrated) {

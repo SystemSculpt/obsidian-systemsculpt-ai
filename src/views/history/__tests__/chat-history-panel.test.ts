@@ -138,6 +138,19 @@ describe("ChatHistoryPanel", () => {
     }
   });
 
+  it("reopens on the full list, not the last search", async () => {
+    const { parent, panel, search } = mount();
+    panel.open();
+    await flush();
+    typeQuery(search, "plan");
+    panel.close();
+    panel.open();
+    await flush();
+    expect(search.value).toBe("");
+    expect(parent.querySelectorAll('[data-testid="history.row"]')).toHaveLength(ROWS.length);
+    panel.unload();
+  });
+
   it("says when there are no chats yet", async () => {
     const { parent, panel } = mount({ loadRows: jest.fn(async () => []) });
     panel.open();

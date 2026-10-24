@@ -4980,7 +4980,8 @@ describe("AgentChatView thin conversation lifecycle", () => {
       messages: [],
       parts: [],
     });
-    expect(harness.workspace.setBanner).toHaveBeenLastCalledWith("Loading chat…");
+    // Loading clears any earlier banner; R3's skeleton shows progress.
+    expect(harness.workspace.setBanner).toHaveBeenLastCalledWith(null);
 
     releaseHydrate.resolve(undefined);
     await loading;

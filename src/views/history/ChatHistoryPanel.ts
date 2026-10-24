@@ -186,6 +186,8 @@ export class ChatHistoryPanel extends Component {
     this.query = "";
     this.contentSearch = null;
     this.pendingContentQuery = null;
+    // Each opening starts from the full list, not the last search.
+    this.combobox.setQuery("", { writeInput: false });
     // Escape closes the combobox along with the panel; reopen it with the panel.
     this.combobox.setOpen(true);
     this.search.input.focus();
