@@ -67,7 +67,7 @@ it.each(['item/commandExecution/requestApproval', 'item/fileChange/requestApprov
     native.mockImplementation(async (_input, signal, callbacks) => { response(await callbacks.request(method, params, signal, 91)); callbacks.text('done'); return { text: 'done' }; });
     const running = session.start(input()); await flush();
     const pending = tools(session)[0];
-    expect(pending).toMatchObject({ state: 'approval-required', input: expect.objectContaining(params), native: { requestId: 91, requestMethod: method, workingDirectory: '/project' } });
+    expect(pending).toMatchObject({ state: 'approval-required', input: expect.objectContaining(params), native: { requestId: 91, requestMethod: method, workingDirectory: '/project', vaultRoot: '/vault' } });
     if (method.includes('fileChange')) expect(pending.input).toHaveProperty('changes', params.change!.changes);
     expect(session.respondToApproval(pending.approvalId!, approved, 'manual', { rememberForSession })).toBe(true);
     await running;
@@ -115,7 +115,9 @@ it('keeps exact native activity and request on the same part through later text 
   });
   const running = session.start(input()); await flush();
   expect(tools(session)).toHaveLength(1);
+  expect(tools(session)[0].native).toMatchObject({ workingDirectory: '/project', vaultRoot: '/vault' });
   session.respondToApproval(tools(session)[0].approvalId!, true); await running;
+  expect(tools(session)[0].native).toMatchObject({ workingDirectory: '/project', vaultRoot: '/vault' });
   expect(tools(session)).toEqual([expect.objectContaining({ callId: 'command', name: 'commandExecution', state: 'succeeded', approvalDecision: 'approved', input: expect.objectContaining({ reason: 'Reason', command: 'pwd' }), output: { data: '/project', summary: '/project' } })]);
   expect(session.getSnapshot().parts.map(part => part.kind)).toEqual(['text', 'tool', 'text']);
   expect(persistAssistant).toHaveBeenCalledWith(expect.objectContaining({ messageParts: expect.arrayContaining([expect.objectContaining({ type: 'tool_call' })]) }));

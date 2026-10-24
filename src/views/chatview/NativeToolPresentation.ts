@@ -36,7 +36,8 @@ function command(input: Record<string, unknown>): string | undefined {
   return text(input.command) ?? (Array.isArray(input.command) ? strings(input.command).join(" ") : undefined);
 }
 function displayPath(part: AgentToolPart, path: string): string {
-  return nativeToolPath(path, part.native!.workingDirectory).displayPath;
+  const { workingDirectory, vaultRoot, vaultRootAlias } = part.native!;
+  return nativeToolPath(path, workingDirectory, vaultRoot, vaultRootAlias).displayPath;
 }
 function kind(part: AgentToolPart): string {
   if (part.native?.agent === "claude") return part.name;
