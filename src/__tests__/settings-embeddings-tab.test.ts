@@ -68,4 +68,33 @@ describe("Embeddings settings tab", () => {
     expect(text).not.toContain("Model name");
     expect(updateSettings).not.toHaveBeenCalled();
   });
+
+  it("reports an index that could not open instead of Starting", async () => {
+    const app = new App();
+    const plugin: any = {
+      app,
+      settings: {
+        embeddingsEnabled: true,
+        embeddingsExclusions: { folders: [], patterns: [], ignoreChatHistory: true, respectObsidianExclusions: true },
+      },
+      getSettingsManager: jest.fn(() => ({ updateSettings: jest.fn() })),
+      embeddingsManager: {
+        getLifecycleSnapshot: () => ({
+          phase: "error",
+          ready: false,
+          failed: 0,
+          lastError: { code: "storage_blocked", message: "Restart Obsidian to finish updating the semantic index." },
+        }),
+      },
+      embeddingsStatusBar: undefined,
+      getOrCreateEmbeddingsManager: jest.fn(),
+    };
+    const container = document.createElement("div");
+
+    await displayEmbeddingsTabContent(container, { app, plugin, display: jest.fn() } as any);
+
+    const status = Array.from(container.querySelectorAll(".setting-item"))
+      .find((item) => item.querySelector(".setting-item-name")?.textContent === "Index status");
+    expect(status?.querySelector(".setting-item-description")?.textContent).toBe("Needs attention");
+  });
 });

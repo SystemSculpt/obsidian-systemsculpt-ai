@@ -4,7 +4,11 @@
  * Covers the surface EmbeddingsStorage uses: versioned open with upgrade,
  * in-line and out-of-line keys, nested-keyPath indexes, get/getAll/getAllKeys
  * with ranges and counts, put/delete/clear/count, and value/key cursors
- * (including "nextunique"). Transactions run strictly one after another and
+ * (including "nextunique"), and connection lifecycle. Opens and deletes of one
+ * database run one at a time, as in browsers: a later request waits, without
+ * its own blocked event, behind an earlier one. A versioned open or a delete
+ * sends versionchange to every other open connection and reports blocked,
+ * then waits, while any of them stays open. Transactions run strictly one after another and
  * every request settles on a microtask, so tests stay deterministic under
  * fake timers. Values are structured-cloned on the way in and out, which
  * catches callers that accidentally alias stored records.
@@ -86,13 +90,15 @@ class NameList {
   get length(): number { return this.names().length; }
 }
 
+interface FakeVersionChangeEvent { oldVersion: number; newVersion: number | null }
+
 class FakeRequest<T = unknown> {
   result: T | undefined;
   error: Error | null = null;
   onsuccess: ((event: { target: FakeRequest<T> }) => void) | null = null;
   onerror: ((event: { target: FakeRequest<T> }) => void) | null = null;
   onupgradeneeded: ((event: { target: FakeRequest<T> }) => void) | null = null;
-  onblocked: (() => void) | null = null;
+  onblocked: ((event: FakeVersionChangeEvent) => void) | null = null;
   transaction: FakeTransaction | null = null;
 }
 
@@ -381,6 +387,7 @@ class FakeTransaction {
 
 class FakeDatabase {
   closed = false;
+  onversionchange: ((event: FakeVersionChangeEvent) => void) | null = null;
   constructor(
     private readonly factory: FakeIndexedDbFactory,
     readonly name: string,
@@ -409,7 +416,11 @@ class FakeDatabase {
     return this.factory.schedule(new FakeTransaction(this.factory, this, scope, mode));
   }
 
-  close(): void { this.closed = true; }
+  close(): void {
+    if (this.closed) return;
+    this.closed = true;
+    this.factory.connectionClosed(this);
+  }
 }
 
 export class FakeIndexedDbFactory {
@@ -417,38 +428,114 @@ export class FakeIndexedDbFactory {
   upgradeTransaction: FakeTransaction | null = null;
   private readonly queue: FakeTransaction[] = [];
   private active: FakeTransaction | null = null;
+  private readonly connections = new Map<string, Set<FakeDatabase>>();
+  /** Upgrades and deletes waiting for other connections to close. */
+  private readonly waiting: Array<{ name: string; proceed: () => void }> = [];
+  /** Per-database open/delete requests; the first one runs, the rest wait. */
+  private readonly requestQueues = new Map<string, Array<(done: () => void) => void>>();
+
+  private enqueueRequest(name: string, run: (done: () => void) => void): void {
+    let queue = this.requestQueues.get(name);
+    if (!queue) {
+      queue = [];
+      this.requestQueues.set(name, queue);
+    }
+    queue.push(run);
+    if (queue.length === 1) this.runNextRequest(name);
+  }
+
+  private runNextRequest(name: string): void {
+    const queue = this.requestQueues.get(name);
+    const run = queue?.[0];
+    if (!queue || !run) return;
+    run(() => {
+      queue.shift();
+      if (queue.length > 0) queueMicrotask(() => this.runNextRequest(name));
+    });
+  }
 
   open(name: string, version?: number): FakeRequest {
     const request = new FakeRequest();
-    queueMicrotask(() => {
-      let data = this.databases.get(name);
-      if (!data) {
-        data = new FakeDatabaseData();
-        this.databases.set(name, data);
+    queueMicrotask(() => this.enqueueRequest(name, (done) => {
+      const current = this.databases.get(name)?.version ?? 0;
+      const target = version ?? Math.max(1, current);
+      if (target < current) {
+        request.error = new Error("VersionError");
+        request.onerror?.({ target: request });
+        done();
+        return;
       }
-      const db = new FakeDatabase(this, name, data);
-      request.result = db;
-      const target = version ?? Math.max(1, data.version);
-      if (target > data.version) {
-        const upgrade = new FakeTransaction(this, db, [...data.stores.keys()], "versionchange");
-        this.upgradeTransaction = upgrade;
-        request.transaction = upgrade;
-        data.version = target;
-        request.onupgradeneeded?.({ target: request });
-        this.upgradeTransaction = null;
-      }
-      request.onsuccess?.({ target: request });
-    });
+      const proceed = () => {
+        let data = this.databases.get(name);
+        if (!data) {
+          data = new FakeDatabaseData();
+          this.databases.set(name, data);
+        }
+        const db = new FakeDatabase(this, name, data);
+        request.result = db;
+        if (target > data.version) {
+          const upgrade = new FakeTransaction(this, db, [...data.stores.keys()], "versionchange");
+          this.upgradeTransaction = upgrade;
+          request.transaction = upgrade;
+          data.version = target;
+          request.onupgradeneeded?.({ target: request });
+          this.upgradeTransaction = null;
+        }
+        this.openConnections(name).add(db);
+        request.onsuccess?.({ target: request });
+        done();
+      };
+      if (target > current) this.afterOthersClose(name, request, { oldVersion: current, newVersion: target }, proceed);
+      else proceed();
+    }));
     return request;
   }
 
   deleteDatabase(name: string): FakeRequest {
     const request = new FakeRequest();
-    queueMicrotask(() => {
-      this.databases.delete(name);
-      request.onsuccess?.({ target: request });
-    });
+    queueMicrotask(() => this.enqueueRequest(name, (done) => {
+      const oldVersion = this.databases.get(name)?.version ?? 0;
+      this.afterOthersClose(name, request, { oldVersion, newVersion: null }, () => {
+        this.databases.delete(name);
+        request.onsuccess?.({ target: request });
+        done();
+      });
+    }));
     return request;
+  }
+
+  /** Open connections to one database, for assertions. */
+  openConnections(name: string): Set<FakeDatabase> {
+    let open = this.connections.get(name);
+    if (!open) {
+      open = new Set();
+      this.connections.set(name, open);
+    }
+    return open;
+  }
+
+  connectionClosed(db: FakeDatabase): void {
+    this.openConnections(db.name).delete(db);
+    for (const entry of [...this.waiting]) {
+      if (entry.name !== db.name || this.openConnections(entry.name).size > 0) continue;
+      this.waiting.splice(this.waiting.indexOf(entry), 1);
+      queueMicrotask(entry.proceed);
+    }
+  }
+
+  private afterOthersClose(
+    name: string,
+    request: FakeRequest,
+    event: FakeVersionChangeEvent,
+    proceed: () => void,
+  ): void {
+    for (const db of [...this.openConnections(name)]) db.onversionchange?.(event);
+    if (this.openConnections(name).size === 0) {
+      proceed();
+      return;
+    }
+    this.waiting.push({ name, proceed });
+    request.onblocked?.(event);
   }
 
   schedule(tx: FakeTransaction): FakeTransaction {

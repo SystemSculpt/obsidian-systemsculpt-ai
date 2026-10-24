@@ -81,7 +81,8 @@ export class EmbeddingsStatusBar extends Component {
   }
 
   private render(snapshot: Readonly<SemanticIndexSnapshot>): void {
-    if (!snapshot.ready || snapshot.phase === "initializing") {
+    // An index that could not open reports its error instead of "Starting".
+    if (snapshot.phase === "initializing" || (!snapshot.ready && snapshot.phase !== "error")) {
       this.renderStarting();
       return;
     }
