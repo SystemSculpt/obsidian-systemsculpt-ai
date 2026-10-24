@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 
-import { App, Platform, Plugin } from "obsidian";
+import { App, Platform, Plugin, TFile } from "obsidian";
 import { ViewManager } from "../views";
 import {
   CHAT_VIEW_TYPE,
@@ -113,6 +113,49 @@ describe("ViewManager", () => {
     await queue.processRestoreQueue();
     expect(visible.view.setState).toHaveBeenCalledTimes(1);
     expect(hidden.view.setState).toHaveBeenCalledTimes(1);
+  });
+
+  it("waits for the registered chat view before attaching a file and focusing its input", async () => {
+    const { app, manager } = createFixture();
+    const file = new TFile({ path: "Example.md", extension: "md" } as any);
+    const view = { addFileToContext: jest.fn().mockResolvedValue(undefined), focusInput: jest.fn() };
+    let finishOpen!: () => void;
+    const ready = new Promise<void>((resolve) => { finishOpen = resolve; });
+    const leaf = {
+      view: null as typeof view | null,
+      setViewState: jest.fn(async () => { await ready; leaf.view = view; }),
+    };
+    const getLeaf = jest.fn(() => leaf);
+    const setActiveLeaf = jest.fn();
+    Object.assign(app.workspace, { getLeaf, setActiveLeaf });
+
+    const opening = manager.openChat({ file });
+    expect(getLeaf).toHaveBeenCalledWith("tab");
+    expect(leaf.setViewState).toHaveBeenCalledWith({
+      type: CHAT_VIEW_TYPE, active: true,
+      state: { chatId: "", chatTitle: expect.any(String) },
+    });
+    expect(setActiveLeaf).not.toHaveBeenCalled();
+    expect(view.addFileToContext).not.toHaveBeenCalled();
+    finishOpen();
+    await opening;
+
+    expect(setActiveLeaf).toHaveBeenCalledWith(leaf, { focus: true });
+    expect(view.addFileToContext).toHaveBeenCalledTimes(1);
+    expect(view.addFileToContext).toHaveBeenCalledWith(file);
+    expect(view.focusInput).toHaveBeenCalledTimes(1);
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it("propagates a failed chat open without focusing or attaching to an unopened view", async () => {
+    const { app, manager } = createFixture();
+    const error = new Error("Unable to create leaf");
+    const leaf = { setViewState: jest.fn().mockRejectedValue(error) };
+    const setActiveLeaf = jest.fn();
+    Object.assign(app.workspace, { getLeaf: jest.fn(() => leaf), setActiveLeaf });
+
+    await expect(manager.openChat()).rejects.toBe(error);
+    expect(setActiveLeaf).not.toHaveBeenCalled();
   });
 
   it("opens Similar Notes in the desktop right sidebar", async () => {
