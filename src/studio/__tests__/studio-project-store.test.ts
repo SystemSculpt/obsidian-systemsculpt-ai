@@ -752,6 +752,7 @@ describe("v1 projects with retired node kinds", () => {
   });
 
   it("keeps a blocked migration readable across shared sessions without edits, runs or policy writes", async () => {
+    const notice = jest.spyOn(obsidian, "Notice").mockImplementation(() => ({}));
     const { app, files, adapter } = createStore();
     const assets = deriveStudioAssetsDir(path);
     files.set(path, v1Text);
@@ -789,6 +790,7 @@ describe("v1 projects with retired node kinds", () => {
     await service.releaseProjectSession(path);
     expect(session.getReadOnlyReason()).toBeUndefined();
     expect(legacyCopies(files).map(copy => files.get(copy))).toEqual([v1Text]);
+    expect(notice).toHaveBeenCalledTimes(1);
     expect(files.has(deriveStudioPolicyPath(path))).toBe(true);
     await session.mutateAndFlush("node.title", project => { project.name = "Recovered"; });
     expect(JSON.parse(files.get(path)!).name).toBe("Recovered");
