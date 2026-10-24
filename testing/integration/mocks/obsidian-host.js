@@ -7,6 +7,7 @@
  * minimal and explicit — a missing export failing loudly here is the signal
  * this suite exists to produce.
  */
+const YAML = require("yaml");
 const base = require("../../../src/tests/mocks/obsidian.js");
 
 class IntegrationApp extends base.App {
@@ -42,4 +43,7 @@ module.exports = {
   apiVersion: "1.7.2",
   App: IntegrationApp,
   Plugin: IntegrationPlugin,
+  // Saved chats keep their identity in YAML frontmatter.
+  parseYaml: (text) => YAML.parse(text),
+  stringifyYaml: (value) => YAML.stringify(value),
 };
