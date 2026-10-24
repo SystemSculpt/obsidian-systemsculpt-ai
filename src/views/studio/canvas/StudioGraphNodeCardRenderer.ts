@@ -217,7 +217,7 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
       onExecutionChange: value => change('execution', value), focus: id => { graphInteraction.setSelectedNodeIds([id]); graphInteraction.fitSelectedNodesInViewport(); } });
     if (node.kind === 'studio.run_collection' && options.agentRuns && options.projectPath) return renderStudioRunCollection(root, { runs: options.agentRuns, projectId: options.projectId || '', projectPath: options.projectPath, sources: Array.isArray(node.config.sources) ? node.config.sources.filter((value): value is string => typeof value === 'string') : [], compact: false, groupBy: String(node.config.groupBy || 'status'), showCompleted: node.config.showCompleted !== false });
     if (node.kind === 'studio.collection') return renderStudioCollection(root, { node, outputs: nodeRunState.outputs || {}, scope: options.projectId, onChange: change });
-    if (node.kind === 'studio.workflow') return renderStudioWorkflow(root, { node, onChange: change });
+    if (node.kind === 'studio.workflow') return renderStudioWorkflow(root, { node });
     root.createDiv({ cls: 'ss-studio-source-empty', text: 'This panel is available once its project is open.' });
   };
 

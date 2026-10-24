@@ -74,10 +74,6 @@ function createPluginStub(overrides?: Partial<any>) {
   return {
     app,
     settings,
-    emitter: {
-      emit: jest.fn(),
-      on: jest.fn(() => jest.fn()),
-    },
     getManagedCapabilityGraph: jest.fn(() => ({
       embeddingsIndex: {
         activeGeneration: undefined,

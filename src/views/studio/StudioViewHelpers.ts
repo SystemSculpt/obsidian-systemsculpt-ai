@@ -8,7 +8,7 @@ export function definitionKey(definition: StudioNodeDefinition): string {
 const NODE_DESCRIPTION_BY_KIND: Record<string, string> = {
   "studio.input": "Injects starter text or JSON into your graph.",
   "studio.collection": "A live collection of records, grouped as a Kanban board.",
-  "studio.workflow": "A durable workflow with native agent tasks, linked evidence and reconnectable runs.",
+  "studio.workflow": "Retired workflow note. Saved configuration is preserved; this node never runs.",
   "studio.json":
     "Edit JSON source, pass through upstream JSON, or validate and parse connected text.",
   "studio.value": "Generic value preview node for scalar or unknown output types.",

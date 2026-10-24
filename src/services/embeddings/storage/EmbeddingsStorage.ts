@@ -23,7 +23,7 @@ const DB_NAME_PREFIX = "SystemSculptEmbeddings";
 /** A search matrix nobody has queried for this long is released. */
 const SEARCH_MATRIX_IDLE_MS = 5 * 60_000;
 const SEARCH_MATRIX_PAGE_SIZE = 512;
-const DB_VERSION = 11;
+const DB_VERSION = 12;
 const STORE_NAME = 'embeddings';
 const STATE_STORE_NAME = "semantic_state";
 
@@ -156,10 +156,9 @@ export class EmbeddingsStorage {
         if (!store.indexNames.contains("by_namespace")) {
           store.createIndex("by_namespace", "metadata.namespace", { unique: false });
         }
-        if (!store.indexNames.contains("by_mtime")) store.createIndex("by_mtime", "metadata.mtime", { unique: false });
-        if (!store.indexNames.contains("by_contentHash")) {
-          store.createIndex("by_contentHash", "metadata.contentHash", { unique: false });
-        }
+        // Version 12 drops unused secondary indexes without rebuilding stored vectors.
+        if (store.indexNames.contains("by_mtime")) store.deleteIndex("by_mtime");
+        if (store.indexNames.contains("by_contentHash")) store.deleteIndex("by_contentHash");
       };
     });
   }

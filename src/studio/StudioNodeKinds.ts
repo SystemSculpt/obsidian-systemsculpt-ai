@@ -1,4 +1,4 @@
-const VISUAL_ONLY_NODE_KINDS = new Set<string>(["studio.terminal", "studio.run_collection", "studio.command_center", "studio.button"]);
+const VISUAL_ONLY_NODE_KINDS = new Set<string>(["studio.terminal", "studio.run_collection", "studio.command_center", "studio.button", "studio.workflow"]);
 export type StudioManagedOutputKind = "image" | "video";
 const MANAGED_OUTPUT_KIND_BY_NODE_KIND: Readonly<Record<string, StudioManagedOutputKind>> = {
   "studio.image_generation": "image",

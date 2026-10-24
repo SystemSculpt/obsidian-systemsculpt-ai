@@ -73,7 +73,6 @@ function createRemoveNodesContext(options: {
     textEdits: new StudioTextEditSessions(),
     nodeContextMenuOverlay: null,
     nodeActionContextMenuOverlay: null,
-    recomputeEntryNodes: jest.fn(),
     render: jest.fn(),
   };
 }

@@ -30,7 +30,6 @@ import { openExternalUrl } from "../../utils/externalUrl";
 import { tryCopyToClipboard } from "../../utils/clipboard";
 import { waitForIdle } from "../../utils/yieldToEventLoop";
 import { getRuntimeCrypto } from "../../utils/runtimeWindow";
-import { resolveAbsoluteVaultPath } from "../../utils/vaultPathUtils";
 import { chatTitleFromMessage, generateDefaultChatTitle, isGeneratedChatTitle, normalizeChatTitle } from "../../utils/titleUtils";
 import { toSafeVaultFileName } from "../../utils/vaultFileName";
 import {
@@ -1212,23 +1211,9 @@ export class AgentChatView extends ItemView {
     return this.app.vault.getAbstractFileByPath(path) instanceof TFile ? path : null;
   }
 
-  public getChatHistoryAbsolutePath(): string | null {
-    const path = this.getChatHistoryFilePath();
-    return path ? resolveAbsoluteVaultPath(this.app.vault.adapter, path) : null;
-  }
-
-  public async copyCurrentChatFilePathToClipboard(): Promise<void> {
-    const path = this.getChatHistoryAbsolutePath();
-    if (!path || !(await tryCopyToClipboard(path))) new Notice("Chat path is not available yet.");
-  }
-
   public async exportChat(options?: Partial<ChatExportOptions>): Promise<ChatExportResult> {
     this.exportService ??= new ChatExportService(this);
     return this.exportService.export(options);
-  }
-
-  public async exportChatAsMarkdown(options?: Partial<ChatExportOptions>): Promise<string> {
-    return (await this.exportChat(options)).markdown;
   }
 
   private shouldOfferPlan(): boolean {
