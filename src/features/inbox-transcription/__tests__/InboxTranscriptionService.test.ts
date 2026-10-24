@@ -119,6 +119,8 @@ describe("InboxTranscriptionService through its host interface", () => {
       recoveryVariant: "workflow-inbox-transcription-v2", signal: expect.any(AbortSignal),
     }), expect.any(Function));
     expect(app.vault.create).toHaveBeenCalledWith("Inbox/audio.md", expect.stringContaining("## Transcript\nTranscribed text"));
+    // The new transcript note is the receipt.
+    expect(Notice).not.toHaveBeenCalled();
   });
 
   it("deduplicates create and rename notifications for the same queued file", async () => {

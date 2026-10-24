@@ -39,34 +39,6 @@ export async function showConfirm(
 }
 
 /**
- * A more advanced notice that supports multi-line messages and custom styling.
- * @param app - The Obsidian App instance.
- * @param parts - An object containing the parts of the message.
- * @param options - Notification options.
- */
-export function displayNotice(parts: { title: string; path?: string; message?: string }, options: NotificationOptions = {}) {
-  const fragment = createSurfaceFragment(resolveSurfaceDomContext().document);
-
-  // Title (e.g., "Switched to tab")
-  const titleEl = fragment.createDiv({ cls: 'systemsculpt-notice-title' });
-  titleEl.setText(parts.title);
-
-  // Path (e.g., "path/to/your/file.md")
-  if (parts.path) {
-    const pathEl = fragment.createDiv({ cls: 'systemsculpt-notice-path' });
-    pathEl.setText(parts.path);
-  }
-
-  // Message (e.g., "File is in another pane.")
-  if (parts.message) {
-    const messageEl = fragment.createDiv({ cls: 'systemsculpt-notice-message' });
-    messageEl.setText(parts.message);
-  }
-
-  new Notice(fragment, options.duration ?? 5000);
-}
-
-/**
  * One notice with a single follow-up action, such as the result of a check
  * the user asked for. Choosing the action dismisses the notice.
  */

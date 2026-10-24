@@ -44,6 +44,19 @@ describe("OperationProgressPanel", () => {
     });
   });
 
+  it("hands each action the button that was clicked", () => {
+    const panel = new OperationProgressPanel({ title: "Test operation", icon: "loader" });
+    const onClick = jest.fn();
+    panel.setActions([{ label: "Copy error", testId: "test.progress.copy", onClick }]);
+    const button = document.querySelector<HTMLButtonElement>('[data-testid="test.progress.copy"]')!;
+
+    button.click();
+
+    expect(onClick).toHaveBeenCalledTimes(1);
+    expect(onClick).toHaveBeenCalledWith(button);
+    panel.close();
+  });
+
   it("fires dismiss callback and detaches itself", () => {
     const onDismiss = jest.fn();
     const panel = new OperationProgressPanel({

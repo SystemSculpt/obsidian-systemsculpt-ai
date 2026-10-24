@@ -1,4 +1,4 @@
-import { App, Notice, TFile } from "obsidian";
+import { App, TFile } from "obsidian";
 import type SystemSculptPlugin from "../main";
 import { StandardModal } from "../core/ui/modals/standard/StandardModal";
 import {
@@ -6,6 +6,7 @@ import {
   type OperationProgressButton,
 } from "../core/ui/progress/OperationProgressPanel";
 import { tryCopyToClipboard } from "../utils/clipboard";
+import { flashButtonResult } from "../core/ui/notifications";
 
 export interface PendingTranscriptionFile {
   file: TFile;
@@ -250,9 +251,9 @@ export class BulkTranscriptionProgressWidget {
     return {
       label: "Copy error",
       testId: "bulk-transcribe.progress.copy-error",
-      onClick: () => {
+      onClick: (button) => {
         void tryCopyToClipboard(copyText, this.panel.element).then((copied) => {
-          new Notice(copied ? "Error copied to clipboard" : "Unable to copy error", 2500);
+          flashButtonResult(button, copied ? "Copied" : "Couldn't copy");
         });
       },
     };
