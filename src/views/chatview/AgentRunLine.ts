@@ -24,18 +24,18 @@ export type AgentRunLineOptions = Readonly<{
 
 type MenuKind = "backend" | "mode" | "detail";
 
+const isEscapeKeydown = (event: Event | undefined): boolean =>
+  event?.type === "keydown" && (event as KeyboardEvent).key === "Escape";
+
 /** Escape dismisses only this menu. Dispose from its owner's sole onHide callback. */
 export function containMenuEscape(menu: Menu, ownerDocument: Document): () => void {
-  const ownerWindow: { event?: Event } | null = ownerDocument.defaultView;
-  // Obsidian's keymap hides the menu on Escape before this listener runs, so
-  // onHide disposes during that Escape. Keep the listener for that one event.
-  let closingEscape: Event | null = null;
+  const ownerWindow = ownerDocument.defaultView ?? window;
+  const ownerEvents: { event?: Event } = ownerWindow;
+  const mainEvents: { event?: Event } = window;
   const release = (): void => ownerDocument.removeEventListener("keydown", onKeydown, true);
   const onKeydown = (event: KeyboardEvent): void => {
     if (event.key !== "Escape" || event.isComposing) return;
     release();
-    // A later Escape belongs to the host, even if the closing one never came.
-    if (closingEscape && closingEscape !== event) return;
     event.preventDefault();
     event.stopPropagation();
     menu.hide();
@@ -45,11 +45,11 @@ export function containMenuEscape(menu: Menu, ownerDocument: Document): () => vo
   ownerDocument.addEventListener("keydown", onKeydown, true);
   // Menu.onHide replaces its callback; the owner composes cleanup with focus.
   return () => {
-    // Chromium sets `event` on the window whose code is running, so a pop-out's
-    // keymap Escape shows up on the main window, not the pop-out.
-    const current = ownerWindow?.event ?? (window as { event?: Event }).event;
-    if (current?.type === "keydown" && (current as KeyboardEvent).key === "Escape") {
-      closingEscape = current;
+    // Obsidian's keymap hides the menu on Escape before this listener runs (for
+    // a pop-out, while handling a copy it sends to the main window), so onHide
+    // disposes mid-keypress. Keep the listener only until that keypress ends.
+    if (isEscapeKeydown(ownerEvents.event) || isEscapeKeydown(mainEvents.event)) {
+      ownerWindow.setTimeout(release, 0);
       return;
     }
     release();
