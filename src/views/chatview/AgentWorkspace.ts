@@ -302,6 +302,7 @@ export class AgentWorkspace extends Component {
           return result;
         });
       },
+      onReviewApproval: () => this.hideHistory(false),
       approvalComposer: () => this.composer?.element,
       isApprovalVisible: options.isApprovalVisible,
       onHiddenApproval: options.onHiddenApproval,
