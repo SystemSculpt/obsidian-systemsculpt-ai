@@ -361,6 +361,30 @@ describe("AgentRunLine", () => {
     line.unload();
   });
 
+  it.each([true, false])("updates an open backend menu in place after sign-in resolves to %s", (signedIn) => {
+    const { parent, line, options } = mount();
+    const initial = state({ backend: "systemsculpt", detection: {
+      ...state().detection!, agents: { ...state().detection!.agents,
+        claude: { installed: true, signedIn: null, recentSessionCount: signedIn ? 0 : 1, lastUsed: null },
+      },
+    } });
+    line.render(initial);
+    segment(parent, "backend").click();
+    const menu = menus().at(-1)!;
+    const item = menu.items.find((entry) => entry.title === "Claude CodeSign-in status unknown")!;
+    expect(item.disabled).toBe(signedIn);
+    line.render({ ...initial, detection: {
+      ...initial.detection!, agents: { ...initial.detection!.agents, claude: { ...initial.detection!.agents.claude, signedIn } },
+    } });
+    expect(menus().at(-1)).toBe(menu);
+    expect(menu.items).toContain(item);
+    expect(item.disabled).toBe(!signedIn);
+    expect(item.title).toBe(signedIn ? "Claude CodeReady" : "Claude CodeNot signed in · Run claude in a terminal and type /login");
+    menu.select(item.title!);
+    expect(options.onSelectBackend).toHaveBeenCalledTimes(signedIn ? 1 : 0);
+    line.unload();
+  });
+
   it("keeps a focused segment focused across a redraw and refreshes a loading model menu", () => {
     const { parent, line } = mount();
     line.render(state({ backend: "codex" }));

@@ -282,6 +282,39 @@ it('replaces recent-session inference with an explicit signed-out result from th
   expect(host.execFile).toHaveBeenCalledTimes(2);
 });
 
+it.each(['lookup', 'usage'] as const)('retains confirmed installation and recent usage when retry %s stalls', async stage => {
+  jest.useFakeTimers();
+  const host = machine({ installed: ['claude'], hang: 'claude' });
+  host.file('/home/test/.claude/projects/vault/main.jsonl');
+  const first = detectLocalAgents();
+  await jest.advanceTimersByTimeAsync(0);
+  if (stage === 'lookup') host.fs.readFile.mockImplementation(() => new Promise(() => {}));
+  else host.fs.readdir.mockImplementation(() => new Promise(() => {}));
+  await jest.advanceTimersByTimeAsync(3000);
+  expect((await first).agents.claude).toMatchObject({ installed: true, signedIn: null, recentSessionCount: 1 });
+  await jest.advanceTimersByTimeAsync(3000);
+  expect(await detectLocalAgents()).toEqual(await first);
+  expect(jest.getTimerCount()).toBe(0);
+});
+
+it('publishes a definitive Detect again result to views waiting on an invalidated retry', async () => {
+  jest.useFakeTimers();
+  const host = machine({ installed: ['claude'], hang: 'claude' });
+  const current = jest.fn();
+  const stop = subscribeLocalAgentDetection('/vault', current);
+  try {
+    const first = detectLocalAgents({ workingDirectory: '/vault' });
+    await jest.advanceTimersByTimeAsync(3000);
+    expect((await first).agents.claude.signedIn).toBeNull();
+    host.execFile.mockImplementation((_binary, _args, _config, callback) => { callback(null, '{"loggedIn":true}', ''); });
+    const refreshed = await detectLocalAgents({ workingDirectory: '/vault', force: true });
+    expect(current).toHaveBeenLastCalledWith(refreshed);
+    const calls = current.mock.calls.length;
+    await jest.advanceTimersByTimeAsync(3000);
+    expect(current).toHaveBeenCalledTimes(calls);
+  } finally { stop(); }
+});
+
 it('does not let an invalidated background retry overwrite Detect again', async () => {
   jest.useFakeTimers();
   const host = machine({ installed: ['claude'], hang: 'claude' });
@@ -322,7 +355,8 @@ it('notifies only current directory subscribers after retry and respects unsubsc
     const initial = detectLocalAgents({ workingDirectory: '/vault' });
     await jest.advanceTimersByTimeAsync(3000);
     expect((await initial).agents.claude.signedIn).toBeNull();
-    expect(current).not.toHaveBeenCalled();
+    expect(current).toHaveBeenCalledWith(await initial);
+    current.mockClear(); removed.mockClear();
     stopRemoved();
     host.execFile.mock.calls[1][3](null, '{"loggedIn":true}', '');
     await jest.advanceTimersByTimeAsync(0);

@@ -2,7 +2,7 @@
 import { mountCodexExecutionControls } from '../CodexExecutionControls';
 import { readCodexCatalog } from '../CodexModelCatalog';
 jest.mock('../../../platform/hostCapabilities', () => ({ hasHostCapability: jest.fn(() => true), getHostOperatingSystem: () => 'macOS' }));
-jest.mock('../LocalAgentDetection', () => ({ detectLocalAgents: jest.fn(async () => ({ preferred: 'claude' })) }));
+jest.mock('../LocalAgentDetection', () => ({ detectLocalAgents: jest.fn(async () => ({ preferred: 'claude' })), subscribeLocalAgentDetection: jest.fn(() => jest.fn()) }));
 jest.mock('../CodexModelCatalog', () => ({ readCodexCatalog: jest.fn() }));
 jest.mock('../CodexExecutionSettings', () => ({ ...jest.requireActual('../CodexExecutionSettings'), codexVaultDirectory: () => '/vault' }));
 const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
@@ -67,6 +67,28 @@ it('re-detects from settings without changing an explicit choice', async () => {
   expect(parent.textContent).toContain('Detected: Claude Code. Your choice is unchanged.');
   expect(updateSettings).not.toHaveBeenCalled();
   dispose(); parent.remove();
+});
+
+it('updates a visible detection summary after the background retry and unsubscribes on disposal', async () => {
+  const { detectLocalAgents, subscribeLocalAgentDetection } = jest.requireMock('../LocalAgentDetection');
+  detectLocalAgents.mockResolvedValueOnce({ preferred: 'systemsculpt' });
+  const parent = document.createElement('div');
+  const plugin = { settings: { textExecutionBackend: 'systemsculpt' }, app: { workspace: { on: jest.fn(), offref: jest.fn() } } };
+  const dispose = mountCodexExecutionControls(parent, plugin as never, {});
+  const listener = subscribeLocalAgentDetection.mock.calls.at(-1)[1];
+  const unsubscribe = subscribeLocalAgentDetection.mock.results.at(-1).value;
+  const status = parent.querySelector('.ss-agent-detection-status') as HTMLElement;
+  listener({ preferred: 'claude' });
+  expect(status.hidden).toBe(true);
+  (parent.querySelector('[data-testid="chat.execution.detect"]') as HTMLButtonElement).click();
+  await flush();
+  expect(status.textContent).toContain('Detected: SystemSculpt. Used for your next new chat.');
+  listener({ preferred: 'claude' });
+  expect(status.textContent).toContain('Detected: Claude Code. Used for your next new chat.');
+  dispose();
+  expect(unsubscribe).toHaveBeenCalledTimes(1);
+  listener({ preferred: 'codex' });
+  expect(status.textContent).toContain('Claude Code');
 });
 
 it('saves a provider switch from settings as the explicit default', async () => {

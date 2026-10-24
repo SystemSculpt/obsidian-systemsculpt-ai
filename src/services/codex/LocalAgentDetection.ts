@@ -91,8 +91,8 @@ async function sessionUsage(agent: LocalAgentId, home: string, deadline: number)
   return usage;
 }
 
-async function probe(agent: LocalAgentId, workingDirectory?: string): Promise<LocalAgentAvailability> {
-  const state = { ...unavailable() };
+async function probe(agent: LocalAgentId, workingDirectory?: string, previous?: LocalAgentAvailability): Promise<LocalAgentAvailability> {
+  const state = { ...(previous ?? unavailable()) };
   const deadline = Date.now() + PROBE_TIMEOUT_MS;
   const controller = new AbortController();
   let timer: number | undefined;
@@ -100,7 +100,8 @@ async function probe(agent: LocalAgentId, workingDirectory?: string): Promise<Lo
     try {
       const launch = await readLocalAgentLaunchConfig(agent, LOCAL_AGENTS[agent]);
       const binary = await resolveLocalAgentBinary(agent, launch, workingDirectory);
-      if (!binary || Date.now() >= deadline) return;
+      if (controller.signal.aborted || Date.now() >= deadline) return;
+      if (!binary) { Object.assign(state, unavailable()); return; }
       state.installed = true;
       state.signedIn = null;
       const path = await desktopHost.path();
@@ -111,7 +112,8 @@ async function probe(agent: LocalAgentId, workingDirectory?: string): Promise<Lo
       const home = native?.codexHome ?? path.resolve(cwd, environment.CLAUDE_CONFIG_DIR || path.join(launch.home, '.claude'));
       await Promise.all([
         signedIn(agent, binary, environment, cwd, controller.signal).then(value => { state.signedIn = value; }),
-        sessionUsage(agent, home, deadline).then(value => { Object.assign(state, value); }),
+        // The retry resolves sign-in, not session usage already sampled for this cache.
+        previous ? Promise.resolve() : sessionUsage(agent, home, deadline).then(value => { Object.assign(state, value); }),
       ]);
     } catch {
       // A completed launch failure is distinct from a probe that ran out of time.
@@ -146,28 +148,34 @@ export function detectLocalAgents(options: { force?: boolean; workingDirectory?:
   if (!detection) {
     detection = Promise.all([probe('claude', options.workingDirectory), probe('codex', options.workingDirectory)]).then(([claude, codex]) => {
       const agents = { claude, codex };
+      const initial = { preferred: preferredAgent(agents), agents };
+      if (cachedDetections.get(options.workingDirectory) === detection) notify(options.workingDirectory, initial);
       if (cachedDetections.get(options.workingDirectory) === detection && (claude.signedIn === null || codex.signedIn === null)) {
         // Cold CLI startup is not a sign-out. Retry unknown probes once, without
         // making the first caller wait or turning the session cache into polling.
         void Promise.all((['claude', 'codex'] as const).map(agent => agents[agent].signedIn === null
-          ? probe(agent, options.workingDirectory) : Promise.resolve(agents[agent]))).then(([claude, codex]) => {
+          ? probe(agent, options.workingDirectory, agents[agent]) : Promise.resolve(agents[agent]))).then(([claude, codex]) => {
           if (cachedDetections.get(options.workingDirectory) !== detection) return;
           const agents = { claude, codex };
           const refreshed = { preferred: preferredAgent(agents), agents };
           cachedDetections.set(options.workingDirectory, Promise.resolve(refreshed));
-          for (const listener of listeners.get(options.workingDirectory) ?? []) {
-            try { listener(refreshed); } catch { /* A view must not interrupt detection. */ }
-          }
+          notify(options.workingDirectory, refreshed);
         });
       }
-      return { preferred: preferredAgent(agents), agents };
+      return initial;
     });
     cachedDetections.set(options.workingDirectory, detection);
   }
   return detection;
 }
 
-/** Updates chrome after the one background retry, without switching an open chat's backend. */
+function notify(workingDirectory: string | undefined, detection: LocalAgentDetection): void {
+  for (const listener of listeners.get(workingDirectory) ?? []) {
+    try { listener(detection); } catch { /* A view must not interrupt detection. */ }
+  }
+}
+
+/** Updates mounted views after detection or its retry, without switching an open chat's backend. */
 export function subscribeLocalAgentDetection(workingDirectory: string | undefined, listener: (detection: LocalAgentDetection) => void): () => void {
   let subscribers = listeners.get(workingDirectory);
   if (!subscribers) { subscribers = new Set(); listeners.set(workingDirectory, subscribers); }
