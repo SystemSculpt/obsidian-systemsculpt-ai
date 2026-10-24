@@ -6,6 +6,14 @@
 - Chat runs through SystemSculpt automatically; there is no chat picker in the plugin.
 - If chat is unavailable, re-check your SystemSculpt license and credits first.
 
+## Browser sign-in did not finish
+
+- If the browser cannot return to Obsidian, paste its connection code into the
+  sign-in screen and choose **Complete sign-in**.
+- If sign-in reports that it is unavailable, choose **Start sign-in again**.
+  If Obsidian also reports that settings could not be saved, resolve the vault's
+  disk-space or write-permission problem first, then retry.
+
 ## Streaming issues
 
 - Retry once after confirming your license and credits are valid.

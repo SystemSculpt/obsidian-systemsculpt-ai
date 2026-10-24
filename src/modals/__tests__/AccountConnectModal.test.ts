@@ -245,11 +245,11 @@ describe("AccountConnectModal", () => {
     expect(onGetStarted).toHaveBeenCalledTimes(1);
   });
 
-  it("offers a one-tap restart for recoverable sign-in errors", async () => {
+  it.each(["expired", "state-mismatch", "invalid-code", "unconfirmed", "unavailable"] as const)("offers a one-tap restart for %s", async (reason) => {
     const onRetrySignIn = jest.fn();
     const modal = new AccountConnectModal(
       {} as any,
-      async () => ({ kind: "error" as const, reason: "expired" as const }),
+      async () => ({ kind: "error" as const, reason }),
       { onRetrySignIn },
     );
 
@@ -289,6 +289,21 @@ describe("AccountConnectModal", () => {
     expect(modal.modalEl.textContent).toContain("Sign-in didn't finish");
     expect(modal.modalEl.textContent).toContain("The connection code was invalid or expired.");
     expect(findButtonByText(modal.modalEl, "Close")).toBeTruthy();
+  });
+
+  it.each([
+    ["missing-code", "No connection code was received", "Paste the code"],
+    ["network", "Could not reach SystemSculpt", "Check your connection"],
+    ["rate-limited", "Too many sign-in attempts", "Wait a moment"],
+  ] as const)("shows actionable %s copy instead of leaving the user authenticating", async (reason, problem, recovery) => {
+    const modal = new AccountConnectModal({} as any, async () => ({ kind: "error", reason }));
+    modal.onOpen();
+    await flushPromises();
+    expect(modal.modalEl.textContent).toContain(problem);
+    expect(modal.modalEl.textContent).toContain(recovery);
+    expect(modal.modalEl.textContent).not.toContain("Authenticating…");
+    expect(findButtonByText(modal.modalEl, "Close")).toBeTruthy();
+    modal.onClose();
   });
 
   it("treats a rejected exchange as temporarily unavailable", async () => {

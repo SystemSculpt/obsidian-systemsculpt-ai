@@ -341,22 +341,6 @@ export default class SystemSculptPlugin extends Plugin {
         // The upgrade/sign-in modal's browser handoff is superseded the
         // moment the deep link comes back — close it before the welcome.
         UpgradePlanModal.closeCurrent();
-        const email = this.settings.userEmail?.trim() ?? "";
-        if (!connect.hasPendingRequest() && email) {
-          // Polling already finished this sign-in; a late deep link should
-          // greet the signed-in user, not show an expired-request error.
-          new AccountConnectModal(
-            this.app,
-            () => Promise.resolve({
-              kind: "signed-in" as const,
-              name: this.settings.userName?.trim() || null,
-              email,
-              licenseValid: this.settings.licenseValid === true,
-            }),
-            defaultAccountConnectActions(this),
-          ).open();
-          return;
-        }
         new AccountConnectModal(
           this.app,
           () => connect.handleProtocolCallback(params),

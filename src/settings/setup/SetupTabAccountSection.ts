@@ -81,6 +81,7 @@ export function renderAccountSection(
         .onClick(async () => {
           try {
             button.setDisabled(true).setButtonText("Working...");
+            connectService.cancelPending();
             await plugin.getSettingsManager().updateSettings({
               licenseKey: "",
               licenseValid: false,
