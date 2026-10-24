@@ -101,11 +101,11 @@ describe("inline approval keyboard ownership", () => {
     ui.input.dispatchEvent(idle);
     expect(idle.defaultPrevented).toBe(false);
 
-    // An empty composer gives focus to the card; no pill is needed.
+    // An empty composer gives focus to the card's Approve (spec 6.2 (3)); no pill is needed.
     const part = tool("one");
     const card = ui.add(part);
     ui.cards.sync([part]);
-    expect(document.activeElement).toBe(card);
+    expect(document.activeElement).toBe(card.querySelector('[data-focus-key="tool-allow-once"]'));
     expect(pill()?.hidden).toBe(true);
     expect(pill()?.getAttribute("aria-keyshortcuts")).toBe("Alt+ArrowUp");
     expect(pill()?.querySelector("kbd")?.getAttribute("aria-hidden")).toBe("true");
