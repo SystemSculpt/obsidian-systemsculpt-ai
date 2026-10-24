@@ -272,6 +272,12 @@ function webSearchQuery(part: AgentToolPart): string | null {
     : null;
 }
 
+function webSearchResultCount(part: AgentToolPart): number | undefined {
+  if (!isWebSearchTool(part)) return undefined;
+  const count = record(part.output?.data).result_count;
+  return typeof count === "number" && Number.isSafeInteger(count) && count >= 0 ? count : undefined;
+}
+
 function displayedToolState(part: AgentToolPart): AgentToolPart["state"] {
   return part.location === "server" && (
     part.state === "input-ready"
@@ -379,7 +385,11 @@ export function presentAgentToolDetails(
   if (part.location === "server") {
     if (canonicalName !== "web_search") return [];
     const query = webSearchQuery(part);
-    return query ? [{ label: "Query", value: detailValue(query)! }] : [];
+    const count = webSearchResultCount(part);
+    return [
+      ...(query ? [{ label: "Query", value: detailValue(query)! }] : []),
+      ...(count !== undefined ? [{ label: "Results", value: String(count) }] : []),
+    ];
   }
   if (!VAULT_TOOLS_WITH_SAFE_DETAILS.has(canonicalName)) return [];
 
@@ -542,8 +552,9 @@ export function presentAgentTool(part: AgentToolPart): AgentToolPresentation {
   const label = serverTool ? actionLabel(query ? `Search the web for “${query}”` : serverLabel ?? UNKNOWN_SERVER_TOOL_LABEL, labelState)
     : displayState === "failed" ? `Couldn't ${baseLabel.charAt(0).toLowerCase()}${baseLabel.slice(1)}` : actionLabel(baseLabel, labelState);
   const output = record(part.output?.data);
-  const resultCount = typeof output.totalMatches === "number" ? output.totalMatches
-    : Array.isArray(output.matches) ? output.matches.length : undefined;
+  const resultCount = serverTool ? webSearchResultCount(part)
+    : typeof output.totalMatches === "number" ? output.totalMatches
+      : Array.isArray(output.matches) ? output.matches.length : undefined;
   return {
     canonicalName: presentedName, label,
     actionIcon: TOOL_ACTION_ICONS[presentedName] ?? "wrench",

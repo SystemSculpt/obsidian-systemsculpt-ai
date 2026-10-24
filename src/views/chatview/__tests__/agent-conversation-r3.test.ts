@@ -101,6 +101,23 @@ describe("R3 conversation semantics", () => {
     renderer.unload();
   });
 
+  it("enables retry after detection confirms the missing agent is ready", async () => {
+    const { renderer, parent, onDetectAgain, onRetryFailedTurn } = setup();
+    onDetectAgain.mockResolvedValue(true);
+    await render(renderer, snapshot([{ kind: "error", id: "missing", order: 0, retryable: true,
+      error: { code: "local_claude_failed", message: "spawn ENOENT" } }], "failed"));
+    const detect = parent.querySelector<HTMLButtonElement>('[data-testid="chat.turn.detect-again"]')!;
+    detect.focus();
+    detect.click();
+    await Promise.resolve();
+    expect(document.activeElement).toBe(detect);
+    expect(detect.dataset.testid).toBe("chat.turn.retry-failed");
+    detect.click();
+    expect(onRetryFailedTurn).toHaveBeenCalledWith("turn");
+    expect(parent.querySelectorAll('.systemsculpt-agent-error-actions button')).toHaveLength(2);
+    renderer.unload();
+  });
+
   it("keeps receipt links and keyboard focus stable across terminal refreshes", async () => {
     const { renderer, parent } = setup();
     const completed = snapshot([tool({ name: "write", input: { path: "Notes/Plan.md", content: "Done" }, state: "succeeded" })], "completed");
@@ -123,6 +140,13 @@ describe("R3 conversation semantics", () => {
     expect(parent.querySelector<HTMLButtonElement>('[data-testid="chat.turn.copy"]')!.title).toBe(`Copy response · ${time}`);
     await renderer.renderHistory([{ role: "assistant", message_id: "untimed", content: "No timestamp" }]);
     expect(parent.querySelector<HTMLButtonElement>('[data-testid="chat.turn.copy"]')!.title).toBe("Copy response");
+    renderer.unload();
+  });
+
+  it("shows the newest streaming activity even while an earlier tool is still active", async () => {
+    const { renderer, parent } = setup();
+    await render(renderer, snapshot([tool(), { kind: "text", id: "new-text", messageId: "answer", order: 1, state: "streaming", markdown: "Here is the result" }]));
+    expect(parent.querySelector('.systemsculpt-agent-tail-status')!.textContent).toBe("Writing · 2s");
     renderer.unload();
   });
 
