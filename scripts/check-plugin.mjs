@@ -164,8 +164,11 @@ async function main() {
   const parallel = [];
   // Compatibility lanes reuse the exhaustive lane's OS-independent ESLint pass.
   if (!skipLint) {
+    // ESLint's per-file cache cannot see type changes in imported files.
+    // Keep cached fast checks, but always re-lint the authoritative full gate.
+    const lintCommand = fast ? "check:plugin:obsidian" : "check:plugin:obsidian:ci";
     parallel.push(
-      runAsync("npm run check:plugin:obsidian").then((result) => ({ name: "obsidian", ...result })),
+      runAsync(`npm run ${lintCommand}`).then((result) => ({ name: "obsidian", ...result })),
     );
   }
 

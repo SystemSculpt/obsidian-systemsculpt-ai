@@ -185,7 +185,8 @@ npm run check:compat
 - check:compat is the smaller compatibility contract used on Node 22.18,
   Node 24, macOS, and Windows after the exhaustive Ubuntu/Node 22 job. It runs
   the same critical ChatView suites without repeating coverage instrumentation
-  or OS-independent ESLint. The exhaustive lane still runs every lint pass.
+  or OS-independent ESLint. The exhaustive lane still runs every lint pass
+  uncached, since per-file caches cannot see imported type changes.
 - CI is credential-free. It runs check:ci on Ubuntu/Node 22 and check:compat
   across the compatibility matrix. It has no provider or native-device lane.
 - The installed pre-push hook runs check:ci before a push. Hosted CI remains

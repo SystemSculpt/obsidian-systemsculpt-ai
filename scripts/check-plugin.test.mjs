@@ -76,7 +76,7 @@ test("fast plugin checks stay on the measured Obsidian-native tier", () => {
   assert.match(source, /scripts\/git-hooks\.test\.mjs/);
   assert.match(source, /scripts\/lint-css\.test\.mjs/);
   assert.match(source, /scripts\/module-ownership\.test\.mjs/);
-  assert.match(source, /npm run check:plugin:obsidian/);
+  assert.match(source, /fast \? "check:plugin:obsidian" : "check:plugin:obsidian:ci"/);
   assert.match(source, /buildProductionPlugin/);
   assert.match(source, /if \(!fast\) \{/);
 
@@ -228,6 +228,8 @@ test("Jest configs share transforms and setup without changing the bundle host",
   assert.ok(integration.transformIgnorePatterns.includes("<rootDir>/main\\.js$"));
   assert.match(packageJson.scripts["lint:community"], /--cache --cache-location \.cache\/eslint\/community\.cache/);
   assert.match(source, /if \(!skipLint\) \{/);
+  assert.equal(packageJson.scripts["check:plugin:obsidian:ci"],
+    "npm run lint:obsidian -- --no-cache && npm run lint:obsidian:meta -- --no-cache && npm run lint:community -- --no-cache");
 });
 
 test("TypeScript and Jest resolve the source alias to the same tree", () => {
