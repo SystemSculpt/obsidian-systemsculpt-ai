@@ -486,7 +486,7 @@ export class StudioProjectSessionController {
       }
 
       try {
-        const cacheSnapshot = await this.host.hydrateProjectCache(projectPath, project);
+        const cacheSnapshot = session.getReadOnlyReason() ? null : await this.host.hydrateProjectCache(projectPath, project);
         if (cacheSnapshot) {
           this.host.materializeManagedOutputNodesFromCache(cacheSnapshot.entries);
         }

@@ -277,6 +277,7 @@ describe("StudioService session-backed mutation commands", () => {
     };
     (service as any).runtime = runtime;
 
+    jest.spyOn((service as any).projectStore, "loadProject").mockResolvedValue(projectFixture());
     const result = await service.runProject("Studio/Cold.systemsculpt");
 
     expect(result).toBe(summary);

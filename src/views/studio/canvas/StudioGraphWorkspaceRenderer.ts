@@ -58,6 +58,7 @@ export type StudioGraphWorkspaceRendererOptions = Omit<RenderStudioGraphNodeCard
   "projectId" | "projectPath" | "projectNodes" | "getRelatedNodeRunState" | "layer" | "node" | "inboundEdges" | "nodeRunState" | "nodeActivity"
 > & {
   root: HTMLElement;
+  readOnly?: boolean;
   currentProject: StudioProjectV1 | null;
   currentProjectPath: string | null;
   getNodeRunState: (nodeId: string) => StudioNodeRunDisplayState;
@@ -172,7 +173,23 @@ export function renderStudioGraphWorkspace(
     return { viewportEl: null, canvasEl: null, refresh: () => false, dispose: () => undefined };
   }
 
+  const readOnly = options.readOnly === true;
   const viewport = editor.createDiv({ cls: "ss-studio-graph-viewport" });
+  if (readOnly) {
+    // Keep scrolling, zoom and readable content, but never dispatch editing/run handlers.
+    for (const type of ["pointerdown", "click", "dblclick", "contextmenu", "keydown", "paste", "drop", "beforeinput"]) {
+      viewport.addEventListener(type, event => {
+        event.stopImmediatePropagation();
+        if (type !== "pointerdown" && type !== "keydown") event.preventDefault();
+      }, true);
+    }
+  }
+  const applyReadOnlyControls = (): void => {
+    if (!readOnly) return;
+    for (const element of viewport.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("input, textarea")) element.readOnly = true;
+    for (const element of viewport.querySelectorAll<HTMLButtonElement | HTMLSelectElement | HTMLInputElement>('button, select, input[type="checkbox"], input[type="radio"], input[type="range"], input[type="file"]')) element.disabled = true;
+    for (const element of viewport.querySelectorAll<HTMLElement>("[contenteditable]")) element.contentEditable = "false";
+  };
   viewport.classList.toggle("is-arrow-tool", activeCanvasTool === "arrow");
   viewport.classList.toggle(
     "is-shape-tool",
@@ -260,7 +277,7 @@ export function renderStudioGraphWorkspace(
   graphInteraction.registerAlignmentGuidesElement(alignmentGuides);
 
   const controls = editor.createDiv({ cls: "ss-studio-graph-workspace-controls" });
-  let currentBusy = busy;
+  let currentBusy = busy || readOnly;
   let currentActiveCanvasTool = activeCanvasTool;
   const graphRow = controls.createDiv({ cls: "ss-studio-graph-workspace-control-row" });
   const commandCenter = currentProject.graph.nodes.find(node => node.kind === 'studio.command_center');
@@ -274,7 +291,7 @@ export function renderStudioGraphWorkspace(
     ariaLabel: "Run Studio graph",
     title: "Run graph",
     className: "is-run",
-    disabled: busy,
+    disabled: busy || readOnly,
     onSelect: () => {
       if (currentBusy) {
         return;
@@ -287,7 +304,7 @@ export function renderStudioGraphWorkspace(
     label: "Add",
     testId: "studio.workspace.add-node",
     ariaLabel: "Add node",
-    disabled: busy,
+    disabled: busy || readOnly,
     onSelect: () => {
       if (currentBusy) {
         return;
@@ -428,7 +445,7 @@ export function renderStudioGraphWorkspace(
       // without labels, and each carries its name as tooltip and aria-label.
       size: "icon",
       selected: activeCanvasTool === control.tool,
-      disabled: busy,
+      disabled: busy || readOnly,
       onSelect: () => {
         if (currentBusy) {
           return;
@@ -567,7 +584,7 @@ export function renderStudioGraphWorkspace(
 
   const refresh = (next: StudioGraphWorkspaceRendererOptions): boolean => {
     const project = next.currentProject;
-    if (disposed || !project || next.currentProjectPath !== currentProjectPath || project.projectId !== currentProject.projectId) return false;
+    if (disposed || !project || next.currentProjectPath !== currentProjectPath || project.projectId !== currentProject.projectId || (next.readOnly === true) !== readOnly) return false;
     latestOptions = next;
     const nextIds = new Set(project.graph.nodes.map(node => node.id));
     let registrationsChanged = false;
@@ -644,27 +661,29 @@ export function renderStudioGraphWorkspace(
     });
     graphInteraction.refreshNodeSelectionClasses();
     graphInteraction.refreshSelectionResizeFrame();
-    currentBusy = next.busy;
+    currentBusy = next.busy || readOnly;
     currentActiveCanvasTool = next.activeCanvasTool;
     viewport.classList.toggle("is-arrow-tool", next.activeCanvasTool === "arrow");
     viewport.classList.toggle("is-shape-tool", resolveStudioCanvasToolShape(next.activeCanvasTool) !== null);
     const runButton = editor.querySelector<HTMLButtonElement>('[aria-label="Run Studio graph"]');
     const addButton = editor.querySelector<HTMLButtonElement>('[aria-label="Add node"]');
-    if (runButton) runButton.disabled = next.busy;
-    if (addButton) addButton.disabled = next.busy;
+    if (runButton) runButton.disabled = next.busy || readOnly;
+    if (addButton) addButton.disabled = next.busy || readOnly;
     const detailButton = editor.querySelector<HTMLButtonElement>('[aria-label="Toggle node detail mode"]');
     if (detailButton) {
       detailButton.setText(next.nodeDetailMode === "collapsed" ? "Expand" : "Collapse");
       detailButton.setAttribute("aria-pressed", String(next.nodeDetailMode === "collapsed"));
     }
     for (const button of editor.querySelectorAll<HTMLButtonElement>(".ss-studio-graph-workspace-control-row.is-tools button")) {
-      button.disabled = next.busy;
+      button.disabled = next.busy || readOnly;
       const selected = button.dataset.testid === `studio.workspace.tool.${next.activeCanvasTool === "rectangle" ? "square" : next.activeCanvasTool}`;
       button.setAttribute("aria-pressed", String(selected));
     }
+    applyReadOnlyControls();
     return true;
   };
 
+  applyReadOnlyControls();
   return {
     viewportEl: viewport,
     canvasEl: world,

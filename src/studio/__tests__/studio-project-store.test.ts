@@ -64,6 +64,9 @@ function createStore(options?: { existingFiles?: string[]; existingDirs?: string
   const adapter = {
     exists: jest.fn(async (path: string) => files.has(path) || dirs.has(path)),
     mkdir: jest.fn(async (path: string) => {
+      if ([...files.keys()].some(file => path === file || path.startsWith(`${file}/`))) {
+        throw new Error(`A file blocks folder ${path}`);
+      }
       dirs.add(path);
     }),
     write: jest.fn(async (path: string, data: string) => {
@@ -716,6 +719,101 @@ describe("v1 projects with retired node kinds", () => {
         { title: "Fetch items", kind: "studio.http_request" },
       ],
     });
+  });
+
+  it("opens a migrated v1 project read-only when a file occupies its assets folder, then retries safely", async () => {
+    const { store, files, adapter } = createStore();
+    const assets = deriveStudioAssetsDir(path);
+    files.set(path, v1Text);
+    files.set(assets, "Keep this unrelated file");
+
+    const opened = await store.refreshDocument(path);
+    expect(opened.project.graph.nodes.find(node => node.id === "caption")?.kind).toBe("studio.text");
+    expect(opened.readOnlyReason).toMatch(/original.*copy/i);
+    expect(opened.readOnlyReason).toContain(`${assets}/legacy`);
+    expect(files.get(path)).toBe(v1Text);
+    expect(files.get(assets)).toBe("Keep this unrelated file");
+    expect(legacyCopies(files)).toEqual([]);
+    expect(adapter.process).not.toHaveBeenCalled();
+
+    const { revision } = await store.readDocument(path);
+    await expect(store.saveProject(path, { ...opened.project, name: "Not saved" })).rejects.toThrow(/read-only/i);
+    await expect(store.editDocument(path, revision, [{ entityId: "project", path: ["name"], value: "Not saved" }])).rejects.toThrow(/read-only/i);
+    expect(files.get(path)).toBe(v1Text);
+
+    // The user moves the blocking file; retry still preserves the exact original before rewriting.
+    files.delete(assets);
+    const retried = await store.refreshDocument(path);
+    expect(retried.readOnlyReason).toBeUndefined();
+    expect(legacyCopies(files).map(copy => files.get(copy))).toEqual([v1Text]);
+    expect(JSON.parse(files.get(path)!).schema).toBe("studio.project.v2");
+    await store.saveProject(path, { ...retried.project, name: "Editable again" });
+    expect(JSON.parse(files.get(path)!).name).toBe("Editable again");
+  });
+
+  it("keeps a blocked migration readable across shared sessions without edits, runs or policy writes", async () => {
+    const { app, files, adapter } = createStore();
+    const assets = deriveStudioAssetsDir(path);
+    files.set(path, v1Text);
+    files.set(assets, "Keep this unrelated file");
+    const service = createService(app);
+    const session = await service.retainProjectSession(path);
+    expect(session.getReadOnlyReason()).toMatch(/read-only.*original copy/i);
+    expect(await service.retainProjectSession(path)).toBe(session);
+    const snapshot = session.getProjectSnapshot();
+    const mutate = jest.fn();
+    expect(session.mutate("node.title", mutate)).toBe(false);
+    expect(await session.mutateAsync("node.config", mutate)).toBe(false);
+    expect(mutate).not.toHaveBeenCalled();
+    expect(session.applyHistorySnapshot({ ...snapshot, name: "Not applied" })).toBe(false);
+    await session.restoreEditingSnapshot({ base: snapshot, project: { ...snapshot, name: "Not restored" } });
+    session.schedulePersist();
+    await session.flushPendingSaveWork({ force: true });
+    expect(session.getProject()).toEqual(snapshot);
+    expect(session.hasPendingLocalSaveWork()).toBe(false);
+    await expect(service.runProject(path)).rejects.toThrow(/read-only/i);
+    await expect(service.runProjectFromNode(path, "caption")).rejects.toThrow(/read-only/i);
+    await expect(service.startAgentRun(path, "caption")).rejects.toThrow(/read-only/i);
+    await expect(service.importFileToProject(path, { bytes: new ArrayBuffer(1), name: "test.txt" })).rejects.toThrow(/read-only/i);
+    expect(files.has(deriveStudioPolicyPath(path))).toBe(false);
+    expect(adapter.process).not.toHaveBeenCalled();
+    expect(files.get(path)).toBe(v1Text);
+
+    // A failed explicit retry retains the same readable session and restriction.
+    expect(await service.retainProjectSession(path, { forceReload: true })).toBe(session);
+    await service.releaseProjectSession(path);
+    expect(session.getReadOnlyReason()).toBeDefined();
+    expect(files.get(path)).toBe(v1Text);
+    files.delete(assets);
+    expect(await service.retainProjectSession(path, { forceReload: true })).toBe(session);
+    await service.releaseProjectSession(path);
+    expect(session.getReadOnlyReason()).toBeUndefined();
+    expect(legacyCopies(files).map(copy => files.get(copy))).toEqual([v1Text]);
+    expect(files.has(deriveStudioPolicyPath(path))).toBe(true);
+    await session.mutateAndFlush("node.title", project => { project.name = "Recovered"; });
+    expect(JSON.parse(files.get(path)!).name).toBe("Recovered");
+    await service.releaseProjectSession(path);
+    await service.releaseProjectSession(path);
+  });
+
+  it("can close and reopen the read-only project when writing the backup itself fails", async () => {
+    const { app, files, adapter } = createStore();
+    files.set(path, v1Text);
+    const writeBinary = adapter.writeBinary.getMockImplementation()!;
+    adapter.writeBinary.mockImplementation(async (target, bytes) => {
+      if (target.startsWith(legacyFolder)) throw new Error("Permission denied");
+      await writeBinary(target, bytes);
+    });
+    const service = createService(app);
+    for (let open = 0; open < 2; open++) {
+      const session = await service.retainProjectSession(path);
+      expect(session.getReadOnlyReason()).toBeDefined();
+      expect(session.getProject().graph.nodes.find(node => node.id === "caption")?.kind).toBe("studio.text");
+      await service.releaseProjectSession(path);
+      expect(session.isDisposed()).toBe(true);
+    }
+    expect(files.get(path)).toBe(v1Text);
+    expect(legacyCopies(files)).toEqual([]);
   });
 
   it("keeps the copy before a save that is the first writer", async () => {
