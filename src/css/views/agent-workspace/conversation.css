@@ -301,3 +301,15 @@
   width: 100%;
   max-width: 100%;
 }
+
+/* Screen-reader-only text: turn headings, "Loading chat" (spec 6.3). */
+.systemsculpt-agent-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
