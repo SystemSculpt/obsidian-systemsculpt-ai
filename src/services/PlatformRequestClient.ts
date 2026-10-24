@@ -329,9 +329,9 @@ export class PlatformRequestClient {
         });
       } catch (error) {
         const failure = toError(error, "The request failed.");
-        if (failure.name === "AbortError" || (error instanceof DOMException && error.name === "AbortError")) {
-          failure.name = "AbortError";
-          throw failure;
+        if (failure.name === "AbortError") throw failure;
+        if (error instanceof DOMException && error.name === "AbortError") {
+          throw Object.assign(new Error(error.message), { name: "AbortError", cause: error });
         }
         // HTTP failures are responses with throw:false. Native connection
         // failures are ordinary Errors; expose the same category as fetch.

@@ -44,6 +44,20 @@ describe("PlatformRequestClient", () => {
     }
   });
 
+  it("preserves native aborts with a readonly name without retrying", async () => {
+    const client = new PlatformRequestClient();
+    const stopped = Object.defineProperty(new Error("Stopped"), "name", { get: () => "AbortError" });
+    (requestUrl as jest.Mock).mockRejectedValueOnce(stopped);
+    const wait = jest.fn().mockResolvedValue(undefined);
+    await expect(dispatchManagedJob({
+      send: () => client.request({ url: "https://api.test/job", method: "POST" }),
+      signal: new AbortController().signal,
+      wait,
+    })).rejects.toBe(stopped);
+    expect(requestUrl).toHaveBeenCalledTimes(1);
+    expect(wait).not.toHaveBeenCalled();
+  });
+
   it("does not turn a native abort or an HTTP rejection into a connection failure", async () => {
     const client = new PlatformRequestClient();
     const stopped = new DOMException("Stopped", "AbortError");
