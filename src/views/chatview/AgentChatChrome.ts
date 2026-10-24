@@ -1,5 +1,5 @@
 import type { CreditsBalanceSnapshot } from "../../services/SystemSculptService";
-import type { CodexModel } from "../../services/codex/CodexModelCatalog";
+import { codexDefaultLabel, type CodexModel } from "../../services/codex/CodexModelCatalog";
 import type { LocalAgentAvailability, LocalAgentDetection } from "../../services/codex/LocalAgentDetection";
 import { LOCAL_AGENTS, isLocalAgentId, type LocalAgentId, type TextExecutionBackend } from "../../services/codex/LocalAgents";
 import { PLAN_REQUIRED_MESSAGE } from "../../utils/errors";
@@ -248,7 +248,9 @@ function modelDetail(state: AgentChromeState): RunLineSegment | null {
   if (state.backend === "codex") {
     const effort = effortLabel(state.codex.effort);
     // The installed Codex's own name for the model, as its menu shows it.
-    const model = state.codex.models?.find((candidate) => candidate.model === state.codex.model)?.name ?? state.codex.model;
+    const model = state.codex.model
+      ? state.codex.models?.find((candidate) => candidate.model === state.codex.model)?.name ?? state.codex.model
+      : codexDefaultLabel(state.codex.models);
     return {
       key: "detail",
       label: model,
@@ -406,21 +408,22 @@ export function modelMenu(state: AgentChromeState): readonly ChromeMenuEntry[] {
     }
   } else if (state.backend === "codex") {
     const { models, model, effort, serviceTier } = state.codex;
-    const current = models?.find((candidate) => candidate.model === model);
+    const current = models?.find((candidate) => model ? candidate.model === model : candidate.isDefault);
     if (!models) entries.push({ kind: "label", title: "Loading Codex models…" });
+    entries.push({ kind: "item", id: "model:", title: codexDefaultLabel(models), checked: !model });
     for (const candidate of models ?? []) {
       entries.push({ kind: "item", id: `model:${candidate.model}`, title: candidate.name, checked: candidate.model === model });
     }
-    if (!current) entries.push({ kind: "item", id: `model:${model}`, title: model, checked: true, disabled: true });
+    if (model && !current) entries.push({ kind: "item", id: `model:${model}`, title: model, checked: true, disabled: true });
     const efforts = current?.efforts.length ? current.efforts : [effort];
     entries.push({ kind: "separator" }, { kind: "label", title: "Thinking" });
-    for (const value of new Set([...efforts, effort])) {
+    for (const value of new Set(["", ...efforts, effort])) {
       entries.push({
         kind: "item",
         id: `effort:${value}`,
-        title: effortLabel(value),
+        title: value ? effortLabel(value) : "Codex default",
         checked: value === effort,
-        disabled: Boolean(current) && !current!.efforts.includes(value),
+        disabled: Boolean(value && current && !current.efforts.includes(value)),
       });
     }
     const fastTier = current?.fastTier ?? (current ? undefined : serviceTier !== "default" ? serviceTier : undefined);

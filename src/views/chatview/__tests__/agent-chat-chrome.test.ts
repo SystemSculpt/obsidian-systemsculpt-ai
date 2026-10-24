@@ -235,6 +235,17 @@ describe("mode and model menus", () => {
       .toEqual([["model:", "Default", false], ["model:opus", "Opus", true], ["model:sonnet", "Sonnet", false], ["model:haiku", "Haiku", false]]);
   });
 
+  it.each([null, [], [{ model: "native", name: "Native model", efforts: ["low", "high"], defaultEffort: "low", isDefault: true }]])("marks native Codex defaults without pinning the catalog model", models => {
+    const current = state({ backend: "codex", codex: { ...state().codex, model: "", effort: "", models } });
+    const choices = items(modelMenu(current));
+    const title = models?.length ? "Codex default (Native model)" : "Codex default";
+    expect(choices.find(entry => entry.id === "model:")).toMatchObject({ title, checked: true });
+    expect(choices.find(entry => entry.id === "effort:")).toMatchObject({ title: "Codex default", checked: true, disabled: false });
+    expect(choices.filter(entry => entry.checked && entry.id.startsWith("model:"))).toHaveLength(1);
+    const line = presentRunLine(current);
+    expect(line.kind === "segments" && line.segments.find(segment => segment.key === "detail")?.label).toBe(title);
+  });
+
   it("offers Codex models, the thinking levels each supports, and speed", () => {
     const models = [
       { model: "gpt-6.1", name: "GPT-6.1", efforts: ["low", "high"], defaultEffort: "high", fastTier: "priority" },
@@ -244,7 +255,7 @@ describe("mode and model menus", () => {
     expect(entries.filter((entry) => entry.kind === "label").map((entry) => entry.kind === "label" && entry.title))
       .toEqual(["Thinking", "Speed"]);
     expect(items(entries).map((entry) => entry.id)).toEqual([
-      "model:gpt-6.1", "model:mini", "effort:low", "effort:high", "tier:default", "tier:priority",
+      "model:", "model:gpt-6.1", "model:mini", "effort:", "effort:low", "effort:high", "tier:default", "tier:priority",
     ]);
     expect(modelMenu(state({ backend: "codex" }))[0]).toEqual({ kind: "label", title: "Loading Codex models…" });
   });

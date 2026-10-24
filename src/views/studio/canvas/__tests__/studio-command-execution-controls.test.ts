@@ -2,7 +2,7 @@
 import { renderStudioCommandExecution } from '../StudioCommandExecutionControls';
 import { readCodexCatalog } from '../../../../services/codex/CodexModelCatalog';
 import { hasHostCapability } from '../../../../platform/hostCapabilities';
-jest.mock('../../../../services/codex/CodexModelCatalog', () => ({ readCodexCatalog: jest.fn() }));
+jest.mock('../../../../services/codex/CodexModelCatalog', () => ({ ...jest.requireActual('../../../../services/codex/CodexModelCatalog'), readCodexCatalog: jest.fn() }));
 jest.mock('../../../../services/codex/CodexExecutionSettings', () => ({ ...jest.requireActual('../../../../services/codex/CodexExecutionSettings'), codexVaultDirectory: () => '/vault' }));
 jest.mock('../../../../platform/hostCapabilities', () => ({ hasHostCapability: jest.fn(() => true) }));
 const models = [{ model: 'gpt-6-astra', name: 'GPT-6 Astra', efforts: ['high', 'xhigh'], defaultEffort: 'high', fastTier: 'priority' }, { model: 'test-model', name: 'Test model', efforts: ['low', 'medium'], defaultEffort: 'medium' }];
@@ -36,5 +36,5 @@ it('offers retry after catalog failure and ignores late resolution after teardow
   await Promise.resolve(); await Promise.resolve(); expect(f.model.disabled).toBe(false); f.dispose();
   let resolve!: (value: any) => void;
   jest.mocked(readCodexCatalog).mockImplementationOnce(() => new Promise(done => { resolve = done; }));
-  const g = await fixture(); g.dispose(); resolve({ models, permissions: '' }); await Promise.resolve(); expect(g.model.options).toHaveLength(1);
+  const g = await fixture(); g.dispose(); resolve({ models, permissions: '' }); await Promise.resolve(); expect(g.model.options).toHaveLength(2);
 });

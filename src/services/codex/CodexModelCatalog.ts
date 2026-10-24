@@ -1,7 +1,11 @@
 import { connectCodex } from './CodexAppServer';
 import { describeCodexPermissions } from './CodexPermissions';
 import { isRecord } from '../../studio/utils';
-export type CodexModel = { model: string; name: string; efforts: string[]; defaultEffort: string; fastTier?: string };
+export type CodexModel = { model: string; name: string; efforts: string[]; defaultEffort: string; isDefault?: boolean; fastTier?: string };
+export function codexDefaultLabel(models: readonly CodexModel[] | null): string {
+  const name = models?.find(model => model.isDefault)?.name;
+  return name ? `Codex default (${name})` : 'Codex default';
+}
 type Catalog = { models: CodexModel[]; permissions: string };
 type CatalogRead = { promise: Promise<Catalog>; controller: AbortController; consumers: number };
 const pending = new Map<string, CatalogRead>();
@@ -48,7 +52,7 @@ async function loadCodexCatalog(cwd: string, signal: AbortSignal): Promise<Catal
         if (typeof model.model !== 'string' || model.hidden === true) continue;
         const tiers = Array.isArray(model.serviceTiers) ? model.serviceTiers.filter(isRecord) : [];
         const fast = tiers.find(tier => tier.id === 'fast' || tier.id === 'priority' || /fast/i.test(String(tier.name)));
-        models.push({ model: model.model, name: String(model.displayName || model.model),
+        models.push({ model: model.model, name: String(model.displayName || model.model), isDefault: model.isDefault === true,
           efforts: (Array.isArray(model.supportedReasoningEfforts) ? model.supportedReasoningEfforts : []).filter(isRecord).map(option => String(option.reasoningEffort)),
           defaultEffort: String(model.defaultReasoningEffort || 'high'),
           ...(fast ? { fastTier: String(fast.id) } : Array.isArray(model.additionalSpeedTiers) && model.additionalSpeedTiers.includes('fast') ? { fastTier: 'fast' } : {}),
