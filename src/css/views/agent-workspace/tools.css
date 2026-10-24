@@ -463,9 +463,18 @@
 .systemsculpt-agent-approval-preview code {
   overflow-wrap: anywhere;
 }
-.ss-native-tool-preview {
+.ss-native-tool-preview,
+.ss-hosted-tool-preview {
   min-width: 0;
   font-size: var(--ss-text-sm);
+}
+.ss-hosted-tool-preview p {
+  margin-block: var(--ss-space-2);
+}
+.ss-hosted-tool-list {
+  margin-block: var(--ss-space-2);
+  padding-inline-start: var(--ss-space-4);
+  overflow-wrap: anywhere;
 }
 .ss-native-tool-preview .ss-agent-tool-details {
   margin: 0;
@@ -478,8 +487,12 @@
   margin: 0 0 var(--ss-space-2);
   overflow-wrap: anywhere;
 }
-.ss-native-tool-preview pre {
+.ss-native-tool-preview pre,
+.ss-hosted-tool-preview pre {
   overflow: auto;
+  white-space: pre;
+  overflow-wrap: normal;
+  word-break: normal;
   font-family: var(--ss-font-mono);
   font-size: calc(1em * 0.9);
 }
