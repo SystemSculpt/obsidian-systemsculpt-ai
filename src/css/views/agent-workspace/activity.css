@@ -18,7 +18,7 @@
   gap: var(--ss-space-2);
   min-height: var(--ss-control-height-sm);
   padding: 0 var(--ss-space-1);
-  color: var(--ss-ink-faint);
+  color: var(--ss-ink-muted);
   font-size: var(--ss-text-xs);
   font-variant-numeric: tabular-nums;
   line-height: 20px;
@@ -31,7 +31,7 @@
   justify-content: center;
   width: 18px;
   height: var(--ss-icon-size-sm);
-  color: var(--ss-ink-faint);
+  color: var(--ss-ink-muted);
 }
 
 .systemsculpt-agent-tail-status-icon svg {
@@ -165,7 +165,7 @@ button.systemsculpt-agent-activity-overflow-header:focus-visible {
   justify-content: center;
   width: 20px;
   height: 20px;
-  color: var(--ss-ink-faint);
+  color: var(--ss-ink-muted);
 }
 
 .systemsculpt-agent-activity-disclosure,

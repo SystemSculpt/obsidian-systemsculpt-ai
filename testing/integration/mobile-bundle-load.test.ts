@@ -90,6 +90,14 @@ describe("built bundle in Obsidian Mobile", () => {
     expect(styles).not.toMatch(/\.is-mobile|\.mobile-navbar-action/);
   });
 
+  it("ships the final ChatView focus invariant after feature styles", () => {
+    const styles = readFileSync(STYLES_PATH, "utf8");
+    const selector = ":is(.ss-surface.systemsculpt-agent-workspace, #ss-specificity-boost) :focus-visible";
+    expect(styles).toContain(selector);
+    expect(styles.slice(styles.indexOf(selector))).toMatch(/^[^{]+\{\s*outline:\s*2px solid var\(--ss-ink-accent\);\s*outline-offset:\s*2px;\s*box-shadow:\s*var\(--ss-ring\);/);
+    expect(styles.indexOf(selector)).toBeGreaterThan(styles.lastIndexOf(".ss-studio-"));
+  });
+
   it("onloads cleanly and opens Studio, Similar Notes, and Chat from the production mobile bundle", async () => {
     for (const specifier of DESKTOP_NODE_MODULES) {
       jest.doMock(specifier, () => {
