@@ -9,6 +9,8 @@ type FlushContext = {
 };
 
 type OnCloseContext = {
+  presentation: { setVisible: jest.Mock<void, [boolean]> };
+  detachLeafVisibility: jest.Mock<void, []> | null;
   mediaModelPicker: { dispose: jest.Mock<void, []> };
   shapeController: { cancelDrawGesture: jest.Mock; registerLayerHandle: jest.Mock };
   assetPreviews: { dispose: jest.Mock<void, []> };
@@ -64,6 +66,8 @@ describe("SystemSculptStudioView save persistence", () => {
 
   it("closes through the project session controller and tears down UI overlays", async () => {
     const context: OnCloseContext = {
+      presentation: { setVisible: jest.fn() },
+      detachLeafVisibility: jest.fn(),
       mediaModelPicker: { dispose: jest.fn() },
       shapeController: { cancelDrawGesture: jest.fn(), registerLayerHandle: jest.fn() },
       assetPreviews: { dispose: jest.fn() },
@@ -90,6 +94,7 @@ describe("SystemSculptStudioView save persistence", () => {
         empty: jest.fn(),
       },
     };
+    const detachVisibility = context.detachLeafVisibility;
     const nodeContextDestroy = context.nodeContextMenuOverlay?.destroy;
     const nodeActionDestroy = context.nodeActionContextMenuOverlay?.destroy;
 
@@ -101,6 +106,9 @@ describe("SystemSculptStudioView save persistence", () => {
     expect(context.runObservation.dispose).toHaveBeenCalledTimes(1);
     expect(context.mediaModelPicker.dispose).toHaveBeenCalledTimes(1);
     expect(context.activity.dispose).toHaveBeenCalledTimes(1);
+    expect(context.presentation.setVisible).toHaveBeenCalledWith(false);
+    expect(detachVisibility).toHaveBeenCalledTimes(1);
+    expect(context.detachLeafVisibility).toBeNull();
     expect(context.projectSessionController.close).toHaveBeenCalledTimes(1);
     expect(context.clipboardAndDropController.dispose).toHaveBeenCalledTimes(1);
     expect(nodeContextDestroy).toHaveBeenCalledTimes(1);

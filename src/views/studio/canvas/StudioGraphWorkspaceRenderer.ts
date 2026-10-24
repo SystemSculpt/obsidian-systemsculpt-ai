@@ -583,7 +583,9 @@ export function renderStudioGraphWorkspace(
   };
 
   nodeLayer.addEventListener("focusout", () => {
-    void Promise.resolve().then(() => { if (!disposed) refresh(latestOptions); });
+    void Promise.resolve().then(() => {
+      if (!disposed && latestOptions.presentation?.isVisible() !== false) refresh(latestOptions);
+    });
   });
 
   const refresh = (next: StudioGraphWorkspaceRendererOptions): boolean => {
