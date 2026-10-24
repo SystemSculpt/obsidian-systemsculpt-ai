@@ -456,12 +456,13 @@ export class ChatHistoryPanel extends Component {
       });
     };
     input.addEventListener("keydown", (event) => {
-      event.stopPropagation();
       if (event.key === "Enter") {
         event.preventDefault();
+        event.stopPropagation();
         finish(true);
       } else if (event.key === "Escape") {
         event.preventDefault();
+        event.stopPropagation();
         finish(false);
       }
     });

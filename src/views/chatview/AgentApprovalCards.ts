@@ -14,6 +14,7 @@ export type ApprovalAnswer = (
 
 type ApprovalOptions = {
   onApprove: ApprovalAnswer;
+  onReview?: () => void;
   composer?: () => HTMLElement | undefined;
   isVisible?: () => boolean;
   onHiddenApproval?: (part: AgentToolPart) => void;
@@ -113,7 +114,7 @@ export class AgentApprovalCards extends Component {
         && !event.defaultPrevented && !event.repeat && !event.isComposing && this.pending.size) {
         event.preventDefault();
         event.stopPropagation();
-        this.focusFirst();
+        this.reviewFirst();
       }
     });
   }
@@ -262,6 +263,11 @@ export class AgentApprovalCards extends Component {
     }
   }
 
+  private reviewFirst(): void {
+    this.options.onReview?.();
+    this.focusFirst();
+  }
+
   private focusAfter(id: string, order: readonly string[]): void {
     const index = order.indexOf(id);
     const candidates = [...order.slice(index + 1), ...order.slice(0, index).reverse()];
@@ -289,7 +295,7 @@ export class AgentApprovalCards extends Component {
         text: getHostOperatingSystem() === "macOS" ? "⌥↑" : "Alt+↑",
         attr: { "aria-hidden": "true" },
       });
-      this.review.onclick = () => this.focusFirst();
+      this.review.onclick = () => this.reviewFirst();
     }
     this.syncReviewVisibility();
   }

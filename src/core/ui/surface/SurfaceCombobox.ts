@@ -132,6 +132,8 @@ export class SurfaceCombobox<T> {
     }
 
     if (!this.open) return;
+    // Modified vertical arrows belong to the host/view, not option navigation.
+    if (event.altKey && (event.key === "ArrowUp" || event.key === "ArrowDown")) return;
 
     if ((this.options.focusMode ?? "input") === "options") {
       if (event.key !== "ArrowDown" || this.visibleItems.length === 0) return;

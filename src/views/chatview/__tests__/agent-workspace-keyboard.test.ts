@@ -56,6 +56,16 @@ describe("ChatView keyboard map (spec 6.1, composed R2/R4/R5 surfaces)", () => {
       onSubmit, onStop, onApprove,
       onAttach: jest.fn(), onRemoveAttachment: jest.fn(), onOpenArtifact: jest.fn(),
       onCopyArtifactPath: jest.fn(), onNewChat: jest.fn(), onOpenHistory: jest.fn(),
+      history: {
+        loadRows: async () => [{
+          chatId: "saved", title: "Saved chat", chatPath: "Chats/saved.md",
+          timestampMs: Date.now(), backend: "systemsculpt", favorite: false,
+        }],
+        loadSearchText: async () => "", isCurrent: () => true, isRunning: () => false,
+        onOpen: jest.fn(), onNewChat: jest.fn(), onClose: () => workspace.hideHistory(),
+        onToggleFavorite: async () => undefined, onRename: async () => undefined,
+        onDelete: async () => false,
+      },
     });
     workspace.load();
     input = query<HTMLTextAreaElement>('[data-testid="chat.composer.input"]');
@@ -225,6 +235,70 @@ describe("ChatView keyboard map (spec 6.1, composed R2/R4/R5 surfaces)", () => {
     outside.focus();
     expect(key(outside, { key: arrow, altKey: true }).defaultPrevented).toBe(false);
     expect(document.activeElement).toBe(outside);
+    expect(onApprove).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["ArrowUp", "history.search"], ["ArrowDown", "history.search"],
+    ["ArrowUp", "history.close"], ["ArrowDown", "history.close"],
+  ])("Go to pending card — Alt+%s closes history from %s before focusing the card", async (arrow, testId) => {
+    type(input, "Keep this draft");
+    await showCards();
+    workspace.showHistory();
+    await settle();
+    const target = query(`[data-testid="${testId}"]`);
+    target.focus();
+    expect(workspace.isHistoryOpen).toBe(true);
+    expect(key(target, { key: arrow, altKey: true }).defaultPrevented).toBe(true);
+    expect(workspace.isHistoryOpen).toBe(false);
+    expect(workspace.element.classList.contains("is-history-open")).toBe(false);
+    expect(document.activeElement).toBe(card("one"));
+    expect(input.value).toBe("Keep this draft");
+    expect(onApprove).not.toHaveBeenCalled();
+  });
+
+  it.each(["ArrowUp", "ArrowDown"])("Go to pending card — Alt+%s reviews from a history row's rename field", async (arrow) => {
+    type(input, "Keep this draft");
+    await showCards();
+    workspace.showHistory();
+    await settle();
+    key(query('[data-testid="history.search"]'), { key: "F10", shiftKey: true });
+    const menus = (Menu as unknown as { instances: Array<Menu & { select: (title: string) => void }> }).instances;
+    menus.at(-1)!.select("Rename");
+    const rename = query<HTMLInputElement>('[data-testid="history.row.rename"]');
+    // Let the row's native animation-frame focus restoration finish first.
+    await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+    expect(document.activeElement).toBe(rename);
+    expect(key(rename, { key: arrow, altKey: true }).defaultPrevented).toBe(true);
+    await settle();
+    expect(workspace.isHistoryOpen).toBe(false);
+    expect(document.activeElement).toBe(card("one"));
+    expect(input.value).toBe("Keep this draft");
+    expect(onApprove).not.toHaveBeenCalled();
+  });
+
+  it("Go to pending card — history stays open until an explicit review of a pending card", async () => {
+    type(input, "Keep this draft");
+    workspace.showHistory();
+    await settle();
+    const search = query('[data-testid="history.search"]');
+    for (const arrow of ["ArrowUp", "ArrowDown"]) {
+      expect(key(search, { key: arrow, altKey: true }).defaultPrevented).toBe(false);
+      expect(workspace.isHistoryOpen).toBe(true);
+      expect(document.activeElement).toBe(search);
+    }
+    await showCards();
+    expect(workspace.isHistoryOpen).toBe(true);
+    expect(document.activeElement).toBe(search);
+    for (const init of [{ isComposing: true }, { repeat: true }, { shiftKey: true }, { ctrlKey: true }, { metaKey: true }]) {
+      expect(key(search, { key: "ArrowUp", altKey: true, ...init }).defaultPrevented).toBe(false);
+      expect(workspace.isHistoryOpen).toBe(true);
+      expect(document.activeElement).toBe(search);
+    }
+    search.addEventListener("keydown", (event) => event.preventDefault(), { once: true });
+    key(search, { key: "ArrowUp", altKey: true });
+    expect(workspace.isHistoryOpen).toBe(true);
+    expect(document.activeElement).toBe(search);
     expect(onApprove).not.toHaveBeenCalled();
   });
 

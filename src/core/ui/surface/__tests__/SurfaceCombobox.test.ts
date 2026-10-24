@@ -151,6 +151,34 @@ describe("SurfaceCombobox", () => {
     expect(onCommit).toHaveBeenCalledWith(expect.objectContaining({ item: items[0] }));
   });
 
+  it.each(["input", "options"] as const)("leaves Alt+vertical arrows to the view in %s focus mode", (focusMode) => {
+    const input = document.body.createEl("input");
+    const listbox = document.body.createDiv();
+    const onCommit = jest.fn();
+    const combobox = new SurfaceCombobox<Item>({
+      input, listbox, focusMode, activeMode: "none",
+      getItemKey: (item) => item.id,
+      filterItems: (source) => source,
+      renderOption: ({ item, ownerDocument }) => {
+        const option = ownerDocument.createElement("div");
+        option.textContent = item.label;
+        return option;
+      },
+      onCommit,
+    });
+    combobox.setItems([{ id: "one", label: "One" }]);
+    input.focus();
+    for (const arrow of ["ArrowUp", "ArrowDown"]) {
+      const event = new KeyboardEvent("keydown", { key: arrow, altKey: true, bubbles: true, cancelable: true });
+      input.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(false);
+      expect(combobox.activeIndex).toBe(-1);
+      expect(document.activeElement).toBe(input);
+    }
+    expect(onCommit).not.toHaveBeenCalled();
+    combobox.destroy();
+  });
+
   it("preserves keyed option focus and scroll across dynamic collection replacement", () => {
     const input = document.body.createEl("input");
     const listbox = document.body.createDiv();
