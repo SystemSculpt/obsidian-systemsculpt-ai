@@ -100,6 +100,8 @@
 }
 
 .systemsculpt-agent-header .systemsculpt-agent-title-button {
+  /* Override Obsidian's button flex layout so the text can ellipsize. */
+  display: block;
   overflow: hidden;
   background: transparent;
   box-shadow: none;
