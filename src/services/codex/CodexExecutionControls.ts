@@ -4,7 +4,7 @@ import { codexOptionsFromSettings, codexVaultDirectory, localAgentDetectionDirec
 import { LOCAL_AGENTS, isLocalAgentId } from './LocalAgents';
 import { mountCodexModelControls } from './CodexModelControls';
 import { mountClaudeExecutionControls } from '../claude/ClaudeExecutionControls';
-import { detectLocalAgents } from './LocalAgentDetection';
+import { detectLocalAgents, subscribeLocalAgentDetection, type LocalAgentDetection } from './LocalAgentDetection';
 
 const CODEX_MODES = [['auto', 'Auto'], ['ask', 'Ask'], ['read-only', 'Read only'], ['settings', 'Codex settings']] as const;
 
@@ -55,15 +55,16 @@ export function mountCodexExecutionControls(parent: HTMLElement, plugin: SystemS
     }
     picker.refresh(); claude.refresh();
   };
+  const showDetection = (result: LocalAgentDetection) => {
+    if (disposed || !detectionStatus || detectionStatus.hidden) return;
+    const label = isLocalAgentId(result.preferred) ? LOCAL_AGENTS[result.preferred] : 'SystemSculpt';
+    detectionStatus.setText(`Detected: ${label}. ${plugin.settings.textExecutionBackendExplicit ? 'Your choice is unchanged.' : 'Used for your next new chat.'}`);
+  };
+  const stopDetection = detect ? subscribeLocalAgentDetection(localAgentDetectionDirectory(plugin.app), showDetection) : undefined;
   detect?.addEventListener('click', () => {
     detect.disabled = true;
     if (detectionStatus) { detectionStatus.setText('Finding Claude Code or Codex…'); detectionStatus.hidden = false; }
-    void detectLocalAgents({ force: true, workingDirectory: localAgentDetectionDirectory(plugin.app) }).then(result => {
-      if (disposed || !detectionStatus) return;
-      const label = isLocalAgentId(result.preferred) ? LOCAL_AGENTS[result.preferred] : 'SystemSculpt';
-      detectionStatus.setText(`Detected: ${label}. ${plugin.settings.textExecutionBackendExplicit ? 'Your choice is unchanged.' : 'Used for your next new chat.'}`);
-      detectionStatus.hidden = false;
-    }).catch(() => {
+    void detectLocalAgents({ force: true, workingDirectory: localAgentDetectionDirectory(plugin.app) }).then(showDetection).catch(() => {
       if (!disposed && detectionStatus) detectionStatus.setText('Could not detect local agents. Please try again.');
     }).finally(() => { detect.disabled = false; });
   });
@@ -86,5 +87,5 @@ export function mountCodexExecutionControls(parent: HTMLElement, plugin: SystemS
     ].includes(key))) render();
   });
   render();
-  return () => { if (disposed) return; disposed = true; picker.dispose(); claude.dispose(); plugin.app.workspace.offref(updated); root.remove(); detectionStatus?.remove(); detect?.remove(); };
+  return () => { if (disposed) return; disposed = true; stopDetection?.(); picker.dispose(); claude.dispose(); plugin.app.workspace.offref(updated); root.remove(); detectionStatus?.remove(); detect?.remove(); };
 }

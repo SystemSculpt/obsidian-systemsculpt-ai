@@ -1,6 +1,6 @@
 import type { CreditsBalanceSnapshot } from "../../services/SystemSculptService";
 import { codexDefaultLabel, type CodexModel } from "../../services/codex/CodexModelCatalog";
-import type { LocalAgentAvailability, LocalAgentDetection } from "../../services/codex/LocalAgentDetection";
+import { isLocalAgentUsable as usable, type LocalAgentDetection } from "../../services/codex/LocalAgentDetection";
 import { LOCAL_AGENTS, isLocalAgentId, type LocalAgentId, type TextExecutionBackend } from "../../services/codex/LocalAgents";
 import { PLAN_REQUIRED_MESSAGE } from "../../utils/errors";
 import type { ChatApprovalMode } from "./storage/ChatPersistenceTypes";
@@ -147,10 +147,6 @@ export function chromeAccount(
   ) return "paid";
   if (credits?.includedCreditsEntitled === false && credits.totalRemaining <= 0) return "no-plan";
   return "signed-in";
-}
-
-function usable(agent: LocalAgentAvailability | undefined): boolean {
-  return Boolean(agent?.installed && agent.signedIn);
 }
 
 function otherAgent(agent: LocalAgentId): LocalAgentId {
@@ -317,6 +313,9 @@ function agentStatus(state: AgentChromeState, agent: LocalAgentId): Readonly<{
   const detection = state.detection;
   if (!detection) return { listed: true, usable: true, description: "Checking…" };
   const availability = detection.agents[agent];
+  if (availability?.installed && availability.signedIn === null) {
+    return { listed: true, usable: usable(availability), description: "Sign-in status unknown" };
+  }
   if (usable(availability)) {
     const usedMost = detection.preferred === agent && availability.lastUsed !== null;
     return { listed: true, usable: true, description: usedMost ? "Ready · used most" : "Ready" };
@@ -485,14 +484,14 @@ function localHints(state: AgentChromeState): readonly EmptyStateHint[] {
   if (!state.localAgents || !state.detection) return [];
   const hints: EmptyStateHint[] = [];
   const { claude, codex } = state.detection.agents;
-  if (claude?.installed && !claude.signedIn) {
+  if (claude?.installed && claude.signedIn === false) {
     hints.push({
       id: "claude-signed-out",
       before: "Claude Code is installed but not signed in. Run `claude` in a terminal and type /login, then",
       after: ".",
     });
   }
-  if (codex?.installed && !codex.signedIn) {
+  if (codex?.installed && codex.signedIn === false) {
     hints.push({
       id: "codex-signed-out",
       before: "Codex is installed but not signed in. Run `codex login` in a terminal, then",
@@ -500,7 +499,7 @@ function localHints(state: AgentChromeState): readonly EmptyStateHint[] {
     });
   }
   if (hints.length > 0) return hints;
-  if (usable(claude) || usable(codex)) return [];
+  if (usable(claude) || usable(codex) || claude?.signedIn === null || codex?.signedIn === null) return [];
   return [{
     id: "local-hint",
     before: "Already use Claude Code or Codex? Install or sign in on this computer, then",

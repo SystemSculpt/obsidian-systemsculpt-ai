@@ -238,14 +238,17 @@ manual mobile exploration is performed.
 
 - New desktop chats honor an explicit execution-backend choice first and preserve
   paid hosted users' selection during migration. Otherwise, choose among installed,
-  signed-in Claude Code and Codex by primary session-file count in the last 30 days
+  usable Claude Code and Codex by primary session-file count in the last 30 days
   (using file modification times), then newest session-file mtime; Claude Code wins
   an exact tie. If neither is usable, use hosted SystemSculpt. Saved chats retain
   their backend. Desktop users need no SystemSculpt account or license to use their
   own agents; mobile uses hosted execution.
-- Agent detection is cached for the Obsidian session. Refresh with **Detect again**
-  or after a native run fails because the agent is missing or signed out; do not
-  poll. Usage detection may only list/stat native session-store names and timestamps,
+- Agent detection is cached for the Obsidian session. A timed-out sign-in probe
+  is unknown, not signed out: an installed agent with sessions in the last 30 days
+  remains usable. Retry unknown probes once in the background with the same 3-second
+  window; refresh status without switching an open chat's backend. Otherwise refresh
+  with **Detect again** or after a native run fails because the agent is missing or
+  signed out; do not poll. Usage detection may only list/stat native session-store names and timestamps,
   never read file contents or credentials. Chat states what runs where in one run
   line under the composer (backend, mode, model or hosted credits), each part a
   one-click menu; **Detect again** lives in its backend menu on desktop.

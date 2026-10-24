@@ -46,7 +46,7 @@ import { ChatExportService } from "./export/ChatExportService";
 import type { ChatExportResult } from "./export/ChatExportTypes";
 import { parseChatApprovalMode, type ChatApprovalMode } from "./storage/ChatPersistenceTypes";
 import { resolveDefaultChatBackend } from "../../services/codex/DefaultChatBackend";
-import { detectLocalAgents, type LocalAgentDetection } from "../../services/codex/LocalAgentDetection";
+import { detectLocalAgents, isLocalAgentUsable, subscribeLocalAgentDetection, type LocalAgentDetection } from "../../services/codex/LocalAgentDetection";
 import { AgentWorkspace, type AgentQueuedFollowUp } from "./AgentWorkspace";
 import {
   agentName,
@@ -893,7 +893,15 @@ export class AgentChatView extends ItemView {
     this.syncAttachments();
     this.syncChrome();
     void this.refreshUsedInVault();
-    if (hasHostCapability("local-cli", this.containerEl)) void this.refreshDetection();
+    if (hasHostCapability("local-cli", this.containerEl)) {
+      this.register(subscribeLocalAgentDetection(localAgentDetectionDirectory(this.app), (detection) => {
+        if (this.closing) return;
+        this.detection = detection;
+        this.applyBackendAvailability();
+        this.syncChrome();
+      }));
+      void this.refreshDetection();
+    }
 
     if (this.chatId) await this.loadChatById(this.chatId);
     else await this.startNewChat(false, undefined, this.draftKey);
@@ -3972,7 +3980,8 @@ export class AgentChatView extends ItemView {
   /**
    * Re-runs detection. An empty chat that detection chose for the person
    * moves to an agent that has become ready; their own choice stays.
-   * Resolves true when this chat's own agent is now installed and signed in.
+   * Resolves true when this chat's own agent is usable, including recent usage
+   * while native sign-in status is unknown.
    */
   private async detectAgain(): Promise<boolean> {
     if (!hasHostCapability("local-cli", this.containerEl)) return false;
@@ -3981,7 +3990,7 @@ export class AgentChatView extends ItemView {
     const detection = await this.refreshDetection(true);
     if (!detection) return false;
     const ready = (["claude", "codex"] as const)
-      .filter((agent) => detection.agents[agent]?.installed && detection.agents[agent]?.signedIn);
+      .filter((agent) => isLocalAgentUsable(detection.agents[agent]));
     const settings = this.plugin.settings;
     const chosen = Boolean(settings.textExecutionBackendExplicit) || isLocalAgentId(settings.textExecutionBackend);
     if (
