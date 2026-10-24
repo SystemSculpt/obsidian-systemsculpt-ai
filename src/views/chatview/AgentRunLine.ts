@@ -197,8 +197,11 @@ export class AgentRunLine extends Component {
     this.openMenuKind = kind;
     this.openMenuLoading = kind === "detail" && state.backend === "codex" && state.codex.models === null;
     opener.setAttribute("aria-expanded", "true");
+    // Every run-line menu opens from the line's leading edge, so in a sidebar
+    // its descriptions stay over the chat instead of spilling over the note.
     const rect = opener.getBoundingClientRect();
-    menu.showAtPosition({ x: rect.left, y: rect.top, width: rect.width, overlap: true, left: false }, ownerDocument);
+    const lineLeft = this.element.getBoundingClientRect().left;
+    menu.showAtPosition({ x: Math.min(rect.left, lineLeft), y: rect.top, overlap: true, left: false }, ownerDocument);
   }
 
   private segment(kind: MenuKind): HTMLButtonElement | undefined {

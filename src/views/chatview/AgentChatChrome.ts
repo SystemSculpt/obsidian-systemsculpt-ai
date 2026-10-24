@@ -161,9 +161,12 @@ function otherAgent(agent: LocalAgentId): LocalAgentId {
 export function presentMode(state: AgentChromeState): Readonly<{
   value: string;
   label: string;
+  /** Shown after the label when the line is wide enough. */
+  wideSuffix?: string;
   description: string;
   icon: string;
   tone?: "warning";
+  fallback?: true;
 }> {
   const choices = MODE_CHOICES[state.backend];
   const value = state.backend === "claude"
@@ -173,10 +176,10 @@ export function presentMode(state: AgentChromeState): Readonly<{
       : state.hostedMode;
   const choice = choices.find((candidate) => candidate.value === value) ?? choices[0];
   if (state.backend === "claude" && value === "auto" && state.claude.autoUnavailable) {
-    return { value, label: "Accept edits · Auto unavailable", description: CLAUDE_AUTO_UNAVAILABLE, icon: "file-pen-line" };
+    return { value, label: "Accept edits", wideSuffix: " · Auto unavailable", description: CLAUDE_AUTO_UNAVAILABLE, icon: "file-pen-line", fallback: true };
   }
   if (state.backend === "codex" && value === "auto" && state.codex.autoUnavailable) {
-    return { value, label: "Ask · Auto unavailable", description: CODEX_AUTO_UNAVAILABLE, icon: "hand" };
+    return { value, label: "Ask", wideSuffix: " · Auto unavailable", description: CODEX_AUTO_UNAVAILABLE, icon: "hand", fallback: true };
   }
   return {
     value: choice.value,
@@ -244,12 +247,14 @@ function modelDetail(state: AgentChromeState): RunLineSegment | null {
   }
   if (state.backend === "codex") {
     const effort = effortLabel(state.codex.effort);
+    // The installed Codex's own name for the model, as its menu shows it.
+    const model = state.codex.models?.find((candidate) => candidate.model === state.codex.model)?.name ?? state.codex.model;
     return {
       key: "detail",
-      label: state.codex.model,
+      label: model,
       ...(effort ? { wideSuffix: ` · ${effort}` } : {}),
       menu: true,
-      ariaLabel: `Model: ${state.codex.model}${effort ? `, ${effort} thinking` : ""}. Change model`,
+      ariaLabel: `Model: ${model}${effort ? `, ${effort} thinking` : ""}. Change model`,
     };
   }
   return null;
@@ -276,9 +281,12 @@ export function presentRunLine(state: AgentChromeState): RunLinePresentation {
       {
         key: "mode",
         ...(mode.tone ? { icon: "shield-alert", tone: mode.tone } : {}),
+        // A narrow line keeps the fallback visible as an icon; the words are in the label.
+        ...(mode.fallback ? { icon: "circle-alert" } : {}),
         label: mode.label,
+        ...(mode.wideSuffix ? { wideSuffix: mode.wideSuffix } : {}),
         menu: true,
-        ariaLabel: `Mode: ${mode.label}. Change mode. ${mode.description}`,
+        ariaLabel: `Mode: ${mode.label}${mode.wideSuffix ?? ""}. Change mode. ${mode.description}`,
       },
       ...(detail ? [detail] : []),
     ],

@@ -112,12 +112,15 @@ describe("ChatHistoryPanel", () => {
   it("filters titles as you type, then appends full-text matches", async () => {
     jest.useFakeTimers();
     try {
-      const { parent, panel, search } = mount();
+      const { parent, panel, search, options } = mount();
       panel.open();
       await flush();
       typeQuery(search, "plan");
       expect(Array.from(parent.querySelectorAll<HTMLElement>('[data-testid="history.row"]'), (option) => option.dataset.chatId))
         .toEqual(["q4"]);
+      // Enter opens the best match while searching.
+      keydown(search, "Enter");
+      expect(options.onOpen).toHaveBeenLastCalledWith(expect.objectContaining({ chatId: "q4" }), false);
       typeQuery(search, "okrs");
       expect(parent.querySelector(".systemsculpt-history-panel-status")?.textContent).toBe("Searching chat text…");
       jest.advanceTimersByTime(250);

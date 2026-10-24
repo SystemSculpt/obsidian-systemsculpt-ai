@@ -247,6 +247,14 @@ export class ChatHistoryPanel extends Component {
     }
     this.scheduleContentSearch(normalized);
     this.combobox.setQuery(query, { writeInput: false });
+    this.activateTopMatch();
+  }
+
+  /** While searching, Enter opens the best match, as a command palette does. */
+  private activateTopMatch(): void {
+    if (this.query && this.combobox.activeIndex < 0 && this.combobox.items.length > 0) {
+      this.combobox.setActiveIndex(0, { scroll: false });
+    }
   }
 
   private filter(query: string): readonly PanelItem[] {
@@ -525,6 +533,7 @@ export class ChatHistoryPanel extends Component {
     search.complete = true;
     if (this.pendingContentQuery === query) this.pendingContentQuery = null;
     this.combobox.refresh();
+    this.activateTopMatch();
   }
 
   private syncFooter(): void {
