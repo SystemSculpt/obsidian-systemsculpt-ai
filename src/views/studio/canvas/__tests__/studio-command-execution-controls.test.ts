@@ -10,6 +10,7 @@ beforeEach(() => { jest.mocked(hasHostCapability).mockReturnValue(true); jest.mo
 async function fixture(value?: unknown) {
   const root = document.createElement('div'), onChange = jest.fn();
   const dispose = renderStudioCommandExecution(root, { value, app: {} as any, onChange });
+  root.querySelector('select')!.dispatchEvent(new Event('focusin', { bubbles: true }));
   await Promise.resolve(); await Promise.resolve();
   return { root, onChange, dispose, model: root.querySelectorAll('select')[0], effort: root.querySelectorAll('select')[1] };
 }
@@ -35,5 +36,5 @@ it('offers retry after catalog failure and ignores late resolution after teardow
   await Promise.resolve(); await Promise.resolve(); expect(f.model.disabled).toBe(false); f.dispose();
   let resolve!: (value: any) => void;
   jest.mocked(readCodexCatalog).mockImplementationOnce(() => new Promise(done => { resolve = done; }));
-  const g = await fixture(); g.dispose(); resolve({ models, permissions: '' }); await Promise.resolve(); expect(g.model.disabled).toBe(true);
+  const g = await fixture(); g.dispose(); resolve({ models, permissions: '' }); await Promise.resolve(); expect(g.model.options).toHaveLength(1);
 });
