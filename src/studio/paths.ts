@@ -1,13 +1,9 @@
-import { normalizePath } from "obsidian";
+import { normalizeVaultRelativePath } from "../utils/vaultPathUtils";
 import { toSafeVaultFileName } from "../utils/vaultFileName";
 import { STUDIO_PROJECT_EXTENSION } from "./types";
 
 export const DEFAULT_STUDIO_PROJECTS_DIR = "SystemSculpt/Studio" as const;
 const DEFAULT_STUDIO_PROJECT_NAME = "Untitled Studio Project" as const;
-
-function trimSlashes(input: string): string {
-  return input.replace(/^\/+|\/+$/g, "");
-}
 
 export function sanitizeStudioProjectName(name: string): string {
   const raw = String(name || "").trim();
@@ -19,7 +15,7 @@ export function sanitizeStudioProjectName(name: string): string {
 }
 
 export function normalizeStudioProjectPath(path: string): string {
-  const normalized = normalizePath(trimSlashes(String(path || "").trim()));
+  const normalized = normalizeVaultRelativePath(path);
   if (!normalized) {
     throw new Error("Studio project path cannot be empty.");
   }
@@ -34,30 +30,30 @@ export function normalizeStudioProjectPath(path: string): string {
 export function deriveStudioAssetsDir(projectPath: string): string {
   const normalized = normalizeStudioProjectPath(projectPath);
   const baseName = normalized.slice(0, -STUDIO_PROJECT_EXTENSION.length);
-  return normalizePath(`${baseName}.systemsculpt-assets`);
+  return normalizeVaultRelativePath(`${baseName}.systemsculpt-assets`);
 }
 
 export function deriveStudioPolicyPath(projectPath: string): string {
   const assetsDir = deriveStudioAssetsDir(projectPath);
-  return normalizePath(`${assetsDir}/policy/grants.json`);
+  return normalizeVaultRelativePath(`${assetsDir}/policy/grants.json`);
 }
 
 export function deriveStudioRunsDir(projectPath: string): string {
   const assetsDir = deriveStudioAssetsDir(projectPath);
-  return normalizePath(`${assetsDir}/runs`);
+  return normalizeVaultRelativePath(`${assetsDir}/runs`);
 }
 
 export function deriveStudioAssetBlobDir(projectPath: string): string {
   const assetsDir = deriveStudioAssetsDir(projectPath);
-  return normalizePath(`${assetsDir}/assets/sha256`);
+  return normalizeVaultRelativePath(`${assetsDir}/assets/sha256`);
 }
 
 export function deriveStudioImportsDir(projectPath: string): string {
   const assetsDir = deriveStudioAssetsDir(projectPath);
-  return normalizePath(`${assetsDir}/imports`);
+  return normalizeVaultRelativePath(`${assetsDir}/imports`);
 }
 
 export function deriveStudioNodeCachePath(projectPath: string): string {
   const assetsDir = deriveStudioAssetsDir(projectPath);
-  return normalizePath(`${assetsDir}/cache/node-results.json`);
+  return normalizeVaultRelativePath(`${assetsDir}/cache/node-results.json`);
 }

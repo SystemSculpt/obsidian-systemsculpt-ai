@@ -13,6 +13,7 @@ import { createManagedFileSource } from "./managed/ManagedFileSource";
 import { errorLogger } from "../utils/errorLogger";
 import { base64ToBytes } from "../utils/base64";
 import { toSafeVaultFileName } from "../utils/vaultFileName";
+import { normalizeVaultRelativePath } from "../utils/vaultPathUtils";
 import { ManagedJobClient } from "./managed/ManagedJobClient";
 import {
   ManagedDocumentProcessingAdapter,
@@ -319,7 +320,7 @@ export class DocumentProcessingService {
         continue;
       }
       const newName = this.generateUniqueImageName(baseName, imageName, imageBase64);
-      const path = this.normalizePath(`${imagesPath}/${newName}`);
+      const path = normalizeVaultRelativePath(`${imagesPath}/${newName}`, { trim: false, preserveCharacters: true });
       const relativePath = `${imagesFolder}/${newName}`;
       contentPaths.set(contentHash, { path, relativePath });
       imagePathMap.set(imageName, relativePath);
@@ -340,7 +341,7 @@ export class DocumentProcessingService {
     }
     const markdown = this.formatExtractionContent(processed, imagesFolder);
     const markdownBytes = new TextEncoder().encode(markdown).buffer;
-    const extractionPath = this.normalizePath(`${parentPath}/${baseName}-extraction.md`);
+    const extractionPath = normalizeVaultRelativePath(`${parentPath}/${baseName}-extraction.md`, { trim: false, preserveCharacters: true });
     return {
       extractionPath,
       markdownBytes,
@@ -555,9 +556,6 @@ export class DocumentProcessingService {
     return toSafeVaultFileName(filename.replace(/[^a-zA-Z0-9-_]/g, "-"), { fallback: "" });
   }
 
-  private normalizePath(value: string): string {
-    return value.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
-  }
 }
 
 function throwIfAborted(signal: AbortSignal): void {

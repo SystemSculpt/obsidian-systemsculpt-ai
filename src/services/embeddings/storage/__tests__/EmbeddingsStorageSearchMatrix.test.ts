@@ -71,6 +71,18 @@ describe("EmbeddingsStorage search matrix", () => {
     expect(await storage.getSearchMatrix(NS)).toBe(first);
   });
 
+  it("normalizes directory prefixes while preserving siblings, spaces and root no-ops", async () => {
+    for (const path of [" Notes/nested/A.md", " Notes/nested-other/B.md", "Outside.md"]) {
+      await storage.publishPath(path, NS, note(path, [[1, 0]]));
+    }
+    await storage.renameByDirectory(" Notes\\nested\\", " Moved//nested/");
+    expect(await paths(storage)).toEqual([" Moved/nested/A.md", " Notes/nested-other/B.md", "Outside.md"]);
+    await storage.removeByDirectory(" Moved\\nested\\");
+    await storage.removeByDirectory("");
+    await storage.removeByDirectory("///");
+    expect(await paths(storage)).toEqual([" Notes/nested-other/B.md", "Outside.md"]);
+  });
+
   it("replays notes changed while the matrix was being built", async () => {
     await storage.publishPath("A.md", NS, note("A.md", [[1, 0]]));
     await storage.publishPath("B.md", NS, note("B.md", [[1, 0]]));

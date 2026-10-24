@@ -18,6 +18,7 @@ import {
 import { SemanticMatrix } from "../search/SemanticMatrix";
 import { LOCAL_EMPTY_EMBEDDING_NAMESPACE } from "../LocalEmptyEmbeddingMarker";
 import { toError } from "../../../utils/errors";
+import { normalizeVaultRelativePath } from "../../../utils/vaultPathUtils";
 
 const DB_NAME_PREFIX = "SystemSculptEmbeddings";
 /** A search matrix nobody has queried for this long is released. */
@@ -93,8 +94,8 @@ export class EmbeddingsStorage {
   }
 
   private normalizeDirPrefix(dir: string): string {
-    if (!dir) return "";
-    return dir.endsWith("/") ? dir : `${dir}/`;
+    const path = normalizeVaultRelativePath(dir, { trim: false, preserveCharacters: true });
+    return path ? `${path}/` : "";
   }
 
   private parseChunkIdFromId(id: string): number {
@@ -223,24 +224,30 @@ export class EmbeddingsStorage {
       const store = transaction.objectStore(STORE_NAME);
       this.cache.clear();
       this.pathsSet.clear();
-      const request = store.openCursor();
+      // v11 already encodes the chunk ordinal in the primary key. Walking
+      // keys avoids deserializing every chunk's Float32Array without a schema
+      // upgrade (older installed plugins keep their v11 connection open).
+      const request = store.openKeyCursor();
       request.onsuccess = () => {
         const cursor = request.result;
-        if (!cursor) {
-          resolve();
-          return;
-        }
-        const vector = cursor.value as EmbeddingVector;
-        const chunkId = typeof vector.chunkId === "number"
-          ? vector.chunkId
-          : this.parseChunkIdFromId(vector.id);
-        if (chunkId === 0) {
-          this.cacheRoot(vector);
-          if (vector.path) this.pathsSet.add(vector.path);
+        if (!cursor) return;
+        if (typeof cursor.primaryKey === "string" && this.parseChunkIdFromId(cursor.primaryKey) === 0) {
+          const rootRequest = store.get(cursor.primaryKey);
+          rootRequest.onsuccess = () => {
+            const vector = rootRequest.result as EmbeddingVector | undefined;
+            if (vector && (vector.chunkId ?? this.parseChunkIdFromId(vector.id)) === 0) {
+              this.cacheRoot(vector);
+              if (vector.path) this.pathsSet.add(vector.path);
+            }
+          };
+          rootRequest.onerror = () => reject(toError(rootRequest.error, "IndexedDB request failed."));
         }
         cursor.continue();
       };
       request.onerror = () => reject(toError(request.error, "IndexedDB request failed."));
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(toError(transaction.error, "IndexedDB transaction failed."));
+      transaction.onabort = () => reject(toError(transaction.error, "IndexedDB root loading aborted."));
     });
   }
 
