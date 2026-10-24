@@ -1,6 +1,7 @@
 import { DEFAULT_SETTINGS } from "../../../../types";
 import {
   CURRENT_SCHEMA_VERSION,
+  LEGACY_ANNOUNCEMENT_KEYS_REMOVED_IN_V16,
   LEGACY_AUDIO_KEYS_REMOVED_IN_V9,
   LEGACY_CHAT_KEYS_REMOVED_IN_V5,
   LEGACY_CLIENT_MODEL_KEYS_REMOVED_IN_V4,
@@ -195,6 +196,23 @@ describe("migrateSettingsToCurrentSchema", () => {
     expect(result.settings.licenseKey).toBe("managed-license");
   });
 
+  it("removes automatic welcome and release-announcement state when upgrading schema v15", () => {
+    const raw: Record<string, unknown> = {
+      schemaVersion: 15,
+      licenseKey: "managed-license",
+      accountOnboardingShown: true,
+      lastAnnouncedPluginRelease: "6.13.0",
+      lastLoadedPluginVersion: "6.13.0",
+    };
+
+    const result = migrateSettingsToCurrentSchema(raw, DEFAULT_SETTINGS);
+
+    expect(result.appliedSteps).toEqual(["Remove automatic welcome and release-announcement state"]);
+    for (const key of LEGACY_ANNOUNCEMENT_KEYS_REMOVED_IN_V16) expect(result.settings).not.toHaveProperty(key);
+    expect(result.settings.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
+    expect(result.settings.licenseKey).toBe("managed-license");
+  });
+
   it("removes the obsolete auto-process switch when upgrading schema v6", () => {
     const raw: Record<string, unknown> = {
       schemaVersion: 6,
@@ -347,6 +365,7 @@ describe("migrateSettingsToCurrentSchema", () => {
       "Add the persisted default output preset for Audio Processor",
       "Remove the write-only embeddings rebuild flag",
       "Detect unchosen desktop chat backends and default native permissions to Auto",
+      "Remove automatic welcome and release-announcement state",
     ]);
     expect(result.settings.audioProcessorOutputPreset).toBe("detailed");
     expect(result.settings.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
@@ -362,6 +381,7 @@ describe("migrateSettingsToCurrentSchema", () => {
       "Add the persisted default output preset for Audio Processor",
       "Remove the write-only embeddings rebuild flag",
       "Detect unchosen desktop chat backends and default native permissions to Auto",
+      "Remove automatic welcome and release-announcement state",
     ]);
     expect(result.settings.audioProcessorOutputPreset).toBe("clean_transcript");
     expect(result.settings.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
@@ -385,6 +405,7 @@ describe("migrateSettingsToCurrentSchema", () => {
     expect(result.appliedSteps).toEqual([
       "Remove the write-only embeddings rebuild flag",
       "Detect unchosen desktop chat backends and default native permissions to Auto",
+      "Remove automatic welcome and release-announcement state",
     ]);
     expect(result.settings).not.toHaveProperty("embeddingsRebuildPending");
     expect(result.settings.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);

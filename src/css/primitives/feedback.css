@@ -17,6 +17,10 @@
   font-size: var(--ss-text-sm);
 }
 
+.systemsculpt-notice-action {
+  margin-top: var(--ss-space-2);
+}
+
 .systemsculpt-notice-path {
   font-family: var(--ss-font-mono);
   font-size: var(--ss-text-sm);

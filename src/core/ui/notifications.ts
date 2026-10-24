@@ -65,3 +65,27 @@ export function displayNotice(parts: { title: string; path?: string; message?: s
 
   new Notice(fragment, options.duration ?? 5000);
 }
+
+/**
+ * One notice with a single follow-up action, such as the result of a check
+ * the user asked for. Choosing the action dismisses the notice.
+ */
+export function showActionNotice(
+  message: string,
+  action: { label: string; onSelect: () => void },
+  options: NotificationOptions = {},
+): void {
+  const fragment = createSurfaceFragment(resolveSurfaceDomContext().document);
+  fragment.createDiv({ cls: "systemsculpt-notice-message", text: message });
+  const button = fragment.createEl("button", {
+    cls: "systemsculpt-notice-action mod-cta",
+    text: action.label,
+    attr: { type: "button", "data-testid": "notice.action" },
+  });
+  const notice = new Notice(fragment, options.duration ?? 10_000);
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    notice.hide();
+    action.onSelect();
+  });
+}

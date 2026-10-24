@@ -406,7 +406,7 @@ describe("AccountConnectService background polling", () => {
   function createPollingService() {
     const created = createService();
     const outcomes: ConnectOutcome[] = [];
-    created.service.setBackgroundOutcomeHandler((outcome) => outcomes.push(outcome));
+    created.service.setOutcomeHandler((outcome) => outcomes.push(outcome));
     return { ...created, outcomes };
   }
 
@@ -504,13 +504,13 @@ describe("AccountConnectService background polling", () => {
       .resolves.toEqual({ kind: "error", reason: "expired" });
   });
 
-  it("returns a completion error to a waiting manual caller without also announcing it", async () => {
+  it("presents a completion error once to the surface waiting on a manual code", async () => {
     const { service, plugin, outcomes } = createPollingService();
     plugin.updateSettings.mockRejectedValueOnce(new Error("disk full"));
     request.mockResolvedValueOnce(jsonResponse(200, successPayload));
     await service.begin("sign-in");
     await expect(service.submitManualCode("code")).resolves.toEqual({ kind: "error", reason: "unavailable" });
-    expect(outcomes).toEqual([]);
+    expect(outcomes).toEqual([{ kind: "error", reason: "unavailable" }]);
     expect(service.hasPendingRequest()).toBe(false);
   });
 
@@ -530,6 +530,8 @@ describe("AccountConnectService background polling", () => {
     expect(outcomes).toEqual([]);
     await expect(service.handleProtocolCallback({ state: firstState, code: "old" }))
       .resolves.toEqual({ kind: "error", reason: "state-mismatch" });
+    // The superseded sign-in's link is a real verification failure.
+    expect(outcomes).toEqual([{ kind: "error", reason: "state-mismatch" }]);
 
     let finishExchange!: (response: Response) => void;
     request.mockImplementationOnce(() => new Promise<Response>((resolve) => { finishExchange = resolve; }));
@@ -538,7 +540,8 @@ describe("AccountConnectService background polling", () => {
     finishExchange(jsonResponse(200, successPayload));
     await expect(manual).resolves.toEqual({ kind: "error", reason: "expired" });
     expect(plugin.updateSettings).not.toHaveBeenCalled();
-    expect(outcomes).toEqual([]);
+    // The user cancelled that sign-in, so its late result is not shown.
+    expect(outcomes).toEqual([{ kind: "error", reason: "state-mismatch" }]);
   });
 
   it.each([429, 503])("resumes polling after HTTP %s from a manual exchange", async (status) => {
@@ -548,7 +551,10 @@ describe("AccountConnectService background polling", () => {
     await service.begin("sign-in");
     await expect(service.submitManualCode("code")).resolves.toMatchObject({ kind: "error" });
     await jest.advanceTimersByTimeAsync(3_500);
-    expect(outcomes).toEqual([expect.objectContaining({ kind: "signed-in" })]);
+    expect(outcomes).toEqual([
+      { kind: "error", reason: status === 429 ? "rate-limited" : "unavailable" },
+      expect.objectContaining({ kind: "signed-in" }),
+    ]);
   });
 
   it("keeps polling through network failures and error responses", async () => {
@@ -591,7 +597,7 @@ describe("AccountConnectService background polling", () => {
 
     await expect(manual).resolves.toMatchObject({ kind: "signed-in" });
     expect(request).toHaveBeenCalledTimes(1); // the poll was the only request
-    expect(outcomes).toHaveLength(0); // the awaiting caller owns the outcome
+    expect(outcomes).toEqual([expect.objectContaining({ kind: "signed-in" })]); // presented once
     expect(plugin.updateSettings).toHaveBeenCalledTimes(1);
     expect(plugin.validateLicenseKeyDetailed).toHaveBeenCalledTimes(1);
     expect(service.hasPendingRequest()).toBe(false);
@@ -607,7 +613,10 @@ describe("AccountConnectService background polling", () => {
     expect(outcome).toEqual({ kind: "error", reason: "network" });
 
     await jest.advanceTimersByTimeAsync(3_500);
-    expect(outcomes).toEqual([expect.objectContaining({ kind: "signed-in" })]);
+    expect(outcomes).toEqual([
+      { kind: "error", reason: "network" },
+      expect.objectContaining({ kind: "signed-in" }),
+    ]);
     expect(service.hasPendingRequest()).toBe(false);
   });
 
@@ -692,7 +701,7 @@ describe("AccountConnectService sign-in requests that answer late or never", () 
   function createNativeService() {
     const created = createService(createPlugin(), new PlatformRequestClient());
     const outcomes: ConnectOutcome[] = [];
-    created.service.setBackgroundOutcomeHandler((outcome) => outcomes.push(outcome));
+    created.service.setOutcomeHandler((outcome) => outcomes.push(outcome));
     return { ...created, outcomes };
   }
 
@@ -757,7 +766,7 @@ describe("AccountConnectService sign-in requests that answer late or never", () 
     // The poll's answer lands late and completes the sign-in exactly once.
     poll.land(native(200, successPayload));
     await expect(manual).resolves.toMatchObject({ kind: "signed-in", email: "user@example.com" });
-    expect(outcomes).toHaveLength(0); // the awaiting exchange owns the outcome
+    expect(outcomes).toEqual([expect.objectContaining({ kind: "signed-in" })]); // presented once
     expect(plugin.updateSettings).toHaveBeenCalledTimes(1);
     expect(plugin.settings.licenseKey).toBe("skss-connected");
     expect(service.hasPendingRequest()).toBe(false);
@@ -781,7 +790,10 @@ describe("AccountConnectService sign-in requests that answer late or never", () 
     expect(parseConnectUrl(openedUrls[1]).challenge).toBe(parseConnectUrl(openedUrls[0]).challenge);
     serve([() => Promise.resolve(native(200, successPayload))]);
     await jest.advanceTimersByTimeAsync(3_500);
-    expect(outcomes).toEqual([expect.objectContaining({ kind: "signed-in" })]);
+    expect(outcomes).toEqual([
+      { kind: "error", reason: "unconfirmed" },
+      expect.objectContaining({ kind: "signed-in" }),
+    ]);
     expect(service.hasPendingRequest()).toBe(false);
   });
 
@@ -834,7 +846,10 @@ describe("AccountConnectService sign-in requests that answer late or never", () 
 
     exchange.land(native(200, successPayload));
     await jest.advanceTimersByTimeAsync(0);
-    expect(outcomes).toEqual([expect.objectContaining({ kind: "signed-in" })]);
+    expect(outcomes).toEqual([
+      { kind: "error", reason: "network" },
+      expect.objectContaining({ kind: "signed-in" }),
+    ]);
     expect(service.hasPendingRequest()).toBe(false);
   });
 
@@ -855,7 +870,11 @@ describe("AccountConnectService sign-in requests that answer late or never", () 
 
     first.land(native(200, successPayload));
     await expect(retry).resolves.toMatchObject({ kind: "signed-in" });
-    expect(outcomes).toHaveLength(0);
+    // The late success completes the sign-in once, through the retry that adopted it.
+    expect(outcomes).toEqual([
+      { kind: "error", reason: "network" },
+      expect.objectContaining({ kind: "signed-in" }),
+    ]);
     expect(plugin.updateSettings).toHaveBeenCalledTimes(1);
   });
 
@@ -1108,7 +1127,7 @@ describe("AccountConnectService abandoned sign-in", () => {
   function createPollingService() {
     const created = createService();
     const outcomes: ConnectOutcome[] = [];
-    created.service.setBackgroundOutcomeHandler((outcome) => outcomes.push(outcome));
+    created.service.setOutcomeHandler((outcome) => outcomes.push(outcome));
     return { ...created, outcomes };
   }
 

@@ -4,6 +4,8 @@
  * Exercise account connection through the exact production bundle and its
  * onload composition. Only host network, browser handoff, and storage edges
  * are mocked; no deep link or manual exchange completes these sign-ins.
+ * A fresh signed-out vault opens with no dialog; sign-in starts from an
+ * explicit plan gate and finishes in that same modal.
  * Run `npm run build` first.
  */
 import { createHash } from "node:crypto";
@@ -102,8 +104,10 @@ describe("account connection in the built bundle", () => {
     expectProductionStartupIdentity(startupIdentity, manifest.version);
     connectCallback = registeredProtocols.mock.calls.find(([action]) => action === "systemsculpt-connect")?.[1];
     expect(typeof connectCallback).toBe("function");
-    expect(document.querySelector(".ss-upgrade-plan-modal")?.textContent)
-      .toContain("Welcome to SystemSculpt AI");
+    // A fresh signed-out install is usable with nothing opened for it.
+    await jest.advanceTimersByTimeAsync(10_000);
+    expect(document.querySelector(".ss-upgrade-plan-modal")).toBeNull();
+    expect(document.querySelectorAll("[role='dialog']")).toHaveLength(0);
     // Startup release metadata is unrelated to the sign-in requests below.
     request.mockClear();
   });
@@ -121,7 +125,17 @@ describe("account connection in the built bundle", () => {
     expect(unexpectedRequests).toEqual([]);
   });
 
+  async function openPlanGate(): Promise<void> {
+    const command = (plugin as unknown as { _commands: Array<{ id: string; callback?: () => unknown }> })
+      ._commands.find(({ id }) => id === "open-audio-processor");
+    expect(command?.callback).toBeDefined();
+    void command!.callback!();
+    await jest.advanceTimersByTimeAsync(0);
+    expect(document.querySelectorAll(".ss-upgrade-plan-modal")).toHaveLength(1);
+  }
+
   async function beginInBrowser(): Promise<URL> {
+    if (!document.querySelector(".ss-upgrade-plan-modal")) await openPlanGate();
     button("upgrade-plan.sign-in").click();
     await jest.advanceTimersByTimeAsync(0);
     expect(document.querySelector(".ss-upgrade-plan-modal")?.textContent)
@@ -138,26 +152,28 @@ describe("account connection in the built bundle", () => {
     return connect;
   }
 
-  function expectWelcome(): void {
-    expect(document.querySelector(".ss-upgrade-plan-modal")).toBeNull();
-    const modals = document.querySelectorAll(".ss-account-connect-modal");
+  /** The plan-less account continues to the plan choice in the modal that started sign-in. */
+  function expectSignedInPlanChoice(): void {
+    expect(document.querySelectorAll("[role='dialog']")).toHaveLength(1);
+    const modals = document.querySelectorAll(".ss-upgrade-plan-modal");
     expect(modals).toHaveLength(1);
-    expect(modals[0].getAttribute("role")).toBe("dialog");
-    expect(modals[0].textContent).toContain("Welcome, Test!");
     expect(modals[0].textContent).toContain("Signed in as account-connect@example.test.");
-    expect(modals[0].textContent).toContain("Your account has no active plan yet.");
-    expect(button("account-connect.choose-plan").textContent).toContain("Choose a plan");
+    expect(modals[0].textContent).not.toContain("Welcome");
+    expect(modals[0].textContent).not.toContain("Waiting for you to finish in the browser");
+    expect(modals[0].textContent).not.toContain("expired");
+    expect(button("upgrade-plan.lifetime").textContent).toContain("Get lifetime license");
     expect(plugin!.getAccountConnectService().hasPendingRequest()).toBe(false);
   }
 
-  it("hands off to the browser, waits for polling, and replaces the handoff with the real welcome modal", async () => {
+  it("hands off to the browser, waits for polling, and shows the result in place of the handoff", async () => {
     request.mockResolvedValueOnce(hostResponse({ status: "pending" }));
     const connect = await beginInBrowser();
     expect(request).not.toHaveBeenCalled();
 
     await jest.advanceTimersByTimeAsync(3_500);
     expect(request).toHaveBeenCalledTimes(1);
-    expect(document.querySelector(".ss-account-connect-modal")).toBeNull();
+    expect(document.querySelector(".ss-upgrade-plan-modal")?.textContent)
+      .toContain("Waiting for you to finish in the browser");
     expect(plugin!.getAccountConnectService().hasPendingRequest()).toBe(true);
     const poll = request.mock.calls[0][0];
     expect(poll).toMatchObject({ url: POLL_URL, method: "POST", throw: false });
@@ -168,7 +184,7 @@ describe("account connection in the built bundle", () => {
       .toBe(connect.searchParams.get("challenge"));
 
     await jest.advanceTimersByTimeAsync(3_500);
-    expectWelcome();
+    expectSignedInPlanChoice();
     expect(await plugin!.loadData()).toMatchObject({
       userEmail: CONNECTED_ACCOUNT.account.email,
       userName: CONNECTED_ACCOUNT.account.name,
@@ -182,7 +198,7 @@ describe("account connection in the built bundle", () => {
       code: "already-consumed-test-code",
     });
     await jest.advanceTimersByTimeAsync(0);
-    expectWelcome();
+    expectSignedInPlanChoice();
     await jest.advanceTimersByTimeAsync(30_000);
     expect(request).toHaveBeenCalledTimes(2);
   });
@@ -199,12 +215,12 @@ describe("account connection in the built bundle", () => {
       userEmail: CONNECTED_ACCOUNT.account.email,
     }));
     expect(await plugin!.loadData()).toEqual(previouslySaved);
-    expect(document.querySelector(".ss-upgrade-plan-modal")).toBeNull();
-    const errorModal = document.querySelector(".ss-account-connect-modal");
+    expect(document.querySelectorAll("[role='dialog']")).toHaveLength(1);
+    const errorModal = document.querySelector(".ss-upgrade-plan-modal");
     expect(errorModal?.textContent).toContain("Sign-in didn't finish");
     expect(errorModal?.textContent).toContain("Sign-in is temporarily unavailable");
-    expect(errorModal?.textContent).not.toContain("Welcome");
-    expect(button("account-connect.retry").textContent).toContain("Start sign-in again");
+    expect(errorModal?.textContent).not.toContain("Signed in as");
+    expect(button("upgrade-plan.retry").textContent).toContain("Start sign-in again");
     expect(plugin!.getAccountConnectService().hasPendingRequest()).toBe(false);
     await jest.advanceTimersByTimeAsync(30_000);
     expect(request).toHaveBeenCalledTimes(1);
@@ -218,21 +234,23 @@ describe("account connection in the built bundle", () => {
       code: "already-consumed-test-code",
     });
     await jest.advanceTimersByTimeAsync(0);
-    const lateModal = document.querySelector(".ss-account-connect-modal");
-    expect(document.querySelectorAll(".ss-account-connect-modal")).toHaveLength(1);
+    const lateModal = document.querySelector(".ss-upgrade-plan-modal");
+    expect(lateModal).toBe(errorModal);
+    expect(document.querySelectorAll("[role='dialog']")).toHaveLength(1);
     expect(lateModal?.textContent).toContain("Sign-in didn't finish");
     expect(lateModal?.textContent).toContain("Sign-in is temporarily unavailable");
-    expect(lateModal?.textContent).not.toContain("Welcome");
+    expect(lateModal?.textContent).not.toContain("Signed in as");
     expect(await plugin!.loadData()).toEqual(previouslySaved);
     expect(request).toHaveBeenCalledTimes(1);
     expect(save).toHaveBeenCalledTimes(1);
-    const retry = button("account-connect.retry");
+    const retry = button("upgrade-plan.retry");
     expect(retry.textContent).toContain("Start sign-in again");
     expect(retry.disabled).toBe(false);
 
     retry.click();
     await jest.advanceTimersByTimeAsync(0);
-    expect(lateModal!.isConnected).toBe(false);
+    expect(lateModal!.isConnected).toBe(true);
+    expect(lateModal?.textContent).toContain("Waiting for you to finish in the browser");
     expect(openedUrls).toHaveLength(2);
     const secondSignIn = new URL(openedUrls[1]);
     expect(secondSignIn.pathname).toBe("/sign-in");
@@ -242,7 +260,7 @@ describe("account connection in the built bundle", () => {
     expect(plugin!.getAccountConnectService().hasPendingRequest()).toBe(true);
 
     await jest.advanceTimersByTimeAsync(3_500);
-    expectWelcome();
+    expectSignedInPlanChoice();
     expect(save).toHaveBeenCalledTimes(2);
     expect(await plugin!.loadData()).toMatchObject({ userEmail: CONNECTED_ACCOUNT.account.email });
     expect(request).toHaveBeenCalledTimes(2);

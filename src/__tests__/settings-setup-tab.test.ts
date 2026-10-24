@@ -41,6 +41,7 @@ const createPluginStub = () => {
     reopen: jest.fn().mockResolvedValue(true),
     begin: jest.fn().mockResolvedValue(undefined),
     submitManualCode: jest.fn().mockResolvedValue({ kind: "error", reason: "expired" }),
+    pollInBackground: jest.fn(),
   };
 
   return {
@@ -159,6 +160,76 @@ describe("Setup tab SystemSculpt-only layout", () => {
     await flushSetupSectionRender();
     expect(plugin.accountConnectService.begin).not.toHaveBeenCalled();
     expect(mockedNotice).toHaveBeenCalledWith(expect.stringContaining("existing connection code still works"));
+  });
+
+  it("submits a pasted connection code in place without opening a dialog", async () => {
+    const plugin = createPluginStub();
+    plugin.accountConnectService.hasPendingRequest.mockReturnValue(true);
+    const tab = new SystemSculptSettingTab(app, plugin);
+    const container = document.body.createDiv();
+    displaySetupTabContent(container, tab, false);
+    const codeInput = container.querySelector<HTMLInputElement>("input[placeholder='Paste code']");
+    expect(codeInput).not.toBeNull();
+    codeInput!.value = "  code-123  ";
+    Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent === "Complete sign-in")!.click();
+    await flushSetupSectionRender();
+
+    expect(plugin.accountConnectService.submitManualCode).toHaveBeenCalledWith("code-123");
+    expect(document.querySelectorAll("[role='dialog'], .modal")).toHaveLength(0);
+  });
+
+  it.each([
+    [{ kind: "error", reason: "network" }, "Could not reach SystemSculpt. Check your connection, then try the code again from settings."],
+    [{ kind: "signed-in", name: null, email: "user@example.test", licenseValid: true }, "Signed in as user@example.test."],
+    [
+      { kind: "signed-in", name: null, email: "user@example.test", licenseValid: false },
+      "Signed in as user@example.test. Your license is being confirmed. If AI features stay locked, open SystemSculpt settings and retry validation.",
+    ],
+  ])("shows the latest sign-in result once under Account: %j", (outcome, text) => {
+    const plugin = createPluginStub();
+    const tab = new SystemSculptSettingTab(app, plugin);
+    tab.accountConnectOutcome = outcome as any;
+    const container = document.createElement("div");
+    displaySetupTabContent(container, tab, false);
+
+    const results = container.querySelectorAll('[data-testid="settings.account.connect-result"]');
+    expect(results).toHaveLength(1);
+    expect(results[0].textContent).toBe(text);
+    expect(results[0].getAttribute("role")).toBe("status");
+  });
+
+  it("adds no result line for a plan-less account, whose Account row already says so", () => {
+    const plugin = createPluginStub();
+    plugin.settings.userEmail = "user@example.test";
+    const tab = new SystemSculptSettingTab(app, plugin);
+    tab.accountConnectOutcome = { kind: "no-license", name: null, email: "user@example.test" };
+    const container = document.createElement("div");
+    displaySetupTabContent(container, tab, false);
+
+    expect(container.querySelector('[data-testid="settings.account.connect-result"]')).toBeNull();
+    expect(container.textContent).toContain("Signed in as user@example.test. No active plan yet");
+  });
+
+  it("takes a sign-in result only while Account settings are on screen, and forgets it when settings close", () => {
+    const plugin = createPluginStub();
+    const tab = new SystemSculptSettingTab(app, plugin);
+    const display = jest.spyOn(tab, "display").mockImplementation(() => undefined);
+    const outcome = { kind: "error", reason: "expired" } as const;
+
+    expect(tab.showAccountConnectOutcome(outcome)).toBe(false);
+    expect(tab.accountConnectOutcome).toBeNull();
+
+    document.body.appendChild(tab.containerEl);
+    expect(tab.showAccountConnectOutcome(outcome)).toBe(true);
+    expect(tab.accountConnectOutcome).toBe(outcome);
+    expect(display).toHaveBeenCalledTimes(1);
+
+    (tab as any).activeTabId = "workspace";
+    expect(tab.showAccountConnectOutcome(outcome)).toBe(false);
+
+    tab.hide();
+    expect(tab.accountConnectOutcome).toBeNull();
   });
 
   it("renders account, license, and help surfaces without local Pi setup", () => {

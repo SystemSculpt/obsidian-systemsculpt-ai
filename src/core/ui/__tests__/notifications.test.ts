@@ -13,7 +13,7 @@ jest.mock("../modals/PromptModal", () => ({
 }));
 
 import { showPrompt } from "../modals/PromptModal";
-import { displayNotice, showConfirm } from "../notifications";
+import { displayNotice, showActionNotice, showConfirm } from "../notifications";
 
 describe("notifications", () => {
   const app = {} as App;
@@ -74,5 +74,41 @@ describe("notifications", () => {
       { cls: "systemsculpt-notice-message", text: "Added to the current pane.", setText: expect.any(Function) },
     ]);
     expect(Notice).toHaveBeenCalledWith(fragment, 8_000);
+  });
+
+  it("offers one action that dismisses the notice before it runs", () => {
+    const button = document.createElement("button");
+    const message = document.createElement("div");
+    const fragment = {
+      createDiv: jest.fn(({ cls, text }: { cls: string; text: string }) => {
+        message.className = cls;
+        message.textContent = text;
+        return message;
+      }),
+      createEl: jest.fn((tag: string, { cls, text, attr }: { cls: string; text: string; attr: Record<string, string> }) => {
+        expect(tag).toBe("button");
+        button.className = cls;
+        button.textContent = text;
+        for (const [name, value] of Object.entries(attr)) button.setAttribute(name, value);
+        return button;
+      }),
+    };
+    jest.spyOn(document, "createDocumentFragment").mockReturnValue(fragment as any);
+    const hide = jest.fn();
+    (Notice as unknown as jest.Mock).mockImplementation(function (this: { hide: () => void }) {
+      this.hide = hide;
+    });
+    const onSelect = jest.fn(() => expect(hide).toHaveBeenCalledTimes(1));
+
+    showActionNotice("SystemSculpt 6.6.2 is available.", { label: "Open plugin updates", onSelect });
+
+    expect(Notice).toHaveBeenCalledWith(fragment, 10_000);
+    expect(message.textContent).toBe("SystemSculpt 6.6.2 is available.");
+    expect(button.textContent).toBe("Open plugin updates");
+    expect(button.getAttribute("type")).toBe("button");
+    expect(button.dataset.testid).toBe("notice.action");
+    expect(onSelect).not.toHaveBeenCalled();
+    button.click();
+    expect(onSelect).toHaveBeenCalledTimes(1);
   });
 });

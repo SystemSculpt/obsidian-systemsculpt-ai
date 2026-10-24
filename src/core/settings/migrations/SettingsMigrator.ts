@@ -198,6 +198,13 @@ export const LEGACY_EMBEDDINGS_KEYS_REMOVED_IN_V14: readonly string[] = [
   "embeddingsRebuildPending",
 ] as const;
 
+/** State of the retired automatic welcome, release announcement, and post-update toast. */
+export const LEGACY_ANNOUNCEMENT_KEYS_REMOVED_IN_V16: readonly string[] = [
+  "accountOnboardingShown",
+  "lastAnnouncedPluginRelease",
+  "lastLoadedPluginVersion",
+] as const;
+
 export interface SettingsMigrationStep {
   /** The schema version this step upgrades the settings TO (from `to - 1`). */
   readonly to: number;
@@ -351,6 +358,11 @@ const SETTINGS_MIGRATIONS: readonly SettingsMigrationStep[] = [
         || settings.textExecutionBackend === "claude",
       claudePermissionMode: settings.claudePermissionMode === "default" ? "auto" : settings.claudePermissionMode,
     }),
+  },
+  {
+    to: 16,
+    describe: "Remove automatic welcome and release-announcement state",
+    migrate: removeKeys(LEGACY_ANNOUNCEMENT_KEYS_REMOVED_IN_V16),
   },
 ];
 

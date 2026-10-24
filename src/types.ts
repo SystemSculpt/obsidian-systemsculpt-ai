@@ -125,8 +125,6 @@ export interface SystemSculptSettings {
   licenseKey: string;
   licenseValid: boolean;
   suppressLicenseUpgradePrompt: boolean;
-  /** One-time first-run welcome/sign-in modal was shown (never repeats). */
-  accountOnboardingShown?: boolean;
   userName?: string;
   displayName?: string;
   userEmail?: string;
@@ -146,10 +144,6 @@ export interface SystemSculptSettings {
   savedChatsDirectory: string;
   /** Session-local validation freshness; omitted from saved settings and backups. */
   lastValidated: number;
-  /** Last release for which the plugin showed the update prompt. */
-  lastAnnouncedPluginRelease: string;
-  /** Last plugin version observed after a successful load. */
-  lastLoadedPluginVersion: string;
   recordingsDirectory: string;
   /** Recorder audio saved before recorder-owned transcription fully committed. */
   pendingRecorderCaptures: PendingRecorderCapture[];
@@ -275,12 +269,9 @@ export const DEFAULT_SETTINGS: SystemSculptSettings = {
   licenseKey: "",
   licenseValid: false,
   suppressLicenseUpgradePrompt: false,
-  accountOnboardingShown: false,
   chatsDirectory: "SystemSculpt/Chats",
   savedChatsDirectory: "SystemSculpt/Saved Chats",
   lastValidated: 0,
-  lastAnnouncedPluginRelease: "",
-  lastLoadedPluginVersion: "",
   recordingsDirectory: "SystemSculpt/Recordings",
   pendingRecorderCaptures: [],
   pendingAudioProcessorUploads: [],

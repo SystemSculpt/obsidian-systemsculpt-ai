@@ -44,8 +44,8 @@ export type ConnectErrorReason =
   | "unconfirmed";
 
 /**
- * Result of a callback or manual-code exchange. Presentation (the connect
- * modal) owns the user-facing copy for each outcome.
+ * Result of a sign-in, however it finished. Presentation (the account surface
+ * that started it) owns the user-facing copy for each outcome.
  */
 export type ConnectOutcome =
   | Readonly<{ kind: "signed-in"; name: string | null; email: string | null; licenseValid: boolean }>
@@ -108,8 +108,11 @@ function base64UrlEncode(bytes: Uint8Array): string {
  * that carries the license key cannot be fetched again. So each sign-in has
  * exactly one completer: whichever of its requests first delivers a success,
  * whenever that answer lands. An exchange never races a poll it can wait for,
- * and it presents the completion's outcome itself; otherwise the completion
- * is announced in the background.
+ * and it adopts the completion's outcome instead.
+ *
+ * Every outcome reaches the outcome handler once, whichever of poll, deep
+ * link, or pasted code produced it. A late deep link that adopts a completion
+ * already presented shows nothing new.
  */
 export class AccountConnectService {
   private readonly requestClient: Pick<PlatformRequestClient, "request">;
@@ -125,7 +128,11 @@ export class AccountConnectService {
   /** The completion of the latest sign-in, adopted by an exchange that was waiting on it. */
   private completion: Readonly<{ state: string; outcome: Promise<ConnectOutcome> }> | null = null;
   private exchangeInProgress = false;
-  private backgroundOutcomeHandler: ((outcome: ConnectOutcome) => void) | null = null;
+  private outcomeHandler: ((outcome: ConnectOutcome) => void) | null = null;
+  /** The outcome last handed to the outcome handler. */
+  private presentedOutcome: ConnectOutcome | null = null;
+  /** The sign-in the user cancelled; its late results are not shown. */
+  private cancelled: PendingConnectRequest | null = null;
 
   constructor(
     private readonly plugin: SystemSculptPlugin,
@@ -144,6 +151,7 @@ export class AccountConnectService {
   }
 
   public cancelPending(): void {
+    this.cancelled = this.pending;
     this.endPending();
     this.completion = null;
   }
@@ -173,11 +181,22 @@ export class AccountConnectService {
   }
 
   /**
-   * Receives sign-in outcomes that complete in the background (via polling)
-   * with no modal awaiting them, so the UI can greet the user immediately.
+   * Receives each sign-in outcome once, from polling, the deep link, or a
+   * pasted code, so one account surface can show it.
    */
-  public setBackgroundOutcomeHandler(handler: ((outcome: ConnectOutcome) => void) | null): void {
-    this.backgroundOutcomeHandler = handler;
+  public setOutcomeHandler(handler: ((outcome: ConnectOutcome) => void) | null): void {
+    this.outcomeHandler = handler;
+  }
+
+  /**
+   * Hands an outcome to the UI unless it is the completion already shown or
+   * the result of the sign-in the user cancelled.
+   */
+  private present(outcome: ConnectOutcome, signIn?: PendingConnectRequest): ConnectOutcome {
+    if (outcome === this.presentedOutcome || (signIn && signIn === this.cancelled)) return outcome;
+    this.presentedOutcome = outcome;
+    this.outcomeHandler?.(outcome);
+    return outcome;
   }
 
   /**
@@ -378,8 +397,8 @@ export class AccountConnectService {
 
   /**
    * Completes the sign-in from the first of its requests to deliver a
-   * success. An exchange waiting on this sign-in presents the outcome in its
-   * own modal; otherwise it is announced in the background.
+   * success. An exchange waiting on this sign-in adopts and presents the
+   * outcome; otherwise it is presented from here.
    */
   private async acceptSuccess(pending: PendingConnectRequest, answer: SignInAnswer): Promise<void> {
     if (answer.status !== 200) return;
@@ -387,7 +406,7 @@ export class AccountConnectService {
     // Another request completed this sign-in first, or it already ended.
     if (!success || this.pending !== pending) return;
     const outcome = await this.complete(pending.state, success);
-    if (!this.exchangeInProgress) this.backgroundOutcomeHandler?.(outcome);
+    if (!this.exchangeInProgress) this.present(outcome);
   }
 
   /** Waits up to `ms` for `promise`; null when it has not settled by then. */
@@ -407,13 +426,17 @@ export class AccountConnectService {
     if (!pending) {
       // A poll may have consumed the code before the browser returned. Reuse
       // its actual result, including save failures, only for that same sign-in.
-      if (this.completion && this.completion.state === params.state) return this.completion.outcome;
-      return { kind: "error", reason: "expired" };
+      if (this.completion && this.completion.state === params.state) {
+        return this.present(await this.completion.outcome);
+      }
+      const expired: ConnectOutcome = { kind: "error", reason: "expired" };
+      // An older sign-in's link must not replace the result of the one that finished.
+      return this.completion ? expired : this.present(expired);
     }
     if ((params.state || "") !== pending.state) {
-      return { kind: "error", reason: "state-mismatch" };
+      return this.present({ kind: "error", reason: "state-mismatch" });
     }
-    return this.exchange((params.code || "").trim(), pending);
+    return this.present(await this.exchange((params.code || "").trim(), pending), pending);
   }
 
   /**
@@ -424,9 +447,9 @@ export class AccountConnectService {
   public async submitManualCode(code: string): Promise<ConnectOutcome> {
     const pending = this.activePending();
     if (!pending) {
-      return { kind: "error", reason: "expired" };
+      return this.present({ kind: "error", reason: "expired" });
     }
-    return this.exchange(code.trim(), pending);
+    return this.present(await this.exchange(code.trim(), pending), pending);
   }
 
   private async exchange(code: string, pending: PendingConnectRequest): Promise<ConnectOutcome> {

@@ -25,6 +25,7 @@ import {
   type UiTabsHandle,
 } from "../core/ui/surface";
 import SystemSculptPlugin from "../main";
+import type { ConnectOutcome } from "../services/AccountConnectService";
 import { getHostDeviceType, getHostOperatingSystem } from "../platform/hostCapabilities";
 import {
   buildSettingsIndexFromRoot,
@@ -48,6 +49,8 @@ type SettingsSearchViewState = {
 
 export class SystemSculptSettingTab extends PluginSettingTab {
   plugin: SystemSculptPlugin;
+  /** The latest sign-in result, shown in Account until settings close or a new sign-in starts. */
+  accountConnectOutcome: ConnectOutcome | null = null;
   private listenerCleanups: (() => void)[] = [];
   private renderCleanups = new Set<() => void>();
   private tabContainerEl: HTMLElement | null = null;
@@ -187,7 +190,7 @@ export class SystemSculptSettingTab extends PluginSettingTab {
       button.onClick(async () => {
         const confirm = await showPrompt(this.app, RESTORE_DEFAULTS_COPY.label, {
           description:
-            "This will replace your current configuration with the recommended defaults. Any customizations you've applied will be overwritten. Do you want to continue?",
+            "Restore the recommended chat text size, audio output, Similar notes, output folders, and debug setting? These settings will replace your current choices. Other settings will stay unchanged.",
           primaryButton: "Restore Defaults",
           secondaryButton: "Cancel",
         });
@@ -207,7 +210,6 @@ export class SystemSculptSettingTab extends PluginSettingTab {
             extractionsDirectory: "SystemSculpt/Extractions",
             debugMode: false,
           });
-          new Notice("Recommended defaults restored.", 2500);
           this.display();
         } catch {
           new Notice("Failed to restore recommended defaults.", 4000);
@@ -448,7 +450,19 @@ export class SystemSculptSettingTab extends PluginSettingTab {
   hide(): void {
     this.disposeRender();
     this.backgroundUnfinishedSignIn();
+    this.accountConnectOutcome = null;
     super.hide();
+  }
+
+  /**
+   * Shows a sign-in result in the Account tab when it is the open settings
+   * tab; false otherwise, so the result is shown somewhere visible instead.
+   */
+  showAccountConnectOutcome(outcome: ConnectOutcome): boolean {
+    if (!this.containerEl?.isConnected || this.activeTabId !== "account") return false;
+    this.accountConnectOutcome = outcome;
+    this.display();
+    return true;
   }
 
   /**

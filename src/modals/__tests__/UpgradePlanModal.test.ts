@@ -1,14 +1,16 @@
 import { JSDOM } from "jsdom";
-import { UpgradePlanModal, hasActivePlan, requireActivePlan } from "../UpgradePlanModal";
+import { Notice } from "obsidian";
+import { UpgradePlanModal, hasActivePlan, presentAccountConnectOutcome, requireActivePlan } from "../UpgradePlanModal";
 import { PLAN_REQUIRED_MESSAGE } from "../../utils/errors";
-import { hasHostCapability } from "../../platform/hostCapabilities";
-import { preferredLocalAgent } from "../../services/codex/LocalAgentDetection";
 
 jest.mock("../../platform/hostCapabilities", () => ({
   ...jest.requireActual("../../platform/hostCapabilities"),
   hasHostCapability: jest.fn(() => true),
 }));
-jest.mock("../../services/codex/LocalAgentDetection", () => ({ preferredLocalAgent: jest.fn(async () => "claude") }));
+jest.mock("obsidian", () => ({
+  ...jest.requireActual("obsidian"),
+  Notice: jest.fn(),
+}));
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>");
 (global as any).window = dom.window;
@@ -103,6 +105,11 @@ const flushPromises = async () => {
   await new Promise((resolve) => setTimeout(resolve, 0));
 };
 
+/** Closes whichever instance is open, as the host would on navigation. */
+const closeOpenModal = (): void => {
+  (UpgradePlanModal as unknown as { current: UpgradePlanModal | null }).current?.close();
+};
+
 const findButtonByText = (root: HTMLElement, text: string): HTMLButtonElement => {
   const button = Array.from(root.querySelectorAll("button")).find((candidate) =>
     candidate.textContent?.includes(text)
@@ -149,7 +156,7 @@ function spyOnAnchorClicks() {
 
 describe("UpgradePlanModal", () => {
   afterEach(() => {
-    UpgradePlanModal.closeCurrent();
+    closeOpenModal();
     document.body.innerHTML = "";
     jest.clearAllMocks();
   });
@@ -308,119 +315,133 @@ describe("UpgradePlanModal", () => {
     expect(plugin.pollInBackground).toHaveBeenCalledTimes(2);
   });
 
-  it("keeps sign-in polling when the modal closes for a completed sign-in or a pasted code", async () => {
+  it("shows a completed sign-in in place, once, and leaves without backgrounding it", async () => {
     const plugin = createPlugin();
-    const completed = UpgradePlanModal.openOnce(plugin);
-    findButtonByText(completed.modalEl, "Sign in").click();
+    const modal = UpgradePlanModal.openOnce(plugin, { feature: "Chat" });
+    findButtonByText(modal.modalEl, "Sign in").click();
     await flushPromises();
-    UpgradePlanModal.closeCurrent();
-    completed.onClose();
+    plugin.hasPendingRequest.mockReturnValue(false);
 
-    const pasted = new UpgradePlanModal(plugin);
-    pasted.onOpen();
-    findButtonByText(pasted.modalEl, "Sign in").click();
-    await flushPromises();
-    const codeInput = pasted.modalEl.querySelector<HTMLInputElement>("[data-testid='upgrade-plan.code']");
-    codeInput!.value = "code-123";
-    findButtonByText(pasted.modalEl, "Complete sign-in").click();
-    await flushPromises();
-    pasted.onClose();
+    expect(UpgradePlanModal.showConnectOutcome({
+      kind: "signed-in", name: "Test User", email: "user@example.test", licenseValid: true,
+    })).toBe(true);
 
+    expect(document.querySelectorAll(".ss-upgrade-plan-modal")).toHaveLength(1);
+    expect(modal.modalEl.textContent).toContain("You're signed in");
+    expect(modal.modalEl.textContent).toContain("Signed in as user@example.test.");
+    expect(modal.modalEl.textContent).not.toContain("Welcome");
+    expect(modal.modalEl.textContent).not.toContain("license is being confirmed");
+    expect(Array.from(modal.footerEl.querySelectorAll("button")).map((button) => button.textContent)).toEqual(["Done"]);
+    findButtonByText(modal.modalEl, "Done").click();
+    modal.onClose();
+    expect(plugin.pollInBackground).not.toHaveBeenCalled();
+    expect(plugin.openNewChat).not.toHaveBeenCalled();
+  });
+
+  it("keeps account and license validation apart in the signed-in result", async () => {
+    const plugin = createPlugin();
+    const modal = UpgradePlanModal.openOnce(plugin);
+    UpgradePlanModal.showConnectOutcome({ kind: "signed-in", name: null, email: null, licenseValid: false });
+    expect(modal.modalEl.textContent).toContain("Signed in to SystemSculpt.");
+    expect(modal.modalEl.textContent).toContain("Your license is being confirmed.");
+    modal.onClose();
+  });
+
+  it("continues a plan-less account to the plan choice in the same modal", async () => {
+    const plugin = createPlugin();
+    const modal = UpgradePlanModal.openOnce(plugin, { feature: "Chat" });
+    findButtonByText(modal.modalEl, "Sign in").click();
+    await flushPromises();
+    plugin.settings.userEmail = "user@example.test";
+    plugin.hasPendingRequest.mockReturnValue(false);
+
+    UpgradePlanModal.showConnectOutcome({ kind: "no-license", name: null, email: "user@example.test" });
+
+    expect(modal.modalEl.textContent).toContain("Signed in as user@example.test.");
+    expect(modal.modalEl.textContent).toContain(PLAN_REQUIRED_MESSAGE);
+    expect(findButtonByText(modal.modalEl, "Get lifetime license")).toBeTruthy();
+    modal.onClose();
     expect(plugin.pollInBackground).not.toHaveBeenCalled();
   });
 
-  it("leads onboarding with Start free and retains sign-in, explore, and plans", async () => {
-    const { hrefs, spy } = spyOnAnchorClicks();
+  it("shows a failed save as a failure with a fresh sign-in, never a success", async () => {
     const plugin = createPlugin();
-    const modal = new UpgradePlanModal(plugin, { context: "onboarding" });
-    modal.onOpen();
-
-    expect(modal.modalEl.textContent).toContain("Welcome to SystemSculpt AI");
-    expect(modal.modalEl.textContent).not.toContain(PLAN_REQUIRED_MESSAGE);
-    expect(modal.modalEl.textContent).toContain("Create a free account to get 500 starter credits for hosted AI. No card needed. Paid plans start at $9/month.");
-    expect(modal.modalEl.textContent).toContain("Already use Claude Code or Codex? Chat with your vault through your own install. No account needed.");
-    const actions = Array.from(modal.footerEl.querySelectorAll<HTMLButtonElement>("button"));
-    expect(actions.map((button) => button.textContent)).toEqual(["Start free", "Sign in", "Use my Claude Code or Codex", "Explore on my own"]);
-    expect(actions.map((button) => button.dataset.testid)).toEqual([
-      "upgrade-plan.create-account",
-      "upgrade-plan.sign-in",
-      "upgrade-plan.use-local-agent",
-      "upgrade-plan.explore",
-    ]);
-    expect(actions[0].classList.contains("ss-button--primary")).toBe(true);
-    expect(actions.slice(1).some((button) => button.classList.contains("ss-button--primary"))).toBe(false);
-    findButtonByText(modal.modalEl, "View plans").click();
-    expect(new URL(hrefs[0]).pathname).toBe("/pricing");
-    expect(new URL(hrefs[0]).searchParams.get("utm_source")).toBe("obsidian-plugin");
-    actions[0].click();
+    const modal = UpgradePlanModal.openOnce(plugin);
+    findButtonByText(modal.modalEl, "Start free").click();
     await flushPromises();
-    expect(plugin.begin).toHaveBeenCalledWith("sign-up", expect.anything());
-    findButtonByText(modal.modalEl, "Back").click();
-    const close = jest.spyOn(modal, "close");
-    findButtonByText(modal.modalEl, "Explore on my own").click();
-    expect(close).toHaveBeenCalled();
-    spy.mockRestore();
+    plugin.hasPendingRequest.mockReturnValue(false);
+
+    UpgradePlanModal.showConnectOutcome({ kind: "error", reason: "unavailable" });
+
+    expect(modal.modalEl.textContent).toContain("Sign-in didn't finish");
+    expect(modal.modalEl.textContent).toContain("Sign-in is temporarily unavailable. Try again in a moment.");
+    expect(modal.modalEl.textContent).not.toContain("signed in");
+    findButtonByText(modal.modalEl, "Start sign-in again").click();
+    await flushPromises();
+    expect(plugin.begin).toHaveBeenLastCalledWith("sign-up", expect.anything());
+    expect(modal.modalEl.textContent).toContain("Waiting for you to finish in the browser");
     modal.onClose();
   });
 
-  it.each(["claude", "codex"] as const)("opens a chat on the user's own %s from the desktop welcome", async (agent) => {
-    jest.mocked(preferredLocalAgent).mockResolvedValueOnce(agent);
+  it("lets a code that could not reach SystemSculpt be entered again for the same sign-in", async () => {
     const plugin = createPlugin();
-    const closeSettings = jest.fn();
-    plugin.app.setting = { close: closeSettings };
-    const modal = new UpgradePlanModal(plugin, { context: "onboarding" });
-    modal.onOpen();
-    const close = jest.spyOn(modal, "close");
-
-    modal.modalEl.querySelector<HTMLButtonElement>('[data-testid="upgrade-plan.use-local-agent"]')!.click();
+    const modal = UpgradePlanModal.openOnce(plugin);
+    findButtonByText(modal.modalEl, "Sign in").click();
     await flushPromises();
 
-    expect(close).toHaveBeenCalled();
-    expect(closeSettings).toHaveBeenCalledTimes(1);
-    expect(plugin.updateSettings).toHaveBeenCalledWith({ textExecutionBackend: agent });
-    expect(plugin.openNewChat).toHaveBeenCalledTimes(1);
-    expect(plugin.updateSettings.mock.invocationCallOrder[0]).toBeLessThan(plugin.openNewChat.mock.invocationCallOrder[0]);
-    expect(plugin.begin).not.toHaveBeenCalled();
+    UpgradePlanModal.showConnectOutcome({ kind: "error", reason: "network" });
+    expect(modal.modalEl.textContent).toContain("Could not reach SystemSculpt.");
+    findButtonByText(modal.modalEl, "Enter the code again").click();
+    expect(modal.modalEl.querySelector("[data-testid='upgrade-plan.code']")).not.toBeNull();
+    expect(plugin.begin).toHaveBeenCalledTimes(1);
+
+    // Leaving the still-open sign-in backgrounds it, as leaving the handoff does.
+    UpgradePlanModal.showConnectOutcome({ kind: "error", reason: "network" });
     modal.onClose();
+    expect(plugin.pollInBackground).toHaveBeenCalledTimes(1);
   });
 
-  it("still opens chat when the provider choice cannot be saved", async () => {
+  it("exchanges a pasted code in place and waits for its result", async () => {
     const plugin = createPlugin();
-    plugin.updateSettings.mockRejectedValueOnce(new Error("disk full"));
-    const modal = new UpgradePlanModal(plugin, { context: "onboarding" });
-    modal.onOpen();
-
-    modal.modalEl.querySelector<HTMLButtonElement>('[data-testid="upgrade-plan.use-local-agent"]')!.click();
+    const modal = UpgradePlanModal.openOnce(plugin);
+    findButtonByText(modal.modalEl, "Sign in").click();
+    await flushPromises();
+    const codeInput = modal.modalEl.querySelector<HTMLInputElement>("[data-testid='upgrade-plan.code']");
+    codeInput!.value = "  code-123  ";
+    findButtonByText(modal.modalEl, "Complete sign-in").click();
     await flushPromises();
 
-    expect(plugin.openNewChat).toHaveBeenCalledTimes(1);
+    expect(plugin.submitManualCode).toHaveBeenCalledWith("code-123");
+    expect(document.querySelectorAll(".ss-upgrade-plan-modal")).toHaveLength(1);
+    expect(modal.modalEl.textContent).toContain("Signing you in…");
     modal.onClose();
   });
 
-  it("keeps the mobile welcome on the account path", () => {
-    jest.mocked(hasHostCapability).mockReturnValue(false);
-    try {
-      const plugin = createPlugin();
-      const modal = new UpgradePlanModal(plugin, { context: "onboarding" });
-      modal.onOpen();
-
-      expect(modal.modalEl.textContent).not.toContain("Claude Code");
-      expect(Array.from(modal.footerEl.querySelectorAll("button")).map((button) => button.textContent))
-        .toEqual(["Start free", "Sign in", "Explore on my own"]);
-      expect(modal.modalEl.querySelector('[data-testid="upgrade-plan.use-local-agent"]')).toBeNull();
-      modal.onClose();
-    } finally {
-      jest.mocked(hasHostCapability).mockReturnValue(true);
-    }
-  });
-
-  it("does not offer on-machine agents outside the welcome", () => {
+  it("presents each outcome in exactly one place: the modal, else Account settings, else a notice", () => {
+    const outcome = { kind: "signed-in", name: null, email: "user@example.test", licenseValid: true } as const;
     const plugin = createPlugin();
-    const modal = new UpgradePlanModal(plugin, { feature: "Chat" });
-    modal.onOpen();
-    expect(modal.modalEl.querySelector('[data-testid="upgrade-plan.use-local-agent"]')).toBeNull();
-    expect(modal.modalEl.textContent).not.toContain("Claude Code");
-    modal.onClose();
+    const showAccountConnectOutcome = jest.fn(() => true);
+    plugin.settingsTab = { showAccountConnectOutcome };
+
+    const modal = UpgradePlanModal.openOnce(plugin);
+    presentAccountConnectOutcome(plugin, outcome);
+    expect(modal.modalEl.textContent).toContain("Signed in as user@example.test.");
+    expect(showAccountConnectOutcome).not.toHaveBeenCalled();
+    expect(Notice).not.toHaveBeenCalled();
+    modal.close();
+
+    presentAccountConnectOutcome(plugin, outcome);
+    expect(showAccountConnectOutcome).toHaveBeenCalledWith(outcome);
+    expect(Notice).not.toHaveBeenCalled();
+
+    showAccountConnectOutcome.mockReturnValue(false);
+    presentAccountConnectOutcome(plugin, { kind: "error", reason: "expired" });
+    presentAccountConnectOutcome(plugin, { kind: "no-license", name: null, email: "user@example.test" });
+    expect(Notice).toHaveBeenNthCalledWith(1,
+      "The sign-in session expired. Start sign-in again from SystemSculpt settings.", 10_000);
+    expect(Notice).toHaveBeenNthCalledWith(2,
+      "Signed in as user@example.test. Your account has no active plan yet. Choose a plan to enable SystemSculpt AI features.", 6_000);
+    expect(document.querySelector(".ss-upgrade-plan-modal")).toBeNull();
   });
 
   it("opens at most one instance at a time via openOnce", () => {
@@ -428,7 +449,7 @@ describe("UpgradePlanModal", () => {
     const first = UpgradePlanModal.openOnce(plugin);
     const second = UpgradePlanModal.openOnce(plugin);
     expect(second).toBe(first);
-    UpgradePlanModal.closeCurrent();
+    closeOpenModal();
     const third = UpgradePlanModal.openOnce(plugin);
     expect(third).not.toBe(first);
   });
@@ -436,7 +457,7 @@ describe("UpgradePlanModal", () => {
 
 describe("plan gate helpers", () => {
   afterEach(() => {
-    UpgradePlanModal.closeCurrent();
+    closeOpenModal();
     document.body.innerHTML = "";
   });
 
@@ -450,7 +471,7 @@ describe("plan gate helpers", () => {
     const plugin = createPlugin();
     expect(requireActivePlan(plugin, "Chat")).toBe(false);
     expect(document.body.textContent).toContain("Unlock SystemSculpt AI");
-    UpgradePlanModal.closeCurrent();
+    closeOpenModal();
 
     expect(requireActivePlan(createPlugin({ licenseKey: "skss-1" }), "Chat")).toBe(true);
   });
