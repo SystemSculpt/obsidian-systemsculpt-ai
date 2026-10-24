@@ -2,6 +2,7 @@
  * @jest-environment node
  */
 
+import { ERROR_CODES } from "../../utils/errors";
 import {
   decodeCreditsBalance,
   normalizeCreditsCheckoutUrl,
@@ -25,6 +26,74 @@ const creditsBalancePayload = {
 };
 
 describe("decodeCreditsBalance", () => {
+  it.each([null, [], "balance", 0])("rejects a non-record balance (%j)", (payload) => {
+    expect(() => decodeCreditsBalance(payload)).toThrow(expect.objectContaining({
+      code: ERROR_CODES.INVALID_RESPONSE,
+      statusCode: 502,
+    }));
+  });
+
+  it.each([
+    ["negative credits", { included_remaining: -1 }],
+    ["fractional credits", { add_on_remaining: 0.5 }],
+    ["string credits", { total_remaining: "0" }],
+    ["non-finite credits", { included_per_month: Infinity }],
+    ["unsafe credits", { included_remaining: Number.MAX_SAFE_INTEGER + 1 }],
+    ["mismatched total", { total_remaining: 1 }],
+    ["overflowed sum", { included_remaining: Number.MAX_SAFE_INTEGER, add_on_remaining: 1 }],
+    ["non-string timestamp", { cycle_anchor_at: 0 }],
+    ["blank timestamp", { cycle_started_at: " " }],
+    ["invalid timestamp", { cycle_ends_at: "not-a-date" }],
+    ["invalid active turn timestamp", { turn_in_flight_until: "not-a-date" }],
+  ])("does not display a fabricated balance for %s", (_label, overrides) => {
+    expect(() => decodeCreditsBalance({ ...creditsBalancePayload, ...overrides })).toThrow(
+      "Unable to read credits balance.",
+    );
+  });
+
+  const annualOffer = {
+    amount_saved_cents: 2000,
+    percent_saved: 20,
+    annual_price_cents: 8000,
+    monthly_equivalent_annual_cents: 10000,
+    checkout_path: "/checkout?plan=annual",
+  };
+
+  it("preserves a valid annual offer and normalizes billing-cycle and active-turn metadata", () => {
+    expect(decodeCreditsBalance({
+      ...creditsBalancePayload,
+      billing_cycle: " Monthly ",
+      cycle_started_at: " 2026-07-01T00:00:00.000Z ",
+      turn_in_flight_until: " 2026-07-15T12:00:00.000Z ",
+      annual_upgrade_offer: annualOffer,
+    })).toMatchObject({
+      billingCycle: "monthly",
+      cycleStartedAt: "2026-07-01T00:00:00.000Z",
+      turnInFlightUntil: "2026-07-15T12:00:00.000Z",
+      annualUpgradeOffer: {
+        amountSavedCents: 2000,
+        percentSaved: 20,
+        annualPriceCents: 8000,
+        monthlyEquivalentAnnualCents: 10000,
+        checkoutUrl: "https://systemsculpt.com/checkout?plan=annual",
+      },
+    });
+  });
+
+  it.each([
+    [],
+    { ...annualOffer, amount_saved_cents: 0 },
+    { ...annualOffer, percent_saved: 1.5 },
+    { ...annualOffer, annual_price_cents: "8000" },
+    { ...annualOffer, monthly_equivalent_annual_cents: 8000 },
+    { ...annualOffer, checkout_path: "https://example.com/checkout" },
+  ])("drops an invalid offer without discarding the usable balance (%j)", (offer) => {
+    expect(decodeCreditsBalance({ ...creditsBalancePayload, annual_upgrade_offer: offer })).toMatchObject({
+      totalRemaining: 0,
+      annualUpgradeOffer: null,
+    });
+  });
+
   it.each(["master_auth", "customer"] as const)(
     "preserves the exact %s usage identity",
     (usageClass) => {
