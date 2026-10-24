@@ -139,7 +139,7 @@ function renderSearch(app: App, host: HTMLElement, output: RecordValue, options:
     const paths = results.flatMap(result => text(result.path) ?? []).sort((a, b) => b.length - a.length);
     renderList(host, matches, (row, snippet) => {
       const path = paths.find(candidate => snippet.startsWith(`${candidate}:`)
-        && /^\d+  /u.test(snippet.slice(candidate.length + 1)));
+        && /^\d+ {2}/u.test(snippet.slice(candidate.length + 1)));
       if (path) {
         const suffix = snippet.slice(path.length + 1);
         const separator = suffix.indexOf("  ");

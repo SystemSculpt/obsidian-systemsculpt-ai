@@ -16,7 +16,7 @@ export const RESPONSE_FAILURE_RECOVERY_MARKER =
   "RESPONSE-FAILURE-RECOVERED-V1";
 export const RESPONSE_FAILURE_VISIBLE_MESSAGE =
   "SystemSculpt could not complete the response.";
-export const COPY_REPORT_ID_LABEL = "Copy report ID";
+export const COPY_REPORT_ID_LABEL = "Copy report";
 export const COPYING_REPORT_ID_LABEL = "Copying…";
 export const REPORT_ID_COPIED_LABEL = "Report ID copied";
 

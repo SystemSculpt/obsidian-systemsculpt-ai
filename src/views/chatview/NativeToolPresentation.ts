@@ -345,7 +345,7 @@ export async function renderNativeToolPreview(app: App, host: HTMLElement, part:
     }
   }
   if (!["AskUserQuestion", "requestUserInput", "questions"].includes(kind(part))) renderOutput(container, part.output?.data);
-  if (!container.childElementCount) container.createEl("p", { text: "Review Details for the full request." });
+  if (!container.childElementCount) container.createEl("p", { text: "No preview is available. The full request is in the disclosure below." });
   host.querySelector(":scope > .ss-native-tool-preview")?.remove();
   host.appendChild(container);
   return true;
