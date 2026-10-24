@@ -98,6 +98,26 @@ it.each(['item/commandExecution/requestApproval', 'item/fileChange/requestApprov
     ]) }));
   }
 });
+it.each(['fileChange', 'commandExecution'])('keeps a declined %s denied when native completion reports failure without hiding other failures', async type => {
+  const { session, persistAssistant } = setup();
+  native.mockImplementation(async (_input, signal, callbacks) => {
+    await callbacks.request(`item/${type}/requestApproval`, { itemId: 'edit', ...(type === 'fileChange'
+      ? { changes: [{ path: '/vault/Notes/Launch plan.md', kind: { type: 'update' } }] }
+      : { command: 'printf hello' }) }, signal);
+    for (const id of ['edit', 'other']) {
+      const item = { id, type, status: 'failed', error: 'Native action did not complete' };
+      callbacks.activity(codexActivity('item/completed', { item }), item);
+    }
+    return { text: 'done' };
+  });
+  const running = session.start(input()); await flush();
+  session.respondToApproval(tools(session)[0].approvalId!, false); await running;
+  expect(tools(session).map(({ callId, state }) => ({ callId, state })))
+    .toEqual([{ callId: 'edit', state: 'denied' }, { callId: 'other', state: 'failed' }]);
+  expect(persistAssistant).toHaveBeenCalledWith(expect.objectContaining({ messageParts: expect.arrayContaining([
+    expect.objectContaining({ type: 'tool_call', data: expect.objectContaining({ id: 'edit', approvalDecision: 'denied', result: expect.objectContaining({ success: false, error: { code: 'NATIVE_TOOL_DENIED', message: 'Native tool denied.' } }) }) }),
+  ]) }));
+});
 it.each([true, false])('returns exact requested permissions with turn/session scope (remember %s)', async rememberForSession => {
   for (const approved of [true, false]) {
     const { session } = setup(), response = jest.fn();

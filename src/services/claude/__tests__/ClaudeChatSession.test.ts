@@ -121,9 +121,47 @@ it.each([true, false])('answers the same inline permission with session options 
   await running;
   expect(response).toHaveBeenCalledWith({ approved, rememberForSession: true });
   expect(tools(session)).toHaveLength(1);
-  expect(tools(session)[0]).toMatchObject({ state: approved ? 'succeeded' : 'failed', approvalDecision: approved ? 'approved' : 'denied', approvalScope: approved ? 'session' : undefined });
+  expect(tools(session)[0]).toMatchObject({ state: approved ? 'succeeded' : 'denied', approvalDecision: approved ? 'approved' : 'denied', approvalScope: approved ? 'session' : undefined });
   expect(persistAssistant).toHaveBeenCalledWith(expect.objectContaining({ messageParts: expect.arrayContaining([
     expect.objectContaining({ type: 'tool_call', data: expect.objectContaining({ approvalScope: approved ? 'session' : undefined }) }),
+  ]) }));
+});
+it('keeps an explicitly denied Edit through a later native error result and persistence', async () => {
+  const { session, persistAssistant } = setup(false);
+  const request = { ...edit, input: { file_path: '/vault/Notes/Launch plan.md', old_string: 'Review the draft.', new_string: 'Publish the draft.' } };
+  const output = 'The user declined this action in SystemSculpt.';
+  let afterResult: AgentToolPart | undefined;
+  native.mockImplementation(async (_input, signal, callbacks) => {
+    callbacks.tool({ id: 'tool1', name: 'Edit', input: request.input, state: 'running' });
+    expect(await callbacks.permission(request, signal)).toEqual({ approved: false });
+    // LocalClaudeClient projects a tool_result with is_error: true as failed.
+    callbacks.tool({ id: 'tool1', state: 'failed', output });
+    afterResult = tools(session)[0];
+    callbacks.tool({ id: 'tool1', name: 'Edit', input: request.input, state: 'running' });
+    return { text: 'The edit was declined. Nothing in the file changed.' };
+  });
+  const running = session.start(input()); await flush();
+  expect(session.respondToApproval(tools(session)[0].approvalId!, false)).toBe(true);
+  expect(tools(session)[0]).toMatchObject({ state: 'denied', approvalDecision: 'denied' });
+  await expect(running).resolves.toMatchObject({ kind: 'completed' });
+  expect(afterResult).toMatchObject({ state: 'denied', approvalDecision: 'denied', output: { data: output } });
+  expect(tools(session)).toEqual([expect.objectContaining({ state: 'denied', approvalDecision: 'denied', input: request.input })]);
+  expect(persistAssistant).toHaveBeenCalledWith(expect.objectContaining({ messageParts: expect.arrayContaining([
+    expect.objectContaining({ type: 'tool_call', data: expect.objectContaining({ approvalDecision: 'denied', result: expect.objectContaining({ success: false, error: { code: 'NATIVE_TOOL_DENIED', message: 'Native tool denied.' } }) }) }),
+  ]) }));
+});
+it.each([false, true])('keeps a genuine native error as failed (approved first %s)', async approved => {
+  const { session, persistAssistant } = setup(approved);
+  native.mockImplementation(async (_input, signal, callbacks) => {
+    callbacks.tool({ id: 'tool1', name: 'Edit', input: edit.input, state: 'running' });
+    if (approved) await callbacks.permission(edit, signal);
+    callbacks.tool({ id: 'tool1', state: 'failed', output: 'old_string was not found' });
+    return { text: 'The edit failed.' };
+  });
+  await session.start(input());
+  expect(tools(session)[0]).toMatchObject({ state: 'failed', output: { data: 'old_string was not found' } });
+  expect(persistAssistant).toHaveBeenCalledWith(expect.objectContaining({ messageParts: expect.arrayContaining([
+    expect.objectContaining({ type: 'tool_call', data: expect.objectContaining({ result: expect.objectContaining({ success: false, error: { code: 'NATIVE_TOOL_FAILED', message: 'Native tool failed.' } }) }) }),
   ]) }));
 });
 it('withdraws native cancellation and rejects stale responses while text streams', async () => {
