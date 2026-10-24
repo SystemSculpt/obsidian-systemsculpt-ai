@@ -278,7 +278,8 @@ export class AgentWorkspace extends Component {
     });
     this.banner.toggleAttribute("hidden", true);
 
-    this.viewport = this.element.createDiv({
+    const transcript = this.element.createDiv({ cls: "systemsculpt-agent-transcript" });
+    this.viewport = transcript.createDiv({
       cls: "systemsculpt-agent-viewport",
       attr: { tabindex: "0" },
     });
@@ -329,7 +330,7 @@ export class AgentWorkspace extends Component {
     });
     this.addChild(this.renderer);
 
-    this.jumpButton = createUiAction(this.element, {
+    this.jumpButton = createUiAction(transcript, {
       label: "Latest",
       testId: "chat.jump-to-latest",
       icon: "arrow-down",

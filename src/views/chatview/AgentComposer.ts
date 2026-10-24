@@ -24,6 +24,7 @@ import {
 } from "./attachments/ChatMessageAttachments";
 import { AgentComposerMentionPopover, type ComposerMentionTrigger } from "./AgentComposerMentions";
 import { AgentComposerVault } from "./AgentComposerVault";
+import { containMenuEscape } from "./AgentRunLine";
 import { containsControlCharacters } from "../../utils/characterValidation";
 
 export type AgentComposerAttachment = Readonly<{
@@ -150,6 +151,8 @@ export class AgentComposer extends Component {
   private dragDepth = 0;
   private hostClearance = 0;
   private attachmentQueue: Promise<void> = Promise.resolve();
+  private openMenu: Menu | null = null;
+  private menuGeneration = 0;
 
   constructor(private readonly parent: HTMLElement, private readonly options: AgentComposerOptions) {
     super();
@@ -325,6 +328,7 @@ export class AgentComposer extends Component {
   }
 
   onunload(): void {
+    this.closeMenu();
     // Closing the chat stops document processing its draft started.
     this.attachmentGeneration += 1;
     this.messageAttachments.dispose();
@@ -610,12 +614,23 @@ export class AgentComposer extends Component {
     this.presentMenu(menu, anchor, () => chosen, event);
   }
 
+  private closeMenu(): void {
+    this.menuGeneration += 1;
+    const menu = this.openMenu;
+    this.openMenu = null;
+    menu?.hide();
+  }
+
   /**
    * Shows a menu and, when it is dismissed from the keyboard, returns focus to
    * the control that opened it. Obsidian otherwise sends focus to the editor.
    */
   private presentMenu(menu: Menu, anchor: HTMLElement, chosen: () => boolean, event?: MouseEvent): void {
+    this.closeMenu();
+    this.openMenu = menu;
+    const generation = this.menuGeneration;
     const ownerDocument = anchor.ownerDocument;
+    const releaseEscape = containMenuEscape(menu, ownerDocument);
     let dismissedByPointer = false;
     const onPointerDown = (pointer: PointerEvent) => {
       const target = pointer.target as Element | null;
@@ -623,11 +638,14 @@ export class AgentComposer extends Component {
     };
     ownerDocument.addEventListener("pointerdown", onPointerDown, true);
     menu.onHide(() => {
+      releaseEscape();
       ownerDocument.removeEventListener("pointerdown", onPointerDown, true);
-      if (chosen() || dismissedByPointer) return;
+      if (this.openMenu !== menu) return;
+      this.openMenu = null;
+      if (chosen() || dismissedByPointer || !anchor.isConnected) return;
       anchor.focus();
       getSurfaceOwnerWindow(anchor).setTimeout(() => {
-        if (anchor.isConnected && ownerDocument.activeElement !== anchor) anchor.focus();
+        if (generation === this.menuGeneration && anchor.isConnected && ownerDocument.activeElement !== anchor) anchor.focus();
       }, 0);
     });
     this.showMenu(menu, anchor, event);

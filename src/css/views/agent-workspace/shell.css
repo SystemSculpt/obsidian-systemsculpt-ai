@@ -153,8 +153,18 @@
   white-space: nowrap;
 }
 
+/* The Latest overlay belongs to the transcript, above the variable-height
+ * composer and outside the scrolling content. */
+.systemsculpt-agent-transcript {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
 .systemsculpt-agent-viewport {
   position: relative;
+  min-width: 0;
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
@@ -200,7 +210,7 @@
 
   .ss-mobile-layout.ss-mobile-navbar-hidden .systemsculpt-agent-header,
   .ss-mobile-layout.ss-mobile-navbar-hidden .systemsculpt-agent-banner,
-  .ss-mobile-layout.ss-mobile-navbar-hidden .systemsculpt-agent-viewport,
+  .ss-mobile-layout.ss-mobile-navbar-hidden .systemsculpt-agent-transcript,
   .ss-mobile-layout.ss-mobile-navbar-hidden .systemsculpt-agent-queue {
     display: none;
   }
