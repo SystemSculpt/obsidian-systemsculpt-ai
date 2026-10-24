@@ -51,6 +51,15 @@ describe("reviewed vault cleanup", () => {
     expect((await scanVaultCleanup(h.app, { ...settings, chatsDirectory: directory })).chat.items).toEqual([]);
   });
 
+  it("normalizes accepted directory separators without crossing a sibling boundary", async () => {
+    const h = harness();
+    const chat = h.addFile("SystemSculpt/Chats/saved.md");
+    h.addFile("SystemSculpt/Chats-archive/keep.md");
+    const plan = await scanVaultCleanup(h.app, { ...settings, chatsDirectory: " SystemSculpt\\\\Chats/// " });
+    expect(plan.chat.directory).toBe("SystemSculpt/Chats");
+    expect(plan.chat.items.map((item) => item.file)).toEqual([chat]);
+  });
+
   it("does not treat authored frontmatter as empty", async () => {
     const h = harness();
     const empty = h.addFile("empty.md", " \n\t");
