@@ -1,8 +1,20 @@
 # SystemSculpt AI for Obsidian
 
-SystemSculpt brings an agent workspace, semantic vault search, transcription, and visual workflows into Obsidian. Hosted features use your SystemSculpt account. Desktop chat and Studio text generation can also use your installed, signed-in Codex or Claude Code.
+An AI agent that works inside your vault. Ask about your notes, let the agent search, read, and edit files with your approval, transcribe audio into Markdown, find related notes, and build visual AI workflows. Runs on desktop and mobile.
 
-Free to install. Paid Monthly and Lifetime plans are available for SystemSculpt in Obsidian. [Compare plans and current usage terms](https://systemsculpt.com/pricing?utm_source=obsidian&utm_medium=plugin_readme&utm_campaign=pricing_discovery_oct2026) before you start. Your own on-machine Codex and Claude Code remain available without a SystemSculpt plan.
+**Free to start.** Install the plugin, create a free SystemSculpt account from inside Obsidian, and get 500 one-time starter credits for hosted AI. No card needed (while available). When you want more, [Monthly is $9/month and Lifetime is $149 once](https://systemsculpt.com/pricing?utm_source=obsidian&utm_medium=plugin_readme&utm_campaign=readme_free_start_nov2026); both include a monthly credit allowance. On desktop, chat and Studio text generation can also run on your own installed Codex or Claude Code without a SystemSculpt plan.
+
+![SystemSculpt asks before it edits a note and shows the exact change](https://raw.githubusercontent.com/SystemSculpt/obsidian-systemsculpt-ai/main/docs/images/readme-chat-approval.png)
+
+![The finished action items next to the chat summary](https://raw.githubusercontent.com/SystemSculpt/obsidian-systemsculpt-ai/main/docs/images/readme-chat-result.png)
+
+## Start in two minutes
+
+1. Install and enable SystemSculpt AI from Obsidian Community Plugins.
+2. In the welcome window (or Settings → SystemSculpt AI → Account), create your free account. Approve the connection in your browser and choose the 500 starter credits.
+3. Run **Open SystemSculpt Chat** from the command palette and ask about your vault.
+
+Already have a plan? Sign in from the same window, or paste your license key in Settings → SystemSculpt AI → Account.
 
 ## What it does
 
@@ -20,16 +32,11 @@ SystemSculpt runs on desktop and mobile. Studio exposes portable nodes on both; 
 
 ## Account, payment, and credits
 
-The plugin is free to install. Hosted AI features use a SystemSculpt account; paid plans and credit packs are available. See the plan terms and your account for included usage.
+The plugin is free to install. Hosted AI features use a SystemSculpt account and credits. A free account can claim 500 one-time starter credits, no card needed, while available. Monthly ($9/month) and Lifetime ($149 once) plans include a monthly credit allowance, and credit packs add more. See the [plan terms](https://systemsculpt.com/pricing) and your account for included usage.
 
 Account, license, billing, and add-credit controls open first-party pages on [systemsculpt.com](https://systemsculpt.com); payments are handled there by Stripe and never occur inside the plugin. The plugin may show first-party license or credit purchase prompts when access or funds are insufficient, but it never purchases anything automatically.
 
-## Install
-
-1. Install and enable SystemSculpt AI from Obsidian Community Plugins.
-2. Open Settings → SystemSculpt AI → Account.
-3. Sign in or activate a SystemSculpt license key.
-4. Run Open SystemSculpt Chat or open Studio.
+## Updates
 
 SystemSculpt checks its first-party release endpoint in the background. On desktop, a newer release shows a quiet **Update SystemSculpt** status-bar item; the **Check for updates** command reports the result on any device. Neither opens a prompt. Obsidian Community Plugins exclusively owns download, installation, updates, and activation.
 
@@ -61,30 +68,7 @@ SystemSculpt checks its first-party release endpoint in the background. On deskt
 
 ## Development
 
-~~~bash
-cd ~/gits/systemsculpt/plugin
-npm install
-npm run check
-~~~
-
-Use `npm run test:related -- <changed source files>` for focused verification, `npm run check:plugin` for a larger checkpoint, and `npm run check:ci` for the exhaustive gate. `npm run lint:community` runs the official Obsidian community-directory source checker locally.
-
-Select each non-production API through its named development command:
-
-~~~bash
-npm run build:local-agent
-npm run build:staging
-~~~
-
-The local-agent route is fixed at `http://127.0.0.1:8787/api/plugin`. Production builds reject endpoint overrides and use `https://systemsculpt.com/api/plugin`.
-
-| Directory | Responsibility |
-| --- | --- |
-| `~/gits/systemsculpt/plugin` | This Obsidian client |
-| `~/gits/systemsculpt/systemsculpt-website` | Website and first-party plugin API |
-| `~/gits/systemsculpt/systemsculpt-os` | Growth and operator automation |
-
-See [development.md](docs/development.md), [community-review.md](docs/community-review.md), [CONTRIBUTING.md](CONTRIBUTING.md), and [AGENTS.md](AGENTS.md).
+Building or contributing to the plugin: see [development.md](docs/development.md), [community-review.md](docs/community-review.md), [CONTRIBUTING.md](CONTRIBUTING.md), and [AGENTS.md](AGENTS.md).
 
 ## Release
 
