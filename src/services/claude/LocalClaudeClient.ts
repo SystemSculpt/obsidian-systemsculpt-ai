@@ -1,6 +1,7 @@
 import { desktopHost } from '../../platform/desktopOnly';
 import { isRecord } from '../../studio/utils';
 import { readLocalAgentLaunchConfig } from '../codex/LocalAgentLaunch';
+import { LocalAgentUsageLimitError } from '../codex/LocalAgents';
 
 export const CLAUDE_PERMISSION_MODES = ['auto', 'manual', 'acceptEdits', 'plan', 'settings'] as const;
 export type ClaudePermissionMode = typeof CLAUDE_PERMISSION_MODES[number];
@@ -309,6 +310,14 @@ async function runClaudeAttempt(input: ClaudeRequest, signal: AbortSignal, callb
           return;
         }
         if (event.type === 'assistant' && isRecord(event.message)) {
+          if (event.error === 'rate_limit' || event.error === 'billing_error') {
+            const content = Array.isArray(event.message.content) ? event.message.content : [];
+            const notice = content.filter(block => isRecord(block) && block.type === 'text' && typeof block.text === 'string').map(block => String(block.text)).join('\n\n');
+            // The native error can follow streamed text; retract only that uncommitted tail.
+            if (partialLength) { partial = ''; partialLength = 0; if (owner) callbacks.text?.('', textLength); else publish(); }
+            finish({ error: new LocalAgentUsageLimitError(notice || 'Claude Code reported a usage or billing limit.') });
+            return;
+          }
           if (event.error === 'authentication_failed') signedOut = true;
           for (const block of Array.isArray(event.message.content) ? event.message.content : []) {
             if (!isRecord(block)) continue;

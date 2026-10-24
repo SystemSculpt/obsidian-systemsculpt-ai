@@ -15,7 +15,7 @@ const NOT_STARTED_ERROR =
 export type PresentedAgentError = Readonly<{
   heading: string;
   message: string;
-  action?: "see-plans" | "add-credits" | "detect" | "sign-in";
+  action?: "see-plans" | "add-credits" | "detect" | "sign-in" | "use-hosted";
   details?: string;
   /** Local report id, or a legacy server incident id while capture settles. */
   reportId?: string;
@@ -44,6 +44,9 @@ export function presentAgentError(
   const nativeAgent = /^local_(claude|codex)_/.exec(error.code)?.[1];
   if (nativeAgent) {
     const name = nativeAgent === "claude" ? "Claude Code" : "Codex";
+    if (error.code === `local_${nativeAgent}_usage_limit`) {
+      return { heading: `${name} usage limit reached`, message: error.message, action: "use-hosted" };
+    }
     const login = nativeAgent === "claude"
       ? "Open a terminal, run `claude` and type /login. Then send your message again."
       : "Open a terminal and run `codex login`. Then send your message again.";

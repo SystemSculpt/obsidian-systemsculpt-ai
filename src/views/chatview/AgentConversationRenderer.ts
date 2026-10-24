@@ -2837,7 +2837,7 @@ export class AgentConversationRenderer extends Component {
             text: "Preparing report…",
           }) : null;
         const canRetry = part.retryable && part.retryMessageId && this.options.onRetryFailedTurn
-          && !presented.action?.match(/^(see-plans|add-credits|detect)$/)
+          && !presented.action?.match(/^(see-plans|add-credits|detect|use-hosted)$/)
           && part.error.code !== "content_filter";
         const actions = canRetry || presented.action || presented.reportId && this.options.onCopyIncidentReport
           ? copy.createDiv({ cls: "systemsculpt-agent-error-actions" }) : null;
@@ -2866,7 +2866,7 @@ export class AgentConversationRenderer extends Component {
             detect.onclick = () => void this.options.onRetryFailedTurn?.(part.retryMessageId!);
           };
         }
-        if (actions && presented.action === "detect" && this.options.onUseHosted) {
+        if (actions && (presented.action === "detect" || presented.action === "use-hosted") && this.options.onUseHosted) {
           const hosted = createUiAction(actions, { label: "Use SystemSculpt instead", testId: "chat.turn.use-hosted", size: "small" });
           hosted.onclick = () => void this.options.onUseHosted?.();
         }

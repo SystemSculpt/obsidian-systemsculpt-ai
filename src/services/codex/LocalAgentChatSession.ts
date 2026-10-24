@@ -6,7 +6,7 @@ import { THIN_AGENT_CONTRACT_VERSION, type MeasuredThinAgentContext, type ThinAg
 import { isRecord } from '../../studio/utils';
 import { CodexThreadLocator } from './CodexThreadLocator';
 import { localAgentChatDirectory } from './CodexExecutionSettings';
-import { LOCAL_AGENTS, type LocalAgentId } from './LocalAgents';
+import { LOCAL_AGENTS, LocalAgentUsageLimitError, type LocalAgentId } from './LocalAgents';
 import { resolveAbsoluteVaultPath } from '../../utils/vaultPathUtils';
 import { localAgentPromptText } from './LocalAgentMessageParts';
 import { desktopHost } from '../../platform/desktopOnly';
@@ -224,8 +224,9 @@ export class LocalAgentChatSession implements ChatSession {
         try { await this.localOptions.persistAssistant(message(receivedText, cancelled ? 'cancelled' : 'failed')); } catch { /* Preserve the original native failure. */ }
       }
       if (cancelled) { this.publish({ status: 'cancelled', phase: 'complete', waitingReason: undefined, statusLabel: `${name} stopped` }); return { kind: 'cancelled', snapshot: this.localSnapshot }; }
-      const error = { code: `local_${this.agent}_failed`, message: cause instanceof Error ? cause.message : `${name} could not complete this response.`, retryable: true };
-      this.publish({ status: 'failed', phase: 'complete', waitingReason: undefined, terminalError: error, parts: [...this.localSnapshot.parts, { id: `${messageId}_error`, order: this.localSnapshot.parts.length, kind: 'error', error, retryable: true }] });
+      const usageLimit = cause instanceof LocalAgentUsageLimitError;
+      const error = { code: `local_${this.agent}_${usageLimit ? 'usage_limit' : 'failed'}`, message: cause instanceof Error ? cause.message : `${name} could not complete this response.`, retryable: !usageLimit };
+      this.publish({ status: 'failed', phase: 'complete', waitingReason: undefined, terminalError: error, parts: [...this.localSnapshot.parts, { id: `${messageId}_error`, order: this.localSnapshot.parts.length, kind: 'error', error, retryable: error.retryable }] });
       return { kind: 'failed', snapshot: this.localSnapshot, error };
     } finally { accepting = false; this.withdrawApprovals(); controller.signal.removeEventListener('abort', stopApprovals); this.sources = []; }
   }
