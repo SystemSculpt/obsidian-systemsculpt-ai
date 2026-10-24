@@ -263,9 +263,6 @@
   border-color: var(--ss-line-accent);
   box-shadow: inset 3px 0 var(--ss-warning), var(--ss-ring);
 }
-.systemsculpt-agent-approval:focus-visible {
-  outline: none;
-}
 .systemsculpt-agent-approval button:focus-visible,
 .systemsculpt-agent-approval input:focus-visible,
 .systemsculpt-agent-approval a:focus-visible,
@@ -423,7 +420,7 @@
   height: 1px;
   padding: 0;
   overflow: hidden;
-  clip-path: inset(50%);
+  clip: rect(0, 0, 0, 0);
   white-space: nowrap;
 }
 .systemsculpt-agent-approval-notice-surface {

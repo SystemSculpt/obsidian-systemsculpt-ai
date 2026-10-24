@@ -155,6 +155,68 @@ function createControllerHarness(project: StudioProjectV1) {
 }
 
 describe("StudioProjectSessionController", () => {
+  it("hydrates read-only results without materializing nodes or refreshing note previews", async () => {
+    const project = projectFixture(noteNodeFixture("Notes/Read only.md"));
+    const { controller, host, service } = createControllerHarness(project);
+    await controller.loadProjectFromPath(null);
+    const session = new StudioProjectSession({ projectPath: "Studio/Test.systemsculpt", project, saveProject: async () => {}, readOnlyReason: "Original copy unavailable" });
+    service.retainProjectSession.mockResolvedValue(session);
+    host.hydrateProjectCache.mockResolvedValue({ entries: { note_1: { outputs: { text: "Saved result" } } } });
+    host.vaultNotes.refresh.mockClear();
+
+    expect(await controller.loadProjectFromPath(session.getProjectPath())).toBe(true);
+    expect(host.hydrateProjectCache).toHaveBeenCalledWith(session.getProjectPath(), project);
+    expect(host.materializeManagedOutputNodesFromCache).not.toHaveBeenCalled();
+    expect(host.vaultNotes.refresh).not.toHaveBeenCalled();
+    expect(session.getProject()).toEqual(project);
+    await controller.close();
+    await session.close();
+  });
+
+  it.each(["switch", "close"])("finishes a delayed migration retry before a later %s and balances retains", async (transition) => {
+    const project = projectFixture(noteNodeFixture("Notes/Retry.md"));
+    const { controller, host, service } = createControllerHarness(project);
+    await controller.loadProjectFromPath(null);
+    host.vaultNotes.refresh.mockResolvedValue(false);
+    const firstPath = "Studio/Test.systemsculpt", secondPath = "Studio/Other.systemsculpt";
+    const first = new StudioProjectSession({ projectPath: firstPath, project, saveProject: async () => {}, readOnlyReason: "Original copy unavailable" });
+    const second = new StudioProjectSession({ projectPath: secondPath, project: { ...project, name: "Other" }, saveProject: async () => {} });
+    const retains = new Map([[firstPath, 0], [secondPath, 0]]);
+    service.retainProjectSession.mockImplementation(async (path: string) => {
+      retains.set(path, retains.get(path)! + 1);
+      return path === firstPath ? first : second;
+    });
+    service.releaseProjectSession.mockImplementation(async (path: string) => {
+      retains.set(path, retains.get(path)! - 1);
+      expect(retains.get(path)).toBeGreaterThanOrEqual(0);
+    });
+    await controller.loadProjectFromPath(firstPath);
+    let finishRetry!: () => void, startedRetry!: () => void;
+    const started = new Promise<void>(resolve => { startedRetry = resolve; });
+    const waiting = new Promise<void>(resolve => { finishRetry = resolve; });
+    service.retainProjectSession.mockImplementationOnce(async () => {
+      retains.set(firstPath, retains.get(firstPath)! + 1);
+      startedRetry();
+      await waiting;
+      return first;
+    });
+    const retry = controller.loadProjectFromPath(firstPath, { forceReload: true });
+    await started;
+    const next = transition === "switch" ? controller.loadProjectFromPath(secondPath) : controller.close();
+    finishRetry();
+    await Promise.all([retry, next]);
+
+    expect(controller.getProjectPath()).toBe(transition === "switch" ? secondPath : null);
+    expect(controller.getProjectSession()).toBe(transition === "switch" ? second : null);
+    expect(retains.get(firstPath)).toBe(0);
+    expect(retains.get(secondPath)).toBe(transition === "switch" ? 1 : 0);
+    expect(host.setError).not.toHaveBeenCalled();
+    if (transition === "switch") await controller.close();
+    expect(retains.get(secondPath)).toBe(0);
+    await first.close();
+    await second.close();
+  });
+
   it("renders peer mutations while an originating asynchronous edit awaits completion", async () => {
     const project = projectFixture(noteNodeFixture("Notes/Shared.md"));
     const session = new StudioProjectSession({ projectPath: "Studio/Test.systemsculpt", project, saveProject: async () => {} });

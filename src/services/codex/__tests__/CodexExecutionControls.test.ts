@@ -33,6 +33,25 @@ it('shows native models, model-specific thinking and Normal/Fast, and saves the 
   dispose(); expect(offref).toHaveBeenCalled(); expect(parent.children).toHaveLength(0); parent.remove();
 });
 
+it('preserves execution controls on unrelated settings notifications', async () => {
+  const parent = document.createElement('div');
+  const settings = { textExecutionBackend: 'systemsculpt', codexModel: 'gpt-6-astra' };
+  const on = jest.fn();
+  const plugin = { settings, app: { workspace: { on, offref: jest.fn() } }, getSettingsManager: () => ({ updateSettings: jest.fn() }) };
+  const dispose = mountCodexExecutionControls(parent, plugin as never, {});
+  const provider = parent.querySelector('[data-testid="codex.execution.provider"]') as HTMLSelectElement;
+  const originalOption = provider.options[0];
+  const listener = on.mock.calls.find(([event]) => event === 'systemsculpt:settings-updated')![1];
+  listener(settings, settings, ['defaultChatTag']);
+  listener(settings, settings, ['lastValidated']);
+  expect(provider.options[0]).toBe(originalOption);
+  settings.textExecutionBackend = 'claude';
+  listener(settings, settings, ['textExecutionBackend']);
+  expect(provider.value).toBe('claude');
+  expect(provider.options[0]).not.toBe(originalOption);
+  dispose();
+});
+
 it('re-detects from settings without changing an explicit choice', async () => {
   const parent = document.createElement('div'); document.body.append(parent);
   const settings = { textExecutionBackend: 'claude', textExecutionBackendExplicit: true, claudePermissionMode: 'auto' };

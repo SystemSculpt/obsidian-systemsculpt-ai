@@ -3412,9 +3412,14 @@ export class AgentChatView extends ItemView {
       }
     }));
     this.registerEvent(this.app.workspace.on("file-open", () => this.syncChrome()));
-    this.registerEvent(this.app.workspace.on("systemsculpt:settings-updated", () => {
-      this.syncChrome();
-      void this.refreshCreditsBalance({ reason: "settings_update" });
+    this.registerEvent(this.app.workspace.on("systemsculpt:settings-updated", (oldSettings, newSettings, changedKeys) => {
+      if (changedKeys.some(key => [
+        "licenseKey", "userEmail", "subscriptionStatus", "textExecutionBackend", "textExecutionBackendExplicit",
+        "codexModel", "codexThinkingLevel", "codexServiceTier", "codexApprovalMode", "claudeModel", "claudePermissionMode",
+      ].includes(key))) this.syncChrome();
+      if (changedKeys.includes("licenseKey") && oldSettings.licenseKey.trim() !== newSettings.licenseKey.trim()) {
+        void this.refreshCreditsBalance({ reason: "settings_update" });
+      }
     }));
   }
 

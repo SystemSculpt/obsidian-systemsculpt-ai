@@ -84,8 +84,9 @@
 }
 
 @keyframes ss-shimmer {
-  from { background-position: 200% 0; }
-  to { background-position: -200% 0; }
+  from { transform: translateX(0); opacity: 0; }
+  15%, 85% { opacity: 1; }
+  to { transform: translateX(200%); opacity: 0; }
 }
 
 /* Feedback */

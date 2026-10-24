@@ -74,6 +74,17 @@ automatic detection does not change Studio's backend default. **Codex chat modes
 not apply to Studio**: Studio continues to inherit Codex's native permission
 configuration. See [Studio workspaces](../studio-workspaces.md).
 
+## Saving changes
+
+Chat tags and Studio text fields save after a short typing pause, or immediately
+when you leave the field or close settings. Workspace directory paths save when
+you leave the field, choose a folder, or close settings, rather than saving each
+partial path. Toggles and selections still apply immediately.
+
+Unchanged values do not rewrite settings or backups. Changes refresh only the
+features that use them; editing a chat tag does not restart vault indexing or
+refresh account credits.
+
 ## Notes
 
 - The top-level settings tabs are `Account`, `Chat`, `Workflow`, `Knowledge`, `Workspace`, `Studio`, and `Advanced`.

@@ -16,6 +16,7 @@
   },
   "description": "Chat with your vault using your own Claude Code or Codex on desktop, or hosted AI. The AI agent edits notes with your approval, transcribes audio and finds related notes. Free to start.",
   "devDependencies": {
+    "@asamuzakjp/css-color": "3.2.0",
     "@eslint/json": "^0.14.0",
     "@swc/core": "^1.15.11",
     "@swc/jest": "^0.2.39",
@@ -54,7 +55,7 @@
     "check:plugin:obsidian": "npm run lint:obsidian && npm run lint:obsidian:meta && npm run lint:community",
     "check:plugin:obsidian:ci": "npm run lint:obsidian -- --no-cache && npm run lint:obsidian:meta -- --no-cache && npm run lint:community -- --no-cache",
     "lint:css": "node scripts/lint-css.mjs",
-    "test:ui:focused": "node scripts/jest.mjs --config jest.config.cjs --testPathPatterns \"src/(components|core/ui|editor|features/audio-processor|modals|services/recorder|views/history|views/studio)/.*__tests__/|src/__tests__/(main-initialize-|settings-recorder-tab|systemsculpt-context-menu|systemsculpt-settings-tab)|src/views/__tests__/EmbeddingsPresentation|src/views/chatview/__tests__/(agent-workspace-ui|agent-composer|resume-chat-service)\"",
+    "test:ui:focused": "node scripts/jest.mjs --config jest.config.cjs --testPathPatterns \"src/(components|core/ui|editor|features/audio-processor|modals|services/recorder|views/history|views/studio)/.*__tests__/|src/__tests__/(main-initialize-|settings-recorder-tab|systemsculpt-context-menu|systemsculpt-settings-tab)|src/views/__tests__/EmbeddingsPresentation|src/views/chatview/__tests__/(agent-workspace-ui|agent-composer|resume-chat-service|chatview-visual-accessibility)\"",
     "check:ui": "node --test scripts/lint-css.test.mjs scripts/ui-architecture.test.mjs && npm run test:ui:focused",
     "check:plugin": "node scripts/check-plugin.mjs",
     "check:plugin:fast": "node scripts/check-plugin.mjs --fast",

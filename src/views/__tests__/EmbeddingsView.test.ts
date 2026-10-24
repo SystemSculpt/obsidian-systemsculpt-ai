@@ -111,6 +111,25 @@ describe("EmbeddingsView", () => {
     jest.clearAllMocks();
   });
 
+  it("ignores unrelated settings events but refreshes for indexing configuration", async () => {
+    await view.onOpen();
+    const listener = mockPlugin.app.workspace.on.mock.calls.find(([event]: [string]) => event === "systemsculpt:settings-updated")![1];
+    const refresh = jest.spyOn(view as any, "debouncedCheckActiveFile").mockImplementation(() => undefined);
+    const settings = mockPlugin.settings;
+    listener(settings, settings, ["lastValidated"]);
+    listener(settings, settings, ["defaultChatTag"]);
+    expect(refresh).not.toHaveBeenCalled();
+    mockPlugin.settings = { ...settings, embeddingsEnabled: false };
+    listener(settings, mockPlugin.settings, ["embeddingsEnabled"]);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    listener(mockPlugin.settings, { ...mockPlugin.settings, chatsDirectory: "Moved/Chats" }, ["chatsDirectory"]);
+    expect(refresh).toHaveBeenCalledTimes(2);
+    listener(settings, { ...settings, embeddingsExclusions: { folders: ["Private"] } }, ["embeddingsExclusions"]);
+    expect(refresh).toHaveBeenCalledTimes(3);
+    refresh.mockRestore();
+    await view.onClose();
+  });
+
   describe("view basics", () => {
     it("returns correct view type", () => {
       expect(view.getViewType()).toBe(EMBEDDINGS_VIEW_TYPE);
@@ -732,37 +751,6 @@ describe("EmbeddingsView", () => {
 
       expect(mockManager.resumeProcessing).toHaveBeenCalledTimes(1);
       expect(refreshChat).toHaveBeenCalledWith(chatView);
-    });
-  });
-
-  describe("config change detection", () => {
-    it("generates different config keys for different settings", () => {
-      const settings1 = {
-        embeddingsEnabled: true,
-        embeddingsExclusions: { folders: [] },
-      };
-
-      const settings2 = {
-        embeddingsEnabled: true,
-        embeddingsExclusions: { folders: ["Private"] },
-      };
-
-      const key1 = (view as any).getEmbeddingsConfigKey(settings1);
-      const key2 = (view as any).getEmbeddingsConfigKey(settings2);
-
-      expect(key1).not.toBe(key2);
-    });
-
-    it("generates same config key for same settings", () => {
-      const settings = {
-        embeddingsEnabled: true,
-        embeddingsExclusions: { folders: [] },
-      };
-
-      const key1 = (view as any).getEmbeddingsConfigKey(settings);
-      const key2 = (view as any).getEmbeddingsConfigKey(settings);
-
-      expect(key1).toBe(key2);
     });
   });
 

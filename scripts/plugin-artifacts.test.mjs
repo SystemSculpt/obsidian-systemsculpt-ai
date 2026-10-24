@@ -256,6 +256,34 @@ test("production CSS builds fail closed on missing imports and normalize source 
   assert.equal(fs.readFileSync(outputPath, "utf8"), first);
 });
 
+test("CSS builds preserve entry rules after imports, including focus and touch invariants", () => {
+  const root = createTempPluginDir();
+  const cssRoot = path.join(root, "css");
+  const indexPath = path.join(cssRoot, "index.css");
+  const outputPath = path.join(root, "styles.css");
+  fs.mkdirSync(cssRoot, { recursive: true });
+  const focusRule = ".control:focus-visible { box-shadow: var(--ss-ring); }";
+  const touchRule = "@media (pointer: coarse) { .control { min-height: 44px; } }";
+  fs.writeFileSync(indexPath, [
+    "/* @import 'missing-commented.css'; */",
+    "@import 'base.css';",
+    '@import "feature.css";',
+    focusRule,
+    touchRule,
+  ].join("\r\n"));
+  fs.writeFileSync(path.join(cssRoot, "base.css"), ".base { color: black; }");
+  fs.writeFileSync(path.join(cssRoot, "feature.css"), ".control { box-shadow: none; }");
+
+  const css = buildCssArtifact({ indexPath, outputPath, logger: {} });
+  assert.equal(fs.readFileSync(outputPath, "utf8"), css);
+  assert.equal(css.includes("\r"), false);
+  assert.ok(css.indexOf(".base {") < css.indexOf(".control {"));
+  assert.ok(css.includes(focusRule));
+  assert.ok(css.includes(touchRule));
+  assert.ok(css.indexOf(focusRule) > css.indexOf(".control { box-shadow: none; }"));
+  assert.ok(css.indexOf(touchRule) > css.indexOf(focusRule));
+});
+
 test("production CSS builds never replace output with a failure sentinel", () => {
   const root = createTempPluginDir();
   const outputPath = path.join(root, "styles.css");

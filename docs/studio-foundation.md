@@ -77,14 +77,19 @@ directly from the file:
   {"from": "a", "to": "b", "label": "text"} instead of the string.
 - docs points at the generated agent reference (node kinds, ports, config
   fields, editing rules) that Studio keeps current in the vault.
-- Studio still reads v1 and legacy documents and rewrites them as v2 on the
-  next save. The schema never moves backward, and agent file tools validate
+- Studio still reads v1 and legacy documents and rewrites them as v2 on
+  opening, once their original copy is safe. The schema never moves backward, and agent file tools validate
   every proposed edit before bytes reach the vault.
 - Migration converts retired node kinds (Label, HTTP Request, Prompt Template,
   Resend Audience Sync); retired request nodes lose their configuration.
   Before the first v2 rewrite, Studio copies the original file byte for byte
   to legacy/<timestamp>-v1-original.json in the assets directory, once per
-  distinct original, and names that copy in a notice.
+  distinct original, and names that copy in a notice. If the copy cannot be
+  saved, the migrated project opens in memory, read-only: its original file
+  remains unchanged, and edits and runs are disabled. The persistent notice
+  names the backup folder. Move any file blocking that folder or restore write
+  access, then select **Try again**. Editing resumes only after the original
+  copy and migrated project have both been saved.
 - Files written by 6.10 also embed merge state in a document field. Studio
   reads their readable canvas and drops that state on the next edit, after
   copying the first such original once to
@@ -222,9 +227,11 @@ execution disabled and a Desktop explanation; portable nodes still work.
   Codex run cards, and workflow steps all carry `data-activity`, derived by
   src/views/studio/activity from run events, native Codex runs, and workflow
   plans. A working node shows a spinner, progress bar, and breathing halo;
-  its outgoing cables surge with travelling energy until the result lands;
-  settled phases keep their color. Activity-only events patch the canvas in
-  place; only outputs and placeholders rebuild it.
+  its outgoing cables show static energy dashes until the result lands;
+  settled phases keep their color. Activity decorations animate only opacity
+  and transforms, and pause while the view is hidden or its window is unfocused.
+  Activity-only events patch the canvas in place; only outputs and placeholders
+  rebuild it.
 
 See src/views/studio/DESIGN.md for presentation principles and the README files
 beside canvas, systemsculpt-studio-view, and activity for current module maps.

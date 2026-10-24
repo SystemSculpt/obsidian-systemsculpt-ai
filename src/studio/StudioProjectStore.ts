@@ -115,6 +115,8 @@ export class StudioProjectStore {
     return {path, project: await this.loadProject(path)};
     });
   }
+  getReadOnlyReason(path: string): string | undefined { return this.document(path).getReadOnlyReason(); }
+  assertWritable(path: string): void { this.document(path).assertWritable(); }
   async loadProject(path: string, _options?: {forceReload?: boolean}): Promise<StudioProjectV1> { return (await this.document(path).refresh()).project; }
   /** The file bytes as published, merge record included, so a watcher's event for them is recognized. */
   async readProjectRawText(path: string): Promise<string | null> { try { return await this.document(path).source(); } catch { return null; } }
@@ -185,7 +187,11 @@ export class StudioProjectStore {
     if (!relative || relative.startsWith("/") || relative.includes("\\") || relative.split("/").some(part => !part || part === "." || part === "..")) throw new Error("Invalid Studio support path.");
     return `${deriveStudioAssetsDir(projectPath)}/${relative.replace(/^support\//, "")}`;
   }
-  private async checkIdentity(path: string, id: string): Promise<void> { if ((await this.loadProject(path)).projectId !== id) throw new Error("Studio project identity mismatch."); }
+  private async checkIdentity(path: string, id: string): Promise<void> {
+    this.assertWritable(path);
+    if ((await this.loadProject(path)).projectId !== id) throw new Error("Studio project identity mismatch.");
+    this.assertWritable(path);
+  }
   async putAsset(path: string, id: string, asset: StudioAssetFile): Promise<void> {
     await this.checkIdentity(path, id);
     if (!/^[0-9a-f]{2}\/[0-9a-f]{64}\.[a-z0-9]+$/.test(asset.contentAddressedPath)) throw new Error("Invalid content-addressed asset path.");

@@ -497,6 +497,16 @@ const ensureObsidianDomHelpers = (win: any = g.window) => {
     };
   }
 
+  if (!proto.isShown) {
+    proto.isShown = function () {
+      if (!this.isConnected) return false;
+      for (let element = this; element; element = element.parentElement) {
+        if (element.hidden || win.getComputedStyle(element).display === "none") return false;
+      }
+      return true;
+    };
+  }
+
   if (!proto.hide) {
     proto.hide = function () {
       this.style.display = "none";

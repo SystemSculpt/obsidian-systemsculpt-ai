@@ -20,6 +20,37 @@
   font-size: var(--ss-text-base);
 }
 
+/* Placeholder copy is meaningful too (history search and approval answers). */
+.systemsculpt-agent-workspace :is(input, textarea)::placeholder {
+  color: var(--ss-ink-muted);
+  opacity: 1;
+}
+
+/* Keep action labels readable in both default themes without changing the
+ * accent used for selection, focus or other plugin surfaces. */
+.systemsculpt-agent-workspace .ss-button--primary,
+.systemsculpt-agent-workspace .ss-button.mod-cta {
+  background-color: var(--ss-agent-action);
+  border-color: var(--ss-agent-action);
+}
+
+.systemsculpt-agent-workspace .ss-button--primary:is(:hover, :active),
+.systemsculpt-agent-workspace .ss-button.mod-cta:is(:hover, :active) {
+  background-color: var(--ss-agent-action-hover);
+  border-color: var(--ss-agent-action-hover);
+}
+
+/* Status ink is readable on its tint, not a white-on-status button fill. */
+.systemsculpt-agent-workspace .ss-button--danger:is(:hover, :active) {
+  background-color: var(--ss-danger-tint);
+  color: var(--ss-danger);
+}
+
+.systemsculpt-agent-workspace .ss-button.mod-warning:is(:hover, :active) {
+  background-color: var(--ss-warning-tint);
+  color: var(--ss-warning);
+}
+
 /* Obsidian's button styles can override the browser's low-specificity hidden
    rule. Keep every workspace disclosure genuinely absent when hidden. */
 .systemsculpt-agent-workspace [hidden] {
@@ -118,7 +149,7 @@
   margin: -1px;
   padding: 0;
   overflow: hidden;
-  clip-path: inset(50%);
+  clip: rect(0, 0, 0, 0);
   white-space: nowrap;
 }
 

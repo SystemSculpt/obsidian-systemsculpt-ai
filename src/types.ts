@@ -144,6 +144,7 @@ export interface SystemSculptSettings {
    * Directory where notes created via the "Save chat as note" feature are stored
    */
   savedChatsDirectory: string;
+  /** Session-local validation freshness; omitted from saved settings and backups. */
   lastValidated: number;
   /** Last release for which the plugin showed the update prompt. */
   lastAnnouncedPluginRelease: string;

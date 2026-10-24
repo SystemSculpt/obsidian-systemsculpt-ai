@@ -74,8 +74,8 @@
 
 @keyframes ss-studio-port-halo {
   0%,
-  100% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--ss-accent) 35%, transparent); }
-  50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--ss-accent) 20%, transparent); }
+  100% { transform: scale(1); opacity: 0.35; }
+  50% { transform: scale(1.4); opacity: 0.2; }
 }
 
 @keyframes ss-studio-pending-shimmer {
@@ -84,37 +84,19 @@
   50% { opacity: 0.9; }
 }
 
-/* Activity (activity.css): travelling cable energy, breathing halo, one-shot
- * transition pulses. Colors resolve through --ss-activity-color. */
-@keyframes ss-studio-surge {
-  from { stroke-dashoffset: 0; }
-  to { stroke-dashoffset: -18; }
-}
-
+/* Activity decorations animate only compositor properties. */
 @keyframes ss-studio-activity-breathe {
   0%,
-  100% { outline-color: color-mix(in srgb, var(--ss-activity-color) 40%, transparent); }
-  50% { outline-color: color-mix(in srgb, var(--ss-activity-color) 8%, transparent); }
+  100% { opacity: 0.4; }
+  50% { opacity: 0.08; }
 }
 
 @keyframes ss-studio-activity-pulse-card {
-  0% {
-    outline: 3px solid color-mix(in srgb, var(--ss-activity-color) 70%, transparent);
-    outline-offset: -1px;
-  }
-  100% {
-    outline: 3px solid transparent;
-    outline-offset: 10px;
-  }
+  from { transform: scale(1); opacity: 0.7; }
+  to { transform: scale(1.06); opacity: 0; }
 }
 
 @keyframes ss-studio-activity-pulse-edge {
-  0% {
-    opacity: 0.6;
-    stroke-width: 10;
-  }
-  100% {
-    opacity: 0.12;
-    stroke-width: 7;
-  }
+  from { opacity: 0.6; }
+  to { opacity: 0.12; }
 }

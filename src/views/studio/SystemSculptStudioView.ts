@@ -183,9 +183,11 @@ import {
 } from "./systemsculpt-studio-view/StudioProjectSessionController";
 import { SYSTEMSCULPT_STUDIO_VIEW_TYPE } from "../../core/plugin/viewTypes";
 import { applyPluginSurface } from "../../core/ui/surface";
+import { createStudioAction } from "./StudioAction";
+import { bindSurfaceActivity } from "../../core/ui/surface/SurfaceActivity";
 const GROUP_DISCONNECT_OFFSET_X = 36;
 const STUDIO_GRAPH_SELECTION_FIT_PADDING_PX = 25;
-function refreshStudioMessages(root: HTMLElement, error: string | null, warning: string | null): void {
+function refreshStudioMessages(root: HTMLElement, error: string | null, warning: string | null, recovery?: { reason: string; retrying: boolean; retry: () => void }): void {
   const update = (className: string, text: string | null): void => {
     const existing = root.querySelector<HTMLElement>(`:scope > .${className}`);
     if (!text) {
@@ -196,7 +198,12 @@ function refreshStudioMessages(root: HTMLElement, error: string | null, warning:
     element.setText(text);
     if (!existing) root.prepend(element);
   };
-  update("ss-studio-warning", warning);
+  update("ss-studio-warning", recovery?.reason ?? warning);
+  if (recovery) {
+    const notice = root.querySelector<HTMLElement>(":scope > .ss-studio-warning")!;
+    notice.setAttribute("role", "status");
+    createStudioAction(notice, { label: "Try again", testId: "studio.migration.retry", disabled: recovery.retrying, onSelect: recovery.retry });
+  }
   update("ss-studio-error", error);
 }
 
@@ -208,6 +215,7 @@ type StudioRunGraphOptions = {
 
 export class SystemSculptStudioView extends ItemView {
   private busy = false;
+  private retryingMigration = false;
   private readonly runObservation = new StudioRunObservationController({
     getProjectPath: () => this.currentProjectPath,
     beginRun: (nodeIds, fromNodeId) => this.runPresentation.beginRun(nodeIds, { fromNodeId }),
@@ -447,7 +455,11 @@ export class SystemSculptStudioView extends ItemView {
     this.render();
   }
 
+  private detachSurfaceActivity: (() => void) | null = null;
+
   async onOpen(): Promise<void> {
+    this.detachSurfaceActivity?.();
+    this.detachSurfaceActivity = bindSurfaceActivity(this.contentEl);
     this.runObservation.bind(this.plugin.getStudioService());
     this.activity.bind(this.plugin.getStudioService().agentRuns);
     this.bindOwnerWindowEvents(getStudioOwnerWindow(this.contentEl));
@@ -477,6 +489,8 @@ export class SystemSculptStudioView extends ItemView {
   }
   private async closeStudioView(): Promise<void> {
     this.closed = true;
+    this.detachSurfaceActivity?.();
+    this.detachSurfaceActivity = null;
     this.mediaModelPicker.dispose();
     this.shapeController.cancelDrawGesture();
     this.shapeController.registerLayerHandle(null);
@@ -750,6 +764,7 @@ export class SystemSculptStudioView extends ItemView {
 
   /** Returns true when the key was consumed as a canvas shortcut. */
   private handleCanvasKeyDown(event: KeyboardEvent): boolean {
+    if (this.currentProjectSession?.getReadOnlyReason()) return false;
     if (event.defaultPrevented) {
       return false;
     }
@@ -2044,6 +2059,7 @@ export class SystemSculptStudioView extends ItemView {
   }
 
   private async runGraph(options?: StudioRunGraphOptions): Promise<void> {
+    if (this.currentProjectSession?.getReadOnlyReason()) return;
     if (!this.currentProjectPath) {
       new Notice("Open a .systemsculpt file from the file explorer first.");
       return;
@@ -3166,6 +3182,7 @@ export class SystemSculptStudioView extends ItemView {
     const nodeDetailMode = this.readCurrentNodeDetailMode(); return {
       root,
       busy: this.busy,
+      readOnly: !!this.currentProjectSession?.getReadOnlyReason(),
       currentProject: this.currentProject,
       currentProjectPath: this.currentProjectPath,
       agentRuns: this.plugin.getStudioService().agentRuns,
@@ -3354,15 +3371,29 @@ export class SystemSculptStudioView extends ItemView {
     }
   }
 
+  private async retryMigration(): Promise<void> {
+    if (this.retryingMigration || !this.currentProjectPath) return;
+    this.retryingMigration = true;
+    this.render();
+    try {
+      await this.projectSessionController.loadProjectFromPath(this.currentProjectPath, { forceReload: true });
+    } finally {
+      this.retryingMigration = false;
+      this.render();
+    }
+  }
+
   private render(): void {
     if (this.closed) return;
+    const reason = this.currentProjectSession?.getReadOnlyReason();
+    const recovery = reason ? { reason, retrying: this.retryingMigration, retry: () => { void this.retryMigration(); } } : undefined;
     if (this.imageEditNodeId && !(this.currentProject && this.findNode(this.currentProject, this.imageEditNodeId))) {
       // The edited node is gone, e.g. an undo reached before it existed.
       this.imageEditNodeId = null;
     }
     const mountedRoot = this.contentEl.querySelector<HTMLElement>(":scope > .ss-studio-view");
     if (mountedRoot && this.graphWorkspace?.refresh(this.createGraphWorkspaceOptions(mountedRoot))) {
-      refreshStudioMessages(mountedRoot, this.lastError, this.projectFileWarning);
+      refreshStudioMessages(mountedRoot, this.lastError, this.projectFileWarning, recovery);
       this.activity.project();
       this.activity.apply();
       return;
@@ -3385,7 +3416,7 @@ export class SystemSculptStudioView extends ItemView {
     this.contentEl.empty();
     const root = this.contentEl.createDiv({ cls: "ss-studio-view" });
     applyPluginSurface(root, "view");
-    refreshStudioMessages(root, this.lastError, this.projectFileWarning);
+    refreshStudioMessages(root, this.lastError, this.projectFileWarning, recovery);
 
     this.activity.project();
     this.renderGraphEditor(root);

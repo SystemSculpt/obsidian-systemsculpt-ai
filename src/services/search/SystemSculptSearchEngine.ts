@@ -454,8 +454,11 @@ export class SystemSculptSearchEngine {
 
     if (typeof this.app.workspace?.on === "function") {
       this.workspaceEventRefs.push(
-        this.app.workspace.on("systemsculpt:settings-updated", () => {
-          this.clearIndexes();
+        this.app.workspace.on("systemsculpt:settings-updated", (_oldSettings, _newSettings, changedKeys) => {
+          if (changedKeys.some(key => [
+            "embeddingsExclusions", "chatsDirectory", "savedChatsDirectory",
+            "recordingsDirectory", "attachmentsDirectory", "extractionsDirectory",
+          ].includes(key))) this.clearIndexes();
         })
       );
     }
