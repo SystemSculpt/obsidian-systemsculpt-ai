@@ -3,6 +3,11 @@
 import { App } from "obsidian";
 import { displayChatTabContent } from "../settings/ChatTabContent";
 
+jest.mock("obsidian", () => ({
+  ...jest.requireActual("obsidian"),
+  Notice: jest.fn(),
+}));
+
 const createPluginStub = (app: App) => {
   const settingsManager = {
     updateSettings: jest.fn().mockResolvedValue(undefined),
