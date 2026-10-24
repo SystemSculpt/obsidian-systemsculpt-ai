@@ -831,6 +831,8 @@ export class AgentChatView extends ItemView {
       onOpenArtifact: (artifact) => this.openArtifact(artifact),
       onCopyArtifactPath: (artifact) => this.copyArtifactPath(artifact),
       onRetryFailedTurn: (id) => this.retryFailedTurn(id),
+      onPrepareIncidentReport: (reportId, retry) =>
+        this.plugin.getAgentIncidentCoordinator()?.prepareReport(reportId, retry) ?? Promise.resolve(false),
       onCopyIncidentReport: (reportId) => this.copyIncidentReport(reportId),
       onRetryMessage: (id) => this.prepareRetry(id),
       onResubmitMessage: (id, text) => this.resubmitMessage(id, text),
@@ -4028,6 +4030,8 @@ export class AgentChatView extends ItemView {
   private async copyIncidentReport(
     reportId: string,
   ): Promise<boolean> {
+    if (reportId.startsWith("report_")
+      && !await this.plugin.getAgentIncidentCoordinator()?.isReportPersisted(reportId)) return false;
     return tryCopyToClipboard(
       reportId,
       this.workspace?.element ?? this.containerEl,
