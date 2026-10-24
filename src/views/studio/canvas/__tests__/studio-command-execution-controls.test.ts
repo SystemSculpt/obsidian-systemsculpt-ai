@@ -16,6 +16,7 @@ async function fixture(value?: unknown) {
 }
 it('uses native models, saves compatible reasoning atomically and never offers a fast control', async () => {
   const f = await fixture(); expect(f.model.value).toBe('gpt-6-astra'); expect(f.effort.value).toBe('high');
+  expect([...f.model.options, ...f.effort.options].some(option => option.value === '')).toBe(false);
   expect(f.root.querySelectorAll('select')).toHaveLength(2); expect(f.root.textContent).toContain('Standard'); expect(f.root.textContent).not.toMatch(/Fast|Priority/);
   f.model.value = 'test-model'; f.model.dispatchEvent(new Event('change'));
   expect(f.onChange).toHaveBeenLastCalledWith({ model: 'test-model', effort: 'medium' });
@@ -36,5 +37,5 @@ it('offers retry after catalog failure and ignores late resolution after teardow
   await Promise.resolve(); await Promise.resolve(); expect(f.model.disabled).toBe(false); f.dispose();
   let resolve!: (value: any) => void;
   jest.mocked(readCodexCatalog).mockImplementationOnce(() => new Promise(done => { resolve = done; }));
-  const g = await fixture(); g.dispose(); resolve({ models, permissions: '' }); await Promise.resolve(); expect(g.model.options).toHaveLength(2);
+  const g = await fixture(); g.dispose(); resolve({ models, permissions: '' }); await Promise.resolve(); expect(g.model.options).toHaveLength(1);
 });

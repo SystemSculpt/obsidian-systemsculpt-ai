@@ -5,8 +5,11 @@ import { isRecord } from './utils';
 export type StudioCommandExecution = { model: string; effort: string };
 export function readStudioCommandExecution(value: unknown): StudioCommandExecution {
   if (value !== undefined && (!isRecord(value) || typeof value.model !== 'string' || typeof value.effort !== 'string')) throw new Error('Choose a model and reasoning level.');
-  // Preserve Command Center's launch defaults for cards without a saved selection.
-  const options = resolveCodexOptions(isRecord(value) ? { model: String(value.model), effort: String(value.effort) } : { model: 'gpt-6-astra', effort: 'high' });
+  // Command Center keeps its existing defaults, including legacy blank fields.
+  const options = resolveCodexOptions({
+    model: isRecord(value) && String(value.model).trim() || 'gpt-6-astra',
+    effort: isRecord(value) && String(value.effort).trim() || 'high',
+  });
   return { model: options.model, effort: options.effort };
 }
 /** Command Center owns launch settings; child runs retain the parent's launch snapshot. */

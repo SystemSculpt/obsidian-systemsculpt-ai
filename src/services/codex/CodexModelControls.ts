@@ -29,12 +29,12 @@ export function mountCodexModelControls(root: HTMLElement, options: Options): { 
     if (disposed || pendingChanges || options.isVisible?.() === false) return;
     const enabled = options.enabled(), selected = options.value(), current = models.find(item => selected.model ? item.model === selected.model : item.isDefault);
     model.empty(); effort.empty(); speed?.empty();
-    option(model, '', codexDefaultLabel(models));
+    if (!command) option(model, '', codexDefaultLabel(models));
     for (const entry of models) option(model, entry.model, entry.name);
     if (selected.model && !current) option(model, selected.model, selected.model);
     model.value = selected.model;
     const supported = current?.efforts || [];
-    for (const value of new Set(['', ...supported, selected.effort])) option(effort, value, !value ? 'Codex default' : value === 'xhigh' ? 'Extra high' : value[0].toUpperCase() + value.slice(1), !!value && !!current && !supported.includes(value));
+    for (const value of new Set([...(command ? [] : ['']), ...supported, selected.effort])) option(effort, value, !value ? 'Codex default' : value === 'xhigh' ? 'Extra high' : value[0].toUpperCase() + value.slice(1), !!value && !!current && !supported.includes(value));
     effort.value = selected.effort;
     if (speed) {
       option(speed, 'default', 'Normal'); option(speed, current?.fastTier || 'priority', current && !current.fastTier ? 'Fast (unavailable)' : 'Fast', !!current && !current.fastTier);
@@ -71,7 +71,7 @@ export function mountCodexModelControls(root: HTMLElement, options: Options): { 
     } catch (cause) { showError(cause instanceof Error ? cause.message : 'Could not save Codex options.'); settled(); }
   };
   model.addEventListener('change', () => {
-    if (!model.value) { change({ model: '', effort: '' }); return; }
+    if (!command && !model.value) { change({ model: '', effort: '' }); return; }
     const next = models.find(item => item.model === model.value); if (!next) return;
     change({ model: next.model, effort: !effort.value || next.efforts.includes(effort.value) ? effort.value : next.defaultEffort, serviceTier: speed && speed.value !== 'default' && next.fastTier ? next.fastTier : 'default' });
   });
