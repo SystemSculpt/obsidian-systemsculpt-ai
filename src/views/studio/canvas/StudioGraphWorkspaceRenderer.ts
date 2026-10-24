@@ -179,6 +179,10 @@ export function renderStudioGraphWorkspace(
     // Keep scrolling, zoom and readable content, but never dispatch editing/run handlers.
     for (const type of ["pointerdown", "click", "dblclick", "contextmenu", "keydown", "paste", "drop", "beforeinput"]) {
       viewport.addEventListener(type, event => {
+        if (type === "pointerdown" && (event as PointerEvent).pointerType === "touch"
+          && !(event.target as HTMLElement | null)?.closest("input, textarea, [contenteditable='true']")) {
+          graphInteraction.startCanvasPan(event as PointerEvent);
+        }
         event.stopImmediatePropagation();
         if (type !== "pointerdown" && type !== "keydown") event.preventDefault();
       }, true);

@@ -9,7 +9,7 @@ import { cloneStudioProjectSnapshot } from "../StudioProjectSnapshots";
 import { StudioProjectStore } from "../StudioProjectStore";
 import { StudioService } from "../StudioService";
 import { createManagedCapabilityGraphStub, getManagedStudioTestVaultName } from "./managed-capability-graph.stub";
-import { deriveStudioAssetsDir, deriveStudioPolicyPath, sanitizeStudioProjectName } from "../paths";
+import { deriveStudioAssetsDir, deriveStudioNodeCachePath, deriveStudioPolicyPath, deriveStudioRunsDir, sanitizeStudioProjectName } from "../paths";
 
 // Spy on the CJS module object so `new Notice(...)` in the service is intercepted.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -758,6 +758,7 @@ describe("v1 projects with retired node kinds", () => {
     files.set(path, v1Text);
     files.set(assets, "Keep this unrelated file");
     const service = createService(app);
+    await expect(service.runProject(path)).rejects.toThrow(/read-only/i);
     const session = await service.retainProjectSession(path);
     expect(session.getReadOnlyReason()).toMatch(/read-only.*original copy/i);
     expect(await service.retainProjectSession(path)).toBe(session);
@@ -795,6 +796,36 @@ describe("v1 projects with retired node kinds", () => {
     await session.mutateAndFlush("node.title", project => { project.name = "Recovered"; });
     expect(JSON.parse(files.get(path)!).name).toBe("Recovered");
     await service.releaseProjectSession(path);
+    await service.releaseProjectSession(path);
+  });
+
+  it("reads saved outputs and history without retrying or rewriting a read-only migration", async () => {
+    const { app, files, adapter } = createStore();
+    files.set(path, v1Text);
+    const writeBinary = adapter.writeBinary.getMockImplementation()!;
+    adapter.writeBinary.mockImplementation(async (target, bytes) => {
+      if (target.startsWith(legacyFolder)) throw new Error("Permission denied");
+      await writeBinary(target, bytes);
+    });
+    const service = createService(app);
+    const session = await service.retainProjectSession(path);
+    const at = "2026-03-22T00:00:00.000Z";
+    const entry = { nodeId: "caption", nodeKind: "studio.text", nodeVersion: "1.0.0", inputFingerprint: "saved", updatedAt: at, runId: "saved_run", outputs: { text: "Saved output" } };
+    files.set(deriveStudioNodeCachePath(path), JSON.stringify({ schema: "studio.node-cache.v1", projectId: session.getProject().projectId, updatedAt: at, entries: { caption: entry } }));
+    files.set(`${deriveStudioRunsDir(path)}/index.json`, JSON.stringify([{ runId: "saved_run", startedAt: at, status: "success" }]));
+    const event = { type: "node.output", runId: "saved_run", nodeId: "caption", outputs: entry.outputs, at };
+    files.set(`${deriveStudioRunsDir(path)}/saved_run/events.ndjson`, JSON.stringify(event));
+    const unchangedFiles = new Map(files);
+    adapter.read.mockClear();
+    adapter.writeBinary.mockClear();
+
+    expect((await service.getProjectNodeCache(path))?.entries.caption).toEqual(entry);
+    expect(await service.getLatestRunEvents(path)).toEqual([event]);
+    expect(adapter.read).not.toHaveBeenCalled();
+    expect(adapter.writeBinary).not.toHaveBeenCalled();
+    expect(adapter.process).not.toHaveBeenCalled();
+    expect(files).toEqual(unchangedFiles);
+    expect(session.getReadOnlyReason()).toBeDefined();
     await service.releaseProjectSession(path);
   });
 

@@ -607,9 +607,9 @@ export class StudioService {
     const normalized = this.requireProjectPath(projectPath);
     const session = this.projectSessionManager.getSession(normalized);
     if (!session) {
-      await this.projectStore.loadProject(normalized);
+      const project = await this.projectStore.loadProject(normalized);
       this.assertProjectWritable(normalized);
-      return this.runtime.runProject(normalized, {
+      return this.runtime.runProjectSnapshot(normalized, project, {
         onEvent: options?.onEvent,
       });
     }
@@ -699,7 +699,9 @@ export class StudioService {
       return null;
     }
     const targetPath = normalizeStudioProjectPath(rawPath);
-    return this.runtime.getNodeCacheSnapshot(targetPath);
+    // Presentation reads must not retry migration or mutate a retained read-only project.
+    const projectId = this.getProjectSession(targetPath)?.getProject().projectId;
+    return this.runtime.getNodeCacheSnapshot(targetPath, projectId);
   }
 
   async storeAsset(projectPath: string, bytes: ArrayBuffer, mimeType: string): Promise<StudioAssetRef> {

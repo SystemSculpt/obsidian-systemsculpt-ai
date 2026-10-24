@@ -223,10 +223,10 @@ export class StudioRuntime {
     return found;
   }
 
-  async getNodeCacheSnapshot(projectPath: string): Promise<StudioNodeCacheSnapshotV1> {
+  async getNodeCacheSnapshot(projectPath: string, projectId?: string): Promise<StudioNodeCacheSnapshotV1> {
     const normalizedPath = normalizePath(projectPath);
-    const project = await this.projectStore.loadProject(normalizedPath);
-    return this.nodeResultCacheStore.load(normalizedPath, project.projectId);
+    const identity = projectId ?? (await this.projectStore.loadProject(normalizedPath)).projectId;
+    return this.nodeResultCacheStore.load(normalizedPath, identity);
   }
 
   async getLatestRunEvents(projectPath: string): Promise<StudioRunEvent[]> {

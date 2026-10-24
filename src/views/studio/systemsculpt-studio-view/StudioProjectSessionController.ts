@@ -105,6 +105,7 @@ export class StudioProjectSessionController {
   private nodeDetailModeByProjectPath: StudioNodeDetailModeByProject = {};
   private pendingViewportState: StudioGraphViewportState | null = null;
   private projectFileMutationTail: Promise<void> = Promise.resolve();
+  private projectTransitionTail: Promise<void> = Promise.resolve();
   private projectBindingEpoch = 0;
   private projectFileRetryScheduled = false;
   private projectFileRetryCount = 0;
@@ -333,7 +334,17 @@ export class StudioProjectSessionController {
     await this.flushPendingProjectSaveWork();
   }
 
-  async close(): Promise<void> {
+  private queueProjectTransition<T>(transition: () => Promise<T>): Promise<T> {
+    const operation = this.projectTransitionTail.then(transition);
+    this.projectTransitionTail = operation.then(() => undefined, () => undefined);
+    return operation;
+  }
+
+  close(): Promise<void> {
+    return this.queueProjectTransition(() => this.closeProject());
+  }
+
+  private async closeProject(): Promise<void> {
     // A vault modify callback captures the changed file bytes before it is
     // queued. Let every already-observed project-file change finish while the
     // current session is still bound; otherwise advancing the epoch here would
@@ -362,19 +373,20 @@ export class StudioProjectSessionController {
     this.currentProject = this.currentProjectSession?.getProject() || null;
   }
 
-  async loadProjectFromPath(
+  loadProjectFromPath(
     projectPath: string | null,
-    options?: {
-      notifyOnError?: boolean;
-      forceReload?: boolean;
-    }
+    options?: { notifyOnError?: boolean; forceReload?: boolean }
   ): Promise<boolean> {
-    // Same-path force reloads run inside the project-file mutation queue, so
-    // waiting there would deadlock. A real path switch must first finish every
-    // modify event already attached to the current binding.
-    if (projectPath !== this.currentProjectPath) {
-      await this.drainProjectFileMutations();
-    }
+    // A retry owns its retain until binding and hydration finish. Later opens or
+    // close must not release that ownership or get overwritten by its completion.
+    return this.queueProjectTransition(() => this.loadProject(projectPath, options));
+  }
+
+  private async loadProject(
+    projectPath: string | null,
+    options?: { notifyOnError?: boolean; forceReload?: boolean }
+  ): Promise<boolean> {
+    await this.drainProjectFileMutations();
     const previousSession = this.currentProjectSession;
     const previousRetainedPath = this.retainedProjectPath;
     const previousProjectPath = this.currentProjectPath;
@@ -486,8 +498,8 @@ export class StudioProjectSessionController {
       }
 
       try {
-        const cacheSnapshot = session.getReadOnlyReason() ? null : await this.host.hydrateProjectCache(projectPath, project);
-        if (cacheSnapshot) {
+        const cacheSnapshot = await this.host.hydrateProjectCache(projectPath, project);
+        if (cacheSnapshot && !session.getReadOnlyReason()) {
           this.host.materializeManagedOutputNodesFromCache(cacheSnapshot.entries);
         }
       } catch (cacheError) {

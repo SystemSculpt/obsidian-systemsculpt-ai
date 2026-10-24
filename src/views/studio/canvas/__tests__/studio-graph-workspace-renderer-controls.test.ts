@@ -155,6 +155,8 @@ describe("StudioGraphWorkspaceRenderer controls", () => {
       workspace.viewportEl!.dispatchEvent(createPointerDown("mouse"));
       expect(options.onCreateTextNodeAtPosition).not.toHaveBeenCalled();
       expect(options.graphInteraction.startMarqueeSelection).not.toHaveBeenCalled();
+      workspace.viewportEl!.dispatchEvent(createPointerDown("touch"));
+      expect(options.graphInteraction.startCanvasPan).toHaveBeenCalledTimes(1);
       // Access changes replace the workspace so no formerly disabled card keeps stale controls.
       expect(workspace.refresh({ ...options, readOnly: false })).toBe(false);
     }
