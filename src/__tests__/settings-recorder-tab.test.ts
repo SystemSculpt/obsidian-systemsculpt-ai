@@ -182,6 +182,33 @@ describe("Recorder settings tab", () => {
     );
   });
 
+  it.each([
+    ["detailed", "meeting_brief", "audioProcessorOutputPreset"],
+    ["markdown", "srt", "transcriptionOutputFormat"],
+  ])("validates the %s dropdown before persisting", async (initialValue, validValue, settingKey) => {
+    setMediaDevices(navigator, { enumerateDevices: jest.fn().mockResolvedValue([]) });
+    const app = new App();
+    const { plugin, updateSettings } = createPlugin(app);
+    const { tab, cleanup } = createTabHarness(app, plugin);
+    const container = document.createElement("div");
+    await displayRecorderTabContent(container, tab as any);
+    const select = Array.from(container.querySelectorAll("select"))
+      .find((candidate) => candidate.value === initialValue);
+    if (!select) throw new Error(`Missing ${settingKey} dropdown`);
+
+    select.value = "not-an-option";
+    expect(select.value).toBe("");
+    select.dispatchEvent(new Event("change"));
+    await flush();
+    expect(updateSettings).not.toHaveBeenCalled();
+
+    select.value = validValue;
+    select.dispatchEvent(new Event("change"));
+    await flush();
+    expect(updateSettings).toHaveBeenCalledWith({ [settingKey]: validValue });
+    cleanup();
+  });
+
   it("persists the default Audio Processor output preset", async () => {
     setMediaDevices(navigator, {
       enumerateDevices: jest.fn().mockResolvedValue([]),

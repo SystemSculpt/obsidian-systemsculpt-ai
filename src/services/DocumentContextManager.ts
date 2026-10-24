@@ -485,10 +485,12 @@ export class DocumentContextManager {
         const baseParent = extractionFolder || (file.parent?.path ?? "");
         const parentPath = baseParent ? `${baseParent}/${baseName}` : baseName;
 
+        const directoryManager = this.plugin.directoryManager;
+        if (!directoryManager) throw new Error("Directory manager has not been initialized.");
         if (extractionFolder) {
-          await this.plugin.directoryManager.ensureDirectoryByKey("extractionsDirectory");
+          await directoryManager.ensureDirectoryByKey("extractionsDirectory");
         }
-        await this.plugin.directoryManager.ensureDirectoryByPath(parentPath);
+        await directoryManager.ensureDirectoryByPath(parentPath);
 
         const titleService = TranscriptionTitleService.getInstance(this.plugin);
         const fallbackBasename = titleService.buildFallbackBasename(baseName);

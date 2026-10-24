@@ -1,4 +1,4 @@
-import { type App, type EventRef, TFile, normalizePath, parseYaml, stringifyYaml } from "obsidian";
+import { type App, type EventRef, type TAbstractFile, TFile, normalizePath, parseYaml, stringifyYaml } from "obsidian";
 import { PlatformRequestClient } from "../../services/PlatformRequestClient";
 import { SystemSculptEnvironment } from "../../services/api/SystemSculptEnvironment";
 import { ensureVaultFolder } from "../../tools/vault/utils";
@@ -472,7 +472,7 @@ class CaptureNoteIndex {
 
   constructor(private readonly app: App) {
     const { vault } = app;
-    const changed = (file: TFile) => {
+    const changed = (file: TAbstractFile) => {
       if (!(file instanceof TFile)) return;
       this.remove(file);
       this.dirty.delete(file);

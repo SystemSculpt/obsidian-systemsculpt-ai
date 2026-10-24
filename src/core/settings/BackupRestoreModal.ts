@@ -133,7 +133,7 @@ export class BackupRestoreModal {
       );
       return await modal.openAndSelect();
     } catch (error) {
-      new Notice(`Error loading backups: ${error}`, 3000);
+      new Notice(`Error loading backups: ${String(error)}`, 3000);
       return null;
     }
   }
@@ -163,7 +163,7 @@ export class BackupRestoreModal {
       new Notice("Settings restored successfully", 3000);
       return true;
     } catch (error) {
-      new Notice(`Error restoring settings: ${error}`, 3000);
+      new Notice(`Error restoring settings: ${String(error)}`, 3000);
       return false;
     }
   }
@@ -237,7 +237,7 @@ export class BackupRestoreModal {
 
       new Notice(`Manual backup "${backupName}" created successfully`, 3000);
     } catch (error) {
-      new Notice(`Error saving backup: ${error}`, 3000);
+      new Notice(`Error saving backup: ${String(error)}`, 3000);
       throw error;
     }
   }

@@ -24,7 +24,7 @@ export class StandardModal extends Modal {
   protected headerEl: HTMLElement;
   public contentEl: HTMLElement;
   protected footerEl: HTMLElement;
-  private listeners: { element: HTMLElement; type: string; listener: EventListener }[] = [];
+  private listenerCleanups: (() => void)[] = [];
   private searchHandles: UiSearchHandle[] = [];
   private asyncTaskEpoch = 0;
   private asyncTaskControllers = new Map<string, AbortController>();
@@ -33,6 +33,10 @@ export class StandardModal extends Modal {
   constructor(app: App) {
     super(app);
 
+    this.modalEl.empty();
+    this.headerEl = this.modalEl.createDiv("ss-modal__header");
+    this.contentEl = this.modalEl.createDiv("ss-modal__content");
+    this.footerEl = this.modalEl.createDiv("ss-modal__footer");
     applyPluginSurface(this.modalEl, "modal");
     this.modalEl.addClass("ss-modal");
     this.applyBaseSemantics();
@@ -99,19 +103,21 @@ export class StandardModal extends Modal {
   /**
    * Registers a DOM event on the given element and ensures it will be cleaned up when the modal is closed
    */
-  protected registerDomEvent(element: HTMLElement, type: string, listener: EventListener) {
+  protected registerDomEvent<K extends keyof HTMLElementEventMap>(
+    element: HTMLElement,
+    type: K,
+    listener: (event: HTMLElementEventMap[K]) => void,
+  ) {
     element.addEventListener(type, listener);
-    this.listeners.push({ element, type, listener });
+    this.listenerCleanups.push(() => element.removeEventListener(type, listener));
   }
 
   /**
    * Removes all registered DOM event listeners
    */
   private removeAllListeners() {
-    this.listeners.forEach(({ element, type, listener }) => {
-      element.removeEventListener(type, listener);
-    });
-    this.listeners = [];
+    this.listenerCleanups.forEach((cleanup) => cleanup());
+    this.listenerCleanups = [];
   }
 
   /**
@@ -120,14 +126,8 @@ export class StandardModal extends Modal {
    */
   protected createModalStructure() {
     this.modalEl.empty();
-    
-    // Create header
     this.headerEl = this.modalEl.createDiv("ss-modal__header");
-    
-    // Create content
     this.contentEl = this.modalEl.createDiv("ss-modal__content");
-    
-    // Create footer
     this.footerEl = this.modalEl.createDiv("ss-modal__footer");
   }
 

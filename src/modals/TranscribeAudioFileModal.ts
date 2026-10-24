@@ -642,7 +642,9 @@ export class TranscribeAudioFileModal extends StandardModal {
     const directory = normalizePath(
       this.plugin.settings.recordingsDirectory || DEFAULT_RECORDINGS_DIRECTORY,
     );
-    await this.plugin.directoryManager.ensureDirectoryByPath(directory);
+    const directoryManager = this.plugin.directoryManager;
+    if (!directoryManager) throw new Error("Directory manager has not been initialized.");
+    await directoryManager.ensureDirectoryByPath(directory);
     if (!this.isCurrentLaunch(launchGeneration)) return null;
 
     const safeName = sanitizeFileName(selection.file.name) || `audio.${this.extensionOf(selection.file.name)}`;

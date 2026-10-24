@@ -15,6 +15,10 @@ class TestStandardModal extends StandardModal {
     this.addTitle(title, description);
   }
 
+  listenForKeys(listener: (event: KeyboardEvent) => void): void {
+    this.registerDomEvent(this.modalEl, "keydown", listener);
+  }
+
 }
 
 describe("StandardModal", () => {
@@ -37,6 +41,27 @@ describe("StandardModal", () => {
     modal.onClose();
     expect(modal.modalEl.getAttribute("aria-label")).toBe("SystemSculpt");
     expect(modal.modalEl.hasAttribute("aria-labelledby")).toBe(false);
+  });
+
+  it("initializes its sections and removes typed listeners before reopening", () => {
+    const modal = new TestStandardModal(new App());
+    const keyPressed = jest.fn();
+    expect(modal.contentEl.parentElement).toBe(modal.modalEl);
+
+    modal.onOpen();
+    modal.listenForKeys((event) => keyPressed(event.key));
+    modal.contentEl.createEl("p", { text: "Old content" });
+    modal.modalEl.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
+    expect(keyPressed).toHaveBeenCalledWith("Enter");
+
+    modal.onClose();
+    modal.modalEl.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(keyPressed).toHaveBeenCalledTimes(1);
+    modal.onOpen();
+    expect(modal.contentEl.textContent).toBe("");
+    expect(modal.modalEl.querySelectorAll(".ss-modal__header")).toHaveLength(1);
+    expect(modal.modalEl.querySelectorAll(".ss-modal__footer")).toHaveLength(1);
+    modal.onClose();
   });
 
   it("invalidates keyed tasks on replacement, close, and reopen", () => {
