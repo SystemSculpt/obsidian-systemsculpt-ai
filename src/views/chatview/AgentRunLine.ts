@@ -26,8 +26,16 @@ type MenuKind = "backend" | "mode" | "detail";
 
 /** Escape dismisses only this menu. Dispose from its owner's sole onHide callback. */
 export function containMenuEscape(menu: Menu, ownerDocument: Document): () => void {
+  const ownerWindow: { event?: Event } | null = ownerDocument.defaultView;
+  // Obsidian's keymap hides the menu on Escape before this listener runs, so
+  // onHide disposes during that Escape. Keep the listener for that one event.
+  let closingEscape: Event | null = null;
+  const release = (): void => ownerDocument.removeEventListener("keydown", onKeydown, true);
   const onKeydown = (event: KeyboardEvent): void => {
     if (event.key !== "Escape" || event.isComposing) return;
+    release();
+    // A later Escape belongs to the host, even if the closing one never came.
+    if (closingEscape && closingEscape !== event) return;
     event.preventDefault();
     event.stopPropagation();
     menu.hide();
@@ -36,7 +44,14 @@ export function containMenuEscape(menu: Menu, ownerDocument: Document): () => vo
   // after its menu scope hides the menu without consuming the event.
   ownerDocument.addEventListener("keydown", onKeydown, true);
   // Menu.onHide replaces its callback; the owner composes cleanup with focus.
-  return () => ownerDocument.removeEventListener("keydown", onKeydown, true);
+  return () => {
+    const current = ownerWindow?.event;
+    if (current?.type === "keydown" && (current as KeyboardEvent).key === "Escape") {
+      closingEscape = current;
+      return;
+    }
+    release();
+  };
 }
 
 /**
