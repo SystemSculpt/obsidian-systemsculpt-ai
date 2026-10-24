@@ -41,18 +41,35 @@ describe("native tool paths", () => {
     ["/vault/Notes/../Plan.md", "/vault", "Plan.md", "Plan.md"],
     ["./Notes/../Plan.md", "/vault/", "Plan.md", "Plan.md"],
     ["Notes//Plan.md", "/vault", "Notes/Plan.md", "Notes/Plan.md"],
-    ["../outside.md", "/vault", "/outside.md", null],
-    ["/vault-copy/Plan.md", "/vault", "/vault-copy/Plan.md", null],
-    ["/vault/../private/Plan.md", "/vault", "/private/Plan.md", null],
+    ["../outside.md", "/vault", "/outside.md (outside vault)", null],
+    ["/vault-copy/Plan.md", "/vault", "/vault-copy/Plan.md (outside vault)", null],
+    ["/vault/../private/Plan.md", "/vault", "/private/Plan.md (outside vault)", null],
     ["/vault", "/vault", "Vault root", null],
     ["C:\\Vault\\Notes\\..\\Plan.md", "C:\\Vault", "Plan.md", "Plan.md"],
     [".\\Notes\\Plan.md", "C:\\Vault", "Notes/Plan.md", "Notes/Plan.md"],
-    ["D:\\Private\\Plan.md", "C:\\Vault", "D:/Private/Plan.md", null],
-    ["~/Plan.md", "/vault", "~/Plan.md", null],
-    ["Plan.md", "relative", "Plan.md", null],
+    ["D:\\Private\\Plan.md", "C:\\Vault", "D:/Private/Plan.md (outside vault)", null],
+    ["~/Plan.md", "/vault", "~/Plan.md (vault location unverified)", null],
+    ["Plan.md", "relative", "Plan.md (vault location unverified)", null],
     ["/Plan.md", "/", "Plan.md", "Plan.md"],
   ])("normalizes %s against %s without turning external paths into vault paths", (path, cwd, displayPath, vaultPath) => {
     expect(nativeToolPath(path, cwd)).toEqual({ displayPath, vaultPath });
+  });
+
+  it.each([
+    ["/vault/Plan.md", "/vault/Notes", "/vault", undefined, "Plan.md", "Plan.md"],
+    ["Plan.md", "/vault/Notes", "/vault", undefined, "Notes/Plan.md", "Notes/Plan.md"],
+    ["../Plan.md", "/vault/Notes", "/vault", undefined, "Plan.md", "Plan.md"],
+    ["/external/Plan.md", "/external", "/vault", undefined, "/external/Plan.md (outside vault)", null],
+    ["Plan.md", "/external", "/vault", undefined, "/external/Plan.md (outside vault)", null],
+    ["/external", "/external", "/vault", undefined, "/external (outside vault)", null],
+    ["/tmp/vault/Plan.md", "/private/tmp/vault", "/private/tmp/vault", "/tmp/vault", "Plan.md", "Plan.md"],
+    ["Plan.md", "/tmp/vault/Notes", "/private/tmp/vault", "/tmp/vault", "Notes/Plan.md", "Notes/Plan.md"],
+    ["/tmp/vault-copy/Plan.md", "/private/tmp/vault", "/private/tmp/vault", "/tmp/vault", "/tmp/vault-copy/Plan.md (outside vault)", null],
+    ["/tmp/vault/../Plan.md", "/private/tmp/vault", "/private/tmp/vault", "/tmp/vault", "/tmp/Plan.md (outside vault)", null],
+    ["C:\\Vault\\Plan.md", "C:\\Vault\\Notes", "C:\\Vault", undefined, "Plan.md", "Plan.md"],
+    ["Plan.md", "D:\\External", "C:\\Vault", undefined, "D:/External/Plan.md (outside vault)", null],
+  ] as const)("separates target %s from request cwd %s and vault root %s", (path, cwd, root, alias, displayPath, vaultPath) => {
+    expect(nativeToolPath(path, cwd, root, alias)).toEqual({ displayPath, vaultPath });
   });
 });
 
@@ -143,6 +160,31 @@ describe("real native edit previews", () => {
     expect(realpath.mock.calls).toEqual([[root]]);
     expect(getAbstractFileByPath.mock.calls).toEqual([["Notes/Plan.md"]]);
     expect(read).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["/tmp/t136-qa/vault/Notes/Plan.md", "/private/tmp/t136-qa/vault/Notes/Plan.md", "Plan.md"])("uses host-provided root aliases for %s without resolving the requested file", async file_path => {
+    const root = "/tmp/t136-qa/vault", canonical = "/private/tmp/t136-qa/vault";
+    const { app, read, getAbstractFileByPath } = vault({ "Notes/Plan.md": "before" }, root);
+    realpath.mockResolvedValue(canonical);
+    const request = part("Edit", { file_path, old_string: "before", new_string: "after" }, {
+      native: { agent: "claude", workingDirectory: `${canonical}/Notes`, vaultRoot: canonical, vaultRootAlias: root },
+    });
+    expect(nativeToolPresentation(request)?.title).toBe("Edit Notes/Plan.md");
+    expect(await prepareNativeWriteEditPreview(app, request)).toMatchObject({ path: "Notes/Plan.md", status: "changed", oldContent: "before", newContent: "after" });
+    expect(realpath.mock.calls).toEqual([[root]]);
+    expect(getAbstractFileByPath.mock.calls).toEqual([["Notes/Plan.md"]]);
+    expect(read).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not use restored aliases as authority to read a current vault file", async () => {
+    const { app, read, getAbstractFileByPath } = vault({ "Notes/Plan.md": "before" });
+    const request = edit({ file_path: "/external/Notes/Plan.md" });
+    expect(await prepareNativeWriteEditPreview(app, {
+      ...request, native: { agent: "claude", workingDirectory: "/vault", vaultRoot: "/vault", vaultRootAlias: "/external" },
+    })).toMatchObject({ status: "unavailable" });
+    expect(getAbstractFileByPath).not.toHaveBeenCalled();
+    expect(read).not.toHaveBeenCalled();
+    expect(realpath).not.toHaveBeenCalled();
   });
 
   it.each(["/restored/vault", "/private/tmp/t136-qa"])("denies restored workingDirectory %s even with a same-named current vault file", async workingDirectory => {
@@ -301,6 +343,28 @@ describe("native preview rendering", () => {
     expect(host.textContent).toContain("Update the notes");
     expect(read).not.toHaveBeenCalled();
     expect(getAbstractFileByPath).not.toHaveBeenCalled();
+  });
+
+  it("uses the vault root, not the request cwd, for Codex file targets and external destinations", async () => {
+    const { app, read, getAbstractFileByPath } = vault();
+    const host = document.createElement("div");
+    const request = part("fileChange", { changes: [{ path: "/vault/Plan.md", kind: { type: "update", move_path: "/external/Plan.md" }, diff: "@@ -1 +1 @@\n-old\n+new\n" }] }, {
+      native: { agent: "codex", workingDirectory: "/external", vaultRoot: "/vault", requestMethod: "item/fileChange/requestApproval" },
+    });
+    expect(nativeToolPresentation(request)?.title).toBe("Move and edit Plan.md → /external/Plan.md (outside vault)");
+    await renderNativeToolPreview(app, host, request);
+    expect(host.querySelector(".systemsculpt-inline-diff__summary")?.textContent).toBe("Move and edit Plan.md → /external/Plan.md (outside vault)");
+    expect(host.querySelector(".systemsculpt-diff-filename")?.textContent).toBe("Plan.md");
+    expect(read).not.toHaveBeenCalled();
+    expect(getAbstractFileByPath).not.toHaveBeenCalled();
+    expect(realpath).not.toHaveBeenCalled();
+
+    await renderNativeToolPreview(app, host, { ...request, name: "permissions", input: { cwd: "/external", permissions: { fileSystem: { write: ["/external", "/vault/Notes"] } } },
+      native: { ...request.native!, requestMethod: "item/permissions/requestApproval" } });
+    expect(host.textContent).toContain("Folder/external (outside vault)");
+    expect(host.textContent).toContain("Read and change /external (outside vault)");
+    expect(host.textContent).toContain("Read and change Notes");
+    expect(host.textContent).not.toContain("Vault root");
   });
 
   it("does not turn a malformed or absent Codex patch into a successful empty diff", async () => {

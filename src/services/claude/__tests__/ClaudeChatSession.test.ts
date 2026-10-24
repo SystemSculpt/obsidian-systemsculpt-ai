@@ -16,12 +16,12 @@ jest.mock('../../codex/CodexThreadLocator', () => ({ CodexThreadLocator: jest.fn
 const native = runLocalClaude as jest.Mock;
 const SESSION = 'b33728f4-ea7d-4fec-bcd0-bf79649b7d28';
 const edit = { toolName: 'Edit', description: 'note.md', requestId: 'req1', toolUseId: 'tool1', input: { file_path: '/vault/note.md', old_string: 'a', new_string: 'b' } };
-function setup(autoApprove = true, notice?: (text: string, reason?: 'session-reset' | 'auto-unavailable') => void) {
+function setup(autoApprove = true, notice?: (text: string, reason?: 'session-reset' | 'auto-unavailable') => void, app = {}) {
   let sessionId: string | undefined;
   const locator = { read: jest.fn(async () => sessionId), write: jest.fn(async (_id, id) => { sessionId = id; }) };
   (CodexThreadLocator as jest.Mock).mockImplementation(() => locator);
   const persistAssistant = jest.fn(async () => {});
-  const session = new ClaudeChatSession({} as never, { persistAssistant, notice }, () => [], () => ({ model: 'sonnet', permissionMode: 'default' }));
+  const session = new ClaudeChatSession(app as never, { persistAssistant, notice }, () => [], () => ({ model: 'sonnet', permissionMode: 'default' }));
   if (autoApprove) session.subscribe(snapshot => {
     const pending = snapshot.parts.find((part): part is AgentToolPart => part.kind === 'tool' && part.state === 'approval-required' && !!part.approvalId);
     if (pending) session.respondToApproval(pending.approvalId!, true);
@@ -55,8 +55,8 @@ it('keeps native session identity, publishes one matched tool and persists it wi
   expect(AgentChatSession).not.toHaveBeenCalled();
 });
 it('uses the canonical chat root for native launch and persisted tool metadata', async () => {
-  const canonical = '/private/tmp/t136-qa/vault';
-  const { session, persistAssistant } = setup();
+  const canonical = '/private/tmp/t136-qa/vault', alias = '/tmp/t136-qa/vault';
+  const { session, persistAssistant } = setup(true, undefined, { vault: { adapter: { getBasePath: () => alias } } });
   (localAgentChatDirectory as jest.Mock).mockResolvedValueOnce(canonical);
   const request = { ...edit, input: { ...edit.input, file_path: `${canonical}/Notes/Plan.md` } };
   native.mockImplementation(async (_input, signal, callbacks) => {
@@ -67,9 +67,9 @@ it('uses the canonical chat root for native launch and persisted tool metadata',
 
   await expect(session.start(input())).resolves.toMatchObject({ kind: 'completed' });
   expect(native.mock.calls[0][0]).toMatchObject({ workingDirectory: canonical });
-  expect(tools(session)[0]).toMatchObject({ input: request.input, native: { workingDirectory: canonical } });
+  expect(tools(session)[0]).toMatchObject({ input: request.input, native: { workingDirectory: canonical, vaultRoot: canonical, vaultRootAlias: alias } });
   expect(persistAssistant).toHaveBeenCalledWith(expect.objectContaining({ messageParts: expect.arrayContaining([
-    expect.objectContaining({ type: 'tool_call', data: expect.objectContaining({ native: expect.objectContaining({ workingDirectory: canonical }) }) }),
+    expect.objectContaining({ type: 'tool_call', data: expect.objectContaining({ native: expect.objectContaining({ workingDirectory: canonical, vaultRoot: canonical, vaultRootAlias: alias }) }) }),
   ]) }));
 });
 it('resumes the saved Claude Code session on a follow-up', async () => {

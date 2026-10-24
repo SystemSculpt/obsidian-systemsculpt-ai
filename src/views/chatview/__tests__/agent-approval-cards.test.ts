@@ -45,6 +45,30 @@ describe("inline approval keyboard ownership", () => {
     ui.dispose();
   });
 
+  it.each([
+    ["/tmp/vault/Notes/Plan.md", "Notes/Plan.md"],
+    ["/private/tmp/vault/Notes/Plan.md", "Notes/Plan.md"],
+    ["/external/Notes/Plan.md", "/external/Notes/Plan.md (outside vault)"],
+  ])("presents %s consistently without changing the request or approval answer", async (file_path, displayed) => {
+    const ui = setup();
+    try {
+      const part = tool("one", { location: "server", input: { file_path, old_string: "Draft", new_string: "Ready" },
+        native: { agent: "claude", workingDirectory: "/private/tmp/vault", vaultRoot: "/private/tmp/vault", vaultRootAlias: "/tmp/vault" } });
+      const original = JSON.stringify(part);
+      const card = ui.add(part);
+      ui.cards.sync([part]);
+      const title = `Claude Code wants to edit ${displayed}`;
+      expect(card.querySelector(".systemsculpt-agent-approval-copy")?.textContent).toBe(title);
+      expect(ui.root.querySelector('[role="status"]')?.textContent).toBe(title);
+      expect(card.querySelector("details pre")?.textContent).toBe(JSON.stringify(part.input, null, 2));
+      expect(JSON.stringify(part)).toBe(original);
+      expect(ui.onApprove).not.toHaveBeenCalled();
+      key(card, "Enter");
+      await tick();
+      expect(ui.onApprove.mock.calls).toEqual([["one", true]]);
+    } finally { ui.dispose(); }
+  });
+
   it("never steals composer focus, and Alt+Up reviews the pending card", () => {
     const ui = setup();
     ui.input.value = "Still typing";

@@ -2907,7 +2907,7 @@ describe("AgentWorkspace", () => {
     }
   });
 
-  it("keeps one stable Working status while distinguishing approval by its icon", async () => {
+  it("keeps one stable status row while distinguishing pending approval by text and icon", async () => {
     const parent = document.body.createDiv();
     const workspace = new AgentWorkspace(parent, {
       app: new App(),
@@ -3012,7 +3012,7 @@ describe("AgentWorkspace", () => {
       state: "approval-required",
       approvalId: "approval-write",
       order: 0,
-    }), "Working", activity, false);
+    }), "Waiting for your approval", activity, false);
     await assertPhase(snapshot("retrying", "Continuing"), "Working", activity);
     await assertPhase(snapshot("retrying", "Reconnecting"), "Working", activity);
     await assertPhase(snapshot("settling", "Finishing"), "Working", activity);

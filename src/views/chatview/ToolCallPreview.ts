@@ -149,19 +149,22 @@ function comparableNativePath(value: string): string {
   return /^[A-Za-z]:/u.test(value) ? value[0].toLowerCase() + value.slice(1) : value;
 }
 
-/** workingDirectory is the vault root supplied to a native Chat session. */
-export function nativeToolPath(path: string, workingDirectory: string): { displayPath: string; vaultPath: string | null } {
-  const normalizedRoot = normalizedNativePath(workingDirectory);
-  const root = normalizedRoot === "/" || /^[A-Za-z]:\/$/u.test(normalizedRoot)
-    ? normalizedRoot : normalizedRoot.replace(/\/$/u, "");
-  if (!path || path.includes("\0") || !/^(?:\/|[A-Za-z]:\/)/u.test(root) || /^~(?:\/|\\|$)/u.test(path)) {
-    return { displayPath: path, vaultPath: null };
+/** Resolve against the request cwd, but display relative only to Chat's vault roots. */
+export function nativeToolPath(path: string, workingDirectory: string, vaultRoot = workingDirectory, vaultRootAlias?: string): { displayPath: string; vaultPath: string | null } {
+  const absolute = (value: string) => /^(?:[/\\]|[A-Za-z]:[/\\])/u.test(value);
+  if (!path || path.includes("\0") || !absolute(vaultRoot) || (!absolute(path) && !absolute(workingDirectory)) || /^~(?:\/|\\|$)/u.test(path)) {
+    return { displayPath: `${path} (vault location unverified)`, vaultPath: null };
   }
-  const target = normalizedNativePath(/^(?:[/\\]|[A-Za-z]:[/\\])/u.test(path) ? path : `${root}/${path}`);
-  const prefix = root.endsWith("/") ? root : `${root}/`;
-  const relative = comparableNativePath(target) === comparableNativePath(root) ? ""
-    : comparableNativePath(target).startsWith(comparableNativePath(prefix)) ? target.slice(prefix.length) : null;
-  return { displayPath: relative === "" ? "Vault root" : relative ?? target, vaultPath: relative || null };
+  const target = normalizedNativePath(absolute(path) ? path : `${workingDirectory}/${path}`);
+  for (const value of [vaultRoot, vaultRootAlias]) {
+    if (!value || !absolute(value)) continue;
+    const root = normalizedNativePath(value);
+    const prefix = root.endsWith("/") ? root : `${root}/`;
+    const relative = comparableNativePath(target) === comparableNativePath(root) ? ""
+      : comparableNativePath(target).startsWith(comparableNativePath(prefix)) ? target.slice(prefix.length) : null;
+    if (relative !== null) return { displayPath: relative === "" ? "Vault root" : relative, vaultPath: relative || null };
+  }
+  return { displayPath: `${target} (outside vault)`, vaultPath: null };
 }
 
 /** Native edits use literal strings, never the hosted tool's fuzzy/range applier. */
@@ -169,19 +172,22 @@ export async function prepareNativeWriteEditPreview(app: App, part: AgentToolPar
   if (part.native?.agent !== "claude" || !["Edit", "MultiEdit", "Write"].includes(part.name)) return null;
   const input = nativeRecord(part.input);
   if (typeof input.file_path !== "string" || !input.file_path) return null;
-  const workingDirectory = part.native.workingDirectory;
-  const target = nativeToolPath(input.file_path, workingDirectory);
+  const { workingDirectory, vaultRoot: nativeRoot = workingDirectory, vaultRootAlias } = part.native;
+  const target = nativeToolPath(input.file_path, workingDirectory, nativeRoot, vaultRootAlias);
   const adapter = app.vault.adapter as { getBasePath?: () => string } | undefined;
-  let vaultRoot = adapter?.getBasePath?.() ?? resolveAbsoluteVaultPath(adapter, ".");
-  const sameRoot = (root: string) => comparableNativePath(normalizedNativePath(root))
-    === comparableNativePath(normalizedNativePath(workingDirectory));
+  const hostRoot = adapter?.getBasePath?.() ?? resolveAbsoluteVaultPath(adapter, ".");
+  let vaultRoot = hostRoot;
+  const samePath = (first: string, second: string) => comparableNativePath(normalizedNativePath(first))
+    === comparableNativePath(normalizedNativePath(second));
+  const sameRoot = (root: string) => samePath(root, nativeRoot);
   if (target.vaultPath) {
     if (vaultRoot && !sameRoot(vaultRoot)) {
       try { vaultRoot = await localAgentChatDirectory(app); }
       catch { vaultRoot = null; }
     }
     // Saved native metadata is not authority to read a same-named file in another vault.
-    if (!vaultRoot || !sameRoot(vaultRoot)) target.vaultPath = null;
+    if (!vaultRoot || !sameRoot(vaultRoot)
+      || (vaultRootAlias && (!hostRoot || !samePath(vaultRootAlias, hostRoot)))) target.vaultPath = null;
   }
   const edits = part.name === "MultiEdit" ? (Array.isArray(input.edits) ? input.edits : []) : [input];
   const requestedCount = part.name === "Write" ? 0 : edits.length;
@@ -189,7 +195,7 @@ export async function prepareNativeWriteEditPreview(app: App, part: AgentToolPar
     path: target.displayPath, oldContent, newContent, status, requestedCount, appliedCount, skipped,
     diff: generateDiff(oldContent, newContent, 5), notice,
   });
-  if (!target.vaultPath) return result("", "", "unavailable", 0, [], "This file is outside your vault. Its current contents were not read; review the requested change in Details.");
+  if (!target.vaultPath) return result("", "", "unavailable", 0, [], "This file is outside your vault or its vault location could not be verified. Its current contents were not read; review the requested change in Details.");
   // Never use folder-note aliases or synthesize a missing file's before-content.
   const file = app.vault.getAbstractFileByPath(target.vaultPath);
   if (file && !(file instanceof TFile)) return result("", "", "unavailable", 0, [], "This path is a folder, not a file.");

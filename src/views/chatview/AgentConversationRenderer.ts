@@ -2047,11 +2047,12 @@ export class AgentConversationRenderer extends Component {
     }
     status.className =
       `systemsculpt-agent-tail-status is-${presentation.phase}`;
-    const workingElapsedMs = presentation.busy
+    const working = presentation.busy && presentation.phase !== "awaiting-approval";
+    const workingElapsedMs = working
       ? this.startWorkingTimer(status, elapsedMs)
       : undefined;
     const workingDuration = formatAgentWorkingDuration(workingElapsedMs);
-    const displayStatus = presentation.busy
+    const displayStatus = working
       ? (workingDuration ? `Working for ${workingDuration}` : "Working")
       : presentation.activityStatus;
     const statusChanged = status.dataset.status !== displayStatus;
@@ -2062,10 +2063,10 @@ export class AgentConversationRenderer extends Component {
         displayStatus,
       );
     }
-    status.toggleAttribute("data-agent-working-timer", presentation.busy);
+    status.toggleAttribute("data-agent-working-timer", working);
     const label = status.querySelector<HTMLElement>(".systemsculpt-agent-tail-status-label");
-    label?.toggleAttribute("data-agent-working-duration", presentation.busy);
-    if (!presentation.busy) this.stopWorkingTimer();
+    label?.toggleAttribute("data-agent-working-duration", working);
+    if (!working) this.stopWorkingTimer();
     const icon = status.querySelector<HTMLElement>(
       ".systemsculpt-agent-tail-status-icon",
     );

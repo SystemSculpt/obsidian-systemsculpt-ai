@@ -301,6 +301,25 @@ describe("AgentConversationPresentation product-copy boundary", () => {
     });
   });
 
+  it.each(["claude", "codex", "hosted"] as const)("waits for %s approval without marking the turn idle or losing terminal truth", (backend) => {
+    const snapshot = {
+      runId: "run-approval", turnId: "turn-approval", status: "waiting" as const,
+      phase: "waiting" as const, waitingReason: "approval" as const, messages: [],
+      parts: [{ id: "tool", kind: "tool" as const, messageId: "assistant", callId: "call", name: "Edit", input: {}, order: 0,
+        location: backend === "hosted" ? "vault" as const : "server" as const,
+        state: "approval-required" as const, approvalId: "approval",
+        ...(backend === "hosted" ? {} : { native: { agent: backend, workingDirectory: "/vault" } }),
+      }],
+    };
+    expect(presentAgentConversation(snapshot, true)).toMatchObject({
+      phase: "awaiting-approval", activityStatus: "Waiting for your approval", busy: true, composerRunning: true,
+    });
+    for (const status of ["completed", "cancelled", "failed"] as const) {
+      expect(presentAgentConversation({ ...snapshot, status }, true)).toMatchObject({ phase: status, busy: false, composerRunning: false });
+    }
+    expect(presentAgentConversation({ ...snapshot, status: "running", parts: [{ ...snapshot.parts[0], state: "approved" }] }, true).phase).toBe("acting");
+  });
+
   it("never turns a server-owned approval-shaped part into vault approval UX", () => {
     const presentation = presentAgentConversation({
       runId: "run-server-approval",
