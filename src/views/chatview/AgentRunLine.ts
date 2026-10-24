@@ -1,4 +1,4 @@
-import { Component, Menu, setIcon } from "obsidian";
+import { Component, Menu, setIcon, type MenuItem } from "obsidian";
 import { getHostOperatingSystem } from "../../platform/hostCapabilities";
 import {
   backendMenu,
@@ -92,6 +92,7 @@ export class AgentRunLine extends Component {
   private openMenu: Menu | null = null;
   private openMenuKind: MenuKind | null = null;
   private openMenuLoading = false;
+  private openBackendItems = new Map<string, MenuItem>();
 
   constructor(parent: HTMLElement, private readonly options: AgentRunLineOptions) {
     super();
@@ -112,6 +113,7 @@ export class AgentRunLine extends Component {
   }
 
   public render(state: AgentChromeState): void {
+    const detectionChanged = this.state?.detection !== state.detection;
     this.state = state;
     const focusedKey = this.segments.find((segment) =>
       segment === segment.ownerDocument.activeElement)?.dataset.segment;
@@ -148,6 +150,14 @@ export class AgentRunLine extends Component {
       // as soon as they arrive instead of leaving "Loading" on screen.
       if (this.openMenuLoading && state.backend === "codex" && state.codex.models !== null) {
         this.showMenu(this.openMenuKind);
+      } else if (this.openMenuKind === "backend" && detectionChanged) {
+        const entries = backendMenu(state).filter(entry => entry.kind === "item");
+        if (entries.length !== this.openBackendItems.size || entries.some(entry => !this.openBackendItems.has(entry.id))) {
+          this.showMenu("backend");
+        } else {
+          // Keep the menu and its focused item alive while sign-in resolves.
+          for (const entry of entries) this.updateMenuItem(this.openBackendItems.get(entry.id)!, "backend", entry);
+        }
       }
     }
   }
@@ -228,6 +238,7 @@ export class AgentRunLine extends Component {
       if (this.openMenu !== menu) return;
       this.openMenu = null;
       this.openMenuKind = null;
+      this.openBackendItems.clear();
       this.segment(kind)?.setAttribute("aria-expanded", "false");
       // Rule 6.2 (7): menus return focus to the element that opened them.
       // Obsidian refocuses its active leaf after hiding, so this runs after it.
@@ -261,26 +272,31 @@ export class AgentRunLine extends Component {
         })).setIsLabel(true);
         return;
       }
-      // Obsidian's menu lives in the main window's realm and adopts its nodes
-      // into a pop-out, so the title is built there too.
-      const title = createFragment((fragment) => {
-        fragment.createSpan({
-          cls: "systemsculpt-agent-menu-title",
-          text: entry.title,
-          // A stable handle for live UI checks: `${menu}.${item}`.
-          attr: { "data-menu-item": `${kind}.${entry.id}` },
-        });
-        if (entry.description) {
-          fragment.createSpan({ cls: "systemsculpt-agent-menu-description", text: entry.description });
-        }
-      });
-      item.setTitle(title);
-      if (entry.icon) item.setIcon(entry.icon);
-      if (entry.checked !== undefined) item.setChecked(entry.checked);
-      if (entry.disabled) item.setDisabled(true);
-      if (entry.warning) item.setWarning(true);
+      this.updateMenuItem(item, kind, entry);
+      if (kind === "backend") this.openBackendItems.set(entry.id, item);
       item.onClick(() => onSelect(entry.id));
     });
+  }
+
+  private updateMenuItem(item: MenuItem, kind: MenuKind, entry: Extract<ChromeMenuEntry, { kind: "item" }>): void {
+    // Obsidian's menu lives in the main window's realm and adopts its nodes
+    // into a pop-out, so the title is built there too.
+    const title = createFragment((fragment) => {
+      fragment.createSpan({
+        cls: "systemsculpt-agent-menu-title",
+        text: entry.title,
+        // A stable handle for live UI checks: `${menu}.${item}`.
+        attr: { "data-menu-item": `${kind}.${entry.id}` },
+      });
+      if (entry.description) {
+        fragment.createSpan({ cls: "systemsculpt-agent-menu-description", text: entry.description });
+      }
+    });
+    item.setTitle(title);
+    if (entry.icon) item.setIcon(entry.icon);
+    if (entry.checked !== undefined) item.setChecked(entry.checked);
+    item.setDisabled(entry.disabled ?? false);
+    if (entry.warning) item.setWarning(true);
   }
 
   private select(kind: MenuKind, id: string): void {

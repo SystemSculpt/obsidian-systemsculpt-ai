@@ -1,6 +1,6 @@
 import type { CreditsBalanceSnapshot } from "../../services/SystemSculptService";
-import type { CodexModel } from "../../services/codex/CodexModelCatalog";
-import type { LocalAgentAvailability, LocalAgentDetection } from "../../services/codex/LocalAgentDetection";
+import { codexDefaultLabel, type CodexModel } from "../../services/codex/CodexModelCatalog";
+import { isLocalAgentUsable as usable, type LocalAgentDetection } from "../../services/codex/LocalAgentDetection";
 import { LOCAL_AGENTS, isLocalAgentId, type LocalAgentId, type TextExecutionBackend } from "../../services/codex/LocalAgents";
 import { PLAN_REQUIRED_MESSAGE } from "../../utils/errors";
 import type { ChatApprovalMode } from "./storage/ChatPersistenceTypes";
@@ -149,10 +149,6 @@ export function chromeAccount(
   return "signed-in";
 }
 
-function usable(agent: LocalAgentAvailability | undefined): boolean {
-  return Boolean(agent?.installed && agent.signedIn);
-}
-
 function otherAgent(agent: LocalAgentId): LocalAgentId {
   return agent === "claude" ? "codex" : "claude";
 }
@@ -248,7 +244,9 @@ function modelDetail(state: AgentChromeState): RunLineSegment | null {
   if (state.backend === "codex") {
     const effort = effortLabel(state.codex.effort);
     // The installed Codex's own name for the model, as its menu shows it.
-    const model = state.codex.models?.find((candidate) => candidate.model === state.codex.model)?.name ?? state.codex.model;
+    const model = state.codex.model
+      ? state.codex.models?.find((candidate) => candidate.model === state.codex.model)?.name ?? state.codex.model
+      : codexDefaultLabel(state.codex.models);
     return {
       key: "detail",
       label: model,
@@ -315,6 +313,9 @@ function agentStatus(state: AgentChromeState, agent: LocalAgentId): Readonly<{
   const detection = state.detection;
   if (!detection) return { listed: true, usable: true, description: "Checking…" };
   const availability = detection.agents[agent];
+  if (availability?.installed && availability.signedIn === null) {
+    return { listed: true, usable: usable(availability), description: "Sign-in status unknown" };
+  }
   if (usable(availability)) {
     const usedMost = detection.preferred === agent && availability.lastUsed !== null;
     return { listed: true, usable: true, description: usedMost ? "Ready · used most" : "Ready" };
@@ -406,21 +407,22 @@ export function modelMenu(state: AgentChromeState): readonly ChromeMenuEntry[] {
     }
   } else if (state.backend === "codex") {
     const { models, model, effort, serviceTier } = state.codex;
-    const current = models?.find((candidate) => candidate.model === model);
+    const current = models?.find((candidate) => model ? candidate.model === model : candidate.isDefault);
     if (!models) entries.push({ kind: "label", title: "Loading Codex models…" });
+    entries.push({ kind: "item", id: "model:", title: codexDefaultLabel(models), checked: !model });
     for (const candidate of models ?? []) {
       entries.push({ kind: "item", id: `model:${candidate.model}`, title: candidate.name, checked: candidate.model === model });
     }
-    if (!current) entries.push({ kind: "item", id: `model:${model}`, title: model, checked: true, disabled: true });
+    if (model && !current) entries.push({ kind: "item", id: `model:${model}`, title: model, checked: true, disabled: true });
     const efforts = current?.efforts.length ? current.efforts : [effort];
     entries.push({ kind: "separator" }, { kind: "label", title: "Thinking" });
-    for (const value of new Set([...efforts, effort])) {
+    for (const value of new Set(["", ...efforts, effort])) {
       entries.push({
         kind: "item",
         id: `effort:${value}`,
-        title: effortLabel(value),
+        title: value ? effortLabel(value) : "Codex default",
         checked: value === effort,
-        disabled: Boolean(current) && !current!.efforts.includes(value),
+        disabled: Boolean(value && current && !current.efforts.includes(value)),
       });
     }
     const fastTier = current?.fastTier ?? (current ? undefined : serviceTier !== "default" ? serviceTier : undefined);
@@ -482,14 +484,14 @@ function localHints(state: AgentChromeState): readonly EmptyStateHint[] {
   if (!state.localAgents || !state.detection) return [];
   const hints: EmptyStateHint[] = [];
   const { claude, codex } = state.detection.agents;
-  if (claude?.installed && !claude.signedIn) {
+  if (claude?.installed && claude.signedIn === false) {
     hints.push({
       id: "claude-signed-out",
       before: "Claude Code is installed but not signed in. Run `claude` in a terminal and type /login, then",
       after: ".",
     });
   }
-  if (codex?.installed && !codex.signedIn) {
+  if (codex?.installed && codex.signedIn === false) {
     hints.push({
       id: "codex-signed-out",
       before: "Codex is installed but not signed in. Run `codex login` in a terminal, then",
@@ -497,7 +499,7 @@ function localHints(state: AgentChromeState): readonly EmptyStateHint[] {
     });
   }
   if (hints.length > 0) return hints;
-  if (usable(claude) || usable(codex)) return [];
+  if (usable(claude) || usable(codex) || claude?.signedIn === null || codex?.signedIn === null) return [];
   return [{
     id: "local-hint",
     before: "Already use Claude Code or Codex? Install or sign in on this computer, then",

@@ -46,7 +46,7 @@ import { ChatExportService } from "./export/ChatExportService";
 import type { ChatExportResult } from "./export/ChatExportTypes";
 import { parseChatApprovalMode, type ChatApprovalMode } from "./storage/ChatPersistenceTypes";
 import { resolveDefaultChatBackend } from "../../services/codex/DefaultChatBackend";
-import { detectLocalAgents, type LocalAgentDetection } from "../../services/codex/LocalAgentDetection";
+import { detectLocalAgents, isLocalAgentUsable, subscribeLocalAgentDetection, type LocalAgentDetection } from "../../services/codex/LocalAgentDetection";
 import { AgentWorkspace, type AgentQueuedFollowUp } from "./AgentWorkspace";
 import {
   agentName,
@@ -893,7 +893,15 @@ export class AgentChatView extends ItemView {
     this.syncAttachments();
     this.syncChrome();
     void this.refreshUsedInVault();
-    if (hasHostCapability("local-cli", this.containerEl)) void this.refreshDetection();
+    if (hasHostCapability("local-cli", this.containerEl)) {
+      this.register(subscribeLocalAgentDetection(localAgentDetectionDirectory(this.app), (detection) => {
+        if (this.closing) return;
+        this.detection = detection;
+        this.applyBackendAvailability();
+        this.syncChrome();
+      }));
+      void this.refreshDetection();
+    }
 
     if (this.chatId) await this.loadChatById(this.chatId);
     else await this.startNewChat(false, undefined, this.draftKey);
@@ -3520,7 +3528,7 @@ export class AgentChatView extends ItemView {
     catch { claude = { model: "", permissionMode: "auto" }; }
     let codex: Readonly<{ model: string; effort: string; serviceTier: string; approvalMode: string }>;
     try { codex = codexOptionsFromSettings(settings); }
-    catch { codex = { model: settings.codexModel ?? "", effort: "high", serviceTier: "default", approvalMode: "auto" }; }
+    catch { codex = { model: settings.codexModel ?? "", effort: "", serviceTier: "default", approvalMode: "auto" }; }
     return {
       backend: backendOf(this.agent),
       localAgents: hasHostCapability("local-cli", this.containerEl),
@@ -3945,13 +3953,15 @@ export class AgentChatView extends ItemView {
       if (backend === "claude" && kind === "model") {
         await settings.updateSettings({ claudeModel: value });
       } else if (backend === "codex") {
-        if (kind === "model") {
+        if (kind === "model" && !value) {
+          await settings.updateSettings({ codexModel: "", codexThinkingLevel: "" });
+        } else if (kind === "model") {
           const next = this.codexModels?.find((candidate) => candidate.model === value);
           if (!next) return;
           const current = codexOptionsFromSettings(this.plugin.settings);
           await settings.updateSettings({
             codexModel: next.model,
-            codexThinkingLevel: next.efforts.includes(current.effort) ? current.effort : next.defaultEffort,
+            codexThinkingLevel: !current.effort || next.efforts.includes(current.effort) ? current.effort : next.defaultEffort,
             codexServiceTier: current.serviceTier !== "default" && next.fastTier ? next.fastTier : "default",
           });
         } else if (kind === "effort") {
@@ -3970,7 +3980,8 @@ export class AgentChatView extends ItemView {
   /**
    * Re-runs detection. An empty chat that detection chose for the person
    * moves to an agent that has become ready; their own choice stays.
-   * Resolves true when this chat's own agent is now installed and signed in.
+   * Resolves true when this chat's own agent is usable, including recent usage
+   * while native sign-in status is unknown.
    */
   private async detectAgain(): Promise<boolean> {
     if (!hasHostCapability("local-cli", this.containerEl)) return false;
@@ -3979,7 +3990,7 @@ export class AgentChatView extends ItemView {
     const detection = await this.refreshDetection(true);
     if (!detection) return false;
     const ready = (["claude", "codex"] as const)
-      .filter((agent) => detection.agents[agent]?.installed && detection.agents[agent]?.signedIn);
+      .filter((agent) => isLocalAgentUsable(detection.agents[agent]));
     const settings = this.plugin.settings;
     const chosen = Boolean(settings.textExecutionBackendExplicit) || isLocalAgentId(settings.textExecutionBackend);
     if (

@@ -2,7 +2,7 @@
 import { renderStudioCommandExecution } from '../StudioCommandExecutionControls';
 import { readCodexCatalog } from '../../../../services/codex/CodexModelCatalog';
 import { hasHostCapability } from '../../../../platform/hostCapabilities';
-jest.mock('../../../../services/codex/CodexModelCatalog', () => ({ readCodexCatalog: jest.fn() }));
+jest.mock('../../../../services/codex/CodexModelCatalog', () => ({ ...jest.requireActual('../../../../services/codex/CodexModelCatalog'), readCodexCatalog: jest.fn() }));
 jest.mock('../../../../services/codex/CodexExecutionSettings', () => ({ ...jest.requireActual('../../../../services/codex/CodexExecutionSettings'), codexVaultDirectory: () => '/vault' }));
 jest.mock('../../../../platform/hostCapabilities', () => ({ hasHostCapability: jest.fn(() => true) }));
 const models = [{ model: 'gpt-6-astra', name: 'GPT-6 Astra', efforts: ['high', 'xhigh'], defaultEffort: 'high', fastTier: 'priority' }, { model: 'test-model', name: 'Test model', efforts: ['low', 'medium'], defaultEffort: 'medium' }];
@@ -16,6 +16,7 @@ async function fixture(value?: unknown) {
 }
 it('uses native models, saves compatible reasoning atomically and never offers a fast control', async () => {
   const f = await fixture(); expect(f.model.value).toBe('gpt-6-astra'); expect(f.effort.value).toBe('high');
+  expect([...f.model.options, ...f.effort.options].some(option => option.value === '')).toBe(false);
   expect(f.root.querySelectorAll('select')).toHaveLength(2); expect(f.root.textContent).toContain('Standard'); expect(f.root.textContent).not.toMatch(/Fast|Priority/);
   f.model.value = 'test-model'; f.model.dispatchEvent(new Event('change'));
   expect(f.onChange).toHaveBeenLastCalledWith({ model: 'test-model', effort: 'medium' });

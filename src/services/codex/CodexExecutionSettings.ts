@@ -43,11 +43,12 @@ export function codexWorkingDirectory(app: App, configuredPath: string): string 
 
 export type CodexExecutionOptions = { model?: string; effort?: string; serviceTier?: string };
 export function resolveCodexOptions(options: CodexExecutionOptions): Required<CodexExecutionOptions> {
-  const model = options.model?.trim() || 'gpt-6-astra';
-  const effort = options.effort?.trim() || 'high';
+  // Empty selections inherit the installed Codex's own configuration.
+  const model = options.model?.trim() || '';
+  const effort = options.effort?.trim() || '';
   const serviceTier = options.serviceTier?.trim() || 'default';
-  if (!/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,159}$/.test(model)) throw new Error('Invalid Codex model.');
-  if (!['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'].includes(effort)) throw new Error('Invalid Codex thinking level.');
+  if (model && !/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,159}$/.test(model)) throw new Error('Invalid Codex model.');
+  if (effort && !['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'].includes(effort)) throw new Error('Invalid Codex thinking level.');
   if (!/^[A-Za-z0-9_-]{1,40}$/.test(serviceTier)) throw new Error('Invalid Codex speed mode.');
   return { model, effort, serviceTier };
 }

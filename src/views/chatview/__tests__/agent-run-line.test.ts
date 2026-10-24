@@ -361,8 +361,32 @@ describe("AgentRunLine", () => {
     line.unload();
   });
 
+  it.each([true, false])("updates an open backend menu in place after sign-in resolves to %s", (signedIn) => {
+    const { parent, line, options } = mount();
+    const initial = state({ backend: "systemsculpt", detection: {
+      ...state().detection!, agents: { ...state().detection!.agents,
+        claude: { installed: true, signedIn: null, recentSessionCount: signedIn ? 0 : 1, lastUsed: null },
+      },
+    } });
+    line.render(initial);
+    segment(parent, "backend").click();
+    const menu = menus().at(-1)!;
+    const item = menu.items.find((entry) => entry.title === "Claude CodeSign-in status unknown")!;
+    expect(item.disabled).toBe(signedIn);
+    line.render({ ...initial, detection: {
+      ...initial.detection!, agents: { ...initial.detection!.agents, claude: { ...initial.detection!.agents.claude, signedIn } },
+    } });
+    expect(menus().at(-1)).toBe(menu);
+    expect(menu.items).toContain(item);
+    expect(item.disabled).toBe(!signedIn);
+    expect(item.title).toBe(signedIn ? "Claude CodeReady" : "Claude CodeNot signed in · Run claude in a terminal and type /login");
+    menu.select(item.title!);
+    expect(options.onSelectBackend).toHaveBeenCalledTimes(signedIn ? 1 : 0);
+    line.unload();
+  });
+
   it("keeps a focused segment focused across a redraw and refreshes a loading model menu", () => {
-    const { parent, line } = mount();
+    const { parent, line, options } = mount();
     line.render(state({ backend: "codex" }));
     segment(parent, "detail").focus();
     segment(parent, "detail").click();
@@ -371,12 +395,15 @@ describe("AgentRunLine", () => {
       backend: "codex",
       codex: {
         ...state().codex,
-        models: [{ model: "gpt-6.1", name: "GPT-6.1", efforts: ["high"], defaultEffort: "high" }],
+        models: [{ model: "gpt-6.1", name: "GPT-6.1", efforts: ["high"], defaultEffort: "high", isDefault: true }],
       },
     }));
     expect(document.activeElement).toBe(segment(parent, "detail"));
     expect(menus().at(-1)!.shown).toBe(true);
-    expect(menus().at(-1)!.items[0].title).toBe("GPT-6.1");
+    expect(menus().at(-1)!.items[0]).toMatchObject({ title: "Codex default (GPT-6.1)", checked: false });
+    expect(menus().at(-1)!.items[1]).toMatchObject({ title: "GPT-6.1", checked: true });
+    menus().at(-1)!.select("Codex default (GPT-6.1)");
+    expect(options.onModelChange).toHaveBeenCalledWith("model:");
     line.unload();
   });
 });

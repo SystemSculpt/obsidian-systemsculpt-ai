@@ -260,7 +260,7 @@ export interface SystemSculptSettings {
 
 export const DEFAULT_SETTINGS: SystemSculptSettings = {
   textExecutionBackend: "systemsculpt", textExecutionBackendExplicit: false,
-  codexModel: "gpt-6-astra", codexThinkingLevel: "high", codexServiceTier: "default", codexApprovalMode: "auto",
+  codexModel: "", codexThinkingLevel: "", codexServiceTier: "default", codexApprovalMode: "auto",
   claudeModel: "", claudePermissionMode: "auto",
   vaultInstanceId: "",
   relativeLineNumbersEnabled: false,

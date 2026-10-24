@@ -199,6 +199,23 @@ describe("backend menu", () => {
     expect(usedBefore.find((entry) => entry.id === "codex")).toMatchObject({ description: "Not installed", disabled: true });
   });
 
+  it.each([0, 1])("reports unknown status without a sign-in hint (recent sessions: %i)", recentSessionCount => {
+    const unknown = { ...signedOut, signedIn: null, recentSessionCount };
+    const input = state({ backend: "systemsculpt", detection: detection(unknown, unknown, recentSessionCount ? "claude" : "systemsculpt") });
+    const entries = items(backendMenu(input));
+    for (const id of ["claude", "codex"]) {
+      expect(entries.find(entry => entry.id === id)).toMatchObject({
+        description: "Sign-in status unknown", disabled: recentSessionCount === 0,
+      });
+    }
+    expect(presentEmptyState(input).hints).toEqual([]);
+  });
+
+  it("keeps confirmed sign-out hints when only the other agent's status is unknown", () => {
+    const input = state({ backend: "systemsculpt", detection: detection({ ...signedOut, signedIn: null }, signedOut, "systemsculpt") });
+    expect(presentEmptyState(input).hints.map(hint => hint.id)).toEqual(["codex-signed-out"]);
+  });
+
   it("warns that switching starts a new chat when this one has messages", () => {
     const [first] = backendMenu(state({ hasMessages: true }));
     expect(first).toEqual({ kind: "label", title: "Switching starts a new chat. This one stays in your history." });
@@ -235,6 +252,17 @@ describe("mode and model menus", () => {
       .toEqual([["model:", "Default", false], ["model:opus", "Opus", true], ["model:sonnet", "Sonnet", false], ["model:haiku", "Haiku", false]]);
   });
 
+  it.each([null, [], [{ model: "native", name: "Native model", efforts: ["low", "high"], defaultEffort: "low", isDefault: true }]])("marks native Codex defaults without pinning the catalog model", models => {
+    const current = state({ backend: "codex", codex: { ...state().codex, model: "", effort: "", models } });
+    const choices = items(modelMenu(current));
+    const title = models?.length ? "Codex default (Native model)" : "Codex default";
+    expect(choices.find(entry => entry.id === "model:")).toMatchObject({ title, checked: true });
+    expect(choices.find(entry => entry.id === "effort:")).toMatchObject({ title: "Codex default", checked: true, disabled: false });
+    expect(choices.filter(entry => entry.checked && entry.id.startsWith("model:"))).toHaveLength(1);
+    const line = presentRunLine(current);
+    expect(line.kind === "segments" && line.segments.find(segment => segment.key === "detail")?.label).toBe(title);
+  });
+
   it("offers Codex models, the thinking levels each supports, and speed", () => {
     const models = [
       { model: "gpt-6.1", name: "GPT-6.1", efforts: ["low", "high"], defaultEffort: "high", fastTier: "priority" },
@@ -244,7 +272,7 @@ describe("mode and model menus", () => {
     expect(entries.filter((entry) => entry.kind === "label").map((entry) => entry.kind === "label" && entry.title))
       .toEqual(["Thinking", "Speed"]);
     expect(items(entries).map((entry) => entry.id)).toEqual([
-      "model:gpt-6.1", "model:mini", "effort:low", "effort:high", "tier:default", "tier:priority",
+      "model:", "model:gpt-6.1", "model:mini", "effort:", "effort:low", "effort:high", "tier:default", "tier:priority",
     ]);
     expect(modelMenu(state({ backend: "codex" }))[0]).toEqual({ kind: "label", title: "Loading Codex models…" });
   });

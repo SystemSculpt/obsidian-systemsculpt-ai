@@ -1,7 +1,10 @@
 import { posix } from 'node:path';
 import { desktopHost } from '../../../platform/desktopOnly';
 import { hasHostCapability } from '../../../platform/hostCapabilities';
-import { detectLocalAgents, invalidateLocalAgentDetection } from '../LocalAgentDetection';
+import { detectLocalAgents, invalidateLocalAgentDetection, subscribeLocalAgentDetection } from '../LocalAgentDetection';
+import { resolveDefaultChatBackend } from '../DefaultChatBackend';
+import { DEFAULT_SETTINGS } from '../../../types';
+import { migrateSettingsToCurrentSchema } from '../../../core/settings/migrations/SettingsMigrator';
 import { windowsNpmHost } from './fixtures/npmNodeShim';
 
 jest.mock('../../../platform/desktopOnly', () => ({ desktopHost: { fs: jest.fn(), os: jest.fn(), path: jest.fn(), environment: jest.fn(), childProcess: jest.fn() } }));
@@ -215,13 +218,177 @@ it('caches results and concurrent probes until invalidated or explicitly detecte
   expect(host.execFile).toHaveBeenCalledTimes(6);
 });
 
-it('returns promptly when an auth command hangs without hiding the other usable agent', async () => {
+it.each(['claude', 'codex'] as const)('keeps hung %s status unknown without hiding the other usable agent', async agent => {
   jest.useFakeTimers();
-  machine({ hang: 'claude' });
+  const host = machine({ hang: agent });
   const result = detectLocalAgents();
   await jest.advanceTimersByTimeAsync(3000);
-  expect((await result).preferred).toBe('codex');
-  expect((await result).agents.claude).toMatchObject({ installed: true, signedIn: false });
+  expect((await result).preferred).toBe(agent === 'claude' ? 'codex' : 'claude');
+  expect((await result).agents[agent]).toMatchObject({ installed: true, signedIn: null });
+  // The initial result remains available while only the unknown agent is retried.
+  expect(detectLocalAgents()).toBe(result);
+  expect(host.execFile).toHaveBeenCalledTimes(3);
+  await jest.advanceTimersByTimeAsync(3000);
+  expect((await detectLocalAgents()).agents[agent].signedIn).toBeNull();
+  await jest.advanceTimersByTimeAsync(30_000);
+  expect(host.execFile).toHaveBeenCalledTimes(3);
+  expect(jest.getTimerCount()).toBe(0);
+});
+
+it.each([
+  ['claude', '/home/test/.claude/projects/vault/main.jsonl'],
+  ['codex', '/home/test/.codex/sessions/2026/10/23/main.jsonl'],
+] as const)('uses recent sessions for hung %s status, but not old or missing sessions', async (agent, session) => {
+  jest.useFakeTimers();
+  const host = machine({ installed: [agent], hang: agent });
+  for (const age of [null, 40 * day, day]) {
+    if (age !== null) host.file(session, now - age);
+    const result = detectLocalAgents({ force: true });
+    await jest.advanceTimersByTimeAsync(3000);
+    expect((await result).agents[agent].signedIn).toBeNull();
+    expect((await result).preferred).toBe(age === day ? agent : 'systemsculpt');
+    await jest.advanceTimersByTimeAsync(3000);
+    expect((await detectLocalAgents()).preferred).toBe(age === day ? agent : 'systemsculpt');
+    expect(jest.getTimerCount()).toBe(0);
+  }
+  expect(host.execFile).toHaveBeenCalledTimes(6);
+});
+
+it.each(['claude', 'codex'] as const)('updates cached %s status after one background retry succeeds', async agent => {
+  jest.useFakeTimers();
+  const host = machine({ installed: [agent] });
+  host.execFile.mockImplementationOnce(() => undefined);
+  const result = detectLocalAgents();
+  await jest.advanceTimersByTimeAsync(3000);
+  expect((await result).agents[agent].signedIn).toBeNull();
+  await jest.advanceTimersByTimeAsync(0);
+  expect((await detectLocalAgents()).agents[agent].signedIn).toBe(true);
+  expect((await detectLocalAgents()).preferred).toBe(agent);
+  expect(host.execFile).toHaveBeenCalledTimes(2);
+  expect(jest.getTimerCount()).toBe(0);
+});
+
+it('replaces recent-session inference with an explicit signed-out result from the retry', async () => {
+  jest.useFakeTimers();
+  const host = machine({ installed: ['claude'], signedIn: [] });
+  host.file('/home/test/.claude/projects/vault/main.jsonl');
+  host.execFile.mockImplementationOnce(() => undefined);
+  const result = detectLocalAgents();
+  await jest.advanceTimersByTimeAsync(3000);
+  expect((await result).preferred).toBe('claude');
+  await jest.advanceTimersByTimeAsync(0);
+  expect((await detectLocalAgents()).agents.claude.signedIn).toBe(false);
+  expect((await detectLocalAgents()).preferred).toBe('systemsculpt');
+  expect(host.execFile).toHaveBeenCalledTimes(2);
+});
+
+it.each(['lookup', 'usage'] as const)('retains confirmed installation and recent usage when retry %s stalls', async stage => {
+  jest.useFakeTimers();
+  const host = machine({ installed: ['claude'], hang: 'claude' });
+  host.file('/home/test/.claude/projects/vault/main.jsonl');
+  const first = detectLocalAgents();
+  await jest.advanceTimersByTimeAsync(0);
+  if (stage === 'lookup') host.fs.readFile.mockImplementation(() => new Promise(() => {}));
+  else host.fs.readdir.mockImplementation(() => new Promise(() => {}));
+  await jest.advanceTimersByTimeAsync(3000);
+  expect((await first).agents.claude).toMatchObject({ installed: true, signedIn: null, recentSessionCount: 1 });
+  await jest.advanceTimersByTimeAsync(3000);
+  expect(await detectLocalAgents()).toEqual(await first);
+  expect(jest.getTimerCount()).toBe(0);
+});
+
+it('publishes a definitive Detect again result to views waiting on an invalidated retry', async () => {
+  jest.useFakeTimers();
+  const host = machine({ installed: ['claude'], hang: 'claude' });
+  const current = jest.fn();
+  const stop = subscribeLocalAgentDetection('/vault', current);
+  try {
+    const first = detectLocalAgents({ workingDirectory: '/vault' });
+    await jest.advanceTimersByTimeAsync(3000);
+    expect((await first).agents.claude.signedIn).toBeNull();
+    host.execFile.mockImplementation((_binary, _args, _config, callback) => { callback(null, '{"loggedIn":true}', ''); });
+    const refreshed = await detectLocalAgents({ workingDirectory: '/vault', force: true });
+    expect(current).toHaveBeenLastCalledWith(refreshed);
+    const calls = current.mock.calls.length;
+    await jest.advanceTimersByTimeAsync(3000);
+    expect(current).toHaveBeenCalledTimes(calls);
+  } finally { stop(); }
+});
+
+it('does not let an invalidated background retry overwrite Detect again', async () => {
+  jest.useFakeTimers();
+  const host = machine({ installed: ['claude'], hang: 'claude' });
+  const first = detectLocalAgents();
+  await jest.advanceTimersByTimeAsync(3000);
+  expect((await first).agents.claude.signedIn).toBeNull();
+  const retryCallback = host.execFile.mock.calls[1][3];
+  host.execFile.mockImplementation((_binary, _args, _config, callback) => { callback(null, '{"loggedIn":true}', ''); });
+  const refreshed = detectLocalAgents({ force: true });
+  expect((await refreshed).preferred).toBe('claude');
+  retryCallback(null, '{"loggedIn":false}', '');
+  await jest.advanceTimersByTimeAsync(3000);
+  expect(detectLocalAgents()).toBe(refreshed);
+  expect((await detectLocalAgents()).preferred).toBe('claude');
+  expect(jest.getTimerCount()).toBe(0);
+});
+
+it.each([DEFAULT_SETTINGS, migrateSettingsToCurrentSchema({ schemaVersion: 14, textExecutionBackend: 'systemsculpt' }, DEFAULT_SETTINGS).settings])('defaults a fresh or migrated desktop chat to an installed recently used agent despite slow auth', async settings => {
+  jest.useFakeTimers();
+  const host = machine({ installed: ['claude'], hang: 'claude' });
+  host.file('/home/test/.claude/projects/vault/main.jsonl');
+  const balance = jest.fn();
+  const backend = resolveDefaultChatBackend(settings, balance);
+  await jest.advanceTimersByTimeAsync(3000);
+  expect(await backend).toBe('claude');
+  expect(balance).not.toHaveBeenCalled();
+  await jest.advanceTimersByTimeAsync(3000);
+});
+
+it('notifies only current directory subscribers after retry and respects unsubscribe', async () => {
+  jest.useFakeTimers();
+  const host = machine({ installed: ['claude'], hang: 'claude' });
+  const current = jest.fn(), other = jest.fn(), removed = jest.fn();
+  const stopCurrent = subscribeLocalAgentDetection('/vault', current);
+  const stopOther = subscribeLocalAgentDetection('/other', other);
+  const stopRemoved = subscribeLocalAgentDetection('/vault', removed);
+  try {
+    const initial = detectLocalAgents({ workingDirectory: '/vault' });
+    await jest.advanceTimersByTimeAsync(3000);
+    expect((await initial).agents.claude.signedIn).toBeNull();
+    expect(current).toHaveBeenCalledWith(await initial);
+    current.mockClear(); removed.mockClear();
+    stopRemoved();
+    host.execFile.mock.calls[1][3](null, '{"loggedIn":true}', '');
+    await jest.advanceTimersByTimeAsync(0);
+    expect(current).toHaveBeenCalledTimes(1);
+    expect(current).toHaveBeenCalledWith(await detectLocalAgents({ workingDirectory: '/vault' }));
+    expect(other).not.toHaveBeenCalled();
+    expect(removed).not.toHaveBeenCalled();
+    expect(jest.getTimerCount()).toBe(0);
+  } finally { stopCurrent(); stopOther(); stopRemoved(); }
+});
+
+it('counts launch lookup time in each original 3-second window and aborts both hung status processes', async () => {
+  jest.useFakeTimers();
+  jest.spyOn(Date, 'now').mockRestore();
+  jest.setSystemTime(now);
+  const host = machine({ installed: ['claude'], hang: 'claude' });
+  const read = host.fs.readFile.getMockImplementation()!;
+  host.fs.readFile.mockImplementation(async path => {
+    await new Promise(resolve => window.setTimeout(resolve, 1000));
+    return read(path);
+  });
+  let finished = false;
+  const initial = detectLocalAgents().then(result => { finished = true; return result; });
+  await jest.advanceTimersByTimeAsync(2999);
+  expect(finished).toBe(false);
+  expect(host.execFile).toHaveBeenCalledTimes(1);
+  await jest.advanceTimersByTimeAsync(1);
+  expect((await initial).agents.claude.signedIn).toBeNull();
+  expect((host.execFile.mock.calls[0][2] as { signal: AbortSignal }).signal.aborted).toBe(true);
+  await jest.advanceTimersByTimeAsync(3000);
+  expect(host.execFile).toHaveBeenCalledTimes(2);
+  expect((host.execFile.mock.calls[1][2] as { signal: AbortSignal }).signal.aborted).toBe(true);
   expect(jest.getTimerCount()).toBe(0);
 });
 
@@ -282,6 +449,8 @@ it('does not spawn a late Windows status process after shim I/O exceeds the exis
   const result = detectLocalAgents({ workingDirectory: windows.cwd });
   await jest.advanceTimersByTimeAsync(3000);
   expect((await result).preferred).toBe('systemsculpt');
+  // Both attempts retain the original deadline, including shim resolution.
+  await jest.advanceTimersByTimeAsync(3000);
   release();
   await jest.advanceTimersByTimeAsync(0);
   expect(execFile).not.toHaveBeenCalled();
