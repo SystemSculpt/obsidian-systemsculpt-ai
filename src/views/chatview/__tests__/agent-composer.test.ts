@@ -421,6 +421,71 @@ describe("AgentComposer", () => {
     composer.unload();
   });
 
+  it.each(["add", "chip"])("contains %s-menu Escape and releases it after closing", async (kind) => {
+    const { composer, query, submissions } = mount();
+    const hostEscape = jest.fn();
+    document.addEventListener("keydown", hostEscape);
+    try {
+      composer.setAttachments([{ id: "a", label: "Plan.md", path: "Plan.md", kind: "vault" }]);
+      const opener = query(kind === "add"
+        ? '[data-testid="chat.composer.add"]'
+        : '[data-testid="chat.composer.attachment.open"]')!;
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        opener.click();
+        const menu = lastMenu();
+        expect(key(document.body, { key: "Escape", isComposing: true }).defaultPrevented).toBe(false);
+        hostEscape.mockClear();
+        expect(key(document.body, { key: "Escape" }).defaultPrevented).toBe(true);
+        expect(menu.shown).toBe(false);
+        expect(hostEscape).not.toHaveBeenCalled();
+        await settle();
+        expect(document.activeElement).toBe(opener);
+        expect(key(document.body, { key: "Escape" }).defaultPrevented).toBe(false);
+        expect(hostEscape).toHaveBeenCalledTimes(1);
+      }
+      expect(submissions).toEqual([]);
+    } finally {
+      composer.unload();
+      document.removeEventListener("keydown", hostEscape);
+    }
+  });
+
+  it("retires composer menus on replacement and unload without reclaiming focus", async () => {
+    const { composer, query } = mount();
+    const opener = query('[data-testid="chat.composer.add"]')!;
+    try {
+      opener.click();
+      const first = lastMenu();
+      opener.click();
+      expect(first.shown).toBe(false);
+      const second = lastMenu();
+      composer.unload();
+      expect(second.shown).toBe(false);
+      const elsewhere = document.body.createEl("button");
+      elsewhere.focus();
+      await settle();
+      expect(document.activeElement).toBe(elsewhere);
+      expect(key(document.body, { key: "Escape" }).defaultPrevented).toBe(false);
+    } finally {
+      composer.unload();
+    }
+  });
+
+  it("does not leave Escape capture after menu selection or pointer dismissal", () => {
+    const { composer, query } = mount();
+    try {
+      query('[data-testid="chat.composer.add"]')!.click();
+      lastMenu().select("Pin files for every message…");
+      expect(key(document.body, { key: "Escape" }).defaultPrevented).toBe(false);
+      query('[data-testid="chat.composer.add"]')!.click();
+      document.body.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+      lastMenu().hide();
+      expect(key(document.body, { key: "Escape" }).defaultPrevented).toBe(false);
+    } finally {
+      composer.unload();
+    }
+  });
+
   it("suggests the active note as a ghost chip only while the composer is empty, and never adds it by itself", async () => {
     const plan = new TFile({ path: "Plan.md" });
     const { app } = vaultApp([plan], { active: plan });
