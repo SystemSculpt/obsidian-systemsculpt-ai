@@ -32,6 +32,8 @@ const terminalToolStates = new Set(['succeeded', 'failed', 'denied', 'cancelled'
 /** Chat presentation adapter shared by on-machine agents. The agent owns every model step, tool and durable thread. */
 export class LocalAgentChatSession implements ChatSession {
   private localSnapshot: AgentConversationSnapshot = { runId: null, turnId: null, status: 'idle', messages: [], parts: [] };
+  /** Monotonic start of the current turn; the status row's elapsed time counts from here. */
+  private runStartedAt: number | null = null;
   private readonly localListeners = new Set<(value: AgentConversationSnapshot) => void>();
   private readonly locator: CodexThreadLocator;
   private readonly approvals = new Map<string, PendingApproval>();
@@ -47,7 +49,9 @@ export class LocalAgentChatSession implements ChatSession {
   getSnapshot(): AgentConversationSnapshot { return this.localSnapshot; }
   subscribe(listener: (value: AgentConversationSnapshot) => void): () => void { this.localListeners.add(listener); return () => this.localListeners.delete(listener); }
   private publish(patch: Partial<AgentConversationSnapshot>) {
-    this.localSnapshot = { ...this.localSnapshot, ...patch };
+    const elapsedMs = this.runStartedAt === null ? undefined : Math.max(0, Math.round(performance.now() - this.runStartedAt));
+    this.localSnapshot = { ...this.localSnapshot, ...(elapsedMs === undefined ? {} : { elapsedMs }), ...patch };
+    if (patch.status === 'completed' || patch.status === 'failed' || patch.status === 'cancelled') this.runStartedAt = null;
     for (const listener of this.localListeners) { try { listener(this.localSnapshot); } catch { /* Presentation must not interrupt the agent. */ } }
   }
   private publishParts(parts: readonly AgentPart[]) {
@@ -171,6 +175,7 @@ export class LocalAgentChatSession implements ChatSession {
       });
       return { role: 'assistant', content, message_id: messageId, messageParts, ...(terminalOutcome ? { terminalOutcome } : {}) };
     };
+    this.runStartedAt = performance.now();
     this.publish({ runId: input.turnId, turnId: input.turnId, status: 'running', phase: 'submitted', waitingReason: undefined, statusLabel: `Connecting to on-machine ${name}`, terminalError: undefined, parts: [], messages: [{ id: messageId, role: 'assistant', partIds: [] }] });
     try {
       if (this.conversationId !== null && this.conversationId !== input.conversationId) await this.closeTransport();

@@ -35,6 +35,22 @@ it('streams and persists a native reply without managed authentication or transp
   expect(AgentChatSession).not.toHaveBeenCalled();
   expect(native.mock.calls[0][0]).toMatchObject({ approvalMode: 'auto' });
 });
+it('publishes the turn\'s elapsed time for the status row and freezes it at the end', async () => {
+  const { session } = setup(), listener = jest.fn(); session.subscribe(listener);
+  let now = 1_000;
+  const clock = jest.spyOn(performance, 'now').mockImplementation(() => now);
+  native.mockImplementationOnce(async (_input, _signal, callbacks) => { now += 2_500; callbacks.text('hi'); now += 1_000; return { text: 'hi', threadId: 't', turnId: 'turn', status: 'completed' }; });
+  try {
+    await session.start(input());
+    const elapsed = listener.mock.calls.map(([snapshot]) => snapshot.elapsedMs).filter((value) => value !== undefined);
+    expect(elapsed[0]).toBe(0);
+    expect(elapsed).toContain(2_500);
+    expect(session.getSnapshot()).toMatchObject({ status: 'completed', elapsedMs: 3_500 });
+    now += 60_000;
+    await session.detach();
+    expect(session.getSnapshot().elapsedMs).toBe(3_500);
+  } finally { clock.mockRestore(); }
+});
 it('preserves an explicitly configured native approval mode instead of the Chat default', async () => {
   setup();
   const session = new CodexChatSession({} as never, { persistAssistant: async () => {} }, () => [], () => ({ approvalMode: 'ask' }));
