@@ -1,4 +1,5 @@
-import { App, TFile, TFolder, normalizePath } from "obsidian";
+import { App, TFile, TFolder } from "obsidian";
+import { normalizeVaultRelativePath } from "../utils/vaultPathUtils";
 import { isAudioFileExtension } from "../constants/fileTypes";
 import type { SystemSculptSettings } from "../types";
 
@@ -21,9 +22,13 @@ export interface VaultCleanupGroup {
 export type VaultCleanupPlan = Record<VaultCleanupKind, VaultCleanupGroup>;
 
 function cleanupDirectory(value: string): string | null {
-  const raw = value.trim().replace(/\\/g, "/");
-  if (!raw || raw.startsWith("/") || raw.split("/").some((part) => part === "." || part === "..")) return null;
-  return normalizePath(raw).replace(/\/+$/, "") || null;
+  try {
+    return normalizeVaultRelativePath(value, {
+      validateRelative: { allowRepeatedSeparators: true },
+    });
+  } catch {
+    return null;
+  }
 }
 
 function withinDirectory(path: string, directory: string | null): boolean {

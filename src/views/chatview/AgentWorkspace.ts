@@ -1,4 +1,5 @@
 import { App, Component, Menu, setIcon } from "obsidian";
+import { getHostOperatingSystem } from "../../platform/hostCapabilities";
 import {
   applyPluginSurface,
   createUiAction,
@@ -203,6 +204,7 @@ export class AgentWorkspace extends Component {
   private announceTimer: number | null = null;
   private announceTimerWindow: Window | null = null;
   private loading = false;
+  private pendingAnnouncements: string[] = [];
   private chromeKey = "";
   private historyReturnFocus: HTMLElement | null = null;
   private moreMenu: Menu | null = null;
@@ -275,6 +277,9 @@ export class AgentWorkspace extends Component {
     const history = iconButton(headerActions, "chat.header.history", "Chat history", "history");
     const create = iconButton(headerActions, "chat.header.new", "New chat", "square-pen");
     const more = iconButton(headerActions, "chat.header.more", "More", "more-horizontal");
+    const modifier = getHostOperatingSystem() === "macOS" ? "Meta" : "Control";
+    history.setAttribute("aria-keyshortcuts", `${modifier}+K`);
+    create.setAttribute("aria-keyshortcuts", `${modifier}+Shift+O`);
     more.setAttribute("aria-haspopup", "menu");
     for (const button of [history, create, more]) button.addClass("systemsculpt-agent-header-button");
     this.registerDomEvent(history, "click", () => void this.options.onOpenHistory());
@@ -287,7 +292,8 @@ export class AgentWorkspace extends Component {
     });
     this.banner.toggleAttribute("hidden", true);
 
-    this.viewport = this.element.createDiv({
+    const transcript = this.element.createDiv({ cls: "systemsculpt-agent-transcript" });
+    this.viewport = transcript.createDiv({
       cls: "systemsculpt-agent-viewport",
       attr: { tabindex: "0" },
     });
@@ -338,7 +344,7 @@ export class AgentWorkspace extends Component {
     });
     this.addChild(this.renderer);
 
-    this.jumpButton = createUiAction(this.element, {
+    this.jumpButton = createUiAction(transcript, {
       label: "Latest",
       testId: "chat.jump-to-latest",
       icon: "arrow-down",
@@ -404,6 +410,7 @@ export class AgentWorkspace extends Component {
       if (this.announceTimer !== null) this.announceTimerWindow?.clearTimeout(this.announceTimer);
       this.announceTimer = null;
       this.announceTimerWindow = null;
+      this.pendingAnnouncements = [];
     });
   }
 
@@ -424,16 +431,18 @@ export class AgentWorkspace extends Component {
   /** Polite announcement for screen readers. */
   public announce(text: string): void {
     if (!this.isRenderingVisible()) return;
-    // Clearing first makes a repeated message announce again.
-    // A timer, not a frame: announcements never take a slot in the render frame queue.
+    this.pendingAnnouncements.push(text);
+    if (this.announceTimer !== null) return;
+    // Clearing first makes a repeated message announce again. Preserve a burst
+    // in order rather than letting a fast reply overwrite its start or approval.
     this.liveRegion.setText("");
     const ownerWindow = getSurfaceOwnerWindow(this.liveRegion);
-    if (this.announceTimer !== null) this.announceTimerWindow?.clearTimeout(this.announceTimer);
     this.announceTimerWindow = ownerWindow;
     this.announceTimer = ownerWindow.setTimeout(() => {
       this.announceTimer = null;
       this.announceTimerWindow = null;
-      this.liveRegion.setText(text);
+      this.liveRegion.setText(this.pendingAnnouncements.join(" "));
+      this.pendingAnnouncements = [];
     }, 50);
   }
 
@@ -1078,9 +1087,7 @@ export class AgentWorkspace extends Component {
         }
       }
     });
-    const activeResponse = this.renderer.element.querySelector<HTMLElement>(
-      ".systemsculpt-agent-active-run .systemsculpt-agent-turn.is-assistant[data-turn-id]",
-    );
+    const activeResponse = this.renderer.activeResponseElement;
     const activeTurnId = activeResponse?.dataset.turnId?.trim();
     this.registeredActiveResponse = activeResponse && activeTurnId
       ? { turnId: activeTurnId, row: activeResponse }
@@ -1088,9 +1095,7 @@ export class AgentWorkspace extends Component {
   }
 
   private syncActiveResponseRow(): void {
-    const activeResponse = this.renderer.element.querySelector<HTMLElement>(
-      ".systemsculpt-agent-active-run .systemsculpt-agent-turn.is-assistant[data-turn-id]",
-    );
+    const activeResponse = this.renderer.activeResponseElement;
     const turnId = activeResponse?.dataset.turnId?.trim();
     if (!activeResponse || !turnId) {
       if (this.registeredActiveResponse) this.syncRows();
@@ -1272,10 +1277,7 @@ export class AgentWorkspace extends Component {
       const presentation = presentAgentConversation(snapshot, this.runPending);
       this.composer.setRunning(presentation.composerRunning);
       this.syncEmpty();
-      const activeRun = this.renderer.element.querySelector<HTMLElement>(
-        ":scope > .systemsculpt-agent-active-run",
-      );
-      const finishLayoutMutation = this.scroller.beginLayoutMutation(activeRun ?? undefined);
+      const finishLayoutMutation = this.scroller.beginLayoutMutation(this.renderer.activeRoot);
       try {
         if (this.historyNeedsRender) {
           try {
@@ -1356,12 +1358,8 @@ export class AgentWorkspace extends Component {
       return;
     }
     if (this.followedTurnId === turnId) return;
-    const durableUserRow = Array.from(
-      this.renderer.element.querySelectorAll<HTMLElement>(
-        ".systemsculpt-agent-history .systemsculpt-agent-turn.is-user[data-message-id]",
-      ),
-    ).find((row) => row.dataset.messageId === turnId);
-    if (!durableUserRow) return;
+    const durableUserRow = this.registeredRows.get(`message:${turnId}`);
+    if (!durableUserRow?.classList.contains("is-user")) return;
     const rowId = `response:${turnId}`;
     if (!this.registeredRows.has(rowId)) return;
     if (this.submittedPromptTurnId === turnId) {
@@ -1395,6 +1393,7 @@ export class AgentWorkspace extends Component {
       if (this.announceTimer !== null) this.announceTimerWindow?.clearTimeout(this.announceTimer);
       this.announceTimer = null;
       this.announceTimerWindow = null;
+      this.pendingAnnouncements = [];
       this.scroller.setStreaming(false);
       this.cancelSnapshotRenderFrame();
       this.pendingSnapshotRender = undefined;

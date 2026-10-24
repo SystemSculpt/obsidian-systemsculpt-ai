@@ -3650,7 +3650,12 @@ export class AgentChatView extends ItemView {
   /** Starts a new chat in this view. */
   public async newChat(focus = true): Promise<void> {
     if (this.workspace?.isHistoryOpen) this.workspace.hideHistory(false);
-    await this.startNewChat(focus);
+    const started = this.startNewChat(focus);
+    const origin = this.conversationOriginToken;
+    await started;
+    if (origin === this.conversationOriginToken) {
+      this.workspace?.announce(`Started a new chat with ${agentName(backendOf(this.agent))}`);
+    }
   }
 
   public openChatHistory(): void {

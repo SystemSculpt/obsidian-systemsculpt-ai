@@ -91,6 +91,21 @@ describe("chat leaf visibility", () => {
     expect(workspace.element.classList.contains("is-loading-chat")).toBe(false);
   });
 
+  it("keeps shown announcement bursts without replaying a cancelled hidden burst", async () => {
+    workspace.announce("Old start");
+    workspace.announce("Old approval");
+    shown(false);
+    workspace.announce("Hidden completion");
+    await tick();
+    shown(true);
+    await tick();
+    workspace.announce("New start");
+    workspace.announce("New approval");
+    await tick();
+    expect(workspace.element.querySelector('[data-testid="chat.announcer"]')?.textContent)
+      .toBe("New start New approval");
+  });
+
   it("suspends the working timer while hidden and restarts it on show without a new event", async () => {
     await render("Still running");
     shown(false);

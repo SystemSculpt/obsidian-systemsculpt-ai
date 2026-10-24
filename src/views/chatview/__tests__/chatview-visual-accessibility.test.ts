@@ -183,6 +183,19 @@ describe("ChatView narrow run-line readability", () => {
   });
 });
 
+describe("ChatView touch input and disclosure targets", () => {
+  test.each([
+    ["views/agent-workspace/composer.css", ".systemsculpt-agent-prompt > .systemsculpt-agent-prompt-input"],
+    ["views/agent-workspace/tools.css", ".systemsculpt-agent-approval-details > summary"],
+  ])("%s gives %s a full touch target without changing fine-pointer sizing", (path, selector) => {
+    const css = readCss(path);
+    const coarse = [...css.matchAll(/@media \(pointer: coarse\)\s*\{((?:[^{}]|\{[^{}]*\})*)\}/g)]
+      .map(([, body]) => body).join("\n");
+    expect(rule(coarse, selector)).toMatch(/min-height:\s*var\(--ss-touch-target\)/);
+    expect(rule(css, selector)).not.toMatch(/min-height:\s*var\(--ss-touch-target\)/);
+  });
+});
+
 describe("ChatView keyboard focus rules", () => {
   test("the post-cascade focus ring covers every interactive element, not just buttons", () => {
     const css = readCss("index.css");

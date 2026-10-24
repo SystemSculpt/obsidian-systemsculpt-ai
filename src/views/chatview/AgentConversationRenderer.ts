@@ -472,7 +472,7 @@ function messageTimeFormat(): Intl.DateTimeFormat {
 export class AgentConversationRenderer extends Component {
   public readonly element: HTMLElement;
   private readonly historyRoot: HTMLElement;
-  private readonly activeRoot: HTMLElement;
+  public readonly activeRoot: HTMLElement;
   private readonly activeNodes = new Map<string, HTMLElement>();
   private readonly activeOverflowNodes = new Map<string, HTMLButtonElement>();
   private readonly activityOverflowStates = new WeakMap<HTMLButtonElement, {
@@ -591,6 +591,11 @@ export class AgentConversationRenderer extends Component {
       onOpenPath: (path) => this.options.onOpenArtifact({ id: path, title: path, path, kind: "vault_file" }),
     });
     this.addChild(this.approvals);
+  }
+
+  /** The mounted live response; settlement transfers it to history and clears this reference. */
+  public get activeResponseElement(): HTMLElement | null {
+    return this.activeTurn;
   }
 
   public setLoading(loading: boolean): void {
@@ -2830,7 +2835,6 @@ export class AgentConversationRenderer extends Component {
           ? copy.createDiv({
             cls: "systemsculpt-agent-error-report",
             text: "Preparing report…",
-            attr: { role: "status", "aria-live": "polite" },
           }) : null;
         const canRetry = part.retryable && part.retryMessageId && this.options.onRetryFailedTurn
           && !presented.action?.match(/^(see-plans|add-credits|detect)$/)
@@ -3642,7 +3646,7 @@ export class AgentConversationRenderer extends Component {
     const actionTitle = (label: string): string => time ? `${label} · ${time}` : label;
     if (canRetryResponse) {
       const retry = createUiAction(actions, {
-        label: "Retry response", testId: "chat.turn.retry", ...icon("rotate-ccw"), size: "icon",
+        label: actionTitle("Retry response"), testId: "chat.turn.retry", ...icon("rotate-ccw"), size: "icon",
         title: actionTitle("Retry response"),
       });
       pending(retry, "rotate-ccw");
@@ -3658,7 +3662,7 @@ export class AgentConversationRenderer extends Component {
     if (canCopy) {
       const subject = message.role === "assistant" ? "response" : "message";
       const copy = createUiAction(actions, {
-        label: `Copy ${subject}`,
+        label: actionTitle(`Copy ${subject}`),
         title: actionTitle(`Copy ${subject}`),
         testId: "chat.turn.copy",
         ...icon("copy"),
@@ -3666,12 +3670,11 @@ export class AgentConversationRenderer extends Component {
       });
       pending(copy, "copy");
       copy.addClass("systemsculpt-agent-message-copy");
-      copy.setAttrs({ "aria-label": `Copy ${subject}` });
       copy.onclick = () => void this.copyWithFeedback(copy, subject, () => this.options.onCopyText?.(text));
     }
     if (canRetry) {
       const retry = createUiAction(actions, {
-        label: "Edit and resubmit",
+        label: actionTitle("Edit and resubmit"),
         title: actionTitle("Edit and resubmit"),
         testId: "chat.turn.edit-resubmit",
         ...icon("pencil"),

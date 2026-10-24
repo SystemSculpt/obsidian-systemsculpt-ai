@@ -1,3 +1,4 @@
+import { normalizeVaultRelativePath } from "../utils/vaultPathUtils";
 import { validateStudioProjectForAgentEdit } from "./StudioProjectAgentContract";
 import {
   assertStableStudioProjectAgentDocumentFieldsUnchanged,
@@ -13,21 +14,14 @@ export type StudioProjectAgentFileMutation = Readonly<{
   mode: "overwrite" | "append" | "edit" | "multi_edit";
 }>;
 
-function normalizeAgentMutationPath(path: string): string {
-  return String(path || "")
-    .trim()
-    .replace(/\\/g, "/")
-    .replace(/\/{2,}/g, "/")
-    .replace(/^\/+/, "");
-}
-
 export function isStudioProjectDocumentPath(path: string): boolean {
-  return normalizeAgentMutationPath(path).toLowerCase().endsWith(".systemsculpt");
+  return normalizeVaultRelativePath(path, { preserveCharacters: true }).toLowerCase().endsWith(".systemsculpt");
 }
 
 export function isStudioOwnedPersistencePath(path: string): boolean {
-  const normalized = normalizeAgentMutationPath(path).toLowerCase();
-  return normalized.startsWith(".systemsculpt/studio/")
+  const normalized = normalizeVaultRelativePath(path, { preserveCharacters: true }).toLowerCase();
+  return normalized === ".systemsculpt/studio"
+    || normalized.startsWith(".systemsculpt/studio/")
     || normalized.endsWith(".systemsculpt.identity.json")
     || normalized.includes(".systemsculpt-assets/")
     || normalized.endsWith(".systemsculpt-assets");
@@ -52,7 +46,7 @@ function parseAgentProjectDocument(rawText: string): Record<string, unknown> {
 export function assertValidStudioProjectAgentFileMutation(
   mutation: StudioProjectAgentFileMutation
 ): void {
-  const path = normalizeAgentMutationPath(mutation.path);
+  const path = normalizeVaultRelativePath(mutation.path, { preserveCharacters: true });
   if (isStudioOwnedPersistencePath(path)) {
     throw new Error(
       "Edit the .systemsculpt project file, not SystemSculpt's private project files."

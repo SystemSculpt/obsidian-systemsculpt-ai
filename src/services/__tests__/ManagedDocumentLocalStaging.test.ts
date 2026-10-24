@@ -26,6 +26,20 @@ const installedPlugin = (adapter: MemoryAdapter) => ({
 }) as any;
 
 describe("ManagedDocumentLocalStaging", () => {
+  it("writes beneath the literal installed directory without changing Unicode or spaces", async () => {
+    const adapter = new MemoryAdapter();
+    const plugin = installedPlugin(adapter);
+    const configDir = " café config ";
+    plugin.app.vault.configDir = configDir;
+    plugin.manifest.dir = `${configDir}/plugins/systemsculpt-ai`;
+    const staging = new ManagedDocumentLocalStaging(plugin);
+    await staging.stage("document-literal-path", [{ kind: "markdown", bytes: bytes("content") }]);
+    expect(adapter.files.size).toBeGreaterThan(0);
+    expect([...adapter.files.keys()].every((path) => path.startsWith(
+      `${configDir}/plugins/systemsculpt-ai/.managed-document-staging/`,
+    ))).toBe(true);
+  });
+
   it("derives the opaque root from installed plugin identity and rejects caller-selected roots", async () => {
     const adapter = new MemoryAdapter();
     const staging = new ManagedDocumentLocalStaging(installedPlugin(adapter));

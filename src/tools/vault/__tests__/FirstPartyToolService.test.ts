@@ -407,6 +407,31 @@ describe("FirstPartyToolService", () => {
     expect(mockReadFiles).toHaveBeenCalledWith({ paths: ["Projects/Demo/Notes/A.md"] });
   });
 
+  it("normalizes root and alias separators without mistaking a sibling for an alias", async () => {
+    server.setVaultRoot(" /Projects\\Demo// ", [" /workspace// "]);
+    await server.executeTool("read", { paths: ["workspace\\Notes//A.md", "workspace-extra/A.md", "Projects/Demo/B.md"] });
+    expect(mockReadFiles).toHaveBeenCalledWith({ paths: [
+      "Projects/Demo/Notes/A.md", "Projects/Demo/workspace-extra/A.md", "Projects/Demo/B.md",
+    ] });
+  });
+
+  it.each(["/", "///", "\\"])("keeps alias mapping enabled for the explicit vault root %j", async (root) => {
+    server.setVaultRoot(root, ["workspace"]);
+    await server.executeTool("read", { paths: ["workspace/Notes/A.md", "workspace-extra/B.md", "Notes/C.md"] });
+    expect(mockReadFiles).toHaveBeenCalledWith({ paths: ["Notes/A.md", "workspace-extra/B.md", "Notes/C.md"] });
+
+    await server.executeTool("list_items", { paths: ["workspace", "/"] });
+    expect(mockListDirectories).toHaveBeenCalledWith({ paths: ["/", "/"] });
+  });
+
+  it.each([null, ""])("disables root mapping when configuration is cleared to %j", async (root) => {
+    server.setVaultRoot("/", ["workspace"]);
+    server.setVaultRoot(root, ["workspace"]);
+    const args = { paths: ["workspace/Notes/A.md"] };
+    await server.executeTool("read", args);
+    expect(mockReadFiles).toHaveBeenCalledWith(args);
+  });
+
   it("rejects pre-cancelled requests before local dispatch", async () => {
     const controller = new AbortController();
     controller.abort();

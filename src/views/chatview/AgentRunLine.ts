@@ -1,4 +1,5 @@
 import { Component, Menu, setIcon } from "obsidian";
+import { getHostOperatingSystem } from "../../platform/hostCapabilities";
 import {
   backendMenu,
   modeMenu,
@@ -154,6 +155,10 @@ export class AgentRunLine extends Component {
         ...(segment.menu ? { "aria-haspopup": "menu", "aria-expanded": "false" } : {}),
       },
     });
+    if (segment.menu && (segment.key === "backend" || segment.key === "mode")) {
+      const modifier = getHostOperatingSystem() === "macOS" ? "Meta" : "Control";
+      button.setAttribute("aria-keyshortcuts", `${modifier}+${segment.key === "backend" ? "Shift+" : ""}.`);
+    }
     if (segment.tone) button.addClass(`is-${segment.tone}`);
     if (segment.key === "mode" && this.state) {
       button.dataset.mode = this.state.backend === "claude"

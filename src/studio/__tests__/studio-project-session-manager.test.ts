@@ -63,6 +63,21 @@ describe("StudioProjectSessionManager", () => {
     expect(manager.getSession("Studio/Test.systemsculpt")).toBe(session);
   });
 
+  it("shares session identity across project path separators and keeps blank-input policy", async () => {
+    const manager = new StudioProjectSessionManager();
+    const session = createSession();
+    const create = jest.fn(async () => session);
+    await manager.retainSession(" /Studio\\Test.systemsculpt// ", create);
+    await manager.retainSession("Studio//Test", create);
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(manager.getSession("Studio/Test.systemsculpt")).toBe(session);
+    expect(manager.getSession(" ")).toBeNull();
+    await expect(manager.retainSession(" ", create)).rejects.toThrow("A valid Studio project path is required.");
+    await manager.releaseSession("Studio\\Test");
+    await manager.releaseSession("Studio/Test.systemsculpt/");
+    expect(manager.getSession("Studio/Test.systemsculpt")).toBeNull();
+  });
+
   it("closes a session when the final retainer releases it", async () => {
     const manager = new StudioProjectSessionManager();
     const session = createSession();

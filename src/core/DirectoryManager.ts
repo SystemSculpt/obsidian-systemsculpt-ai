@@ -1,4 +1,5 @@
-import { App, normalizePath, TFolder } from "obsidian";
+import { App, TFolder } from "obsidian";
+import { normalizeVaultRelativePath } from "../utils/vaultPathUtils";
 import type SystemSculptPlugin from "../main";
 import type { SystemSculptSettings } from "../types";
 import { createVaultFolder, isVaultFolder } from "../utils/vaultFolders";
@@ -112,9 +113,7 @@ export class DirectoryManager {
   }
 
   private normalizedDirectory(value: string): string {
-    const path = normalizePath(value.trim())
-      .replace(/^\/+|\/+$/g, "")
-      .replace(/\/+/g, "/");
+    const path = normalizeVaultRelativePath(value);
     if (!path) throw new Error("Cannot create directory: empty path provided");
     return path;
   }
