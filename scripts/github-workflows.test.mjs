@@ -1,4 +1,5 @@
 import test from "node:test";
+import { spawnSync } from "node:child_process";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -22,7 +23,7 @@ const releaseMetadataWorkflow = parse(releaseMetadataSource);
 
 test("hosted workflows separate secret-free CI from release publication", () => {
   assert.deepEqual(workflowNames, ["ci.yml", "publish-release-metadata.yml"]);
-  assert.deepEqual(Object.keys(workflow.jobs), ["plugin", "compatibility", "required"]);
+  assert.deepEqual(Object.keys(workflow.jobs), ["plan", "plugin", "compatibility", "required"]);
   assert.deepEqual(Object.keys(workflow.on), [
     "pull_request",
     "merge_group",
@@ -121,7 +122,7 @@ test("CI preserves a secret-free exhaustive Linux gate and compatibility matrix"
   assert.match(ci, /^\s{2}plugin:$/m);
   assert.match(ci, /^\s{2}compatibility:$/m);
   assert.match(ci, /^\s{2}required:$/m);
-  assert.equal((ci.match(/runs-on: ubuntu-latest/g) || []).length, 2);
+  assert.equal((ci.match(/runs-on: ubuntu-latest/g) || []).length, 3);
   assert.doesNotMatch(ci, /secrets\.|pull_request_target|android|\bios\b/i);
   assert.doesNotMatch(ci, /native|provider|runtime.smoke|hosted/i);
   assert.match(ci, /^permissions:\n\s+contents: read$/m);
@@ -133,13 +134,16 @@ test("CI preserves a secret-free exhaustive Linux gate and compatibility matrix"
   assert.match(ci, /fail-fast: false/);
   assert.doesNotMatch(ci, /continue-on-error:\s*true/);
   assert.equal(workflow.jobs.compatibility.strategy.matrix.include.length, 4);
-  assert.deepEqual(workflow.jobs.required.needs, ["plugin", "compatibility"]);
+  assert.deepEqual(workflow.jobs.required.needs, ["plan", "plugin", "compatibility"]);
   assert.equal(workflow.jobs.required.if, "${{ always() }}");
   assert.equal(workflow.jobs.required["runs-on"], "ubuntu-latest");
   assert.equal(workflow.jobs.required["timeout-minutes"], 2);
   assert.deepEqual(
     workflow.jobs.required.steps[0].env,
     {
+      PLAN_RESULT: "${{ needs.plan.result }}",
+      REUSED_RUN: "${{ needs.plan.outputs.reuse }}",
+      EVENT_NAME: "${{ github.event_name }}",
       PLUGIN_RESULT: "${{ needs.plugin.result }}",
       COMPATIBILITY_RESULT: "${{ needs.compatibility.result }}",
     },
@@ -250,16 +254,54 @@ test("the hosted gate is the exact exhaustive local CI contract", () => {
   );
   assert.equal(
     packageJson.scripts["check:ci"],
-    "npm run check:plugin && npm run test:mobile:interactions && npm run test:chatview:critical "
+    "npm run check:plugin && npm run test:mobile:ci && npm run test:chatview:critical "
       + "&& npm run test:unit:ci && npm run test:embeddings:ci "
       + "&& npm run test:integration:ci",
   );
   assert.equal(
     packageJson.scripts["check:compat"],
-    "npm run check:plugin:fast && npm run test:chatview:compat "
+    "npm run check:plugin:fast -- --skip-lint && npm run test:chatview:compat "
       + "&& npm run test:integration:ci",
   );
   assert.doesNotMatch(ci, /desktop-baselines/);
+});
+
+test("only proven identical main trees may skip full CI", () => {
+  assert.deepEqual(workflow.on.push, { branches: ["main"] });
+  const plan = workflow.jobs.plan;
+  assert.deepEqual(plan.permissions, { contents: "read", actions: "read", "pull-requests": "read" });
+  assert.equal(plan.steps.find((step) => step.id === "plan").run, "node scripts/ci-plan.mjs");
+  for (const name of ["plan", "plugin", "compatibility"]) {
+    assert.equal(workflow.jobs[name].steps[0].with.ref, "${{ github.sha }}");
+  }
+  for (const name of ["plugin", "compatibility"]) {
+    assert.equal(workflow.jobs[name].needs, "plan");
+    assert.equal(workflow.jobs[name].if, "${{ needs.plan.outputs.reuse == '' }}");
+  }
+  const proof = workflow.jobs.required.steps[1];
+  assert.equal(proof.name, "Validated tree ${{ needs.plan.outputs.tree }}");
+  assert.equal(proof.if, "${{ needs.plan.outputs.reuse == '' }}");
+});
+
+test("required accepts only complete lanes or verified push reuse", { skip: process.platform === "win32" }, () => {
+  // This job runs on Ubuntu; execute its actual shell rather than a JS replica.
+  const script = workflow.jobs.required.steps[0].run;
+  const run = (changes = {}) => spawnSync("bash", ["-c", script], {
+    env: { ...process.env, PLAN_RESULT: "success", REUSED_RUN: "", EVENT_NAME: "pull_request",
+      PLUGIN_RESULT: "success", COMPATIBILITY_RESULT: "success", ...changes },
+    encoding: "utf8",
+  }).status;
+  assert.equal(run(), 0);
+  const reuse = { REUSED_RUN: "405", EVENT_NAME: "push", PLUGIN_RESULT: "skipped", COMPATIBILITY_RESULT: "skipped" };
+  assert.equal(run(reuse), 0);
+  for (const state of ["failure", "cancelled", "skipped", ""]) {
+    assert.notEqual(run({ PLUGIN_RESULT: state }), 0);
+    assert.notEqual(run({ COMPATIBILITY_RESULT: state }), 0);
+    assert.notEqual(run({ ...reuse, PLAN_RESULT: state }), 0);
+  }
+  assert.notEqual(run({ ...reuse, EVENT_NAME: "pull_request" }), 0);
+  assert.notEqual(run({ ...reuse, PLUGIN_RESULT: "failure" }), 0);
+  assert.notEqual(run({ ...reuse, COMPATIBILITY_RESULT: "failure" }), 0);
 });
 
 test("local and hosted CI select the same Node LTS major", () => {

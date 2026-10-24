@@ -24,6 +24,7 @@ import {
 const args = process.argv.slice(2);
 const fast = args.includes("--fast");
 const skipTests = args.includes("--skip-tests");
+const skipLint = args.includes("--skip-lint");
 const root = process.cwd();
 const defaultTimeoutMs = Number(process.env.SYSTEMSCULPT_CHECK_TIMEOUT_MS || "") || 20 * 60 * 1000;
 // The script suites create temp Git fixtures. Git hooks export GIT_DIR and
@@ -35,6 +36,7 @@ const FAST_SCRIPT_TESTS = [
   "scripts/verify-ci-failure-evidence.test.mjs",
   "scripts/git-hooks.test.mjs",
   "scripts/github-workflows.test.mjs",
+  "scripts/ci-plan.test.mjs",
   "scripts/plugin-release-metadata.test.mjs",
   "scripts/lint-css.test.mjs",
   "scripts/ui-architecture.test.mjs",
@@ -159,9 +161,16 @@ async function main() {
   // The Obsidian rules are type-aware, so running a second TypeScript program
   // beside them makes the edit loop slower through CPU contention. The fast
   // tier keeps the canonical Obsidian lint; the default/full tier adds tsc.
-  const parallel = [
-    runAsync("npm run check:plugin:obsidian").then((result) => ({ name: "obsidian", ...result })),
-  ];
+  const parallel = [];
+  // Compatibility lanes reuse the exhaustive lane's OS-independent ESLint pass.
+  if (!skipLint) {
+    // ESLint's per-file cache cannot see type changes in imported files.
+    // Keep cached fast checks, but always re-lint the authoritative full gate.
+    const lintCommand = fast ? "check:plugin:obsidian" : "check:plugin:obsidian:ci";
+    parallel.push(
+      runAsync(`npm run ${lintCommand}`).then((result) => ({ name: "obsidian", ...result })),
+    );
+  }
 
   if (!fast) {
     parallel.push(

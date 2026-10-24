@@ -65,15 +65,21 @@ npm run check:compat
   integration.
 - test:unit:ci is the partitioned remainder. It excludes every focused
   critical-risk and mobile path already run earlier in check:ci, so breadth
-  does not require a third execution of the same suites.
+  does not repeat suites. The mobile CI subset also excludes critical-owned
+  suites; standalone mobile checks retain them. Embeddings owns its service
+  tree only, while embeddings-named UI/tool suites run as ordinary unit tests.
 - check:compat is the exact smaller gate for the Node and operating-system
   compatibility matrix. It reruns every critical ChatView suite without
-  repeating the coverage instrumentation already enforced by check:ci.
+  repeating coverage instrumentation or OS-independent ESLint already enforced
+  by check:ci.
 
 CI runs check:ci on Ubuntu/Node 22. It also runs check:compat on Node 22.18,
 Node 24, macOS/Node 22, and Windows/Node 22 with fail-fast disabled. All jobs
-are credential-free. A stable `required` job fails unless every lane succeeds.
-There is no native-device or provider matrix.
+use no provider credentials. A stable `required` job requires every lane to
+succeed, except main pushes may reuse a successful PR/merge-group run whose
+GitHub job records prove every lane tested the identical Git tree. Missing
+proof or API failures run the full matrix; manual dispatch always runs it.
+Release publication remains independent. There is no native-device or provider matrix.
 
 Each top-level hosted Jest gate writes its normalized child argv and replay
 seed into `.cache/ci-evidence/jest-seeds`. Failed jobs retain that evidence,
