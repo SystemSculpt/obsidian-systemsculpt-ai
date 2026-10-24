@@ -2200,7 +2200,8 @@ export class AgentConversationRenderer extends Component {
     const activity = presentation.phase === "submitting"
       ? backend === "SystemSculpt" ? "Connecting…" : `Starting ${backend}…`
       : latestActivity && ["acting", "reasoning", "responding"].includes(presentation.phase)
-        ? latestActivity.kind === "tool" ? presentAgentTool(latestActivity).label
+        // The row adds its own elapsed time (spec 3.3: "Editing Plan.md · 12s").
+        ? latestActivity.kind === "tool" ? presentAgentTool(latestActivity).label.replace(/…$/u, "")
           : latestActivity.kind === "text" ? "Writing" : "Thinking"
         : presentation.activityStatus;
     status.dataset.activityLabel = activity;
