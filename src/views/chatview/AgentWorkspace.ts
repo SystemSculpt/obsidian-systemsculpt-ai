@@ -895,20 +895,22 @@ export class AgentWorkspace extends Component {
         discovered.set(id, { priority, row });
       }
     }
-    for (const [id, { row }] of discovered) {
-      const registered = this.registeredRows.get(id);
-      if (registered !== row) {
-        if (registered) this.scroller.unregisterRow(id);
-        this.scroller.registerRow(id, row);
-        this.registeredRows.set(id, row);
+    this.scroller.batchRowChanges(() => {
+      for (const [id, { row }] of discovered) {
+        const registered = this.registeredRows.get(id);
+        if (registered !== row) {
+          if (registered) this.scroller.unregisterRow(id);
+          this.scroller.registerRow(id, row);
+          this.registeredRows.set(id, row);
+        }
       }
-    }
-    for (const id of this.registeredRows.keys()) {
-      if (!discovered.has(id)) {
-        this.scroller.unregisterRow(id);
-        this.registeredRows.delete(id);
+      for (const id of this.registeredRows.keys()) {
+        if (!discovered.has(id)) {
+          this.scroller.unregisterRow(id);
+          this.registeredRows.delete(id);
+        }
       }
-    }
+    });
     const activeResponse = this.renderer.element.querySelector<HTMLElement>(
       ".systemsculpt-agent-active-run .systemsculpt-agent-turn.is-assistant[data-turn-id]",
     );

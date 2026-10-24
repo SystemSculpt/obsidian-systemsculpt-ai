@@ -457,6 +457,13 @@ function terminalToolPresentation(
 }
 
 /** Projects durable messages plus the active normalized agent run into native DOM. */
+// One formatter for every row; building one per message is measurable on 500-message chats.
+let cachedMessageTimeFormat: Intl.DateTimeFormat | null = null;
+function messageTimeFormat(): Intl.DateTimeFormat {
+  cachedMessageTimeFormat ??= new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
+  return cachedMessageTimeFormat;
+}
+
 export class AgentConversationRenderer extends Component {
   public readonly element: HTMLElement;
   private readonly historyRoot: HTMLElement;
@@ -2857,6 +2864,34 @@ export class AgentConversationRenderer extends Component {
   public override onload(): void {
     this.renderingEnabled = true;
     this.lifecycleGeneration += 1;
+    // Action rows stay invisible until a turn is hovered or focused, so their
+    // icons are drawn then rather than for every row of a long chat.
+    const reveal = (event: Event) => this.drawPendingActionIcons(event.target);
+    this.registerDomEvent(this.element, "pointerover", reveal);
+    this.registerDomEvent(this.element, "focusin", reveal);
+  }
+
+  /** Fine pointers reveal actions on hover/focus; touch shows them faintly at once. */
+  private defersActionIcons(): boolean {
+    try {
+      const media = getSurfaceOwnerWindow(this.element).matchMedia?.("(pointer: coarse)");
+      return media !== undefined && !media.matches;
+    } catch {
+      return false;
+    }
+  }
+
+  private drawPendingActionIcons(target: EventTarget | null): void {
+    const turn = (target as Element | null)?.closest?.(".systemsculpt-agent-turn");
+    const actions = turn?.querySelector<HTMLElement>(
+      ":scope > .systemsculpt-agent-message-actions[data-pending-icons]",
+    );
+    if (!actions) return;
+    delete actions.dataset.pendingIcons;
+    for (const button of Array.from(actions.querySelectorAll<HTMLButtonElement>("button[data-pending-icon]"))) {
+      updateUiAction(button, { icon: button.dataset.pendingIcon! });
+      delete button.dataset.pendingIcon;
+    }
   }
 
   private async renderReasoning(
@@ -3525,15 +3560,22 @@ export class AgentConversationRenderer extends Component {
 
     row.querySelector(":scope > .systemsculpt-agent-message-actions")?.remove();
     const actions = row.createDiv({ cls: "systemsculpt-agent-message-actions" });
+    const deferIcons = this.defersActionIcons();
+    if (deferIcons) actions.dataset.pendingIcons = "";
+    const icon = (name: string): Readonly<{ icon?: string }> => deferIcons ? {} : { icon: name };
+    const pending = (button: HTMLButtonElement, name: string): void => {
+      if (deferIcons) button.dataset.pendingIcon = name;
+    };
     const timestamp = message.messageParts?.find((part) => part.timestamp > 1_000_000_000_000)?.timestamp;
-    const time = timestamp ? new Date(timestamp).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : null;
+    const time = timestamp ? messageTimeFormat().format(timestamp) : null;
     if (time) actions.setAttribute("title", time);
     const actionTitle = (label: string): string => time ? `${label} · ${time}` : label;
     if (canRetryResponse) {
       const retry = createUiAction(actions, {
-        label: "Retry response", testId: "chat.turn.retry", icon: "rotate-ccw", size: "icon",
+        label: "Retry response", testId: "chat.turn.retry", ...icon("rotate-ccw"), size: "icon",
         title: actionTitle("Retry response"),
       });
+      pending(retry, "rotate-ccw");
       retry.onclick = () => void this.options.onRetryFailedTurn?.(row.dataset.turnId!);
     }
     if (message.role === "assistant" && message.responseDurationMs !== undefined
@@ -3549,9 +3591,10 @@ export class AgentConversationRenderer extends Component {
         label: `Copy ${subject}`,
         title: actionTitle(`Copy ${subject}`),
         testId: "chat.turn.copy",
-        icon: "copy",
+        ...icon("copy"),
         size: "icon",
       });
+      pending(copy, "copy");
       copy.addClass("systemsculpt-agent-message-copy");
       copy.setAttrs({ "aria-label": `Copy ${subject}` });
       copy.onclick = () => void this.copyWithFeedback(copy, subject, () => this.options.onCopyText?.(text));
@@ -3561,9 +3604,10 @@ export class AgentConversationRenderer extends Component {
         label: "Edit and resubmit",
         title: actionTitle("Edit and resubmit"),
         testId: "chat.turn.edit-resubmit",
-        icon: "pencil",
+        ...icon("pencil"),
         size: "icon",
       });
+      pending(retry, "pencil");
       retry.addClass("systemsculpt-agent-inline-button");
       retry.setAttr("data-focus-key", "edit-message");
       retry.onclick = () => void this.options.onRetryMessage?.(message.message_id);
@@ -3787,6 +3831,7 @@ export class AgentConversationRenderer extends Component {
     button.classList.toggle("is-copy-failed", !copied);
     const subjectLabel = subject[0].toUpperCase() + subject.slice(1);
     const label = copied ? `${subjectLabel} copied` : `Could not copy ${subject}. Try again`;
+    delete button.dataset.pendingIcon;
     updateUiAction(button, {
       label,
       icon: copied ? "check" : "circle-alert",
