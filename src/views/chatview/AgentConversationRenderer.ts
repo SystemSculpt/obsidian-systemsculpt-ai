@@ -77,7 +77,7 @@ export type AgentConversationRendererOptions = Readonly<{
   showPlanOffer?: () => boolean;
   backendName?: () => string;
   onAnnounce?: (message: string) => void;
-  onDetectAgain?: () => void | Promise<void>;
+  onDetectAgain?: () => boolean | void | Promise<boolean | void>;
   onUseHosted?: () => void | Promise<void>;
   onOpenCredits?: () => void | Promise<void>;
   onViewPlans?: () => void | Promise<void>;
@@ -2176,13 +2176,15 @@ export class AgentConversationRenderer extends Component {
     const waiting = presentation.phase === "awaiting-approval";
     const timed = presentation.busy && !waiting;
     const backend = this.options.backendName?.() ?? "SystemSculpt";
-    const latestTool = [...presentation.visibleParts].reverse().find(
-      (part): part is AgentToolPart => part.kind === "tool" && isActiveAgentToolState(part.state),
+    const latestActivity = [...presentation.visibleParts].reverse().find((part) =>
+      part.kind === "tool" ? isActiveAgentToolState(part.state)
+        : (part.kind === "text" || part.kind === "reasoning") && part.state === "streaming",
     );
     const activity = presentation.phase === "submitting"
       ? backend === "SystemSculpt" ? "Connecting…" : `Starting ${backend}…`
-      : latestTool && presentation.phase === "acting"
-        ? presentAgentTool(latestTool).label
+      : latestActivity && ["acting", "reasoning", "responding"].includes(presentation.phase)
+        ? latestActivity.kind === "tool" ? presentAgentTool(latestActivity).label
+          : latestActivity.kind === "text" ? "Writing" : "Thinking"
         : presentation.activityStatus;
     status.dataset.activityLabel = activity;
     const workingElapsedMs = timed ? this.startWorkingTimer(status, elapsedMs) : undefined;
@@ -2766,7 +2768,14 @@ export class AgentConversationRenderer extends Component {
         }
         if (actions && (presented.action === "detect" || presented.action === "sign-in") && this.options.onDetectAgain) {
           const detect = createUiAction(actions, { label: "Detect again", testId: "chat.turn.detect-again", size: "small" });
-          detect.onclick = () => void this.options.onDetectAgain?.();
+          detect.onclick = async () => {
+            const ready = await this.options.onDetectAgain?.();
+            if (ready !== true || !detect.isConnected || presented.action !== "detect"
+              || !part.retryable || !part.retryMessageId || !this.options.onRetryFailedTurn) return;
+            updateUiAction(detect, { label: "Retry" });
+            detect.dataset.testid = "chat.turn.retry-failed";
+            detect.onclick = () => void this.options.onRetryFailedTurn?.(part.retryMessageId!);
+          };
         }
         if (actions && presented.action === "detect" && this.options.onUseHosted) {
           const hosted = createUiAction(actions, { label: "Use SystemSculpt instead", testId: "chat.turn.use-hosted", size: "small" });

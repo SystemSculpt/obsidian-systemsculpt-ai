@@ -250,6 +250,17 @@ describe("presentAgentTool", () => {
     }))).toEqual([{ label: "Query", value: "Completed public query" }]);
   });
 
+  it("uses only the public result count for hosted web search", () => {
+    const search = part({ name: "web_search", location: "server", state: "succeeded", input: {},
+      output: { data: { query: "Public query", result_count: 3, matches: ["private"] } } });
+    expect(presentAgentToolDetails(search)).toEqual([{ label: "Query", value: "Public query" }, { label: "Results", value: "3" }]);
+    expect(presentAgentTool(search).meta).toBe("3 results");
+    for (const count of [-1, 1.5, "3", NaN, Infinity]) {
+      expect(presentAgentTool({ ...search, output: { data: { result_count: count, matches: ["private"] } } }).meta).toBeUndefined();
+    }
+    expect(presentAgentTool({ ...search, name: "private_server_tool" }).meta).toBeUndefined();
+  });
+
   it("presents capped, known vault details without exposing file or edit content", () => {
     const secret = "private edit text sentinel";
     const details = presentAgentToolDetails(part({
