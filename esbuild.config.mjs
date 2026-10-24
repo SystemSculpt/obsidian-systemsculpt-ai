@@ -40,13 +40,17 @@ const buildSyncController = createBuildSyncController({
 	apiBaseUrl,
 });
 
+let cssBuild = Promise.resolve();
 const buildCSS = () => {
-	return buildCssArtifact({
+	const next = cssBuild.then(() => buildCssArtifact({
 		indexPath: indexCssPath,
 		outputPath: stylesOutputPath,
 		production: prod,
 		logger: cssLogger,
-	});
+	}));
+	// Watch events and JS rebuilds share one ordered CSS publisher.
+	cssBuild = next.catch(() => {});
+	return next;
 };
 
 const watchCss = () => {
@@ -56,8 +60,9 @@ const watchCss = () => {
 	fs.watch(cssDir, { recursive: true }, (eventType, filename) => {
 		if (filename && filename.endsWith(".css")) {
 			cssLogger.info(`File changed: ${filename}`);
-			buildCSS();
-			buildSyncController.schedule();
+			void buildCSS().then(() => buildSyncController.schedule()).catch((error) => {
+				cssLogger.error("CSS rebuild failed", error);
+			});
 		}
 	});
 };
@@ -97,7 +102,7 @@ const buildOptions = createPluginBuildOptions({
 					if (result.errors.length > 0) {
 						return;
 					}
-					finalizeBuild(buildStart, { watch: isWatching });
+					return finalizeBuild(buildStart, { watch: isWatching });
 				});
 			}
 		}
@@ -106,8 +111,8 @@ const buildOptions = createPluginBuildOptions({
 
 let isWatching = false;
 
-const finalizeBuild = (startedAt, { watch } = {}) => {
-	buildCSS();
+const finalizeBuild = async (startedAt, { watch } = {}) => {
+	await buildCSS();
 	const mainStats = fs.statSync("main.js");
 	const duration = Date.now() - startedAt;
 
