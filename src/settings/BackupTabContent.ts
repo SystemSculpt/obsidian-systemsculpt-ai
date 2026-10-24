@@ -50,12 +50,10 @@ export function displayBackupTabContent(containerEl: HTMLElement, tabInstance: S
 
           const confirmRestore = async (details: string | null) => {
             const description = details
-              ? `This will replace your current settings.
+              ? `Replace your current settings with this backup?
 
-${details}
-
-Continue?`
-              : 'This will replace your current settings with the selected backup. Continue?';
+${details}`
+              : 'Replace your current settings with the selected backup?';
             const confirmed = await showPrompt(app, 'Restore settings from backup', {
               description,
               primaryButton: 'Restore',

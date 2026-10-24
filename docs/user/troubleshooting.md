@@ -36,7 +36,7 @@
 2. Confirm your SystemSculpt license is active and embeddings processing has a healthy status.
 3. Review exclusions (chat history, folders, patterns).
 4. Run `Show Embeddings Database Statistics (Debug)`.
-5. If needed, run `Rebuild Embeddings`.
+5. If needed, run `Rebuild SystemSculpt embeddings`.
 
 ## Audio/transcription failures
 

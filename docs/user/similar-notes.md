@@ -24,8 +24,7 @@ Core controls:
 ## Related commands
 
 - `Find Similar Notes (Current Note)`
-- `Rebuild Embeddings`
-- `Rebuild Embeddings (Current Model)`
+- `Rebuild SystemSculpt embeddings`
 - `Show Embeddings Database Statistics (Debug)`
 
 ## Notes

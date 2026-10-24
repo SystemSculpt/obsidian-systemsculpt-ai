@@ -148,7 +148,7 @@ export class BackupRestoreModal {
 
       const backupData = await this.plugin.app.vault.adapter.read(backupPath);
       const backupSettings = JSON.parse(backupData);
-      if (!backupSettings || typeof backupSettings !== "object") {
+      if (!backupSettings || typeof backupSettings !== "object" || Array.isArray(backupSettings)) {
         new Notice("Invalid backup file format", 3000);
         return false;
       }

@@ -4,7 +4,7 @@ import type SystemSculptPlugin from "../../main";
 import { RibbonManager } from "./ribbons";
 import { tryCopyToClipboard } from "../../utils/clipboard";
 import { toSafeVaultFileName } from "../../utils/vaultFileName";
-import { showConfirm } from "../ui/notifications";
+import { confirmSimilarNotesRebuild } from "../../modals/SimilarNotesRebuildConfirmation";
 import { getSurfaceOwnerWindow, resolveSurfaceDomContext } from "../ui/surface";
 import type { ChatMessage } from "../../types";
 import { CHAT_VIEW_TYPE, SYSTEMSCULPT_STUDIO_VIEW_TYPE } from "./viewTypes";
@@ -923,17 +923,7 @@ export class CommandManager {
         if (!checking) {
           void (async () => {
             try {
-              const { confirmed } = await showConfirm(
-                this.app,
-                "This will delete and rebuild the current SystemSculpt embeddings index.",
-                {
-                  title: "Rebuild Embeddings",
-                  primaryButton: "Rebuild",
-                  secondaryButton: "Cancel",
-                  icon: "alert-triangle",
-                }
-              );
-              if (!confirmed) return;
+              if (!await confirmSimilarNotesRebuild(this.app)) return;
               new Notice('Rebuilding SystemSculpt embeddings…', 4000);
               const manager = this.plugin.getOrCreateEmbeddingsManager();
               await manager.forceRefreshCurrentNamespace();
