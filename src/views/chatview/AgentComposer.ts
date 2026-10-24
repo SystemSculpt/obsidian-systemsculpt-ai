@@ -269,8 +269,13 @@ export class AgentComposer extends Component {
     });
     this.registerDomEvent(this.input, "keydown", (event) => this.handleInputKeydown(event));
     this.registerDomEvent(this.input, "click", () => this.mentions.update());
-    this.registerDomEvent(this.input, "focus", () => this.resize());
+    // The card draws the message box's focus (composer.css), not the textarea.
+    this.registerDomEvent(this.input, "focus", () => {
+      this.card.addClass("is-focused");
+      this.resize();
+    });
     this.registerDomEvent(this.input, "blur", () => {
+      this.card.removeClass("is-focused");
       // Pointer commits on options land before blur; anything else closes it.
       this.mentions.close();
     });
