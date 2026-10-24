@@ -901,12 +901,12 @@ export class SettingsManager {
    * This ensures settings are properly saved with fallback options
    */
   async saveSettings(): Promise<void> {
-    return this.enqueuePersistence(() => this.saveSettingsNow());
+    await this.enqueuePersistence(() => this.saveSettingsNow());
   }
 
-  private async saveSettingsNow(): Promise<void> {
+  private async saveSettingsNow(): Promise<boolean> {
     if (!this.isInitialized) {
-      return;
+      return false;
     }
 
     try {
@@ -934,10 +934,12 @@ export class SettingsManager {
       if (this.pendingBackupSettings && await this.backupSettings(this.pendingBackupSettings)) {
         this.pendingBackupSettings = null;
       }
+      return true;
     } catch (error) {
-      // Persistence failed (disk full, permissions, sync lock, …). Do NOT
-      // swallow it: log + show a de-duplicated Notice so the loss is visible.
+      // Persistence failed (disk full, permissions, sync lock, …). Keep drafts
+      // retryable without rejecting fire-and-forget callers or duplicating notices.
       this.surfaceSaveFailure(error);
+      return false;
     }
   }
 
@@ -952,13 +954,14 @@ export class SettingsManager {
   }
 
   /**
-   * Update settings with partial changes
+   * Update settings with partial changes. False means the primary save failed;
+   * the manager already reported the failure, and the same edit can be retried.
    */
-  async updateSettings(newSettings: Partial<SystemSculptSettings> | ((current: Readonly<SystemSculptSettings>) => Partial<SystemSculptSettings>)): Promise<void> {
+  async updateSettings(newSettings: Partial<SystemSculptSettings> | ((current: Readonly<SystemSculptSettings>) => Partial<SystemSculptSettings>)): Promise<boolean> {
     return this.enqueuePersistence(() => this.updateSettingsNow(newSettings));
   }
 
-  private async updateSettingsNow(update: Partial<SystemSculptSettings> | ((current: Readonly<SystemSculptSettings>) => Partial<SystemSculptSettings>)): Promise<void> {
+  private async updateSettingsNow(update: Partial<SystemSculptSettings> | ((current: Readonly<SystemSculptSettings>) => Partial<SystemSculptSettings>)): Promise<boolean> {
     if (!this.isInitialized) {
       await this.loadSettingsNow(); // Ensure settings are loaded before update
     }
@@ -991,8 +994,7 @@ export class SettingsManager {
 
     // Persist, update plugin._settings, and dispatch the event. This already
     // runs inside the persistence queue, so call the unqueued variant.
-    await this.saveSettingsNow();
-    // Settings updated and saved - silent operation
+    return this.saveSettingsNow();
   }
 
   /**

@@ -39,8 +39,8 @@ export function displayImageGenerationTabContent(
       text
         .setPlaceholder(DEFAULT_STUDIO_PROJECTS_DIR)
         .setValue(plugin.settings.studioDefaultProjectsFolder || DEFAULT_STUDIO_PROJECTS_DIR);
-      const commitFolder = bindTextSetting(text.inputEl, async (value) => {
-        await plugin.getSettingsManager().updateSettings({
+      const commitFolder = bindTextSetting("studioDefaultProjectsFolder", text.inputEl, async (value) => {
+        return plugin.getSettingsManager().updateSettings({
           studioDefaultProjectsFolder: value.trim() || DEFAULT_STUDIO_PROJECTS_DIR,
         });
       });
@@ -57,10 +57,10 @@ export function displayImageGenerationTabContent(
       text
         .setPlaceholder("100")
         .setValue(String(plugin.settings.studioRunRetentionMaxRuns ?? 100));
-      bindTextSetting(text.inputEl, async (value) => {
+      bindTextSetting("studioRunRetentionMaxRuns", text.inputEl, async (value) => {
         const parsed = Number.parseInt(value, 10);
         if (!Number.isFinite(parsed)) return;
-        await plugin.getSettingsManager().updateSettings({
+        return plugin.getSettingsManager().updateSettings({
           studioRunRetentionMaxRuns: Math.max(1, Math.min(5000, parsed)),
         });
       });
@@ -74,10 +74,10 @@ export function displayImageGenerationTabContent(
       text
         .setPlaceholder("1024")
         .setValue(String(plugin.settings.studioRunRetentionMaxArtifactsMb ?? 1024));
-      bindTextSetting(text.inputEl, async (value) => {
+      bindTextSetting("studioRunRetentionMaxArtifactsMb", text.inputEl, async (value) => {
         const parsed = Number.parseInt(value, 10);
         if (!Number.isFinite(parsed)) return;
-        await plugin.getSettingsManager().updateSettings({
+        return plugin.getSettingsManager().updateSettings({
           studioRunRetentionMaxArtifactsMb: Math.max(1, Math.min(200_000, parsed)),
         });
       });

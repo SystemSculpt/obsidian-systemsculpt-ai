@@ -26,11 +26,13 @@ export function mountCodexExecutionControls(parent: HTMLElement, plugin: SystemS
   const picker = mountCodexModelControls(root, { variant: 'chat', value: () => codexOptionsFromSettings(plugin.settings),
     enabled: () => desktop && backend() === 'codex', workingDirectory: () => codexVaultDirectory(plugin.app),
     onPermissions: description => permissions.setText(`Codex settings · ${description}`),
-    onChange: patch => plugin.getSettingsManager().updateSettings({
-      ...(patch.model === undefined ? {} : { codexModel: patch.model }),
-      ...(patch.effort === undefined ? {} : { codexThinkingLevel: patch.effort }),
-      ...(patch.serviceTier === undefined ? {} : { codexServiceTier: patch.serviceTier }),
-    }),
+    onChange: async patch => {
+      await plugin.getSettingsManager().updateSettings({
+        ...(patch.model === undefined ? {} : { codexModel: patch.model }),
+        ...(patch.effort === undefined ? {} : { codexThinkingLevel: patch.effort }),
+        ...(patch.serviceTier === undefined ? {} : { codexServiceTier: patch.serviceTier }),
+      });
+    },
   });
   const mode = root.createEl('label', { cls: 'ss-codex-control', text: 'Permissions' }).createEl('select', { attr: { 'aria-label': 'Codex permissions', 'data-testid': 'codex.execution.permissions' } });
   for (const [value, text] of CODEX_MODES) mode.createEl('option', { value, text });

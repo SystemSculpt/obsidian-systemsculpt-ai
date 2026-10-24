@@ -604,7 +604,7 @@ describe("SettingsManager managed settings contract", () => {
     await manager.loadSettings();
 
     plugin.saveData.mockRejectedValueOnce(new Error("disk full"));
-    await expect(manager.updateSettings({ chatFontSize: "large" })).resolves.toBeUndefined();
+    await expect(manager.updateSettings({ chatFontSize: "large" })).resolves.toBe(false);
     expect(plugin.logger.error).toHaveBeenCalledWith(
       "Failed to save SystemSculpt settings",
       expect.any(Error),
@@ -613,7 +613,7 @@ describe("SettingsManager managed settings contract", () => {
 
     plugin.saveData.mockResolvedValue(undefined);
     plugin.app.vault.adapter.write.mockRejectedValueOnce(new Error("backup unavailable"));
-    await expect(manager.updateSettings({ chatFontSize: "small" })).resolves.toBeUndefined();
+    await expect(manager.updateSettings({ chatFontSize: "small" })).resolves.toBe(true);
     expect(plugin.logger.error).toHaveBeenCalledWith(
       "Failed to write SystemSculpt settings backup",
       expect.any(Error),
@@ -800,8 +800,8 @@ describe("SettingsManager managed settings contract", () => {
       const failing = manager.updateSettings({ chatFontSize: "large" });
       const following = manager.updateSettings({ defaultChatTag: "after-failure" });
 
-      await expect(failing).resolves.toBeUndefined();
-      await expect(following).resolves.toBeUndefined();
+      await expect(failing).resolves.toBe(false);
+      await expect(following).resolves.toBe(true);
       expect(manager.settings).toMatchObject({ chatFontSize: "large", defaultChatTag: "after-failure" });
       expect(plugin.saveData.mock.calls.at(-1)?.[0]).toMatchObject({ defaultChatTag: "after-failure" });
     });

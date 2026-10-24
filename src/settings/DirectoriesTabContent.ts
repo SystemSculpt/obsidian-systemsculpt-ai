@@ -21,7 +21,8 @@ async function handleDirectoryChange(
         | "savedChatsDirectory",
 ) {
     const { plugin } = tabInstance;
-    await plugin.getSettingsManager().updateSettings({ [settingKey]: value });
+    const saved = await plugin.getSettingsManager().updateSettings({ [settingKey]: value });
+    if (saved === false) return false;
 
     if (plugin.directoryManager) {
         try {
@@ -55,12 +56,12 @@ function createDirectorySetting(
                 .setPlaceholder(placeholder)
                 .setValue(plugin.settings[settingKey]);
 
-            const commitDirectory = bindTextSetting(text.inputEl, async (value) => {
+            const commitDirectory = bindTextSetting(settingKey, text.inputEl, async (value) => {
                 if (!validateDirectory(value)) {
                     new Notice("Use a vault-relative path without '..' or a leading slash.");
                     return;
                 }
-                await handleDirectoryChange(tabInstance, value, settingKey);
+                return handleDirectoryChange(tabInstance, value, settingKey);
             }, { commitOn: "blur", errorMessage: "Couldn’t save that directory." });
 
             attachFolderSuggester(

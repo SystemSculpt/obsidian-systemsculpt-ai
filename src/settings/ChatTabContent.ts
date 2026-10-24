@@ -34,9 +34,9 @@ export async function displayChatTabContent(containerEl: HTMLElement, tabInstanc
             text
                 .setPlaceholder("Ai-chat")
                 .setValue(plugin.settings.defaultChatTag || "");
-            bindTextSetting(text.inputEl, async (value) => {
+            bindTextSetting("defaultChatTag", text.inputEl, async (value) => {
                 const normalized = normalizeDefaultChatTag(value);
-                await plugin.getSettingsManager().updateSettings({ defaultChatTag: normalized });
+                return plugin.getSettingsManager().updateSettings({ defaultChatTag: normalized });
             });
         });
 

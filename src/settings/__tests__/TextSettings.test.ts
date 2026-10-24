@@ -43,7 +43,7 @@ describe("Settings text commit lifecycle", () => {
     );
     const input = ownerWindow.document.createElement("input");
     const save = jest.fn().mockResolvedValue(undefined);
-    beginTextSettings(frame, tab)(input, save);
+    beginTextSettings(frame, tab)("defaultChatTag", input, save);
 
     typeValue(input, "draft");
     typeValue(input, "final");
@@ -62,7 +62,7 @@ describe("Settings text commit lifecycle", () => {
     const save = jest.fn().mockResolvedValue(undefined).mockImplementationOnce(() =>
       new Promise<void>((resolve) => { finishFirstSave = resolve; }),
     );
-    beginTextSettings(tab.containerEl, tab)(input, save);
+    beginTextSettings(tab.containerEl, tab)("defaultChatTag", input, save);
 
     typeValue(input, "first");
     jest.advanceTimersByTime(300);
@@ -84,7 +84,7 @@ describe("Settings text commit lifecycle", () => {
     const save = jest.fn().mockResolvedValue(undefined).mockImplementationOnce(() =>
       new Promise<void>((_resolve, reject) => { rejectFirstSave = reject; }),
     );
-    const commit = beginTextSettings(tab.containerEl, tab)(input, save);
+    const commit = beginTextSettings(tab.containerEl, tab)("defaultChatTag", input, save);
 
     typeValue(input, "first");
     commit();
@@ -109,7 +109,7 @@ describe("Settings text commit lifecycle", () => {
     const save = jest.fn().mockResolvedValue(undefined)
       .mockImplementationOnce(() => new Promise<void>((_resolve, reject) => { rejectFirstSave = reject; }))
       .mockImplementationOnce(() => new Promise<void>((_resolve, reject) => { rejectSecondSave = reject; }));
-    const commit = beginTextSettings(tab.containerEl, tab)(input, save);
+    const commit = beginTextSettings(tab.containerEl, tab)("defaultChatTag", input, save);
 
     typeValue(input, "first");
     commit();
@@ -133,7 +133,7 @@ describe("Settings text commit lifecycle", () => {
     const save = jest.fn().mockResolvedValue(undefined)
       .mockImplementationOnce(() => new Promise<void>((resolve) => { finishFirstSave = resolve; }))
       .mockRejectedValueOnce(new Error("Latest failure"));
-    const commit = beginTextSettings(tab.containerEl, tab)(input, save);
+    const commit = beginTextSettings(tab.containerEl, tab)("defaultChatTag", input, save);
 
     typeValue(input, "first");
     commit();
@@ -149,10 +149,27 @@ describe("Settings text commit lifecycle", () => {
     expect(jest.getTimerCount()).toBe(0);
   });
 
+  it("drops a reverted draft so replacement controls can show a later external change", () => {
+    const input = document.createElement("input");
+    input.value = "original";
+    const save = jest.fn().mockResolvedValue(true);
+    beginTextSettings(tab.containerEl, tab)("defaultChatTag", input, save);
+    typeValue(input, "draft");
+    typeValue(input, "original");
+
+    const bindReplacement = beginTextSettings(tab.containerEl, tab);
+    const replacement = document.createElement("input");
+    replacement.value = "external";
+    bindReplacement("defaultChatTag", replacement, save);
+
+    expect(replacement.value).toBe("external");
+    expect(save).not.toHaveBeenCalled();
+  });
+
   it("reports a failed save and permits committing the same edit again on blur", async () => {
     const input = document.createElement("input");
     const save = jest.fn().mockResolvedValue(undefined).mockRejectedValueOnce(new Error("Disk unavailable"));
-    beginTextSettings(tab.containerEl, tab)(input, save);
+    beginTextSettings(tab.containerEl, tab)("defaultChatTag", input, save);
 
     typeValue(input, "keep-me");
     jest.advanceTimersByTime(300);

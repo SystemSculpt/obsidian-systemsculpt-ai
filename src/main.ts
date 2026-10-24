@@ -2208,8 +2208,10 @@ export default class SystemSculptPlugin extends Plugin {
       }),
       // The credits balance carries the link; a recent balance is reused.
       checkLinked: async () => (await this.aiService.readCreditsBalance()).iosAppLinked === true,
-      onLinked: (licenseKey) => this.getSettingsManager().updateSettings(current =>
-        current.licenseKey?.trim() === licenseKey ? { phoneCapturesLinked: true } : {}),
+      onLinked: async (licenseKey) => {
+        await this.getSettingsManager().updateSettings(current =>
+          current.licenseKey?.trim() === licenseKey ? { phoneCapturesLinked: true } : {});
+      },
       confirm: async (captures, folder) => (await showConfirm(
         this.app,
         captures.length === 1
