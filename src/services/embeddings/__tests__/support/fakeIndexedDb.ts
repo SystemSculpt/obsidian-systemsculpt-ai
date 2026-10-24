@@ -244,6 +244,15 @@ class FakeObjectStore {
       query,
     );
   }
+
+  openKeyCursor(query?: unknown, direction = "next"): FakeRequest {
+    return this.tx.cursor(
+      () => this.primaryRows().map((row) => ({ key: row.key, value: { primaryKey: row.key, value: row.value } })),
+      direction,
+      false,
+      query,
+    );
+  }
 }
 
 class FakeTransaction {

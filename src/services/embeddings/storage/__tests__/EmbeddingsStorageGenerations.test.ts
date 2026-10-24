@@ -118,6 +118,47 @@ describe("EmbeddingsStorage schema", () => {
   });
 });
 
+describe("EmbeddingsStorage root loading", () => {
+  let fake: ReturnType<typeof installFakeIndexedDb>;
+  beforeEach(() => { fake = installFakeIndexedDb(); });
+  afterEach(() => fake.restore());
+
+  it("reads values only for root keys, including legacy roots and paths containing #", async () => {
+    const name = "SystemSculptEmbeddings::root-loading";
+    const storage = new EmbeddingsStorage(name);
+    await storage.initialize();
+    const legacyRoot = record(V3, "Legacy.md", 0);
+    delete legacyRoot.chunkId;
+    const records = [
+      record(V3, "A.md", 0), record(V3, "A.md", 1), record(V3, "A.md", 10),
+      record(V4, "A.md", 0), record(V4, "A.md", 1),
+      record(V3, "A.md#1.md", 0), record(V3, "A.md#1.md", 1),
+      record(V3, "Orphan.md", 3), legacyRoot,
+      createLocalEmptyEmbeddingMarkerForRevision({ path: "Empty.md", basename: "Empty", mtime: 1 }, ""),
+    ];
+    await storage.storeVectors(records);
+    const readValues: string[] = [];
+    // Observe deserialization, not just the final cache: a full value cursor
+    // would still produce the right roots while copying every chunk's vector.
+    for (const [id, row] of fake.factory.rows(name, "embeddings")) {
+      const vector = (row as EmbeddingVector).vector;
+      Object.defineProperty(row, "vector", {
+        enumerable: true,
+        get: () => { readValues.push(String(id)); return vector; },
+      });
+    }
+
+    await storage.loadEmbeddings();
+
+    const roots = records.filter((row) => (row.chunkId ?? 0) === 0);
+    expect(readValues.sort()).toEqual(roots.map((row) => row.id).sort());
+    expect([...storage.listRoots()].map((row) => row.id).sort()).toEqual(roots.map((row) => row.id).sort());
+    expect([...storage.listRoots()].every((row) => !("vector" in row))).toBe(true);
+    expect(storage.getDistinctPaths().sort()).toEqual(["A.md", "A.md#1.md", "Empty.md", "Legacy.md"]);
+    storage.close();
+  });
+});
+
 describe("EmbeddingsStorage connections", () => {
   let fake: ReturnType<typeof installFakeIndexedDb>;
   beforeEach(() => { fake = installFakeIndexedDb(); });
