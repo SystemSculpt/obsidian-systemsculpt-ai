@@ -96,7 +96,9 @@ describe("SettingsManager managed settings contract", () => {
     expect(manager.settings).not.toHaveProperty("customProviders");
     expect(manager.settings).not.toHaveProperty("selectedModelId");
     expect(manager.settings).not.toHaveProperty("readwiseApiToken");
-    expect(plugin.saveData).toHaveBeenCalledWith(manager.settings);
+    expect(plugin.saveData).toHaveBeenCalledWith(Object.fromEntries(
+      Object.entries(manager.settings).filter(([key]) => key !== "lastValidated"),
+    ));
     expect(backupStart).toHaveBeenCalledTimes(1);
   });
 
@@ -153,9 +155,81 @@ describe("SettingsManager managed settings contract", () => {
     expect(plugin.saveData).toHaveBeenCalledWith(expect.objectContaining({ chatFontSize: "large" }));
     expect(plugin.app.workspace.trigger).toHaveBeenCalledWith(
       "systemsculpt:settings-updated",
-      expect.any(Object),
+      expect.objectContaining({ chatFontSize: "medium" }),
       manager.settings,
+      ["chatFontSize"],
     );
+  });
+
+  it("skips equivalent updates, including normalized and nested values", async () => {
+    const plugin = createPlugin();
+    const manager = new SettingsManager(plugin);
+    await manager.loadSettings();
+    jest.clearAllMocks();
+
+    await manager.updateSettings({});
+    await manager.updateSettings({ chatFontSize: "medium" });
+    await manager.updateSettings({ knownChatsDirectories: [...manager.settings.knownChatsDirectories] });
+    await manager.updateSettings({ workflowEngine: JSON.parse(JSON.stringify(manager.settings.workflowEngine)) });
+    await manager.updateSettings({ workflowEngine: Object.fromEntries(Object.entries(manager.settings.workflowEngine).reverse()) as any });
+    await manager.saveSettings();
+
+    expect(plugin.saveData).not.toHaveBeenCalled();
+    expect(plugin.app.vault.adapter.write).not.toHaveBeenCalled();
+    expect(plugin.app.workspace.trigger).not.toHaveBeenCalled();
+  });
+
+  it("keeps validation timestamps in memory without rewriting settings or backups", async () => {
+    const plugin = createPlugin({ lastValidated: 123 });
+    const manager = new SettingsManager(plugin);
+    await manager.loadSettings();
+    expect(manager.settings.lastValidated).toBe(0);
+    expect(plugin.saveData.mock.calls.at(-1)[0]).not.toHaveProperty("lastValidated");
+    expect(JSON.parse(plugin.app.vault.adapter.write.mock.calls.at(-1)[1])).not.toHaveProperty("lastValidated");
+    jest.clearAllMocks();
+
+    await manager.updateSettings({ lastValidated: 456 });
+    expect(manager.settings.lastValidated).toBe(456);
+    expect(plugin.saveData).not.toHaveBeenCalled();
+    expect(plugin.app.vault.adapter.write).not.toHaveBeenCalled();
+  });
+
+  it("detects nested mutations against a detached snapshot", async () => {
+    const plugin = createPlugin();
+    const manager = new SettingsManager(plugin);
+    await manager.loadSettings();
+    jest.clearAllMocks();
+    plugin._internal_settings_systemsculpt_plugin.workflowEngine.enabled = false;
+    await manager.saveSettings();
+    expect(plugin.app.workspace.trigger).toHaveBeenCalledWith(
+      "systemsculpt:settings-updated",
+      expect.objectContaining({ workflowEngine: expect.objectContaining({ enabled: true }) }),
+      expect.objectContaining({ workflowEngine: expect.objectContaining({ enabled: false }) }),
+      ["workflowEngine"],
+    );
+  });
+
+  it("retries an identical update after a failed write", async () => {
+    const plugin = createPlugin();
+    const manager = new SettingsManager(plugin);
+    await manager.loadSettings();
+    jest.clearAllMocks();
+    plugin.saveData.mockRejectedValueOnce(new Error("disk full"));
+    await manager.updateSettings({ chatFontSize: "large" });
+    expect(plugin.app.workspace.trigger).not.toHaveBeenCalled();
+    await manager.updateSettings({ chatFontSize: "large" });
+    expect(plugin.saveData).toHaveBeenCalledTimes(2);
+    expect(plugin.app.workspace.trigger).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not rewrite an unchanged current settings file on reload", async () => {
+    const plugin = createPlugin();
+    const manager = new SettingsManager(plugin);
+    await manager.loadSettings();
+    const reloaded = createPlugin(plugin.saveData.mock.calls.at(-1)[0]);
+    await new SettingsManager(reloaded).loadSettings();
+    expect(reloaded.saveData).not.toHaveBeenCalled();
+    expect(reloaded.app.vault.adapter.write).not.toHaveBeenCalled();
   });
 
   it("keeps the iOS link only for the account that reported it", async () => {
@@ -196,12 +270,14 @@ describe("SettingsManager managed settings contract", () => {
     await manager.restoreFromExternalSettings({
       schemaVersion: 3,
       licenseKey: "backup-license",
+      lastValidated: Date.now() + 86_400_000,
       customProviders: [{ id: "retired" }],
       serverUrl: "http://localhost:3002/api/plugin",
     });
 
     expect(manager.settings.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
     expect(manager.settings.licenseKey).toBe("backup-license");
+    expect(manager.settings.lastValidated).toBe(0);
     expect(manager.settings).not.toHaveProperty("customProviders");
     expect(manager.settings).not.toHaveProperty("serverUrl");
   });
@@ -528,7 +604,7 @@ describe("SettingsManager managed settings contract", () => {
     await manager.loadSettings();
 
     plugin.saveData.mockRejectedValueOnce(new Error("disk full"));
-    await expect(manager.updateSettings({ chatFontSize: "large" })).resolves.toBeUndefined();
+    await expect(manager.updateSettings({ chatFontSize: "large" })).resolves.toBe(false);
     expect(plugin.logger.error).toHaveBeenCalledWith(
       "Failed to save SystemSculpt settings",
       expect.any(Error),
@@ -537,12 +613,48 @@ describe("SettingsManager managed settings contract", () => {
 
     plugin.saveData.mockResolvedValue(undefined);
     plugin.app.vault.adapter.write.mockRejectedValueOnce(new Error("backup unavailable"));
-    await expect(manager.updateSettings({ chatFontSize: "small" })).resolves.toBeUndefined();
+    await expect(manager.updateSettings({ chatFontSize: "small" })).resolves.toBe(true);
     expect(plugin.logger.error).toHaveBeenCalledWith(
       "Failed to write SystemSculpt settings backup",
       expect.any(Error),
       expect.objectContaining({ source: "SettingsManager" }),
     );
+  });
+
+  it("retries only the backup after its write fails", async () => {
+    const plugin = createPlugin();
+    const manager = new SettingsManager(plugin);
+    await manager.loadSettings();
+    jest.clearAllMocks();
+    plugin.app.vault.adapter.write.mockRejectedValueOnce(new Error("backup unavailable"));
+    await manager.updateSettings({ chatFontSize: "large" });
+    await manager.updateSettings({ chatFontSize: "large" });
+    await manager.saveSettings();
+    expect(plugin.saveData).toHaveBeenCalledTimes(1);
+    expect(plugin.app.workspace.trigger).toHaveBeenCalledTimes(1);
+    expect(plugin.app.vault.adapter.write).toHaveBeenCalledTimes(2);
+  });
+
+  it("backs up the committed revision rather than a mutation during the primary write", async () => {
+    const plugin = createPlugin();
+    const manager = new SettingsManager(plugin);
+    await manager.loadSettings();
+    let release!: () => void;
+    let started!: () => void;
+    const writing = new Promise<void>(resolve => { started = resolve; });
+    plugin.saveData.mockImplementationOnce(async () => {
+      started();
+      await new Promise<void>(resolve => { release = resolve; });
+    });
+    const update = manager.updateSettings({ defaultChatTag: "committed" });
+    await writing;
+    plugin._internal_settings_systemsculpt_plugin.workflowEngine.enabled = false;
+    release();
+    await update;
+    expect(plugin.saveData.mock.calls.at(-1)[0].workflowEngine.enabled).toBe(true);
+    expect(JSON.parse(plugin.app.vault.adapter.write.mock.calls.at(-1)[1]).workflowEngine.enabled).toBe(true);
+    await manager.saveSettings();
+    expect(JSON.parse(plugin.app.vault.adapter.write.mock.calls.at(-1)[1]).workflowEngine.enabled).toBe(false);
   });
 
   it("writes the settings backup when a concurrent save already created its folder", async () => {
@@ -649,7 +761,9 @@ describe("SettingsManager managed settings contract", () => {
       expect(manager.settings.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
       expect(manager.settings.chatFontSize).toBe("medium");
       expect(manager.settings.defaultChatTag).toBe("");
-      expect(plugin.saveData).toHaveBeenCalledWith(manager.settings);
+      expect(plugin.saveData).toHaveBeenCalledWith(Object.fromEntries(
+      Object.entries(manager.settings).filter(([key]) => key !== "lastValidated"),
+    ));
       expect(plugin.logger.warn).not.toHaveBeenCalled();
     });
   });
@@ -672,8 +786,8 @@ describe("SettingsManager managed settings contract", () => {
         chatFontSize: "large",
         defaultChatTag: "queued",
       });
-      expect(plugin.saveData).toHaveBeenCalledTimes(3);
-      expect(plugin.saveData.mock.calls.map(([data]: [any]) => data.chatFontSize)).toEqual(["large", "large", "large"]);
+      expect(plugin.saveData).toHaveBeenCalledTimes(2);
+      expect(plugin.saveData.mock.calls.map(([data]: [any]) => data.chatFontSize)).toEqual(["large", "large"]);
       expect(plugin.saveData.mock.calls.at(-1)?.[0]).toMatchObject({ chatFontSize: "large", defaultChatTag: "queued" });
     });
 
@@ -686,8 +800,8 @@ describe("SettingsManager managed settings contract", () => {
       const failing = manager.updateSettings({ chatFontSize: "large" });
       const following = manager.updateSettings({ defaultChatTag: "after-failure" });
 
-      await expect(failing).resolves.toBeUndefined();
-      await expect(following).resolves.toBeUndefined();
+      await expect(failing).resolves.toBe(false);
+      await expect(following).resolves.toBe(true);
       expect(manager.settings).toMatchObject({ chatFontSize: "large", defaultChatTag: "after-failure" });
       expect(plugin.saveData.mock.calls.at(-1)?.[0]).toMatchObject({ defaultChatTag: "after-failure" });
     });

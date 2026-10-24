@@ -560,9 +560,11 @@ export default class SystemSculptPlugin extends Plugin {
       optional: true,
       run: () => {
         this.registerEvent(
-          this.app.workspace.on("systemsculpt:settings-updated", () => {
+          this.app.workspace.on("systemsculpt:settings-updated", (_oldSettings, _newSettings, changedKeys) => {
             try {
-              this.embeddingsManager?.syncFromSettings();
+              if (changedKeys.some(key => ["embeddingsEnabled", "embeddingsExclusions", "chatsDirectory", "savedChatsDirectory"].includes(key))) {
+                this.embeddingsManager?.syncFromSettings();
+              }
             } catch (error) {
               const logger = this.getLogger();
               logger.error("Embeddings manager settings sync failed", error, {
@@ -571,7 +573,7 @@ export default class SystemSculptPlugin extends Plugin {
             }
 
             try {
-              this.syncRelativeLineNumbersExtension();
+              if (changedKeys.includes("relativeLineNumbersEnabled")) this.syncRelativeLineNumbersExtension();
             } catch (error) {
               const logger = this.getLogger();
               logger.error("Relative line numbers settings sync failed", error, {
@@ -580,7 +582,7 @@ export default class SystemSculptPlugin extends Plugin {
             }
 
             try {
-              this.syncDiagnosticsRecording();
+              if (changedKeys.includes("showDiagnostics")) this.syncDiagnosticsRecording();
             } catch (error) {
               const logger = this.getLogger();
               logger.error("Diagnostics recording settings sync failed", error, {
@@ -2206,8 +2208,10 @@ export default class SystemSculptPlugin extends Plugin {
       }),
       // The credits balance carries the link; a recent balance is reused.
       checkLinked: async () => (await this.aiService.readCreditsBalance()).iosAppLinked === true,
-      onLinked: (licenseKey) => this.getSettingsManager().updateSettings(current =>
-        current.licenseKey?.trim() === licenseKey ? { phoneCapturesLinked: true } : {}),
+      onLinked: async (licenseKey) => {
+        await this.getSettingsManager().updateSettings(current =>
+          current.licenseKey?.trim() === licenseKey ? { phoneCapturesLinked: true } : {});
+      },
       confirm: async (captures, folder) => (await showConfirm(
         this.app,
         captures.length === 1

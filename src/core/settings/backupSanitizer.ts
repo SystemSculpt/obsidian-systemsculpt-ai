@@ -15,6 +15,7 @@ const CURRENT_SECRET_KEYS = ["licenseKey"] as const;
  */
 function removeRetiredSettings(settings: Record<string, unknown>): void {
   delete settings.managedDisclosureAcceptance;
+  delete settings.lastValidated;
   for (const key of [
     ...LEGACY_KEYS_REMOVED_IN_V1,
     ...LEGACY_EMBEDDINGS_KEYS_REMOVED_IN_V3,

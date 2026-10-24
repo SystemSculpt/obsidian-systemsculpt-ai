@@ -1,6 +1,7 @@
 import { Notice, Setting } from "obsidian";
 import { SystemSculptSettingTab } from "./SystemSculptSettingTab";
 import { attachFolderSuggester } from "../components/FolderSuggester";
+import { beginTextSettings } from "./TextSettings";
 
 function validateDirectory(path: string): boolean {
     if (!path) return true;
@@ -18,17 +19,12 @@ async function handleDirectoryChange(
         | "chatsDirectory"
         | "extractionsDirectory"
         | "savedChatsDirectory",
-    createFolder: boolean = false
 ) {
     const { plugin } = tabInstance;
-    if (!validateDirectory(value)) {
-        new Notice("Use a vault-relative path without '..' or a leading slash.");
-        return;
-    }
+    const saved = await plugin.getSettingsManager().updateSettings({ [settingKey]: value });
+    if (saved === false) return false;
 
-    await plugin.getSettingsManager().updateSettings({ [settingKey]: value });
-
-    if (createFolder && plugin.directoryManager) {
+    if (plugin.directoryManager) {
         try {
             await plugin.directoryManager.handleDirectorySettingChange(settingKey, value);
         } catch {
@@ -40,6 +36,7 @@ async function handleDirectoryChange(
 function createDirectorySetting(
     containerEl: HTMLElement,
     tabInstance: SystemSculptSettingTab,
+    bindTextSetting: ReturnType<typeof beginTextSettings>,
     name: string,
     desc: string,
     settingKey:
@@ -57,28 +54,21 @@ function createDirectorySetting(
         .addText((text) => {
             text
                 .setPlaceholder(placeholder)
-                .setValue(plugin.settings[settingKey])
-                .onChange(async (value) => {
-                    await handleDirectoryChange(tabInstance, value, settingKey, false);
-                });
+                .setValue(plugin.settings[settingKey]);
 
-            text.inputEl.addEventListener('blur', () => {
-                void handleDirectoryChange(tabInstance, text.inputEl.value, settingKey, true).catch(() => {
-                    new Notice("Couldn’t save that directory.");
-                });
-            });
+            const commitDirectory = bindTextSetting(settingKey, text.inputEl, async (value) => {
+                if (!validateDirectory(value)) {
+                    new Notice("Use a vault-relative path without '..' or a leading slash.");
+                    return;
+                }
+                return handleDirectoryChange(tabInstance, value, settingKey);
+            }, { commitOn: "blur", errorMessage: "Couldn’t save that directory." });
 
             attachFolderSuggester(
                 text.inputEl,
                 (selectedPath: string) => {
-                    if (validateDirectory(selectedPath)) {
-                        text.setValue(selectedPath);
-                        void handleDirectoryChange(tabInstance, selectedPath, settingKey, true).catch(() => {
-                            new Notice("Couldn’t save that directory.");
-                        });
-                    } else {
-                        new Notice("Use a vault-relative path without '..' or a leading slash.");
-                    }
+                    text.setValue(selectedPath);
+                    commitDirectory();
                 },
                 app
             );
@@ -87,6 +77,7 @@ function createDirectorySetting(
 }
 
 export function displayDirectoriesTabContent(containerEl: HTMLElement, tabInstance: SystemSculptSettingTab) {
+    const bindTextSetting = beginTextSettings(containerEl, tabInstance);
     containerEl.empty();
     if (containerEl.classList.contains("systemsculpt-tab-content")) {
         containerEl.dataset.tab = "workspace";
@@ -98,6 +89,7 @@ export function displayDirectoriesTabContent(containerEl: HTMLElement, tabInstan
     createDirectorySetting(
         containerEl,
         tabInstance,
+        bindTextSetting,
         "Chats directory",
         "Where new chats are saved. Existing chats stay in the folder they were saved in.",
         "chatsDirectory",
@@ -107,6 +99,7 @@ export function displayDirectoriesTabContent(containerEl: HTMLElement, tabInstan
     createDirectorySetting(
         containerEl,
         tabInstance,
+        bindTextSetting,
         "Saved chats directory",
         "Where chats saved as notes are stored.",
         "savedChatsDirectory",
@@ -116,6 +109,7 @@ export function displayDirectoriesTabContent(containerEl: HTMLElement, tabInstan
     createDirectorySetting(
         containerEl,
         tabInstance,
+        bindTextSetting,
         "Recordings directory",
         "Where recordings are stored.",
         "recordingsDirectory",
@@ -125,6 +119,7 @@ export function displayDirectoriesTabContent(containerEl: HTMLElement, tabInstan
     createDirectorySetting(
         containerEl,
         tabInstance,
+        bindTextSetting,
         "Attachments directory",
         "Where saved images and attachments are stored.",
         "attachmentsDirectory",
@@ -134,6 +129,7 @@ export function displayDirectoriesTabContent(containerEl: HTMLElement, tabInstan
     createDirectorySetting(
         containerEl,
         tabInstance,
+        bindTextSetting,
         "Extractions directory",
         "Where extracted documents are stored.",
         "extractionsDirectory",

@@ -1,10 +1,12 @@
 import { mountCodexExecutionControls } from "../services/codex/CodexExecutionControls";
 import { Notice, Setting } from "obsidian";
 import { SystemSculptSettingTab } from "./SystemSculptSettingTab";
+import { beginTextSettings } from "./TextSettings";
 
 const codexSettingsCleanup = new WeakMap<HTMLElement, () => void>();
 
 export async function displayChatTabContent(containerEl: HTMLElement, tabInstance: SystemSculptSettingTab) {
+    const bindTextSetting = beginTextSettings(containerEl, tabInstance);
     codexSettingsCleanup.get(containerEl)?.(); containerEl.empty();
     if (containerEl.classList.contains('systemsculpt-tab-content')) {
         containerEl.dataset.tab = "chat";
@@ -31,11 +33,11 @@ export async function displayChatTabContent(containerEl: HTMLElement, tabInstanc
         .addText((text) => {
             text
                 .setPlaceholder("Ai-chat")
-                .setValue(plugin.settings.defaultChatTag || "")
-                .onChange(async (value) => {
-                    const normalized = normalizeDefaultChatTag(value);
-                    await plugin.getSettingsManager().updateSettings({ defaultChatTag: normalized });
-                });
+                .setValue(plugin.settings.defaultChatTag || "");
+            bindTextSetting("defaultChatTag", text.inputEl, async (value) => {
+                const normalized = normalizeDefaultChatTag(value);
+                return plugin.getSettingsManager().updateSettings({ defaultChatTag: normalized });
+            });
         });
 
 // --- Default Chat Font Size ---
