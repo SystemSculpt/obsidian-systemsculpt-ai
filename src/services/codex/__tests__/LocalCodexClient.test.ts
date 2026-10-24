@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events';
 import { posix, win32 } from 'node:path';
 import { CodexChatTransport, runLocalCodex } from '../LocalCodexClient';
 import { desktopHost } from '../../../platform/desktopOnly';
+import { windowsNpmHost } from './fixtures/npmNodeShim';
 jest.mock('../../../platform/desktopOnly', () => ({ desktopHost: { childProcess: jest.fn(), fs: jest.fn(), os: jest.fn(), path: jest.fn(), environment: jest.fn() } }));
 
 function host(options: { failLogin?: boolean; requiresOpenaiAuth?: boolean; requestApproval?: boolean; wait?: boolean; malformed?: boolean; nativePolicy?: unknown; nativeReviewer?: string; nativeSandbox?: unknown; nativeProfile?: string; savedTurn?: unknown } = {}) {
@@ -73,6 +74,18 @@ it.each(['/home/test/.nvm/versions/node/v22.18.0/bin', '/home/test/.volta/bin'])
   });
   await expect(runLocalCodex(input, new AbortController().signal, callbacks())).resolves.toMatchObject({ text: 'hello', status: 'completed' });
   expect(spawn).toHaveBeenCalledTimes(1);
+});
+it('launches a Windows npm app-server with its native home and approval protocol intact', async () => {
+  const { messages } = host({ requestApproval: true }), windows = windowsNpmHost(), cb = callbacks();
+  const prompt = 'Read "notes" & echo injected > marker %PATH% !name!\nnext line';
+  await expect(runLocalCodex({ ...input, prompt, workingDirectory: windows.cwd }, new AbortController().signal, cb)).resolves.toMatchObject({ status: 'completed' });
+  expect((await desktopHost.childProcess()).spawn).toHaveBeenCalledWith(windows.node, [windows.scripts.codex, 'app-server'],
+    expect.objectContaining({ shell: false, cwd: windows.home, env: expect.objectContaining({ CODEX_HOME: windows.environment.CODEX_HOME }) }));
+  expect(messages.find(m => m.method === 'thread/start').params.cwd).toBe(windows.cwd);
+  expect(messages.find(m => m.method === 'turn/start').params.input).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'text', text: prompt })]));
+  expect(messages.find(m => m.method === 'account/read').params).toEqual({ refreshToken: false });
+  expect(cb.request).toHaveBeenCalledTimes(1);
+  expect(messages.find(m => m.id === 99).result).toEqual({ decision: 'decline' });
 });
 it('persists the native identity before admitting a resumed turn', async () => {
   const { messages } = host(); const cb = callbacks();

@@ -2,7 +2,7 @@ import { desktopHost } from '../../platform/desktopOnly';
 import { hasHostCapability } from '../../platform/hostCapabilities';
 import { isRecord } from '../../studio/utils';
 import { resolveCodexLaunchOptions } from './CodexLaunch';
-import { readLocalAgentLaunchConfig, resolveLocalAgentBinary } from './LocalAgentLaunch';
+import { readLocalAgentLaunchConfig, resolveLocalAgentBinary, resolveLocalAgentCommand } from './LocalAgentLaunch';
 import { LOCAL_AGENTS, type LocalAgentId, type TextExecutionBackend } from './LocalAgents';
 
 export type LocalAgentAvailability = Readonly<{
@@ -24,9 +24,11 @@ const cachedDetections = new Map<string | undefined, Promise<LocalAgentDetection
 /** Only booleans and aggregate timestamps/counts leave the probe; status output is never retained. */
 async function signedIn(agent: LocalAgentId, binary: string, environment: Record<string, string | undefined>, cwd: string, signal: AbortSignal): Promise<boolean> {
   const childProcess = await desktopHost.childProcess();
+  const command = await resolveLocalAgentCommand(binary, agent === 'claude' ? ['auth', 'status', '--json'] : ['login', 'status'], environment, cwd);
+  if (signal.aborted) return false;
   return new Promise(resolve => {
-    childProcess.execFile(binary, agent === 'claude' ? ['auth', 'status', '--json'] : ['login', 'status'], {
-      cwd, env: environment, signal, encoding: 'utf8', timeout: PROBE_TIMEOUT_MS, killSignal: 'SIGKILL', windowsHide: true,
+    childProcess.execFile(command.binary, command.args, {
+      cwd, env: environment, signal, encoding: 'utf8', timeout: PROBE_TIMEOUT_MS, killSignal: 'SIGKILL', windowsHide: true, shell: false,
     }, (error, stdout, stderr) => {
       if (error) { resolve(false); return; }
       if (agent === 'codex') { resolve(/^Logged in\b/im.test(`${stdout}\n${stderr}`)); return; }

@@ -2,6 +2,7 @@ import { posix } from 'node:path';
 import { desktopHost } from '../../../platform/desktopOnly';
 import { hasHostCapability } from '../../../platform/hostCapabilities';
 import { detectLocalAgents, invalidateLocalAgentDetection } from '../LocalAgentDetection';
+import { windowsNpmHost } from './fixtures/npmNodeShim';
 
 jest.mock('../../../platform/desktopOnly', () => ({ desktopHost: { fs: jest.fn(), os: jest.fn(), path: jest.fn(), environment: jest.fn(), childProcess: jest.fn() } }));
 jest.mock('../../../platform/hostCapabilities', () => ({ hasHostCapability: jest.fn(() => true) }));
@@ -255,6 +256,35 @@ it('keeps the existing detection deadline when install-directory enumeration sta
   await jest.advanceTimersByTimeAsync(3000);
   expect((await result).preferred).toBe('systemsculpt');
   expect(host.execFile).not.toHaveBeenCalled();
+  expect(jest.getTimerCount()).toBe(0);
+});
+
+it('probes Windows npm agents without a shell and keeps native credential homes and the deadline', async () => {
+  const { execFile } = machine(), windows = windowsNpmHost();
+  execFile.mockImplementation((_binary, args, _options, callback) => {
+    queueMicrotask(() => callback(null, args[0] === windows.scripts.claude ? '{"loggedIn":true}' : '', args[0] === windows.scripts.codex ? 'Logged in using ChatGPT' : ''));
+  });
+  const result = await detectLocalAgents({ workingDirectory: windows.cwd });
+  for (const agent of ['claude', 'codex'] as const) {
+    expect(result.agents[agent]).toMatchObject({ installed: true, signedIn: true });
+    expect(execFile).toHaveBeenCalledWith(windows.node, [windows.scripts[agent], ...(agent === 'claude' ? ['auth', 'status', '--json'] : ['login', 'status'])],
+      expect.objectContaining({ shell: false, timeout: 3000, killSignal: 'SIGKILL', cwd: agent === 'claude' ? windows.cwd : windows.home,
+        env: expect.objectContaining({ CODEX_HOME: windows.environment.CODEX_HOME, CLAUDE_CONFIG_DIR: windows.environment.CLAUDE_CONFIG_DIR }) }), expect.any(Function));
+  }
+});
+
+it('does not spawn a late Windows status process after shim I/O exceeds the existing deadline', async () => {
+  jest.useFakeTimers();
+  const { execFile } = machine(), windows = windowsNpmHost(), read = windows.fs.readFile.getMockImplementation()!;
+  let release!: () => void;
+  const stalled = new Promise<void>(resolve => { release = resolve; });
+  windows.fs.readFile.mockImplementation(async file => { if (/\.cmd$/i.test(file)) await stalled; return read(file); });
+  const result = detectLocalAgents({ workingDirectory: windows.cwd });
+  await jest.advanceTimersByTimeAsync(3000);
+  expect((await result).preferred).toBe('systemsculpt');
+  release();
+  await jest.advanceTimersByTimeAsync(0);
+  expect(execFile).not.toHaveBeenCalled();
   expect(jest.getTimerCount()).toBe(0);
 });
 

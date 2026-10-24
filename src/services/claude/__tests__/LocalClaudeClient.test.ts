@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events';
 import { posix } from 'node:path';
 import { CLAUDE_SIGN_IN_MESSAGE, ClaudeChatTransport, claudeLaunchArgs, claudePermissionResponse, runLocalClaude } from '../LocalClaudeClient';
 import { desktopHost } from '../../../platform/desktopOnly';
+import { windowsNpmHost } from '../../codex/__tests__/fixtures/npmNodeShim';
 jest.mock('../../../platform/desktopOnly', () => ({ desktopHost: { childProcess: jest.fn(), fs: jest.fn(), os: jest.fn(), path: jest.fn(), environment: jest.fn() } }));
 
 const SESSION = 'b33728f4-ea7d-4fec-bcd0-bf79649b7d28';
@@ -172,6 +173,15 @@ describe('discovery', () => {
     });
     await expect(runLocalClaude(input, new AbortController().signal, callbacks())).resolves.toMatchObject({ text: 'hello there' });
     expect(spawn).toHaveBeenCalledTimes(1);
+  });
+  it('launches a Windows npm CLI with native permissions and literal prompt data over stdio', async () => {
+    const { spawn, messages } = host(), windows = windowsNpmHost();
+    const prompt = 'Read "notes" & echo injected > marker %PATH% !name!\nnext line';
+    await expect(runLocalClaude({ ...input, prompt, workingDirectory: windows.cwd }, new AbortController().signal, callbacks())).resolves.toMatchObject({ sessionId: SESSION });
+    expect(spawn).toHaveBeenCalledWith(windows.node, [windows.scripts.claude, ...claudeLaunchArgs({}), '--session-id', SESSION],
+      expect.objectContaining({ shell: false, cwd: windows.cwd, env: expect.objectContaining({ CLAUDE_CONFIG_DIR: windows.environment.CLAUDE_CONFIG_DIR }) }));
+    expect((spawn.mock.calls[0] as any[])[2].env.CLAUDECODE).toBeUndefined();
+    expect(messages[0]).toEqual({ type: 'user', message: { role: 'user', content: prompt } });
   });
   it('uses the binary from ~/.config/systemsculpt/claude.json', async () => {
     const { spawn } = host({ config: { binary: '~/tools/claude' } });

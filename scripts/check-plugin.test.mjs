@@ -32,7 +32,7 @@ test("package scripts preserve fast edit and exhaustive verification tiers", () 
   assert.equal(
     packageJson.scripts["check:compat"],
     "npm run check:plugin:fast -- --skip-lint && npm run test:chatview:compat "
-      + "&& npm run test:integration:ci",
+      + "&& npm run test:local-agent:compat && npm run test:integration:ci",
   );
   assert.equal(
     packageJson.scripts["release:plugin"],

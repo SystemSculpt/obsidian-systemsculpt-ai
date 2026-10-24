@@ -380,6 +380,16 @@ installed version. These runtime folders stay on the launched process's PATH
 so Node-based CLI scripts can find `node`, even when Obsidian starts from the
 Dock or Start menu. No shell startup scripts are loaded.
 
+On Windows, standard npm `.cmd` shims are recognized. Node scripts launch with
+the adjacent `node.exe`, or Node from that same PATH; npm shims for native
+executables (including newer Claude Code installs) launch their target directly.
+Detection and both native transports use this shell-free launch: paths and
+arguments are not interpreted by `cmd.exe`. Native executables continue to run
+directly. Customized batch wrappers (including added commands,
+environment setup or interpreter flags) are not reinterpreted; use a native
+executable wrapper or reinstall the standard npm CLI instead. Login checks keep
+the existing three-second detection deadline and use the native CLI's login.
+
 After installing an agent while Obsidian is open, use **Detect again** in the
 chat's backend menu. Detection remains cached for the Obsidian session.
 

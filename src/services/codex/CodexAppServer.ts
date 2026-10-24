@@ -1,6 +1,7 @@
 import { desktopHost } from '../../platform/desktopOnly';
 import { isRecord } from '../../studio/utils';
 import { resolveCodexLaunchOptions } from './CodexLaunch';
+import { resolveLocalAgentCommand } from './LocalAgentLaunch';
 export type CodexJson = Record<string, unknown>;
 export type CodexConnection = {
   request: (method: string, params: CodexJson) => Promise<CodexJson>;
@@ -21,10 +22,11 @@ export async function connectCodex(workingDirectory: string, signal: AbortSignal
   const [childProcess, fs, path] = await Promise.all([desktopHost.childProcess(), desktopHost.fs(), desktopHost.path()]);
   if (!path.isAbsolute(workingDirectory) || !(await fs.stat(workingDirectory)).isDirectory()) throw new Error('Codex requires an existing absolute working directory.');
   const launch = await resolveCodexLaunchOptions();
+  const command = await resolveLocalAgentCommand(launch.binary, ['app-server'], launch.environment, launch.home);
   if (signal.aborted) throw new Error('Codex run canceled.');
   // Start the transport from home; thread/start and thread/resume own the task cwd.
   // Some macOS application hosts stall CLI initialization in Documents subfolders.
-  const child = childProcess.spawn(launch.binary, ['app-server'], { cwd: launch.home, env: launch.environment, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+  const child = childProcess.spawn(command.binary, command.args, { cwd: launch.home, env: launch.environment, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, shell: false });
   let release!: () => void;
   const closed = new Promise<void>(resolve => { release = resolve; });
   const pending = new Map<number, { resolve: (value: CodexJson) => void; reject: (error: Error) => void; timer: number }>();
