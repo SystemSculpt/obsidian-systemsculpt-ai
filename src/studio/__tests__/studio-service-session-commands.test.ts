@@ -260,7 +260,7 @@ describe("StudioService session-backed mutation commands", () => {
     expect(runtime.runProject).not.toHaveBeenCalled();
   });
 
-  it("falls back to a store-backed run when no session is retained for the path", async () => {
+  it("runs the already checked store snapshot without a second load when no session is retained", async () => {
     const service = new StudioService(createPluginStub());
     const summary = {
       runId: "run_cold",
@@ -277,11 +277,17 @@ describe("StudioService session-backed mutation commands", () => {
     };
     (service as any).runtime = runtime;
 
+    const project = projectFixture();
+    const load = jest.spyOn((service as any).projectStore, "loadProject").mockResolvedValueOnce(project);
+    const assertWritable = jest.spyOn((service as any).projectStore, "assertWritable");
     const result = await service.runProject("Studio/Cold.systemsculpt");
 
     expect(result).toBe(summary);
-    expect(runtime.runProject).toHaveBeenCalledWith("Studio/Cold.systemsculpt", { onEvent: undefined });
-    expect(runtime.runProjectSnapshot).not.toHaveBeenCalled();
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(assertWritable.mock.invocationCallOrder[0]).toBeGreaterThan(load.mock.invocationCallOrder[0]);
+    expect(runtime.runProjectSnapshot.mock.invocationCallOrder[0]).toBeGreaterThan(assertWritable.mock.invocationCallOrder[0]);
+    expect(runtime.runProjectSnapshot).toHaveBeenCalledWith("Studio/Cold.systemsculpt", project, { onEvent: undefined });
+    expect(runtime.runProject).not.toHaveBeenCalled();
   });
 
   it("runs scoped node executions from the retained session snapshot", async () => {

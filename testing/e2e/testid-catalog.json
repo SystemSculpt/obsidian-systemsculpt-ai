@@ -193,6 +193,7 @@
     "studio.media-model-picker.trigger",
     "studio.media-preview.close",
     "studio.media.*",
+    "studio.migration.retry",
     "studio.node.copy-prompt",
     "studio.node.lock-output",
     "studio.node.remove",

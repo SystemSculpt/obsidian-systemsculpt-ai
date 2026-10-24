@@ -35,6 +35,8 @@ type Accepted = {
   documentState: boolean;
   /** The import changed the file's content or its merge record, so the file must be rewritten. */
   rewrite: boolean;
+  /** Migration is readable in memory, but its original must be preserved before editing. */
+  readOnlyReason?: string;
 };
 const accepted = new WeakMap<object, Map<string, Accepted>>();
 const revisions = new WeakMap<object, Map<string, Map<string, string>>>();
@@ -43,7 +45,7 @@ const tails = new WeakMap<object, Map<string, Promise<unknown>>>();
 const MAX_REVISIONS = 16, MAX_REVISION_CHARS = 4_000_000;
 export type StudioDocumentEdit = {entityId: string; kind?: "set" | "create" | "delete" | "restore"; path?: string[]; value?: unknown; remove?: boolean};
 /** Accepted content and its exact published bytes belong to the same file version. */
-export type StudioDocumentReconciliation = StudioProjectReconciliation & {source: string};
+export type StudioDocumentReconciliation = StudioProjectReconciliation & {source: string; readOnlyReason?: string};
 export type StudioDocumentEditResult = StudioDocumentReconciliation & {revision: string};
 /** The untouched bytes of an older file, kept before Studio first republishes it as plain v2. */
 export type StudioLegacyOriginalCopy = Readonly<{projectPath: string; copyPath: string; retiredNodes: readonly Readonly<{title: string; kind: string}>[]}>;
@@ -51,6 +53,7 @@ const LEGACY_ORIGINAL_SUFFIX = "-v1-original.json";
 const DOCUMENT_STATE_ORIGINAL_SUFFIX = "-document-state-original.json";
 const RESERVED_KEYS = ["__proto__", "constructor", "prototype"];
 class StudioWriteRace extends Error {}
+class StudioOriginalCopyError extends Error {}
 
 /** An agent revision: the SHA-256 of the canonical document text. */
 export async function studioDocumentRevision(text: string): Promise<string> {
@@ -126,11 +129,22 @@ export class StudioProjectDocument {
     if (text !== undefined) { texts.delete(revision); texts.set(revision, text); }
     return text;
   }
+  getReadOnlyReason(): string | undefined { return this.cache.get(this.path)?.readOnlyReason; }
+  assertWritable(): void {
+    const reason = this.getReadOnlyReason();
+    if (reason) throw new Error(reason);
+  }
   /** Every write replaces the resolved file; an older format first keeps its original bytes. */
   private async publish(entry: StudioEntryResolution, value: Accepted, next: string): Promise<boolean> {
     if (next !== entry.raw) {
-      if (value.legacy && !await this.keepOriginal(entry, LEGACY_ORIGINAL_SUFFIX)) return false;
-      if (value.documentState && !await this.keepOriginal(entry, DOCUMENT_STATE_ORIGINAL_SUFFIX)) return false;
+      try {
+        if (value.legacy && !await this.keepOriginal(entry, LEGACY_ORIGINAL_SUFFIX)) return false;
+        if (value.documentState && !await this.keepOriginal(entry, DOCUMENT_STATE_ORIGINAL_SUFFIX)) return false;
+      } catch (error) {
+        if (!value.legacy) throw error;
+        value.readOnlyReason = `This project is open read-only because Studio couldn't save an original copy in ${deriveStudioAssetsDir(this.path)}/legacy. The project file is unchanged. Make that folder writable, then choose Try again.`;
+        throw new StudioOriginalCopyError(value.readOnlyReason);
+      }
     }
     return writeStudioDocumentAtomically(this.adapter, entry.path, entry.raw, next);
   }
@@ -264,7 +278,7 @@ export class StudioProjectDocument {
   /** Publish `value` with a fresh merge record, so other devices receive what this device accepted. */
   private async republish(entry: StudioEntryResolution, value: Accepted): Promise<Accepted> {
     const at = this.clock.now();
-    const next: Accepted = {...value, source: await this.bytes(value.project, value.text, value.clock, at), at, legacy: false, documentState: false, rewrite: false};
+    const next: Accepted = {...value, source: await this.bytes(value.project, value.text, value.clock, at), at, legacy: false, documentState: false, rewrite: false, readOnlyReason: undefined};
     if (!await this.publish(entry, value, next.source)) throw new StudioWriteRace("Studio file changed during reconciliation; the edit remains pending.");
     this.cache.set(this.path, next);
     return next;
@@ -281,13 +295,19 @@ export class StudioProjectDocument {
     }
     // Older dialects are upgraded at once, and a merge is published so the other writer receives it.
     // Formatting and 6.10 merge state alone are only rewritten by the next edit.
-    if (value.legacy || value.rewrite) value = await this.republish(entry, value);
+    if (value.legacy || value.rewrite) {
+      try { value = await this.republish(entry, value); }
+      catch (error) {
+        // Validation already succeeded. Only a failed original copy may fall back to an in-memory preview.
+        if (!(error instanceof StudioOriginalCopyError)) throw error;
+      }
+    }
     return {value, conflicts: []};
   }
   async refresh(): Promise<StudioDocumentReconciliation> {
     return this.exclusive(async () => {
       const {value, conflicts} = await this.refreshLocked();
-      return {project: cloneStudioProjectSnapshot(value.project), conflicts, source: value.source};
+      return {project: cloneStudioProjectSnapshot(value.project), conflicts, source: value.source, readOnlyReason: value.readOnlyReason};
     });
   }
   /** The file bytes of the current document, as a watcher reports them. */
@@ -310,6 +330,7 @@ export class StudioProjectDocument {
     return this.exclusive(async () => {
       const entry = await resolveStudioEntry(this.adapter, this.path);
       const current = await this.import(entry.raw);
+      this.assertWritable();
       const base = options?.baseProject;
       const merged = !base || serializeStudioProject(base) === current.text
         ? {project, conflicts: [] as string[]}
@@ -331,6 +352,7 @@ export class StudioProjectDocument {
     return this.exclusive(async () => {
       const entry = await resolveStudioEntry(this.adapter, this.path);
       const current = await this.import(entry.raw);
+      this.assertWritable();
       const latest = revision === await studioDocumentRevision(current.text);
       const basisText = latest ? current.text : this.revisionText(revision);
       if (basisText === undefined) throw new Error("This Studio revision is no longer available. Read the document again and retry.");
