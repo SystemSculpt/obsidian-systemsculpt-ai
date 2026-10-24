@@ -615,6 +615,6 @@ export class AccountConnectService {
   private refreshSettingsTab(): void {
     const tab = this.plugin.settingsTab;
     if (!tab?.containerEl?.isConnected) return;
-    void Promise.resolve().then(() => tab.display()).catch(() => undefined);
+    void Promise.resolve().then(() => tab.refreshAccountSection()).catch(() => undefined);
   }
 }

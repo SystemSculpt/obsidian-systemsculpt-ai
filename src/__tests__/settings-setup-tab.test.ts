@@ -1,6 +1,7 @@
 /** @jest-environment jsdom */
 
-import { displaySetupTabContent } from "../settings/SetupTabContent";
+import { renderAccountSection } from "../settings/setup/SetupTabAccountSection";
+import { renderSupportSection } from "../settings/setup/SetupTabSupportSection";
 import { SystemSculptSettingTab } from "../settings/SystemSculptSettingTab";
 import { App, Notice } from "obsidian";
 
@@ -121,7 +122,7 @@ describe("Setup tab SystemSculpt-only layout", () => {
     const plugin = createPluginStub();
     const tab = new SystemSculptSettingTab(app, plugin);
     const container = document.createElement("div");
-    displaySetupTabContent(container, tab, false);
+    renderAccountSection(container, tab, false);
     Array.from(container.querySelectorAll("button"))
       .find((button) => button.textContent === "View plans")!.click();
     expect(new URL(anchorHrefs[0]).pathname).toBe("/pricing");
@@ -130,7 +131,7 @@ describe("Setup tab SystemSculpt-only layout", () => {
     plugin.settings.licenseKey = "skss-test";
     plugin.settings.licenseValid = true;
     container.replaceChildren();
-    displaySetupTabContent(container, tab, true);
+    renderAccountSection(container, tab, true);
     container.querySelector<HTMLElement>('[aria-label="Manage account"]')!.click();
     expect(new URL(anchorHrefs[1]).pathname).toBe("/dashboard/billing");
   });
@@ -140,7 +141,7 @@ describe("Setup tab SystemSculpt-only layout", () => {
     plugin.accountConnectService.hasPendingRequest.mockReturnValue(true);
     const tab = new SystemSculptSettingTab(app, plugin);
     const container = document.createElement("div");
-    displaySetupTabContent(container, tab, false);
+    renderAccountSection(container, tab, false);
     Array.from(container.querySelectorAll("button"))
       .find((button) => button.textContent === "Open the sign-in page again")!.click();
     await flushSetupSectionRender();
@@ -154,7 +155,7 @@ describe("Setup tab SystemSculpt-only layout", () => {
     plugin.accountConnectService.reopen.mockResolvedValue(false);
     const tab = new SystemSculptSettingTab(app, plugin);
     const container = document.createElement("div");
-    displaySetupTabContent(container, tab, false);
+    renderAccountSection(container, tab, false);
     Array.from(container.querySelectorAll("button"))
       .find((button) => button.textContent === "Open the sign-in page again")!.click();
     await flushSetupSectionRender();
@@ -167,7 +168,7 @@ describe("Setup tab SystemSculpt-only layout", () => {
     plugin.accountConnectService.hasPendingRequest.mockReturnValue(true);
     const tab = new SystemSculptSettingTab(app, plugin);
     const container = document.body.createDiv();
-    displaySetupTabContent(container, tab, false);
+    renderAccountSection(container, tab, false);
     const codeInput = container.querySelector<HTMLInputElement>("input[placeholder='Paste code']");
     expect(codeInput).not.toBeNull();
     codeInput!.value = "  code-123  ";
@@ -191,7 +192,7 @@ describe("Setup tab SystemSculpt-only layout", () => {
     const tab = new SystemSculptSettingTab(app, plugin);
     tab.accountConnectOutcome = outcome as any;
     const container = document.createElement("div");
-    displaySetupTabContent(container, tab, false);
+    renderAccountSection(container, tab, false);
 
     const results = container.querySelectorAll('[data-testid="settings.account.connect-result"]');
     expect(results).toHaveLength(1);
@@ -205,7 +206,7 @@ describe("Setup tab SystemSculpt-only layout", () => {
     const tab = new SystemSculptSettingTab(app, plugin);
     tab.accountConnectOutcome = { kind: "no-license", name: null, email: "user@example.test" };
     const container = document.createElement("div");
-    displaySetupTabContent(container, tab, false);
+    renderAccountSection(container, tab, false);
 
     expect(container.querySelector('[data-testid="settings.account.connect-result"]')).toBeNull();
     expect(container.textContent).toContain("Signed in as user@example.test. No active plan yet");
@@ -214,14 +215,20 @@ describe("Setup tab SystemSculpt-only layout", () => {
   it("takes a sign-in result only while Account settings are on screen, and forgets it when settings close", () => {
     const plugin = createPluginStub();
     const tab = new SystemSculptSettingTab(app, plugin);
-    const display = jest.spyOn(tab, "display").mockImplementation(() => undefined);
+    plugin.consumePendingSettingsFocusTab = () => null;
+    plugin.clearPendingSettingsFocusTab = jest.fn();
+    const display = jest.spyOn(tab, "display");
     const outcome = { kind: "error", reason: "expired" } as const;
 
     expect(tab.showAccountConnectOutcome(outcome)).toBe(false);
     expect(tab.accountConnectOutcome).toBeNull();
 
     document.body.appendChild(tab.containerEl);
+    tab.display();
+    const support = tab.containerEl.querySelector('[data-ss-setting="account.documentation"]');
     expect(tab.showAccountConnectOutcome(outcome)).toBe(true);
+    expect(tab.containerEl.querySelector('[data-testid="settings.account.connect-result"]')).not.toBeNull();
+    expect(tab.containerEl.querySelector('[data-ss-setting="account.documentation"]')).toBe(support);
     expect(tab.accountConnectOutcome).toBe(outcome);
     expect(display).toHaveBeenCalledTimes(1);
 
@@ -237,7 +244,8 @@ describe("Setup tab SystemSculpt-only layout", () => {
     const tab = new SystemSculptSettingTab(app, plugin);
     const container = document.createElement("div");
 
-    displaySetupTabContent(container, tab, false);
+    renderAccountSection(container, tab, false);
+    renderSupportSection(container, tab, false);
 
     expect(container.querySelectorAll(".setting-item").length).toBeGreaterThan(0);
     expect(container.querySelector('input[type="password"]')).not.toBeNull();
@@ -258,7 +266,7 @@ describe("Setup tab SystemSculpt-only layout", () => {
     const tab = new SystemSculptSettingTab(app, plugin);
     const container = document.createElement("div");
 
-    displaySetupTabContent(container, tab, true);
+    renderAccountSection(container, tab, true);
     await flushSetupSectionRender();
 
     const detailsButton = Array.from(container.querySelectorAll("button")).find(
@@ -279,7 +287,7 @@ describe("Setup tab SystemSculpt-only layout", () => {
     const tab = new SystemSculptSettingTab(app, plugin);
     const container = document.createElement("div");
 
-    displaySetupTabContent(container, tab, true);
+    renderAccountSection(container, tab, true);
     await flushSetupSectionRender();
 
     expect(plugin.embeddingsManager.resumeProcessing).toHaveBeenCalledTimes(1);
@@ -306,7 +314,7 @@ describe("Setup tab SystemSculpt-only layout", () => {
     const tab = new SystemSculptSettingTab(app, plugin);
     const container = document.createElement("div");
 
-    displaySetupTabContent(container, tab, true);
+    renderAccountSection(container, tab, true);
     await flushSetupSectionRender();
 
     expect(container.textContent).toContain("Available: 681 credits");
@@ -335,7 +343,7 @@ describe("Setup tab SystemSculpt-only layout", () => {
     const tab = new SystemSculptSettingTab(app, plugin);
     const container = document.createElement("div");
 
-    displaySetupTabContent(container, tab, true);
+    renderAccountSection(container, tab, true);
     await flushSetupSectionRender();
 
     expect(container.textContent).toContain("Usage mode");
@@ -369,7 +377,7 @@ describe("Setup tab SystemSculpt-only layout", () => {
 
     const tab = new SystemSculptSettingTab(app, plugin);
     const container = document.createElement("div");
-    displaySetupTabContent(container, tab, true);
+    renderAccountSection(container, tab, true);
     await flushSetupSectionRender();
 
     const licenseInput = container.querySelector<HTMLInputElement>('input[type="password"]');
@@ -391,9 +399,9 @@ describe("Setup tab SystemSculpt-only layout", () => {
     plugin.settings.licenseValid = true;
     plugin.settings.licenseKey = "skss-saved-secret";
     const tab = new SystemSculptSettingTab(app, plugin);
-    tab.display = jest.fn();
+    tab.refreshAccountSection = jest.fn();
     const container = document.createElement("div");
-    displaySetupTabContent(container, tab, true);
+    renderAccountSection(container, tab, true);
 
     const licenseInput = container.querySelector<HTMLInputElement>('input[type="password"]')!;
     licenseInput.value = "skss-replacement";
@@ -411,7 +419,7 @@ describe("Setup tab SystemSculpt-only layout", () => {
     // The button's "Working..." state is the progress; the re-rendered
     // account row is the result.
     expect(mockedNotice).not.toHaveBeenCalled();
-    expect(tab.display).toHaveBeenCalledTimes(1);
+    expect(tab.refreshAccountSection).toHaveBeenCalledTimes(1);
   });
 
   it.each(["returns false", "throws"])(
@@ -428,9 +436,9 @@ describe("Setup tab SystemSculpt-only layout", () => {
         plugin.getLicenseManager().validateLicenseKeyDetailed.mockResolvedValue({ outcome: "rejected", isValid: false, reason: "invalid" });
       }
       const tab = new SystemSculptSettingTab(app, plugin);
-      tab.display = jest.fn();
+      tab.refreshAccountSection = jest.fn();
       const container = document.createElement("div");
-      displaySetupTabContent(container, tab, true);
+      renderAccountSection(container, tab, true);
 
       const licenseInput = container.querySelector<HTMLInputElement>('input[type="password"]')!;
       licenseInput.value = "skss-invalid-replacement";
@@ -455,9 +463,9 @@ describe("Setup tab SystemSculpt-only layout", () => {
     plugin.settings.licenseValid = true;
     plugin.settings.licenseKey = "skss-saved-secret";
     const tab = new SystemSculptSettingTab(app, plugin);
-    tab.display = jest.fn();
+    tab.refreshAccountSection = jest.fn();
     const container = document.createElement("div");
-    displaySetupTabContent(container, tab, true);
+    renderAccountSection(container, tab, true);
 
     const deactivate = Array.from(container.querySelectorAll("button")).find(
       (button) => button.textContent?.trim() === "Deactivate"
@@ -475,7 +483,7 @@ describe("Setup tab SystemSculpt-only layout", () => {
       lastValidated: 0,
     });
     expect(container.innerHTML).not.toContain("skss-saved-secret");
-    expect(tab.display).toHaveBeenCalledTimes(1);
+    expect(tab.refreshAccountSection).toHaveBeenCalledTimes(1);
     expect(mockedNotice).not.toHaveBeenCalled();
   });
 
@@ -485,9 +493,9 @@ describe("Setup tab SystemSculpt-only layout", () => {
       new Error("upstream leaked skss-secret and request details")
     );
     const tab = new SystemSculptSettingTab(app, plugin);
-    tab.display = jest.fn();
+    tab.refreshAccountSection = jest.fn();
     const container = document.createElement("div");
-    displaySetupTabContent(container, tab, false);
+    renderAccountSection(container, tab, false);
 
     const licenseInput = container.querySelector<HTMLInputElement>('input[type="password"]')!;
     licenseInput.value = "skss-secret";
@@ -508,7 +516,7 @@ describe("Setup tab SystemSculpt-only layout", () => {
     const tab = new SystemSculptSettingTab(app, plugin);
     const container = document.createElement("div");
 
-    displaySetupTabContent(container, tab, true);
+    renderAccountSection(container, tab, true);
     await flushSetupSectionRender();
 
     const annualSwitchButton = Array.from(container.querySelectorAll("button")).find(
@@ -542,7 +550,7 @@ describe("Setup tab SystemSculpt-only layout", () => {
     const tab = new SystemSculptSettingTab(app, plugin);
     const container = document.createElement("div");
 
-    displaySetupTabContent(container, tab, true);
+    renderAccountSection(container, tab, true);
     await flushSetupSectionRender();
 
     const annualSwitchButton = Array.from(container.querySelectorAll("button")).find(

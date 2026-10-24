@@ -1,5 +1,6 @@
 import { SystemSculptSettingTab } from "./SystemSculptSettingTab";
-import { displaySetupTabContent } from "./SetupTabContent";
+import { renderAccountSection } from "./setup/SetupTabAccountSection";
+import { renderSupportSection } from "./setup/SetupTabSupportSection";
 import { displayChatTabContent } from "./ChatTabContent";
 import { displayRecorderTabContent } from "./RecorderTabContent";
 import { displayDirectoriesTabContent } from "./DirectoriesTabContent";
@@ -17,17 +18,13 @@ export interface SettingsTabConfig {
 }
 
 export function buildSettingsTabConfigs(tab: SystemSculptSettingTab): SettingsTabConfig[] {
-  const isProActive = tab.plugin.settings.licenseValid === true;
-
   const configs: SettingsTabConfig[] = [
     {
       id: "account",
       label: "Account",
       sections: [
-        (parent) => {
-          const section = parent.createDiv();
-          displaySetupTabContent(section, tab, isProActive);
-        },
+        (parent) => renderAccountSection(parent, tab, tab.plugin.settings.licenseValid === true),
+        (parent) => renderSupportSection(parent, tab, tab.plugin.settings.licenseValid === true),
       ],
       anchor: {
         title: "SystemSculpt Account, License, Credits, Support",
@@ -41,10 +38,7 @@ export function buildSettingsTabConfigs(tab: SystemSculptSettingTab): SettingsTa
       id: "chat",
       label: "Chat",
       sections: [
-        (parent) => {
-          const section = parent.createDiv();
-          void displayChatTabContent(section, tab);
-        },
+        (parent) => { void displayChatTabContent(parent, tab); },
       ],
       anchor: {
         title: "Chat Preferences, Display",
@@ -55,10 +49,7 @@ export function buildSettingsTabConfigs(tab: SystemSculptSettingTab): SettingsTa
       id: "workflow",
       label: "Workflow",
       sections: [
-        (parent) => {
-          const section = parent.createDiv();
-          void displayRecorderTabContent(section, tab);
-        },
+        (parent) => { void displayRecorderTabContent(parent, tab); },
       ],
       anchor: {
         title: "Audio Capture, Recording, Transcription",
@@ -82,24 +73,17 @@ export function buildSettingsTabConfigs(tab: SystemSculptSettingTab): SettingsTa
       id: "workspace",
       label: "Workspace",
       sections: [
-        (parent) => {
-          const section = parent.createDiv();
-          displayDirectoriesTabContent(section, tab);
-        },
-        (parent) => {
-          const section = parent.createDiv();
-          displayPhoneCapturesTabContent(section, tab);
-        },
-        (parent) => {
-          const section = parent.createDiv();
-          displayBackupTabContent(section, tab);
-        },
+        (parent) => displayDirectoriesTabContent(parent, tab),
+        (parent) => displayPhoneCapturesTabContent(parent, tab),
+        (parent) => displayBackupTabContent(parent, tab),
       ],
-      anchor: {
-        title: tab.plugin.settings.phoneCapturesLinked === true
-          ? "Directories, Files, iOS Captures, Backups, Restore"
-          : "Directories, Files, Backups, Restore",
-        desc: "Control vault folders, verify or repair the SystemSculpt workspace layout, and manage backups and restores for client-side settings.",
+      get anchor() {
+        return {
+          title: tab.plugin.settings.phoneCapturesLinked === true
+            ? "Directories, Files, iOS Captures, Backups, Restore"
+            : "Directories, Files, Backups, Restore",
+          desc: "Control vault folders, verify or repair the SystemSculpt workspace layout, and manage backups and restores for client-side settings.",
+        };
       },
     },
     {

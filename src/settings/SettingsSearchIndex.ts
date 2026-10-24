@@ -5,7 +5,8 @@ export interface SettingsIndexEntry {
   tabLabel: string;
   title: string;
   description: string;
-  element: HTMLElement;
+  element?: HTMLElement;
+  settingId?: string;
   kind: SettingsIndexEntryKind;
 }
 
@@ -158,6 +159,7 @@ export function buildSettingsIndexFromRoot(
         title,
         description,
         element: setting,
+        settingId: setting.dataset.ssSetting,
         kind: "setting",
       });
     }

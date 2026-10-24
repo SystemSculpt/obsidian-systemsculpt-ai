@@ -138,7 +138,7 @@ describe("Backup settings tab", () => {
     };
     const display = jest.fn();
     const container = document.createElement("div");
-    displayBackupTabContent(container, { app, plugin, display } as any);
+    displayBackupTabContent(container, { app, plugin, refreshSettings: display } as any);
     const select = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Select backup");
     expect(select).toBeDefined();
     select!.click();

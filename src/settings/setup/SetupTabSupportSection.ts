@@ -1,4 +1,4 @@
-import { Setting } from "obsidian";
+import { createCatalogSetting } from "../SettingsCatalog";
 import { SYSTEMSCULPT_WEBSITE } from "../../constants/externalServices";
 import { createExternalHelpLink } from "../uiHelpers";
 import { SystemSculptSettingTab } from "../SystemSculptSettingTab";
@@ -10,9 +10,7 @@ export function renderSupportSection(
 ): void {
   root.createEl("h3", { text: "Help & resources" });
 
-  const linksSetting = new Setting(root)
-    .setName("Documentation")
-    .setDesc("Guides, troubleshooting, and ways to contact support.");
+  const linksSetting = createCatalogSetting(root, "account.documentation");
 
   const linkContainer = linksSetting.controlEl.createDiv({ cls: "ss-help-links" });
   createExternalHelpLink(linkContainer, {

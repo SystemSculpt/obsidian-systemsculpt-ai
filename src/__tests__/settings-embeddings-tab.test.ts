@@ -49,7 +49,7 @@ describe("Embeddings settings tab", () => {
     const tab: any = {
       app,
       plugin,
-      display: jest.fn(),
+      invalidateSearchIndex: jest.fn(),
     };
 
     await displayEmbeddingsTabContent(container, tab);
@@ -91,7 +91,7 @@ describe("Embeddings settings tab", () => {
     };
     const container = document.createElement("div");
 
-    await displayEmbeddingsTabContent(container, { app, plugin, display: jest.fn() } as any);
+    await displayEmbeddingsTabContent(container, { app, plugin, invalidateSearchIndex: jest.fn() } as any);
 
     const status = Array.from(container.querySelectorAll(".setting-item"))
       .find((item) => item.querySelector(".setting-item-name")?.textContent === "Index status");
