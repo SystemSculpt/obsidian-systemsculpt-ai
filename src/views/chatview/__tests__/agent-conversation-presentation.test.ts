@@ -1,3 +1,4 @@
+import type { AgentConversationSnapshot, AgentToolPart } from "../../../chat/ChatConversation";
 import {
   presentAgentConversation,
   presentAgentError,
@@ -135,6 +136,7 @@ describe("AgentConversationPresentation product-copy boundary", () => {
     }, false)).toEqual({
       heading: "Out of credits",
       message: "You have no credits left. Add credits to continue using Chat.",
+      action: "add-credits",
     });
   });
 
@@ -173,7 +175,7 @@ describe("AgentConversationPresentation product-copy boundary", () => {
     expect(presentAgentError({
       code,
       message: "Unsafe remote billing detail.",
-    }, false)).toEqual({ heading, message });
+    }, false)).toEqual({ heading, message, action: "add-credits" });
   });
 
   it.each(["out_of_credits", "insufficient_credits", "payment_required"])(
@@ -229,7 +231,7 @@ describe("AgentConversationPresentation product-copy boundary", () => {
       parts: [visibleText],
     }, true);
 
-    expect(presentation.activityStatus).toBe("Thinking");
+    expect(presentation.activityStatus).toBe("Writing");
     expect(presentation.visibleParts).toEqual([visibleText]);
   });
 
@@ -320,7 +322,98 @@ describe("AgentConversationPresentation product-copy boundary", () => {
     expect(presentAgentConversation({ ...snapshot, status: "running", parts: [{ ...snapshot.parts[0], state: "approved" }] }, true).phase).toBe("acting");
   });
 
-  it("never turns a server-owned approval-shaped part into vault approval UX", () => {
+  it.each([
+    { name: "Bash", native: { agent: "claude" as const, workingDirectory: "/vault" }, expected: "Waiting for your approval" },
+    { name: "AskUserQuestion", native: { agent: "claude" as const, workingDirectory: "/vault" }, expected: "Waiting for your answer" },
+    { name: "requestUserInput", native: { agent: "codex" as const, workingDirectory: "/vault", requestMethod: "item/tool/requestUserInput" }, expected: "Waiting for your answer" },
+  ])("projects native $name as a user wait even at the server location", ({ name, native, expected }) => {
+    const presentation = presentAgentConversation({
+      runId: "run-native-wait",
+      turnId: "user-native-wait",
+      status: "waiting",
+      phase: "waiting",
+      elapsedMs: 45_000,
+      messages: [],
+      parts: [{
+        id: "native-wait",
+        kind: "tool",
+        messageId: "assistant-native-wait",
+        callId: "call-native-wait",
+        name,
+        native,
+        location: "server",
+        input: {},
+        state: "approval-required",
+        approvalId: "approval-native-wait",
+        order: 0,
+      }],
+    }, true);
+
+    expect(presentation).toMatchObject({
+      phase: "awaiting-approval",
+      busy: true,
+      composerRunning: true,
+      activityStatus: expected,
+    });
+  });
+
+  it.each(["hosted", "native"] as const)("keeps a pending %s approval actionable through a connection interruption", (backend) => {
+    const pending: AgentToolPart = {
+      id: "pending-disconnected",
+      kind: "tool",
+      messageId: "assistant-disconnected",
+      callId: "call-disconnected",
+      name: backend === "native" ? "Bash" : "write",
+      location: backend === "native" ? "server" : "vault",
+      ...(backend === "native" ? { native: { agent: "claude" as const, workingDirectory: "/vault" } } : {}),
+      input: {},
+      state: "approval-required",
+      approvalId: "approval-disconnected",
+      order: 0,
+    };
+    const disconnected: AgentConversationSnapshot = {
+      runId: "run-disconnected",
+      turnId: "user-disconnected",
+      status: "running",
+      phase: "retrying",
+      statusLabel: "Connection interrupted",
+      messages: [],
+      parts: [pending],
+    };
+
+    expect(presentAgentConversation(disconnected, true)).toMatchObject({
+      phase: "awaiting-approval",
+      busy: true,
+      composerRunning: true,
+      activityStatus: "Waiting for your approval",
+    });
+    expect(presentAgentConversation({
+      ...disconnected,
+      parts: [{ ...pending, state: "approved" }],
+    }, true)).toMatchObject({
+      phase: "recovering",
+      busy: true,
+      activityStatus: "Reconnecting",
+    });
+    expect(presentAgentConversation({ ...disconnected, status: "failed" }, true)).toMatchObject({
+      phase: "failed",
+      busy: false,
+      composerRunning: false,
+      activityStatus: "Failed",
+    });
+  });
+
+  it("uses a connection-specific label before any response arrives", () => {
+    expect(presentAgentConversation(null, true)).toMatchObject({
+      phase: "submitting",
+      busy: true,
+      composerRunning: true,
+      activityStatus: "Connecting…",
+      visibleParts: [],
+    });
+  });
+
+  it.each(["write", "AskUserQuestion", "requestUserInput"])("never turns a server-owned %s approval-shaped part into vault approval UX", (name) => {
     const presentation = presentAgentConversation({
       runId: "run-server-approval",
       turnId: "user-server-approval",
@@ -336,7 +429,7 @@ describe("AgentConversationPresentation product-copy boundary", () => {
         kind: "tool",
         messageId: "assistant-server-approval",
         callId: "call-server-approval",
-        name: "write",
+        name,
         location: "server",
         input: {},
         state: "approval-required",

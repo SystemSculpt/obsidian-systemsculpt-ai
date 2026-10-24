@@ -1,0 +1,131 @@
+/** @jest-environment jsdom */
+import { App } from "obsidian";
+import type { AgentConversationSnapshot, AgentToolPart } from "../../../chat/ChatConversation";
+import { AgentConversationRenderer } from "../AgentConversationRenderer";
+import { presentAgentConversation, presentAgentError } from "../AgentConversationPresentation";
+
+function tool(overrides: Partial<AgentToolPart> = {}): AgentToolPart {
+  return { kind: "tool", id: "tool-1", callId: "call-1", messageId: "answer", order: 0,
+    name: "read", input: { paths: ["Notes/Plan.md"] }, state: "running", location: "vault", ...overrides };
+}
+function snapshot(parts: AgentConversationSnapshot["parts"], status: AgentConversationSnapshot["status"] = "running"): AgentConversationSnapshot {
+  return { runId: "run", turnId: "turn", elapsedMs: 2_000, status, messages: [], parts };
+}
+function setup() {
+  const onAnnounce = jest.fn();
+  const onRetryFailedTurn = jest.fn();
+  const onDetectAgain = jest.fn();
+  const parent = document.body.createDiv();
+  const renderer = new AgentConversationRenderer(parent, { app: new App(), sourcePath: () => "",
+    backendName: () => "Claude Code", onAnnounce, onRetryFailedTurn, onDetectAgain,
+    onUseHosted: jest.fn(), onOpenCredits: jest.fn(), onApprove: jest.fn(), onOpenArtifact: jest.fn(), onCopyArtifactPath: jest.fn() });
+  renderer.load();
+  return { renderer, parent, onAnnounce, onRetryFailedTurn, onDetectAgain };
+}
+async function render(renderer: AgentConversationRenderer, value: AgentConversationSnapshot) {
+  await renderer.renderActive(value, presentAgentConversation(value, false));
+}
+
+describe("R3 conversation semantics", () => {
+  afterEach(() => { document.body.empty(); jest.useRealTimers(); jest.clearAllMocks(); });
+
+  it("delays loading placeholders by 300ms and cancels fast loads", () => {
+    jest.useFakeTimers();
+    const { renderer, parent, onAnnounce } = setup();
+    renderer.setLoading(true);
+    jest.advanceTimersByTime(299);
+    expect(parent.querySelector('[data-testid="chat.loading"]')).toBeNull();
+    renderer.setLoading(false);
+    jest.advanceTimersByTime(1);
+    expect(onAnnounce).not.toHaveBeenCalled();
+    renderer.setLoading(true);
+    jest.advanceTimersByTime(300);
+    expect(parent.querySelectorAll('.systemsculpt-agent-loading-bar')).toHaveLength(3);
+    expect(onAnnounce).toHaveBeenCalledWith("Loading chat");
+    renderer.unload();
+    expect(parent.querySelector('[data-testid="chat.loading"]')).toBeNull();
+  });
+
+  it("labels articles without making the transcript a live region", async () => {
+    const { renderer, parent } = setup();
+    await renderer.renderHistory([{ role: "user", message_id: "turn", content: "Hello" },
+      { role: "assistant", message_id: "answer", content: "Welcome" }]);
+    expect(renderer.element.getAttribute("aria-live")).toBe("off");
+    expect([...parent.querySelectorAll('[role="article"] > h3')].map(e => e.textContent)).toEqual(["You", "Claude Code"]);
+    renderer.unload();
+  });
+
+  it("deduplicates a notice until another saved chat loads", () => {
+    const { renderer, parent } = setup();
+    renderer.showNotice("Auto is unavailable");
+    parent.querySelector<HTMLButtonElement>('[data-testid="chat.notice.dismiss"]')!.click();
+    renderer.showNotice("Auto is unavailable");
+    expect(parent.querySelector('[data-testid="chat.notice"]')).toBeNull();
+    renderer.setLoading(true);
+    renderer.setLoading(false);
+    renderer.showNotice("Auto is unavailable");
+    expect(parent.querySelectorAll('[data-testid="chat.notice"]')).toHaveLength(1);
+    renderer.unload();
+  });
+
+  it("announces one start and completion but never text deltas", async () => {
+    const { renderer, onAnnounce } = setup();
+    const first = snapshot([{ kind: "text", id: "text", messageId: "answer", order: 0, markdown: "Hello", state: "streaming" }]);
+    await render(renderer, first);
+    await render(renderer, { ...first, parts: [{ ...first.parts[0], kind: "text", messageId: "answer", markdown: "Hello again", state: "streaming" }] });
+    await render(renderer, { ...first, status: "completed", parts: [{ ...first.parts[0], kind: "text", messageId: "answer", markdown: "Hello again", state: "complete" }] });
+    expect(onAnnounce.mock.calls).toEqual([["Claude Code is working"], ["Claude Code replied"]]);
+    renderer.unload();
+  });
+
+  it("offers retry for native failures even without a provider retry-message ID", async () => {
+    const { renderer, parent, onRetryFailedTurn } = setup();
+    await render(renderer, snapshot([{ kind: "error", id: "failed", order: 0, retryable: true,
+      error: { code: "local_claude_failed", message: "synthetic diagnostic", retryable: true } }], "failed"));
+    const retry = parent.querySelector<HTMLButtonElement>('[data-testid="chat.turn.retry-failed"]');
+    expect(retry).not.toBeNull();
+    retry!.click();
+    expect(onRetryFailedTurn).toHaveBeenCalledWith("turn");
+    const details = parent.querySelector('[data-testid="chat.turn.error-details"]')!.closest('details')!;
+    expect(details.open).toBe(false);
+    expect(details.textContent).toContain("synthetic diagnostic");
+    renderer.unload();
+  });
+
+  it("keeps native approval waits spinner-free and timer-free", async () => {
+    const { renderer, parent } = setup();
+    const pending = tool({ name: "Bash", location: "server", input: { command: "pwd" }, state: "approval-required", approvalId: "approval",
+      native: { agent: "claude", workingDirectory: "/synthetic" } });
+    await render(renderer, snapshot([pending]));
+    const status = parent.querySelector('.systemsculpt-agent-tail-status')!;
+    expect(status.textContent).toBe("Waiting for your approval");
+    expect(status.querySelector('.is-animated')).toBeNull();
+    expect(status.hasAttribute('data-agent-working-timer')).toBe(false);
+    renderer.unload();
+  });
+
+  it("keeps Details lazy and exposes a real keyboard disclosure", async () => {
+    const { renderer, parent } = setup();
+    await render(renderer, snapshot([tool({ name: "Bash", input: { command: "printf demo" }, native: { agent: "claude", workingDirectory: "/synthetic" } })]));
+    const shell = parent.querySelector<HTMLDetailsElement>('details.systemsculpt-agent-tool')!;
+    const summary = shell.querySelector('summary')!;
+    expect(summary.getAttribute('role')).toBe('button');
+    expect(summary.getAttribute('aria-expanded')).toBe('false');
+    expect(document.getElementById(summary.getAttribute('aria-controls')!)).not.toBeNull();
+    expect(shell.querySelector('.ss-native-tool-preview')).toBeNull();
+    shell.open = true; shell.dispatchEvent(new Event('toggle'));
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    expect(summary.getAttribute('aria-expanded')).toBe('true');
+    expect(shell.textContent).toContain('printf demo');
+    renderer.unload();
+  });
+});
+
+describe("native friendly failures", () => {
+  it.each([['claude', 'Claude Code'], ['codex', 'Codex']])("separates missing %s installation from diagnostics", (agent, name) => {
+    expect(presentAgentError({ code: `local_${agent}_failed`, message: 'spawn ENOENT' }, true)).toMatchObject({
+      heading: `${name} isn't installed on this computer`, action: 'detect',
+    });
+    expect(presentAgentError({ code: `local_${agent}_failed`, message: 'Not signed in' }, true)).toMatchObject({ action: 'sign-in' });
+  });
+});

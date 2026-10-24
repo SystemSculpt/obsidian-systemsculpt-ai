@@ -70,3 +70,62 @@
   background: var(--ss-danger-tint);
   color: var(--ss-danger);
 }
+
+.systemsculpt-agent-loading {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-5);
+  width: 100%;
+  padding-block: var(--ss-space-5);
+}
+
+.systemsculpt-agent-loading-bar {
+  min-height: 3em;
+  border-radius: var(--ss-radius-sm);
+  background: linear-gradient(90deg, var(--ss-surface-2), var(--ss-surface-1), var(--ss-surface-2));
+  background-size: 200% 100%;
+  animation: ss-chat-loading 1.2s linear infinite;
+}
+
+.systemsculpt-agent-loading-bar:nth-of-type(1) {
+  width: 65%;
+  align-self: flex-end;
+  border-radius: var(--ss-radius-lg);
+}
+
+.systemsculpt-agent-conversation.is-loading-chat > .systemsculpt-agent-history,
+.systemsculpt-agent-conversation.is-loading-chat > .systemsculpt-agent-active-run {
+  display: none;
+}
+
+.systemsculpt-agent-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ss-space-2);
+  margin-block: var(--ss-space-3);
+  padding: var(--ss-space-3);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-md);
+  color: var(--ss-ink-muted);
+  background: var(--ss-surface-1);
+  font-size: var(--ss-text-base);
+}
+
+.systemsculpt-agent-notice > span { flex: 1; }
+
+.systemsculpt-agent-error-details pre {
+  max-width: 100%;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@keyframes ss-chat-loading {
+  to { background-position: -200% 0; }
+}
+
+.is-reduced-motion .systemsculpt-agent-loading-bar { animation: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .systemsculpt-agent-loading-bar { animation: none; }
+}
