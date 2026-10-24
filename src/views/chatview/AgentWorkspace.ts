@@ -30,7 +30,7 @@ import type { ApprovalAnswer } from "./AgentApprovalCards";
 import type { AgentToolPart } from "../../chat/ChatConversation";
 import { presentEmptyState, type AgentChromeState } from "./AgentChatChrome";
 import { AgentEmptyState, type AgentEmptyStateOptions } from "./AgentEmptyState";
-import { AgentRunLine, returnFocusAfterMenu, type AgentRunLineOptions } from "./AgentRunLine";
+import { AgentRunLine, containMenuEscape, returnFocusAfterMenu, type AgentRunLineOptions } from "./AgentRunLine";
 import { ChatHistoryPanel, type ChatHistoryPanelOptions } from "../history/ChatHistoryPanel";
 import {
   AgentConversationRenderer,
@@ -200,6 +200,7 @@ export class AgentWorkspace extends Component {
   private announceTimer: number | null = null;
   private chromeKey = "";
   private historyReturnFocus: HTMLElement | null = null;
+  private moreMenu: Menu | null = null;
   private showPlanOffer = false;
   private readonly banner: HTMLElement;
   private readonly queueElement: HTMLElement;
@@ -464,10 +465,15 @@ export class AgentWorkspace extends Component {
 
   private showMoreMenu(anchor: HTMLElement): void {
     // The same in-view menu style as the run line, whatever the native-menu setting.
+    this.moreMenu?.hide();
     const menu = new Menu().setUseNativeMenu(false);
+    this.moreMenu = menu;
+    containMenuEscape(menu, anchor.ownerDocument);
     this.options.buildMoreMenu?.(menu);
     anchor.setAttribute("aria-expanded", "true");
     menu.onHide(() => {
+      if (this.moreMenu !== menu) return;
+      this.moreMenu = null;
       anchor.setAttribute("aria-expanded", "false");
       returnFocusAfterMenu(this.element, () => this.titleElement.querySelector("input") ? null : anchor);
     });
@@ -1327,6 +1333,8 @@ export class AgentWorkspace extends Component {
   }
 
   public override onunload(): void {
+    this.moreMenu?.hide();
+    this.moreMenu = null;
     this.pendingDisclosureLayoutMutation?.cancel();
     this.unloaded = true;
     this.lifecycleGeneration += 1;
