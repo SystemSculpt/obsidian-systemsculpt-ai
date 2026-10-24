@@ -339,7 +339,7 @@ describe("ManagedChatDocumentAttachmentProcessor through the plugin capability g
     } finally { h.collection.dispose(); h.restore(); }
   });
 
-  it.each(["create", "upload"] as const)("recovers the same operation after an interrupted %s response", async (phase) => {
+  it.each(["create", "upload"] as const)("recovers the same operation after exhausting transient %s retries", async (phase) => {
     const h = harness();
     try {
       const nativeRequest = requestUrl as jest.Mock;
@@ -353,33 +353,32 @@ describe("ManagedChatDocumentAttachmentProcessor through the plugin capability g
           dispatches.push(request);
           const response = await route(request);
           // The service received the dispatch; only its response was lost.
-          if (dispatches.length <= 2) return new Promise(() => undefined);
+          if (dispatches.length <= 8) return new Promise(() => undefined);
           return response;
         }
         return route(request);
       });
       const pending = h.collection.addFiles([pdf]);
       await until(() => dispatches.length === 1);
-      await jest.advanceTimersByTimeAsync(120_000);
+      await jest.advanceTimersByTimeAsync(4 * 120_000 + 7_000);
       expect((await pending).issues).toHaveLength(1);
       const operationId = h.operationId();
       await expect(h.recovery.read("document_processing", operationId)).resolves.toMatchObject({
         phase: phase === "create" ? "create_dispatching" : "part_dispatching",
       });
       const retryInterrupted = h.collection.retry(h.collection.displaySnapshot()[0].id);
-      await until(() => dispatches.length === 2);
-      await jest.advanceTimersByTimeAsync(120_000);
+      await until(() => dispatches.length === 5);
+      await jest.advanceTimersByTimeAsync(4 * 120_000 + 7_000);
       expect((await retryInterrupted).issues).toHaveLength(1);
       h.state.downloadReady = true;
       const retried = await h.collection.retry(h.collection.displaySnapshot()[0].id);
       expect(retried.issues).toEqual([]);
       expect(retried.accepted).toHaveLength(1);
-      expect(dispatches).toHaveLength(3);
-      expect(dispatches[1].body).toEqual(dispatches[0].body);
-      expect(dispatches[2].body).toEqual(dispatches[0].body);
+      expect(dispatches).toHaveLength(9);
+      for (const dispatch of dispatches) expect(dispatch.body).toEqual(dispatches[0].body);
       if (phase === "create") {
-        expect(dispatches.map((request) => request.headers["idempotency-key"]))
-          .toEqual([`${operationId}:create`, `${operationId}:create`, `${operationId}:create`]);
+        expect(new Set(dispatches.map((request) => request.headers["idempotency-key"])))
+          .toEqual(new Set([`${operationId}:create`]));
       }
       expect(new Set(h.state.creates)).toEqual(new Set([`${operationId}:create`]));
       expect(h.admission.acquireLease).toHaveBeenCalledTimes(1);
