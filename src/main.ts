@@ -2036,7 +2036,7 @@ export default class SystemSculptPlugin extends Plugin {
 
   /** Opens a fresh chat tab — the post-sign-in "Get started" destination. */
   public async openNewChat(): Promise<void> {
-    await this.ensureCommandManager().openChatView();
+    await this.getViewManager().openChat();
   }
 
   public async openCreditsBalanceModal(options?: {

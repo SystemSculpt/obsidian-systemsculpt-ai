@@ -1,4 +1,5 @@
-import { App, WorkspaceLeaf, Notice, ItemView } from "obsidian";
+import { App, WorkspaceLeaf, Notice, ItemView, TFile } from "obsidian";
+import { generateDefaultChatTitle } from "../../utils/titleUtils";
 import type SystemSculptPlugin from "../../main";
 import { RibbonManager } from "./ribbons";
 import { ChatState } from "../../types/index";
@@ -35,7 +36,7 @@ interface ChatViewState {
 export class ViewManager {
   private plugin: SystemSculptPlugin;
   private app: App;
-  private ribbonManager: RibbonManager;
+  readonly ribbonManager: RibbonManager;
   private hasStarted: boolean = false;
   private isInitialized: boolean = false;
   private isInitializing: boolean = false;
@@ -306,6 +307,26 @@ export class ViewManager {
   }
 
 
+
+  /** Open one fresh chat through Obsidian's registered view factory. */
+  async openChat({ file }: { file?: TFile } = {}): Promise<void> {
+    const { workspace } = this.app;
+    const leaf = workspace.getLeaf("tab");
+    await leaf.setViewState({
+      type: CHAT_VIEW_TYPE,
+      active: true,
+      state: {
+        chatId: "",
+        chatTitle: generateDefaultChatTitle(),
+      },
+    });
+    workspace.setActiveLeaf(leaf, { focus: true });
+    if (file) {
+      const view = leaf.view as AgentChatView;
+      await view.addFileToContext(file);
+      view.focusInput();
+    }
+  }
 
   async activateEmbeddingsView(): Promise<EmbeddingsView> {
     // Check if we already have an embeddings view open

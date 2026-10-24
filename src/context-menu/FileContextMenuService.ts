@@ -32,11 +32,9 @@ import {
   type DocumentProcessingPanelLauncher,
 } from "../modals/DocumentProcessingPanel";
 import { tryCopyImageFileToClipboard } from "../utils/clipboard";
-import { getSurfaceOwnerWindow } from "../core/ui/surface";
 import { isPlanAccessError } from "../utils/errors";
 import { requireActivePlan, UpgradePlanModal } from "../modals/UpgradePlanModal";
 import { STUDIO_DISPLAY_NAME } from "../studio/types";
-import { AgentChatView } from "../views/chatview/AgentChatView";
 
 const CHAT_TEXT_EXTENSIONS = new Set(["md", "txt", "markdown"]);
 const COPYABLE_IMAGE_EXTENSIONS = new Set([
@@ -84,23 +82,6 @@ interface MenuContext {
   multiSelectCount?: number;
 }
 
-class DefaultChatWithFileLauncher implements ChatWithFileLauncher {
-  constructor(private readonly app: App, private readonly plugin: SystemSculptPlugin) {}
-
-  async open(file: TFile): Promise<void> {
-    const leaf = this.app.workspace.getLeaf("tab");
-    const view = new AgentChatView(leaf, this.plugin);
-    await leaf.open(view);
-    await this.focusLeaf(leaf, view.containerEl);
-    await view.addFileToContext(file);
-  }
-
-  private async focusLeaf(leaf: WorkspaceLeaf, host: HTMLElement) {
-    await new Promise((resolve) => getSurfaceOwnerWindow(host).setTimeout(resolve, 50));
-    this.app.workspace.setActiveLeaf(leaf, { focus: true });
-  }
-}
-
 export class FileContextMenuService {
   private readonly app: App;
   private readonly plugin: SystemSculptPlugin;
@@ -118,8 +99,9 @@ export class FileContextMenuService {
     this.documentProcessor =
       options.documentProcessor ??
       DocumentProcessingService.getInstance(this.app, this.plugin);
-    this.chatLauncher =
-      options.chatLauncher ?? new DefaultChatWithFileLauncher(this.app, this.plugin);
+    this.chatLauncher = options.chatLauncher ?? {
+      open: (file) => this.plugin.getViewManager().openChat({ file }),
+    };
     this.pluginLogger =
       options.pluginLogger ??
       this.plugin.getPluginLogger();
