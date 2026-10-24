@@ -141,6 +141,18 @@ test("Agent workspace CSS stays feature-owned under views/agent-workspace", () =
   }
 });
 
+test("chat header titles ellipsize instead of inheriting Obsidian's centered button flex layout", () => {
+  const css = read("src/css/views/agent-workspace/shell.css");
+  const titleButton = /\.systemsculpt-agent-header \.systemsculpt-agent-title-button\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+
+  // text-overflow applies to inline text in a block, not an anonymous flex item.
+  assert.match(titleButton, /display:\s*block;/);
+  assert.match(titleButton, /overflow:\s*hidden;/);
+  assert.match(titleButton, /text-align:\s*left;/);
+  assert.match(titleButton, /text-overflow:\s*ellipsis;/);
+  assert.match(titleButton, /white-space:\s*nowrap;/);
+});
+
 test("every discoverable Obsidian host mounts a direct or named deep surface adapter", () => {
   const sourceRoot = path.join(root, "src");
   const candidates = listProductionTypeScript(sourceRoot)
