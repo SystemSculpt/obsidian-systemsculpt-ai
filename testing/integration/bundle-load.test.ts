@@ -88,6 +88,50 @@ describe("built bundle (main.js)", () => {
     plugin.unload();
   });
 
+  it("routes settings changes only to affected services after production startup", async () => {
+    const bundleModule = require(BUNDLE_PATH);
+    const PluginClass = bundleModule?.default ?? bundleModule;
+    const { App } = require("obsidian");
+    const app = new App();
+    app.workspace.updateOptions = jest.fn();
+    const listeners = new Map<string, ((...args: any[]) => void)[]>();
+    app.workspace.on.mockImplementation((event: string, listener: (...args: any[]) => void) => {
+      listeners.set(event, [...(listeners.get(event) ?? []), listener]);
+      return {};
+    });
+    app.workspace.trigger.mockImplementation((event: string, ...args: any[]) => {
+      for (const listener of listeners.get(event) ?? []) listener(...args);
+    });
+    const manifest = JSON.parse(readFileSync(MANIFEST_PATH, "utf8"));
+    const plugin = new PluginClass(app, manifest);
+    const startupIdentity = captureStartupIdentity();
+    await plugin.onload();
+    expectProductionStartupIdentity(startupIdentity, manifest.version);
+    await plugin.criticalInitializationPromise;
+    await plugin.deferredInitializationPromise;
+    const syncFromSettings = jest.fn();
+    plugin.embeddingsManager = { syncFromSettings, cleanup: jest.fn(async () => undefined) };
+    app.workspace.updateOptions.mockClear();
+    try {
+      const settings = plugin.getSettingsManager();
+      await settings.updateSettings({ defaultChatTag: "notes" });
+      await settings.updateSettings({ lastValidated: Date.now() });
+      await settings.updateSettings({ lastAutomaticBackup: Date.now() });
+      expect(syncFromSettings).not.toHaveBeenCalled();
+      expect(app.workspace.updateOptions).not.toHaveBeenCalled();
+      await settings.updateSettings({ embeddingsEnabled: true });
+      await settings.updateSettings({ embeddingsExclusions: { ...plugin.settings.embeddingsExclusions, folders: ["Private"] } });
+      expect(syncFromSettings).toHaveBeenCalledTimes(2);
+      expect(app.workspace.updateOptions).not.toHaveBeenCalled();
+      await settings.updateSettings({ relativeLineNumbersEnabled: true });
+      expect(app.workspace.updateOptions).toHaveBeenCalledTimes(1);
+      expect(syncFromSettings).toHaveBeenCalledTimes(2);
+    } finally {
+      plugin.unload();
+      await plugin.unloadPromise;
+    }
+  });
+
   it("ships only the thin-agent protocol without legacy SDK runtimes", () => {
     const code = readFileSync(BUNDLE_PATH, "utf8");
 

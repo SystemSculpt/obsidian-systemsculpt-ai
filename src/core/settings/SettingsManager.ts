@@ -205,6 +205,7 @@ export class SettingsManager {
   private persistenceQueue: Promise<void> = Promise.resolve();
   // Detached baselines survive direct nested mutations and failed writes.
   private persistedSettings: Partial<SystemSculptSettings> | null = null;
+  private pendingBackupSettings: SystemSculptSettings | null = null;
   private notifiedSettings: SystemSculptSettings = snapshotSettings(DEFAULT_SETTINGS);
 
 
@@ -391,6 +392,7 @@ export class SettingsManager {
 
   private async loadSettingsNow(): Promise<void> {
     let raw = await this.readPersistedSettings();
+    this.pendingBackupSettings = null;
     this.persistedSettings = raw ? JSON.parse(JSON.stringify(raw)) as Partial<SystemSculptSettings> : null;
     if (raw === null) {
       // data.json is missing, unreadable, empty, or not an object. Consult the
@@ -824,10 +826,9 @@ export class SettingsManager {
    * This provides a safety net in case the main settings file becomes corrupted
    * Uses the vault-based .systemsculpt directory for backups
    */
-  private async backupSettings(): Promise<void> {
-    if (!this.isInitialized || !this.settings) return;
+  private async backupSettings(settings: SystemSculptSettings): Promise<boolean> {
     try {
-      const redactedSettings = redactSettingsForBackup(this.settings as unknown as Record<string, unknown>);
+      const redactedSettings = redactSettingsForBackup(settings as unknown as Record<string, unknown>);
       const backupData = JSON.stringify(redactedSettings, null, 2);
       
       // Use explicit relative paths to prevent path resolution issues
@@ -842,6 +843,7 @@ export class SettingsManager {
       }
       
       await this.plugin.app.vault.adapter.write(backupPath, backupData);
+      return true;
     } catch (error) {
       // Backups are a best-effort safety net: log for diagnostics but do not
       // rethrow or block saveSettings — a failed backup must not look like a
@@ -854,6 +856,7 @@ export class SettingsManager {
       } catch {
         // Logger must never mask the (already non-fatal) backup failure.
       }
+      return false;
     }
   }
 
@@ -920,6 +923,7 @@ export class SettingsManager {
       if (needsWrite) {
         await this.plugin.saveData(durableSettings);
         this.persistedSettings = durableSettings;
+        this.pendingBackupSettings = snapshotSettings(nextSettings);
       }
       // Advance only after a successful primary write, so an identical retry
       // still persists and publishes changes after a disk/sync failure.
@@ -927,7 +931,9 @@ export class SettingsManager {
       if (changedKeys.length > 0) {
         this.plugin.app.workspace.trigger("systemsculpt:settings-updated", oldSettings, nextSettings, changedKeys);
       }
-      if (needsWrite) await this.backupSettings();
+      if (this.pendingBackupSettings && await this.backupSettings(this.pendingBackupSettings)) {
+        this.pendingBackupSettings = null;
+      }
     } catch (error) {
       // Persistence failed (disk full, permissions, sync lock, …). Do NOT
       // swallow it: log + show a de-duplicated Notice so the loss is visible.

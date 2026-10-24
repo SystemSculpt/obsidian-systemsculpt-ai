@@ -621,6 +621,42 @@ describe("SettingsManager managed settings contract", () => {
     );
   });
 
+  it("retries only the backup after its write fails", async () => {
+    const plugin = createPlugin();
+    const manager = new SettingsManager(plugin);
+    await manager.loadSettings();
+    jest.clearAllMocks();
+    plugin.app.vault.adapter.write.mockRejectedValueOnce(new Error("backup unavailable"));
+    await manager.updateSettings({ chatFontSize: "large" });
+    await manager.updateSettings({ chatFontSize: "large" });
+    await manager.saveSettings();
+    expect(plugin.saveData).toHaveBeenCalledTimes(1);
+    expect(plugin.app.workspace.trigger).toHaveBeenCalledTimes(1);
+    expect(plugin.app.vault.adapter.write).toHaveBeenCalledTimes(2);
+  });
+
+  it("backs up the committed revision rather than a mutation during the primary write", async () => {
+    const plugin = createPlugin();
+    const manager = new SettingsManager(plugin);
+    await manager.loadSettings();
+    let release!: () => void;
+    let started!: () => void;
+    const writing = new Promise<void>(resolve => { started = resolve; });
+    plugin.saveData.mockImplementationOnce(async () => {
+      started();
+      await new Promise<void>(resolve => { release = resolve; });
+    });
+    const update = manager.updateSettings({ defaultChatTag: "committed" });
+    await writing;
+    plugin._internal_settings_systemsculpt_plugin.workflowEngine.enabled = false;
+    release();
+    await update;
+    expect(plugin.saveData.mock.calls.at(-1)[0].workflowEngine.enabled).toBe(true);
+    expect(JSON.parse(plugin.app.vault.adapter.write.mock.calls.at(-1)[1]).workflowEngine.enabled).toBe(true);
+    await manager.saveSettings();
+    expect(JSON.parse(plugin.app.vault.adapter.write.mock.calls.at(-1)[1]).workflowEngine.enabled).toBe(false);
+  });
+
   it("writes the settings backup when a concurrent save already created its folder", async () => {
     const plugin = createPlugin();
     const manager = new SettingsManager(plugin);

@@ -4,7 +4,6 @@ import { EMBEDDINGS_VIEW_TYPE } from "../core/plugin/viewTypes";
 import { CHAT_VIEW_TYPE } from "../core/plugin/viewTypes";
 import { SearchResult } from '../services/embeddings/types';
 import type { AgentChatView } from './chatview/AgentChatView';
-import { SystemSculptSettings } from '../types';
 import { EmbeddingsPendingFilesModal } from '../modals/EmbeddingsPendingFilesModal';
 import { UpgradePlanModal } from '../modals/UpgradePlanModal';
 import { SimilarNotesPresentation } from './SimilarNotesPresentation';
@@ -38,7 +37,6 @@ export class EmbeddingsView extends ItemView {
   private currentResults: SearchResult[] = [];
   private lastFileHash = '';
   private forceRefreshNextCheck = false;
-  private lastEmbeddingsConfigKey = '';
   private isDragging = false;
   private unsubscribeIndexLifecycle: (() => void) | null = null;
   private lastIndexSnapshot: Readonly<SemanticIndexSnapshot> | null = null;
@@ -103,7 +101,6 @@ export class EmbeddingsView extends ItemView {
     this.setupUI();
     this.bindIndexLifecycle();
     this.registerEvents();
-    this.lastEmbeddingsConfigKey = this.getEmbeddingsConfigKey(this.plugin.settings);
     
     // Immediately evaluate the current active file/chat to populate results on open
     // so users don't need to refocus the editor to see similar notes.
@@ -169,13 +166,8 @@ export class EmbeddingsView extends ItemView {
 
     // Refresh results when managed indexing settings change.
     this.registerEvent(
-      this.app.workspace.on("systemsculpt:settings-updated", (_oldSettings, newSettings: SystemSculptSettings, changedKeys) => {
+      this.app.workspace.on("systemsculpt:settings-updated", (_oldSettings, _newSettings, changedKeys) => {
         if (!changedKeys.some(key => ["embeddingsEnabled", "embeddingsExclusions", "chatsDirectory", "savedChatsDirectory"].includes(key))) return;
-        const nextKey = this.getEmbeddingsConfigKey(newSettings);
-        if (nextKey === this.lastEmbeddingsConfigKey) {
-          return;
-        }
-        this.lastEmbeddingsConfigKey = nextKey;
         this.bindIndexLifecycle();
         this.forceRefreshNextCheck = true;
         this.debouncedCheckActiveFile();
@@ -473,15 +465,6 @@ export class EmbeddingsView extends ItemView {
       }
     }
     // If none of the above, preserve current state
-  }
-
-  private getEmbeddingsConfigKey(settings: SystemSculptSettings): string {
-    const enabled = settings?.embeddingsEnabled ? "1" : "0";
-    const exclusions = settings?.embeddingsExclusions ?? {};
-    return JSON.stringify({
-      enabled,
-      exclusions,
-    });
   }
 
   private async searchForSimilar(file: TFile): Promise<void> {
