@@ -1,0 +1,385 @@
+{
+  "title": "T234 production contrast and focus QA",
+  "scope": "Synthetic presentation fixtures in the exact built plugin running inside an isolated Obsidian installation. No model turns, credentials, customer content, or public posting. This file intentionally excludes local home paths, runtime session IDs, and process handles.",
+  "sourceRevision": "e34c4741018fee633c9d9924bd1645f58d7acfcd",
+  "pluginVersion": "6.14.0",
+  "host": {
+    "application": "Obsidian",
+    "runtimeVersion": "1.14.5",
+    "platform": "macOS",
+    "viewport": {
+      "width": 1280,
+      "height": 1000,
+      "deviceScaleFactor": 1
+    },
+    "theme": "Built-in default light and dark; no community theme or snippets",
+    "cssSha256": "866e50ac84dd8ad2775e0047ebd3ec5bd03e5af722aff259e6c4ea3cec42d7ba",
+    "olderCssComparison": {
+      "version": "1.13.7",
+      "sha256": "f612f1e8f36486fa57f3b8bd45f0c848409d5b168002e757a13c6d286a7b4c41",
+      "method": "Extracted installed CSS evaluated in an isolated iframe; not a running older application"
+    }
+  },
+  "artifacts": {
+    "main.js": {
+      "sha256": "567ba3fc76211775eed6e063faf15a8e682586d55fa3031f68c7a8af916f0d6c",
+      "bytes": 3135891
+    },
+    "styles.css": {
+      "sha256": "8f3283677bf6f0622bbddf1384a940ec254a33b91491367b778041054d2f5e43",
+      "bytes": 330328
+    },
+    "manifest.json": {
+      "sha256": "5d0ba6b619dc9043ae31cb7f102f52167dd16d5159603b51dddcbba8f992fd43",
+      "bytes": 469
+    }
+  },
+  "runtimeStylesheetVerified": {
+    "sha256": "8f3283677bf6f0622bbddf1384a940ec254a33b91491367b778041054d2f5e43",
+    "hasUniversalFocus": true
+  },
+  "themes": {
+    "light": {
+      "focus": {
+        "counts": {
+          "conversation": 35,
+          "history": 5,
+          "historyRow": 2,
+          "historySecondRowActions": 2,
+          "rename": 1
+        },
+        "supplementalIdleComposer": [
+          {
+            "testId": "chat.composer.attachment.open",
+            "focused": true,
+            "focusVisible": true,
+            "label": "Plan.md, pinned for every message. Options",
+            "outline": "color(srgb 0.438573 0.303933 0.752733) solid 2px",
+            "boxShadow": "color(srgb 0.597615 0.451304 0.967696 / 0.35) 0px 0px 0px 3px",
+            "disabled": false
+          },
+          {
+            "testId": "chat.composer.attachment.unpin",
+            "focused": true,
+            "focusVisible": true,
+            "label": "Unpin Plan.md",
+            "outline": "color(srgb 0.438573 0.303933 0.752733) solid 2px",
+            "boxShadow": "color(srgb 0.597615 0.451304 0.967696 / 0.35) 0px 0px 0px 3px",
+            "disabled": false
+          },
+          {
+            "testId": "chat.composer.input",
+            "focused": true,
+            "focusVisible": true,
+            "label": "Message SystemSculpt",
+            "outline": "color(srgb 0.438573 0.303933 0.752733) solid 2px",
+            "boxShadow": "color(srgb 0.597615 0.451304 0.967696 / 0.35) 0px 0px 0px 3px",
+            "disabled": false
+          },
+          {
+            "testId": "chat.composer.send",
+            "focused": true,
+            "focusVisible": true,
+            "label": "Send message",
+            "outline": "color(srgb 0.438573 0.303933 0.752733) solid 2px",
+            "boxShadow": "color(srgb 0.597615 0.451304 0.967696 / 0.35) 0px 0px 0px 3px",
+            "disabled": false
+          }
+        ],
+        "cascadeMisses": 0,
+        "example": {
+          "testId": "chat.composer.add",
+          "focused": true,
+          "outline": "color(srgb 0.438573 0.303933 0.752733) solid 2px",
+          "boxShadow": "color(srgb 0.597615 0.451304 0.967696 / 0.35) 0px 0px 0px 3px"
+        },
+        "approvalCardFocusWithin": true
+      },
+      "contrast": {
+        "counts": {
+          "conversation": 51,
+          "linkHover": 3,
+          "history": 10
+        },
+        "minimum": {
+          "ratio": 5.312602058438061,
+          "text": "+1",
+          "color": "color(srgb 0.082353 0.429412 0.219608)",
+          "background": [
+            252,
+            230,
+            233
+          ]
+        },
+        "below45": 0,
+        "links": {
+          "conversation": [
+            {
+              "className": "external-link",
+              "text": "launch notes",
+              "ratio": 5.932439944289088,
+              "color": "color(srgb 0.438573 0.303933 0.752733)",
+              "opacity": 1
+            },
+            {
+              "className": "internal-link",
+              "text": "saved plan",
+              "ratio": 5.932439944289088,
+              "color": "color(srgb 0.438573 0.303933 0.752733)",
+              "opacity": 1
+            },
+            {
+              "className": "internal-link is-unresolved",
+              "text": "unresolved plan",
+              "ratio": 5.932439944289088,
+              "color": "color(srgb 0.438573 0.303933 0.752733)",
+              "opacity": 1
+            }
+          ],
+          "linkHover": [
+            {
+              "className": "external-link",
+              "text": "launch notes",
+              "ratio": 15.909984431773273,
+              "color": "rgb(34, 34, 34)",
+              "opacity": 1
+            },
+            {
+              "className": "internal-link",
+              "text": "saved plan",
+              "ratio": 15.909984431773273,
+              "color": "rgb(34, 34, 34)",
+              "opacity": 1
+            },
+            {
+              "className": "internal-link is-unresolved",
+              "text": "unresolved plan",
+              "ratio": 15.909984431773273,
+              "color": "rgb(34, 34, 34)",
+              "opacity": 1
+            }
+          ]
+        }
+      }
+    },
+    "dark": {
+      "focus": {
+        "counts": {
+          "conversation": 35,
+          "history": 5,
+          "historyRow": 2,
+          "historySecondRowActions": 2,
+          "rename": 1
+        },
+        "supplementalIdleComposer": [
+          {
+            "testId": "chat.composer.attachment.open",
+            "focused": true,
+            "focusVisible": true,
+            "label": "Plan.md, pinned for every message. Options",
+            "outline": "color(srgb 0.701855 0.620734 0.945217) solid 2px",
+            "boxShadow": "color(srgb 0.54032 0.3608 0.9592 / 0.35) 0px 0px 0px 3px",
+            "disabled": false
+          },
+          {
+            "testId": "chat.composer.attachment.unpin",
+            "focused": true,
+            "focusVisible": true,
+            "label": "Unpin Plan.md",
+            "outline": "color(srgb 0.701855 0.620734 0.945217) solid 2px",
+            "boxShadow": "color(srgb 0.54032 0.3608 0.9592 / 0.35) 0px 0px 0px 3px",
+            "disabled": false
+          },
+          {
+            "testId": "chat.composer.input",
+            "focused": true,
+            "focusVisible": true,
+            "label": "Message SystemSculpt",
+            "outline": "color(srgb 0.701855 0.620734 0.945217) solid 2px",
+            "boxShadow": "color(srgb 0.54032 0.3608 0.9592 / 0.35) 0px 0px 0px 3px",
+            "disabled": false
+          },
+          {
+            "testId": "chat.composer.send",
+            "focused": true,
+            "focusVisible": true,
+            "label": "Send message",
+            "outline": "color(srgb 0.701855 0.620734 0.945217) solid 2px",
+            "boxShadow": "color(srgb 0.54032 0.3608 0.9592 / 0.35) 0px 0px 0px 3px",
+            "disabled": false
+          }
+        ],
+        "cascadeMisses": 0,
+        "example": {
+          "testId": "chat.composer.add",
+          "focused": true,
+          "outline": "color(srgb 0.701855 0.620734 0.945217) solid 2px",
+          "boxShadow": "color(srgb 0.54032 0.3608 0.9592 / 0.35) 0px 0px 0px 3px"
+        },
+        "approvalCardFocusWithin": true
+      },
+      "contrast": {
+        "counts": {
+          "conversation": 51,
+          "linkHover": 3,
+          "history": 10
+        },
+        "minimum": {
+          "ratio": 6.373844824190132,
+          "text": "-1",
+          "color": "color(srgb 0.919608 0.564706 0.576471)",
+          "background": [
+            55,
+            33,
+            34
+          ]
+        },
+        "below45": 0,
+        "links": {
+          "conversation": [
+            {
+              "className": "external-link",
+              "text": "launch notes",
+              "ratio": 7.3667659709080695,
+              "color": "color(srgb 0.701855 0.620734 0.945217)",
+              "opacity": 1
+            },
+            {
+              "className": "internal-link",
+              "text": "saved plan",
+              "ratio": 7.3667659709080695,
+              "color": "color(srgb 0.701855 0.620734 0.945217)",
+              "opacity": 1
+            },
+            {
+              "className": "internal-link is-unresolved",
+              "text": "unresolved plan",
+              "ratio": 7.3667659709080695,
+              "color": "color(srgb 0.701855 0.620734 0.945217)",
+              "opacity": 1
+            }
+          ],
+          "linkHover": [
+            {
+              "className": "external-link",
+              "text": "launch notes",
+              "ratio": 12.190789180653185,
+              "color": "rgb(218, 218, 218)",
+              "opacity": 1
+            },
+            {
+              "className": "internal-link",
+              "text": "saved plan",
+              "ratio": 12.190789180653185,
+              "color": "rgb(218, 218, 218)",
+              "opacity": 1
+            },
+            {
+              "className": "internal-link is-unresolved",
+              "text": "unresolved plan",
+              "ratio": 12.190789180653185,
+              "color": "rgb(218, 218, 218)",
+              "opacity": 1
+            }
+          ]
+        }
+      }
+    }
+  },
+  "genuineTab": {
+    "tag": "BUTTON",
+    "testId": "chat.composer.add",
+    "focusVisible": true,
+    "outline": "color(srgb 0.701855 0.620734 0.945217) solid 2px",
+    "boxShadow": "color(srgb 0.54032 0.3608 0.9592 / 0.35) 0px 0px 0px 3px"
+  },
+  "method": {
+    "focus": "Production DOM controls were focused and CDP forced focus-visible. CSS transitions settled before computed styles and PNG capture. Real Tab reached the composer Add button. Real ArrowDown activated history rows, then row actions were focused. Production approval cards showed focus-within ring.",
+    "contrast": "Computed CSS color and ancestor background-color compositing; browser canvas normalizes CSS color spaces to 8-bit sRGB. Excludes invisible text, icons and decorative lines. No screenshot OCR; gradients/images flagged as limitations.",
+    "unresolvedState": "The production Markdown renderer did not mark the missing target as unresolved; is-unresolved was explicitly applied to the real rendered anchor as a synthetic CSS state, not claimed as automatic resolution behavior.",
+    "screenshots": "Native Electron renderer Page.captureScreenshot, not an HTML mock or desktop crop. All fourteen PNGs visually inspected by coordinator; representative PNGs independently inspected by QA."
+  },
+  "limitations": [
+    "These are recorded states, not distinct-control counts or exhaustive accessibility certification. Main audit:45 observations/theme;4 supplemental idle-composer observations/theme;98 total focus observations.",
+    "Two history-row observations/theme force CSS pseudo-state on nonfocusable rows. Real keyboard selection uses aria-activedescendant; no claim that those rows are Tab stops.",
+    "Missing-target Markdown anchor did not automatically receive is-unresolved; that class was explicitly applied to the actual rendered anchor for CSS-state coverage.",
+    "Contrast covers64 actual DOM text/state observations/theme (51 conversation,3 link-hover,10 history),128 total. Hidden text, icons and decorative lines are excluded; gradients/images are limitations where recorded.",
+    "Default desktop themes at the stated geometry only; deterministic mobile, touch and broader compatibility gates are separate coordinator-owned evidence."
+  ],
+  "resolvedFindings": [
+    "The CSS builder previously dropped inline index declarations, removing the universal focus rule from shipped styles.css. Final runtime hash contains the rule and all measured controls show the ring.",
+    "Default external Markdown link previously measured4.2596:1 in light theme. Final scoped link colors measure5.9324:1 light and7.3668:1 dark; hover measures15.9100:1 and12.1908:1."
+  ],
+  "screenshots": [
+    {
+      "file": "light-approval-button-focus.png",
+      "sha256": "99df5607518ed937f2f1221906fe036ca3cec831d46f21fca6f423c4fcf8e61e",
+      "bytes": 78706
+    },
+    {
+      "file": "light-approval-input-focus.png",
+      "sha256": "dd439a9d6952b9e93d0c948808107711707d2bceb7c265c4e5a59347c4bcfde4",
+      "bytes": 78882
+    },
+    {
+      "file": "light-composer-icon-focus.png",
+      "sha256": "e727ba4780608eabc2d10823fe51add58e3a74b85e3420b66f7101a169c0f944",
+      "bytes": 78543
+    },
+    {
+      "file": "light-composer-send-focus.png",
+      "sha256": "ec9439a1e768d4e9857f8a49184c9d569fc49467c6f9ac4010f739bbecaa951e",
+      "bytes": 47050
+    },
+    {
+      "file": "light-history-icon-focus.png",
+      "sha256": "0004c665e5ae0b66721789f3aca227f44a30f9037f415932f770e9a9de227c97",
+      "bytes": 35078
+    },
+    {
+      "file": "light-history-rename-focus.png",
+      "sha256": "83ce786eb93b6764ff54dee611855eb9dfa3c8a907c93e121711777ad3857416",
+      "bytes": 35265
+    },
+    {
+      "file": "light-markdown-links.png",
+      "sha256": "204e2b023eb2b34136575ef9e8a13fd23a185e4121418fc809f4a54ad7e735a8",
+      "bytes": 83710
+    },
+    {
+      "file": "dark-approval-button-focus.png",
+      "sha256": "121f0246facf2fa16fee4cb76309be5d456e9ca9afa944b13d1ecabe6f7e1487",
+      "bytes": 79594
+    },
+    {
+      "file": "dark-approval-input-focus.png",
+      "sha256": "c496e386d2f9a9299ec94107c9a6a780f6bcc9541f7a29f669e1edd89dde6ab1",
+      "bytes": 79795
+    },
+    {
+      "file": "dark-composer-icon-focus.png",
+      "sha256": "02cc9224d7299c0c02543729237716171b9670341c100e0c9623d42d8bf95ec6",
+      "bytes": 79508
+    },
+    {
+      "file": "dark-composer-send-focus.png",
+      "sha256": "7767cc7f349ccc64548fb43724d1c5eddec86b1ac45f073d9c9b2bb5564a2c70",
+      "bytes": 48004
+    },
+    {
+      "file": "dark-history-icon-focus.png",
+      "sha256": "7eab80a8d553c06581c5afd482b6c5299897f747e750bc1be30040cbc398d044",
+      "bytes": 35063
+    },
+    {
+      "file": "dark-history-rename-focus.png",
+      "sha256": "7e7c15d4b1cdb8ba63d3e9de99b4f59da4f2254650eaf2a384ac5999d40e6755",
+      "bytes": 35222
+    },
+    {
+      "file": "dark-markdown-links.png",
+      "sha256": "85505304ef76b280760c497f5754ab4611a4e051e5da350cd0cdcdfeddd6b00f",
+      "bytes": 85150
+    }
+  ]
+}
