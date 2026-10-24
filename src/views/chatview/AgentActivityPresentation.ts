@@ -3,27 +3,42 @@ import { presentAgentTool } from "./AgentToolPresentation";
 
 export type AgentActivitySummary = Readonly<{ label: string; failedCount: number }>;
 
+type ActivityGroup = { label: string; items: Set<string>; uncounted: number };
+
+const groupSize = (group: ActivityGroup): number => group.items.size + group.uncounted;
+
 /** Count adjacent activity by action without repeating payloads or full paths. */
 export function summarizeAgentActivity(parts: readonly AgentPart[]): AgentActivitySummary {
-  const groups = new Map<string, { count: number; label: string }>();
+  const groups = new Map<string, ActivityGroup>();
   let failedCount = 0;
+  const add = (kind: string, label: string, items: readonly string[] = [], count = 1): void => {
+    const group = groups.get(kind) ?? { label, items: new Set<string>(), uncounted: 0 };
+    group.label = label;
+    if (items.length) for (const item of items) group.items.add(item);
+    else group.uncounted += count;
+    groups.set(kind, group);
+  };
   for (const part of parts) {
     if (part.kind === "reasoning") {
-      const previous = groups.get("reasoning");
-      groups.set("reasoning", { count: (previous?.count ?? 0) + 1, label: "Thought" });
+      add("reasoning", "Thought");
     } else if (part.kind === "tool") {
       const tool = presentAgentTool(part);
-      // Denials are decisions, not failed executions or completed actions.
-      const denied = tool.displayState === "denied";
-      const kind = denied ? "denied" : tool.groupKind;
-      const previous = groups.get(kind);
-      groups.set(kind, { count: (previous?.count ?? 0) + (denied ? 1 : tool.groupCount), label: denied ? `${tool.label} · Denied` : tool.label.replace(/…$/u, "") });
-      if (["failed", "partial", "outcome-unknown"].includes(tool.displayState)) failedCount += 1;
+      // Only completed or in-progress work counts toward "Edited 2 notes", and
+      // each note once. Denials are decisions, withdrawn requests never ran and
+      // failed or uncertain actions aren't completed changes: each keeps its
+      // own clause, and a withdrawn request is not a failure.
+      if (tool.displayState === "denied") add("denied", `${tool.label} · Denied`);
+      else if (tool.displayState === "cancelled" || part.approvalDecision === "withdrawn") add("withdrawn", `${tool.label} · Withdrawn`);
+      else if (tool.displayState === "failed" || tool.displayState === "outcome-unknown") add("failed", tool.label);
+      else add(tool.groupKind, tool.label.replace(/…$/u, ""), tool.groupItems, tool.groupCount);
+      if (part.approvalDecision !== "withdrawn" && ["failed", "partial", "outcome-unknown"].includes(tool.displayState)) failedCount += 1;
     }
   }
   const labels = Array.from(groups, ([kind, group]) => {
-    const count = group.count;
+    const count = groupSize(group);
     if (kind === "denied") return count === 1 ? group.label : `Denied ${count} actions`;
+    if (kind === "withdrawn") return count === 1 ? group.label : `${count} actions withdrawn`;
+    if (kind === "failed") return count === 1 ? group.label : `Couldn't complete ${count} actions`;
     // One read names its note (spec 3.2: "Read Plan.md, searched 2 patterns").
     if (kind === "read") return count === 1 ? group.label : `Read ${count} notes`;
     if (kind === "search") return `Searched ${count} pattern${count === 1 ? "" : "s"}`;
@@ -37,7 +52,7 @@ export function summarizeAgentActivity(parts: readonly AgentPart[]): AgentActivi
     return group.label;
   });
   const visible = labels.slice(0, 3).map((label, index) => index ? label.charAt(0).toLowerCase() + label.slice(1) : label).join(", ");
-  const more = Array.from(groups.values()).slice(3).reduce((count, group) => count + group.count, 0);
+  const more = Array.from(groups.values()).slice(3).reduce((count, group) => count + groupSize(group), 0);
   return {
     label: `${visible || "Activity"}${more ? ` · ${more} more` : ""}${failedCount ? ` · ${failedCount} failed` : ""}`,
     failedCount,

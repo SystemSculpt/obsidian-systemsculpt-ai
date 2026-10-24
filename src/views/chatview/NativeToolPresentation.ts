@@ -23,6 +23,8 @@ export type NativeToolPresentation = Readonly<{
   agentName: string;
   groupKind: string;
   groupCount: number;
+  /** Distinct notes or folders the group counts, so a repeated path counts once. */
+  groupItems?: readonly string[];
 }>;
 
 type Detail = { label: string; value: string; code?: boolean; path?: string };
@@ -98,11 +100,12 @@ export function nativeToolPresentation(part: AgentToolPart): NativeToolPresentat
   if (!part.native) return null;
   const input = record(part.input);
   const agentName = part.native.agent === "claude" ? "Claude Code" : "Codex";
-  const presentation = (verb: string, completed: string, running: string, target: string, icon: string, groupKind: string, options: { path?: string; approval?: string; count?: number; meta?: string } = {}): NativeToolPresentation => {
+  const presentation = (verb: string, completed: string, running: string, target: string, icon: string, groupKind: string, options: { path?: string; approval?: string; count?: number; items?: readonly string[]; meta?: string } = {}): NativeToolPresentation => {
     const path = options.path ? resolvedPath(part, options.path) : undefined;
     const title = `${verb} ${target}`;
     const description = realReason(part, path?.displayPath ?? target, title);
     const folder = path?.displayPath.includes("/") ? path.displayPath.slice(0, path.displayPath.lastIndexOf("/")) : undefined;
+    const items = options.items ?? (path ? [path.vaultPath ?? path.displayPath] : []);
     return {
       title, completedTitle: `${completed} ${target}`, runningTitle: `${running} ${target}…`,
       approvalTitle: options.approval ?? `${verb.toLowerCase()} ${target}`,
@@ -110,6 +113,7 @@ export function nativeToolPresentation(part: AgentToolPart): NativeToolPresentat
       ...(path ? { path: path.displayPath, ...(path.vaultPath ? { targetPath: path.vaultPath } : {}) } : {}),
       meta: [options.meta ?? folder, description].filter(Boolean).join(" · ") || undefined,
       icon, agentName, groupKind, groupCount: options.count ?? 1,
+      ...(items.length ? { groupItems: items } : {}),
     };
   };
   const rawPath = text(input.file_path) ?? text(input.path);
@@ -143,7 +147,13 @@ export function nativeToolPresentation(part: AgentToolPart): NativeToolPresentat
     case "ExitPlanMode": return { ...presentation("Approve", "Approved", "Preparing", "plan", "list-checks", "plan"), approvalTitle: "has a plan", completedTitle: "Plan approved" };
     case "fileChange": {
       const changes = records(input.changes);
-      if (changes.length !== 1) return { ...presentation("Change", "Changed", "Changing", changes.length ? `${changes.length} files` : "files", "files", "edit", { count: changes.length || 1, meta: changeSize(input) }), changeSize: changeSize(input) };
+      if (changes.length !== 1) {
+        const changed = changes.flatMap(change => text(change.path) ?? []).map(path => resolvedPath(part, path));
+        return { ...presentation("Change", "Changed", "Changing", changes.length ? `${changes.length} files` : "files", "files", "edit", {
+          count: changes.length || 1, meta: changeSize(input),
+          items: changed.length === changes.length ? changed.map(path => path.vaultPath ?? path.displayPath) : [],
+        }), changeSize: changeSize(input) };
+      }
       const [verb, completed, running, icon] = fileAction(changes[0]);
       const source = text(changes[0].path);
       const destination = text(record(changes[0].kind).move_path);

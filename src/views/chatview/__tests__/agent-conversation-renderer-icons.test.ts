@@ -5296,4 +5296,54 @@ describe("AgentConversationRenderer tail status", () => {
     expect(onCancelMessageEdit).toHaveBeenCalledWith("user-keyup-fallback");
     renderer.unload();
   });
+
+  it("summarizes repeated approved edits, denials and a withdrawn edit like the change receipt", async () => {
+    const parent = document.body.createDiv();
+    const renderer = new AgentConversationRenderer(parent, {
+      app: new App(),
+      sourcePath: () => "Notes/Launch plan.md",
+      onApprove: jest.fn(),
+      onOpenArtifact: jest.fn(),
+      onCopyArtifactPath: jest.fn(),
+    });
+    renderer.load();
+    const native = { agent: "claude" as const, workingDirectory: "/synthetic-vault", vaultRoot: "/synthetic-vault" };
+    const edit = (id: string, order: number, overrides: Partial<Extract<AgentPart, { kind: "tool" }>>): AgentPart => ({
+      id, kind: "tool", messageId: "resolved-answer", callId: id, approvalId: id, order,
+      name: "Edit", location: "server", native, state: "succeeded",
+      input: { file_path: "/synthetic-vault/Notes/Launch plan.md", old_string: "- Plan the launch.", new_string: "- Finalize the launch plan." },
+      ...overrides,
+    });
+    const parts: AgentPart[] = [
+      edit("approved", 0, { approvalDecision: "approved" }),
+      edit("chat-approved", 1, { approvalDecision: "approved", approvalScope: "session" }),
+      edit("denied", 2, { state: "denied", approvalDecision: "denied" }),
+      edit("withdrawn", 3, { state: "cancelled", approvalDecision: "withdrawn" }),
+      edit("kept-planning", 4, { name: "ExitPlanMode", state: "denied", approvalDecision: "denied", input: { plan: "Review the checklist before editing." } }),
+      { id: "resolved-text", kind: "text", messageId: "resolved-answer", state: "complete", markdown: "The completed changes are ready for review.", order: 10 },
+    ];
+    const snapshot: AgentConversationSnapshot = {
+      runId: "resolved-run", turnId: "resolved-turn", status: "completed", phase: "complete", elapsedMs: 12_000,
+      messages: [{ id: "resolved-answer", role: "assistant", partIds: parts.map(part => part.id) }],
+      parts,
+    };
+
+    await renderer.renderActive(snapshot, presentation("completed", false, "Done", snapshot));
+
+    expect(parent.querySelector("details[data-agent-turn-fold] > summary .systemsculpt-agent-activity-label")?.textContent)
+      .toBe("Edited Launch plan.md, denied 2 actions, edit Launch plan.md · Withdrawn");
+    expect(parent.querySelector('[data-testid="chat.turn.changes"]')?.textContent).toBe("Changed 1 note: Launch plan.md");
+    const overflow = parent.querySelector<HTMLButtonElement>("button[data-agent-activity-overflow]")!;
+    expect(overflow.dataset.activitySummary).toBe("Edited Launch plan.md, denied 2 actions, edit Launch plan.md · Withdrawn");
+    overflow.click();
+    // Rows keep their order, decisions and approval scope.
+    expect([...parent.querySelectorAll(".systemsculpt-agent-part.is-tool .systemsculpt-agent-tool-label")].map(label => label.textContent)).toEqual([
+      "Edited Launch plan.md · Approved",
+      "Edited Launch plan.md · Approved for this chat",
+      "Edit Launch plan.md · Denied",
+      "Edit Launch plan.md · Withdrawn",
+      "Kept planning",
+    ]);
+    renderer.unload();
+  });
 });
