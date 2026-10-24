@@ -11,6 +11,7 @@ function createPendingFiles() {
   return [
     { file: new TFile({ path: "Inbox/first.wav", name: "first.wav" }) },
     { file: new TFile({ path: "Inbox/second.mp3", name: "second.mp3" }) },
+    { file: new TFile({ path: "Inbox/third.m4a", name: "third.m4a" }) },
   ];
 }
 
@@ -19,50 +20,61 @@ describe("BulkTranscriptionConfirmModal", () => {
     document.body.innerHTML = "";
   });
 
-  it("confirms the full audio file set without firing cancel", () => {
+  it("asks once in plain words and confirms the full audio file set exactly once", () => {
     const onConfirm = jest.fn();
-    const onCancel = jest.fn();
+    const onDefer = jest.fn();
     const pendingFiles = createPendingFiles();
 
     const modal = new BulkTranscriptionConfirmModal({
       app: new App(),
       pendingFiles,
       onConfirm,
-      onCancel,
+      onDefer,
     });
 
     modal.open();
 
-    expect(document.body.textContent).toContain("Bulk transcription detected");
-    expect(document.body.textContent).toContain("2 transcriptions");
-    expect(document.body.textContent).not.toContain("automation");
+    expect(document.body.textContent).toContain(
+      "Transcribe 3 audio files with SystemSculpt? Processing stops at the first error. Closing this window leaves the files waiting.",
+    );
+    expect(document.body.textContent).not.toContain("Skip all");
+    expect(document.body.textContent).not.toContain("settings > workflow");
+    expect(document.body.textContent).not.toContain("batches of 3");
+    const footerButtons = [...document.querySelectorAll(".ss-modal__footer button")].map((button) => button.textContent);
+    expect(footerButtons).toEqual(["Not now", "Transcribe 3 files"]);
 
     const processButton = [...document.querySelectorAll("button")].find((button) =>
-      button.textContent?.includes("Transcribe 2 files")
+      button.textContent?.includes("Transcribe 3 files")
     ) as HTMLButtonElement;
     processButton.click();
+    processButton.click();
 
+    expect(onConfirm).toHaveBeenCalledTimes(1);
     expect(onConfirm).toHaveBeenCalledWith(pendingFiles);
-    expect(onCancel).not.toHaveBeenCalled();
+    expect(onDefer).not.toHaveBeenCalled();
   });
 
-  it("treats dismiss as skip all", () => {
+  it.each([
+    ["Not now", () => (document.querySelector("[data-testid='bulk-transcribe.not-now']") as HTMLButtonElement).click()],
+    ["the close button", () => (document.querySelector(".ss-modal__close-button") as HTMLButtonElement).click()],
+    // Obsidian closes a modal on Escape.
+    ["Escape", (modal: BulkTranscriptionConfirmModal) => modal.close()],
+  ])("defers once on %s and never confirms", (_label, dismiss) => {
     const onConfirm = jest.fn();
-    const onCancel = jest.fn();
+    const onDefer = jest.fn();
 
-    const pendingFiles = createPendingFiles();
     const modal = new BulkTranscriptionConfirmModal({
       app: new App(),
-      pendingFiles,
+      pendingFiles: createPendingFiles(),
       onConfirm,
-      onCancel,
+      onDefer,
     });
 
     modal.open();
-    const closeButton = document.querySelector(".ss-modal__close-button") as HTMLButtonElement;
-    closeButton.click();
+    dismiss(modal);
+    modal.close();
 
-    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(onDefer).toHaveBeenCalledTimes(1);
     expect(onConfirm).not.toHaveBeenCalled();
   });
 

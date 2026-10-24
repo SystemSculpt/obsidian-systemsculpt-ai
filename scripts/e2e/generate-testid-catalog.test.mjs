@@ -15,7 +15,7 @@ test("the testid grammar accepts dot-namespaced lowercase ids and wildcards only
     "chat.composer.send",
     "settings.tab.*",
     "studio.config.option.*",
-    "bulk-transcribe.skip-all",
+    "bulk-transcribe.not-now",
   ]) {
     assert.equal(TESTID_GRAMMAR.test(valid), true, valid);
   }

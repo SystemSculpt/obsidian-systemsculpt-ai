@@ -18,6 +18,7 @@ Source of truth:
 | Open Credits & Usage |  | `open-credits-balance` | Opens the credits/usage modal |
 | Sign in |  | `sign-in` | Opens browser sign-in and Account settings |
 | View plans / buy credits |  | `view-plans` | Opens the plan comparison page |
+| Check for updates |  | `check-for-updates` | Reports whether a newer SystemSculpt release is available; **Open plugin updates** opens Obsidian's plugin page |
 | Reload Obsidian |  | `reload-obsidian` | Reloads app window |
 | Copy Vault-Relative File Path |  | `copy-current-file-path` | Copies the focused note or Studio file's path relative to the vault, with a success notice; assign a shortcut in Obsidian Hotkeys |
 
@@ -74,8 +75,7 @@ closing history restores your draft.
 | Open SystemSculpt Search | `Mod+K` | `open-systemsculpt-search` | Searches notes, canvases, and Studio projects; an empty query shows recently modified files |
 | Open Similar Notes Panel |  | `open-embeddings-view` | Opens embeddings/similar-notes view |
 | Find Similar Notes (Current Note) |  | `find-similar-current-note` | Added in `src/main.ts`; requires active note |
-| Rebuild Embeddings |  | `rebuild-embeddings` | Clears all embeddings data |
-| Rebuild SystemSculpt Embeddings |  | `rebuild-embeddings-current-model` | Rebuilds the current SystemSculpt embeddings index |
+| Rebuild SystemSculpt embeddings |  | `rebuild-embeddings-current-model` | Replaces the Similar notes index and processes eligible notes again, after one confirmation |
 | Show Embeddings Database Statistics (Debug) |  | `embeddings-database-stats` | Visible only when embeddings are enabled |
 
 ## Audio and media
@@ -84,6 +84,7 @@ closing history restores your draft.
 | --- | --- | --- | --- |
 | Toggle Audio Recorder |  | `toggle-audio-recorder` | Starts/stops recording |
 | Transcribe an audio file |  | `transcribe-audio-file` | Transcribes a vault audio file through SystemSculpt |
+| Resume inbox transcription |  | `resume-inbox-transcription` | Only after **Not now** on a bulk inbox transcription; sends the audio files left waiting |
 | Open audio processor |  | `open-audio-processor` | Processes audio or YouTube into a detailed note, meeting brief, or clean transcript |
 | Process YouTube video |  | `process-youtube-video` | Opens Audio Processor on the YouTube input |
 | Save audio summary |  | `save-audio-summary` | Creates or opens a summary-only note for detailed and meeting brief outputs |

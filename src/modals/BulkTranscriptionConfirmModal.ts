@@ -15,20 +15,22 @@ export interface BulkTranscriptionConfirmModalOptions {
   app: App;
   pendingFiles: PendingTranscriptionFile[];
   onConfirm: (files: PendingTranscriptionFile[]) => void;
-  onCancel: () => void;
+  /** Not now, Escape, or closing: the files stay waiting and nothing is recorded. */
+  onDefer: () => void;
 }
 
+/** Asks once before a batch of inbox audio is uploaded for transcription. */
 export class BulkTranscriptionConfirmModal extends StandardModal {
   private readonly pendingFiles: PendingTranscriptionFile[];
   private readonly onConfirm: (files: PendingTranscriptionFile[]) => void;
-  private readonly onCancel: () => void;
+  private readonly onDefer: () => void;
   private settled = false;
 
   constructor(options: BulkTranscriptionConfirmModalOptions) {
     super(options.app);
     this.pendingFiles = options.pendingFiles;
     this.onConfirm = options.onConfirm;
-    this.onCancel = options.onCancel;
+    this.onDefer = options.onDefer;
     this.setSize("small");
     this.modalEl.addClass("ss-bulk-transcription-modal");
   }
@@ -39,38 +41,24 @@ export class BulkTranscriptionConfirmModal extends StandardModal {
 
     this.addTitle(
       "Bulk transcription detected",
-      `${count} audio file${count === 1 ? " is" : "s are"} ready for transcription.`,
+      `Transcribe ${count} audio files with SystemSculpt? Processing stops at the first error. Closing this window leaves the files waiting.`,
     );
 
-    const body = this.contentEl.createDiv({
-      cls: "ss-modal__custom-content ss-bulk-transcription-modal__body",
-    });
-    body.createEl("p", {
-      cls: "ss-bulk-transcription-modal__summary",
-      text: `${count} transcription${count === 1 ? "" : "s"}`,
-    });
-
-    const notes = body.createEl("ul", { cls: "ss-bulk-transcription-modal__notes" });
-    notes.createEl("li", { text: "Runs in batches of 3 and stops on the first error." });
-    notes.createEl("li", {
-      text: "Skip all marks these files as skipped until you clear them in settings > workflow.",
-    });
-
-    this.addActionButton("bulk-transcribe.skip-all", "Skip all", () => this.handleCancel(), false);
+    this.addActionButton("bulk-transcribe.not-now", "Not now", () => this.close(), false);
     this.addActionButton(
       "bulk-transcribe.confirm",
-      `Transcribe ${count} file${count === 1 ? "" : "s"}`,
+      `Transcribe ${count} files`,
       () => this.handleConfirm(),
       true,
     );
   }
 
   onClose(): void {
-    const shouldCancel = !this.settled;
+    const shouldDefer = !this.settled;
     super.onClose();
-    if (shouldCancel) {
+    if (shouldDefer) {
       this.settled = true;
-      this.onCancel();
+      this.onDefer();
     }
   }
 
@@ -81,12 +69,6 @@ export class BulkTranscriptionConfirmModal extends StandardModal {
     this.close();
   }
 
-  private handleCancel(): void {
-    if (this.settled) return;
-    this.settled = true;
-    this.onCancel();
-    this.close();
-  }
 }
 
 export interface BulkTranscriptionProgressWidgetOptions {
