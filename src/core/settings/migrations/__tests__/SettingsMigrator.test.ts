@@ -84,6 +84,28 @@ describe("deepMergeDefaults", () => {
 });
 
 describe("migrateSettingsToCurrentSchema", () => {
+  it("clears the old Codex default pair once while preserving unrelated settings", () => {
+    const raw = { schemaVersion: 16, codexModel: "gpt-6-astra", codexThinkingLevel: "high", codexServiceTier: "priority", codexApprovalMode: "ask" };
+    const { settings } = migrateSettingsToCurrentSchema(raw, DEFAULT_SETTINGS);
+    expect(settings).toMatchObject({ codexModel: "", codexThinkingLevel: "", codexServiceTier: "priority", codexApprovalMode: "ask" });
+    expect(raw.codexModel).toBe("gpt-6-astra");
+    const pickedAgain = { ...settings, codexModel: "gpt-6-astra", codexThinkingLevel: "high" };
+    expect(migrateSettingsToCurrentSchema(pickedAgain, DEFAULT_SETTINGS).settings).toEqual(pickedAgain);
+  });
+
+  it.each([
+    { codexModel: "custom", codexThinkingLevel: "high" },
+    { codexModel: "gpt-6-astra", codexThinkingLevel: "low" },
+    { codexModel: "gpt-6-astra", codexThinkingLevel: "" },
+    { codexModel: "", codexThinkingLevel: "high" },
+  ])("preserves a non-default Codex combination: %j", choices => {
+    expect(migrateSettingsToCurrentSchema({ schemaVersion: 16, ...choices }, DEFAULT_SETTINGS).settings).toMatchObject(choices);
+  });
+
+  it("leaves fresh Codex settings to the installed CLI", () => {
+    expect(migrateSettingsToCurrentSchema({}, DEFAULT_SETTINGS).settings).toMatchObject({ codexModel: "", codexThinkingLevel: "" });
+  });
+
   it("stamps the current version and prunes every legacy key from v0 data", () => {
     const raw: Record<string, unknown> = {
       licenseKey: "abc",
@@ -207,7 +229,7 @@ describe("migrateSettingsToCurrentSchema", () => {
 
     const result = migrateSettingsToCurrentSchema(raw, DEFAULT_SETTINGS);
 
-    expect(result.appliedSteps).toEqual(["Remove automatic welcome and release-announcement state"]);
+    expect(result.appliedSteps).toEqual(["Remove automatic welcome and release-announcement state", "Replace the pinned Codex default model and effort with native inheritance"]);
     for (const key of LEGACY_ANNOUNCEMENT_KEYS_REMOVED_IN_V16) expect(result.settings).not.toHaveProperty(key);
     expect(result.settings.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
     expect(result.settings.licenseKey).toBe("managed-license");
@@ -366,6 +388,7 @@ describe("migrateSettingsToCurrentSchema", () => {
       "Remove the write-only embeddings rebuild flag",
       "Detect unchosen desktop chat backends and default native permissions to Auto",
       "Remove automatic welcome and release-announcement state",
+      "Replace the pinned Codex default model and effort with native inheritance",
     ]);
     expect(result.settings.audioProcessorOutputPreset).toBe("detailed");
     expect(result.settings.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
@@ -382,6 +405,7 @@ describe("migrateSettingsToCurrentSchema", () => {
       "Remove the write-only embeddings rebuild flag",
       "Detect unchosen desktop chat backends and default native permissions to Auto",
       "Remove automatic welcome and release-announcement state",
+      "Replace the pinned Codex default model and effort with native inheritance",
     ]);
     expect(result.settings.audioProcessorOutputPreset).toBe("clean_transcript");
     expect(result.settings.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
@@ -406,6 +430,7 @@ describe("migrateSettingsToCurrentSchema", () => {
       "Remove the write-only embeddings rebuild flag",
       "Detect unchosen desktop chat backends and default native permissions to Auto",
       "Remove automatic welcome and release-announcement state",
+      "Replace the pinned Codex default model and effort with native inheritance",
     ]);
     expect(result.settings).not.toHaveProperty("embeddingsRebuildPending");
     expect(result.settings.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);

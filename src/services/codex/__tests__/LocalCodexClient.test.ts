@@ -3,6 +3,8 @@ import { posix, win32 } from 'node:path';
 import { CodexChatTransport, runLocalCodex } from '../LocalCodexClient';
 import { desktopHost } from '../../../platform/desktopOnly';
 import { windowsNpmHost } from './fixtures/npmNodeShim';
+import { codexOptionsFromSettings } from '../CodexExecutionSettings';
+import { DEFAULT_SETTINGS } from '../../../types';
 jest.mock('../../../platform/desktopOnly', () => ({ desktopHost: { childProcess: jest.fn(), fs: jest.fn(), os: jest.fn(), path: jest.fn(), environment: jest.fn() } }));
 
 function host(options: { failLogin?: boolean; requiresOpenaiAuth?: boolean; requestApproval?: boolean; wait?: boolean; malformed?: boolean; nativePolicy?: unknown; nativeReviewer?: string; nativeSandbox?: unknown; nativeProfile?: string; savedTurn?: unknown } = {}) {
@@ -48,15 +50,17 @@ function host(options: { failLogin?: boolean; requiresOpenaiAuth?: boolean; requ
 const callbacks = () => ({ log: jest.fn(), thread: jest.fn(), text: jest.fn(), request: jest.fn(async () => ({ decision: 'decline' })) });
 const input = { prompt: 'hello', workingDirectory: '/workspace' };
 beforeEach(() => jest.clearAllMocks());
-it('uses native login and astra/high, streams the answer and closes its transport', async () => {
+it.each([input, { ...input, ...codexOptionsFromSettings(DEFAULT_SETTINGS) }])('uses native model and effort defaults, streams the answer and closes its transport', async request => {
   const { child, messages } = host(), cb = callbacks();
-  await expect(runLocalCodex(input, new AbortController().signal, cb)).resolves.toMatchObject({ threadId: 'native-thread', text: 'hello', status: 'completed' });
+  await expect(runLocalCodex(request, new AbortController().signal, cb)).resolves.toMatchObject({ threadId: 'native-thread', text: 'hello', status: 'completed' });
   const childProcess = await desktopHost.childProcess();
   expect(childProcess.spawn).toHaveBeenCalledWith('codex', ['app-server'], expect.objectContaining({ cwd: '/home/test' }));
   expect(messages.find(m => m.method === 'thread/start').params.cwd).toBe('/workspace');
   expect(messages.find(m => m.method === 'account/read').params).toEqual({ refreshToken: false });
-  expect(messages.find(m => m.method === 'thread/start').params).toMatchObject({ model: 'gpt-6-astra' });
-  expect(messages.find(m => m.method === 'turn/start').params).toMatchObject({ model: 'gpt-6-astra', effort: 'high' });
+  expect(messages.find(m => m.method === 'thread/start').params).not.toHaveProperty('model');
+  expect(messages.find(m => m.method === 'thread/start').params).not.toHaveProperty('config');
+  expect(messages.find(m => m.method === 'turn/start').params).not.toHaveProperty('model');
+  expect(messages.find(m => m.method === 'turn/start').params).not.toHaveProperty('effort');
   expect(cb.text).toHaveBeenCalledWith('hello'); expect(child.kill).toHaveBeenCalled();
 });
 it.each(['/home/test/.nvm/versions/node/v22.18.0/bin', '/home/test/.volta/bin'])('launches an app-server and its node interpreter from %s with a bare GUI PATH', async folder => {
@@ -86,6 +90,24 @@ it('launches a Windows npm app-server with its native home and approval protocol
   expect(messages.find(m => m.method === 'account/read').params).toEqual({ refreshToken: false });
   expect(cb.request).toHaveBeenCalledTimes(1);
   expect(messages.find(m => m.id === 99).result).toEqual({ decision: 'decline' });
+});
+it.each([
+  { model: 'custom-model', effort: 'low' },
+  { model: 'custom-model', effort: '' },
+  { model: '', effort: 'xhigh' },
+  { model: '', effort: '' },
+])('forwards only explicit model and effort on resume and turn start: %j', async options => {
+  const { messages } = host();
+  await runLocalCodex({ ...input, ...options, threadId: 'native-thread' }, new AbortController().signal, callbacks());
+  for (const { method, params } of messages.filter(m => ['thread/start', 'thread/resume', 'turn/start'].includes(m.method))) {
+    if (options.model) expect(params.model).toBe(options.model);
+    else expect(params).not.toHaveProperty('model');
+    if (method === 'turn/start') {
+      if (options.effort) expect(params.effort).toBe(options.effort);
+      else expect(params).not.toHaveProperty('effort');
+    } else if (options.effort) expect(params.config).toEqual({ model_reasoning_effort: options.effort });
+    else expect(params).not.toHaveProperty('config');
+  }
 });
 it('persists the native identity before admitting a resumed turn', async () => {
   const { messages } = host(); const cb = callbacks();

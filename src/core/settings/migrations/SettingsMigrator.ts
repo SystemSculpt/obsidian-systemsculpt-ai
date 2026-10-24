@@ -364,6 +364,13 @@ const SETTINGS_MIGRATIONS: readonly SettingsMigrationStep[] = [
     describe: "Remove automatic welcome and release-announcement state",
     migrate: removeKeys(LEGACY_ANNOUNCEMENT_KEYS_REMOVED_IN_V16),
   },
+  {
+    to: 17,
+    describe: "Replace the pinned Codex default model and effort with native inheritance",
+    migrate: (settings) => settings.codexModel === "gpt-6-astra" && settings.codexThinkingLevel === "high"
+      ? { ...settings, codexModel: "", codexThinkingLevel: "" }
+      : { ...settings },
+  },
 ];
 
 /** Read a non-negative integer schema version from raw data; 0 if absent/garbage. */

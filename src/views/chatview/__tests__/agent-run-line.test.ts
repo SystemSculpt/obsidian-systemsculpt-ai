@@ -362,7 +362,7 @@ describe("AgentRunLine", () => {
   });
 
   it("keeps a focused segment focused across a redraw and refreshes a loading model menu", () => {
-    const { parent, line } = mount();
+    const { parent, line, options } = mount();
     line.render(state({ backend: "codex" }));
     segment(parent, "detail").focus();
     segment(parent, "detail").click();
@@ -371,12 +371,15 @@ describe("AgentRunLine", () => {
       backend: "codex",
       codex: {
         ...state().codex,
-        models: [{ model: "gpt-6.1", name: "GPT-6.1", efforts: ["high"], defaultEffort: "high" }],
+        models: [{ model: "gpt-6.1", name: "GPT-6.1", efforts: ["high"], defaultEffort: "high", isDefault: true }],
       },
     }));
     expect(document.activeElement).toBe(segment(parent, "detail"));
     expect(menus().at(-1)!.shown).toBe(true);
-    expect(menus().at(-1)!.items[0].title).toBe("GPT-6.1");
+    expect(menus().at(-1)!.items[0]).toMatchObject({ title: "Codex default (GPT-6.1)", checked: false });
+    expect(menus().at(-1)!.items[1]).toMatchObject({ title: "GPT-6.1", checked: true });
+    menus().at(-1)!.select("Codex default (GPT-6.1)");
+    expect(options.onModelChange).toHaveBeenCalledWith("model:");
     line.unload();
   });
 });

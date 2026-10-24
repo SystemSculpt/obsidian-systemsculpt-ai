@@ -263,6 +263,9 @@ manual mobile exploration is performed.
   writable sandbox. **Codex settings** inherits native approval policy, sandbox,
   permission profiles and reviewer unchanged. Resuming in settings mode resolves
   current native configuration through an ephemeral thread without a model turn.
+- Unset Codex model and thinking selections inherit the installed Codex configuration:
+  omit both overrides from native thread and turn requests. Catalog defaults are
+  display hints, never persisted model overrides. Explicit selections remain overrides.
 - Chat's Codex approval-mode override does not apply to Studio. Studio continues to
   inherit native Codex configuration, including on resume; `CodexExecutionOptions`
   carries model, effort and service tier, not the plugin chat approval mode.

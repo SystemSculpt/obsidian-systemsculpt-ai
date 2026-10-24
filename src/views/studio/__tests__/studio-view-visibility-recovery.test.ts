@@ -9,7 +9,7 @@ import { commandCenterNode } from "../../../studio/nodes/commandCenterNode";
 import { SystemSculptStudioView } from "../SystemSculptStudioView";
 import { readCodexCatalog } from "../../../services/codex/CodexModelCatalog";
 
-jest.mock("../../../services/codex/CodexModelCatalog", () => ({ readCodexCatalog: jest.fn() }));
+jest.mock("../../../services/codex/CodexModelCatalog", () => ({ ...jest.requireActual("../../../services/codex/CodexModelCatalog"), readCodexCatalog: jest.fn() }));
 
 const PATH = "Studio/Recovery.systemsculpt";
 const AT = "2026-10-24T12:00:00.000Z";
