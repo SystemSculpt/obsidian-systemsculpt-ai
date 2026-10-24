@@ -84,6 +84,7 @@ export type AgentConversationRendererOptions = Readonly<{
   onOpenCredits?: () => void | Promise<void>;
   onViewPlans?: () => void | Promise<void>;
   onRetryFailedTurn?: (messageId: string) => void | Promise<void>;
+  onPrepareIncidentReport?: (reportId: string, retry?: boolean) => Promise<boolean>;
   onCopyIncidentReport?: (
     reportId: string,
   ) => boolean | Promise<boolean>;
@@ -2769,12 +2770,12 @@ export class AgentConversationRenderer extends Component {
           if (segment.startsWith("`") && segment.endsWith("`")) message.createEl("code", { text: segment.slice(1, -1) });
           else message.appendText(segment);
         }
-        if (presented.reportId) {
-          copy.createDiv({
+        const reportStatus = presented.reportId
+          ? copy.createDiv({
             cls: "systemsculpt-agent-error-report",
-            text: `Report ID: ${presented.reportId}`,
-          });
-        }
+            text: "Preparing report…",
+            attr: { role: "status", "aria-live": "polite" },
+          }) : null;
         const canRetry = part.retryable && part.retryMessageId && this.options.onRetryFailedTurn
           && !presented.action?.match(/^(see-plans|add-credits|detect)$/)
           && part.error.code !== "content_filter";
@@ -2823,18 +2824,8 @@ export class AgentConversationRenderer extends Component {
           });
           plans.onclick = () => void this.options.onViewPlans?.();
         }
-        if (actions && presented.reportId && this.options.onCopyIncidentReport) {
-          const copyReport = createUiAction(actions, {
-            label: "Copy report",
-            testId: "chat.turn.copy-incident-report",
-            size: "small",
-            tooltip: false,
-          });
-          copyReport.addClass("systemsculpt-agent-error-copy-report");
-          copyReport.onclick = () => void this.copyIncidentReport(
-            copyReport,
-            presented.reportId!,
-          );
+        if (reportStatus && presented.reportId) {
+          void this.prepareIncidentReport(reportStatus, actions, presented.reportId);
         }
         return true;
       }
@@ -3776,6 +3767,49 @@ export class AgentConversationRenderer extends Component {
     this.copyFeedbackTimers.set(button, timer);
   }
 
+  private async prepareIncidentReport(
+    status: HTMLElement,
+    actions: HTMLElement | null,
+    reportId: string,
+    retry = false,
+  ): Promise<void> {
+    const generation = this.lifecycleGeneration;
+    status.setText("Preparing report…");
+    let available = !isLocalReportId(reportId);
+    try {
+      if (!available) available = await this.options.onPrepareIncidentReport?.(reportId, retry) ?? false;
+    } catch {
+      available = false;
+    }
+    if (!this.renderingEnabled || generation !== this.lifecycleGeneration) return;
+    status.setText(available ? `Report ID: ${reportId}` : "Report unavailable");
+    if (!actions) return;
+    if (!available) {
+      if (!this.options.onPrepareIncidentReport) return;
+      const retrySave = createUiAction(actions, {
+        label: "Retry report",
+        testId: "chat.turn.retry-incident-report",
+        size: "small",
+        tooltip: false,
+      });
+      retrySave.onclick = () => {
+        retrySave.disabled = true;
+        retrySave.remove();
+        void this.prepareIncidentReport(status, actions, reportId, true);
+      };
+      return;
+    }
+    if (!this.options.onCopyIncidentReport) return;
+    const copyReport = createUiAction(actions, {
+      label: "Copy report ID",
+      testId: "chat.turn.copy-incident-report",
+      size: "small",
+      tooltip: false,
+    });
+    copyReport.addClass("systemsculpt-agent-error-copy-report");
+    copyReport.onclick = () => void this.copyIncidentReport(copyReport, reportId);
+  }
+
   private async copyIncidentReport(
     button: HTMLButtonElement,
     reportId: string,
@@ -3812,7 +3846,7 @@ export class AgentConversationRenderer extends Component {
     this.copyFeedbackTimers.set(button, ownerWindow.setTimeout(() => {
       this.copyFeedbackTimers.delete(button);
       if (!button.isConnected || button.dataset.copyAttempt !== attempt) return;
-      updateUiAction(button, { label: "Copy report" });
+      updateUiAction(button, { label: "Copy report ID" });
     }, 2_000));
   }
 
