@@ -153,6 +153,36 @@ describe("ChatView text contrast (WCAG AA, default Obsidian themes)", () => {
   });
 });
 
+describe("ChatView narrow run-line readability", () => {
+  test("modes and hosted balances can wrap rather than lose their meaning to ellipsis", () => {
+    const css = readCss("views/agent-workspace/shell.css");
+    for (const selector of [
+      ".systemsculpt-agent-run-segment.is-mode .systemsculpt-agent-run-label",
+      '.systemsculpt-agent-run-segment.is-detail:not([aria-haspopup]) .systemsculpt-agent-run-label',
+    ]) {
+      const label = rule(css, selector);
+      expect(label).toMatch(/white-space:\s*normal/);
+      expect(label).toMatch(/overflow:\s*visible/);
+      expect(label).toMatch(/overflow-wrap:\s*normal/);
+    }
+    // Keep mode words intact ("Full access", not "Full / acces / s").
+    expect(rule(css, ".systemsculpt-agent-run-line .systemsculpt-agent-run-segment.is-mode"))
+      .toMatch(/min-width:\s*min-content/);
+    expect(css).toMatch(/\.is-detail:not\(\[aria-haspopup\]\) \.systemsculpt-agent-run-label\s*\{\s*overflow-wrap:\s*anywhere/);
+    const segment = rule(css, ".systemsculpt-agent-run-line .systemsculpt-agent-run-segment");
+    expect(segment).toMatch(/height:\s*auto/);
+    expect(segment).toMatch(/min-height:\s*var\(--ss-control-height-sm\)/);
+  });
+
+  test("narrow spacing yields to text, not smaller touch targets", () => {
+    const css = readCss("views/agent-workspace/shell.css");
+    expect(css).toMatch(/@container ss-surface \(max-width: 439px\)\s*\{\s*\.systemsculpt-agent-run-line\s*\{\s*column-gap:\s*0;/);
+    const coarse = css.slice(css.indexOf("@media (pointer: coarse)", css.indexOf(".systemsculpt-agent-run-line")));
+    expect(rule(coarse, ".systemsculpt-agent-run-line .systemsculpt-agent-run-segment"))
+      .toMatch(/min-width:\s*var\(--ss-touch-target\);\s*min-height:\s*var\(--ss-touch-target\)/);
+  });
+});
+
 describe("ChatView keyboard focus rules", () => {
   test("the post-cascade focus ring covers every interactive element, not just buttons", () => {
     const css = readCss("index.css");

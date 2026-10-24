@@ -23,6 +23,20 @@ export type AgentRunLineOptions = Readonly<{
 
 type MenuKind = "backend" | "mode" | "detail";
 
+/** Escape dismisses only this menu, not Obsidian's active non-navigation leaf. */
+export function containMenuEscape(menu: Menu, ownerDocument: Document): void {
+  const onKeydown = (event: KeyboardEvent): void => {
+    if (event.key !== "Escape" || event.isComposing) return;
+    event.preventDefault();
+    event.stopPropagation();
+    menu.hide();
+  };
+  // The host's bubbling Escape handler otherwise switches to the last note
+  // after its menu scope hides the menu without consuming the event.
+  ownerDocument.addEventListener("keydown", onKeydown, true);
+  menu.onHide(() => ownerDocument.removeEventListener("keydown", onKeydown, true));
+}
+
 /**
  * Focuses `target()` once Obsidian has finished hiding a menu, unless
  * something else, such as a newly started chat, has taken focus meanwhile.
@@ -184,6 +198,7 @@ export class AgentRunLine extends Component {
     // a native macOS menu would flatten title and description into one string.
     const menu = new Menu().setUseNativeMenu(false);
     const ownerDocument = opener.ownerDocument;
+    containMenuEscape(menu, ownerDocument);
     for (const entry of entries) this.addEntry(menu, kind, entry, (id) => this.select(kind, id));
     menu.onHide(() => {
       if (this.openMenu !== menu) return;
