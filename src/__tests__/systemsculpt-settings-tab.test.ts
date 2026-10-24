@@ -65,11 +65,6 @@ const createPluginStub = () => {
     },
     getSettingsManager: jest.fn(() => settingsManager),
     getSettingsManagerInstance: settingsManager,
-    emitter: {
-      on: jest.fn(),
-      off: jest.fn(),
-      emit: jest.fn(),
-    },
     modelService: {
       getModels: jest.fn().mockResolvedValue([]),
       refreshModels: jest.fn(),

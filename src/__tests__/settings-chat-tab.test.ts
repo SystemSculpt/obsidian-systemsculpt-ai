@@ -15,7 +15,6 @@ const createPluginStub = (app: App) => {
 
   return {
     app,
-    emitter: { emit: jest.fn() },
     settings: {
       chatFontSize: "medium",
       textExecutionBackend: "systemsculpt",
