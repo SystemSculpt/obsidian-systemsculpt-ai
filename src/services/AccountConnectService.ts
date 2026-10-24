@@ -123,7 +123,7 @@ export class AccountConnectService {
   /** Settles when the poll holding the in-flight slot is answered or gives the slot back. */
   private pollSlot: Promise<void> | null = null;
   /** The completion of the latest sign-in, adopted by an exchange that was waiting on it. */
-  private completion: Promise<ConnectOutcome> | null = null;
+  private completion: Readonly<{ state: string; outcome: Promise<ConnectOutcome> }> | null = null;
   private exchangeInProgress = false;
   private backgroundOutcomeHandler: ((outcome: ConnectOutcome) => void) | null = null;
 
@@ -386,7 +386,7 @@ export class AccountConnectService {
     const success = this.readExchangeSuccess(answer.payload);
     // Another request completed this sign-in first, or it already ended.
     if (!success || this.pending !== pending) return;
-    const outcome = await this.complete(success);
+    const outcome = await this.complete(pending.state, success);
     if (!this.exchangeInProgress) this.backgroundOutcomeHandler?.(outcome);
   }
 
@@ -405,6 +405,9 @@ export class AccountConnectService {
   public async handleProtocolCallback(params: Record<string, string>): Promise<ConnectOutcome> {
     const pending = this.activePending();
     if (!pending) {
+      // A poll may have consumed the code before the browser returned. Reuse
+      // its actual result, including save failures, only for that same sign-in.
+      if (this.completion && this.completion.state === params.state) return this.completion.outcome;
       return { kind: "error", reason: "expired" };
     }
     if ((params.state || "") !== pending.state) {
@@ -488,25 +491,30 @@ export class AccountConnectService {
 
   /** The outcome of whatever ended this sign-in while an exchange waited on it. */
   private adoptCompletion(): Promise<ConnectOutcome> {
-    return this.completion ?? Promise.resolve({ kind: "error", reason: "expired" });
+    return this.completion?.outcome ?? Promise.resolve({ kind: "error", reason: "expired" });
   }
 
   /** Stores the account from the one request that completed this sign-in. */
-  private complete(success: ExchangeSuccess): Promise<ConnectOutcome> {
+  private complete(state: string, success: ExchangeSuccess): Promise<ConnectOutcome> {
     this.endPending();
-    this.completion = success.status === "ok"
+    const outcome = (success.status === "ok"
       ? this.completeSignIn(success.licenseKey, success.account)
-      : this.completeWithoutLicense(success.account);
-    return this.completion;
+      : this.completeWithoutLicense(success.account))
+      // The code is consumed and polling has stopped. A local save or license
+      // check failure must reach the UI even when no exchange is awaiting it.
+      .catch((): ConnectOutcome => ({ kind: "error", reason: "unavailable" }));
+    this.completion = { state, outcome };
+    return outcome;
   }
 
   private async completeSignIn(licenseKey: string, account: ExchangeAccount): Promise<ConnectOutcome> {
-    await this.plugin.getSettingsManager().updateSettings({
+    const saved = await this.plugin.getSettingsManager().updateSettings({
       licenseKey,
       userEmail: account.email ?? "",
       userName: account.name ?? account.email ?? "",
       displayName: account.name ?? account.email ?? "",
     });
+    if (!saved) return { kind: "error", reason: "unavailable" };
     await this.plugin.getLicenseManager().validateLicenseKeyDetailed();
     this.refreshSettingsTab();
     return {
@@ -518,7 +526,7 @@ export class AccountConnectService {
   }
 
   private async completeWithoutLicense(account: ExchangeAccount): Promise<ConnectOutcome> {
-    await this.plugin.getSettingsManager().updateSettings({
+    const saved = await this.plugin.getSettingsManager().updateSettings({
       licenseKey: "",
       licenseValid: false,
       userEmail: account.email ?? "",
@@ -526,6 +534,7 @@ export class AccountConnectService {
       displayName: account.name ?? account.email ?? "",
       subscriptionStatus: "",
     });
+    if (!saved) return { kind: "error", reason: "unavailable" };
     this.refreshSettingsTab();
     return { kind: "no-license", name: account.name, email: account.email };
   }
@@ -583,6 +592,6 @@ export class AccountConnectService {
   private refreshSettingsTab(): void {
     const tab = this.plugin.settingsTab;
     if (!tab?.containerEl?.isConnected) return;
-    void Promise.resolve(tab.display()).catch(() => undefined);
+    void Promise.resolve().then(() => tab.display()).catch(() => undefined);
   }
 }

@@ -22,6 +22,7 @@ const RETRYABLE_REASONS: ReadonlySet<ConnectErrorReason> = new Set([
   "state-mismatch",
   "invalid-code",
   "unconfirmed",
+  "unavailable",
 ]);
 
 /**
