@@ -14,6 +14,7 @@ export type ApprovalAnswer = (
 
 type ApprovalOptions = {
   onApprove: ApprovalAnswer;
+  onReview?: () => void;
   composer?: () => HTMLElement | undefined;
   isVisible?: () => boolean;
   onHiddenApproval?: (part: AgentToolPart) => void;
@@ -106,12 +107,14 @@ export class AgentApprovalCards extends Component {
     this.registerDomEvent(composer, "input", () => this.syncReviewVisibility());
     this.registerDomEvent(composer, "focusin", () => this.syncReviewVisibility());
     this.registerDomEvent(composer, "focusout", () => this.syncReviewVisibilityAfterFocusMoves());
-    this.registerDomEvent(composer, "keydown", event => {
-      if (event.altKey && event.key === "ArrowUp" && !event.ctrlKey && !event.metaKey
-        && !event.repeat && !event.isComposing && this.pending.size) {
+    const keyboardRoot = composer.closest<HTMLElement>(".systemsculpt-agent-workspace") ?? composer;
+    this.registerDomEvent(keyboardRoot, "keydown", event => {
+      if (event.altKey && (event.key === "ArrowUp" || event.key === "ArrowDown")
+        && !event.ctrlKey && !event.metaKey && !event.shiftKey
+        && !event.defaultPrevented && !event.repeat && !event.isComposing && this.pending.size) {
         event.preventDefault();
         event.stopPropagation();
-        this.focusFirst();
+        this.reviewFirst();
       }
     });
   }
@@ -260,6 +263,11 @@ export class AgentApprovalCards extends Component {
     }
   }
 
+  private reviewFirst(): void {
+    this.options.onReview?.();
+    this.focusFirst();
+  }
+
   private focusAfter(id: string, order: readonly string[]): void {
     const index = order.indexOf(id);
     const candidates = [...order.slice(index + 1), ...order.slice(0, index).reverse()];
@@ -281,13 +289,13 @@ export class AgentApprovalCards extends Component {
       this.review = createUiAction(composer, { label: "Approval needed · Review", icon: "shield-question", size: "small", testId: "chat.approval.review", tooltip: false });
       composer.prepend(this.review);
       this.review.addClass("systemsculpt-agent-approval-review");
-      this.review.setAttribute("aria-keyshortcuts", "Alt+ArrowUp");
+      this.review.setAttribute("aria-keyshortcuts", "Alt+ArrowUp Alt+ArrowDown");
       this.review.createEl("kbd", {
         cls: "systemsculpt-agent-approval-review-key",
         text: getHostOperatingSystem() === "macOS" ? "⌥↑" : "Alt+↑",
         attr: { "aria-hidden": "true" },
       });
-      this.review.onclick = () => this.focusFirst();
+      this.review.onclick = () => this.reviewFirst();
     }
     this.syncReviewVisibility();
   }
@@ -327,7 +335,8 @@ export class AgentApprovalCards extends Component {
     const target = event.target as HTMLElement | null;
     const card = target?.closest<HTMLElement>(".systemsculpt-agent-approval[data-approval-id]");
     if (!card || !this.pending.has(card.dataset.approvalId!)) return;
-    if ((event.key === "ArrowDown" || event.key === "ArrowUp") && !editable(target)) {
+    if ((event.key === "ArrowDown" || event.key === "ArrowUp") && !editable(target)
+      && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
       const cards = this.cards();
       const index = cards.indexOf(card);
       const next = cards[(index + (event.key === "ArrowDown" ? 1 : -1) + cards.length) % cards.length];

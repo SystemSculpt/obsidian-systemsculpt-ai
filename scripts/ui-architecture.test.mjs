@@ -180,6 +180,34 @@ test("every discoverable Obsidian host mounts a direct or named deep surface ada
   }
 });
 
+test("continuous activity animations change only compositor properties", () => {
+  const css = readCssDirectory("src/css").replace(/\/\*[\s\S]*?\*\//g, "");
+  const keyframes = new Map([...css.matchAll(/@keyframes\s+([\w-]+)\s*\{([\s\S]*?\n\})/g)]
+    .map((match) => [match[1], match[2]]));
+  const activityCss = readCssDirectory("src/css/views/studio")
+    + readCssDirectory("src/css/views/agent-workspace");
+  const continuous = [...activityCss.matchAll(/animation:\s*([\w-]+)[^;{}]*\binfinite\b[^;{}]*;/g)]
+    .map((match) => match[1]);
+  assert.ok(continuous.length > 0);
+  for (const name of new Set([...continuous, "ss-studio-activity-pulse-card", "ss-studio-activity-pulse-edge"])) {
+    const frames = keyframes.get(name);
+    assert.ok(frames, `${name} needs a keyframe definition`);
+    for (const [, property] of frames.matchAll(/([\w-]+)\s*:/g)) {
+      assert.ok(["transform", "opacity"].includes(property), `${name} animates paint-bound ${property}`);
+    }
+  }
+});
+
+test("hidden surfaces and reduced motion override feature animation specificity", () => {
+  const surface = read("src/css/foundation/surface.css");
+  assert.match(surface, /:is\(\.ss-motion-paused, #ss-specificity-boost\) \*::after\s*\{\s*animation-play-state:\s*paused;/);
+  // Studio pulse cleanup depends on animationend, even under reduced motion.
+  assert.match(surface, /prefers-reduced-motion:[\s\S]*#ss-specificity-boost\) \*::after\s*\{\s*animation-duration:\s*0\.01ms;\s*animation-iteration-count:\s*1;/);
+  const chat = read("src/css/views/agent-workspace/reasoning.css");
+  assert.match(chat, /:is\(\.systemsculpt-agent-workspace\.is-reduced-motion, #ss-specificity-boost\) \*::after\s*\{\s*animation:\s*none;/);
+  assert.match(chat, /prefers-reduced-motion:[\s\S]*#ss-specificity-boost\) \*::after\s*\{\s*animation:\s*none;/);
+});
+
 test("the shared surface owns adaptation and obsolete UI seams stay deleted", () => {
   const surfaceCss = read("src/css/foundation/surface.css");
   const tokensCss = read("src/css/foundation/tokens.css");

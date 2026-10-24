@@ -227,9 +227,11 @@ execution disabled and a Desktop explanation; portable nodes still work.
   Codex run cards, and workflow steps all carry `data-activity`, derived by
   src/views/studio/activity from run events, native Codex runs, and workflow
   plans. A working node shows a spinner, progress bar, and breathing halo;
-  its outgoing cables surge with travelling energy until the result lands;
-  settled phases keep their color. Activity-only events patch the canvas in
-  place; only outputs and placeholders rebuild it.
+  its outgoing cables show static energy dashes until the result lands;
+  settled phases keep their color. Activity decorations animate only opacity
+  and transforms, and pause while the view is hidden or its window is unfocused.
+  Activity-only events patch the canvas in place; only outputs and placeholders
+  rebuild it.
 
 See src/views/studio/DESIGN.md for presentation principles and the README files
 beside canvas, systemsculpt-studio-view, and activity for current module maps.

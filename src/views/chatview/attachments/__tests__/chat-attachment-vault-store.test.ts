@@ -1,4 +1,18 @@
-import type { ChatAttachmentMetadata } from "../../../../types";
+import type { ChatAttachmentMetadata, MultiPartContent } from "../../../../types";
+import { ChatMessageAttachmentCollection, composeAttachmentMetadata, composeUserMessageContent } from "../ChatMessageAttachments";
+import { hashAttachmentPart } from "../../../../chat/ChatAttachmentContent";
+import * as hashing from "../../../../utils/sha256";
+import { base64ToBytes } from "../../../../utils/base64";
+
+jest.mock("../../../../utils/base64", () => {
+  const actual = jest.requireActual("../../../../utils/base64");
+  return { ...actual, base64ToBytes: jest.fn(actual.base64ToBytes) };
+});
+
+jest.mock("../../../../utils/sha256", () => {
+  const actual = jest.requireActual("../../../../utils/sha256");
+  return { ...actual, sha256HexFromBytes: jest.fn(async (bytes: Uint8Array) => actual.sha256HexFromBytesPortable(bytes)) };
+});
 import {
   ChatAttachmentVaultStore,
   chatAttachmentRefKey,
@@ -44,11 +58,72 @@ const imageAttachment = {
 };
 
 describe("ChatAttachmentVaultStore", () => {
+  it("hashes an image once through ingestion, repeated persistence and live request hydration", async () => {
+    const hash = jest.mocked(hashing.sha256HexFromBytes);
+    hash.mockClear();
+    const { adapter } = harness();
+    const store = new ChatAttachmentVaultStore(adapter);
+    const collection = new ChatMessageAttachmentCollection(async () => new Uint8Array([1, 2, 3]).buffer);
+    await collection.addFiles([{ name: "diagram.png", type: "image/png", size: 3 } as File]);
+    const attachments = await store.externalizeAttachments(collection.snapshot());
+    await store.externalizeAttachments(attachments);
+    const readsBeforeSend = jest.mocked(adapter.readBinary).mock.calls.length;
+    const message = {
+      role: "user" as const, message_id: "live",
+      content: composeUserMessageContent("Describe", attachments),
+      attachmentMetadata: composeAttachmentMetadata("Describe", attachments),
+    };
+    expect((await store.hydrateMessage(message)).content).toEqual(message.content);
+    expect(adapter.readBinary).toHaveBeenCalledTimes(readsBeforeSend);
+    expect(hash).toHaveBeenCalledTimes(1);
+
+    // A restored descriptor is untrusted disk data: hash once on read, then
+    // reuse that verified immutable part for the subsequent send.
+    const reference = store.referencePersistedAttachment(store.dehydrateAttachment(attachments[0]));
+    const restored = await store.hydrateMessage({ ...message, content: [{ type: "text", text: "Describe" }, reference.contentPart] });
+    await store.hydrateMessage(restored);
+    expect(hash).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not trust a forged saved ref or an ID as proof of the inline bytes", async () => {
+    const { adapter } = harness();
+    const store = new ChatAttachmentVaultStore(adapter);
+    const [stored] = await store.externalizeAttachments([imageAttachment]);
+    const message = {
+      role: "user" as const, message_id: "forged",
+      content: [{ type: "image_url" as const, image_url: { url: "data:image/png;base64,CQkJ" } }],
+      attachmentMetadata: [{ ...store.dehydrateAttachment(stored), contentPartIndex: 0 }],
+    };
+    expect((await store.hydrateMessage(message)).content).toEqual([imageAttachment.contentPart]);
+  });
+
+  it("never caches mutable content and shares only immutable in-flight fingerprints", async () => {
+    const hash = jest.mocked(hashing.sha256HexFromBytes);
+    hash.mockClear();
+    const mutable: MultiPartContent = { type: "text", text: "first" };
+    const first = await hashAttachmentPart(mutable);
+    mutable.text = "other";
+    expect((await hashAttachmentPart(mutable)).sha256).not.toBe(first.sha256);
+    const frozen = Object.freeze({ type: "text" as const, text: "shared" });
+    const [left, right] = await Promise.all([hashAttachmentPart(frozen), hashAttachmentPart(frozen)]);
+    expect(left).toEqual(right);
+    expect(hash).toHaveBeenCalledTimes(3);
+  });
+
+  it("retries a rejected fingerprint instead of retaining a poisoned cache entry", async () => {
+    const part = Object.freeze({ type: "text" as const, text: "retry" });
+    jest.mocked(hashing.sha256HexFromBytes).mockRejectedValueOnce(new Error("digest failed"));
+    await expect(hashAttachmentPart(part)).rejects.toThrow("digest failed");
+    await expect(hashAttachmentPart(part)).resolves.toMatchObject({ byteLength: 5 });
+  });
+
   it("externalizes runtime attachments and hydrates them back losslessly", async () => {
+    jest.mocked(base64ToBytes).mockClear();
     const { adapter, files } = harness();
     const store = new ChatAttachmentVaultStore(adapter);
 
     const [externalized] = await store.externalizeAttachments([imageAttachment]);
+    expect(base64ToBytes).toHaveBeenCalledTimes(1);
     expect(externalized.contentRef).toEqual(expect.objectContaining({
       schema: "systemsculpt-chat-attachment-v1",
       payload: "image-bytes",

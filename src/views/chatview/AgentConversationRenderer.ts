@@ -67,6 +67,7 @@ export type AgentConversationRendererOptions = Readonly<{
     mutationTarget?: HTMLElement,
   ) => (() => void) | undefined;
   onApprove: ApprovalAnswer;
+  onReviewApproval?: () => void;
   approvalComposer?: () => HTMLElement | undefined;
   isApprovalVisible?: () => boolean;
   onHiddenApproval?: (part: AgentToolPart) => void;
@@ -552,6 +553,7 @@ export class AgentConversationRenderer extends Component {
     this.addChild(this.liveMarkdown);
     this.approvals = new AgentApprovalCards(this.element, {
       onApprove: options.onApprove,
+      onReview: options.onReviewApproval,
       composer: options.approvalComposer,
       isVisible: options.isApprovalVisible,
       onHiddenApproval: options.onHiddenApproval,

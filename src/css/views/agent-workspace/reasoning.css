@@ -144,22 +144,18 @@
   animation: ss-pulse 0.9s var(--ss-ease) infinite;
 }
 
-.systemsculpt-agent-workspace.is-reduced-motion *,
-.systemsculpt-agent-workspace.is-reduced-motion *::before,
-.systemsculpt-agent-workspace.is-reduced-motion *::after {
-  animation-duration: 0.01ms;
-  animation-iteration-count: 1;
+:is(.systemsculpt-agent-workspace.is-reduced-motion, #ss-specificity-boost) *,
+:is(.systemsculpt-agent-workspace.is-reduced-motion, #ss-specificity-boost) *::before,
+:is(.systemsculpt-agent-workspace.is-reduced-motion, #ss-specificity-boost) *::after {
+  animation: none;
   scroll-behavior: auto;
   transition-duration: 0.01ms;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .systemsculpt-agent-workspace *,
-  .systemsculpt-agent-workspace *::before,
-  .systemsculpt-agent-workspace *::after {
-    animation-duration: 0.01ms;
-    animation-iteration-count: 1;
-    scroll-behavior: auto;
-    transition-duration: 0.01ms;
+  :is(.systemsculpt-agent-workspace, #ss-specificity-boost) *,
+  :is(.systemsculpt-agent-workspace, #ss-specificity-boost) *::before,
+  :is(.systemsculpt-agent-workspace, #ss-specificity-boost) *::after {
+    animation: none;
   }
 }

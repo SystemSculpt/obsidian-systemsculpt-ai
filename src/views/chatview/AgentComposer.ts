@@ -16,7 +16,7 @@ import type { ChatMessage } from "../../types";
 import {
   CHAT_ATTACHMENT_PICKER_ACCEPT,
   ChatMessageAttachmentCollection,
-  restoreChatMessageDraft,
+  chatMessageDraftText,
   type ChatAttachmentDisplay,
   type ChatDocumentAttachmentProcessor,
   type ChatMessageAttachment,
@@ -389,7 +389,7 @@ export class AgentComposer extends Component {
     const prompts: string[] = [];
     for (const message of messages) {
       if (message.role !== "user") continue;
-      const text = restoreChatMessageDraft(message).text.trim();
+      const text = chatMessageDraftText(message).trim();
       if (text && prompts[prompts.length - 1] !== text) prompts.push(text);
     }
     const browsing = this.recallIndex === null ? null : this.promptHistory[this.recallIndex];
@@ -863,7 +863,7 @@ export class AgentComposer extends Component {
 
   private handleInputKeydown(event: KeyboardEvent): void {
     // "Process" is what an IME reports for keys it is still composing.
-    if (event.isComposing || event.key === "Process") return;
+    if (event.defaultPrevented || event.isComposing || event.key === "Process") return;
     const modified = event.altKey || event.ctrlKey || event.metaKey;
     if (this.mentions.isOpen()) {
       if (event.key === "Tab" && !event.shiftKey && !modified) {

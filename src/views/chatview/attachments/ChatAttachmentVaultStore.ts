@@ -1,4 +1,3 @@
-import { sha256HexFromBytesPortable } from "../../../utils/sha256";
 import type {
   ChatAttachmentContentRef,
   ChatAttachmentMetadata,
@@ -6,8 +5,10 @@ import type {
   MultiPartContent,
 } from "../../../types";
 import {
-  attachmentPartPayloadBytes,
-  createImageAttachmentPart,
+  prepareAttachmentPayload,
+  cachedAttachmentFingerprint,
+  hashAttachmentPart,
+  createHashedImageAttachmentPart,
   createUnavailableAttachmentPart,
   parseAttachedTextContent,
 } from "../../../chat/ChatAttachmentContent";
@@ -150,18 +151,14 @@ function arrayBuffer(bytes: Uint8Array): ArrayBuffer {
   return bytes.slice().buffer;
 }
 
-function buildRef(part: MultiPartContent): Readonly<{ ref: ChatAttachmentContentRef; bytes: Uint8Array }> {
-  const bytes = attachmentPartPayloadBytes(part);
-  if (!bytes) {
-    throw new Error("Only valid image and text attachment payloads can be stored.");
-  }
+async function buildRef(part: MultiPartContent): Promise<Readonly<{ ref: ChatAttachmentContentRef; bytes: Uint8Array }>> {
   const payload = part.type === "image_url" ? "image-bytes" as const : "utf8-content-part" as const;
+  const { bytes, fingerprint } = await prepareAttachmentPayload(part);
   return Object.freeze({
     ref: Object.freeze({
       schema: CHAT_ATTACHMENT_REF_SCHEMA,
       payload,
-      sha256: sha256HexFromBytesPortable(bytes),
-      byteLength: bytes.byteLength,
+      ...fingerprint,
     }),
     bytes,
   });
@@ -182,7 +179,7 @@ export class ChatAttachmentVaultStore {
   ): Promise<readonly (T & Readonly<{ contentRef: ChatAttachmentContentRef }>)[]> {
     const results: Array<T & Readonly<{ contentRef: ChatAttachmentContentRef }>> = [];
     for (const attachment of attachments) {
-      const { ref, bytes } = buildRef(attachment.contentPart);
+      const { ref, bytes } = await buildRef(attachment.contentPart);
       this.claim(ref);
       await this.write(ref, bytes);
       results.push(Object.freeze({
@@ -322,9 +319,16 @@ export class ChatAttachmentVaultStore {
         const compatible = metadata.kind === "image"
           ? metadata.contentRef.payload === "image-bytes"
           : metadata.contentRef.payload === "utf8-content-part";
-        part = compatible
-          ? await this.hydrateContentPart(metadata)
-          : createUnavailableAttachmentPart(metadata.name, metadata.mimeType);
+        const livePart = baseParts[metadata.contentPartIndex];
+        const fingerprint = livePart && cachedAttachmentFingerprint(livePart);
+        const verified = fingerprint ? await fingerprint : undefined;
+        part = compatible && (metadata.kind === "image" ? livePart?.type === "image_url" : livePart?.type === "text")
+          && verified?.sha256 === metadata.contentRef.sha256
+          && verified.byteLength === metadata.contentRef.byteLength
+          ? livePart
+          : compatible
+            ? await this.hydrateContentPart(metadata)
+            : createUnavailableAttachmentPart(metadata.name, metadata.mimeType);
       } else {
         part = baseParts[metadata.contentPartIndex];
       }
@@ -458,13 +462,7 @@ export class ChatAttachmentVaultStore {
   ): Promise<MultiPartContent | null> {
     if (!metadata.contentRef || !isChatAttachmentContentRef(metadata.contentRef)) return null;
     try {
-      const bytes = await this.read(metadata.contentRef);
-      return metadata.contentRef.payload === "image-bytes"
-        ? createImageAttachmentPart(metadata.mimeType, bytes)
-        : Object.freeze({
-            type: "text" as const,
-            text: new TextDecoder("utf-8", { fatal: false }).decode(bytes),
-          });
+      return await this.read(metadata.contentRef, metadata.mimeType);
     } catch {
       return createUnavailableAttachmentPart(metadata.name, metadata.mimeType);
     }
@@ -501,29 +499,45 @@ export class ChatAttachmentVaultStore {
     bytes: Uint8Array,
   ): Promise<void> {
     if (await this.adapter.exists(path)) {
-      await this.read(ref);
+      await this.verifyExisting(path, ref, bytes);
       return;
     }
     await this.mkdirRecursive(dirname(path));
     // Recheck after directory creation so another store instance can win the
     // race without turning the content-addressed payload into a rewrite log.
     if (await this.adapter.exists(path)) {
-      await this.read(ref);
+      await this.verifyExisting(path, ref, bytes);
       return;
     }
     await this.adapter.writeBinary(path, arrayBuffer(bytes));
   }
 
-  private async read(ref: ChatAttachmentContentRef): Promise<Uint8Array> {
+  private async verifyExisting(path: string, ref: ChatAttachmentContentRef, expected: Uint8Array): Promise<void> {
+    const actual = new Uint8Array(await this.adapter.readBinary(path));
+    if (actual.byteLength !== expected.byteLength) throw new Error(`Attachment payload ${ref.sha256} is corrupt.`);
+    // The incoming snapshot was already hashed. Exact comparison keeps the
+    // corruption check without hashing that payload a second time.
+    for (let index = 0; index < actual.byteLength; index += 1) {
+      if (actual[index] !== expected[index]) throw new Error(`Attachment payload ${ref.sha256} is corrupt.`);
+    }
+  }
+
+  private async read(ref: ChatAttachmentContentRef, mimeType: string): Promise<MultiPartContent> {
     const path = this.path(ref);
     if (!await this.adapter.exists(path)) {
       throw new Error(`Attachment payload ${ref.sha256} is missing.`);
     }
     const bytes = new Uint8Array(await this.adapter.readBinary(path));
-    if (bytes.byteLength !== ref.byteLength || sha256HexFromBytesPortable(bytes) !== ref.sha256) {
+    if (bytes.byteLength !== ref.byteLength) {
       throw new Error(`Attachment payload ${ref.sha256} is corrupt.`);
     }
-    return bytes;
+    const part = ref.payload === "image-bytes"
+      ? await createHashedImageAttachmentPart(mimeType, bytes)
+      : Object.freeze({ type: "text" as const, text: new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes) });
+    if ((await hashAttachmentPart(part)).sha256 !== ref.sha256) {
+      throw new Error(`Attachment payload ${ref.sha256} is corrupt.`);
+    }
+    return part;
   }
 
   private async mkdirRecursive(path: string): Promise<void> {

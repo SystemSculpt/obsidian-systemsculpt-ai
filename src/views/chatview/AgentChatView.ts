@@ -77,6 +77,7 @@ import {
   composeUserMessageContent,
   restoreChatMessageDraft,
   type ChatMessageAttachment,
+  type RestoredChatMessageDraft,
 } from "./attachments/ChatMessageAttachments";
 import { ManagedChatDocumentAttachmentProcessor } from "./attachments/ManagedChatDocumentAttachmentProcessor";
 import {
@@ -2827,7 +2828,18 @@ export class AgentChatView extends ItemView {
       return null;
     }
     const generation = ++this.messageEditGeneration;
-    const hydratedMessage = await this.attachmentStore.hydrateMessage(message);
+    let draft: RestoredChatMessageDraft;
+    try {
+      const hydratedMessage = await this.attachmentStore.hydrateMessage(message);
+      draft = await restoreChatMessageDraft(hydratedMessage);
+    } catch {
+      if (generation === this.messageEditGeneration
+        && this.isCurrentConversationOrigin(expectedConversationOriginToken)
+        && !this.isSubmissionActive()) {
+        new Notice("This message's attachments could not be prepared. Try again.", 5000);
+      }
+      return null;
+    }
     if (
       generation !== this.messageEditGeneration
       || !this.isCurrentConversationOrigin(expectedConversationOriginToken)
@@ -2841,7 +2853,6 @@ export class AgentChatView extends ItemView {
       new Notice("This chat changed before the message could be edited.", 5000);
       return null;
     }
-    const draft = restoreChatMessageDraft(hydratedMessage);
     const expectedAttachments = message.attachmentMetadata?.length ?? 0;
     const unavailableAttachmentCount = Math.max(0, expectedAttachments - draft.attachments.length);
     const durableConsequences = historicalResubmitConsequences(
@@ -3401,9 +3412,14 @@ export class AgentChatView extends ItemView {
       }
     }));
     this.registerEvent(this.app.workspace.on("file-open", () => this.syncChrome()));
-    this.registerEvent(this.app.workspace.on("systemsculpt:settings-updated", () => {
-      this.syncChrome();
-      void this.refreshCreditsBalance({ reason: "settings_update" });
+    this.registerEvent(this.app.workspace.on("systemsculpt:settings-updated", (oldSettings, newSettings, changedKeys) => {
+      if (changedKeys.some(key => [
+        "licenseKey", "userEmail", "subscriptionStatus", "textExecutionBackend", "textExecutionBackendExplicit",
+        "codexModel", "codexThinkingLevel", "codexServiceTier", "codexApprovalMode", "claudeModel", "claudePermissionMode",
+      ].includes(key))) this.syncChrome();
+      if (changedKeys.includes("licenseKey") && oldSettings.licenseKey.trim() !== newSettings.licenseKey.trim()) {
+        void this.refreshCreditsBalance({ reason: "settings_update" });
+      }
     }));
   }
 

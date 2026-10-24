@@ -45,7 +45,7 @@
   height: 4px;
   margin-inline: 7px;
   border-radius: var(--ss-radius-round);
-  background-color: color-mix(in srgb, currentcolor 30%, transparent);
+  background-color: currentcolor;
   animation: ss-agent-working-dot 1.2s var(--ss-ease) 200ms infinite;
 }
 
@@ -56,9 +56,8 @@
   width: 4px;
   height: 4px;
   border-radius: var(--ss-radius-round);
-  background-color: color-mix(in srgb, currentcolor 30%, transparent);
+  background-color: currentcolor;
   content: "";
-  animation: ss-agent-working-dot 1.2s var(--ss-ease) infinite;
 }
 
 .systemsculpt-agent-tail-status-icon.is-animated::before {
@@ -67,7 +66,6 @@
 
 .systemsculpt-agent-tail-status-icon.is-animated::after {
   right: -7px;
-  animation-delay: 400ms;
 }
 
 .systemsculpt-agent-tail-status-icon.is-animated svg {
@@ -86,13 +84,8 @@
 
 @keyframes ss-agent-working-dot {
   0%,
-  100% {
-    background-color: color-mix(in srgb, currentcolor 30%, transparent);
-  }
-
-  50% {
-    background-color: color-mix(in srgb, currentcolor 68%, transparent);
-  }
+  100% { opacity: 0.3; }
+  50% { opacity: 0.68; }
 }
 
 /* A completed turn has one closed Worked fold. Live turns have no outer fold. */

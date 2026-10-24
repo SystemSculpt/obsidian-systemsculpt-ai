@@ -2,6 +2,13 @@
 
 SystemSculpt can use tools during chat when the current flow needs them. There is no separate Agent Mode toggle in the plugin.
 
+## Motion
+
+Chat activity animations pause while the view is hidden or its window is
+unfocused; this does not stop the running task. **Settings → Chat → Reduce chat
+motion** minimizes chat animations even without a system reduced-motion
+preference. System reduced motion is always honored.
+
 ## Approval behavior
 
 The run line under the composer says who answers and where it runs, the mode, and
@@ -84,8 +91,9 @@ permission. Native agents own the grant, and already-pending requests still need
 their own answer. Closing the live chat ends its native session grants.
 
 A new card does not interrupt typing. Use **Approval needed · Review** or
-**⌥/Alt+↑** to move from the composer to the pending card. Resolved cards retain
-their result, and focus moves to the next pending card or back to the composer.
+**⌥/Alt+↑** (also **⌥/Alt+↓**) anywhere in the chat view to focus the first pending
+card. With no card pending, these keys keep their normal behavior. Resolved cards
+retain their result, and focus moves to the next pending card or back to the composer.
 
 ## Where tools come from
 

@@ -4,7 +4,12 @@ import {
   ManagedDocumentLocalEffectError,
   type DocumentProcessingDependencies,
 } from "../DocumentProcessingService";
-import { sha256HexFromBytesPortable } from "../../utils/sha256";
+import { sha256HexFromArrayBuffer, sha256HexFromBytesPortable } from "../../utils/sha256";
+
+jest.mock("../../utils/sha256", () => {
+  const actual = jest.requireActual("../../utils/sha256");
+  return { ...actual, sha256HexFromArrayBuffer: jest.fn(actual.sha256HexFromArrayBuffer) };
+});
 import { errorLogger } from "../../utils/errorLogger";
 
 jest.mock("obsidian", () => {
@@ -84,6 +89,36 @@ describe("DocumentProcessingService managed local effects", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     globalThis.atob ??= (value: string) => Buffer.from(value, "base64").toString("binary");
+  });
+
+  it("hashes one loaded document snapshot once even when admission asks twice", async () => {
+    const { app, dependencies, managed, plugin } = harness();
+    managed.processAndCommit.mockImplementationOnce(async (source: any) => {
+      const [first, second] = await Promise.all([source.fingerprint(), source.fingerprint()]);
+      expect(first).toBe(second);
+      expect((await source.load()).bytes).toBe(sourceBytes);
+      return {};
+    });
+    await new DocumentProcessingService(app, plugin, dependencies).processDocumentWithReceipt(file(), { showNotices: false });
+    expect(app.vault.readBinary).toHaveBeenCalledTimes(1);
+    expect(sha256HexFromArrayBuffer).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not stage or write results when cancellation wins an asynchronous image digest", async () => {
+    const { app, dependencies, managed, plugin, staging } = harness({ images: true });
+    const controller = new AbortController();
+    jest.mocked(sha256HexFromArrayBuffer)
+      .mockResolvedValueOnce("a".repeat(64))
+      .mockImplementationOnce(async (bytes) => {
+        controller.abort();
+        return sha256HexFromBytesPortable(new Uint8Array(bytes));
+      });
+    await expect(new DocumentProcessingService(app, plugin, dependencies).processDocument(file(), {
+      signal: controller.signal, showNotices: false,
+    })).rejects.toMatchObject({ name: "AbortError" });
+    expect(staging.stage).not.toHaveBeenCalled();
+    expect(app.vault.createBinary).not.toHaveBeenCalled();
+    expect(managed.completeLocalCommit).not.toHaveBeenCalled();
   });
 
   it("uses one signal and commits verified image, Markdown, and context effects in order", async () => {

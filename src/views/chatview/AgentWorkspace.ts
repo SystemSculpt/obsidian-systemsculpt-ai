@@ -8,6 +8,7 @@ import {
   cancelSurfaceAnimationFrame,
   requestSurfaceAnimationFrame,
 } from "../../core/ui/surface/SurfaceDomContext";
+import { bindSurfaceActivity } from "../../core/ui/surface/SurfaceActivity";
 import type { ChatMessage } from "../../types";
 import { contentKeys, sameContentKeys } from "../../utils/immutableJson";
 import {
@@ -302,6 +303,7 @@ export class AgentWorkspace extends Component {
           return result;
         });
       },
+      onReviewApproval: () => this.hideHistory(false),
       approvalComposer: () => this.composer?.element,
       isApprovalVisible: options.isApprovalVisible,
       onHiddenApproval: options.onHiddenApproval,
@@ -1302,6 +1304,7 @@ export class AgentWorkspace extends Component {
   }
 
   public override onload(): void {
+    this.register(bindSurfaceActivity(this.element));
     this.unloaded = false;
     this.lifecycleGeneration += 1;
   }
