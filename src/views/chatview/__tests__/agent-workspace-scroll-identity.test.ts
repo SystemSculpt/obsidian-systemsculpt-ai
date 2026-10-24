@@ -1058,7 +1058,7 @@ describe("AgentWorkspace response scroll identity", () => {
       );
     }
     await workspace.setHistory(history);
-    jest.useFakeTimers();
+    jest.useFakeTimers({ doNotFake: ["requestAnimationFrame", "cancelAnimationFrame"] });
     const animationFrames: FrameRequestCallback[] = [];
     jest.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
       animationFrames.push(callback);
