@@ -114,6 +114,15 @@ describe("SettingsManager managed settings contract", () => {
     expect(manager.settings.thinAgentClientId).toMatch(/^client_[a-f0-9]{32}$/);
   });
 
+  it.each([undefined, null, 42, "Work/Meetings", ""])("loads the meeting capture folder without changing the inbox (case %#)", async (value) => {
+    const manager = new SettingsManager(createPlugin({ phoneCapturesFolder: "Phone", phoneCapturesMeetingsFolder: value }));
+    await manager.loadSettings();
+    expect(manager.settings.phoneCapturesFolder).toBe("Phone");
+    expect(manager.settings.phoneCapturesMeetingsFolder).toBe(typeof value === "string" ? value : "SystemSculpt/Meetings");
+    await manager.updateSettings({ phoneCapturesMeetingsFolder: "Meetings/Team" });
+    expect(manager.settings.phoneCapturesMeetingsFolder).toBe("Meetings/Team");
+  });
+
   it("persists one stable thin-agent installation client id across reloads", async () => {
     const plugin = createPlugin({
       schemaVersion: CURRENT_SCHEMA_VERSION,

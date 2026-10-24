@@ -640,6 +640,10 @@ export class SettingsManager {
       validatedSettings.phoneCapturesFolder = defaultSettings.phoneCapturesFolder;
     }
 
+    if (typeof validatedSettings.phoneCapturesMeetingsFolder !== 'string') {
+      validatedSettings.phoneCapturesMeetingsFolder = defaultSettings.phoneCapturesMeetingsFolder;
+    }
+
     if (typeof validatedSettings.phoneCapturesAskBeforeSaving !== 'boolean') {
       validatedSettings.phoneCapturesAskBeforeSaving = defaultSettings.phoneCapturesAskBeforeSaving;
     }
