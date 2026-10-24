@@ -198,6 +198,22 @@ it('projects offset snapshots beyond the native rolling boundary without repeati
   const saved = persistAssistant.mock.calls[0][0] as any;
   expect(saved.messageParts.filter((part: any) => part.type === 'content').map((part: any) => part.data).join('')).toBe(full);
 });
+it('keeps a fully corrected text part before the tool that followed it', async () => {
+  const { session, persistAssistant } = setup();
+  native.mockImplementation(async (_input, _signal, callbacks) => {
+    callbacks.text('Draft');
+    const item = { id: 'between', type: 'commandExecution', status: 'completed', command: 'pwd' };
+    callbacks.activity(codexActivity('item/completed', { item }), item);
+    callbacks.text('Corrected answer', 0);
+    return { text: 'Corrected answer' };
+  });
+  await session.start(input());
+  expect(session.getSnapshot().parts.map(part => part.kind)).toEqual(['text', 'tool']);
+  expect(persistAssistant).toHaveBeenCalledWith(expect.objectContaining({ messageParts: [
+    expect.objectContaining({ type: 'content', data: 'Corrected answer' }),
+    expect.objectContaining({ type: 'tool_call' }),
+  ] }));
+});
 it('replaces a corrected streamed text tail rather than appending another copy', async () => {
   const { session } = setup();
   native.mockImplementation(async (_input, _signal, callbacks) => {

@@ -6,7 +6,7 @@ import { THIN_AGENT_CONTRACT_VERSION, type MeasuredThinAgentContext, type ThinAg
 import { isRecord } from '../../studio/utils';
 import { CodexThreadLocator } from './CodexThreadLocator';
 import { localAgentChatDirectory } from './CodexExecutionSettings';
-import { LOCAL_AGENTS, type LocalAgentId } from './LocalAgents';
+import { LOCAL_AGENTS, LocalAgentUsageLimitError, type LocalAgentId } from './LocalAgents';
 import { resolveAbsoluteVaultPath } from '../../utils/vaultPathUtils';
 import { localAgentPromptText } from './LocalAgentMessageParts';
 import { desktopHost } from '../../platform/desktopOnly';
@@ -127,12 +127,13 @@ export class LocalAgentChatSession implements ChatSession {
         });
       }
       const delta = nextText.slice(unchanged), previous = parts.find(part => part.id === activeTextId);
-      if (previous?.kind === 'text') this.publishParts(parts.map(part => part === previous ? { ...previous, markdown: previous.markdown + delta } : part));
-      else if (delta) {
+      if (!delta) this.publishParts(parts.filter(part => part.kind !== 'text' || part.markdown.length > 0));
+      else if (previous?.kind === 'text') this.publishParts(parts.map(part => part === previous ? { ...previous, markdown: previous.markdown + delta } : part));
+      else {
         const order = parts.reduce((last, part) => Math.max(last, part.order + 1), 0);
         activeTextId = `${messageId}_text_${order}`;
         this.publishParts([...parts, { id: activeTextId, order, kind: 'text', messageId, state: 'streaming', markdown: delta }]);
-      } else this.publishParts(parts);
+      }
     };
     const approval = (update: LocalAgentToolUpdate, signal: AbortSignal, grantsSessionScope = true): Promise<LocalAgentApprovalResponse> => {
       if (!live() || signal.aborted) return Promise.reject(new Error('Native approval withdrawn.'));
@@ -224,8 +225,9 @@ export class LocalAgentChatSession implements ChatSession {
         try { await this.localOptions.persistAssistant(message(receivedText, cancelled ? 'cancelled' : 'failed')); } catch { /* Preserve the original native failure. */ }
       }
       if (cancelled) { this.publish({ status: 'cancelled', phase: 'complete', waitingReason: undefined, statusLabel: `${name} stopped` }); return { kind: 'cancelled', snapshot: this.localSnapshot }; }
-      const error = { code: `local_${this.agent}_failed`, message: cause instanceof Error ? cause.message : `${name} could not complete this response.`, retryable: true };
-      this.publish({ status: 'failed', phase: 'complete', waitingReason: undefined, terminalError: error, parts: [...this.localSnapshot.parts, { id: `${messageId}_error`, order: this.localSnapshot.parts.length, kind: 'error', error, retryable: true }] });
+      const usageLimit = cause instanceof LocalAgentUsageLimitError;
+      const error = { code: `local_${this.agent}_${usageLimit ? 'usage_limit' : 'failed'}`, message: cause instanceof Error ? cause.message : `${name} could not complete this response.`, retryable: !usageLimit };
+      this.publish({ status: 'failed', phase: 'complete', waitingReason: undefined, terminalError: error, parts: [...this.localSnapshot.parts, { id: `${messageId}_error`, order: this.localSnapshot.parts.length, kind: 'error', error, retryable: error.retryable }] });
       return { kind: 'failed', snapshot: this.localSnapshot, error };
     } finally { accepting = false; this.withdrawApprovals(); controller.signal.removeEventListener('abort', stopApprovals); this.sources = []; }
   }

@@ -27,6 +27,12 @@ Source of truth:
 Chat uses hosted SystemSculpt, on-machine Codex or on-machine Claude Code. Choose
 the backend, mode and model in the run line under the composer.
 
+If Claude Code or Codex reaches its plan's usage limit, Chat shows **Claude Code
+usage limit reached** or **Codex usage limit reached**, with the agent's own
+notice and reset time when provided. **Use SystemSculpt instead** offers hosted
+chat without retrying the exhausted plan. The notice is not saved as an answer;
+any real work already received stays in the transcript.
+
 | Command | Default hotkey | Command ID | Notes |
 | --- | --- | --- | --- |
 | Create Title from Content | `Mod+Shift+T` | `change-chat-title` | Works in chat and markdown notes |

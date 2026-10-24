@@ -3,6 +3,7 @@ import { connectCodex, type CodexConnection, type CodexJson } from './CodexAppSe
 import { resolveCodexOptions, type CodexExecutionOptions } from './CodexExecutionSettings';
 import { codexActivity, type CodexActivity } from './CodexActivity';
 import { codexApprovalParameters, resolveCodexApprovalMode } from './CodexApprovalPolicy';
+import { LocalAgentUsageLimitError } from './LocalAgents';
 const activeThreads = new Set<string>();
 export type CodexRequest = CodexExecutionOptions & { approvalMode?: string; prompt: string; workingDirectory: string; threadId?: string; images?: readonly string[]; dynamicTools?: readonly CodexJson[]; recoverCompletedTurn?: boolean };
 export type CodexResult = { threadId: string; turnId: string; text: string; status: string };
@@ -115,7 +116,10 @@ export async function runLocalCodex(input: CodexRequest, signal: AbortSignal, ca
           active = false;
           const turn = params.turn;
           if (turn.status === 'completed') complete({ threadId, turnId: String(turn.id), text, status: 'completed' });
-          else fail(new Error(`Codex ${String(turn.status)}: ${isRecord(turn.error) ? String(turn.error.message) : 'Turn did not complete.'} Thread: ${threadId}`));
+          else if (isRecord(turn.error) && turn.error.codexErrorInfo === 'usageLimitExceeded') {
+            const notice = [turn.error.message, turn.error.additionalDetails].filter(value => typeof value === 'string' && value).join('\n\n');
+            fail(new LocalAgentUsageLimitError(notice || 'Codex reported a usage limit.'));
+          } else fail(new Error(`Codex ${String(turn.status)}: ${isRecord(turn.error) ? String(turn.error.message) : 'Turn did not complete.'} Thread: ${threadId}`));
         }
       },
     });
