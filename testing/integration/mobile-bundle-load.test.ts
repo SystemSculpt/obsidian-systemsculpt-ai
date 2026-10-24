@@ -92,7 +92,7 @@ describe("built bundle in Obsidian Mobile", () => {
 
   it("ships the final ChatView focus invariant after feature styles", () => {
     const styles = readFileSync(STYLES_PATH, "utf8");
-    const selector = /:is\(\.ss-surface\.systemsculpt-agent-workspace,\s*#ss-specificity-boost\) :focus-visible/;
+    const selector = /:is\(\.ss-surface\.systemsculpt-agent-workspace,\s*#ss-specificity-boost\) :focus-visible:not\(\.systemsculpt-agent-prompt-input\)/;
     const index = styles.search(selector);
     expect(index).toBeGreaterThanOrEqual(0);
     expect(styles.slice(index)).toMatch(/^[^{]+\{\s*outline:\s*2px solid var\(--ss-ink-accent\);\s*outline-offset:\s*2px;\s*box-shadow:\s*var\(--ss-ring\)(?:;|\})/);

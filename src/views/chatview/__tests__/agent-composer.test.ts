@@ -138,6 +138,21 @@ describe("AgentComposer", () => {
     composer.unload();
   });
 
+  it("marks the card focused only while the message box has focus", () => {
+    const { composer, input, query } = mount();
+    const card = query<HTMLElement>(".systemsculpt-agent-prompt")!;
+    expect(card.classList.contains("is-focused")).toBe(false);
+
+    input.focus();
+    expect(card.classList.contains("is-focused")).toBe(true);
+
+    // A toolbar control draws its own ring; the card does not repeat it.
+    query('[data-testid="chat.composer.add"]')!.focus();
+    expect(document.activeElement?.getAttribute("data-testid")).toBe("chat.composer.add");
+    expect(card.classList.contains("is-focused")).toBe(false);
+    composer.unload();
+  });
+
   it.each([false, true])("keeps a declined draft and can send it later (async: %s)", async (asynchronous) => {
     const onSubmit = jest.fn<ReturnType<AgentComposerOptions["onSubmit"]>, [unknown]>()
       .mockImplementationOnce(() => asynchronous ? Promise.resolve(false as const) : false);

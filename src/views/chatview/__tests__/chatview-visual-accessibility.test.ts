@@ -64,6 +64,9 @@ function contrast(foreground: Color, background: Color): number {
   return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
 }
 
+// Obsidian's named colours, the usual picks for a custom accent.
+const customAccents = ["#e93147", "#ec7500", "#e0ac00", "#08b94e", "#00bfbc", "#086ddd", "#7852ee", "#d53984"];
+
 const textPairs = [
   // Reading surfaces, hover/selection, history metadata, chips and approval diffs.
   ...["--ss-surface-0", "--ss-surface-1", "--ss-surface-2", "--ss-surface-3",
@@ -150,6 +153,24 @@ describe("ChatView text contrast (WCAG AA, default Obsidian themes)", () => {
       const ratio = contrast(color(ink), background);
       expect(ratio).toBeGreaterThanOrEqual(4.5);
     });
+
+    // The focused message box is drawn by its card's border alone (WCAG 1.4.11).
+    // Obsidian's accent picker sets --accent-h/s/l. 1.13 derives text accent
+    // hsl(h, s, l) and interactive accent hsl(h - 1, s × 1.01, l × 1.075) in
+    // light; hsl(h - 3, s × 1.02, l × 1.15) and hsl(h, s, l) in dark.
+    test.each(["default", ...customAccents])("the focused composer border is at least 3:1 with the %s accent", (accent) => {
+      const border = /border-color:\s*var\((--ss-[\w-]+)\)/
+        .exec(rule(readCss("views/agent-workspace/composer.css"), ".systemsculpt-agent-prompt.is-focused"))?.[1];
+      expect(border).toBeDefined();
+      const [h, s, l] = convert.colorToHsl(accent === "default" ? "#000" : accent);
+      const hsl = (dh: number, ks: number, kl: number) => `hsl(${h + dh}, ${Math.min(100, s * ks)}%, ${l * kl}%)`;
+      const picked = accent === "default" ? {} : theme === "light"
+        ? { "--text-accent": hsl(0, 1, 1), "--interactive-accent": hsl(-1, 1.01, 1.075) }
+        : { "--text-accent": hsl(-3, 1.02, 1.15), "--interactive-accent": hsl(0, 1, 1) };
+      const rgb = (token: string): Color =>
+        convert.colorToRgb(`var(${token})`, { customProperty: { ...tokens, ...picked } });
+      expect(contrast(rgb(border!), rgb("--ss-surface-0"))).toBeGreaterThanOrEqual(3);
+    });
   });
 });
 
@@ -201,12 +222,24 @@ describe("ChatView keyboard focus rules", () => {
     const css = readCss("index.css");
     // :is borrows ID specificity, beating resting icon-button shadows with
     // multiple :not() classes as well as feature-specific focus rules.
-    const selector = ":is(.ss-surface.systemsculpt-agent-workspace, #ss-specificity-boost) :focus-visible";
+    const selector = ":is(.ss-surface.systemsculpt-agent-workspace, #ss-specificity-boost) :focus-visible:not(.systemsculpt-agent-prompt-input)";
     const treatment = rule(css, selector);
     expect(treatment).toMatch(/outline:\s*2px solid var\(--ss-ink-accent\)/);
     expect(treatment).toMatch(/outline-offset:\s*2px/);
     expect(treatment).toMatch(/box-shadow:\s*var\(--ss-ring\)/);
     expect(css.indexOf(selector)).toBeGreaterThan(css.lastIndexOf("@import"));
+  });
+
+  test("the message box shows focus once, on its card", () => {
+    // Only the composer textarea skips the chat-wide ring; its card draws focus instead.
+    const index = readCss("index.css");
+    expect(index.match(/:focus-visible:not\(([^)]*)\)/g)).toEqual([":focus-visible:not(.systemsculpt-agent-prompt-input)"]);
+    const composer = readCss("views/agent-workspace/composer.css");
+    const card = rule(composer, ".systemsculpt-agent-prompt.is-focused");
+    expect(card).toMatch(/border-color:\s*var\(--ss-ink-accent\)/);
+    expect(card).toMatch(/box-shadow:\s*var\(--ss-ring\)/);
+    // Forced colours drop the shadow and repaint the border; the outline survives.
+    expect(composer).toMatch(/@media \(forced-colors: active\)\s*\{\s*\.systemsculpt-agent-prompt\.is-focused\s*\{\s*outline:\s*2px solid;/);
   });
 
   test.each(chatSheets)("%s never suppresses keyboard focus", (path) => {
