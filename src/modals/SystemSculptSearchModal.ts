@@ -42,6 +42,8 @@ export class SystemSculptSearchModal extends StandardModal {
   private pointerOverResults = false;
   private previewAbortController: AbortController | null = null;
   private querySerial = 0;
+  /** Keeps the engine's index while the modal is open; it is freed some minutes after close. */
+  private releaseEngine: (() => void) | null = null;
 
   constructor(plugin: SystemSculptPlugin) {
     super(plugin.app);
@@ -52,6 +54,8 @@ export class SystemSculptSearchModal extends StandardModal {
 
   onOpen() {
     super.onOpen();
+    this.releaseEngine?.();
+    this.releaseEngine = this.engine.hold();
     this.addTitle("Search your vault");
     this.contentEl.addClass("ss-search__content");
     this.footerEl.addClass("ss-search__footer");
@@ -89,6 +93,8 @@ export class SystemSculptSearchModal extends StandardModal {
     }
     this.combobox?.destroy();
     this.combobox = null;
+    this.releaseEngine?.();
+    this.releaseEngine = null;
     super.onClose();
     this.searchInputEl = null;
     this.statusEl = null;
