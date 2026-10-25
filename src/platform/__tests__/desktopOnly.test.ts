@@ -28,7 +28,8 @@ describe("desktop host seam (#207)", () => {
   });
 
   describe("desktopHost", () => {
-    const host = globalThis as typeof globalThis & { window?: { require?: jest.Mock } };
+    // The node test environment has no window; each case installs the desktop one it needs.
+    const host = globalThis as unknown as { window?: { require: jest.Mock } };
 
     afterEach(() => {
       delete host.window;
