@@ -16,6 +16,20 @@ import {
 } from "./viewTypes";
 
 const CHAT_VIEW_PRODUCER_QUIESCE_DEADLINE_MS = 1_000;
+
+/** The existing unload window also covers native runs with no remaining pane. */
+export async function waitForChatProducers(barriers: Promise<unknown>): Promise<void> {
+  let deadlineTimer: number | null = null;
+  const deadline = new Promise<void>((resolve) => {
+    deadlineTimer = window.setTimeout(resolve, CHAT_VIEW_PRODUCER_QUIESCE_DEADLINE_MS);
+  });
+  try {
+    await Promise.race([barriers, deadline]);
+  } finally {
+    if (deadlineTimer !== null) window.clearTimeout(deadlineTimer);
+  }
+}
+
 type AppWithViewRegistry = App & {
   viewRegistry?: {
     viewByType?: Record<string, unknown>;
@@ -406,18 +420,7 @@ export class ViewManager {
       if (typeof view.quiesceIncidentProducers !== "function") return;
       await view.quiesceIncidentProducers();
     })).then(() => undefined);
-    let deadlineTimer: number | null = null;
-    const deadline = new Promise<void>((resolve) => {
-      deadlineTimer = window.setTimeout(
-        resolve,
-        CHAT_VIEW_PRODUCER_QUIESCE_DEADLINE_MS,
-      );
-    });
-    try {
-      await Promise.race([barriers, deadline]);
-    } finally {
-      if (deadlineTimer !== null) window.clearTimeout(deadlineTimer);
-    }
+    await waitForChatProducers(barriers);
   }
 
   unloadViews() {

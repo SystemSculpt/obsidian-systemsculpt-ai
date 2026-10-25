@@ -3,6 +3,7 @@
 import { App } from "obsidian";
 import SystemSculptPlugin from "../main";
 import { AudioTranscriptionPanel } from "../modals/AudioTranscriptionPanel";
+import { nativeChatSessions } from "../views/chatview/NativeChatSessions";
 
 const createTracer = () => ({
   startPhase: jest.fn(() => ({ complete: jest.fn(), fail: jest.fn() })),
@@ -109,6 +110,47 @@ describe("SystemSculptPlugin safe mode + version gate (#212)", () => {
     expect(check).toHaveBeenCalledTimes(1);
   });
 
+  it("cancels and drains a background native chat even with no open view", async () => {
+    const plugin = makePlugin();
+    const viewer = {};
+    let finish!: () => void;
+    const finalWrite = new Promise<void>(resolve => { finish = resolve; });
+    const session = {
+      subscribe: () => () => {},
+      getSnapshot: () => ({ status: "running" }),
+      detach: jest.fn(() => finalWrite),
+    };
+    const transcript = { bindSaveOptions: jest.fn(), idle: jest.fn(async () => {}) };
+    const sessions = nativeChatSessions(plugin);
+    sessions.retain("background-chat", session as never, transcript as never, viewer);
+    await sessions.release(session as never, viewer);
+    expect(session.detach).not.toHaveBeenCalled();
+    const unloading = beginUnload(plugin);
+    expect(session.detach).toHaveBeenCalledTimes(1);
+    expect(transcript.idle).not.toHaveBeenCalled();
+    finish();
+    await unloading;
+    expect(transcript.idle).toHaveBeenCalledTimes(1);
+    expect(sessions.get("background-chat")).toBeUndefined();
+  });
+
+  it("continues unload when a background native transcript write stalls", async () => {
+    jest.useFakeTimers();
+    const plugin = makePlugin();
+    let finish!: () => void;
+    const finalWrite = new Promise<void>(resolve => { finish = resolve; });
+    const session = { subscribe: () => () => {}, getSnapshot: () => ({ status: "running" }), detach: jest.fn(() => finalWrite) };
+    const transcript = { idle: jest.fn(async () => {}) };
+    const destroy = jest.fn();
+    plugin.settingsManager = { destroy };
+    nativeChatSessions(plugin).retain("background", session as never, transcript as never, {});
+    const unloading = beginUnload(plugin);
+    await jest.advanceTimersByTimeAsync(1_000);
+    expect(destroy).toHaveBeenCalledTimes(1);
+    finish();
+    await unloading;
+  });
+
   it("stops recorder capture before any fallible service teardown", async () => {
     const plugin = makePlugin();
     const order: string[] = [];
@@ -169,8 +211,7 @@ describe("SystemSculptPlugin safe mode + version gate (#212)", () => {
     };
 
     const unloading = beginUnload(plugin);
-    await Promise.resolve();
-    await Promise.resolve();
+    await jest.advanceTimersByTimeAsync(0);
     expect(closeAdmissionAndDrain).toHaveBeenCalledTimes(1);
     expect(order).toEqual(["recorder", "views"]);
 
@@ -210,8 +251,7 @@ describe("SystemSculptPlugin safe mode + version gate (#212)", () => {
     };
 
     const unloading = beginUnload(plugin);
-    await Promise.resolve();
-    await Promise.resolve();
+    await jest.advanceTimersByTimeAsync(0);
     jest.advanceTimersByTime(1_499);
     await Promise.resolve();
     expect(order).toEqual(["recorder", "views"]);

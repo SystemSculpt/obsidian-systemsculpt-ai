@@ -394,8 +394,21 @@ export class AgentTranscriptRepository {
 
   constructor(
     private readonly storage: ChatStorageService,
-    private readonly getSaveOptions: () => AgentTranscriptSaveOptions,
+    private getSaveOptions: () => AgentTranscriptSaveOptions,
   ) {}
+
+  private readonly saveOptionsProviders = new Set<() => AgentTranscriptSaveOptions>();
+
+  /** Attached panes supply metadata; the last departure leaves an owned snapshot. */
+  public bindSaveOptions(provider: () => AgentTranscriptSaveOptions): () => void {
+    this.saveOptionsProviders.add(provider);
+    this.getSaveOptions = provider;
+    return () => {
+      const retained = this.getSaveOptions();
+      this.saveOptionsProviders.delete(provider);
+      this.getSaveOptions = [...this.saveOptionsProviders].pop() ?? (() => retained);
+    };
+  }
 
   public snapshot(): AgentTranscriptSnapshot {
     return Object.freeze({

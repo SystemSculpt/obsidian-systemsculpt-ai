@@ -17,7 +17,7 @@ import { FileContextMenuService } from "./context-menu/FileContextMenuService";
 import { SettingsManager } from "./core/settings/SettingsManager";
 import { LicenseManager } from "./core/license/LicenseManager";
 import { AccountConnectService } from "./services/AccountConnectService";
-import { ViewManager } from "./core/plugin/views";
+import { ViewManager, waitForChatProducers } from "./core/plugin/views";
 import { CommandManager } from "./core/plugin/commands";
 import { setLogLevel } from "./utils/errorHandling";
 import { errorLogger } from "./utils/errorLogger";
@@ -26,6 +26,7 @@ import { StorageManager } from "./core/storage";
 import { showConfirm } from "./core/ui/notifications";
 import { legacyCredentialNotice, protectLegacyCredentials } from "./core/security/LegacyCredentialProtection";
 import { ResumeChatService } from "./views/chatview/ResumeChatService";
+import { nativeChatSessions } from "./views/chatview/NativeChatSessions";
 import { EmbeddingsManager } from "./services/embeddings/EmbeddingsManager";
 import { VaultFileCache } from "./utils/VaultFileCache";
 import { EmbeddingsStatusBar } from "./components/EmbeddingsStatusBar";
@@ -1680,13 +1681,19 @@ export default class SystemSculptPlugin extends Plugin {
       // A failed producer stop must not skip the pending diagnostics drain.
     }
 
-    // Wait for each live ChatView to stop session callbacks before closing
-    // incident admission. Each view owns an idempotent close barrier, so the
-    // normal leaf detach below reuses the completed teardown.
+    // Cancel background native runs immediately, then drain them alongside
+    // views within the existing unload window. Slow vault writes can finish
+    // best-effort without preventing the remaining service teardown.
+    const nativeDisposal = nativeChatSessions(this).dispose();
+    // Each view owns an idempotent close barrier, so normal leaf detach below
+    // reuses the completed teardown.
     const viewManager = this.viewManager;
     this.viewManager = null;
     try {
-      await viewManager?.quiesceChatViewProducers();
+      await waitForChatProducers(Promise.allSettled([
+        nativeDisposal,
+        Promise.resolve().then(() => viewManager?.quiesceChatViewProducers()),
+      ]));
     } catch {
       // A stale ViewManager must not skip normal leaf detach or incident drain.
     }

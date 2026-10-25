@@ -16,7 +16,9 @@ it('creates native sessions for the selected backend and retains saved-chat rout
   expect(native.agent).toBeInstanceOf(CodexChatSession);
   expect(native.agent.forkHistory()).toEqual([]);
   native.pendingForkHistory = { prefix: [{ role: 'user', content: 'Earlier context', message_id: 'earlier' }] };
-  expect(native.agent.forkHistory()).toEqual(native.pendingForkHistory.prefix);
+  // A shared session must not read the creating pane's pending retry. The
+  // submitting turn supplies that prefix (covered by native-chat-lifetime).
+  expect(native.agent.forkHistory()).toEqual([]);
   native.chatExecutionBackend = 'systemsculpt';
   expect(prototype.createAgentSession.call(native)).toBeInstanceOf(AgentChatSession);
   expect(prototype.createAgentSession.call(native)).not.toBeInstanceOf(CodexChatSession);

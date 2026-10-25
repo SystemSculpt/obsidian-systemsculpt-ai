@@ -28,6 +28,7 @@ export class AgentConversationSessionBinding<
   public constructor(
     initialSession: TSession,
     private readonly listener: (session: TSession, snapshot: TSnapshot) => void,
+    private readonly release: (session: TSession) => Promise<void> = (session) => session.detach(),
   ) {
     this.attach(initialSession);
   }
@@ -80,7 +81,7 @@ export class AgentConversationSessionBinding<
     if (binding) {
       this.unsubscribe();
       this.active = null;
-      this.detachBarrier = (async () => { await binding.session.detach(); })();
+      this.detachBarrier = (async () => { await this.release(binding.session); })();
     }
     return this.detachBarrier;
   }

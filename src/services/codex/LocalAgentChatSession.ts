@@ -68,14 +68,14 @@ export class LocalAgentChatSession implements ChatSession {
     this.sources = context.sources;
     return { contract_version: THIN_AGENT_CONTRACT_VERSION, context_ref: `local-${this.agent}-context`, expires_at: new Date(Date.now() + 60_000).toISOString(), bytes: 0, sha256: '' };
   }
-  start(input: AgentRunInput): Promise<AgentRunResult> {
+  start(input: AgentRunInput & { forkHistory?: readonly ChatMessage[] }): Promise<AgentRunResult> {
     if (this.localController) return Promise.reject(new Error(`Wait for the current ${this.agentName} response to finish.`));
     const controller = new AbortController(); this.localController = controller;
     this.sources = [];
     this.localCompletion = this.execute(input, controller).finally(() => { this.localController = null; this.localCompletion = null; });
     return this.localCompletion;
   }
-  private async execute(input: AgentRunInput, controller: AbortController): Promise<AgentRunResult> {
+  private async execute(input: AgentRunInput & { forkHistory?: readonly ChatMessage[] }, controller: AbortController): Promise<AgentRunResult> {
     const name = this.agentName, working = `${name} is working`, messageId = `${input.turnId}_assistant`;
     let accepting = true, receivedText = '', activeTextId: string | undefined, persisted = false;
     let vaultRoot: string | undefined, vaultRootAlias: string | undefined, homeDirectory: string | undefined;
@@ -200,7 +200,7 @@ export class LocalAgentChatSession implements ChatSession {
         return source.kind === 'text' ? `File: ${source.path}\n${source.content}` : `Read the attached document from this vault path: ${source.path}`;
       }).join('\n\n');
       // A new native session after Retry or an edit gets the earlier chat as the person saw it.
-      const replay = threadId ? '' : localAgentReplay(this.forkHistory());
+      const replay = threadId ? '' : localAgentReplay(input.forkHistory ?? this.forkHistory());
       const prefix = replay ? `${replay}\n\nCurrent message:\n` : '';
       const prompt = `${prefix}${userText}${context ? `\n\nAttached vault context:\n${context}` : ''}`;
       if (prompt.length > 256_000) throw new Error(`This message and its attached context exceed the ${name} input limit.`);
