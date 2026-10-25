@@ -5,7 +5,7 @@ import { isActiveAgentRun } from '../../../services/codex/StudioAgentRunStore';
 import { workflowOpen } from '../../../services/codex/StudioWorkflow';
 import { hasHostCapability } from '../../../platform/hostCapabilities';
 import { createStudioAction } from '../StudioAction';
-import { StudioRunDetailModal } from './StudioRunDetailModal';
+import { StudioRunDetailModal, markStoppedHint } from './StudioRunDetailModal';
 import { activityPhaseFromWorkflowStatus, activityPhaseFromWorkflowStepStatus } from '../activity/StudioActivity';
 const drafts = new Map<string, string>();
 const report = (error: unknown): void => { new Notice(error instanceof Error ? error.message : 'Workflow action failed.'); };
@@ -68,6 +68,7 @@ export function renderStudioOrchestrator(root: HTMLElement, options: {
         const toolbar = card.createDiv({ cls: 'ss-studio-run-actions' });
         createStudioAction(toolbar, { label: 'Open orchestrator', testId: 'studio.workflow.open', onSelect: () => new StudioRunDetailModal(runs, run.id).open() });
         const stop = createStudioAction(toolbar, { label: 'Stop workflow', testId: 'studio.workflow.stop', onSelect: () => { runs.stop(run.id); update(); } });
+        const markStopped = createStudioAction(toolbar, { label: 'Mark stopped', testId: 'studio.workflow.mark-stopped', title: markStoppedHint(run.machine), onSelect: () => { void runs.markStopped(run.id).catch(report); } });
         const review = createStudioAction(toolbar, { label: 'Review request', testId: 'studio.workflow.review', onSelect: () => { void runs.review(run.id).catch(report); } });
         const body = card.createDiv({ cls: 'ss-studio-workflow-plan' });
         const followup = card.createEl('textarea', { cls: 'ss-studio-workflow-followup', attr: { 'data-testid': 'studio.workflow.followup', 'aria-label': 'Steer this workflow', placeholder: 'Add context or change direction…', rows: '2', maxlength: '16000' } });
@@ -89,8 +90,9 @@ export function renderStudioOrchestrator(root: HTMLElement, options: {
           submittedMessage = null;
           const workflow = current.workflow, children = runs.list(projectId).filter(child => child.workflowId === run.id);
           const label = { active: 'Working', waiting: 'Waiting for results', needs_input: 'Needs your input', completed: 'Completed', stopped: 'Stopped' }[workflow.status];
-          status.setText(children.some(child => runs.hasRequest(child.id)) ? 'A child needs your input' : label); card.dataset.status = workflow.status; card.dataset.activity = activityPhaseFromWorkflowStatus(workflow.status); activity.setText(current.persistenceError || current.error || current.currentActivity);
-          stop.hidden = !runs.canControl(run.id) || (!workflowOpen(workflow) && !isActiveAgentRun(current.status));
+          const stale = runs.isStale(run.id);
+          status.setText(children.some(child => runs.hasRequest(child.id)) ? 'A child needs your input' : stale ? 'Stale' : label); card.dataset.status = workflow.status; card.dataset.activity = stale ? 'stopped' : activityPhaseFromWorkflowStatus(workflow.status); activity.setText(current.persistenceError || current.error || current.currentActivity);
+          stop.hidden = !runs.canControl(run.id) || (!workflowOpen(workflow) && !isActiveAgentRun(current.status)); markStopped.hidden = !runs.canMarkStopped(run.id);
           review.hidden = !runs.hasRequest(run.id); followup.disabled = !runs.canControl(run.id); send.disabled = sending || followup.disabled;
           const next = JSON.stringify([workflow, children.map(child => [child.id, child.status, child.currentActivity])]);
           if (signature === next) return; signature = next; body.empty();

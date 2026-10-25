@@ -49,8 +49,8 @@ export function renderStudioCommandCenter(root: HTMLElement, options: {
     }
   }
   const update = (): void => { for (const [id, element] of summaries) {
-    const records = options.runs?.list(options.projectId, [id]) || [], active = records.filter(run => isActiveAgentRun(run.status));
-    element.setText(active.length ? `${active.length} active · ${active[0].currentActivity.slice(0, 80)}` : records.length ? `Last run: ${records[0].status}` : '');
+    const records = options.runs?.list(options.projectId, [id]) || [], active = records.filter(run => isActiveAgentRun(run.status) && !options.runs?.isStale(run.id));
+    element.setText(active.length ? `${active.length} active · ${active[0].currentActivity.slice(0, 80)}` : records.length ? `Last run: ${options.runs?.isStale(records[0].id) ? 'stale' : records[0].status}` : '');
   } };
   const observation = (options.presentation ?? new StudioPresentation()).watch(update,
     refresh => options.runs?.subscribe(id => { if (id === options.projectId) refresh(); }) ?? (() => {}));

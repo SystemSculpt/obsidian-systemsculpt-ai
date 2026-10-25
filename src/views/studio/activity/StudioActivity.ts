@@ -149,8 +149,13 @@ export function activityPhaseFromAgentRunStatus(
   }
 }
 
-/** Native Codex run record → activity for the role card that started it. */
-export function nodeActivityFromAgentRun(run: StudioAgentRunActivitySource): StudioNodeActivity {
+/**
+ * Native Codex run record → activity for the role card that started it. A
+ * stale run (another machine's active run whose record stopped changing)
+ * settles without motion.
+ */
+export function nodeActivityFromAgentRun(run: StudioAgentRunActivitySource, stale = false): StudioNodeActivity {
+  if (stale) return createNodeActivity("stopped", { label: "Stale" });
   const phase = activityPhaseFromAgentRunStatus(run.status);
   const detail = String(run.error || run.currentActivity || "").trim();
   return createNodeActivity(phase, {

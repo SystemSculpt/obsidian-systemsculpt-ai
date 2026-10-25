@@ -21,7 +21,7 @@ type StudioActivityGraph = Readonly<{
 }>;
 
 export type StudioActivityAgentRun = StudioAgentRunActivitySource &
-  Readonly<{ nodeId: string; updatedAt: string }>;
+  Readonly<{ id: string; nodeId: string; updatedAt: string }>;
 
 export type StudioActivitySnapshot = Readonly<{
   nodes: ReadonlyMap<string, StudioNodeActivity>;
@@ -37,6 +37,8 @@ export type StudioActivityProjectionInput = Readonly<{
   agentRuns?: ReadonlyArray<StudioActivityAgentRun>;
   /** Managed output placeholders that are still waiting for their result. */
   isPlaceholder?: (nodeId: string) => boolean;
+  /** Active runs another machine left unchanged for a while: shown settled, never live. */
+  isStaleAgentRun?: (runId: string) => boolean;
 }>;
 
 /** @internal Unit-tested directly. */
@@ -53,7 +55,8 @@ export const EMPTY_ACTIVITY_SNAPSHOT: StudioActivitySnapshot = Object.freeze({
 const AGENT_RUN_LIVE = new Set(["queued", "running", "waiting"]);
 
 function latestAgentRunByNode(
-  runs: ReadonlyArray<StudioActivityAgentRun> | undefined
+  runs: ReadonlyArray<StudioActivityAgentRun> | undefined,
+  isLive: (run: StudioActivityAgentRun) => boolean
 ): Map<string, StudioActivityAgentRun> {
   const byNode = new Map<string, StudioActivityAgentRun>();
   for (const run of runs || []) {
@@ -62,8 +65,8 @@ function latestAgentRunByNode(
       byNode.set(run.nodeId, run);
       continue;
     }
-    const currentLive = AGENT_RUN_LIVE.has(current.status);
-    const nextLive = AGENT_RUN_LIVE.has(run.status);
+    const currentLive = isLive(current);
+    const nextLive = isLive(run);
     if (nextLive !== currentLive) {
       if (nextLive) byNode.set(run.nodeId, run);
       continue;
@@ -83,7 +86,9 @@ export function projectStudioActivity(input: StudioActivityProjectionInput): Stu
   const graph = input.graph;
   if (!graph) return EMPTY_ACTIVITY_SNAPSHOT;
 
-  const agentRuns = latestAgentRunByNode(input.agentRuns);
+  const isStale = (run: StudioActivityAgentRun): boolean => input.isStaleAgentRun?.(run.id) ?? false;
+  const isLive = (run: StudioActivityAgentRun): boolean => AGENT_RUN_LIVE.has(run.status) && !isStale(run);
+  const agentRuns = latestAgentRunByNode(input.agentRuns, isLive);
   const nodes = new Map<string, StudioNodeActivity>();
   for (const node of graph.nodes) {
     if (input.isPlaceholder?.(node.id)) {
@@ -96,10 +101,10 @@ export function projectStudioActivity(input: StudioActivityProjectionInput): Stu
       nodes.set(node.id, fromRun);
       continue;
     }
-    const fromAgent = nodeActivityFromAgentRun(agentRun);
+    const fromAgent = nodeActivityFromAgentRun(agentRun, isStale(agentRun));
     // A live native run owns the card; otherwise a live graph run does; a
-    // settled native run still reports its outcome when the graph is quiet.
-    if (AGENT_RUN_LIVE.has(agentRun.status)) nodes.set(node.id, fromAgent);
+    // settled or stale native run still reports itself when the graph is quiet.
+    if (isLive(agentRun)) nodes.set(node.id, fromAgent);
     else if (fromRun.phase !== "idle") nodes.set(node.id, fromRun);
     else nodes.set(node.id, fromAgent);
   }

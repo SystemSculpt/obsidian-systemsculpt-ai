@@ -14,13 +14,14 @@ const graph = {
   ],
 };
 
-function project(presentation: StudioRunPresentationState, agentRuns: StudioActivityAgentRun[] = [], placeholders: string[] = []) {
+function project(presentation: StudioRunPresentationState, agentRuns: StudioActivityAgentRun[] = [], placeholders: string[] = [], stale: string[] = []) {
   return projectStudioActivity({
     graph,
     runStatus: presentation.getProgress().status,
     getNodeRunState: (nodeId) => presentation.getNodeState(nodeId),
     agentRuns,
     isPlaceholder: (nodeId) => placeholders.includes(nodeId),
+    isStaleAgentRun: (runId) => stale.includes(runId),
   });
 }
 
@@ -74,17 +75,36 @@ describe("projectStudioActivity", () => {
   it("lets a live native Codex run own its role card and cables", () => {
     const presentation = new StudioRunPresentationState();
     const runs: StudioActivityAgentRun[] = [
-      { nodeId: "n3", status: "completed", currentActivity: "Completed", updatedAt: "2026-09-13T00:00:01.000Z" },
-      { nodeId: "n3", status: "waiting", currentActivity: "Waiting for your answer", updatedAt: "2026-09-13T00:00:00.000Z" },
+      { id: "done", nodeId: "n3", status: "completed", currentActivity: "Completed", updatedAt: "2026-09-13T00:00:01.000Z" },
+      { id: "waiting", nodeId: "n3", status: "waiting", currentActivity: "Waiting for your answer", updatedAt: "2026-09-13T00:00:00.000Z" },
     ];
     const snapshot = project(presentation, runs);
     expect(snapshot.nodes.get("n3")).toEqual({ phase: "waiting", label: "Waiting", detail: "Waiting for your answer", progress: null });
     expect(snapshot.edges.get("e2")).toBe("idle");
   });
 
+  it("settles a stale native run without motion and lets a newer settled run own the card", () => {
+    const presentation = new StudioRunPresentationState();
+    const elsewhere: StudioActivityAgentRun = { id: "elsewhere", nodeId: "n2", status: "running", currentActivity: "Codex is working", updatedAt: AT };
+    expect(project(presentation, [elsewhere]).edges.get("e2")).toBe("surging");
+
+    const stale = project(presentation, [elsewhere], [], ["elsewhere"]);
+    expect(stale.nodes.get("n2")).toEqual({ phase: "stopped", label: "Stale", detail: "", progress: null });
+    expect(stale.edges.get("e2")).toBe("idle");
+    expect(stale.ports.size).toBe(0);
+
+    const done: StudioActivityAgentRun = { id: "done", nodeId: "n2", status: "completed", currentActivity: "Completed", updatedAt: "2026-09-13T00:00:01.000Z" };
+    expect(project(presentation, [elsewhere, done], [], ["elsewhere"]).nodes.get("n2")?.phase).toBe("done");
+    // A live graph run outranks a stale native run.
+    presentation.beginRun(["n2"]);
+    presentation.applyEvent({ type: "run.started", runId: "r", at: AT });
+    presentation.applyEvent({ type: "node.started", runId: "r", nodeId: "n2", at: AT });
+    expect(project(presentation, [elsewhere], [], ["elsewhere"]).nodes.get("n2")?.phase).toBe("active");
+  });
+
   it("reports a settled native run when the graph is quiet, but a live graph run wins", () => {
     const presentation = new StudioRunPresentationState();
-    const settled: StudioActivityAgentRun[] = [{ nodeId: "n3", status: "failed", currentActivity: "Stopped", error: "Transport lost", updatedAt: AT }];
+    const settled: StudioActivityAgentRun[] = [{ id: "failed", nodeId: "n3", status: "failed", currentActivity: "Stopped", error: "Transport lost", updatedAt: AT }];
     expect(project(presentation, settled).nodes.get("n3")).toMatchObject({ phase: "failed", detail: "Transport lost" });
 
     presentation.beginRun(["n3"]);
