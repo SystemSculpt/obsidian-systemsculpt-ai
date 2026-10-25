@@ -16,8 +16,8 @@ export type ManagedNamespaceIdentity = Readonly<{
 
 export function buildManagedNamespace(
   dimensions: number,
-  generationId = CURRENT_MANAGED_EMBEDDING_GENERATION,
-  indexSchemaVersion = CURRENT_MANAGED_EMBEDDING_SCHEMA_VERSION,
+  generationId: string = CURRENT_MANAGED_EMBEDDING_GENERATION,
+  indexSchemaVersion: number = CURRENT_MANAGED_EMBEDDING_SCHEMA_VERSION,
 ): string {
   if (
     !GENERATION_ID.test(generationId)
