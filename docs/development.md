@@ -277,6 +277,13 @@ clicks, typing, waits, assertions — in one invocation and reports per-step
 results. The CLI resolves the vault from systemsculpt-sync.config.json; use
 --vault or --plugin-dir to override.
 
+Script steps name driver actions (`waitFor`, `click`,
+`chat.waitForDevelopmentRun`, ...). Each area module in src/testing/driver
+(domActions, snapshotsAndWaits, chatToolLifecycle, chatDevelopmentState,
+diagnosticsExports) exports a record of its actions by name; actions.ts merges
+them into the one registry the driver dispatches from, and an unknown action's
+error lists every registered name.
+
 The guarded live ChatView lanes drive the visible UI, use synthetic
 `SS-DEV-TEST-*` ownership markers, stay in Ask Approval, and trash only the
 exact saved chat and marker folder they created:
