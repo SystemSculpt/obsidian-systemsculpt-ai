@@ -1,7 +1,8 @@
-import { AbstractInputSuggest, App, TFolder } from "obsidian";
+import { AbstractInputSuggest, App } from "obsidian";
 
 class FolderSuggester extends AbstractInputSuggest<string> {
   private readonly input: HTMLInputElement;
+  private folderPaths: string[] | null = null;
 
   constructor(
     app: App,
@@ -10,12 +11,13 @@ class FolderSuggester extends AbstractInputSuggest<string> {
   ) {
     super(app, inputEl);
     this.input = inputEl;
+    inputEl.addEventListener("blur", () => { this.folderPaths = null; });
   }
 
   getSuggestions(inputStr: string): string[] {
-    const folders = getFolderSuggestions(this.app);
+    this.folderPaths ??= this.app.vault.getAllFolders(true).map((folder) => folder.path);
     const lowerCaseInputStr = inputStr.toLowerCase();
-    return [...folders].filter((content) =>
+    return this.folderPaths.filter((content) =>
       content.toLowerCase().includes(lowerCaseInputStr)
     );
   }
@@ -31,13 +33,6 @@ class FolderSuggester extends AbstractInputSuggest<string> {
     this.close();
     super.selectSuggestion(content, evt);
   }
-}
-
-function getFolderSuggestions(app: App): Set<string> {
-  const folders = app.vault
-    .getAllLoadedFiles()
-    .filter((file) => file instanceof TFolder);
-  return new Set(folders.map((folder) => folder.path));
 }
 
 export function attachFolderSuggester(

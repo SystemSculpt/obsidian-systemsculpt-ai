@@ -208,6 +208,39 @@ describe("EmbeddingsPendingFilesModal", () => {
     });
   });
 
+  it("keeps one list listener through 30 whole-list filter passes", async () => {
+    const pending = Array.from({ length: 250 }, (_, index) => ({
+      path: `notes/file-${index}.md`, reason: "missing" as const, lastModified: NOW,
+    }));
+    mockManager.listPendingFiles.mockResolvedValue(pending);
+    const addListener = jest.spyOn(EventTarget.prototype, "addEventListener");
+    await modal.onOpen();
+    const list = modal.modalEl.querySelector<HTMLElement>(".ss-modal__list")!;
+    const search = modal.modalEl.querySelector<HTMLInputElement>('input[type="search"]')!;
+    const detachedButton = list.querySelector<HTMLButtonElement>(".ss-modal__item")!;
+
+    for (let pass = 0; pass < 30; pass++) {
+      search.value = pass % 2 === 0 ? "notes" : "file";
+      search.dispatchEvent(new Event("input", { bubbles: true }));
+      expect(list.querySelectorAll(".ss-modal__item")).toHaveLength(250);
+    }
+    const registrations = addListener.mock.calls.filter((_, index) => {
+      const target = addListener.mock.contexts[index] as HTMLElement;
+      return target === list || target.matches?.(".ss-modal__item");
+    });
+    addListener.mockRestore();
+    expect(registrations.map(([type]) => type)).toEqual(["click"]);
+
+    detachedButton.click();
+    expect(plugin.app.workspace.getLeaf().openFile).not.toHaveBeenCalled();
+    list.querySelectorAll<HTMLElement>(".ss-modal__item-description")[249]!.click();
+    expect(plugin.app.workspace.getLeaf().openFile).toHaveBeenCalledWith(
+      expect.objectContaining({ path: "notes/file-249.md" }),
+    );
+    await Promise.resolve();
+    modal.onClose();
+  });
+
   describe("empty states", () => {
     it("shows 'all done' when no pending files", async () => {
       mockManager.listPendingFiles.mockResolvedValue([]);

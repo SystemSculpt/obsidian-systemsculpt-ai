@@ -148,6 +148,7 @@ export class ContextSelectionModal extends StandardModal {
       cls: "ss-context-file-list",
       attr: { "aria-label": "Vault files" },
     });
+    this.registerDomEvent(this.listContainer, "click", (event) => this.handleListClick(event));
     this.renderFileList();
 
     this.addActionButton("modal.context.cancel", "Cancel", () => this.close());
@@ -174,10 +175,14 @@ export class ContextSelectionModal extends StandardModal {
 
   private readSupportedFiles(): FileItem[] {
     const items: FileItem[] = [];
+    const typesByExtension = new Map<string, ContextFileType>();
+    for (const type of this.copy.types) {
+      for (const extension of FILE_TYPES[type].extensions) typesByExtension.set(extension, type);
+    }
+    const collator = new Intl.Collator();
     for (const file of this.app.vault.getFiles()) {
       const extension = file.extension.toLowerCase();
-      const type = (this.copy.types as readonly ContextFileType[]).find((candidate) =>
-        (FILE_TYPES[candidate].extensions as readonly string[]).includes(extension));
+      const type = typesByExtension.get(extension);
       if (!type) continue;
       items.push({
         file,
@@ -185,7 +190,7 @@ export class ContextSelectionModal extends StandardModal {
         searchText: `${file.basename} ${file.path} ${extension}`.toLowerCase(),
       });
     }
-    return items.sort((left, right) => left.file.basename.localeCompare(right.file.basename));
+    return items.sort((left, right) => collator.compare(left.file.basename, right.file.basename));
   }
 
   private applyInitialSelection(paths?: readonly string[]): void {
@@ -274,6 +279,7 @@ export class ContextSelectionModal extends StandardModal {
       checkbox.checked = pinned || selected;
       checkbox.disabled = pinned || this.processing;
       checkbox.dataset.pinned = String(pinned);
+      checkbox.dataset.fileIndex = String(index);
       checkbox.setAttribute("aria-label", pinned
         ? this.copy.taken(item.file.path)
         : this.copy.select(item.file.path));
@@ -283,12 +289,6 @@ export class ContextSelectionModal extends StandardModal {
       info.createSpan({ text: item.file.path, cls: "ss-context-file-path" });
       if (pinned) info.createSpan({ text: this.copy.takenBadge, cls: "ss-context-file-badge" });
 
-      this.registerDomEvent(checkbox, "change", () => {
-        if (checkbox.checked) this.selectedFiles.add(item.file);
-        else this.selectedFiles.delete(item.file);
-        row.toggleClass("is-selected", checkbox.checked);
-        this.updateAddButton();
-      });
       this.fileItemControlsByPath.set(item.file.path, { el: row, checkbox });
     }
   }
@@ -348,15 +348,31 @@ export class ContextSelectionModal extends StandardModal {
     });
     this.loadMoreButton.addClass("ss-context-load-more");
     this.loadMoreButton.disabled = this.processing;
-    this.registerDomEvent(this.loadMoreButton, "click", () => {
-      item.remove();
+  }
+
+  private handleListClick(event: MouseEvent): void {
+    const target = event.target as HTMLElement | null;
+    if (this.loadMoreButton && target?.closest(".ss-context-load-more") === this.loadMoreButton) {
+      if (this.loadMoreButton.disabled) return;
+      this.loadMoreButton.closest("li")?.remove();
       this.loadMoreButton = null;
       const start = this.renderedCount;
       const end = Math.min(start + this.maxRenderedFiles, this.filteredFiles.length);
       this.appendFileItems(start, end);
       this.renderedCount = end;
       this.updateLoadMoreButton();
-    });
+      return;
+    }
+
+    // Native checkbox activation (including its label and keyboard) toggles before click bubbles.
+    const checkbox = target?.closest<HTMLInputElement>("input[data-file-index]");
+    if (!checkbox || checkbox.disabled) return;
+    const item = this.filteredFiles[Number(checkbox.dataset.fileIndex)];
+    if (!item) return;
+    if (checkbox.checked) this.selectedFiles.add(item.file);
+    else this.selectedFiles.delete(item.file);
+    checkbox.closest("li")?.toggleClass("is-selected", checkbox.checked);
+    this.updateAddButton();
   }
 
   private updateAddButton(): void {

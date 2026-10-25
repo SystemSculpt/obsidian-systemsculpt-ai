@@ -79,7 +79,7 @@ describe("JanitorModal", () => {
     const stale = new TFile({ path: "SystemSculpt/Chats/stale.md", extension: "md", stat: { size: 3 } });
     (app.vault.getFiles as jest.Mock).mockReturnValueOnce([stale]).mockReturnValue([]);
     (app.vault.getAllLoadedFiles as jest.Mock).mockReturnValue([]);
-    (app.vault.read as jest.Mock).mockImplementationOnce(() => new Promise((resolve) => {
+    (app.vault.cachedRead as jest.Mock).mockImplementationOnce(() => new Promise((resolve) => {
       resolveFirstRead = resolve;
     }));
 
