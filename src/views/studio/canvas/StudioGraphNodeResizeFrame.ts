@@ -512,14 +512,14 @@ export function mountStudioGraphNodeResizeFrame(
     }
   };
 
-  const stopTracking = (): void => {
+  const stopTracking = (commit = true): void => {
     if (activePointerId === null) {
       return;
     }
     if (frameId !== null) {
       ownerWindow.cancelAnimationFrame(frameId);
       frameId = null;
-      applyPendingFrame();
+      if (commit) applyPendingFrame();
     }
     ownerWindow.removeEventListener("pointermove", onPointerMove);
     ownerWindow.removeEventListener("pointerup", onPointerFinish);
@@ -538,7 +538,7 @@ export function mountStudioGraphNodeResizeFrame(
         }
       }
     }
-    if (didMutateDuringDrag && lastApplied) {
+    if (commit && didMutateDuringDrag && lastApplied) {
       commitTarget(lastApplied, "discrete");
     }
     lastApplied = null;
@@ -640,18 +640,21 @@ export function mountStudioGraphNodeResizeFrame(
     ownerWindow.addEventListener("pointercancel", onPointerFinish);
   };
 
-  const zoneListeners = new Map<HTMLElement, (event: PointerEvent) => void>();
-  for (const [zone, zoneEl] of zoneEls) {
-    const listener = (event: PointerEvent): void => startDrag(zone, zoneEl, event);
-    zoneEl.addEventListener("pointerdown", listener);
-    zoneListeners.set(zoneEl, listener);
-  }
+  const onPointerDown = (event: PointerEvent): void => {
+    const target = event.target as Element | null;
+    const zoneEl = target?.closest?.<HTMLElement>(".ss-studio-node-resize-zone");
+    const zone = zoneEl?.dataset.resizeZone as StudioGraphResizeZone | undefined;
+    if (!zoneEl || !zone || zoneEls.get(zone) !== zoneEl) {
+      return;
+    }
+    startDrag(zone, zoneEl, event);
+  };
+  nodeEl.addEventListener("pointerdown", onPointerDown);
 
   return () => {
-    for (const [zoneEl, listener] of zoneListeners) {
-      zoneEl.removeEventListener("pointerdown", listener);
-    }
-    stopTracking();
+    nodeEl.removeEventListener("pointerdown", onPointerDown);
+    // Teardown must not replay stale geometry over the replacement card.
+    stopTracking(false);
     removeFrame();
   };
 }

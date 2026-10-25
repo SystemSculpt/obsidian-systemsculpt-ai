@@ -11,6 +11,7 @@ import { StudioRunObservationController } from "./StudioRunObservationController
 import {
   ItemView,
   Scope,
+  Component,
   MarkdownRenderer,
   Notice,
   normalizePath,
@@ -466,7 +467,7 @@ export class SystemSculptStudioView extends ItemView {
   private detachLeafVisibility: (() => void) | null = null;
   private leafVisible = true;
   private readonly presentation = new StudioPresentation();
-  private readonly markdownPreviewRequests = new WeakMap<HTMLElement, object>();
+  private readonly markdownPreviewRequests = new WeakMap<HTMLElement, () => void>();
 
   private setLeafVisible(visible: boolean): void {
     if (this.closed || this.leafVisible === visible) return;
@@ -1353,18 +1354,30 @@ export class SystemSculptStudioView extends ItemView {
   private async renderNodeMarkdownPreview(
     node: StudioNodeInstance,
     markdown: string,
-    containerEl: HTMLElement
+    containerEl: HTMLElement,
+    lifetime: AbortSignal
   ): Promise<void> {
+    this.markdownPreviewRequests.get(containerEl)?.();
+    if (lifetime.aborted) return;
     const content = String(markdown || "");
-    const request = {};
-    this.markdownPreviewRequests.set(containerEl, request);
+    const component = new Component();
+    component.load();
+    let disposed = false;
+    const dispose = (): void => {
+      disposed = true;
+      component.unload();
+      lifetime.removeEventListener("abort", dispose);
+      if (this.markdownPreviewRequests.get(containerEl) === dispose) this.markdownPreviewRequests.delete(containerEl);
+    };
+    lifetime.addEventListener("abort", dispose, { once: true });
+    this.markdownPreviewRequests.set(containerEl, dispose);
     // The host renderer can finish asynchronously. Keep both success and fallback
     // off the mounted card until the leaf can present them.
     const staging = createSurfaceElement(containerEl.ownerDocument, "div");
     const noteSourcePath = node.kind === "studio.note" ? normalizePath(readPrimaryStudioNotePath(node.config)) : "";
     const sourcePath = noteSourcePath || this.currentProjectPath || "SystemSculpt Studio";
     try {
-      if (content.trim()) await MarkdownRenderer.render(this.app, content, staging, sourcePath, this);
+      if (content.trim()) await MarkdownRenderer.render(this.app, content, staging, sourcePath, component);
     } catch (error) {
       console.warn("[SystemSculpt Studio] Failed to render node markdown preview", {
         nodeId: node.id,
@@ -1372,11 +1385,21 @@ export class SystemSculptStudioView extends ItemView {
         sourcePath,
         error: error instanceof Error ? error.message : String(error),
       });
+      component.unload();
       staging.setText(content);
     }
+    if (disposed) {
+      // A renderer may register children after its card was removed. Reload only
+      // this detached owner so unload also drains those late registrations.
+      component.load();
+      component.unload();
+      return;
+    }
     await this.presentation.deliver(() => {
-      if (!this.closed && containerEl.isConnected && this.markdownPreviewRequests.get(containerEl) === request) {
+      if (!disposed && !this.closed && containerEl.isConnected && this.markdownPreviewRequests.get(containerEl) === dispose) {
         containerEl.replaceChildren(...Array.from(staging.childNodes));
+      } else {
+        dispose();
       }
     });
   }
@@ -3117,8 +3140,8 @@ export class SystemSculptStudioView extends ItemView {
       onCopyNodeImageToClipboard: (node) => {
         void this.copyImageForNodeToClipboard(node);
       },
-      renderMarkdownPreview: (node, markdown, containerEl) => {
-        return this.renderNodeMarkdownPreview(node, markdown, containerEl);
+      renderMarkdownPreview: (node, markdown, containerEl, lifetime) => {
+        return this.renderNodeMarkdownPreview(node, markdown, containerEl, lifetime);
       },
       onNodeGeometryMutated: () => {
         this.graphInteraction.notifyNodePositionsChanged();

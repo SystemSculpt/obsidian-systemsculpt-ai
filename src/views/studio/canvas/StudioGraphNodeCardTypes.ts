@@ -114,7 +114,8 @@ export type RenderStudioGraphNodeCardOptions = {
   renderMarkdownPreview?: (
     node: StudioNodeInstance,
     markdown: string,
-    containerEl: HTMLElement
+    containerEl: HTMLElement,
+    lifetime: AbortSignal
   ) => Promise<void> | void;
   onNodeGeometryMutated: (node: StudioNodeInstance) => void;
   resolveDynamicSelectOptions?: (

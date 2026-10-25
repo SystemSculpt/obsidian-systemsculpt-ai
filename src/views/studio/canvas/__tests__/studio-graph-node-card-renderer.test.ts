@@ -78,6 +78,7 @@ function createGraphInteractionStub() {
     beginConnection: jest.fn(),
     toggleNodeSelection: jest.fn(),
     ensureSingleSelection: jest.fn(),
+    clearAlignmentGuides: jest.fn(),
   };
 }
 
@@ -194,6 +195,20 @@ function renderNodeCard(options: Parameters<typeof renderNodeCardHarness>[0]): H
 
 describe("content-aware Studio cards", () => {
   afterEach(() => { nodeTeardowns.splice(0).forEach(teardown => teardown()); document.body.innerHTML = ""; });
+  it.each(["studio.text", "studio.json", "studio.media_ingest"])("releases %s resize tracking when its card is disposed during a drag", kind => {
+    const add = jest.spyOn(window, "addEventListener"), remove = jest.spyOn(window, "removeEventListener");
+    try {
+      const { nodeEl } = renderNodeCardHarness({ kind, config: { value: "Text", sourcePath: "image.png" }, resolveAssetPreviewSrc: () => "app://image.png" });
+      const zone = nodeEl.querySelector<HTMLElement>('[data-resize-zone="e"]')!;
+      zone.dispatchEvent(createPointerEvent("pointerdown", { pointerId: 44, clientX: 300, clientY: 50 }));
+      const tracking = add.mock.calls.filter(([type]) => ["pointermove", "pointerup", "pointercancel"].includes(type));
+      expect(tracking).toHaveLength(3);
+      nodeTeardowns[nodeTeardowns.length - 1]();
+      for (const [type, listener] of tracking) expect(remove).toHaveBeenCalledWith(type, listener);
+      expect(nodeEl.querySelector(".ss-studio-node-resize-zone")).toBeNull();
+    } finally { add.mockRestore(); remove.mockRestore(); }
+  });
+
   it.each([
     { value: { saved: "<b>literal</b>" } },
     { value: [1, "two"] },
