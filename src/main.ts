@@ -727,6 +727,26 @@ export default class SystemSculptPlugin extends Plugin {
       },
     });
 
+    // Studio before 6.10 left per-save snapshots in .systemsculpt/studio/projects;
+    // each device offers once to delete those of projects that open now (#354).
+    coordinator.registerTask("layout", {
+      id: "studio.legacyGenerations",
+      label: "old Studio history check",
+      optional: true,
+      run: () => {
+        void waitForIdle(DEFERRED_STARTUP_IDLE_TIMEOUT_MS, this.deferredStartup.signal).then(async (idle) => {
+          if (!idle || this.isUnloading) return;
+          const { offerStudioLegacyGenerationsCleanup } = await import("./studio/StudioLegacyGenerations");
+          await offerStudioLegacyGenerationsCleanup(this.app.vault, this.deferredStartup.signal);
+        }).catch((error: unknown) => {
+          this.getLogger().warn("Could not check for old Studio history", {
+            source: "SystemSculptPlugin",
+            metadata: { error: error instanceof Error ? error.message : String(error) },
+          });
+        });
+      },
+    });
+
     coordinator.registerTask("layout", {
       id: "embeddings.autostart",
       label: "embeddings auto-start",

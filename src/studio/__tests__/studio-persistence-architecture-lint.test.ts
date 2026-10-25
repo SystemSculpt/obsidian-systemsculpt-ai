@@ -49,6 +49,9 @@ describe("Studio persistence architecture lint", () => {
       "src/core/diagnostics/DiagnosticsSessionLifecycle.ts#rotate",
       // Vault-level generated agent documentation, not project-local state.
       "src/studio/StudioAgentReferenceFile.ts#ensureCurrent",
+      // Pre-6.10 per-save snapshots under .systemsculpt/studio/projects and the record of their one-time check.
+      "src/studio/StudioLegacyGenerations.ts#deleteLegacyFolders",
+      "src/studio/StudioLegacyGenerations.ts#recordCheck",
       "src/studio/StudioApiExecutionAdapter.ts#removeTempPath",
       "src/studio/StudioApiExecutionAdapter.ts#ensureDir",
       "src/studio/StudioApiExecutionAdapter.ts#writeBinary",

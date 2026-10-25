@@ -44,6 +44,16 @@
 - Retry once after confirming the source audio file is still available.
 - On desktop, retry with automatic audio conversion enabled if the source format may be incompatible.
 
+## Studio history from before 6.10
+
+- Studio before 6.10 kept a copy of every save, media included, in
+  `.systemsculpt/studio/projects/` inside your vault. Studio no longer uses it.
+- After you update, SystemSculpt asks once, in one notice, whether
+  to delete that history for the projects that open now, and shows the space it
+  frees. It deletes nothing unless you choose **Delete**. It leaves a project's
+  history in place when the project fails to open or no longer exists.
+- To be asked again, delete `.systemsculpt/studio/legacy-generations-check.json`.
+
 ## Diagnostics helpers
 
 - Advanced tab: `Record diagnostics`. Off by default. Turn it on while you
