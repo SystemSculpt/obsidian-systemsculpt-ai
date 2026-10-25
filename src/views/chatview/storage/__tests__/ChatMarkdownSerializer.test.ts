@@ -945,6 +945,84 @@ Using tools...
       ]);
     });
 
+    describe("legacy multipart block placement", () => {
+      const content = [
+        { type: "text" as const, text: "Original answer" },
+        { type: "image_url" as const, image_url: { url: "data:image/png;base64,YWJj" } },
+      ];
+      const encoded = btoa(JSON.stringify(content));
+      const multipart = `<!-- SYSTEMSCULPT-CONTENT-PARTS base64\n${encoded}\n-->`;
+      const reasoning = "<!-- REASONING\nOriginal reasoning\n-->";
+      const tools = '<!-- TOOL-CALLS\n[{"id":"legacy-tool"}]\n-->';
+      const frame = (body: string) => [
+        '<!-- SYSTEMSCULPT-MESSAGE-START role="assistant" message-id="assistant-1" -->',
+        body,
+        "<!-- SYSTEMSCULPT-MESSAGE-END -->",
+      ].join("\n");
+
+      it.each([
+        ["LF", "\n", false],
+        ["CRLF", "\r\n", false],
+        ["BOM plus LF", "\n", true],
+        ["BOM plus CRLF", "\r\n", true],
+      ])("rejects overlapping or duplicate metadata with %s framing", (_label, newline, bom) => {
+        const nested = [
+          `Original answer\n<!-- REASONING\nbefore\n${multipart}\nafter\n-->`,
+          `Original answer\n<!-- REASONING\nbefore\n${multipart}`,
+          `<!-- TOOL-CALLS\n[{"id":"legacy-tool"}]\n${multipart}\n-->`,
+          `<!-- SYSTEMSCULPT-PART-CONTENT base64="${encoded}" -->\n${multipart}\n<!-- SYSTEMSCULPT-PART-CONTENT-END -->`,
+          `${multipart}\n${reasoning}\n${multipart}`,
+          `${multipart}\n<!-- REASONING\nbefore\n${multipart}\nafter\n-->`,
+        ];
+        const validPrefix = ChatMarkdownSerializer.serializeMessages([
+          { role: "user", message_id: "user-1", content: "Keep the whole history" },
+        ]);
+        for (const body of nested) {
+          const markdown = `${validPrefix}\n\n${frame(body)}`;
+          expect(ChatMarkdownSerializer.parseMarkdown(normalizeMarkdown(
+            createMarkdown({ id: "legacy-placement" }, markdown), newline, bom,
+          ))).toBeNull();
+        }
+      });
+
+      it("preserves legacy metadata quoted as a JSON string rather than a structural block", () => {
+        const tool = { id: "quoted-metadata", result: { success: true, data: multipart } };
+        const quotedTools = `<!-- TOOL-CALLS\n${JSON.stringify([tool])}\n-->`;
+        for (const body of [quotedTools, `${multipart}\n${quotedTools}`]) {
+          const parsed = ChatMarkdownSerializer.parseMarkdown(createMarkdown({ id: "legacy-quoted" }, frame(body)));
+          expect(parsed?.messages[0].tool_calls).toEqual([tool]);
+          if (body !== quotedTools) expect(parsed?.messages[0].content).toEqual(content);
+        }
+      });
+
+      it.each([
+        ["LF", "\n", false],
+        ["CRLF", "\r\n", false],
+        ["BOM plus LF", "\n", true],
+        ["BOM plus CRLF", "\r\n", true],
+      ])("preserves top-level metadata and neighboring blocks with %s framing", (_label, newline, bom) => {
+        for (const body of [
+          multipart,
+          `${multipart}\n${reasoning}\n${tools}\nOriginal answer`,
+          `${reasoning}\n${multipart}\n${tools}\nOriginal answer`,
+          `${reasoning}\n${tools}\nOriginal answer\n${multipart}`,
+        ]) {
+          const parsed = ChatMarkdownSerializer.parseMarkdown(normalizeMarkdown(
+            createMarkdown({ id: "legacy-placement" }, frame(body)), newline, bom,
+          ));
+          expect(parsed?.messages[0]).toMatchObject({
+            role: "assistant", message_id: "assistant-1", content,
+          });
+          expect(parsed?.messages[0].messageParts).toBeUndefined();
+          if (body !== multipart) {
+            expect(parsed?.messages[0].reasoning).toBe("Original reasoning");
+            expect(parsed?.messages[0].tool_calls).toEqual([{ id: "legacy-tool" }]);
+          }
+          expect(ChatMarkdownSerializer.readBack(parsed!.messages)?.[0].content).toEqual(content);
+        }
+      });
+    });
+
     it("fails closed when any declared message is missing required attributes", () => {
       const messageBlock = `
 <!-- SYSTEMSCULPT-MESSAGE-START role="user" -->

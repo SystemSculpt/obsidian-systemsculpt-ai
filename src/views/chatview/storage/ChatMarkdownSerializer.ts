@@ -60,19 +60,14 @@ type FramedMessagePayload =
 
 type StoredMultipartParseResult =
   | Readonly<{
-      state: "absent";
-      body: string;
+      state: "absent" | "invalid";
       content: null;
     }>
   | Readonly<{
       state: "valid";
-      body: string;
+      start: number;
+      end: number;
       content: MultiPartContent[];
-    }>
-  | Readonly<{
-      state: "invalid";
-      body: string;
-      content: null;
     }>;
 
 type AttachmentMetadataParseResult =
@@ -176,9 +171,9 @@ export class ChatMarkdownSerializer {
         continue;
       }
 
-      const storedMultipart = this.extractStoredMultipart(match[2]);
+      const body = match[2];
+      const storedMultipart = this.parseStoredMultipart(body);
       if (storedMultipart.state === "invalid") return { success: false, messages: [] };
-      const body = storedMultipart.body;
       const reasoningEscape = this.textEscape(attrs, REASONING_ESCAPE_ATTRIBUTE);
       const markerEscape = this.textEscape(attrs, MARKER_ESCAPE_ATTRIBUTE);
       if (reasoningEscape === "invalid" || markerEscape === "invalid") return { success: false, messages: [] };
@@ -191,7 +186,13 @@ export class ChatMarkdownSerializer {
         | { type: "reasoning"; data: string; start: number; end: number }
         | { type: "tool_calls"; data: ToolCall[]; start: number; end: number }
         | { type: "content"; data: MultiPartContent[]; start: number; end: number }
+        | { type: "stored_multipart"; start: number; end: number }
       > = [];
+      // Keep the original offsets until every structural span is checked.
+      // Stripping legacy metadata first hides a block nested inside reasoning.
+      if (storedMultipart.state === "valid") {
+        extractedBlocks.push({ type: "stored_multipart", start: storedMultipart.start, end: storedMultipart.end });
+      }
 
       const reasoningRegex = /<!-- REASONING\r?\n([\s\S]*?)\r?\n-->/g;
       let reasoningMatch: RegExpExecArray | null;
@@ -282,7 +283,7 @@ export class ChatMarkdownSerializer {
           parts.push({ id: `reasoning-${ts}`, type: "reasoning", data: block.data, timestamp: ts++ });
         } else if (block.type === "content") {
           parts.push({ id: `content-${ts}`, type: "content", data: block.data, timestamp: ts++ });
-        } else {
+        } else if (block.type === "tool_calls") {
           for (const toolCall of block.data) {
             const toolId = typeof toolCall.id === "string" ? toolCall.id : String(ts);
             const partId = toolId ? `tool_call_part-${toolId}` : `tool_call-${ts}`;
@@ -301,7 +302,7 @@ export class ChatMarkdownSerializer {
           trimLeadingBoundary: true,
           trimTrailingBoundary: true,
         });
-      } else if (parts.length === 0) {
+      } else if (parts.length === 0 && storedMultipart.state !== "valid") {
         pushContentChunk(body, {
           trimLeadingBoundary: true,
           trimTrailingBoundary: true,
@@ -532,20 +533,22 @@ export class ChatMarkdownSerializer {
     });
   }
 
-  private static extractStoredMultipart(body: string): StoredMultipartParseResult {
-    const marker = /(?:\r?\n)?<!-- SYSTEMSCULPT-CONTENT-PARTS base64\r?\n([A-Za-z0-9+/=]+)\r?\n-->/;
-    const match = body.match(marker);
-    if (!match) return { state: "absent", body, content: null };
+  private static parseStoredMultipart(body: string): StoredMultipartParseResult {
+    const declarations = body.match(/<!-- SYSTEMSCULPT-CONTENT-PARTS base64\r?\n/gu) ?? [];
+    if (declarations.length === 0) return { state: "absent", content: null };
+    const marker = /<!-- SYSTEMSCULPT-CONTENT-PARTS base64\r?\n([A-Za-z0-9+/=]+)\r?\n-->/;
+    const match = marker.exec(body);
+    if (declarations.length !== 1 || !match) return { state: "invalid", content: null };
     try {
       const binary = atob(match[1]);
       const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
       const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
       if (!Array.isArray(parsed) || parsed.length === 0 || !parsed.every((part) => this.isStoredContentPart(part))) {
-        return { state: "invalid", body, content: null };
+        return { state: "invalid", content: null };
       }
-      return { state: "valid", body: body.replace(match[0], ""), content: parsed };
+      return { state: "valid", start: match.index, end: match.index + match[0].length, content: parsed };
     } catch {
-      return { state: "invalid", body, content: null };
+      return { state: "invalid", content: null };
     }
   }
 
