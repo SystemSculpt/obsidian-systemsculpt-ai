@@ -801,6 +801,15 @@ export class AgentChatView extends ItemView {
     return !this.chatId && !this.titleExplicit ? "New chat" : this.chatTitle || "New chat";
   }
 
+  private syncTitle(): void {
+    const title = this.displayTitle();
+    this.workspace?.setTitle(title);
+    // Obsidian's tab refresh does not refresh the view header. Both host APIs
+    // are optional because they are not part of its public ItemView contract.
+    (this as ItemView & { titleEl?: HTMLElement }).titleEl?.setText(title);
+    (this.leaf as WorkspaceLeaf & { updateHeader?: () => void })?.updateHeader?.();
+  }
+
   public async onOpen(): Promise<void> {
     this.contentEl.empty();
     this.contentEl.addClass("systemsculpt-agent-view");
@@ -983,7 +992,7 @@ export class AgentChatView extends ItemView {
         if (incomingTitle && incomingTitle !== this.chatTitle) {
           this.chatTitle = incomingTitle;
           this.titleExplicit = !isGeneratedChatTitle(incomingTitle);
-          this.workspace?.setTitle(this.displayTitle());
+          this.syncTitle();
         }
       }
       if (state?.chatFontSize) await this.setChatFontSize(state.chatFontSize, false);
@@ -1169,7 +1178,7 @@ export class AgentChatView extends ItemView {
     if (normalized === this.chatTitle) return;
     this.chatTitle = normalized;
     this.transcript.setTitle(normalized);
-    this.workspace?.setTitle(this.displayTitle());
+    this.syncTitle();
     if (shouldSave) await this.saveChat();
     this.updateViewState();
     this.app.workspace.requestSaveLayout();
@@ -3387,7 +3396,7 @@ export class AgentChatView extends ItemView {
     this.chatId = snapshot.chatId;
     this.chatTitle = snapshot.title;
     this.chatVersion = snapshot.version;
-    this.workspace?.setTitle(this.displayTitle());
+    this.syncTitle();
     // The first message changes what the empty state and backend menu say.
     if (snapshot.messages.length > 0 && this.switchedFrom) this.switchedFrom = null;
     this.syncChrome();
