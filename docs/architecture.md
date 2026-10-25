@@ -22,7 +22,7 @@ public operations and behavioral tests before following private helpers.
 | Studio project edits | `src/studio/StudioProjectSession.ts`, `StudioProjectSessionManager.ts` | Shared editable project state, save/rebase, and retained session lifetime. |
 | Studio persistence | `src/studio/StudioProjectStore.ts`, `document/`, `persistence/` | One readable `.systemsculpt` document per project: validated import, three-way merged UI and agent edits, stamped field merges of copies from other devices by the merge record each file carries, atomic publication, and independent support-file reconciliation. |
 | Studio execution | `src/studio/StudioService.ts`, `StudioRuntime.ts`, `StudioGraphCompiler.ts`, `nodes/` | User-requested scopes, typed dependency plans, immutable run snapshots, execution gates, and node results. |
-| Studio interaction | `src/views/studio/SystemSculptStudioView.ts`, `canvas/`, `connections/` | Obsidian leaf, canvas cards, visual connections, editors, and pointer/keyboard interaction. |
+| Studio interaction | `src/views/studio/SystemSculptStudioView.ts`, `PendingStudioView.ts`, `canvas/`, `connections/` | Obsidian leaf, canvas cards, visual connections, editors, and pointer/keyboard interaction. The view's code is evaluated when Studio first opens (`ViewManager.loadStudioView`); until then `PendingStudioView` holds a tab Obsidian opens and hands it to the real view. The source editor's language packs load with the first source card. |
 | Studio edit history | `src/views/studio/StudioGraphHistory.ts` | Each view's local edit transactions, rebased onto the shared canvas for undo/redo. Restoration preserves unrelated peer edits and the accepted disk baseline. |
 | Vault operations | `src/tools/FirstPartyToolService.ts`, `src/tools/vault/` | Advertised local actions, validated vault paths, execution, and typed results. |
 | Audio Processor | `src/features/audio-processor/AudioProcessorService.ts`, `AudioProcessorDelivery.ts` | Input/job workflow and durable local output delivery respectively. |
@@ -66,6 +66,9 @@ type-only, re-exported, and lazy imports. It enforces host independence and
 prevents chat and Studio domain code, vault tools, diagnostics, and generic utilities
 from depending on presentation. Composition belongs in `src/main.ts` and
 `src/core/plugin/`; those modules intentionally know the capabilities they wire.
+A feature that most people never open is reached through `import()`, which
+esbuild evaluates on first use; `scripts/plugin-build-options.test.mjs` checks
+that plugin load evaluates no Studio view code.
 Managed-service and native-process seams use deterministic test adapters.
 
 Use a focused dependency type when a module needs only a small capability from
