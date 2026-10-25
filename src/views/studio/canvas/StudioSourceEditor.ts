@@ -9,7 +9,10 @@ import { markStudioNodeCardInteractive } from './StudioGraphNodeCardPointer';
 type Languages = typeof import('./StudioSourceLanguages');
 let languages: Languages | null = null;
 let languagesLoad: Promise<Languages> | null = null;
-/** The language packs are evaluated when a card first shows source, not when Studio opens. */
+/**
+ * The language packs are evaluated when a card first shows source, not when Studio opens.
+ * @internal Unit-tested directly.
+ */
 export function loadStudioSourceLanguages(): Promise<Languages> {
   languagesLoad ??= import('./StudioSourceLanguages').then(
     loaded => (languages = loaded),
