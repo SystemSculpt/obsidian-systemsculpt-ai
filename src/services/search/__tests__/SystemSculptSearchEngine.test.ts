@@ -11,7 +11,6 @@ const makePlugin = (app: App) =>
         respectObsidianExclusions: false,
       },
     },
-    vaultFileCache: undefined,
   } as any);
 
 describe("SystemSculptSearchEngine lexical mode", () => {
@@ -273,11 +272,7 @@ describe("SystemSculptSearchEngine lexical mode", () => {
 
   it("does not mutate the cached vault file array when selecting recents", async () => {
     const { app, files } = buildFixture();
-    const plugin = makePlugin(app);
-    plugin.vaultFileCache = {
-      getAllFilesView: jest.fn(() => files),
-    };
-    const engine = new SystemSculptSearchEngine(app as any, plugin);
+    const engine = new SystemSculptSearchEngine(app as any, makePlugin(app));
 
     await engine.getRecent(2);
 
@@ -294,16 +289,13 @@ describe("SystemSculptSearchEngine lexical mode", () => {
 
   it("reuses the eligible file snapshot across metadata searches", async () => {
     jest.useFakeTimers();
-    const { app, files } = buildFixture();
-    const plugin = makePlugin(app);
-    const getAllFilesView = jest.fn(() => files);
-    plugin.vaultFileCache = { getAllFilesView };
-    const engine = new SystemSculptSearchEngine(app as any, plugin);
+    const { app } = buildFixture();
+    const engine = new SystemSculptSearchEngine(app as any, makePlugin(app));
 
     await engine.search("fresh", { mode: "smart", limit: 10 });
     await engine.search("orange", { mode: "smart", limit: 10 });
 
-    expect(getAllFilesView).toHaveBeenCalledTimes(1);
+    expect(app.vault.getFiles).toHaveBeenCalledTimes(1);
 
     engine.destroy();
     jest.useRealTimers();
@@ -458,11 +450,8 @@ describe("SystemSculptSearchEngine lexical mode", () => {
 
   it("invalidates the eligible file snapshot when files are created", async () => {
     jest.useFakeTimers();
-    const { app, files } = buildFixture();
-    const plugin = makePlugin(app);
-    const getAllFilesView = jest.fn(() => files);
-    plugin.vaultFileCache = { getAllFilesView };
-    const engine = new SystemSculptSearchEngine(app as any, plugin);
+    const { app } = buildFixture();
+    const engine = new SystemSculptSearchEngine(app as any, makePlugin(app));
 
     await engine.search("fresh", { mode: "smart", limit: 10 });
     const createListener = (app.vault.on as jest.Mock).mock.calls.find(([event]) => event === "create")?.[1];
@@ -470,7 +459,7 @@ describe("SystemSculptSearchEngine lexical mode", () => {
     createListener(new TFile({ path: "notes/new.md", stat: { mtime: NOW } }));
     await engine.search("orange", { mode: "smart", limit: 10 });
 
-    expect(getAllFilesView).toHaveBeenCalledTimes(2);
+    expect(app.vault.getFiles).toHaveBeenCalledTimes(2);
 
     engine.destroy();
     jest.useRealTimers();

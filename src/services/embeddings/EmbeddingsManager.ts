@@ -1452,10 +1452,8 @@ export class EmbeddingsManager {
   }
 
   private eligibleFiles(): TFile[] {
-    const cached = this.plugin.vaultFileCache?.getMarkdownFiles();
-    const files = Array.isArray(cached) ? cached : this.app.vault.getMarkdownFiles();
     const exclusions = this.exclusions();
-    return files.filter((file): file is TFile => file instanceof TFile && !exclusions.isExcluded(file.path));
+    return this.app.vault.getMarkdownFiles().filter((file): file is TFile => file instanceof TFile && !exclusions.isExcluded(file.path));
   }
 
   private isFileExcluded(file: TFile): boolean {

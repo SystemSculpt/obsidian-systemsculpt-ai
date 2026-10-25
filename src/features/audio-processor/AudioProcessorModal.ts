@@ -140,7 +140,7 @@ export class AudioProcessorModal extends StandardModal {
     });
     this.picker = new AudioSourcePicker(container, {
       app: this.app,
-      listFiles: () => this.plugin.vaultFileCache?.getAllFiles() ?? this.app.vault.getFiles(),
+      listFiles: () => this.app.vault.getFiles(),
       vaultAvailable: vaultAudioAvailable,
       acceptsVaultFile: (file) => file.stat.size > 0 && file.stat.size <= AUDIO_PROCESSOR_MAX_AUDIO_BYTES,
       acceptDeviceFile: (file) => {

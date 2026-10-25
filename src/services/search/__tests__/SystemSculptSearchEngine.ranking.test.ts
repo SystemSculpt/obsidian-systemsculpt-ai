@@ -67,7 +67,6 @@ function makeEngine(vault: GeneratedVault, overrides: Map<string, string> = new 
       embeddingsEnabled: false,
       embeddingsExclusions: { ignoreChatHistory: false, respectObsidianExclusions: false },
     },
-    vaultFileCache: undefined,
   };
   const engine = new SystemSculptSearchEngine(app as never, plugin as never);
   const listener = (event: string) =>

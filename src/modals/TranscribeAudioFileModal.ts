@@ -106,7 +106,7 @@ export class TranscribeAudioFileModal extends StandardModal {
     const shell = this.contentEl.createDiv({ cls: "ss-transcribe-audio" });
     this.picker = new AudioSourcePicker(shell, {
       app: this.app,
-      listFiles: () => this.plugin.vaultFileCache?.getAllFiles() ?? this.app.vault.getFiles(),
+      listFiles: () => this.app.vault.getFiles(),
       acceptDeviceFile: (file) => this.acceptDeviceFile(file),
       deviceHint: "You can also drop a file here.",
       onChange: () => this.syncTranscribeButton(),

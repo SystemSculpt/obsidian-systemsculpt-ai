@@ -21,7 +21,6 @@ const makePlugin = (app: App, options: { embeddingsEnabled?: boolean; manager?: 
         respectObsidianExclusions: false,
       },
     },
-    vaultFileCache: undefined,
     embeddingsManager: manager,
     getOrCreateEmbeddingsManager: jest.fn().mockReturnValue(manager),
   } as any;
@@ -483,7 +482,6 @@ describe("SystemSculptSearchEngine semantic mode", () => {
       const plugin = {
         app,
         settings: { embeddingsEnabled: true, embeddingsExclusions: {} },
-        vaultFileCache: undefined,
         getOrCreateEmbeddingsManager: jest.fn().mockImplementation(() => {
           throw new Error("Manager initialization failed");
         }),
@@ -508,7 +506,6 @@ describe("SystemSculptSearchEngine semantic mode", () => {
       const plugin: any = {
         app,
         settings: { embeddingsEnabled: true, embeddingsExclusions: {} },
-        vaultFileCache: undefined,
         embeddingsManager: undefined,
         getOrCreateEmbeddingsManager: jest.fn(() => {
           plugin.embeddingsManager = manager;

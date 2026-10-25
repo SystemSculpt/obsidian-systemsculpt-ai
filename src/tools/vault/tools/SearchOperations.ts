@@ -579,16 +579,7 @@ export class SearchOperations {
       !(file instanceof TFile);
     const getStat = (file: SearchFile) => (isAdapterFile(file) ? file.stat : file.stat);
 
-    // Search entire vault using cached access if available
-    const getFiles = () => {
-      try {
-        return this.plugin.vaultFileCache?.getAllFiles() || this.app.vault.getFiles();
-      } catch {
-        return [];
-      }
-    };
-
-    let filesToSearch: SearchFile[] = getFiles();
+    let filesToSearch: SearchFile[] = this.app.vault.getFiles();
     const adapterFiles = await this.listHiddenFiles();
     if (adapterFiles.length > 0) {
       filesToSearch = filesToSearch.concat(adapterFiles);

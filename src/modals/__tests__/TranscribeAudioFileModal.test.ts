@@ -53,7 +53,6 @@ describe("TranscribeAudioFileModal", () => {
       settings,
       directoryManager: { ensureDirectoryByPath },
       getSettingsManager: () => ({ updateSettings }),
-      vaultFileCache: null,
     } as any;
 
     return { app, plugin, settings, updateSettings, ensureDirectoryByPath };

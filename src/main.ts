@@ -28,7 +28,6 @@ import { legacyCredentialNotice, protectLegacyCredentials } from "./core/securit
 import { ResumeChatService } from "./views/chatview/ResumeChatService";
 import { nativeChatSessions } from "./views/chatview/NativeChatSessions";
 import { EmbeddingsManager } from "./services/embeddings/EmbeddingsManager";
-import { VaultFileCache } from "./utils/VaultFileCache";
 import { EmbeddingsStatusBar } from "./components/EmbeddingsStatusBar";
 import { ResourceMonitorService } from "./services/ResourceMonitorService";
 import { PluginLogger } from "./utils/PluginLogger";
@@ -175,7 +174,6 @@ export default class SystemSculptPlugin extends Plugin {
   private pluginLogger: PluginLogger | null = null;
   private initializationTracer: InitializationTracer | null = null;
   public embeddingsManager: EmbeddingsManager | null = null;
-  public vaultFileCache: VaultFileCache | undefined;
   public embeddingsStatusBar: EmbeddingsStatusBar | null = null;
   private resourceMonitor: ResourceMonitorService | null = null;
   private loadedPluginBuildIdPromise: Promise<`sha256:${string}`> | null = null;
@@ -1044,7 +1042,6 @@ export default class SystemSculptPlugin extends Plugin {
 
       const parallelTasks = [
         this.initializeDirectories(),
-        this.initializeVaultFileCache(),
         this.initializeBasicServices(),
       ];
 
@@ -1132,35 +1129,6 @@ export default class SystemSculptPlugin extends Plugin {
 
       logger.error("Directory manager failed to initialize", error, {
         source: "SystemSculptPlugin",
-      });
-    }
-  }
-
-  private async initializeVaultFileCache() {
-    const tracer = this.getInitializationTracer();
-    const phase = tracer.startPhase("cache.vaultFile.initialize", {
-      slowThresholdMs: 600,
-      timeoutMs: 6000,
-    });
-    const logger = this.getLogger();
-
-    try {
-      this.vaultFileCache = new VaultFileCache(this.app);
-      await this.vaultFileCache.initialize();
-
-      logger.info("Vault file cache primed", {
-        source: "SystemSculptPlugin",
-      });
-
-      phase.complete();
-    } catch (error) {
-      phase.fail(error);
-
-      logger.warn("Vault file cache unavailable", {
-        source: "SystemSculptPlugin",
-        metadata: {
-          error: error instanceof Error ? error.message : String(error),
-        },
       });
     }
   }
@@ -1846,7 +1814,6 @@ export default class SystemSculptPlugin extends Plugin {
     // every fallible teardown step above.
     await safely("transcription service", () => this.transcriptionService?.unload());
     await safely("resume chat service", () => this.resumeChatService?.cleanup());
-    await safely("vault file cache", () => this.vaultFileCache?.destroy());
     await safely("service singletons", () => {
       SystemSculptService.clearInstance();
       this.managedCapabilityGraph = null;
