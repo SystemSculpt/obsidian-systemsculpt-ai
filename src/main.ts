@@ -6,7 +6,7 @@
 /**
  * SystemSculpt AI Plugin for Obsidian
  */
-import { Plugin, Notice, FileSystemAdapter, apiVersion } from "obsidian";
+import { Plugin, Notice, FileSystemAdapter, apiVersion, requireApiVersion } from "obsidian";
 import { checkObsidianCompatibility, MINIMUM_OBSIDIAN_VERSION } from "./core/plugin/lifecycle/ObsidianCompat";
 import { SystemSculptSettings, DEFAULT_SETTINGS, LogLevel, LICENSE_URL } from "./types";
 import { SystemSculptService, type CreditsBalanceSnapshot } from "./services/SystemSculptService";
@@ -52,6 +52,9 @@ import {
   PhoneCaptureInbox,
   type PhoneCaptureSyncResult,
 } from "./features/phone-captures/PhoneCaptureInbox";
+import { PhoneHandoffInbox, type HandoffAgent } from "./features/phone-captures/PhoneHandoffInbox";
+import { detectLocalAgents, isLocalAgentUsable } from "./services/codex/LocalAgentDetection";
+import { localAgentDetectionDirectory } from "./services/codex/CodexExecutionSettings";
 import { SystemSculptSearchEngine } from "./services/search/SystemSculptSearchEngine";
 import { relativeLineNumbersExtension } from "./editor/relative-line-numbers";
 import { studioTextNodeEmptyLines } from "./views/studio/canvas/StudioTextNodeEmptyLines";
@@ -181,6 +184,7 @@ export default class SystemSculptPlugin extends Plugin {
   private diagnosticsSessionLifecycle: DiagnosticsSessionLifecycle | null = null;
   private inboxTranscriptionService: InboxTranscriptionService | null = null;
   private phoneCaptureInbox: PhoneCaptureInbox | null = null;
+  private phoneHandoffInbox: PhoneHandoffInbox | null = null;
   private searchEngine: SystemSculptSearchEngine | null = null;
   private studioService: StudioService | null = null;
   private managedCapabilityGraph: ManagedCapabilityGraph | null = null;
@@ -664,8 +668,15 @@ export default class SystemSculptPlugin extends Plugin {
       optional: true,
       run: () => {
         const sync = () => {
-          if (!this.isUnloading) void this.getPhoneCaptureInbox().maybeSync();
+          if (!this.isUnloading) {
+            // A capture confirmation can stay open; it must not hold the queue.
+            void this.getPhoneCaptureInbox().maybeSync();
+            void this.pollPhoneHandoffs();
+          }
         };
+        this.registerEvent(this.app.workspace.on("systemsculpt:settings-updated", () => {
+          if (this.phoneHandoffInbox || this.settings.phoneCapturesLinked) void this.pollPhoneHandoffs();
+        }));
         this.registerInterval(window.setInterval(sync, PHONE_CAPTURE_POLL_INTERVAL_MS));
         this.registerDomEvent(window, "focus", sync);
         this.registerDomEvent(document, "visibilitychange", () => {
@@ -1638,6 +1649,7 @@ export default class SystemSculptPlugin extends Plugin {
 
   private async unloadAsync(): Promise<void> {
     this.deferredStartup.abort();
+    this.phoneHandoffInbox?.dispose();
     // Microphone privacy is the first teardown action and must never wait on
     // diagnostics disk I/O or an unrelated service cleanup.
     const recorder = this.recorderService;
@@ -2165,6 +2177,47 @@ export default class SystemSculptPlugin extends Plugin {
       }),
     });
     return this.phoneCaptureInbox;
+  }
+
+  getPhoneHandoffInbox(): PhoneHandoffInbox {
+    if (!this.phoneHandoffInbox) {
+      // Obsidian's vault-local browser storage is installation-specific, unlike
+      // synced data.json. A fresh session identity is safe if storage is blocked.
+      let instanceId = "";
+      try {
+        if (requireApiVersion("1.8.7")) instanceId = String(this.app.loadLocalStorage("systemsculpt-handoff-instance") ?? "");
+      } catch { /* Older host. */ }
+      if (!/^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(instanceId)) {
+        instanceId = crypto.randomUUID();
+        try {
+          if (requireApiVersion("1.8.7")) this.app.saveLocalStorage("systemsculpt-handoff-instance", instanceId);
+        } catch { /* Session-local identity. */ }
+      }
+      this.phoneHandoffInbox = new PhoneHandoffInbox({
+        app: this.app, pluginVersion: this.manifest.version, instanceId,
+        settings: () => ({ licenseKey: this.settings.licenseKey ?? "", linked: this.settings.phoneCapturesLinked === true,
+          autoRun: this.settings.phoneHandoffsAutoRun === true, vaultId: this.settings.vaultInstanceId ?? "" }),
+        availableAgents: async () => {
+          const agents: HandoffAgent[] = ["systemsculpt"];
+          if (hasHostCapability("local-cli")) {
+            const detection = await detectLocalAgents({ workingDirectory: localAgentDetectionDirectory(this.app) });
+            if (isLocalAgentUsable(detection.agents.claude)) agents.push("claude_code");
+            if (isLocalAgentUsable(detection.agents.codex)) agents.push("codex");
+          }
+          return agents;
+        },
+        execute: execution => this.getViewManager().runPhoneHandoff(execution),
+      });
+    }
+    return this.phoneHandoffInbox;
+  }
+
+  private async pollPhoneHandoffs(): Promise<void> {
+    if (this.isUnloading) return;
+    // An unlinked account never starts queue polling.
+    if (!this.phoneHandoffInbox && this.settings.phoneCapturesLinked !== true) return;
+    try { await this.getPhoneHandoffInbox().poll(); }
+    catch { this.getLogger().warn("Couldn't check for iPhone handoffs.", { source: "PhoneHandoffInbox" }); }
   }
 
   /** Saves waiting iPhone captures now; a manual sync asks again about declined ones. */

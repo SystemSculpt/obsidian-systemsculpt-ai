@@ -33,6 +33,13 @@ export function displayPhoneCapturesTabContent(containerEl: HTMLElement, tabInst
         await settingsManager.updateSettings({ phoneCapturesAskBeforeSaving: value });
       }));
 
+  createCatalogSetting(containerEl, "workspace.run-phone-handoffs")
+    .addToggle((toggle) => toggle
+      .setValue(plugin.settings.phoneHandoffsAutoRun === true)
+      .onChange(async (value) => {
+        await settingsManager.updateSettings({ phoneHandoffsAutoRun: value });
+      }));
+
   const folders = [
     {
       key: "phoneCapturesFolder" as const,
