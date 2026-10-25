@@ -334,7 +334,7 @@ describe("EmbeddingsManager exclusions", () => {
       expect((manager as any).isPathExcluded(includedPath)).toBe(false);
 
       const app = new App();
-      const toolPlugin = { app, settings } as any;
+      const toolPlugin = { app, settings, registerEvent: jest.fn() } as any;
       const files = [excludedPath, includedPath].map((path) => new TFile({
         path,
         stat: { ctime: Date.now(), mtime: Date.now(), size: 14 },
