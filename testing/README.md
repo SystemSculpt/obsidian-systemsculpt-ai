@@ -1,6 +1,6 @@
 # Testing architecture
 
-The plugin has four local test layers:
+The plugin has three local test layers:
 
 1. src/**/__tests__ proves module behavior with Jest, including seeded
    lifecycle, persistence, rendering, approval, queue, and recovery races.
@@ -8,10 +8,6 @@ The plugin has four local test layers:
    contracts plus Obsidian host composition.
 3. scripts/*.test.mjs proves build, release, workflow, mobile-import, sync, and
    repository policy.
-4. The retired managed-chat replay fixture remains hash-pinned as a released
-   compatibility artifact. Behavioral validation of that legacy server route
-   belongs to the website API; the plugin does not replay it through a second
-   client-owned projector.
 
 Managed fixtures live in testing/fixtures/managed; versioned settings inputs
 live in testing/fixtures/settings. Default tests need no provider key, hosted
