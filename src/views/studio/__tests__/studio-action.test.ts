@@ -12,6 +12,7 @@ describe("createStudioAction", () => {
     const button = createStudioAction(parent, {
       className: "ss-studio-test-action",
       label: "Inspect",
+      testId: "studio.test.inspect",
       ariaLabel: "Inspect node",
       size: "small",
       selected: true,
@@ -36,6 +37,7 @@ describe("createStudioAction", () => {
     parent.addEventListener("pointerdown", parentPointerDown);
     const button = createStudioAction(parent, {
       label: "Rename",
+      testId: "studio.test.rename",
       stopPointerDown: true,
     });
 

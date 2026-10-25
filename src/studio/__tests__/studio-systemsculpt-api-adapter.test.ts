@@ -1,7 +1,8 @@
+import type { ManagedTextGenerationOperation } from "../../services/managed/ManagedTextGenerationAdapter";
 import { StudioApiExecutionAdapter } from "../StudioApiExecutionAdapter";
 
 function createPlugin() {
-  const generateText = jest.fn(async operation => {
+  const generateText = jest.fn(async (operation: ManagedTextGenerationOperation) => {
     const messages = await operation.buildMessages();
     return {
       operationId: operation.operationId,

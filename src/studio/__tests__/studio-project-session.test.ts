@@ -143,7 +143,7 @@ describe("StudioProjectSession", () => {
   });
 
   it("queues a follow-up save when edits arrive during an in-flight save", async () => {
-    let resolveFirstSave: (() => void) | null = null;
+    let resolveFirstSave = (): void => {};
     const saveProject = jest
       .fn<Promise<void>, [string, StudioProjectV1]>()
       .mockImplementationOnce(
@@ -168,7 +168,7 @@ describe("StudioProjectSession", () => {
     expect(saveProject).toHaveBeenCalledTimes(1);
 
     session.schedulePersist({ mode: "discrete" });
-    resolveFirstSave?.();
+    resolveFirstSave();
     await Promise.resolve();
     jest.advanceTimersByTime(40);
     await session.flushPendingSaveWork({ force: true });
@@ -395,7 +395,7 @@ describe("StudioProjectSession", () => {
   });
   it("keeps keystrokes made during persistence and adopts unrelated reconciled fields", async () => {
     const project = projectFixture();
-    project.graph.nodes.push({ id: "a", kind: "studio.text", version: "1.0.0", position: { x: 0, y: 0 }, config: { value: "base" } });
+    project.graph.nodes.push({ id: "a", kind: "studio.text", version: "1.0.0", title: "Text", position: { x: 0, y: 0 }, config: { value: "base" } });
     let finish!: (result: { project: StudioProjectV1; conflicts: string[] }) => void;
     let submitted!: StudioProjectV1;
     const saveProject = jest.fn(async (_path: string, snapshot: StudioProjectV1) => {
@@ -418,7 +418,7 @@ describe("StudioProjectSession", () => {
 
   it("rebases an async producer without erasing edits made while it awaited I/O", async () => {
     const project = projectFixture();
-    project.graph.nodes.push({ id: "a", kind: "studio.text", version: "1.0.0", position: { x: 0, y: 0 }, config: { value: "base" } });
+    project.graph.nodes.push({ id: "a", kind: "studio.text", version: "1.0.0", title: "Text", position: { x: 0, y: 0 }, config: { value: "base" } });
     const session = new StudioProjectSession({ projectPath: "Studio/Test.systemsculpt", project, saveProject: async () => undefined });
     let resume!: () => void;
     const waiting = new Promise<void>(resolve => { resume = resolve; });

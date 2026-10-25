@@ -91,7 +91,7 @@ function createControllerHarness(project: StudioProjectV1) {
   } as any;
   const service = {
     getProjectNodeCache: jest.fn(async () => cacheSnapshot),
-    releaseProjectSession: jest.fn(async () => {}),
+    releaseProjectSession: jest.fn(async (_path: string) => {}),
     retainProjectSession: jest.fn(),
     preserveProjectRecovery: jest.fn(async () => {}),
     consumeBlockedProjectRecovery: jest.fn(async () => null),
@@ -345,7 +345,7 @@ describe("StudioProjectSessionController", () => {
 
   it("finishes central file reconciliation before close releases the project", async () => {
     const originalProject = projectFixture(noteNodeFixture("Notes/Before close.md"));
-    const { controller, host, service, session } = createControllerHarness(originalProject);
+    const { controller, host, service } = createControllerHarness(originalProject);
     Object.assign(controller as any, { retainedProjectPath: "Studio/Test.systemsculpt" });
     const rawText = '{"schema":"studio.project.v1","name":"Agent edit loaded before close"}';
     host.app.vault.adapter.read = jest.fn(async () => rawText);
@@ -507,7 +507,7 @@ describe("StudioProjectSessionController", () => {
     let active = 0;
     let maxActive = 0;
     const seen: string[] = [];
-    jest.spyOn(controller as any, "processCurrentProjectFileMutation").mockImplementation(async (rawText: string) => {
+    controller["processCurrentProjectFileMutation"] = jest.fn(async (rawText: string) => {
       active += 1;
       maxActive = Math.max(maxActive, active);
       seen.push(rawText);

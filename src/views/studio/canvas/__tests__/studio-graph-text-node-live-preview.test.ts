@@ -142,7 +142,7 @@ function createEditorFactory(result: "handle" | "null" = "handle"): EditorFactor
 describe("studio.text live-preview card", () => {
   afterEach(() => {
     document.body.innerHTML = "";
-    delete (document as Document & { caretRangeFromPoint?: unknown }).caretRangeFromPoint;
+    Reflect.deleteProperty(document, "caretRangeFromPoint");
     jest.restoreAllMocks();
   });
 

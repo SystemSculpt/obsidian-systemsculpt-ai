@@ -1,4 +1,4 @@
-import type { StudioProjectV1 } from "../types";
+import type { StudioNodeCachePolicy, StudioProjectV1 } from "../types";
 import { planStudioRun, scopeProjectForRun } from "../StudioRunScope";
 
 function baseProject(): StudioProjectV1 {
@@ -218,7 +218,7 @@ describe("StudioRuntime scoped run projection", () => {
 });
 
 describe("planStudioRun", () => {
-  const policyOf = (never: string[]) => (node: { id: string }) => (never.includes(node.id) ? "never" : "by_inputs") as const;
+  const policyOf = (never: string[]) => (node: { id: string }): StudioNodeCachePolicy => (never.includes(node.id) ? "never" : "by_inputs");
 
   it("runs the whole executable graph when no entry node is given", () => {
     const project = projectWithBranchMerge();

@@ -104,7 +104,6 @@ function createController(
     getNodeElement: () => null,
     notifyNodePositionsChanged: () => undefined,
     requestRender: () => undefined,
-    scheduleProjectSave: () => undefined,
     commitProjectMutation: (_reason, mutator) => mutator(project) !== false,
     ...overrides,
   });

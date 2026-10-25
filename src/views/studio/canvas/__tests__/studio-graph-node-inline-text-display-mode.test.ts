@@ -16,6 +16,7 @@ function definitionFixture(kind: string): StudioNodeDefinition {
   return {
     kind,
     version: "1.0.0",
+    requiredHostCapabilities: [],
     capabilityClass: "local_cpu",
     cachePolicy: "never",
     inputPorts: [],
@@ -90,7 +91,7 @@ describe("StudioGraphNodeInlineEditors text display mode", () => {
       },
     });
     const onNodeConfigMutated = jest.fn();
-    const onNodePresentationMutated = jest.fn();
+    const onNodeConfigValueChange = jest.fn();
     const nodeRunState: StudioNodeRunDisplayState = {
       status: "succeeded",
       message: "Preview ready",
@@ -105,7 +106,7 @@ describe("StudioGraphNodeInlineEditors text display mode", () => {
       definition: definitionFixture("studio.note"),
       interactionLocked: false,
       onNodeConfigMutated,
-      onNodePresentationMutated,
+      onNodeConfigValueChange,
     });
 
     const textarea = nodeEl.querySelector<HTMLTextAreaElement>(".ss-studio-node-text-editor");
@@ -117,7 +118,7 @@ describe("StudioGraphNodeInlineEditors text display mode", () => {
     expect(modeToggle?.classList.contains("is-hidden")).toBe(true);
     expect(buttons).toHaveLength(2);
     expect(node.config.textDisplayMode).toBeUndefined();
-    expect(onNodePresentationMutated).not.toHaveBeenCalled();
+    expect(onNodeConfigValueChange).not.toHaveBeenCalled();
     expect(onNodeConfigMutated).not.toHaveBeenCalled();
   });
 

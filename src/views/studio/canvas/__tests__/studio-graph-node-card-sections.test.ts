@@ -24,6 +24,7 @@ function createDefinition(options: {
   return {
     kind: "studio.terminal",
     version: "1.0.0",
+    requiredHostCapabilities: [],
     capabilityClass: "local_io",
     cachePolicy: "never",
     inputPorts: options.inputPorts,

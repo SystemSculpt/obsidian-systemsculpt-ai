@@ -30,6 +30,7 @@ function definitionFixture(kind: string): StudioNodeDefinition {
     return {
       kind,
       version: "1.0.0",
+      requiredHostCapabilities: [],
       capabilityClass: "local_cpu",
       cachePolicy: "never",
       inputPorts: [],
@@ -58,6 +59,7 @@ function definitionFixture(kind: string): StudioNodeDefinition {
     return {
       kind,
       version: "1.0.0",
+      requiredHostCapabilities: [],
       capabilityClass: "api",
       cachePolicy: "never",
       inputPorts: [],
@@ -96,6 +98,7 @@ function definitionFixture(kind: string): StudioNodeDefinition {
     return {
       kind,
       version: "1.0.0",
+      requiredHostCapabilities: [],
       capabilityClass: "local_io",
       cachePolicy: "never",
       inputPorts: [],
@@ -122,6 +125,7 @@ function definitionFixture(kind: string): StudioNodeDefinition {
   return {
     kind,
     version: "1.0.0",
+    requiredHostCapabilities: [],
     capabilityClass: "local_cpu",
     cachePolicy: "never",
     inputPorts: [],
