@@ -59,6 +59,25 @@ it('resumes a finished native thread for one explicit message without scheduling
   expect(saved.messages[0].status).toBe('delivered'); expect(saved.turnId).toBe(a.turnId);
   sessions[1].resolve(); await tick(); jest.advanceTimersByTime(10_000); await tick(); expect(sessions).toHaveLength(2); await runs.dispose();
 });
+it('saves streamed text after a few seconds and state changes promptly', async () => {
+  const { runs, adapter } = fixture(); const a = await runs.start(spec()); await tick();
+  const saves = () => adapter.write.mock.calls.filter(([path]) => String(path).endsWith(`${a.id}.json`)).length;
+  const settled = saves();
+  for (const text of ['D', 'Do', 'Doing', 'Doing work']) { sessions[0].cb.text(text); jest.advanceTimersByTime(400); await tick(); }
+  expect(saves()).toBe(settled);
+  jest.advanceTimersByTime(5_000); await tick();
+  expect(saves()).toBe(settled + 1);
+  expect(a.result).toBe('Doing work');
+
+  // A state change while streamed text waits is saved on the short delay, once.
+  sessions[0].cb.text('Doing more work');
+  sessions[0].cb.log('Connected to Codex');
+  jest.advanceTimersByTime(400); await tick();
+  expect(saves()).toBe(settled + 2);
+  jest.advanceTimersByTime(10_000); await tick();
+  expect(saves()).toBe(settled + 2);
+  sessions[0].resolve(); await tick(); await runs.dispose();
+});
 it('caps concurrent native turns and delivers queued messages once the target is ready', async () => {
   const { runs } = fixture(); const records = await Promise.all(Array.from({ length: 9 }, () => runs.start(spec()))); await tick();
   expect(sessions).toHaveLength(8); const message = await runs.send(records[8].id, 'Queued handoff'); expect(message.status).toBe('pending');
