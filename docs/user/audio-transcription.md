@@ -60,6 +60,14 @@ Audio and transcription settings now live inside the `Workflow` tab.
 
 Raw `.aac` and `.opus` files are not accepted by the managed transcription runtime. Use an M4A/MP4 or Ogg/WebM container instead.
 
+## Saved filenames and note presentation
+
+- **Transcribe an audio file** saves Markdown beside the source audio as `<audio name>.md`, without an epoch prefix or words copied from the transcript. If the name is taken, it uses `<audio name> (2).md`, then the next available number; existing notes are not overwritten. SRT output keeps the same audio-based naming and numbered collision behavior.
+- Device imports keep a readable, vault-safe audio filename in your configured recordings folder (by default `SystemSculpt/Recordings`). If that audio filename is taken, the import adds `-2`, `-3`, and so on. Transcripts stay beside that imported audio. Vault-selected audio stays in its existing folder.
+- Existing transcripts are not renamed. An interrupted transcription can still recover an output saved under the older ` - transcript - …` naming pattern.
+- Audio Processor continues to save the server-selected note title and its companion transcript in `SystemSculpt/Audio Notes`. New notes use Obsidian's inline filename title rather than repeating it as a top-level heading. Transcript navigation is a normal callout, with its bookkeeping kept in frontmatter rather than a raw HTML marker in the note body.
+- Audio Processor's Source callout keeps readable attribution, duration, and language. Source fingerprints and the exact processing timestamp remain in frontmatter, not in the visible callout; downloaded artifacts are still integrity-checked before their vault presentation is adjusted.
+
 ## Pipeline behavior notes
 
 - Every transcription is admitted through the SystemSculpt account and runs as a managed job.

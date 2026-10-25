@@ -751,7 +751,6 @@ export class TranscribeAudioFileModal extends StandardModal {
     safeName: string,
     create: (path: string) => Promise<TFile>,
   ): Promise<TFile> {
-    const timestamp = Date.now();
     const dotIndex = safeName.lastIndexOf(".");
     const stem = dotIndex > 0 ? safeName.slice(0, dotIndex) : safeName;
     const suffix = dotIndex > 0 ? safeName.slice(dotIndex) : "";
@@ -760,7 +759,7 @@ export class TranscribeAudioFileModal extends StandardModal {
       const candidateName = attempt === 1
         ? safeName
         : `${stem}-${attempt}${suffix}`;
-      const path = normalizePath(`${directory}/${timestamp}_${candidateName}`);
+      const path = normalizePath(`${directory}/${candidateName}`);
       if (this.app.vault.getAbstractFileByPath(path)) continue;
 
       try {
