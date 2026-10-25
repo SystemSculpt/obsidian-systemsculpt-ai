@@ -131,8 +131,10 @@ export class StudioGraphConnectionEngine {
       getCursorAnchorPoint: () => this.cursorAnchorPoint(),
       resolveEdgeActivity: (edgeId) => this.edgeActivity.get(edgeId) ?? "idle",
     });
-    this.storeUnsub = this.store.subscribe(() => {
-      if (!this.settingEdges) this.renderer?.render();
+    this.storeUnsub = this.store.subscribe((change) => {
+      // A pending connection's moves redraw its preview; the cables didn't move.
+      if (change === "drag") this.renderer?.renderPreview();
+      else if (!this.settingEdges) this.renderer?.render();
     });
     this.bindEdgeLayerListeners(layer);
     this.observeCanvasForEdgeReresolve();
