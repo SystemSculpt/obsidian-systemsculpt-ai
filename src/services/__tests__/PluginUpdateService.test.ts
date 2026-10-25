@@ -7,8 +7,8 @@ import {
   PluginUpdateService,
   cacheControlMaxAgeMs,
   parsePluginReleaseInfo,
-  retryAfterMs,
 } from "../PluginUpdateService";
+import fixture from "../../../testing/fixtures/retry-after.json";
 
 const HOUR_MS = 60 * 60_000;
 
@@ -277,14 +277,33 @@ describe("PluginUpdateService", () => {
     request.mockRestore();
   });
 
-  it("parses only bounded cache and retry hints", () => {
+  it.each(fixture.cases)("schedules $name from the real release transport at the existing 24-hour ceiling", async ({ header, milliseconds }) => {
+    jest.setSystemTime(fixture.now);
+    setHidden(false);
+    setOnline(true);
+    const request = jest.spyOn(PlatformRequestClient.prototype, "request").mockImplementation(async () =>
+      new Response("busy", { status: 503, headers: header === null ? {} : { "Retry-After": header } }),
+    );
+    const service = new PluginUpdateService(createPlugin(), { notify: jest.fn() });
+    try {
+      service.start();
+      await settle();
+      const wait = Math.max(15 * 60_000, Math.min(24 * HOUR_MS, milliseconds ?? 0));
+      await jest.advanceTimersByTimeAsync(wait - 1);
+      expect(request).toHaveBeenCalledTimes(1);
+      await jest.advanceTimersByTimeAsync(1);
+      expect(request).toHaveBeenCalledTimes(2);
+    } finally {
+      service.stop();
+      request.mockRestore();
+    }
+  });
+
+  it("parses cache hints", () => {
     expect(cacheControlMaxAgeMs("public, max-age=60")).toBe(60_000);
     expect(cacheControlMaxAgeMs("no-store, max-age=600")).toBeUndefined();
     expect(cacheControlMaxAgeMs("private")).toBeUndefined();
     expect(cacheControlMaxAgeMs(null)).toBeUndefined();
-    expect(retryAfterMs("120", 0)).toBe(120_000);
-    expect(retryAfterMs(new Date(90_000).toUTCString(), 30_000)).toBe(60_000);
-    expect(retryAfterMs("soon", 0)).toBeUndefined();
   });
 
   it("keeps failures quiet in the background and gives manual feedback", async () => {

@@ -215,7 +215,6 @@ describe("PlatformRequestClient", () => {
       method: "POST",
       body: { ok: true },
       stream: true,
-      preserveResponseHeaders: true,
       allowTransportFallback: false,
       licenseKey: "license",
       streamingProbeUrl: "https://systemsculpt.com/api/plugin/connectivity",
@@ -270,7 +269,6 @@ describe("PlatformRequestClient", () => {
       method: "POST",
       body: { ok: true },
       stream: true,
-      preserveResponseHeaders: true,
       allowTransportFallback: false,
       streamingProbeUrl: "https://systemsculpt.com/api/plugin/connectivity",
     });
@@ -302,7 +300,6 @@ describe("PlatformRequestClient", () => {
       body: { ok: true },
       stream: true,
       licenseKey: "license",
-      preserveResponseHeaders: true,
       allowTransportFallback: false,
       streamingProbeUrl: "https://systemsculpt.com/api/plugin/connectivity",
     });
@@ -363,7 +360,6 @@ describe("PlatformRequestClient", () => {
       body,
       bodyEncoding: "raw",
       transport: "requestUrl",
-      preserveResponseHeaders: true,
     });
 
     expect(fetchMock).not.toHaveBeenCalled();
@@ -436,7 +432,6 @@ describe("PlatformRequestClient", () => {
       licenseKey: "license",
       transport: "requestUrl",
       responseEncoding: "arrayBuffer",
-      preserveResponseHeaders: true,
     });
 
     expect(fetchMock).not.toHaveBeenCalled();
@@ -749,7 +744,6 @@ describe("PlatformRequestClient", () => {
         method: "POST",
         body: {},
         stream: true,
-        preserveResponseHeaders: true,
         signal: controller.signal,
         timeoutMs: 5_000,
       });
@@ -781,7 +775,6 @@ describe("PlatformRequestClient", () => {
         method: "POST",
         body: { ok: true },
         stream: true,
-        preserveResponseHeaders: true,
         allowTransportFallback: false,
         signal: controller.signal,
       });
@@ -790,7 +783,6 @@ describe("PlatformRequestClient", () => {
         method: "POST",
         body: { ok: true },
         stream: true,
-        preserveResponseHeaders: true,
         transport: "requestUrl",
       });
       direct.catch(() => undefined);

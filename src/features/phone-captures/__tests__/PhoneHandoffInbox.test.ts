@@ -3,6 +3,7 @@ import YAML from "yaml";
 import { PhoneHandoffInbox, decodePhoneHandoff, type HandoffExecution, type PhoneHandoff } from "../PhoneHandoffInbox";
 import { PHONE_CAPTURE_MIN_SYNC_GAP_MS } from "../PhoneCaptureInbox";
 import type { PlatformRequestClient, PlatformRequestInput } from "../../../services/PlatformRequestClient";
+import retryFixture from "../../../../testing/fixtures/retry-after.json";
 
 jest.mock("obsidian", () => ({
   ...jest.requireActual("obsidian"),
@@ -21,7 +22,7 @@ function deferred<T>() {
   const promise = new Promise<T>(done => { resolve = done; });
   return { resolve, promise };
 }
-function setup() {
+function setup(now?: () => number) {
   let settings = { licenseKey: "test-license", linked: true, autoRun: false, vaultId: VAULT };
   let handoff = { ...HANDOFF };
   const files = new Map<string, string>();
@@ -85,7 +86,7 @@ function setup() {
   }) } as unknown as PlatformRequestClient;
   const execute = jest.fn(async (_execution: HandoffExecution) => "# Agenda\n\nDiscuss the launch.");
   const makeInbox = () => new PhoneHandoffInbox({ app, pluginVersion: "6.16.0", settings: () => settings, instanceId: INSTANCE,
-    availableAgents: async () => ["systemsculpt", "claude_code"], execute, requestClient, baseUrl: "https://example.test/api/plugin" });
+    availableAgents: async () => ["systemsculpt", "claude_code"], execute, requestClient, now, baseUrl: "https://example.test/api/plugin" });
   return { inbox: makeInbox(), makeInbox, execute, files, vault, requests, response,
     move: (from: string, to: string) => {
       const file = fileAt(from)!;
@@ -106,6 +107,36 @@ function setup() {
 
 describe("PhoneHandoffInbox", () => {
   afterEach(() => { jest.useRealTimers(); });
+
+  it.each(retryFixture.cases)("honors $name before polling again for JSON and gateway errors", async ({ header, milliseconds }) => {
+    for (const body of ["{}", "<html>Gateway unavailable</html>"]) {
+      let now = retryFixture.now;
+      const t = setup(() => now);
+      t.override(() => new Response(body, { status: 503, headers: header === null ? {} : { "Retry-After": header } }));
+      await expect(t.inbox.poll()).rejects.toThrow();
+      expect(t.requests).toHaveLength(1);
+      if (milliseconds !== null && milliseconds > 0) {
+        now += milliseconds - 1;
+        await t.inbox.poll();
+        expect(t.requests).toHaveLength(1);
+        now += 1;
+      }
+      await expect(t.inbox.poll()).rejects.toThrow();
+      expect(t.requests).toHaveLength(2);
+      t.inbox.dispose();
+    }
+  });
+
+  it("does not discard an overflowing delta or add a handoff wait ceiling", async () => {
+    let now = retryFixture.now;
+    const t = setup(() => now);
+    t.override(() => new Response("{}", { status: 503, headers: { "Retry-After": "9".repeat(400) } }));
+    await expect(t.inbox.poll()).rejects.toThrow();
+    now += 48 * 60 * 60_000;
+    await t.inbox.poll();
+    expect(t.requests).toHaveLength(1);
+    t.inbox.dispose();
+  });
 
   it("stays dormant until this account has used iOS", async () => {
     const t = setup();

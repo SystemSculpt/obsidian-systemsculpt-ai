@@ -91,7 +91,7 @@ function transport(
       rateLimitLimit: null,
       rateLimitRemaining: null,
       rateLimitReset: null,
-      retryAfter: null,
+      retryAfterMs: undefined,
       errorText: "",
     },
   };

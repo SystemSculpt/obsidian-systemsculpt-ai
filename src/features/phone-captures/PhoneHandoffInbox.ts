@@ -3,6 +3,7 @@ import { PlatformRequestClient } from "../../services/PlatformRequestClient";
 import { SystemSculptEnvironment } from "../../services/api/SystemSculptEnvironment";
 import { ensureVaultFolder } from "../../tools/vault/utils";
 import { sha256HexFromBytesPortable } from "../../utils/sha256";
+import { parseRetryAfterMs } from "../../utils/retryAfter";
 import { PHONE_CAPTURE_MIN_SYNC_GAP_MS, PHONE_CAPTURE_POLL_INTERVAL_MS } from "./PhoneCaptureInbox";
 
 export type HandoffAgent = "systemsculpt" | "claude_code" | "codex";
@@ -410,14 +411,14 @@ export class PhoneHandoffInbox {
     this.requireCurrent(key);
     const text = await response.text();
     this.requireCurrent(key);
+    if (!response.ok) {
+      const now = this.now();
+      const retryMs = parseRetryAfterMs(response.headers.get("Retry-After"), { now });
+      if (retryMs !== undefined) this.retryAt = now + retryMs;
+    }
     let payload: unknown;
     try { payload = JSON.parse(text); } catch { throw new HandoffApiError(response.status, "invalid_response"); }
     if (!response.ok) {
-      const retry = response.headers.get("Retry-After");
-      if (retry) {
-        const delay = Number(retry);
-        this.retryAt = Number.isFinite(delay) ? this.now() + delay * 1000 : Date.parse(retry) || 0;
-      }
       const detail = record(payload) && record(payload.error) ? payload.error : payload;
       throw new HandoffApiError(response.status, record(detail) && typeof detail.code === "string" ? detail.code : "request_failed");
     }

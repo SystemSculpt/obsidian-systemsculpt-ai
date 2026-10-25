@@ -1,5 +1,4 @@
 import { requestUrl } from "obsidian";
-import { postJsonStreaming } from "../utils/streaming";
 import { toError } from "../utils/errors";
 
 export type PlatformTransport = "fetch" | "requestUrl";
@@ -20,7 +19,6 @@ export type PlatformRequestInput = {
   signal?: AbortSignal;
   cache?: RequestCache;
   licenseKey?: string;
-  preserveResponseHeaders?: boolean;
   allowTransportFallback?: boolean;
   transport?: PlatformTransport;
   bodyEncoding?: "json" | "raw";
@@ -258,24 +256,6 @@ export class PlatformRequestClient {
     const deadline: Deadline | null = timeoutMs === null
       ? null
       : { at: Date.now() + timeoutMs, timeoutMs };
-
-    if (input.stream && !input.preserveResponseHeaders) {
-      this.observeTransport(input, transport);
-      const send = (signal?: AbortSignal) => postJsonStreaming(
-        input.url,
-        headers,
-        input.body,
-        transport !== "fetch",
-        signal,
-      );
-      const response = deadline === null
-        ? await send(input.signal)
-        : await this.fetchWithin(input.signal, deadline, true, send);
-      return markResponseDeliveryMode(
-        response,
-        transport === "fetch" ? "fetch_stream" : "request_url_buffered",
-      );
-    }
 
     if (transport === "fetch" && typeof window.fetch === "function") {
       let responded = false;
