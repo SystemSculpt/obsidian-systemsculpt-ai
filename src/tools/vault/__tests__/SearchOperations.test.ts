@@ -97,6 +97,7 @@ describe("SearchOperations", () => {
         chatHistoryFolder: "ChatHistory",
         customPromptsFolder: "Prompts",
       },
+      registerEvent: jest.fn(),
       app: {
         vault: {
           configDir: ".obsidian",
@@ -825,21 +826,242 @@ Body content here`;
       expect(result).toBeDefined();
     });
 
-    it("sorts files by size (smallest first)", async () => {
-      const files = [
-        new TFile({ path: "large.md" }),
-        new TFile({ path: "small.md" }),
-        new TFile({ path: "medium.md" }),
-      ];
-      (files[0].stat as any) = { ctime: Date.now(), mtime: Date.now(), size: 10000 };
-      (files[1].stat as any) = { ctime: Date.now(), mtime: Date.now(), size: 100 };
-      (files[2].stat as any) = { ctime: Date.now(), mtime: Date.now(), size: 1000 };
-      (app.vault.getFiles as jest.Mock).mockReturnValue(files);
-      (app.vault.cachedRead as jest.Mock).mockResolvedValue("test content");
+    describe("candidate order", () => {
+      const DAY = 86400000;
+      const note = (path: string, size: number, mtime: number) => {
+        const file = new TFile({ path });
+        (file.stat as any) = { ctime: mtime, mtime, size };
+        return file;
+      };
+      // Sixty small notes that all mention the term: enough to fill the
+      // 25-file result budget many times over before a larger note is read.
+      const smallNotes = (mtime: number) => Array.from({ length: 60 }, (_, index) =>
+        note(`Daily/2026-${String(index).padStart(3, "0")}.md`, 120, mtime));
+      const readPaths = () => (app.vault.cachedRead as jest.Mock).mock.calls.map(([file]) => file.path);
 
-      const result = await searchOps.grepVault({ patterns: ["test"] });
+      it("reads a large, recently edited matching note ahead of many small ones", async () => {
+        const large = note("Projects/Roadmap.md", 150000, Date.now());
+        (app.vault.getFiles as jest.Mock).mockReturnValue([...smallNotes(Date.now() - 30 * DAY), large]);
+        (app.vault.cachedRead as jest.Mock).mockImplementation(async (file: TFile) =>
+          file.path === large.path ? `${"plan ".repeat(29000)}launch checklist` : "launch notes");
 
-      expect(result).toBeDefined();
+        const result = await searchOps.grepVault({ patterns: ["launch"] });
+
+        expect(readPaths()[0]).toBe(large.path);
+        expect(result.results.map((entry: any) => entry.path)).toContain(large.path);
+        expect(result.metaInfo).toEqual(expect.arrayContaining([
+          expect.objectContaining({ file: "_summary" }),
+        ]));
+      });
+
+      it("reads a note whose title matches before newer notes that only mention the term", async () => {
+        const titled = note("Archive/Launch.md", 150000, Date.now() - 365 * DAY);
+        (app.vault.getFiles as jest.Mock).mockReturnValue([...smallNotes(Date.now()), titled]);
+        (app.vault.cachedRead as jest.Mock).mockResolvedValue("launch notes");
+
+        const result = await searchOps.grepVault({ patterns: ["launch"] });
+
+        expect(readPaths()[0]).toBe(titled.path);
+        expect(result.results.map((entry: any) => entry.path)).toContain(titled.path);
+      });
+
+      it("ranks a title hit, then a folder hit, then recency, then path", async () => {
+        const now = Date.now();
+        const files = [
+          note("b-old.md", 10, now - 2 * DAY),
+          note("a-old.md", 10, now - 2 * DAY),
+          note("Launch plans/inside.md", 10, now - 5 * DAY),
+          note("newest.md", 10, now),
+          note("Archive/launch.md", 10, now - 9 * DAY),
+        ];
+        (app.vault.getFiles as jest.Mock).mockReturnValue(files);
+        (app.vault.cachedRead as jest.Mock).mockResolvedValue("launch");
+
+        await searchOps.grepVault({ patterns: ["launch"] });
+
+        expect(readPaths()).toEqual([
+          "Archive/launch.md",
+          "Launch plans/inside.md",
+          "newest.md",
+          "a-old.md",
+          "b-old.md",
+        ]);
+      });
+
+      it("returns one result per file when both its path and its text match", async () => {
+        (app.vault.getFiles as jest.Mock).mockReturnValue([note("Launch.md", 10, Date.now())]);
+        (app.vault.cachedRead as jest.Mock).mockResolvedValue("launch day");
+
+        const result = await searchOps.grepVault({ patterns: ["launch"] });
+
+        expect(result.results.map((entry: any) => entry.path)).toEqual(["Launch.md"]);
+        expect(result.snippets).toEqual(["Launch.md:1  【launch】 day"]);
+      });
+
+      it("compiles each pattern once, however many files and matches it scans", async () => {
+        const files = Array.from({ length: 40 }, (_, index) => note(`notes/${index}.md`, 500, Date.now()));
+        (app.vault.getFiles as jest.Mock).mockReturnValue(files);
+        (app.vault.cachedRead as jest.Mock).mockResolvedValue(
+          Array.from({ length: 12 }, () => `alpha ${"filler ".repeat(80)} beta`).join("\n"));
+        await searchOps.grepVault({ patterns: ["warm"] });
+        const NativeRegExp = RegExp;
+        let constructed = 0;
+        const CountingRegExp = function (this: unknown, ...args: [string | RegExp, string?]) {
+          constructed++;
+          return new NativeRegExp(...args);
+        } as unknown as RegExpConstructor;
+        CountingRegExp.prototype = NativeRegExp.prototype;
+        (globalThis as any).RegExp = CountingRegExp;
+        try {
+          await searchOps.grepVault({ patterns: ["alpha", "beta"] });
+        } finally {
+          (globalThis as any).RegExp = NativeRegExp;
+        }
+
+        // Two patterns, each with one path matcher and one scanner.
+        expect(constructed).toBe(4);
+      });
+    });
+
+    describe("paging", () => {
+      let vaultHandlers: Record<string, (file: unknown, oldPath?: string) => void>;
+      const pagedVault = () => {
+        const files = Array.from({ length: 12 }, (_, index) => {
+          const file = new TFile({ path: `notes/note-${String(index).padStart(2, "0")}.md` });
+          (file.stat as any) = { ctime: Date.now(), mtime: Date.now() - index * 1000, size: 4000 };
+          return file;
+        });
+        (app.vault.getFiles as jest.Mock).mockReturnValue(files);
+        (app.vault.cachedRead as jest.Mock).mockImplementation(async (file: TFile) =>
+          Array.from({ length: 6 }, (_, line) =>
+            `${file.path} line ${line} needle ${"words ".repeat(90)}`).join("\n"));
+        return files;
+      };
+      const page = (cursor?: string) =>
+        searchOps.grepVault({ patterns: ["needle"], pageTokens: 1024, ...(cursor ? { cursor } : {}) }) as Promise<any>;
+
+      beforeEach(() => {
+        vaultHandlers = {};
+        (app.vault.on as jest.Mock).mockImplementation((name: string, handler: (file: unknown) => void) => {
+          vaultHandlers[name] = handler;
+          return { name };
+        });
+      });
+
+      it("serves later pages from the kept scan without reading a file or repeating a snippet", async () => {
+        pagedVault();
+        const first = await page();
+        expect(first.page.next_cursor).toEqual(expect.any(String));
+        expect(plugin.registerEvent).toHaveBeenCalledTimes(4);
+
+        const seen = [...first.snippets];
+        let cursor: string | null = first.page.next_cursor;
+        let pages = 1;
+        (app.vault.cachedRead as jest.Mock).mockClear();
+        (app.vault.getFiles as jest.Mock).mockClear();
+        while (cursor) {
+          const next = await page(cursor);
+          expect(next.snippets.length).toBeGreaterThan(0);
+          expect(next.metaInfo ?? []).not.toEqual(expect.arrayContaining([
+            expect.objectContaining({ file: "_new_search" }),
+          ]));
+          seen.push(...next.snippets);
+          cursor = next.page.next_cursor;
+          pages++;
+        }
+
+        expect(pages).toBeGreaterThan(2);
+        expect(app.vault.cachedRead).not.toHaveBeenCalled();
+        expect(app.vault.getFiles).not.toHaveBeenCalled();
+        expect(new Set(seen).size).toBe(seen.length);
+        expect(seen).toHaveLength(first.page.total_matches);
+        expect(plugin.registerEvent).toHaveBeenCalledTimes(4);
+      });
+
+      it("searches again when a searchable note changes between pages", async () => {
+        const files = pagedVault();
+        const first = await page();
+        (app.vault.cachedRead as jest.Mock).mockClear();
+
+        vaultHandlers.modify(files[3]);
+        const second = await page(first.page.next_cursor);
+
+        expect(app.vault.cachedRead).toHaveBeenCalledTimes(files.length);
+        expect(second.metaInfo).toEqual(expect.arrayContaining([
+          expect.objectContaining({ file: "_new_search", notice: expect.stringContaining("new search") }),
+        ]));
+        // The next page continues the new scan without another read.
+        (app.vault.cachedRead as jest.Mock).mockClear();
+        const third = await page(second.page.next_cursor);
+        expect(app.vault.cachedRead).not.toHaveBeenCalled();
+        expect(third.metaInfo ?? []).not.toEqual(expect.arrayContaining([
+          expect.objectContaining({ file: "_new_search" }),
+        ]));
+      });
+
+      it("keeps the scan when only an excluded file changes", async () => {
+        plugin.settings.chatsDirectory = "SystemSculpt/Chats";
+        pagedVault();
+        const first = await page();
+        (app.vault.cachedRead as jest.Mock).mockClear();
+
+        vaultHandlers.modify(new TFile({ path: "SystemSculpt/Chats/Running chat.md" }));
+        await page(first.page.next_cursor);
+
+        expect(app.vault.cachedRead).not.toHaveBeenCalled();
+      });
+
+      it("searches again when a note is renamed into the searched vault", async () => {
+        plugin.settings.chatsDirectory = "SystemSculpt/Chats";
+        pagedVault();
+        const first = await page();
+        (app.vault.cachedRead as jest.Mock).mockClear();
+
+        vaultHandlers.rename(new TFile({ path: "notes/moved.md" }), "SystemSculpt/Chats/moved.md");
+        await page(first.page.next_cursor);
+
+        expect(app.vault.cachedRead).toHaveBeenCalled();
+      });
+
+      it("does not keep a scan the vault changed under while it ran", async () => {
+        const files = pagedVault();
+        const read = (app.vault.cachedRead as jest.Mock).getMockImplementation()!;
+        (app.vault.cachedRead as jest.Mock).mockImplementationOnce(async (file: TFile) => {
+          vaultHandlers.modify(files[0]);
+          return read(file);
+        });
+        const first = await page();
+        (app.vault.cachedRead as jest.Mock).mockClear();
+
+        await page(first.page.next_cursor);
+
+        expect(app.vault.cachedRead).toHaveBeenCalledTimes(files.length);
+      });
+
+      it("reuses a kept scan for the same first-page search until the vault changes", async () => {
+        const files = pagedVault();
+        const first = await page();
+        (app.vault.cachedRead as jest.Mock).mockClear();
+
+        expect((await page()).snippets).toEqual(first.snippets);
+        expect(app.vault.cachedRead).not.toHaveBeenCalled();
+
+        vaultHandlers.delete(files[0]);
+        await page();
+        expect(app.vault.cachedRead).toHaveBeenCalledTimes(files.length);
+      });
+
+      it("still accepts a cursor issued before scans were kept", async () => {
+        pagedVault();
+        const legacyCursor = Buffer.from(JSON.stringify({ q: "content|literal|needle", o: 2 })).toString("base64");
+
+        const result = await page(legacyCursor);
+
+        expect(result.snippets.length).toBeGreaterThan(0);
+        expect(result.metaInfo).toEqual(expect.arrayContaining([
+          expect.objectContaining({ file: "_new_search" }),
+        ]));
+      });
     });
 
     it("filters grep results to allowed paths", async () => {
