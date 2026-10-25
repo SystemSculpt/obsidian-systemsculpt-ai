@@ -84,6 +84,7 @@
   font-size: var(--ss-text-sm);
   color: var(--ss-ink-muted);
   line-height: var(--ss-leading-base);
+  text-wrap: pretty;
 }
 
 /* ------------------------------------------------------------------ *

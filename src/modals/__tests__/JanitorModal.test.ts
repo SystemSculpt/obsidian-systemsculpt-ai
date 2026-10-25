@@ -146,7 +146,7 @@ describe("JanitorModal", () => {
     const { modal, confirmation } = await reviewChatCleanup([chat]);
 
     expect(confirmation.textContent).toContain(
-      "1 files from SystemSculpt/Chats will be moved to trash using Obsidian’s trash setting. Review the list before continuing.",
+      "1 file (2.0 KB) will move to Trash, following Obsidian’s trash setting.",
     );
     expect(confirmation.textContent).not.toContain("restore");
     modal.close();
