@@ -12,6 +12,7 @@ import {
   captureStartupIdentity,
   expectProductionStartupIdentity,
 } from "./startup-identity-assertions";
+import { createObsidianLeaf } from "./obsidian-leaf";
 
 const DEFAULT_ARTIFACT_ROOT = path.resolve(__dirname, "..", "..");
 const ARTIFACT_ROOT = process.env.SYSTEMSCULPT_PLUGIN_ARTIFACT_ROOT?.trim()
@@ -43,14 +44,12 @@ async function openView(options: {
   plugin: any;
   type: string;
   state?: Record<string, unknown>;
-  prepare?: (view: any) => void;
 }): Promise<any> {
   const leaf = new options.host.WorkspaceLeaf(options.plugin.app);
   await leaf.setViewState({ type: options.type, state: options.state ?? {} });
   const view = options.creator(leaf);
   leaf.view = view;
   options.plugin.app.workspace.activeLeaf = leaf;
-  options.prepare?.(view);
   await view.onOpen();
   await flushAsyncWork();
   await view.onClose();
@@ -189,17 +188,20 @@ describe("built bundle in Obsidian Mobile", () => {
     expect(document.body.classList.contains("ss-mobile-layout")).toBe(true);
     settingsTab.hide();
 
-    const studioView = await openView({
-      creator: plugin._views.get(STUDIO_VIEW_TYPE),
-      host,
-      plugin,
-      type: STUDIO_VIEW_TYPE,
-      prepare: (view) => {
-        view.contentEl.onWindowMigrated = () => () => {};
-      },
+    // Studio's view code is evaluated only when something first opens Studio:
+    // until then the factory returns a placeholder that opens the real view.
+    const studioLeaf = createObsidianLeaf(host, plugin.app, (type) => plugin._views.get(type), (view: any) => {
+      view.contentEl.onWindowMigrated = () => () => {};
     });
+    expect(plugin._views.get(STUDIO_VIEW_TYPE)(studioLeaf).constructor.name).toBe("PendingStudioView");
+    await studioLeaf.setViewState({ type: STUDIO_VIEW_TYPE, state: {} });
+    await flushAsyncWork();
+    const studioView = studioLeaf.view as any;
+    expect(studioView.constructor.name).toBe("SystemSculptStudioView");
     expect(studioView.getViewType()).toBe(STUDIO_VIEW_TYPE);
+    expect(studioView.contentEl.querySelector(".ss-studio-view")).not.toBeNull();
     expect(studioView.contentEl.textContent).not.toMatch(/Studio is desktop-only/i);
+    await studioLeaf.detach();
 
     const embeddingsView = await openView({
       creator: plugin._views.get(EMBEDDINGS_VIEW_TYPE),
