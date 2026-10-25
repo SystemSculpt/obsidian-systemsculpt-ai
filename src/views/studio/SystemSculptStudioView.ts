@@ -223,6 +223,7 @@ type StudioRunGraphOptions = {
 export class SystemSculptStudioView extends ItemView {
   private busy = false;
   private retryingMigration = false;
+  private renderFrame: { ownerWindow: Window; id: number } | null = null;
   private readonly runObservation = new StudioRunObservationController({
     getProjectPath: () => this.currentProjectPath,
     beginRun: (nodeIds, fromNodeId) => this.runPresentation.beginRun(nodeIds, { fromNodeId }),
@@ -246,7 +247,7 @@ export class SystemSculptStudioView extends ItemView {
   private nodeContextMenuOverlay: StudioNodeContextMenuOverlay | null = null;
   private nodeActionContextMenuOverlay: StudioSimpleContextMenuOverlay | null = null;
   private nodeDragInProgress = false;
-  private readonly mediaModelPicker = new StudioMediaModelPickerController({ plugin: () => this.plugin, requestRender: () => this.render() });
+  private readonly mediaModelPicker = new StudioMediaModelPickerController({ plugin: () => this.plugin, requestRender: () => this.scheduleRender() });
   private readonly outputContainers = new StudioOutputContainerController({
     getProject: () => this.currentProject,
     getNodeElement: (id) => this.leafVisible ? this.graphInteraction.getNodeElement(id) : null,
@@ -323,7 +324,7 @@ export class SystemSculptStudioView extends ItemView {
   ) {
     super(leaf);
     this.vaultNotes = new StudioVaultNotes(this.app.vault, this.runPresentation);
-    this.assetPreviews = new StudioAssetPreviewController(this.app, () => this.render(), async (path) => {
+    this.assetPreviews = new StudioAssetPreviewController(this.app, () => this.scheduleRender(), async (path) => {
       const projectPath = this.currentProjectPath;
       return projectPath ? this.plugin.getStudioService().restoreAssetFile(projectPath, path) : false;
     });
@@ -523,6 +524,7 @@ export class SystemSculptStudioView extends ItemView {
   }
   private async closeStudioView(): Promise<void> {
     this.closed = true;
+    if (this.renderFrame) this.cancelScheduledRender();
     this.detachSurfaceActivity?.();
     this.detachSurfaceActivity = null;
     this.detachLeafVisibility?.();
@@ -652,7 +654,7 @@ export class SystemSculptStudioView extends ItemView {
       async (project) => await this.vaultNotes.refresh(project),
       { captureHistory: false }
     ).then(() => {
-      this.render();
+      this.scheduleRender();
     });
     return { project: currentProject, selectedNodeIds: nextSelection };
   }
@@ -945,7 +947,7 @@ export class SystemSculptStudioView extends ItemView {
     void this.vaultNotes.refresh(project, {
       onlyNodeIds: new Set(createdNodeIds),
     }).then(() => {
-      this.render();
+      this.scheduleRender();
     });
   }
 
@@ -978,7 +980,7 @@ export class SystemSculptStudioView extends ItemView {
         onlyNodeIds: new Set(options.refreshNoteNodeIds),
       }).then(() => {
         if (this.currentProject === project) {
-          this.render();
+          this.scheduleRender();
         }
       });
     }
@@ -1119,7 +1121,8 @@ export class SystemSculptStudioView extends ItemView {
     } else if (event.type === "run.completed") {
       this.removePendingManagedOutputPlaceholders({ runId: event.runId });
     }
-    if (structural) this.render();
+    // A burst of run events (outputs for many nodes, say) renders once.
+    if (structural) this.scheduleRender();
     else this.activity.refresh();
   }
 
@@ -3222,7 +3225,32 @@ export class SystemSculptStudioView extends ItemView {
     }
   }
 
+  /**
+   * Coalesces renders that background work asks for (previews resolving, run
+   * events, catalogs and notes loading) into one frame. A direct render()
+   * supersedes a pending one.
+   */
+  private scheduleRender(): void {
+    if (this.closed || this.renderFrame) return;
+    const ownerWindow = getStudioOwnerWindow(this.contentEl);
+    const frame = { ownerWindow, id: 0 };
+    this.renderFrame = frame;
+    const id = ownerWindow.requestAnimationFrame(() => {
+      if (this.renderFrame !== frame) return;
+      this.renderFrame = null;
+      this.render();
+    });
+    if (this.renderFrame === frame) frame.id = id;
+  }
+
+  private cancelScheduledRender(): void {
+    const frame = this.renderFrame;
+    this.renderFrame = null;
+    if (frame) frame.ownerWindow.cancelAnimationFrame(frame.id);
+  }
+
   private render(): void {
+    if (this.renderFrame) this.cancelScheduledRender();
     if (this.closed || this.leafVisible === false) return;
     const reason = this.currentProjectSession?.getReadOnlyReason();
     const recovery = reason ? { reason, retrying: this.retryingMigration, retry: () => { void this.retryMigration(); } } : undefined;

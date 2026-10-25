@@ -167,6 +167,7 @@ function createEditEndHarness(options: {
     refreshNodeCardPreview: jest.fn(),
     handleNoteNodeConfigMutated: jest.fn(),
     render: jest.fn(),
+    scheduleRender: jest.fn(),
     commitCurrentProjectMutationAsync: jest.fn(() => Promise.resolve(false)),
   };
   for (const id of options.editingNodeIds ?? []) context.textEdits.begin(id);
