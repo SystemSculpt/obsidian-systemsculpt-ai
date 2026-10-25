@@ -1,7 +1,7 @@
 import type { AgentToolPart } from "../../chat/ChatConversation";
 import { splitToolName } from "../../utils/toolPolicy";
 import { parseUnifiedDiff } from "../../utils/diffUtils";
-import { nativeToolPath } from "./ToolCallPreview";
+import { nativeToolPath } from "../../utils/nativeToolPath";
 
 export type TurnChange = Readonly<{ path: string; label: string; meta?: string; deleted?: true }>;
 function record(value: unknown): Record<string, unknown> {

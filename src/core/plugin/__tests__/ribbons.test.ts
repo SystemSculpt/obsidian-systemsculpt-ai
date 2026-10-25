@@ -206,9 +206,7 @@ describe("RibbonManager", () => {
     });
   });
 
-  // #134/#214: ribbon init is deferred (a setTimeout in ViewManager), so the
-  // queued callback can fire after onunload flips the unloading flag. The guard
-  // must keep that late init from re-adding icons to a disabled plugin.
+  // #134/#214: a late lazy caller must not re-add icons after unloading.
   it("does not register ribbons when the plugin is already unloading (#134)", async () => {
     const { app, plugin } = createPlugin();
     plugin.isPluginUnloading = jest.fn(() => true);

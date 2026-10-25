@@ -128,13 +128,14 @@ describe.each(['claude', 'codex'] as const)('a 40-turn %s chat with large tool o
     expect(current.messages).toHaveLength(80);
     return current;
   }
-  function expectReplay(prompt: string, turns: number, message: string) {
+  function expectReplay(prompt: string, turns: number, message: string, portable = false) {
+    const root = portable ? '' : '/vault/';
     expect(prompt.length).toBeLessThanOrEqual(INPUT_LIMIT);
     for (const toolData of ['TOOL-OUTPUT', 'WRITTEN-INPUT', 'file body', 'new text', 'aggregatedOutput', '"native"']) expect(prompt).not.toContain(toolData);
     for (let turn = 1; turn <= turns; turn++) {
       expect(prompt).toContain(`User:\nQuestion ${turn}\n\nAssistant:\nReading note ${turn}.\n\n${agent === 'claude'
-        ? `[Tool: Read /vault/Notes/note-${turn}.md]\n[Tool: Write /vault/Notes/summary-${turn}.md]`
-        : `[Tool: commandExecution cat Notes/note-${turn}.md]\n[Tool: fileChange /vault/Notes/summary-${turn}.md]`}\n\nSummary ${turn} is saved.\n\n`);
+        ? `[Tool: Read ${root}Notes/note-${turn}.md]\n[Tool: Write ${root}Notes/summary-${turn}.md]`
+        : `[Tool: commandExecution cat Notes/note-${turn}.md]\n[Tool: fileChange ${root}Notes/summary-${turn}.md]`}\n\nSummary ${turn} is saved.\n\n`);
     }
     expect(prompt).not.toContain(`Question ${turns + 1}\n`);
     expect(prompt.endsWith(`\n\nCurrent message:\n${message}`)).toBe(true);
@@ -159,7 +160,7 @@ describe.each(['claude', 'codex'] as const)('a 40-turn %s chat with large tool o
       const before = history.findIndex(message => message.message_id === 'user_25');
       expect(JSON.stringify(history.slice(0, before)).length).toBeGreaterThan(INPUT_LIMIT);
       await expect(current.resend(before, 'Question 25, in one paragraph', history)).resolves.toMatchObject({ kind: 'completed' });
-      expectReplay(current.lastCall().prompt, 24, 'Question 25, in one paragraph');
+      expectReplay(current.lastCall().prompt, 24, 'Question 25, in one paragraph', history === reopened);
     }
   });
 });

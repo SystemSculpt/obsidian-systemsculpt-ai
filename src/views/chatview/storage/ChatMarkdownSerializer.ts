@@ -23,12 +23,10 @@ import {
   normalizeFailedTerminalReceipt,
 } from "../FailedTerminalReceipt";
 import type { ToolCall } from "../../../types/toolCalls";
+import { nativeToolPath } from "../../../utils/nativeToolPath";
 
 const FRAMED_PAYLOAD_FORMAT = "base64-json-v1";
-/**
- * Only these literal markers can change how a stored message is parsed, so
- * only they force a message into the opaque framed payload.
- */
+/** Literal markers in message text are escaped, never treated as structure. */
 const RESERVED_MARKERS = [
   "<!-- SYSTEMSCULPT-",
   "<!-- REASONING",
@@ -45,6 +43,7 @@ const REASONING_ESCAPE_ATTRIBUTE = "reasoning-escape";
 const REASONING_ESCAPE_VERSION = "v1";
 const REASONING_CLOSER_RUN = /--(\\*)(!?)>/gu;
 const ESCAPED_REASONING_CLOSER_RUN = /--\\(\\*)(!?)>/gu;
+const MARKER_ESCAPE_ATTRIBUTE = "marker-escape";
 const MAX_RESPONSE_DURATION_MS = 24 * 60 * 60 * 1_000;
 
 type FramedMessagePayload =
@@ -180,8 +179,10 @@ export class ChatMarkdownSerializer {
       const storedMultipart = this.extractStoredMultipart(match[2]);
       if (storedMultipart.state === "invalid") return { success: false, messages: [] };
       const body = storedMultipart.body;
-      const reasoningEscape = this.reasoningEscape(attrs);
-      if (reasoningEscape === "invalid") return { success: false, messages: [] };
+      const reasoningEscape = this.textEscape(attrs, REASONING_ESCAPE_ATTRIBUTE);
+      const markerEscape = this.textEscape(attrs, MARKER_ESCAPE_ATTRIBUTE);
+      if (reasoningEscape === "invalid" || markerEscape === "invalid") return { success: false, messages: [] };
+      const restoreMarkers = (text: string) => markerEscape === "escaped" ? this.unescapeMarkers(text) : text;
 
       const parts: MessagePart[] = [];
       let ts = Date.now();
@@ -189,22 +190,21 @@ export class ChatMarkdownSerializer {
       const extractedBlocks: Array<
         | { type: "reasoning"; data: string; start: number; end: number }
         | { type: "tool_calls"; data: ToolCall[]; start: number; end: number }
+        | { type: "content"; data: MultiPartContent[]; start: number; end: number }
       > = [];
 
       const reasoningRegex = /<!-- REASONING\r?\n([\s\S]*?)\r?\n-->/g;
       let reasoningMatch: RegExpExecArray | null;
       while ((reasoningMatch = reasoningRegex.exec(body)) !== null) {
         const reasoningText = reasoningMatch[1];
-        if (reasoningText) {
-          extractedBlocks.push({
-            type: "reasoning",
-            data: reasoningEscape === "escaped"
-              ? this.unescapeReasoning(reasoningText)
-              : reasoningText,
-            start: reasoningMatch.index,
-            end: reasoningMatch.index + reasoningMatch[0].length,
-          });
-        }
+        extractedBlocks.push({
+          type: "reasoning",
+          data: restoreMarkers(reasoningEscape === "escaped"
+            ? this.unescapeReasoning(reasoningText)
+            : reasoningText),
+          start: reasoningMatch.index,
+          end: reasoningMatch.index + reasoningMatch[0].length,
+        });
       }
 
       const toolCallRegex = /<!-- TOOL-CALLS\r?\n([\s\S]*?)\r?\n-->/g;
@@ -231,6 +231,17 @@ export class ChatMarkdownSerializer {
         }
       }
 
+      const contentPartRegex = /<!-- SYSTEMSCULPT-PART-CONTENT base64="([A-Za-z0-9+/=]+)" -->\r?\n[\s\S]*?\r?\n<!-- SYSTEMSCULPT-PART-CONTENT-END -->/gu;
+      for (const block of body.matchAll(contentPartRegex)) {
+        try {
+          const data = this.decodeBase64Json(block[1]);
+          if (!Array.isArray(data) || !data.length || !data.every((part) => this.isStoredContentPart(part))) {
+            return { success: false, messages: [] };
+          }
+          extractedBlocks.push({ type: "content", data, start: block.index, end: block.index + block[0].length });
+        } catch { return { success: false, messages: [] }; }
+      }
+
       extractedBlocks.sort((a, b) => {
         if (a.start !== b.start) {
           return a.start - b.start;
@@ -238,15 +249,24 @@ export class ChatMarkdownSerializer {
         return a.end - b.end;
       });
 
+      let checkedThrough = 0;
+      for (const block of extractedBlocks) {
+        if (block.start < checkedThrough || RESERVED_MARKERS.some((marker) => body.slice(checkedThrough, block.start).includes(marker))) {
+          return { success: false, messages: [] };
+        }
+        checkedThrough = block.end;
+      }
+      if (RESERVED_MARKERS.some((marker) => body.slice(checkedThrough).includes(marker))) return { success: false, messages: [] };
+
       const pushContentChunk = (
         rawChunk: string,
         options: { trimLeadingBoundary: boolean; trimTrailingBoundary: boolean },
       ) => {
         const normalizedChunk = this.normalizeSequentialContentChunk(rawChunk, options);
-        if (normalizedChunk.trim().length === 0) {
+        if (normalizedChunk.length === 0) {
           return;
         }
-        parts.push({ id: `content-${ts}`, type: "content", data: normalizedChunk, timestamp: ts++ });
+        parts.push({ id: `content-${ts}`, type: "content", data: restoreMarkers(normalizedChunk), timestamp: ts++ });
       };
 
       let cursor = 0;
@@ -260,6 +280,8 @@ export class ChatMarkdownSerializer {
 
         if (block.type === "reasoning") {
           parts.push({ id: `reasoning-${ts}`, type: "reasoning", data: block.data, timestamp: ts++ });
+        } else if (block.type === "content") {
+          parts.push({ id: `content-${ts}`, type: "content", data: block.data, timestamp: ts++ });
         } else {
           for (const toolCall of block.data) {
             const toolId = typeof toolCall.id === "string" ? toolCall.id : String(ts);
@@ -690,29 +712,50 @@ export class ChatMarkdownSerializer {
   private static messageToMarkdown(msg: ChatMessage): string {
     let messageBody = "";
     let escapesReasoning = false;
+    const orderedParts = msg.messageParts?.reduce<MessagePart[]>((parts, part) => {
+      const previous = parts[parts.length - 1];
+      if (previous?.type === "content" && part.type === "content"
+        && typeof previous.data === "string" && typeof part.data === "string") {
+        parts[parts.length - 1] = { ...previous, data: previous.data + part.data };
+      } else parts.push(part);
+      return parts;
+    }, []);
+    const textValues = orderedParts?.length
+      ? orderedParts.filter((part) => part.type !== "tool_call")
+        .map((part) => typeof part.data === "string" ? part.data : this.multipartDisplay(part.data))
+      : [typeof msg.content === "string" ? msg.content : this.multipartDisplay(msg.content ?? [])];
+    const escapesMarkers = textValues.some((value) => value.includes("\r")
+      || RESERVED_MARKERS.some((marker) => value.includes(marker)));
+    const storeText = (text: string) => escapesMarkers ? this.escapeMarkers(text) : text;
 
-    if (msg.messageParts && msg.messageParts.length > 0) {
+    if (orderedParts && orderedParts.length > 0) {
       // New format – iterate through parts in order.
-      msg.messageParts.forEach((part: MessagePart) => {
+      orderedParts.forEach((part: MessagePart) => {
         switch (part.type) {
           case "content":
-            messageBody += part.data as string;
+            if (Array.isArray(part.data)) {
+              // Only attachment data is encoded; the accompanying prose stays Markdown.
+              messageBody += `\n<!-- SYSTEMSCULPT-PART-CONTENT base64="${this.encodeStoredMultipart(part.data)}" -->\n${storeText(this.multipartDisplay(part.data))}\n<!-- SYSTEMSCULPT-PART-CONTENT-END -->\n`;
+            } else messageBody += storeText(part.data);
             break;
           case "reasoning":
             if (typeof part.data === "string") {
               // Preserve reasoning without trimming or normalization. The
               // only change is the reversible comment-closer escape.
-              const escaped = this.escapeReasoning(part.data);
-              if (escaped !== part.data) escapesReasoning = true;
+              const text = storeText(part.data);
+              const escaped = this.escapeReasoning(text);
+              if (escaped !== text) escapesReasoning = true;
               messageBody += `\n<!-- REASONING\n${escaped}\n-->\n`;
             }
             break;
           case "tool_call": {
-            const toolCallArray = [part.data];
+            // Also escape < so quoted message markers stay inert in JSON.
+            const toolCallArray = [this.portableToolCall(part.data)];
             // `>` only occurs inside JSON strings, where \u003e is the same
             // character, so the comment can never be closed early. Compact
             // JSON: readers parse it the same, and it is a third smaller.
-            const toolCallJson = JSON.stringify(toolCallArray).replace(/>/gu, "\\u003e");
+            const toolCallJson = JSON.stringify(toolCallArray)
+              .replace(/</gu, "\\u003c").replace(/>/gu, "\\u003e");
             messageBody += `\n<!-- TOOL-CALLS\n${toolCallJson}\n-->\n`;
             break;
           }
@@ -722,12 +765,12 @@ export class ChatMarkdownSerializer {
       // User messages and simple assistant messages do not need ordered parts.
       let contentString = "";
       if (typeof msg.content === "string") {
-        contentString = msg.content;
+        contentString = storeText(msg.content);
       } else if (Array.isArray(msg.content) && this.canPersistAttachmentRefs(msg)) {
-        contentString = this.multipartTextWithoutAttachments(msg.content, msg.attachmentMetadata ?? []);
+        contentString = storeText(this.multipartTextWithoutAttachments(msg.content, msg.attachmentMetadata ?? []));
       } else if (Array.isArray(msg.content)) {
         contentString = [
-          this.multipartDisplay(msg.content),
+          storeText(this.multipartDisplay(msg.content)),
           `<!-- SYSTEMSCULPT-CONTENT-PARTS base64\n${this.encodeStoredMultipart(msg.content)}\n-->`,
         ].filter(Boolean).join("\n");
       }
@@ -775,10 +818,8 @@ export class ChatMarkdownSerializer {
       attributes += ` attachment-metadata="${this.encodeBase64Json(msg.attachmentMetadata)}"`;
     }
 
-    if (this.needsFramedPayload(msg)) {
-      attributes += ` payload-format="${FRAMED_PAYLOAD_FORMAT}"`;
-      messageBody = this.encodeBase64Json(this.createFramedMessagePayload(msg));
-    } else if (escapesReasoning) {
+    if (escapesMarkers) attributes += ` ${MARKER_ESCAPE_ATTRIBUTE}="v1"`;
+    if (escapesReasoning) {
       attributes += ` ${REASONING_ESCAPE_ATTRIBUTE}="${REASONING_ESCAPE_VERSION}"`;
     }
 
@@ -787,23 +828,59 @@ export class ChatMarkdownSerializer {
     return `${messageStart}\n${messageBody}\n<!-- SYSTEMSCULPT-MESSAGE-END -->`;
   }
 
-  private static needsFramedPayload(message: ChatMessage): boolean {
-    const persisted = message.messageParts?.length
-      ? message.messageParts.map((part) => part.data)
-      : this.persistedSimpleContent(message);
-    return this.containsReservedFraming(persisted);
+  /** Native roots are live presentation context, not portable transcript data. */
+  private static portableToolCall(tool: ToolCall): ToolCall {
+    if (!tool.native) return tool;
+    const { workingDirectory, vaultRoot = workingDirectory, vaultRootAlias, homeDirectory } = tool.native;
+    const resolve = (path: string) => nativeToolPath(path, workingDirectory, vaultRoot, vaultRootAlias, homeDirectory);
+    const cwd = resolve(workingDirectory);
+    const savedCwd = vaultRoot === "." ? workingDirectory : cwd.vaultPath ?? (cwd.displayPath === "Vault root" ? "." : "..");
+    const native = { ...tool.native, workingDirectory: savedCwd, vaultRoot: "." };
+    delete native.vaultRootAlias;
+    delete native.homeDirectory;
+    delete native.permissionSuggestions;
+
+    // Preserve authored text, commands and results verbatim. Only structured
+    // path arguments are made relative; paths outside the vault never become
+    // vault links. The live tool record and native session stay unchanged.
+    const portablePath = (path: string): string => {
+      const target = resolve(path);
+      const targetPath = target.vaultPath ?? (target.displayPath === "Vault root" ? "." : null);
+      if (targetPath === null) {
+        return target.displayPath.startsWith("~/") ? target.displayPath.replace(/ \(outside vault\)$/u, "") : path;
+      }
+      if (savedCwd === "..") return path;
+      const from = savedCwd.split("/").filter((segment) => segment && segment !== ".");
+      const to = targetPath.split("/").filter((segment) => segment && segment !== ".");
+      let common = 0;
+      while (common < from.length && common < to.length && from[common] === to[common]) common += 1;
+      return [...from.slice(common).map(() => ".."), ...to.slice(common)].join("/") || ".";
+    };
+    const portableInput = (value: unknown, key = ""): unknown => {
+      if (typeof value === "string") return ["file_path", "path", "move_path", "cwd", "workingDirectory"].includes(key) ? portablePath(value) : value;
+      if (Array.isArray(value)) return value.map((item) => portableInput(item, key));
+      if (!value || typeof value !== "object") return value;
+      return Object.fromEntries(Object.entries(value).map(([field, item]) => [field, portableInput(item, field)]));
+    };
+    let request = tool.request;
+    if (request?.function?.arguments) {
+      try {
+        const input: unknown = JSON.parse(request.function.arguments);
+        request = { ...request, function: { ...request.function, arguments: JSON.stringify(portableInput(input)) } };
+      } catch { /* In-flight, incomplete tool arguments remain readable as received. */ }
+    }
+    return { ...tool, native, ...(request ? { request } : {}) };
   }
 
-  private static containsReservedFraming(value: unknown, seen = new Set<object>()): boolean {
-    if (typeof value === "string") {
-      return RESERVED_MARKERS.some((marker) => value.includes(marker));
-    }
-    if (!value || typeof value !== "object") return false;
-    if (seen.has(value)) return false;
-    seen.add(value);
-    return Array.isArray(value)
-      ? value.some((item) => this.containsReservedFraming(item, seen))
-      : Object.values(value).some((item) => this.containsReservedFraming(item, seen));
+  /** Escape & first so literal entities also survive a save/load exactly. */
+  private static escapeMarkers(text: string): string {
+    return text.replace(/&/gu, "&amp;").replace(/\r/gu, "&#13;").replace(/<!-- (?:SYSTEMSCULPT-|REASONING|TOOL-CALLS)/gu,
+      (marker) => `&lt;${marker.slice(1)}`);
+  }
+
+  private static unescapeMarkers(text: string): string {
+    return text.replace(/&lt;(?=!-- (?:SYSTEMSCULPT-|REASONING|TOOL-CALLS))|&amp;|&#13;/gu,
+      (entity) => entity === "&amp;" ? "&" : entity === "&#13;" ? "\r" : "<");
   }
 
   private static escapeReasoning(text: string): string {
@@ -821,33 +898,14 @@ export class ChatMarkdownSerializer {
   }
 
   /** Unknown or repeated escape declarations fail closed. */
-  private static reasoningEscape(attributes: string): "verbatim" | "escaped" | "invalid" {
+  private static textEscape(attributes: string, attribute: string): "verbatim" | "escaped" | "invalid" {
     const declarations = [...attributes.matchAll(
-      new RegExp(`(?:^|\\s)${REASONING_ESCAPE_ATTRIBUTE}="([^"]*)"(?=\\s|$)`, "gu"),
+      new RegExp(`(?:^|\\s)${attribute}="([^"]*)"(?=\\s|$)`, "gu"),
     )];
     if (declarations.length === 0) return "verbatim";
     return declarations.length === 1 && declarations[0][1] === REASONING_ESCAPE_VERSION
       ? "escaped"
       : "invalid";
-  }
-
-  private static createFramedMessagePayload(message: ChatMessage): FramedMessagePayload {
-    if (message.messageParts?.length) {
-      return {
-        version: 1,
-        kind: "parts",
-        parts: message.messageParts.map((part) => ({ type: part.type, data: part.data })),
-      };
-    }
-    return { version: 1, kind: "content", content: this.persistedSimpleContent(message) };
-  }
-
-  private static persistedSimpleContent(message: ChatMessage): string | MultiPartContent[] {
-    if (typeof message.content === "string") return message.content;
-    if (!Array.isArray(message.content)) return "";
-    return this.canPersistAttachmentRefs(message)
-      ? this.multipartTextWithoutAttachments(message.content, message.attachmentMetadata ?? [])
-      : message.content;
   }
 
   private static canPersistAttachmentRefs(message: ChatMessage): boolean {

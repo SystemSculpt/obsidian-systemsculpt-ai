@@ -57,6 +57,14 @@ describe("ViewManager", () => {
     jest.useRealTimers();
   });
 
+  it("registers ribbon actions before Obsidian restores their hidden state and order", () => {
+    const { plugin, manager } = createFixture();
+    const addRibbon = jest.spyOn(plugin, "addRibbonIcon");
+    manager.initialize();
+    expect(addRibbon).toHaveBeenCalledTimes(7);
+    expect(addRibbon.mock.calls.map(([, title]) => title)).toContain("Open janitor");
+  });
+
   it("does not register views more than once when initialize is called repeatedly", () => {
     const { plugin, manager } = createFixture();
     const registerViewSpy = jest.spyOn(plugin, "registerView");
