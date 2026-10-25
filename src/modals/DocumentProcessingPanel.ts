@@ -1,6 +1,7 @@
 import { Notice, TFile } from "obsidian";
 import type SystemSculptPlugin from "../main";
 import { OperationProgressPanel } from "../core/ui/progress/OperationProgressPanel";
+import { registerRunTeardown } from "../core/plugin/lifecycle/RunTeardown";
 import {
   DocumentProcessingProgressEvent,
   DocumentProcessingStage,
@@ -111,6 +112,7 @@ class DocumentProcessingPanel implements DocumentProcessingPanelHandle {
   private readonly plugin: SystemSculptPlugin;
   private readonly onCancel?: () => void;
   private readonly panel: OperationProgressPanel;
+  private readonly releaseUnload: () => void;
   private destroyed = false;
 
   constructor(options: DocumentProcessingPanelOptions) {
@@ -129,7 +131,13 @@ class DocumentProcessingPanel implements DocumentProcessingPanelHandle {
       metaIcon: "file",
       dismissLabel: "Hide conversion progress",
       steps: TIMELINE_ORDER.map((step) => ({ id: step, label: STEP_LABEL[step] })),
+      // Hide, Close, the header's dismiss and the success auto-close all end here.
+      onClose: () => {
+        this.destroyed = true;
+        this.releaseUnload();
+      },
     });
+    this.releaseUnload = registerRunTeardown(this.plugin, () => this.close());
 
     this.panel.setActions([
       {
@@ -269,18 +277,12 @@ class DocumentProcessingPanel implements DocumentProcessingPanelHandle {
       return;
     }
 
-    this.destroyed = true;
     this.panel.close();
   }
-
-
 }
 
-export const launchDocumentProcessingPanel: DocumentProcessingPanelLauncher = (options) => {
-  const panel = new DocumentProcessingPanel(options);
-  options.plugin.register(() => panel.close());
-  return panel;
-};
+export const launchDocumentProcessingPanel: DocumentProcessingPanelLauncher = (options) =>
+  new DocumentProcessingPanel(options);
 
 function clampPercentage(value: number): number {
   if (!Number.isFinite(value)) {

@@ -3,6 +3,7 @@ import type SystemSculptPlugin from "../../main";
 import { isCreditsRequiredError, isPlanAccessError, PLAN_REQUIRED_MESSAGE } from "../../utils/errors";
 import { UpgradePlanModal } from "../../modals/UpgradePlanModal";
 import { OperationProgressPanel } from "../../core/ui/progress/OperationProgressPanel";
+import { registerRunTeardown } from "../../core/plugin/lifecycle/RunTeardown";
 import type {
   AudioProcessorArtifactKind,
   AudioProcessorAvailableTranscript,
@@ -25,6 +26,7 @@ export class AudioProcessorPanel {
   private serverOwned = false;
   private availableTranscript: AudioProcessorAvailableTranscript | null = null;
   private lastProgressEvent: AudioProcessorProgressEvent | null = null;
+  private readonly releaseUnload: () => void;
 
   constructor(
     private readonly plugin: SystemSculptPlugin,
@@ -34,7 +36,7 @@ export class AudioProcessorPanel {
   ) {
     this.panel = this.createPanel();
     this.renderRunningActions("Cancel");
-    plugin.register(() => this.close());
+    this.releaseUnload = registerRunTeardown(plugin, () => this.close());
   }
 
   private createPanel(): OperationProgressPanel {
@@ -49,6 +51,7 @@ export class AudioProcessorPanel {
         this.hidden = true;
         this.panel = null;
         this.notifyHiddenProgress();
+        if (this.finished) this.close();
       },
       steps: [
         { id: "source", label: "Source" },
@@ -117,6 +120,7 @@ export class AudioProcessorPanel {
           : `Transcript recovered to ${note.transcriptPath}; primary note unavailable.`,
         6000,
       );
+      this.close();
       return;
     }
     this.renderCompleted(note);
@@ -198,6 +202,12 @@ export class AudioProcessorPanel {
 
   fail(error: unknown): void {
     this.finished = true;
+    this.renderFailure(error);
+    // A failure reported elsewhere (a notice, the plan modal) leaves nothing to close at unload.
+    if (!this.panel) this.close();
+  }
+
+  private renderFailure(error: unknown): void {
     const message = error instanceof Error ? error.message : String(error ?? "Audio processing failed.");
     const cancelled = error instanceof DOMException && error.name === "AbortError";
     if (!cancelled && isPlanAccessError(error)) {
@@ -293,6 +303,7 @@ export class AudioProcessorPanel {
     this.panel?.close();
     this.panel = null;
     this.hidden = true;
+    this.releaseUnload();
   }
 
   private hide(): void {
