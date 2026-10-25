@@ -62,8 +62,10 @@ export class StudioAgentRuns {
   /** Projects whose older loaded runs were evicted to keep the cache bounded. */
   private readonly capped = new Set<string>();
   private readonly timers = new Map<string, { timer: number; due: number }>();
-  /** When each fresh run executing elsewhere would turn stale; its record is read again then. */
+  /** When to read each run executing elsewhere again: as it would turn stale, then every STALE_AGENT_RUN_MS. */
   private readonly staleChecks = new Map<string, number>();
+  /** Runs this device marked stopped; they stay watched, so a later save from their machine shows them again. */
+  private readonly markedStopped = new Set<string>();
   private staleTimer: { timer: number; due: number } | null = null;
   private readonly delivering = new Set<string>();
   private readonly notificationTimers = new Map<string, number>();
@@ -90,10 +92,17 @@ export class StudioAgentRuns {
   get(id: string): StudioAgentRunView | undefined { return this.records.get(id); }
   canControl(id: string): boolean { const run = this.records.get(id); return !!run && hasHostCapability('local-cli') && this.isOwn(run); }
   hasRequest(id: string): boolean { return !!this.controls.get(id)?.reviews.length; }
-  /** An active run this machine isn't executing whose saved record hasn't changed for STALE_AGENT_RUN_MS. */
+  /**
+   * An active run this machine isn't executing whose saved record hasn't
+   * changed for STALE_AGENT_RUN_MS, or an open workflow between turns whose
+   * active assignments are all stale.
+   */
   isStale(id: string, now = Date.now()): boolean {
     const run = this.records.get(id);
-    return !!run && isActiveAgentRun(run.status) && !this.controls.has(id) && now - Date.parse(run.updatedAt) >= STALE_AGENT_RUN_MS;
+    if (!run || this.controls.has(id)) return false;
+    if (isActiveAgentRun(run.status)) return now - Date.parse(run.updatedAt) >= STALE_AGENT_RUN_MS;
+    const active = workflowOpen(run.workflow) ? this.children(run).filter(child => isActiveAgentRun(child.status)) : [];
+    return active.length > 0 && active.every(child => this.isStale(child.id, now));
   }
   /** Runs, or open workflows, that stay active on record although this machine can't stop them. */
   canMarkStopped(id: string): boolean {
@@ -102,16 +111,23 @@ export class StudioAgentRuns {
   }
   /**
    * Settle a run this machine can't stop, such as one another machine left
-   * active when it closed or crashed. Only the saved record changes: if that
-   * machine is still working, its next save shows the run as active again.
+   * active when it closed or crashed. It settles the latest saved copy, so
+   * anything that machine saved since is kept, and reaches no other machine:
+   * if that machine is still working, its next save shows the run again.
    */
-  markStopped(id: string): void {
+  async markStopped(id: string): Promise<void> {
+    const loaded = this.records.get(id);
+    if (!loaded || !this.canMarkStopped(id)) return;
+    const saved = await this.store.read(loaded.projectPath, loaded.projectId, id);
+    if (this.disposed) return;
+    if (saved && saved.updatedAt > loaded.updatedAt && this.records.get(id) === loaded) this.adopt({ records: [saved], before: null, olderRemaining: 0 });
     const record = this.records.get(id);
-    if (!record || !this.canMarkStopped(id)) return;
-    if (record.workflow && workflowOpen(record.workflow)) { record.workflow.status = 'stopped'; for (const child of this.children(record)) this.markStopped(child.id); }
+    if (!record || !this.canMarkStopped(id)) { if (record) this.emit(record.projectId); return; }
+    if (record.workflow && workflowOpen(record.workflow)) { record.workflow.status = 'stopped'; await Promise.all(this.children(record).map(child => this.markStopped(child.id))); }
     if (isActiveAgentRun(record.status)) { record.status = 'stopped'; record.finishedAt = new Date().toISOString(); }
-    record.currentActivity = 'Marked stopped'; this.staleChecks.delete(id);
-    this.changed(record); void this.persist(record).catch(() => {});
+    record.currentActivity = 'Marked stopped'; this.markedStopped.add(id);
+    this.changed(record); this.watchElsewhere(record, Date.now()); this.scheduleStaleCheck();
+    await this.persist(record);
   }
   /** Whether this machine executes a run: its stable ID matches, or, on records saved before machines had one, its current hostname does. */
   private isOwn(run: StudioAgentRun): boolean {
@@ -191,11 +207,20 @@ export class StudioAgentRuns {
       if (own && isActiveAgentRun(run.status)) {
         run.status = 'interrupted'; run.currentActivity = 'Previous Obsidian session ended';
       }
-      this.records.set(run.id, run);
-      const due = Date.parse(run.updatedAt) + STALE_AGENT_RUN_MS;
-      if (isActiveAgentRun(run.status) && due > Date.now()) this.staleChecks.set(run.id, due); else this.staleChecks.delete(run.id);
+      this.records.set(run.id, run); this.watchElsewhere(run);
     }
     this.scheduleStaleCheck();
+  }
+  /**
+   * Read a run executing elsewhere again when it would turn stale, then every
+   * STALE_AGENT_RUN_MS while it stays active, so a run its machine saves again
+   * comes back live. `changedAt` defaults to its last save; a save dated in
+   * the future (a fast clock) counts as now.
+   */
+  private watchElsewhere(run: StudioAgentRun, changedAt = Date.parse(run.updatedAt)): void {
+    if (this.controls.has(run.id) || (!isActiveAgentRun(run.status) && !this.markedStopped.has(run.id))) { this.staleChecks.delete(run.id); return; }
+    const now = Date.now(), from = Number.isFinite(changedAt) ? Math.min(changedAt, now) : now;
+    this.staleChecks.set(run.id, from + STALE_AGENT_RUN_MS > now ? from + STALE_AGENT_RUN_MS : now + STALE_AGENT_RUN_MS);
   }
   private scheduleStaleCheck(): void {
     if (this.disposed || !this.staleChecks.size) return;
@@ -204,7 +229,7 @@ export class StudioAgentRuns {
     if (this.staleTimer) window.clearTimeout(this.staleTimer.timer);
     this.staleTimer = { due, timer: window.setTimeout(() => { this.staleTimer = null; void this.checkStale(); }, Math.max(0, due - Date.now())) };
   }
-  /** Read each run that just turned stale again: a newer save from its machine keeps it live. */
+  /** Read each due run again: a newer save from its machine shows it live; otherwise it is checked again later. */
   private async checkStale(): Promise<void> {
     const now = Date.now(), due = [...this.staleChecks].filter(([, at]) => at <= now).map(([id]) => id), projects = new Set<string>();
     for (const id of due) this.staleChecks.delete(id);
@@ -212,7 +237,9 @@ export class StudioAgentRuns {
       const run = this.records.get(id); if (!run) return;
       projects.add(run.projectId);
       const saved = await this.store.read(run.projectPath, run.projectId, id);
-      if (!this.disposed && saved && saved.updatedAt > run.updatedAt && this.records.get(id) === run) this.adopt({ records: [saved], before: null, olderRemaining: 0 });
+      if (this.disposed || this.records.get(id) !== run) return;
+      if (saved && saved.updatedAt > run.updatedAt) { this.markedStopped.delete(id); this.adopt({ records: [saved], before: null, olderRemaining: 0 }); }
+      else this.watchElsewhere(run, now);
     }));
     if (this.disposed) return;
     for (const projectId of projects) this.emit(projectId);
@@ -604,7 +631,7 @@ export class StudioAgentRuns {
   async dispose(): Promise<void> {
     this.disposed = true;
     for (const { timer } of this.timers.values()) window.clearTimeout(timer); this.timers.clear();
-    if (this.staleTimer) window.clearTimeout(this.staleTimer.timer); this.staleTimer = null; this.staleChecks.clear();
+    if (this.staleTimer) window.clearTimeout(this.staleTimer.timer); this.staleTimer = null; this.staleChecks.clear(); this.markedStopped.clear();
     for (const [id, control] of this.controls) {
       control.controller.abort(); const record = this.records.get(id)!; record.status = 'interrupted'; record.currentActivity = 'Obsidian session ended';
       control.reject(new Error('Obsidian session ended.')); await this.persist(record).catch(() => {});

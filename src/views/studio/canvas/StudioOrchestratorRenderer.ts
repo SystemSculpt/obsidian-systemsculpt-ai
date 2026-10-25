@@ -68,7 +68,7 @@ export function renderStudioOrchestrator(root: HTMLElement, options: {
         const toolbar = card.createDiv({ cls: 'ss-studio-run-actions' });
         createStudioAction(toolbar, { label: 'Open orchestrator', testId: 'studio.workflow.open', onSelect: () => new StudioRunDetailModal(runs, run.id).open() });
         const stop = createStudioAction(toolbar, { label: 'Stop workflow', testId: 'studio.workflow.stop', onSelect: () => { runs.stop(run.id); update(); } });
-        const markStopped = createStudioAction(toolbar, { label: 'Mark stopped', testId: 'studio.workflow.mark-stopped', title: markStoppedHint(run.machine), onSelect: () => { runs.markStopped(run.id); update(); } });
+        const markStopped = createStudioAction(toolbar, { label: 'Mark stopped', testId: 'studio.workflow.mark-stopped', title: markStoppedHint(run.machine), onSelect: () => { void runs.markStopped(run.id).catch(report); } });
         const review = createStudioAction(toolbar, { label: 'Review request', testId: 'studio.workflow.review', onSelect: () => { void runs.review(run.id).catch(report); } });
         const body = card.createDiv({ cls: 'ss-studio-workflow-plan' });
         const followup = card.createEl('textarea', { cls: 'ss-studio-workflow-followup', attr: { 'data-testid': 'studio.workflow.followup', 'aria-label': 'Steer this workflow', placeholder: 'Add context or change direction…', rows: '2', maxlength: '16000' } });

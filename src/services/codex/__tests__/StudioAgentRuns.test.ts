@@ -473,6 +473,37 @@ describe('machine identity', () => {
     expect(runs.isStale(run.id)).toBe(true); expect(updates).toContain('project');
     // Presentation only: the record still says what the laptop last saved.
     expect(runs.get(run.id)?.status).toBe('running'); expect(saved(files, run.id).status).toBe('running');
+
+    // Stale runs are read again every ten minutes, so one the laptop saves again comes back live.
+    jest.advanceTimersByTime(2 * 60_000);
+    files.set(path, elsewhere(1, { updatedAt: new Date().toISOString(), currentActivity: 'Approved' }).content);
+    jest.advanceTimersByTime(6 * 60_000); await tick();
+    expect(runs.isStale(run.id)).toBe(false); expect(runs.get(run.id)?.currentActivity).toBe('Approved');
+    await runs.dispose();
+  });
+
+  it('counts a save dated in the future as now, without a busy timer', async () => {
+    const files = new Map<string, string>(), run = elsewhere(1, { updatedAt: '2100-01-01T00:00:00.000Z' });
+    files.set(`${folder}/${run.id}.json`, run.content);
+    const { runs, adapter } = fixture(files, new Map()); await runs.load('project.systemsculpt', 'project');
+    adapter.read.mockClear(); const timers = jest.spyOn(window, 'setTimeout');
+    jest.advanceTimersByTime(60_000); await tick();
+    expect(adapter.read).not.toHaveBeenCalled(); expect(timers).not.toHaveBeenCalled(); timers.mockRestore();
+    jest.advanceTimersByTime(STALE_AGENT_RUN_MS); await tick();
+    expect(adapter.read).toHaveBeenCalledTimes(1);
+    await runs.dispose();
+  });
+
+  it('shows an open workflow between turns as stale once all its active assignments are', async () => {
+    const files = new Map<string, string>();
+    const root = elsewhere(1, { nodeId: 'center', status: 'completed', workflow: { ...createStudioWorkflow('Elsewhere'), status: 'waiting' } }), rootId = JSON.parse(root.content).id;
+    const quiet = elsewhere(2, { workflowId: rootId, parentRunId: rootId, assignmentId: 'quiet' });
+    const busy = elsewhere(3, { workflowId: rootId, parentRunId: rootId, assignmentId: 'busy', updatedAt: minutesAgo(1) });
+    for (const record of [root, quiet, busy]) files.set(`${folder}/${record.id}.json`, record.content);
+    const { runs } = fixture(files, new Map()); await runs.load('project.systemsculpt', 'project');
+    expect(runs.isStale(quiet.id)).toBe(true); expect(runs.isStale(busy.id)).toBe(false); expect(runs.isStale(rootId)).toBe(false);
+    jest.advanceTimersByTime(STALE_AGENT_RUN_MS); await tick();
+    expect(runs.isStale(busy.id)).toBe(true); expect(runs.isStale(rootId)).toBe(true);
     await runs.dispose();
   });
 
@@ -485,7 +516,7 @@ describe('machine identity', () => {
     const { runs } = fixture(files, new Map()); await runs.load('project.systemsculpt', 'project');
     const own = await runs.start(spec()); await tick();
 
-    expect(runs.canMarkStopped(own.id)).toBe(false); runs.markStopped(own.id); expect(own.status).toBe('running');
+    expect(runs.canMarkStopped(own.id)).toBe(false); await runs.markStopped(own.id); expect(own.status).toBe('running');
     // Agents see the same state through studio_runs.
     const listed = JSON.parse((await call(0, 'studio_runs')).contentItems[0].text).runs;
     expect(listed.find((run: { id: string }) => run.id === stale.id)).toMatchObject({ status: 'running', controllable: false, stale: true });
@@ -493,17 +524,39 @@ describe('machine identity', () => {
     // Stop still refuses another machine's run; Mark stopped is the way to clear it.
     runs.stop(stale.id); expect(runs.get(stale.id)?.status).toBe('running');
     expect(runs.canMarkStopped(stale.id)).toBe(true);
-    runs.markStopped(stale.id); await tick();
+    await runs.markStopped(stale.id);
     expect(runs.get(stale.id)).toMatchObject({ status: 'stopped', currentActivity: 'Marked stopped' });
     expect(runs.isStale(stale.id)).toBe(false); expect(runs.canMarkStopped(stale.id)).toBe(false);
     expect(saved(files, stale.id)).toMatchObject({ status: 'stopped', machine: 'laptop.local', machineId: 'a1b2c3d4e5f6' });
 
     // An open workflow settles with its active assignments.
     expect(runs.canMarkStopped(rootId)).toBe(true);
-    runs.markStopped(rootId); await tick();
+    await runs.markStopped(rootId);
     expect(runs.get(rootId)?.workflow?.status).toBe('stopped'); expect(runs.get(child.id)?.status).toBe('stopped');
     expect(saved(files, rootId).workflow.status).toBe('stopped'); expect(saved(files, child.id).status).toBe('stopped');
     expect(turn).toHaveBeenCalledTimes(1);
+
+    // If the laptop saves the marked run again, it shows here again within ten minutes.
+    files.set(`${folder}/${stale.id}.json`, elsewhere(1, { updatedAt: new Date(Date.now() + 1).toISOString(), currentActivity: 'Still working' }).content);
+    jest.advanceTimersByTime(STALE_AGENT_RUN_MS); await tick();
+    expect(runs.get(stale.id)).toMatchObject({ status: 'running', currentActivity: 'Still working' });
+    await runs.dispose();
+  });
+
+  it('settles the latest saved copy, keeping what the other machine saved since', async () => {
+    const files = new Map<string, string>(), finished = elsewhere(1, { status: 'waiting', currentActivity: 'Waiting for native approval' }), working = elsewhere(2);
+    for (const record of [finished, working]) files.set(`${folder}/${record.id}.json`, record.content);
+    const { runs } = fixture(files, new Map()); await runs.load('project.systemsculpt', 'project');
+    // After this device last read them, the laptop finished one run and added a result to the other.
+    const later = new Date().toISOString();
+    files.set(`${folder}/${finished.id}.json`, elsewhere(1, { status: 'completed', result: 'FINAL ANSWER', currentActivity: 'Completed', updatedAt: later }).content);
+    files.set(`${folder}/${working.id}.json`, elsewhere(2, { result: 'Partial answer', updatedAt: later }).content);
+
+    await runs.markStopped(finished.id);
+    expect(runs.get(finished.id)).toMatchObject({ status: 'completed', result: 'FINAL ANSWER' });
+    expect(saved(files, finished.id)).toMatchObject({ status: 'completed', result: 'FINAL ANSWER', updatedAt: later });
+    await runs.markStopped(working.id);
+    expect(saved(files, working.id)).toMatchObject({ status: 'stopped', result: 'Partial answer', currentActivity: 'Marked stopped' });
     await runs.dispose();
   });
 

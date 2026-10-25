@@ -45,7 +45,7 @@ it('falls back to exact text if the host Markdown renderer fails', async () => {
 it('says a stale run went quiet on its machine and offers Mark stopped instead of Stop', () => {
   jest.spyOn(MarkdownRenderer, 'render').mockResolvedValue(); const f = fixture();
   Object.assign(f.run, { status: 'running', machine: 'laptop.local', updatedAt: '2026-09-09T10:00:00.000Z' });
-  Object.assign(f.runs, { canControl: () => false, isStale: () => true, canMarkStopped: () => true, markStopped: jest.fn() });
+  Object.assign(f.runs, { canControl: () => false, isStale: () => true, canMarkStopped: () => true, markStopped: jest.fn(async () => {}) });
   f.listener();
   expect(f.modal.modalEl.querySelector('.ss-studio-run-status')?.textContent).toBe(`Stale · No update from laptop.local since ${new Date('2026-09-09T10:00:00.000Z').toLocaleString()}`);
   expect(f.modal.modalEl.querySelector('[data-testid="studio.run.stop"]')).toBeNull();

@@ -64,7 +64,7 @@ it("offers Mark stopped, not Stop, for another machine's workflow and shows it s
   await Promise.resolve();
   const stop = root.querySelector<HTMLButtonElement>('[data-testid="studio.workflow.stop"]')!, mark = root.querySelector<HTMLButtonElement>('[data-testid="studio.workflow.mark-stopped"]')!;
   expect(stop.hidden).toBe(false); expect(mark.hidden).toBe(true);
-  Object.assign(runs, { canControl: () => false, isStale: () => true, canMarkStopped: () => true, markStopped: jest.fn() }); update();
+  Object.assign(runs, { canControl: () => false, isStale: () => true, canMarkStopped: () => true, markStopped: jest.fn(async () => {}) }); update();
   expect(stop.hidden).toBe(true); expect(mark.hidden).toBe(false);
   const card = root.querySelector<HTMLElement>('.ss-studio-workflow-card')!;
   expect(card.dataset.activity).toBe('stopped'); expect(card.querySelector('.ss-studio-workflow-status')?.textContent).toBe('Stale');

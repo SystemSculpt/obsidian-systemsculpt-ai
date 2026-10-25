@@ -50,7 +50,7 @@ export class StudioRunDetailModal extends StandardModal {
       actions.empty();
       if (run.parentRunId && this.runs.get(run.parentRunId)) createStudioAction(actions, { label: 'Parent run', testId: 'studio.run.parent', onSelect: () => new StudioRunDetailModal(this.runs, run.parentRunId!).open() });
       if (this.runs.canControl(run.id) && isActiveAgentRun(run.status)) createStudioAction(actions, { label: 'Stop', testId: 'studio.run.stop', onSelect: () => this.runs.stop(run.id) });
-      else if (this.runs.canMarkStopped(run.id)) createStudioAction(actions, { label: 'Mark stopped', testId: 'studio.run.mark-stopped', title: markStoppedHint(run.machine), onSelect: () => this.runs.markStopped(run.id) });
+      else if (this.runs.canMarkStopped(run.id)) createStudioAction(actions, { label: 'Mark stopped', testId: 'studio.run.mark-stopped', title: markStoppedHint(run.machine), onSelect: () => { void this.runs.markStopped(run.id).catch(report); } });
       if (this.runs.hasRequest(run.id)) createStudioAction(actions, { label: 'Review request', testId: 'studio.run.review', onSelect: () => { void this.runs.review(run.id).catch(report); } });
       composer.disabled = !this.runs.canControl(run.id); send.disabled = sending || composer.disabled;
       const nextViewKey = `${selected}:${source}`;
