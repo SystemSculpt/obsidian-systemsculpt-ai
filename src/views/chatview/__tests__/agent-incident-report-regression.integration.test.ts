@@ -1829,7 +1829,7 @@ describe("ChatView incident report regression integration", () => {
       expect(report.tools.reduce((sum, tool) => sum + (tool.requested_item_count ?? 0), 0)).toBe(12);
       expect(report.tools.reduce((sum, tool) => sum + (tool.completed_item_count ?? 0), 0)).toBe(9);
       expect(report.tools.reduce((sum, tool) => sum + (tool.failed_item_count ?? 0), 0)).toBe(3);
-      expect(report.tools).toEqual(report.tools.map((tool) => expect.objectContaining({
+      expect(report.tools).toEqual(report.tools.map(() => expect.objectContaining({
         tool_name: "read",
         outcome: "failed",
         failure_class: "partial_failure",

@@ -37,7 +37,6 @@ function createWorkspace(): Readonly<{
     onCopyArtifactPath: jest.fn(),
     onNewChat: jest.fn(),
     onOpenHistory: jest.fn(),
-    onOpenSettings: jest.fn(),
   });
   workspace.load();
   return { host, workspace };

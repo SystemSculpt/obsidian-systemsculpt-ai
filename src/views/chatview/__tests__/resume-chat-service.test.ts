@@ -107,7 +107,7 @@ describe("ResumeChatService", () => {
     });
 
     it("returns false for non-markdown files", () => {
-      const { app, plugin } = createPluginStub();
+      const { plugin } = createPluginStub();
       const service = new ResumeChatService(plugin);
 
       const txtFile = new TFile({ path: "SystemSculpt/Chats/chat-1.txt" });

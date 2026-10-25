@@ -164,7 +164,7 @@ describe("ChatView text contrast (WCAG AA, default Obsidian themes)", () => {
       expect(border).toBeDefined();
       const [h, s, l] = convert.colorToHsl(accent === "default" ? "#000" : accent);
       const hsl = (dh: number, ks: number, kl: number) => `hsl(${h + dh}, ${Math.min(100, s * ks)}%, ${l * kl}%)`;
-      const picked = accent === "default" ? {} : theme === "light"
+      const picked: Record<string, string> = accent === "default" ? {} : theme === "light"
         ? { "--text-accent": hsl(0, 1, 1), "--interactive-accent": hsl(-1, 1.01, 1.075) }
         : { "--text-accent": hsl(-3, 1.02, 1.15), "--interactive-accent": hsl(0, 1, 1) };
       const rgb = (token: string): Color =>
