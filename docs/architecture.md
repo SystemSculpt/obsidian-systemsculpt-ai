@@ -26,6 +26,7 @@ public operations and behavioral tests before following private helpers.
 | Studio edit history | `src/views/studio/StudioGraphHistory.ts` | Each view's local edit transactions, rebased onto the shared canvas for undo/redo. Restoration preserves unrelated peer edits and the accepted disk baseline. |
 | Vault operations | `src/tools/FirstPartyToolService.ts`, `src/tools/vault/` | Advertised local actions, validated vault paths, execution, and typed results. |
 | Audio Processor | `src/features/audio-processor/AudioProcessorService.ts`, `AudioProcessorDelivery.ts` | Input/job workflow and durable local output delivery respectively. |
+| Choosing audio | `src/components/AudioSourcePicker.ts` | The vault audio list, device dropzone, keyboard navigation and selected-audio preview shared by Transcribe audio and Audio Processor. Each modal keeps only its output options and submit. |
 | Inbox automation | `src/features/inbox-transcription/InboxTranscriptionService.ts` | Vault event admission, batching, user confirmation, and cancellation for automatic transcription. |
 | Search and Similar notes | `src/services/search/`, `src/services/embeddings/` | Vault indexing/search and managed semantic index integration. |
 | Account and settings | `src/core/settings/`, `src/settings/`, `src/services/AccountConnectService.ts` | Settings persistence/migration, settings presentation, and account connection respectively. |

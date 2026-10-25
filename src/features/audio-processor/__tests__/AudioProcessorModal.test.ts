@@ -159,7 +159,7 @@ describe("AudioProcessorModal", () => {
     modal.onOpen();
 
     const options = modal.modalEl.querySelectorAll<HTMLButtonElement>(
-      ".ss-audio-processor__audio-file[role='option']",
+      ".ss-audio-source__file[role='option']",
     );
     expect(options).toHaveLength(50);
     expect(modal.modalEl.textContent).toContain("Showing 50 of 60");
@@ -170,7 +170,7 @@ describe("AudioProcessorModal", () => {
       bubbles: true,
     }));
     const selected = modal.modalEl.querySelector<HTMLButtonElement>(
-      ".ss-audio-processor__audio-file[aria-selected='true']",
+      ".ss-audio-source__file[aria-selected='true']",
     );
     expect(selected).toBeTruthy();
     expect(document.activeElement).toBe(selected);
@@ -181,14 +181,14 @@ describe("AudioProcessorModal", () => {
     )!;
     search.value = "session-7.m4a";
     search.dispatchEvent(new Event("input", { bubbles: true }));
-    expect(modal.modalEl.querySelectorAll(".ss-audio-processor__audio-file")).toHaveLength(1);
+    expect(modal.modalEl.querySelectorAll(".ss-audio-source__file")).toHaveLength(1);
 
     buttonWithText(modal.modalEl, "Device").click();
     const input = modal.modalEl.querySelector<HTMLInputElement>(
-      ".ss-audio-processor__file-input",
+      ".ss-audio-source__file-input",
     )!;
     const label = modal.modalEl.querySelector<HTMLLabelElement>(
-      ".ss-audio-processor__choose-file",
+      ".ss-audio-source__choose-file",
     )!;
     expect(input.type).toBe("file");
     expect(input.accept).toContain(".flac");
@@ -205,12 +205,13 @@ describe("AudioProcessorModal", () => {
     input.dispatchEvent(new Event("change", { bubbles: true }));
 
     expect(modal.modalEl.querySelector(
-      ".ss-audio-processor__selection-name",
+      ".ss-audio-source__selection-name",
     )?.textContent).toBe("device-recording.mp3");
     expect(buttonWithText(modal.modalEl, "Process audio").disabled).toBe(false);
   });
 
-  it("fails closed instead of dereferencing an incomplete audio selection", () => {
+  it("fails closed instead of dereferencing an incomplete audio selection", async () => {
+    const notice = jest.spyOn(console, "log").mockImplementation(() => {});
     const modal = new AudioProcessorModal(createPlugin([
       undefined as unknown as TFile,
       audioFile("Meetings/valid.m4a", 2_000, 1),
@@ -218,13 +219,13 @@ describe("AudioProcessorModal", () => {
     document.body.appendChild(modal.modalEl);
 
     expect(() => modal.onOpen()).not.toThrow();
-    expect(() => (modal as any).selectAudio({
-      kind: "device",
-      file: undefined,
-    })).not.toThrow();
+    await expect((modal as any).picker.selectDeviceFile(undefined)).resolves.toBe(false);
+    expect(notice).toHaveBeenCalledWith(
+      "Notice: Choose an MP3, WAV, M4A, MP4, OGG, WebM, or FLAC audio file.",
+    );
 
     expect(modal.modalEl.textContent).toContain("No audio selected.");
-    expect(modal.modalEl.querySelector(".ss-audio-processor__audio-preview")).toBeNull();
+    expect(modal.modalEl.querySelector(".ss-audio-source__preview")).toBeNull();
     expect(buttonWithText(modal.modalEl, "Process audio").disabled).toBe(true);
   });
 
@@ -238,12 +239,12 @@ describe("AudioProcessorModal", () => {
       document.body.appendChild(modal.modalEl);
       modal.onOpen();
 
-      expect(modal.modalEl.querySelector(".ss-audio-processor__audio-file")).toBeNull();
+      expect(modal.modalEl.querySelector(".ss-audio-source__file")).toBeNull();
       expect(Array.from(modal.modalEl.querySelectorAll("button"))
         .some((button) => button.textContent === "Vault")).toBe(false);
       expect(modal.modalEl.textContent).toContain("Large files upload in small parts");
       expect(modal.modalEl.querySelector<HTMLInputElement>(
-        ".ss-audio-processor__file-input",
+        ".ss-audio-source__file-input",
       )).toBeTruthy();
     } finally {
       (Platform as unknown as { isDesktopApp: boolean }).isDesktopApp = previousDesktopApp;

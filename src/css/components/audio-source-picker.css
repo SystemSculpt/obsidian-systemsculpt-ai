@@ -1,0 +1,262 @@
+/** Shared audio source picker (AudioSourcePicker): vault list, device
+ * dropzone and the selected-audio preview, used by Transcribe and Audio Processor. */
+
+.ss-audio-source {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-3);
+  min-width: 0;
+}
+
+.ss-audio-source__tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--ss-space-1);
+  padding: var(--ss-space-1);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-md);
+  background: var(--ss-surface-sunken);
+}
+
+.ss-audio-source__tab.ss-button {
+  justify-content: center;
+  min-height: var(--ss-touch-target);
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
+.ss-audio-source__tab.ss-button.is-selected {
+  border-color: var(--ss-line);
+  background: var(--ss-surface-0);
+  box-shadow: var(--ss-elevation-1);
+  color: var(--ss-ink);
+}
+
+.ss-audio-source__panel,
+.ss-audio-source__selected {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-2);
+  min-width: 0;
+}
+
+.ss-audio-source__title {
+  margin: 0;
+  color: var(--ss-ink);
+  font-size: var(--ss-text-sm);
+  font-weight: var(--ss-weight-semibold);
+}
+
+.ss-audio-source__list {
+  display: flex;
+  flex-direction: column;
+  max-height: min(34vh, 240px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-md);
+  background: var(--ss-surface-0);
+}
+
+/* Rows are <button>s: the list scope gives them (0,2,0), above Obsidian's
+ * `button:not(.clickable-icon)` (0,1,1), which otherwise paints each row as
+ * a grey control with its own shadow. */
+.ss-audio-source__list .ss-audio-source__file {
+  appearance: none;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--ss-space-3);
+  width: 100%;
+  height: auto;
+  min-height: var(--ss-touch-target);
+  margin: 0;
+  padding: var(--ss-space-2) var(--ss-space-3);
+  border: 0;
+  border-bottom: 1px solid var(--ss-line);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  transition: var(--ss-transition-colors);
+}
+
+.ss-audio-source__list .ss-audio-source__file:last-of-type {
+  border-bottom: 0;
+}
+
+.ss-audio-source__list .ss-audio-source__file:hover {
+  background: var(--ss-state-hover);
+}
+
+.ss-audio-source__list .ss-audio-source__file.is-selected {
+  background: var(--ss-accent-tint);
+  box-shadow: inset 3px 0 0 var(--ss-accent);
+}
+
+/* Inset, because the scrolling list would clip an outer ring. */
+.ss-audio-source__list .ss-audio-source__file:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--ss-accent);
+}
+
+.ss-audio-source__file-copy,
+.ss-audio-source__selection-copy {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-0);
+  min-width: 0;
+}
+
+.ss-audio-source__file-name,
+.ss-audio-source__file-path,
+.ss-audio-source__selection-name,
+.ss-audio-source__selection-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ss-audio-source__file-name,
+.ss-audio-source__selection-name {
+  color: var(--ss-ink);
+  font-size: var(--ss-text-sm);
+  font-weight: var(--ss-weight-medium);
+}
+
+.ss-audio-source__file-path,
+.ss-audio-source__file-size,
+.ss-audio-source__selection-path,
+.ss-audio-source__more {
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
+}
+
+.ss-audio-source__file-size {
+  white-space: nowrap;
+}
+
+.ss-audio-source__more {
+  padding: var(--ss-space-2) var(--ss-space-3);
+  line-height: var(--ss-leading-base);
+  text-align: center;
+}
+
+.ss-audio-source__dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ss-space-2);
+  min-height: calc(var(--ss-touch-target) * 4);
+  padding: var(--ss-space-5);
+  border: 1px dashed var(--ss-line-strong);
+  border-radius: var(--ss-radius-md);
+  background: var(--ss-surface-sunken);
+  color: var(--ss-ink-muted);
+  text-align: center;
+  transition: var(--ss-transition-colors);
+}
+
+.ss-audio-source__dropzone.is-dragging {
+  border-color: var(--ss-accent);
+  background: var(--ss-accent-tint);
+}
+
+.ss-audio-source__drop-icon {
+  display: inline-flex;
+  color: var(--ss-accent);
+}
+
+.ss-audio-source__drop-title {
+  color: var(--ss-ink);
+  font-size: var(--ss-text-base);
+  font-weight: var(--ss-weight-semibold);
+}
+
+.ss-audio-source__drop-hint {
+  max-width: 48ch;
+  font-size: var(--ss-text-sm);
+  line-height: var(--ss-leading-base);
+}
+
+.ss-audio-source__accepted {
+  color: var(--ss-ink-faint);
+  font-size: var(--ss-text-xs);
+}
+
+/* Keep the native input in the accessibility tree while the label provides
+ * the large touch target. */
+.ss-audio-source__file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+  white-space: nowrap;
+}
+
+.ss-audio-source__choose-file.ss-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--ss-touch-target);
+  cursor: pointer;
+}
+
+.ss-audio-source__file-input:focus-visible + .ss-audio-source__choose-file {
+  outline: none;
+  box-shadow: var(--ss-ring);
+}
+
+.ss-audio-source__selection {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-2);
+  min-width: 0;
+  padding: var(--ss-space-3);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-md);
+  background: var(--ss-surface-1);
+}
+
+.ss-audio-source__selection.is-empty {
+  border-style: dashed;
+  background: transparent;
+}
+
+.ss-audio-source__selection-empty {
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-sm);
+}
+
+.ss-audio-source__selection-summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--ss-space-2);
+  min-width: 0;
+}
+
+.ss-audio-source__selection-icon {
+  display: inline-flex;
+  color: var(--ss-accent);
+}
+
+.ss-audio-source__preview {
+  width: 100%;
+  min-height: var(--ss-touch-target);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ss-audio-source__dropzone,
+  .ss-audio-source__list .ss-audio-source__file {
+    transition: none;
+  }
+}

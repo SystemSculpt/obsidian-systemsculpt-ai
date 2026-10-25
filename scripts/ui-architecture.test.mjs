@@ -461,6 +461,35 @@ test("Janitor owns one typed confirmation-list implementation", () => {
   );
 });
 
+test("Transcribe and Audio Processor share one audio source picker", () => {
+  const picker = read("src/components/AudioSourcePicker.ts");
+  const pickerCss = read("src/css/components/audio-source-picker.css");
+  const modals = [
+    read("src/modals/TranscribeAudioFileModal.ts"),
+    read("src/features/audio-processor/AudioProcessorModal.ts"),
+  ];
+  const modalCss = [
+    read("src/css/modals/transcribe-audio.css"),
+    read("src/css/modals/audio-processor.css"),
+  ].join("\n");
+
+  assert.match(picker, /export class AudioSourcePicker/);
+  assert.match(pickerCss, /\.ss-audio-source__list \.ss-audio-source__file\s*\{/);
+  for (const modal of modals) {
+    assert.match(modal, /new AudioSourcePicker\(/);
+    assert.doesNotMatch(
+      modal,
+      /createUiSearch|role: "listbox"|"ArrowDown"|dragenter|createObjectURL|revokeObjectURL/,
+      "vault list, keyboard, dropzone and preview code belongs to AudioSourcePicker",
+    );
+  }
+  assert.doesNotMatch(
+    modalCss,
+    /__(?:dropzone|file-input|choose-file|selection|list|audio-list|audio-file|file)\b/,
+    "picker styles belong to components/audio-source-picker.css",
+  );
+});
+
 test("the deep combobox interface owns interaction for dissimilar feature adapters", () => {
   const combobox = read("src/core/ui/surface/SurfaceCombobox.ts");
   const history = read("src/views/history/SystemSculptHistoryModal.ts");
