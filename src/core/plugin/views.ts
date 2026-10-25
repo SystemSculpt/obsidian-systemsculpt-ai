@@ -4,7 +4,7 @@ import type SystemSculptPlugin from "../../main";
 import { RibbonManager } from "./ribbons";
 import { ChatState } from "../../types/index";
 import { EmbeddingsView } from "../../views/EmbeddingsView";
-import { SystemSculptStudioView } from "../../views/studio/SystemSculptStudioView";
+import { PendingStudioView, type StudioViewCreator } from "../../views/studio/PendingStudioView";
 import { AgentChatView } from "../../views/chatview/AgentChatView";
 import { yieldToEventLoop } from "../../utils/yieldToEventLoop";
 import { isMobileLayout } from "../../platform/mobileLayout";
@@ -59,6 +59,8 @@ export class ViewManager {
   private restoreQueuedLeaves: Set<WorkspaceLeaf> = new Set();
   private restorePromise: Promise<void> | null = null;
   private registeredViewTypes: Set<string> = new Set();
+  private studioViewCreator: StudioViewCreator | null = null;
+  private studioViewLoad: Promise<StudioViewCreator> | null = null;
 
   constructor(plugin: SystemSculptPlugin, app: App) {
     this.plugin = plugin;
@@ -315,9 +317,28 @@ export class ViewManager {
     this.registerViewType(
       SYSTEMSCULPT_STUDIO_VIEW_TYPE,
       (leaf: WorkspaceLeaf) => {
-        return new SystemSculptStudioView(leaf, this.plugin);
+        return this.studioViewCreator?.(leaf) ?? new PendingStudioView(leaf, () => this.loadStudioView());
       }
     );
+  }
+
+  /**
+   * Evaluates Studio's view code the first time anything opens Studio, so
+   * people who never use it don't pay for it at startup.
+   */
+  loadStudioView(): Promise<StudioViewCreator> {
+    this.studioViewLoad ??= import("../../views/studio/SystemSculptStudioView").then(
+      ({ SystemSculptStudioView }) => {
+        const create = (leaf: WorkspaceLeaf) => new SystemSculptStudioView(leaf, this.plugin);
+        this.studioViewCreator = create;
+        return create;
+      },
+      (error: unknown) => {
+        this.studioViewLoad = null;
+        throw error;
+      }
+    );
+    return this.studioViewLoad;
   }
 
 
@@ -381,7 +402,8 @@ export class ViewManager {
     return targetLeaf.view as EmbeddingsView;
   }
 
-  async activateSystemSculptStudioView(projectPath?: string): Promise<SystemSculptStudioView> {
+  async activateSystemSculptStudioView(projectPath?: string): Promise<void> {
+    await this.loadStudioView();
     const normalizedTarget = String(projectPath || "").trim();
     if (normalizedTarget) {
       const existingLeaves = this.app.workspace.getLeavesOfType(SYSTEMSCULPT_STUDIO_VIEW_TYPE);
@@ -392,7 +414,7 @@ export class ViewManager {
           : "";
         if (file === normalizedTarget) {
           await this.app.workspace.revealLeaf(leaf);
-          return leaf.view as SystemSculptStudioView;
+          return;
         }
       }
     }
@@ -409,7 +431,6 @@ export class ViewManager {
     });
 
     await this.app.workspace.revealLeaf(leaf);
-    return leaf.view as SystemSculptStudioView;
   }
 
   /** Waits until live ChatViews can no longer add incident evidence. */
