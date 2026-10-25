@@ -9,6 +9,7 @@ export type NormalizedFailedTerminalReceipt = Readonly<{
   terminalReportId?: string;
   terminalIncidentId?: string;
   terminalFailureCode: string;
+  terminalFailureMessage?: string;
   terminalRetryable: boolean;
   terminalServerRunId?: string;
 }>;
@@ -18,6 +19,7 @@ type FailedTerminalReceiptCandidate = Readonly<{
   terminalReportId?: unknown;
   terminalIncidentId?: unknown;
   terminalFailureCode?: unknown;
+  terminalFailureMessage?: unknown;
   terminalRetryable?: unknown;
   terminalServerRunId?: unknown;
 }>;
@@ -36,6 +38,20 @@ export function normalizeFailedTerminalReceipt(
     || !isThinAgentFailureCode(candidate.terminalFailureCode)
     || typeof candidate.terminalRetryable !== "boolean"
   ) return null;
+  // Native agents have no hosted incident/report identity. Keep their error
+  // text separate from the assistant's answer and from content-free diagnostics.
+  if (/^local_(?:claude|codex)_(?:failed|usage_limit)$/u.test(candidate.terminalFailureCode)) {
+    if (typeof candidate.terminalFailureMessage !== "string"
+      || candidate.terminalReportId !== undefined
+      || candidate.terminalIncidentId !== undefined
+      || candidate.terminalServerRunId !== undefined) return null;
+    return {
+      terminalOutcome: "failed",
+      terminalFailureCode: candidate.terminalFailureCode,
+      terminalFailureMessage: candidate.terminalFailureMessage,
+      terminalRetryable: candidate.terminalRetryable,
+    };
+  }
   const terminalReportId = isLocalReportId(candidate.terminalReportId)
     ? candidate.terminalReportId
     : undefined;

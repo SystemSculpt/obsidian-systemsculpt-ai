@@ -463,6 +463,9 @@ export interface ChatMessage {
   terminalReportId?: string;
   terminalIncidentId?: string;
   terminalFailureCode?: string;
+  // Native error text for the same local-agent recovery presentation after reload.
+  // Managed failures retain only their content-free receipt identifiers.
+  terminalFailureMessage?: string;
   terminalRetryable?: boolean;
   terminalServerRunId?: string;
 }
