@@ -231,7 +231,7 @@ type AgentIncidentRenderingEvidenceInput = Readonly<{
   failureSurfacePaintOpportunityObserved: boolean;
 }>;
 
-export type AgentIncidentTimelineEvent = Readonly<{
+type AgentIncidentTimelineEvent = Readonly<{
   ordinal: number;
   timestamp: string;
   source_sequence?: number;
