@@ -39,10 +39,6 @@ describe("Backup settings tab", () => {
       },
       getSettingsManager: jest.fn(() => ({
         updateSettings: jest.fn().mockResolvedValue(undefined),
-        getAutomaticBackupService: jest.fn(() => ({
-          start: jest.fn(),
-          stop: jest.fn(),
-        })),
       })),
     };
 
@@ -60,17 +56,13 @@ describe("Backup settings tab", () => {
     expect(text).not.toContain("prompt preferences");
   });
 
-  it("starts and stops automatic backups from the toggle without a notice", async () => {
+  it("turns automatic backups on and off through settings without a notice", async () => {
     const app = new App();
-    const backupService = { start: jest.fn(), stop: jest.fn() };
     const updateSettings = jest.fn().mockResolvedValue(undefined);
     const plugin: any = {
       app,
       settings: { automaticBackupsEnabled: false },
-      getSettingsManager: jest.fn(() => ({
-        updateSettings,
-        getAutomaticBackupService: jest.fn(() => backupService),
-      })),
+      getSettingsManager: jest.fn(() => ({ updateSettings })),
     };
     const container = document.createElement("div");
     document.body.append(container);
@@ -84,10 +76,11 @@ describe("Backup settings tab", () => {
     toggle!.click();
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
 
-    expect(updateSettings).toHaveBeenNthCalledWith(1, { automaticBackupsEnabled: true });
-    expect(updateSettings).toHaveBeenNthCalledWith(2, { automaticBackupsEnabled: false });
-    expect(backupService.start).toHaveBeenCalledTimes(1);
-    expect(backupService.stop).toHaveBeenCalledTimes(1);
+    // The settings manager arms and clears the backup timer on these updates.
+    expect(updateSettings.mock.calls).toEqual([
+      [{ automaticBackupsEnabled: true }],
+      [{ automaticBackupsEnabled: false }],
+    ]);
     expect(Notice).not.toHaveBeenCalled();
   });
 
@@ -99,10 +92,6 @@ describe("Backup settings tab", () => {
       settings: { automaticBackupsEnabled: false },
       getSettingsManager: jest.fn(() => ({
         updateSettings: jest.fn().mockResolvedValue(undefined),
-        getAutomaticBackupService: jest.fn(() => ({
-          start: jest.fn(),
-          stop: jest.fn(),
-        })),
       })),
     };
     const container = document.createElement("div");
@@ -133,7 +122,6 @@ describe("Backup settings tab", () => {
       settings: { automaticBackupsEnabled: false },
       getSettingsManager: jest.fn(() => ({
         updateSettings: jest.fn().mockResolvedValue(undefined),
-        getAutomaticBackupService: jest.fn(() => ({ start: jest.fn(), stop: jest.fn() })),
       })),
     };
     const display = jest.fn();

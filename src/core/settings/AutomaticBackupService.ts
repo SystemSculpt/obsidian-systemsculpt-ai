@@ -15,12 +15,23 @@ export class AutomaticBackupService {
     }
 
     /**
-     * Start the automatic backup service
+     * Arm the hourly check while automatic backups are enabled and clear it
+     * while they are off. Safe to call again after any settings change.
      */
     public start(): void {
-        this.stop(); // Clean up any existing timer
-        
-        // Start the periodic check
+        let enabled = false;
+        try {
+            enabled = this.plugin.isPluginUnloading?.() !== true
+                && this.plugin.getSettingsManager().getSettings().automaticBackupsEnabled === true;
+        } catch {
+            // Unreadable settings arm nothing; the next load or toggle retries.
+        }
+        if (!enabled) {
+            this.stop();
+            return;
+        }
+        if (this.backupTimer !== null) return;
+
         // registerInterval also lets Obsidian clear the timer on plugin
         // unload, so a teardown path that never reaches stop() cannot leak it.
         this.backupTimer = this.plugin.registerInterval(window.setInterval(() => {
@@ -35,7 +46,7 @@ export class AutomaticBackupService {
      * Stop the automatic backup service
      */
     public stop(): void {
-        if (this.backupTimer) {
+        if (this.backupTimer !== null) {
             window.clearInterval(this.backupTimer);
             this.backupTimer = null;
         }

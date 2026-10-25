@@ -956,6 +956,7 @@ export class SettingsManager {
     if (!this.isInitialized) {
       await this.loadSettingsNow(); // Ensure settings are loaded before update
     }
+    const backupsWereEnabled = this.settings.automaticBackupsEnabled;
     const newSettings = typeof update === "function" ? update(this.settings) : update;
     // Merge new settings into the manager's internal copy
     const updatedSettings = { ...this.settings, ...newSettings };
@@ -985,7 +986,13 @@ export class SettingsManager {
 
     // Persist, update plugin._settings, and dispatch the event. This already
     // runs inside the persistence queue, so call the unqueued variant.
-    return this.saveSettingsNow();
+    const saved = await this.saveSettingsNow();
+    // The toggle, a restored backup or an import can switch backups; the
+    // hourly check runs only while they are on.
+    if (this.settings.automaticBackupsEnabled !== backupsWereEnabled) {
+      this.automaticBackupService.start();
+    }
+    return saved;
   }
 
   /**
@@ -1007,12 +1014,5 @@ export class SettingsManager {
     if (this.automaticBackupService) {
       this.automaticBackupService.stop();
     }
-  }
-
-  /**
-   * Get the automatic backup service instance for external access
-   */
-  public getAutomaticBackupService(): AutomaticBackupService {
-    return this.automaticBackupService;
   }
 }

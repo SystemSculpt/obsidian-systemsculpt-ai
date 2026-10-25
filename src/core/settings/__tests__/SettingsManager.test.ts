@@ -858,6 +858,49 @@ describe("SettingsManager managed settings contract", () => {
     });
   });
 
+  describe("automatic backups timer", () => {
+    it("re-checks the timer whenever an update switches automatic backups, and only then", async () => {
+      const plugin = createPlugin({ schemaVersion: CURRENT_SCHEMA_VERSION });
+      const manager = new SettingsManager(plugin);
+      await manager.loadSettings();
+      expect(backupStart).toHaveBeenCalledTimes(1);
+
+      await manager.updateSettings({ chatFontSize: "large" });
+      await manager.updateSettings({ automaticBackupsEnabled: true });
+      expect(backupStart).toHaveBeenCalledTimes(1);
+
+      await manager.updateSettings({ automaticBackupsEnabled: false });
+      expect(backupStart).toHaveBeenCalledTimes(2);
+      // A restored backup or an import can turn them back on.
+      await manager.restoreFromExternalSettings({ schemaVersion: CURRENT_SCHEMA_VERSION, automaticBackupsEnabled: true });
+      expect(backupStart).toHaveBeenCalledTimes(3);
+    });
+  });
+
+  describe("retired saved-chats and attachments folders", () => {
+    it("seeds neither setting on a fresh vault and keeps a value an older version saved", async () => {
+      const fresh = new SettingsManager(createPlugin(null));
+      await fresh.loadSettings();
+      expect(fresh.settings).not.toHaveProperty("savedChatsDirectory");
+      expect(fresh.settings).not.toHaveProperty("attachmentsDirectory");
+
+      const plugin = createPlugin({
+        schemaVersion: CURRENT_SCHEMA_VERSION,
+        savedChatsDirectory: "Archive/Saved Chats",
+        attachmentsDirectory: "Archive/Attachments",
+      });
+      const upgraded = new SettingsManager(plugin);
+      await upgraded.loadSettings();
+      await upgraded.updateSettings({ chatFontSize: "large" });
+
+      // Search keeps excluding the folders those values name.
+      expect(plugin.saveData.mock.calls.at(-1)?.[0]).toMatchObject({
+        savedChatsDirectory: "Archive/Saved Chats",
+        attachmentsDirectory: "Archive/Attachments",
+      });
+    });
+  });
+
   describe("serialized persistence", () => {
     it("applies concurrent updates in order so no key is dropped", async () => {
       const plugin = createPlugin({ schemaVersion: CURRENT_SCHEMA_VERSION });

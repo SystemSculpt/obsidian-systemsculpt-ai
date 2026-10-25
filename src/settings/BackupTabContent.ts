@@ -20,13 +20,8 @@ export function displayBackupTabContent(containerEl: HTMLElement, tabInstance: S
       toggle
         .setValue(plugin.settings.automaticBackupsEnabled)
         .onChange(async (value) => {
+          // The settings manager arms or clears the backup timer on this change.
           await plugin.getSettingsManager().updateSettings({ automaticBackupsEnabled: value });
-          const backupService = plugin.getSettingsManager().getAutomaticBackupService();
-          if (value) {
-            backupService.start();
-          } else {
-            backupService.stop();
-          }
         });
     });
 

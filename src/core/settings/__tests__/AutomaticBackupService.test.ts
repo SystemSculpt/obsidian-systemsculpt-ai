@@ -91,11 +91,57 @@ describe("AutomaticBackupService", () => {
       );
     });
 
-    it("stops existing timer before starting new one", () => {
+    it("arms one timer however often it is started", () => {
       service.start();
       service.start();
 
-      expect(clearIntervalSpy).toHaveBeenCalled();
+      expect(setIntervalSpy).toHaveBeenCalledTimes(1);
+      expect(clearIntervalSpy).not.toHaveBeenCalled();
+    });
+
+    it("arms no timer and writes nothing while automatic backups are off", async () => {
+      const settings = mockPlugin.getSettingsManager().getSettings();
+      mockPlugin.getSettingsManager = () => ({
+        getSettings: () => ({ ...settings, automaticBackupsEnabled: false }),
+        updateSettings: mockPlugin._updateSettings,
+      });
+
+      service.start();
+      await jest.advanceTimersByTimeAsync(3 * 24 * 60 * 60 * 1000);
+
+      expect(setIntervalSpy).not.toHaveBeenCalled();
+      expect(jest.getTimerCount()).toBe(0);
+      expect(mockPlugin.app.vault.adapter.write).not.toHaveBeenCalled();
+    });
+
+    it("clears its timer when backups are turned off and arms it again when they are turned on", () => {
+      let enabled = true;
+      const settings = mockPlugin.getSettingsManager().getSettings();
+      mockPlugin.getSettingsManager = () => ({
+        getSettings: () => ({ ...settings, automaticBackupsEnabled: enabled }),
+        updateSettings: mockPlugin._updateSettings,
+      });
+
+      service.start();
+      expect(jest.getTimerCount()).toBe(1);
+
+      enabled = false;
+      service.start();
+      expect(clearIntervalSpy).toHaveBeenCalledWith(setIntervalSpy.mock.results[0].value);
+      expect(jest.getTimerCount()).toBe(0);
+
+      enabled = true;
+      service.start();
+      expect(setIntervalSpy).toHaveBeenCalledTimes(2);
+      expect(jest.getTimerCount()).toBe(1);
+    });
+
+    it("arms nothing while the plugin unloads", () => {
+      mockPlugin.isPluginUnloading = () => true;
+
+      service.start();
+
+      expect(setIntervalSpy).not.toHaveBeenCalled();
     });
 
     it("registers the interval with the plugin so Obsidian clears it on unload", () => {
@@ -611,7 +657,7 @@ describe("AutomaticBackupService", () => {
       expect(mockPlugin.app.vault.adapter.write).toHaveBeenCalled();
     });
 
-    it("continues running after errors", async () => {
+    it("arms nothing when settings cannot be read", async () => {
       mockPlugin.getSettingsManager = () => {
         throw new Error("Settings error");
       };
@@ -619,8 +665,7 @@ describe("AutomaticBackupService", () => {
       service = new AutomaticBackupService(mockPlugin);
       service.start();
 
-      // The timer should still be set even if checkAndCreateBackup fails
-      expect(setIntervalSpy).toHaveBeenCalled();
+      expect(setIntervalSpy).not.toHaveBeenCalled();
     });
   });
 });
