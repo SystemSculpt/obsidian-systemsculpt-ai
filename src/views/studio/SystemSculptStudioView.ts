@@ -465,6 +465,7 @@ export class SystemSculptStudioView extends ItemView {
 
   private detachSurfaceActivity: (() => void) | null = null;
   private detachLeafVisibility: (() => void) | null = null;
+  private detachLeafChange: (() => void) | null = null;
   private leafVisible = true;
   private readonly presentation = new StudioPresentation();
   private readonly markdownPreviewRequests = new WeakMap<HTMLElement, () => void>();
@@ -490,6 +491,14 @@ export class SystemSculptStudioView extends ItemView {
     this.detachSurfaceActivity = bindSurfaceActivity(this.contentEl);
     this.detachLeafVisibility?.();
     this.detachLeafVisibility = observeLeafVisibility(this.containerEl, this.app.workspace, visible => this.setLeafVisible(visible));
+    this.detachLeafChange?.();
+    const leafChange = this.app.workspace.on("active-leaf-change", (leaf) => {
+      // A connection started here ends once another leaf takes over.
+      if (leaf !== this.leaf && this.graphInteraction.getPendingConnection()) {
+        this.graphInteraction.clearPendingConnection();
+      }
+    });
+    this.detachLeafChange = () => this.app.workspace.offref(leafChange);
     this.runObservation.bind(this.plugin.getStudioService());
     this.activity.bind(this.plugin.getStudioService().agentRuns);
     this.bindOwnerWindowEvents(getStudioOwnerWindow(this.contentEl));
@@ -530,6 +539,8 @@ export class SystemSculptStudioView extends ItemView {
     this.detachSurfaceActivity = null;
     this.detachLeafVisibility?.();
     this.detachLeafVisibility = null;
+    this.detachLeafChange?.();
+    this.detachLeafChange = null;
     this.presentation.dispose();
     this.mediaModelPicker.dispose();
     this.shapeController.cancelDrawGesture();

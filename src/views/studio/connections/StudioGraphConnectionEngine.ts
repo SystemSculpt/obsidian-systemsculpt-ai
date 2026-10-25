@@ -112,6 +112,7 @@ export class StudioGraphConnectionEngine {
 
   registerViewportElement(viewport: HTMLElement): void {
     this.graphViewportEl = viewport;
+    this.portInteraction.registerViewport(viewport);
   }
 
   /** The world layer: positioned children live in world px and its rect marks the world origin on screen. */
