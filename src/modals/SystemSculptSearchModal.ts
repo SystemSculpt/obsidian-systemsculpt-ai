@@ -37,6 +37,9 @@ export class SystemSculptSearchModal extends StandardModal {
   private indexRefreshHandle: number | null = null;
   private semanticHandle: number | null = null;
   private searchAbortController: AbortController | null = null;
+  private semanticAbortController: AbortController | null = null;
+  /** The pointer moved over this query's results: the person may be about to click one. */
+  private pointerOverResults = false;
   private previewAbortController: AbortController | null = null;
   private querySerial = 0;
 
@@ -62,6 +65,12 @@ export class SystemSculptSearchModal extends StandardModal {
 
     this.listEl = shell.createDiv({ cls: "ss-search__list" });
     this.listEl.id = this.listId;
+    this.registerDomEvent(this.listEl, "pointermove", () => {
+      this.pointerOverResults = true;
+    });
+    this.registerDomEvent(this.listEl, "pointerleave", () => {
+      this.pointerOverResults = false;
+    });
     this.initializeCombobox();
 
     this.ownerWindow.setTimeout(() => this.searchInputEl?.focus(), 0);
@@ -185,6 +194,7 @@ export class SystemSculptSearchModal extends StandardModal {
     this.cancelIndexRefresh();
     this.cancelSemanticPass();
     this.cancelSearch();
+    this.pointerOverResults = false;
 
     const controller = new AbortController();
     this.searchAbortController = controller;
@@ -230,17 +240,20 @@ export class SystemSculptSearchModal extends StandardModal {
     }, Math.max(0, this.SEMANTIC_IDLE_MS - this.SEARCH_DEBOUNCE_MS));
   }
 
+  /** Also stops waiting for a pass already running: its query is out of date. */
   private cancelSemanticPass() {
     if (this.semanticHandle !== null) {
       this.ownerWindow.clearTimeout(this.semanticHandle);
       this.semanticHandle = null;
     }
+    this.semanticAbortController?.abort();
+    this.semanticAbortController = null;
   }
 
   private async runSemanticPass(query: string, serial: number) {
     if (serial !== this.querySerial || this.currentQuery.trim() !== query || !this.listEl) return;
     const controller = new AbortController();
-    this.searchAbortController = controller;
+    this.semanticAbortController = controller;
     try {
       const response = await this.engine.search(query, {
         mode: "smart",
@@ -255,8 +268,8 @@ export class SystemSculptSearchModal extends StandardModal {
     } catch {
       // The lexical results already on screen stand.
     } finally {
-      if (this.searchAbortController === controller) {
-        this.searchAbortController = null;
+      if (this.semanticAbortController === controller) {
+        this.semanticAbortController = null;
       }
     }
   }
@@ -289,10 +302,14 @@ export class SystemSculptSearchModal extends StandardModal {
         sort: "relevance",
         limit: this.SEARCH_LIMIT,
         signal: controller.signal,
+        semantic: false,
       });
 
       if (serial === this.querySerial && !controller.signal.aborted) {
         this.renderResponse(response, { stabilize: true });
+        if (query.length >= this.SEMANTIC_MIN_CHARS) {
+          this.scheduleSemanticPass(query, serial);
+        }
       }
     } catch (error) {
       if (!this.isAbortError(error) && serial === this.querySerial) {
@@ -337,7 +354,9 @@ export class SystemSculptSearchModal extends StandardModal {
   ) {
     if (!this.listEl) return;
     const previousState = this.captureListState();
-    const orderedResults = options.stabilize
+    // A refresh of the same query takes its better order unless the person is
+    // already choosing a result; then the rows they can see stay put.
+    const orderedResults = options.stabilize && previousState.choosing
       ? this.stabilizeResults(results, previousState.renderedPaths, previousState.focusedPath)
       : results;
 
@@ -513,6 +532,7 @@ export class SystemSculptSearchModal extends StandardModal {
     renderedPaths: string[];
     focusedPath: string | null;
     hadListFocus: boolean;
+    choosing: boolean;
   } {
     const items = this.getResultItems();
     const activeItem = this.findResultItem(this.modalEl.ownerDocument.activeElement);
@@ -520,6 +540,8 @@ export class SystemSculptSearchModal extends StandardModal {
       renderedPaths: items.map((item) => item.getAttribute("data-path") ?? "").filter(Boolean),
       focusedPath: activeItem?.getAttribute("data-path") ?? null,
       hadListFocus: !!activeItem,
+      // A focused result, a pointer moving over the results, or a scrolled list.
+      choosing: !!activeItem || this.pointerOverResults || (this.listEl?.scrollTop ?? 0) > 0,
     };
   }
 

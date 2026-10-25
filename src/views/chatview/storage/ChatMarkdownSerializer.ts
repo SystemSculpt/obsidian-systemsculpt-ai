@@ -23,7 +23,7 @@ import {
   normalizeFailedTerminalReceipt,
 } from "../FailedTerminalReceipt";
 import type { ToolCall } from "../../../types/toolCalls";
-import { nativeToolPath } from "../../../utils/nativeToolPath";
+import { isAbsoluteNativePath, nativePathPrefixRewriter, nativeToolPath } from "../../../utils/nativeToolPath";
 
 const FRAMED_PAYLOAD_FORMAT = "base64-json-v1";
 /** Literal markers in message text are escaped, never treated as structure. */
@@ -866,9 +866,21 @@ export class ChatMarkdownSerializer {
     delete native.homeDirectory;
     delete native.permissionSuggestions;
 
-    // Preserve authored text, commands and results verbatim. Only structured
-    // path arguments are made relative; paths outside the vault never become
-    // vault links. The live tool record and native session stay unchanged.
+    // Structured path arguments become relative to the saved working
+    // directory; paths outside the vault never become vault links. Native text
+    // (commands, results, errors, request descriptions) keeps its wording, with
+    // the vault's absolute prefix spelled from that directory and the home
+    // folder as ~. The live tool record and native session stay unchanged, and
+    // replayed history leaves tool results out.
+    const savedSegments = savedCwd.split("/").filter((segment) => segment && segment !== ".");
+    // The working directory and each ancestor up to the vault root, under every root spelling.
+    const relativeDirectories = savedCwd === ".." ? [] : [vaultRoot, vaultRootAlias]
+      .filter((root): root is string => !!root && isAbsoluteNativePath(root))
+      .flatMap((root) => Array.from({ length: savedSegments.length + 1 }, (_, up): [string, string] => [
+        [root, ...savedSegments.slice(0, savedSegments.length - up)].join("/"),
+        Array.from({ length: up }, () => "..").join("/") || ".",
+      ]));
+    const portableText = nativePathPrefixRewriter([...relativeDirectories, ...(homeDirectory ? [[homeDirectory, "~"] as const] : [])]);
     const portablePath = (path: string): string => {
       const target = resolve(path);
       const targetPath = target.vaultPath ?? (target.displayPath === "Vault root" ? "." : null);
@@ -876,26 +888,27 @@ export class ChatMarkdownSerializer {
         return target.displayPath.startsWith("~/") ? target.displayPath.replace(/ \(outside vault\)$/u, "") : path;
       }
       if (savedCwd === "..") return path;
-      const from = savedCwd.split("/").filter((segment) => segment && segment !== ".");
+      const from = savedSegments;
       const to = targetPath.split("/").filter((segment) => segment && segment !== ".");
       let common = 0;
       while (common < from.length && common < to.length && from[common] === to[common]) common += 1;
       return [...from.slice(common).map(() => ".."), ...to.slice(common)].join("/") || ".";
     };
     const portableInput = (value: unknown, key = ""): unknown => {
-      if (typeof value === "string") return ["file_path", "path", "move_path", "cwd", "workingDirectory"].includes(key) ? portablePath(value) : value;
+      if (typeof value === "string") return ["file_path", "path", "move_path", "cwd", "workingDirectory"].includes(key) ? portablePath(value) : portableText(value);
       if (Array.isArray(value)) return value.map((item) => portableInput(item, key));
       if (!value || typeof value !== "object") return value;
       return Object.fromEntries(Object.entries(value).map(([field, item]) => [field, portableInput(item, field)]));
     };
     let request = tool.request;
     if (request?.function?.arguments) {
-      try {
-        const input: unknown = JSON.parse(request.function.arguments);
-        request = { ...request, function: { ...request.function, arguments: JSON.stringify(portableInput(input)) } };
-      } catch { /* In-flight, incomplete tool arguments remain readable as received. */ }
+      let input: unknown;
+      try { input = JSON.parse(request.function.arguments); } catch { /* In-flight, incomplete arguments stay text. */ }
+      const argumentsText = input === undefined ? portableText(request.function.arguments) : JSON.stringify(portableInput(input));
+      request = { ...request, function: { ...request.function, arguments: argumentsText } };
     }
-    return { ...tool, native, ...(request ? { request } : {}) };
+    if (typeof native.description === "string") native.description = portableText(native.description);
+    return { ...tool, native, ...(request ? { request } : {}), ...(tool.result ? { result: portableInput(tool.result) as ToolCall["result"] } : {}) };
   }
 
   /** Escape & first so literal entities also survive a save/load exactly. */
