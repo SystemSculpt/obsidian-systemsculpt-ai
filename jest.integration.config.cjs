@@ -9,6 +9,7 @@ module.exports = {
 	roots: ['<rootDir>/testing/integration'],
 	testMatch: ['**/*.test.ts'],
 	testTimeout: 30000,
+	setupFilesAfterEnv: [...base.setupFilesAfterEnv, '<rootDir>/testing/integration/host-setup.ts'],
 	moduleNameMapper: {
 		...base.moduleNameMapper,
 		'^obsidian$': '<rootDir>/testing/integration/mocks/obsidian-host.js'
