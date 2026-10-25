@@ -41,6 +41,7 @@ function createPointerEvent(
     clientY: number;
     button?: number;
     ctrlKey?: boolean;
+    pointerType?: string;
   }
 ): PointerEvent {
   const event = new MouseEvent(type, {
@@ -51,9 +52,9 @@ function createPointerEvent(
     button: options.button ?? 0,
     ctrlKey: options.ctrlKey ?? false,
   });
-  Object.defineProperty(event, "pointerId", {
-    value: options.pointerId,
-    configurable: true,
+  Object.defineProperties(event, {
+    pointerId: { value: options.pointerId, configurable: true },
+    pointerType: { value: options.pointerType ?? "mouse", configurable: true },
   });
   return event as PointerEvent;
 }
@@ -164,6 +165,110 @@ describe("mountStudioGraphNodeResizeFrame", () => {
       // Corners are mounted after edges so equal stacking resolves corner-first.
       const lastFour = zoneEls.slice(4).map((el) => el.dataset.resizeZone);
       expect(new Set(lastFour)).toEqual(new Set(["nw", "ne", "sw", "se"]));
+    });
+
+    it("delegates pointerdown to one owning-card listener and removes it on unmount", () => {
+      const addListener = jest.spyOn(HTMLElement.prototype, "addEventListener");
+      const { nodeEl, unmount } = mountFrame(createNode());
+      const pointerdownCalls = addListener.mock.calls.flatMap(([type, listener], index) =>
+        type === "pointerdown" ? [{ listener, owner: addListener.mock.contexts[index] }] : []
+      );
+      expect(pointerdownCalls).toEqual([{ listener: expect.any(Function), owner: nodeEl }]);
+      const removeListener = jest.spyOn(nodeEl, "removeEventListener");
+
+      unmount();
+      expect(removeListener).toHaveBeenCalledWith("pointerdown", pointerdownCalls[0].listener);
+      expect(nodeEl.classList.contains("has-resize-frame")).toBe(false);
+      expect(nodeEl.querySelector("[data-resize-zone]")).toBeNull();
+    });
+
+    it("keeps touch capture on the hit zone when its child starts the resize", () => {
+      const { nodeEl, applySize, unmount } = mountFrame(createNode());
+      const zoneEl = queryZone(nodeEl, "se");
+      const child = zoneEl.createSpan();
+      const setCapture = jest.fn();
+      const releaseCapture = jest.fn();
+      zoneEl.setPointerCapture = setCapture;
+      zoneEl.releasePointerCapture = releaseCapture;
+      const bubbled = jest.fn();
+      nodeEl.parentElement!.addEventListener("pointerdown", bubbled);
+      const press = createPointerEvent("pointerdown", {
+        pointerId: 22, clientX: 0, clientY: 0, pointerType: "touch",
+      });
+
+      child.dispatchEvent(press);
+      expect(press.defaultPrevented).toBe(true);
+      expect(bubbled).not.toHaveBeenCalled();
+      expect(setCapture).toHaveBeenCalledWith(22);
+      expect(zoneEl.classList.contains("is-active")).toBe(true);
+      window.dispatchEvent(createPointerEvent("pointermove", {
+        pointerId: 22, clientX: 40, clientY: 50, pointerType: "touch",
+      }));
+      expect(applySize).toHaveBeenCalledWith({ width: 340, height: 250 });
+
+      unmount();
+      expect(releaseCapture).toHaveBeenCalledWith(22);
+      expect(zoneEl.classList.contains("is-active")).toBe(false);
+      applySize.mockClear();
+      nodeEl.appendChild(zoneEl);
+      child.dispatchEvent(createPointerEvent("pointerdown", {
+        pointerId: 23, clientX: 0, clientY: 0, pointerType: "touch",
+      }));
+      window.dispatchEvent(createPointerEvent("pointermove", {
+        pointerId: 23, clientX: 80, clientY: 80, pointerType: "touch",
+      }));
+      expect(setCapture).toHaveBeenCalledTimes(1);
+      expect(applySize).not.toHaveBeenCalled();
+      nodeEl.parentElement!.removeEventListener("pointerdown", bubbled);
+    });
+
+    it.each(["applied", "pending"])("cancels %s resize work on unmount without replaying it over a newer edit", phase => {
+      if (phase === "pending") jest.mocked(window.requestAnimationFrame).mockImplementation(() => 42);
+      const node = createNode();
+      const { nodeEl, unmount, onNodeConfigMutated, onNodeGeometryMutated } = mountFrame(node);
+      dragZone(nodeEl, "e", { to: { x: 40, y: 0 }, release: false });
+      node.size = { width: 900, height: 400 };
+      onNodeGeometryMutated.mockClear();
+
+      unmount();
+      window.dispatchEvent(createPointerEvent("pointerup", { pointerId: 7, clientX: 40, clientY: 0 }));
+      expect(node.size).toEqual({ width: 900, height: 400 });
+      expect(onNodeConfigMutated).not.toHaveBeenCalled();
+      expect(onNodeGeometryMutated).not.toHaveBeenCalled();
+      if (phase === "pending") expect(window.cancelAnimationFrame).toHaveBeenCalledWith(42);
+    });
+
+    it("ignores card body and foreign zones while locked and secondary presses still bubble", () => {
+      const { nodeEl, applySize } = mountFrame(createNode());
+      const body = nodeEl.createDiv();
+      const foreignZone = body.createDiv({
+        cls: "ss-studio-node-resize-zone",
+        attr: { "data-resize-zone": "se" },
+      });
+      const locked = mountFrame(createNode(), { interactionLocked: true });
+      const bubbled = jest.fn();
+      document.body.addEventListener("pointerdown", bubbled);
+
+      for (const [target, button] of [
+        [nodeEl, 0],
+        [body, 0],
+        [foreignZone, 0],
+        [queryZone(nodeEl, "se"), 2],
+        [queryZone(locked.nodeEl, "se"), 0],
+      ] as const) {
+        const press = createPointerEvent("pointerdown", {
+          pointerId: 31, clientX: 0, clientY: 0, button,
+        });
+        target.dispatchEvent(press);
+        expect(press.defaultPrevented).toBe(false);
+      }
+      window.dispatchEvent(createPointerEvent("pointermove", {
+        pointerId: 31, clientX: 100, clientY: 100,
+      }));
+      expect(bubbled).toHaveBeenCalledTimes(5);
+      expect(applySize).not.toHaveBeenCalled();
+      expect(locked.applySize).not.toHaveBeenCalled();
+      document.body.removeEventListener("pointerdown", bubbled);
     });
 
     it("declares the carved zone layout as data", () => {

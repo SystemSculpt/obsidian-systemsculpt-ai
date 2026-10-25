@@ -460,7 +460,7 @@ function mountLiveMarkdownEditor(options: MountLiveMarkdownEditorOptions): boole
   return true;
 }
 
-export function renderTextNodeCard(options: RenderTextNodeCardOptions): void {
+export function renderTextNodeCard(options: RenderTextNodeCardOptions): () => void {
   const {
     nodeEl,
     node,
@@ -686,7 +686,7 @@ export function renderTextNodeCard(options: RenderTextNodeCardOptions): void {
     }
   }
 
-  mountStudioGraphNodeResizeFrame({
+  return mountStudioGraphNodeResizeFrame({
     node,
     nodeEl,
     title: "Resize text",

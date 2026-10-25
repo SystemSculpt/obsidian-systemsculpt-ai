@@ -1,5 +1,5 @@
 /** @jest-environment jsdom */
-import { App, ItemView, MarkdownRenderer, Scope, WorkspaceLeaf } from "obsidian";
+import { App, Component, ItemView, MarkdownRenderer, Scope, WorkspaceLeaf } from "obsidian";
 import { createEmptyStudioProject } from "../../../studio/schema";
 import { StudioProjectSession } from "../../../studio/StudioProjectSession";
 import { StudioRunObserver } from "../../../studio/StudioRunObserver";
@@ -135,6 +135,68 @@ describe("Studio visibility recovery", () => {
     f.show();
     expect(preview.innerHTML).toBe(before);
     expect(f.view.contentEl.childElementCount).toBe(0);
+  });
+
+  it("unloads Markdown children as cards are replaced and removed, not just when the view closes", async () => {
+    const cleanups: jest.Mock[] = [];
+    const owners: Component[] = [];
+    jest.spyOn(MarkdownRenderer, "render").mockImplementation(async (_app, markdown, target, _path, owner) => {
+      const cleanup = jest.fn();
+      const child = new Component(); child.load(); child.register(cleanup);
+      owner.addChild(child); owners.push(owner); cleanups.push(cleanup);
+      target.setText(markdown);
+    });
+    const f = await fixture();
+    try {
+      expect(owners[0]).not.toBe(f.view);
+      for (let index = 1; index <= 4; index++) {
+        f.session.mutate("node.config", project => { project.graph.nodes.find(node => node.id === "text")!.config.value = `# Revision ${index}`; });
+        jest.advanceTimersByTime(50); await flush();
+        expect(cleanups).toHaveLength(index + 1);
+        expect(cleanups.filter(cleanup => cleanup.mock.calls.length === 0)).toHaveLength(1);
+      }
+      f.session.mutate("node.remove", project => { project.graph.nodes = project.graph.nodes.filter(node => node.id !== "text"); });
+      jest.advanceTimersByTime(50); await flush();
+      for (const cleanup of cleanups) expect(cleanup).toHaveBeenCalledTimes(1);
+    } finally { await f.close(); }
+    for (const cleanup of cleanups) expect(cleanup).toHaveBeenCalledTimes(1);
+  });
+
+  it("releases children of a failed Markdown render while preserving the plain-text fallback", async () => {
+    const cleanup = jest.fn();
+    jest.spyOn(console, "warn").mockImplementation(() => {});
+    jest.spyOn(MarkdownRenderer, "render").mockImplementation(async (_app, _markdown, _target, _path, owner) => {
+      const child = new Component(); child.load(); child.register(cleanup); owner.addChild(child);
+      throw new Error("Markdown processor failed");
+    });
+    const f = await fixture();
+    try {
+      expect(cleanup).toHaveBeenCalledTimes(1);
+      expect(f.view.contentEl.querySelector(".ss-studio-text-node-display")!.textContent).toBe("# Text preview");
+    } finally { await f.close(); }
+    expect(cleanup).toHaveBeenCalledTimes(1);
+  });
+
+  it("releases pending Markdown children on close and drains children registered by a late completion", async () => {
+    const earlyCleanup = jest.fn(), lateCleanup = jest.fn();
+    let finish!: () => void;
+    jest.spyOn(MarkdownRenderer, "render").mockImplementation((_app, markdown, target, _path, owner) => {
+      const early = new Component(); early.load(); early.register(earlyCleanup); owner.addChild(early);
+      return new Promise(resolve => {
+        finish = () => {
+          const late = new Component(); late.load(); late.register(lateCleanup); owner.addChild(late);
+          target.setText(markdown); resolve();
+        };
+      });
+    });
+    const f = await fixture();
+    const preview = f.view.contentEl.querySelector(".ss-studio-text-node-display")!;
+    const before = preview.innerHTML;
+    await f.close();
+    expect(earlyCleanup).toHaveBeenCalledTimes(1);
+    finish(); await flush();
+    expect(lateCleanup).toHaveBeenCalledTimes(1);
+    expect(preview.innerHTML).toBe(before);
   });
 
   it("defers pending command-center catalog DOM updates until shown", async () => {

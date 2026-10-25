@@ -183,15 +183,6 @@ export function renderNodePorts(options: {
         text: `${port.id}${port.required ? "*" : ""}`,
       });
       graphInteraction.registerPortElement(node.id, "in", port.id, pin);
-      if (savedConnectionsOnly) continue;
-      pin.addEventListener("click", (event) => {
-        event.stopPropagation();
-        if (!graphInteraction.getPendingConnection()) {
-          new Notice("Select an output port first.");
-          return;
-        }
-        graphInteraction.completeConnection(node.id, port.id);
-      });
     }
   }
 
@@ -215,18 +206,32 @@ export function renderNodePorts(options: {
       pin.dataset.portDirection = "out";
       lockStudioControl(interactionLocked, pin, savedConnectionsOnly);
       graphInteraction.registerPortElement(node.id, "out", port.id, pin);
-      if (savedConnectionsOnly) continue;
-      pin.addEventListener("pointerdown", (event) => {
-        event.stopPropagation();
-        graphInteraction.startConnectionDrag(node.id, port.id, event, pin);
-      });
-      pin.addEventListener("click", (event) => {
-        event.stopPropagation();
-        if (graphInteraction.consumeSuppressedOutputPortClick(node.id, port.id)) {
-          return;
-        }
-        graphInteraction.beginConnection(node.id, port.id);
-      });
     }
   }
+  if (savedConnectionsOnly) return;
+  const eventPin = (event: Event): HTMLButtonElement | null => {
+    // Adopted cards retain their original realm's element prototypes.
+    const target = event.target as Element | null;
+    const pin = target?.closest?.<HTMLButtonElement>(".ss-studio-port-pin");
+    return pin && ports.contains(pin) && !pin.disabled ? pin : null;
+  };
+  ports.addEventListener("pointerdown", event => {
+    const pin = eventPin(event);
+    if (!pin || pin.dataset.portDirection !== "out") return;
+    event.stopPropagation();
+    graphInteraction.startConnectionDrag(node.id, pin.dataset.portId!, event, pin);
+  });
+  ports.addEventListener("click", event => {
+    const pin = eventPin(event);
+    if (!pin) return;
+    event.stopPropagation();
+    const portId = pin.dataset.portId!;
+    if (pin.dataset.portDirection === "out") {
+      if (!graphInteraction.consumeSuppressedOutputPortClick(node.id, portId)) graphInteraction.beginConnection(node.id, portId);
+    } else if (!graphInteraction.getPendingConnection()) {
+      new Notice("Select an output port first.");
+    } else {
+      graphInteraction.completeConnection(node.id, portId);
+    }
+  });
 }
