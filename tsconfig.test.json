@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["DOM", "ES2022"],
+    "types": ["jest", "node"],
+    "paths": {
+      "@/*": ["src/*"],
+      "obsidian": ["src/tests/mocks/obsidian"]
+    }
+  },
+  "include": ["src/**/*.ts", "testing/**/*.ts"],
+  "exclude": ["node_modules"]
+}

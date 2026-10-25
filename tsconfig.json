@@ -38,6 +38,7 @@
     "node_modules",
     "../node_modules",
     "tests",
+    "src/tests/**",
     "src/__tests__/**/*",
     "**/__tests__/**/*",
     "**/*.test.ts",
