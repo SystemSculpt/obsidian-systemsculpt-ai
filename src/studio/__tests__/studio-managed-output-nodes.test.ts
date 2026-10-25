@@ -11,7 +11,6 @@ import {
   MANAGED_MEDIA_SOURCE_NODE_ID_KEY,
   MANAGED_TEXT_OWNER,
   MANAGED_TEXT_OWNER_KEY,
-  MANAGED_TEXT_SLOT_INDEX_KEY,
   MANAGED_TEXT_SOURCE_NODE_ID_KEY,
   materializePendingImageOutputPlaceholders,
   materializePendingVideoOutputPlaceholders,
@@ -106,7 +105,7 @@ function addLegacyTextOutput(project: StudioProjectV1, source: StudioNodeInstanc
     id, kind: "studio.text_output", version: "1.0.0", title: "Saved text", position: { x: 500, y: 160 },
     config: {
       value: "Saved text value", [MANAGED_TEXT_OWNER_KEY]: MANAGED_TEXT_OWNER,
-      [MANAGED_TEXT_SOURCE_NODE_ID_KEY]: source.id, [MANAGED_TEXT_SLOT_INDEX_KEY]: 0,
+      [MANAGED_TEXT_SOURCE_NODE_ID_KEY]: source.id, __studio_source_output_index: 0,
       ...(runId ? { [MANAGED_OUTPUT_PENDING_KEY]: true, [MANAGED_OUTPUT_PENDING_RUN_ID_KEY]: runId } : {}),
     }, disabled: !!runId,
   });

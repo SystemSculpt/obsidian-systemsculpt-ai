@@ -46,7 +46,7 @@ async function fixture(load: () => Promise<void> = async () => {}) {
     app, list: jest.fn((_projectId: string, sources?: string[]) => records.filter(run => !sources?.length || sources.includes(run.nodeId))),
     get: (id: string) => records.find(run => run.id === id),
     subscribe: (listener: (projectId: string) => void) => { listeners.add(listener); return () => listeners.delete(listener); },
-    load: jest.fn(load), hasOlder: () => false, isCapped: () => false, canControl: () => true, hasRequest: () => false,
+    load: jest.fn(load), hasOlder: () => false, isCapped: () => false, canControl: () => true, hasRequest: () => false, isStale: () => false, canMarkStopped: () => false,
   };
   const service = {
     subscribeRunEvents: (listener: Parameters<StudioRunObserver["subscribe"]>[0]) => observer.subscribe(listener), getActiveRun: (path: string) => observer.getActiveRun(path),
@@ -155,7 +155,7 @@ describe("Studio visibility recovery", () => {
         expect(cleanups).toHaveLength(index + 1);
         expect(cleanups.filter(cleanup => cleanup.mock.calls.length === 0)).toHaveLength(1);
       }
-      f.session.mutate("node.remove", project => { project.graph.nodes = project.graph.nodes.filter(node => node.id !== "text"); });
+      f.session.mutate("graph.node.remove", project => { project.graph.nodes = project.graph.nodes.filter(node => node.id !== "text"); });
       jest.advanceTimersByTime(50); await flush();
       for (const cleanup of cleanups) expect(cleanup).toHaveBeenCalledTimes(1);
     } finally { await f.close(); }

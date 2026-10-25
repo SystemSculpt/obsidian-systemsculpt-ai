@@ -1,4 +1,4 @@
-export const MAX_SERVER_TIMING_DURATION_MS = 7 * 24 * 60 * 60 * 1_000;
+const MAX_SERVER_TIMING_DURATION_MS = 7 * 24 * 60 * 60 * 1_000;
 
 type ServerTimingOptions<Field extends string> = Readonly<{
   fields: Readonly<Record<string, Field>>;

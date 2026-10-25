@@ -1,9 +1,9 @@
 /**
  * @jest-environment jsdom
  */
-import { StorageManager, StorageLocationType } from "../StorageManager";
+import { StorageManager } from "../StorageManager";
 import { StorageManager as StorageManagerExport } from "../index";
-import { App, FileSystemAdapter, TFolder } from "obsidian";
+import { FileSystemAdapter } from "obsidian";
 
 // Create mock vault adapter
 const createMockAdapter = () => Object.assign(new FileSystemAdapter("/vault"), {
@@ -30,6 +30,14 @@ const createMockApp = (vault = createMockVault()) => ({
 
 // Create mock plugin
 const createMockPlugin = () => ({});
+
+// Both Obsidian adapters reject a missing path with code ENOENT.
+const missingPathError = (path: string) =>
+  Object.assign(new Error(`ENOENT: no such file or directory, open '${path}'`), { code: "ENOENT" });
+
+const ADAPTER_IO = ["exists", "read", "write", "remove", "list", "append"] as const;
+const adapterCallCount = (adapter: ReturnType<typeof createMockAdapter>) =>
+  ADAPTER_IO.reduce((total, method) => total + adapter[method].mock.calls.length, 0);
 
 describe("StorageManager", () => {
   let mockApp: ReturnType<typeof createMockApp>;
@@ -113,6 +121,61 @@ describe("StorageManager", () => {
 
       expect(storage.isInitialized()).toBe(true);
       expect(mockApp.vault.createFolder.mock.calls.filter(([path]) => path === ".systemsculpt/diagnostics")).toHaveLength(1);
+    });
+
+    it("checks the base folder once, not on every later call", async () => {
+      const adapter = mockApp.vault.adapter;
+      await storage.writeFile("settings", "a.json", "{}");
+      adapter.exists.mockClear();
+      adapter.write.mockClear();
+      mockApp.vault.createFolder.mockClear();
+
+      await storage.initialize();
+      await storage.initialize();
+      await storage.writeFile("settings", "b.json", "{}");
+
+      expect(adapter.exists).not.toHaveBeenCalled();
+      expect(mockApp.vault.createFolder).not.toHaveBeenCalled();
+      expect(adapterCallCount(adapter)).toBe(1);
+    });
+
+    it("recreates folders deleted while Obsidian runs when a write finds them gone", async () => {
+      const adapter = mockApp.vault.adapter;
+      adapter.exists.mockImplementation(async (path: string) => path.startsWith(".systemsculpt"));
+      await storage.writeFile("diagnostics", "first.json", "{}");
+      mockApp.vault.createFolder.mockClear();
+      adapter.write.mockClear();
+
+      // The whole .systemsculpt folder was deleted outside the plugin.
+      adapter.exists.mockResolvedValue(false);
+      adapter.write.mockRejectedValueOnce(missingPathError(".systemsculpt/diagnostics/second.json"));
+
+      const result = await storage.writeFile("diagnostics", "second.json", "{}");
+
+      expect(result).toEqual({ success: true, path: ".systemsculpt/diagnostics/second.json" });
+      expect(mockApp.vault.createFolder.mock.calls.map(([path]) => path)).toEqual([
+        ".systemsculpt",
+        ".systemsculpt/diagnostics",
+      ]);
+      expect(adapter.write.mock.calls.map(([path]) => path)).toEqual([
+        ".systemsculpt/diagnostics/second.json",
+        ".systemsculpt/diagnostics/.folder",
+        ".systemsculpt/diagnostics/second.json",
+      ]);
+    });
+
+    it("recreates a deleted folder for appends too", async () => {
+      const adapter = mockApp.vault.adapter;
+      await storage.appendToFile("diagnostics", "log.txt", "first");
+      mockApp.vault.createFolder.mockClear();
+      adapter.write.mockClear();
+      adapter.write.mockRejectedValueOnce(missingPathError(".systemsculpt/diagnostics/log.txt"));
+
+      const result = await storage.appendToFile("diagnostics", "log.txt", "second");
+
+      expect(result.success).toBe(true);
+      expect(mockApp.vault.createFolder).toHaveBeenCalledWith(".systemsculpt/diagnostics");
+      expect(adapter.write).toHaveBeenLastCalledWith(".systemsculpt/diagnostics/log.txt", "second\n");
     });
 
     it("reinitializes when the vault base path changes", async () => {
@@ -243,6 +306,17 @@ describe("StorageManager", () => {
 
       expect(result.success).toBe(false);
       expect(result.error).toBe("Write failed");
+      expect(mockApp.vault.adapter.write).toHaveBeenCalledTimes(1);
+    });
+
+    it("reports a write that still finds its folder missing after recreating it", async () => {
+      mockApp.vault.adapter.write.mockRejectedValue(missingPathError(".systemsculpt/settings/test.txt"));
+
+      const result = await storage.writeFile("settings", "test.txt", "content");
+
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/ENOENT/);
+      expect(mockApp.vault.adapter.write).toHaveBeenCalledTimes(2);
     });
   });
 
@@ -306,26 +380,29 @@ describe("StorageManager", () => {
     });
   });
 
+  // Each call goes straight to the adapter: one call, and a missing path
+  // returns what the old exists() check returned.
   describe("readFile", () => {
     it("reads file content", async () => {
-      mockApp.vault.adapter.exists.mockResolvedValue(true);
       mockApp.vault.adapter.read.mockResolvedValue("file content");
 
       const result = await storage.readFile("settings", "test.txt");
 
       expect(result).toBe("file content");
+      expect(mockApp.vault.adapter.read).toHaveBeenCalledWith(".systemsculpt/settings/test.txt");
+      expect(adapterCallCount(mockApp.vault.adapter)).toBe(1);
     });
 
     it("returns null if file does not exist", async () => {
-      mockApp.vault.adapter.exists.mockResolvedValue(false);
+      mockApp.vault.adapter.read.mockRejectedValue(missingPathError(".systemsculpt/settings/missing.txt"));
 
       const result = await storage.readFile("settings", "missing.txt");
 
       expect(result).toBeNull();
+      expect(adapterCallCount(mockApp.vault.adapter)).toBe(1);
     });
 
     it("parses JSON when requested", async () => {
-      mockApp.vault.adapter.exists.mockResolvedValue(true);
       mockApp.vault.adapter.read.mockResolvedValue('{"key": "value"}');
 
       const result = await storage.readFile<{ key: string }>(
@@ -335,41 +412,49 @@ describe("StorageManager", () => {
       );
 
       expect(result).toEqual({ key: "value" });
+      expect(adapterCallCount(mockApp.vault.adapter)).toBe(1);
+    });
+
+    it("returns null for unparseable JSON", async () => {
+      mockApp.vault.adapter.read.mockResolvedValue("{truncated");
+
+      await expect(storage.readFile("settings", "test.json", true)).resolves.toBeNull();
     });
 
     it("returns null on read error", async () => {
-      mockApp.vault.adapter.exists.mockResolvedValue(true);
       mockApp.vault.adapter.read.mockRejectedValue(new Error("Read failed"));
 
       const result = await storage.readFile("settings", "test.txt");
 
       expect(result).toBeNull();
+      expect(adapterCallCount(mockApp.vault.adapter)).toBe(1);
     });
   });
 
   describe("deleteFile", () => {
     it("deletes existing file", async () => {
-      mockApp.vault.adapter.exists.mockResolvedValue(true);
-
       const result = await storage.deleteFile("settings", "test.txt");
 
-      expect(result.success).toBe(true);
+      expect(result).toEqual({ success: true, path: ".systemsculpt/settings/test.txt" });
       expect(mockApp.vault.adapter.remove).toHaveBeenCalledWith(
         ".systemsculpt/settings/test.txt"
       );
+      expect(adapterCallCount(mockApp.vault.adapter)).toBe(1);
     });
 
-    it("succeeds if file does not exist", async () => {
-      mockApp.vault.adapter.exists.mockResolvedValue(false);
+    it.each([
+      ["desktop ENOENT", missingPathError(".systemsculpt/settings/missing.txt")],
+      ["a 'does not exist' message", new Error("File does not exist")],
+    ])("succeeds if file does not exist (%s)", async (_label, error) => {
+      mockApp.vault.adapter.remove.mockRejectedValue(error);
 
       const result = await storage.deleteFile("settings", "missing.txt");
 
-      expect(result.success).toBe(true);
-      expect(mockApp.vault.adapter.remove).not.toHaveBeenCalled();
+      expect(result).toEqual({ success: true, path: ".systemsculpt/settings/missing.txt" });
+      expect(adapterCallCount(mockApp.vault.adapter)).toBe(1);
     });
 
     it("handles delete errors", async () => {
-      mockApp.vault.adapter.exists.mockResolvedValue(true);
       mockApp.vault.adapter.remove.mockRejectedValue(
         new Error("Delete failed")
       );
@@ -378,35 +463,36 @@ describe("StorageManager", () => {
 
       expect(result.success).toBe(false);
       expect(result.error).toBe("Delete failed");
+      expect(adapterCallCount(mockApp.vault.adapter)).toBe(1);
     });
   });
 
   describe("listFiles", () => {
     it("lists files in a directory", async () => {
-      mockApp.vault.adapter.exists.mockResolvedValue(true);
       mockApp.vault.adapter.list.mockResolvedValue({
         files: [
           ".systemsculpt/settings/file1.json",
           ".systemsculpt/settings/file2.json",
         ],
-        folders: [],
+        folders: [".systemsculpt/settings/backups"],
       });
 
       const result = await storage.listFiles("settings");
 
       expect(result).toEqual(["file1.json", "file2.json"]);
+      expect(adapterCallCount(mockApp.vault.adapter)).toBe(1);
     });
 
     it("returns empty array if directory does not exist", async () => {
-      mockApp.vault.adapter.exists.mockResolvedValue(false);
+      mockApp.vault.adapter.list.mockRejectedValue(missingPathError(".systemsculpt/settings"));
 
       const result = await storage.listFiles("settings");
 
       expect(result).toEqual([]);
+      expect(adapterCallCount(mockApp.vault.adapter)).toBe(1);
     });
 
     it("handles subpath", async () => {
-      mockApp.vault.adapter.exists.mockResolvedValue(true);
       mockApp.vault.adapter.list.mockResolvedValue({
         files: [".systemsculpt/settings/backups/backup1.json"],
         folders: [],
@@ -415,15 +501,17 @@ describe("StorageManager", () => {
       const result = await storage.listFiles("settings", "backups");
 
       expect(result).toEqual(["backup1.json"]);
+      expect(mockApp.vault.adapter.list).toHaveBeenCalledWith(".systemsculpt/settings/backups");
+      expect(adapterCallCount(mockApp.vault.adapter)).toBe(1);
     });
 
     it("returns empty array on error", async () => {
-      mockApp.vault.adapter.exists.mockResolvedValue(true);
       mockApp.vault.adapter.list.mockRejectedValue(new Error("List failed"));
 
       const result = await storage.listFiles("settings");
 
       expect(result).toEqual([]);
+      expect(adapterCallCount(mockApp.vault.adapter)).toBe(1);
     });
   });
 

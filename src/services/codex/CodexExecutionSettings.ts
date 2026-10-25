@@ -11,9 +11,6 @@ export function localTextAgent(settings: Pick<SystemSculptSettings, 'textExecuti
   const backend = settings?.textExecutionBackend;
   return isLocalAgentId(backend) && hasHostCapability('local-cli') ? backend : null;
 }
-export function usesLocalCodex(settings: Pick<SystemSculptSettings, 'textExecutionBackend'> | undefined): boolean {
-  return localTextAgent(settings) === 'codex';
-}
 export function defaultTextBackend(settings: Pick<SystemSculptSettings, 'textExecutionBackend'>): TextExecutionBackend {
   return localTextAgent(settings) ?? 'systemsculpt';
 }

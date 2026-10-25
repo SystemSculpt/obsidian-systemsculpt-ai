@@ -39,8 +39,9 @@ const MIME_TYPES: Readonly<Record<string, string>> = Object.freeze({
 });
 
 // Both hosts upload slices; only the managed service's input limit applies.
+/** @internal Tests assert against this value. */
 export const DESKTOP_TRANSCRIPTION_MAX_FILE_SIZE = MAX_FILE_SIZE;
-export const MOBILE_TRANSCRIPTION_MAX_FILE_SIZE = MAX_FILE_SIZE;
+const MOBILE_TRANSCRIPTION_MAX_FILE_SIZE = MAX_FILE_SIZE;
 
 export function getTranscriptionMaxFileSize(): number {
   return getHostDeviceType() === "Mobile"

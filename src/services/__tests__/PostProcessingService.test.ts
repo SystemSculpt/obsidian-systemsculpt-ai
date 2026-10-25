@@ -1,5 +1,6 @@
 import { DEFAULT_SETTINGS } from "../../types";
 import { PostProcessingService } from "../PostProcessingService";
+import type { ManagedTextGenerationOperation } from "../managed/ManagedTextGenerationAdapter";
 
 type PostProcessingInput = Readonly<{
   cleanupInstructions: string;
@@ -74,7 +75,7 @@ describe("PostProcessingService", () => {
 
   it("defers prompt lookup and transcript message construction to the admitted callback", async () => {
     const mock = plugin();
-    mock.generateText.mockImplementationOnce(async (operation) => {
+    mock.generateText.mockImplementationOnce(async (operation: ManagedTextGenerationOperation) => {
       expect(operation.buildMessages).toEqual(expect.any(Function));
       return { operationId: operation.operationId, requestId: "r", text: "clean", finishReason: "stop", usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 } };
     });
@@ -122,7 +123,7 @@ describe("PostProcessingService", () => {
 
   it("honors task-scoped enabled and prompt snapshots after settings change", async () => {
     const mock = plugin();
-    mock.generateText.mockImplementationOnce(async (operation) => {
+    mock.generateText.mockImplementationOnce(async (operation: ManagedTextGenerationOperation) => {
       mock.settings.postProcessingEnabled = false;
       mock.settings.postProcessingPrompt = "Changed while running.";
       const messages = await operation.buildMessages();

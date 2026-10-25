@@ -21,7 +21,6 @@ const makePlugin = (app: App, options: { embeddingsEnabled?: boolean; manager?: 
         respectObsidianExclusions: false,
       },
     },
-    vaultFileCache: undefined,
     embeddingsManager: manager,
     getOrCreateEmbeddingsManager: jest.fn().mockReturnValue(manager),
   } as any;
@@ -44,11 +43,10 @@ describe("SystemSculptSearchEngine semantic mode", () => {
       "notes/cooking.md": "Recipes for delicious meals and cooking tips.",
     };
 
-    app.vault.getFiles.mockReturnValue(files);
-    // @ts-expect-error mock injected for tests
+    jest.spyOn(app.vault, "getFiles").mockReturnValue(files);
     app.vault.cachedRead = jest.fn((file) => Promise.resolve(contents[file.path] ?? ""));
-    app.vault.read.mockImplementation(app.vault.cachedRead);
-    app.vault.getAbstractFileByPath.mockImplementation((p) => files.find((f) => f.path === p) ?? null);
+    jest.spyOn(app.vault, "read").mockImplementation(app.vault.cachedRead);
+    jest.spyOn(app.vault, "getAbstractFileByPath").mockImplementation((p) => files.find((f) => f.path === p) ?? null);
 
     const plugin = makePlugin(app, pluginOptions);
     return { app, files, plugin };
@@ -211,11 +209,10 @@ describe("SystemSculptSearchEngine semantic mode", () => {
         "Research/Timetable page ideas.md": "The next sailing first, big, at the top. Pay on board stays near the top.",
         "Projects/Low Water.md": "Tide tables for the slipway and the harbour crossing.",
       };
-      app.vault.getFiles.mockReturnValue(files);
-      // @ts-expect-error mock injected for tests
+      jest.spyOn(app.vault, "getFiles").mockReturnValue(files);
       app.vault.cachedRead = jest.fn((file) => Promise.resolve(contents[file.path] ?? ""));
-      app.vault.read.mockImplementation(app.vault.cachedRead);
-      app.vault.getAbstractFileByPath.mockImplementation((p) => files.find((f) => f.path === p) ?? null);
+      jest.spyOn(app.vault, "read").mockImplementation(app.vault.cachedRead);
+      jest.spyOn(app.vault, "getAbstractFileByPath").mockImplementation((p) => files.find((f) => f.path === p) ?? null);
       const mockManager = createMockManager({
         searchSimilar: jest.fn().mockResolvedValue([
           { path: "Research/Timetable page ideas.md", score: 0.444, metadata: { title: "Timetable page ideas" } },
@@ -485,7 +482,6 @@ describe("SystemSculptSearchEngine semantic mode", () => {
       const plugin = {
         app,
         settings: { embeddingsEnabled: true, embeddingsExclusions: {} },
-        vaultFileCache: undefined,
         getOrCreateEmbeddingsManager: jest.fn().mockImplementation(() => {
           throw new Error("Manager initialization failed");
         }),
@@ -510,7 +506,6 @@ describe("SystemSculptSearchEngine semantic mode", () => {
       const plugin: any = {
         app,
         settings: { embeddingsEnabled: true, embeddingsExclusions: {} },
-        vaultFileCache: undefined,
         embeddingsManager: undefined,
         getOrCreateEmbeddingsManager: jest.fn(() => {
           plugin.embeddingsManager = manager;

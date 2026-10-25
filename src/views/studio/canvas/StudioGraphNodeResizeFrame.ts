@@ -48,9 +48,15 @@ export const STUDIO_GRAPH_RESIZE_ZONES: readonly StudioGraphResizeZone[] = [
   "se",
 ];
 
-/** Thickness of the edge hit strips (straddles the card border). */
+/**
+ * Thickness of the edge hit strips (straddles the card border).
+ * @internal Tests assert against this value.
+ */
 export const STUDIO_GRAPH_RESIZE_EDGE_HIT_PX = 6;
-/** Side length of the square corner hit zones. */
+/**
+ * Side length of the square corner hit zones.
+ * @internal Tests assert against this value.
+ */
 export const STUDIO_GRAPH_RESIZE_CORNER_HIT_PX = 12;
 
 /** Guard against inverted/degenerate scale factors on text drags. */

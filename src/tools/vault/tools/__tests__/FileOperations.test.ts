@@ -1,13 +1,13 @@
 /**
  * @jest-environment jsdom
  */
-import { App, TFile, TFolder, normalizePath } from "obsidian";
+import { App, TFile, TFolder } from "obsidian";
 import { FileOperations } from "../FileOperations";
 import { FILESYSTEM_LIMITS } from "../../constants";
 
 // Mock utils
 jest.mock("../../utils", () => ({
-  validatePath: jest.fn((path, allowedPaths) => {
+  validatePath: jest.fn((path, _allowedPaths) => {
     if (path === "blocked/file.md") return false;
     return true;
   }),
@@ -20,7 +20,7 @@ jest.mock("../../utils", () => ({
       .replace(/\/+$/, "")
   ),
   normalizeLineEndings: jest.fn((text) => text.replace(/\r\n/g, "\n")),
-  createSimpleDiff: jest.fn((original, modified, path) => `diff for ${path}`),
+  createSimpleDiff: jest.fn((_original, _modified, path) => `diff for ${path}`),
   isHiddenSystemPath: jest.fn(() => false),
   ensureAdapterFolder: jest.fn(async () => {}),
   ensureVaultFolder: jest.fn(async () => {}),

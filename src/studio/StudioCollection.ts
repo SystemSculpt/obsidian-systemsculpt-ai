@@ -1,9 +1,9 @@
 import type { StudioJsonValue } from "./types";
 import { isRecord } from "./utils";
 
-export type StudioCollectionResource = { title: string; url: string | null; role: string };
-export type StudioCollectionComment = { id: string; body: string; author: string; updatedAt: string; url: string | null };
-export type StudioCollectionItem = { id: string; title: string; subtitle: string; url: string | null; parent: string; closed: boolean; group: string; resources?: StudioCollectionResource[]; updatedAt?: string; observedAt?: string; description?: string; comments?: StudioCollectionComment[]; moreComments?: boolean; detailsTruncated?: boolean };
+type StudioCollectionResource = { title: string; url: string | null; role: string };
+type StudioCollectionComment = { id: string; body: string; author: string; updatedAt: string; url: string | null };
+type StudioCollectionItem = { id: string; title: string; subtitle: string; url: string | null; parent: string; closed: boolean; group: string; resources?: StudioCollectionResource[]; updatedAt?: string; observedAt?: string; description?: string; comments?: StudioCollectionComment[]; moreComments?: boolean; detailsTruncated?: boolean };
 export type StudioCollection = { total: number; open: number; observedAt: string; groups: { name: string; total: number; items: StudioCollectionItem[] }[] };
 const MAX_ITEMS = 5000;
 const MAX_GROUPS = 100;

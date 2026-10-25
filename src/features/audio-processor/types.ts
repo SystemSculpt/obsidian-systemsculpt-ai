@@ -21,7 +21,7 @@ export function normalizeAudioProcessorOutputPreset(
     : "detailed";
 }
 
-export type AudioProcessorResumableAudioSource = PendingAudioProcessorUploadSource;
+type AudioProcessorResumableAudioSource = PendingAudioProcessorUploadSource;
 
 export type AudioProcessorStatus =
   | "uploading"

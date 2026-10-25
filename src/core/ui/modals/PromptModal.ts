@@ -1,7 +1,7 @@
 import { App, setIcon } from "obsidian";
 import { StandardModal } from "./standard/StandardModal";
 
-export type PromptResultAction = "primary" | "secondary" | "cancel";
+type PromptResultAction = "primary" | "secondary" | "cancel";
 
 export interface PromptOptions {
   primaryButton?: string;

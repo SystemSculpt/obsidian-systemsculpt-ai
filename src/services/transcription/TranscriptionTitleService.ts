@@ -134,6 +134,7 @@ export class TranscriptionTitleService {
   }
 }
 
+/** @internal Unit-tested directly. */
 export function buildPercentileExcerpt(text: string, maxChars: number): string {
   const normalized = String(text || "").replace(/\r\n/g, "\n").trim();
   if (!normalized) return "";

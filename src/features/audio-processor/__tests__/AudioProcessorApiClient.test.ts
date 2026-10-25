@@ -92,7 +92,7 @@ describe("AudioProcessorApiClient", () => {
 
   it.each(retryFixture.cases)("carries $name through signed uploads, API failures and audio poll hints", async ({ header, milliseconds }) => {
     const now = jest.spyOn(Date, "now").mockReturnValue(retryFixture.now);
-    const headers = header === null ? {} : { "Retry-After": header };
+    const headers: Record<string, string> = header === null ? {} : { "Retry-After": header };
     const { client, requestClient } = setup();
     try {
       requestClient.responses.push(new Response("busy", { status: 503, headers }));

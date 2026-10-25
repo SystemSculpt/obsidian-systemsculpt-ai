@@ -11,6 +11,7 @@ function createActions(overrides: Partial<SimilarNotesPresentationActions> = {})
   return {
     onRefresh: jest.fn(),
     onOpenCredits: jest.fn(),
+    onChoosePlan: jest.fn(),
     onOpenSettings: jest.fn(),
     onOpenPendingFiles: jest.fn(),
     onStartProcessing: jest.fn(),
@@ -218,12 +219,16 @@ describe("SimilarNotesPresentation", () => {
     const frame = document.createElement("iframe");
     document.body.appendChild(frame);
     const foreignWindow = frame.contentWindow!;
+    if (!("HTMLElement" in foreignWindow) || typeof foreignWindow.HTMLElement !== "function") {
+      throw new Error("Expected the frame to have its own HTMLElement.");
+    }
+    const ForeignHTMLElement = foreignWindow.HTMLElement;
     for (const helper of [
       "setText", "setAttr", "setAttrs", "empty", "createEl", "createDiv", "createSpan",
       "appendText", "addClass", "removeClass", "toggleClass", "hasClass", "toggle",
       "setCssStyles", "setCssProps", "hide", "show", "createFragment",
     ]) {
-      (foreignWindow.HTMLElement.prototype as any)[helper] = (HTMLElement.prototype as any)[helper];
+      (ForeignHTMLElement.prototype as any)[helper] = (HTMLElement.prototype as any)[helper];
     }
     const foreignRoot = frame.contentDocument!.createElement("div");
     frame.contentDocument!.body.appendChild(foreignRoot);

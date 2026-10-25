@@ -1,5 +1,4 @@
 declare const __SYSTEMSCULPT_API_BASE_URL__: string | undefined;
-declare const __SS_RELEASE_BUILD__: boolean | undefined;
 
 function normalizeCompiledApiBaseUrl(value: string): string {
   const raw = value.trim().replace(/\/+$/, "");
@@ -22,9 +21,6 @@ function normalizeCompiledApiBaseUrl(value: string): string {
   return raw;
 }
 
-const RELEASE_BUILD =
-  typeof __SS_RELEASE_BUILD__ === "boolean" ? __SS_RELEASE_BUILD__ : true;
-
 const COMPILED_API_BASE_URL =
   typeof __SYSTEMSCULPT_API_BASE_URL__ === "string"
     ? __SYSTEMSCULPT_API_BASE_URL__
@@ -44,7 +40,6 @@ if (COMPILED_API_BASE_URL === undefined) {
  * scripts/plugin-artifacts.mjs.
  */
 export const API_BASE_URL = normalizeCompiledApiBaseUrl(COMPILED_API_BASE_URL);
-export const IS_DEVELOPMENT_BUILD = !RELEASE_BUILD;
 
 export const SYSTEMSCULPT_API_ENDPOINTS = {
   CREDITS: {

@@ -15,7 +15,7 @@ it("binds managed recovery to the view visibility and rebinds its observer on wi
   const root = document.body.createDiv();
   const shown = jest.spyOn(root, "isShown").mockReturnValue(true);
   const detachMigration = jest.fn();
-  let migrate = () => {};
+  let migrate: (win: Window) => unknown = () => {};
   root.onWindowMigrated = listener => { migrate = listener; return detachMigration; };
   const leafEvent = {};
   const workspace = { on: jest.fn(() => leafEvent), offref: jest.fn() };
@@ -38,7 +38,7 @@ it("binds managed recovery to the view visibility and rebinds its observer on wi
   observers[0].refresh();
   expect(activity.isVisible()).toBe(false);
   expect(workspace.on).toHaveBeenCalledWith("active-leaf-change", refresh);
-  migrate();
+  migrate(window);
   expect(observers[0].disconnect).toHaveBeenCalledTimes(1);
   expect(observers[1].observe).toHaveBeenCalledWith(root);
   detach();

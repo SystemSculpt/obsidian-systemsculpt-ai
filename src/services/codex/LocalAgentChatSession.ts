@@ -12,10 +12,10 @@ import { localAgentPromptText } from './LocalAgentMessageParts';
 import { localAgentReplay } from './LocalAgentReplay';
 import { desktopHost } from '../../platform/desktopOnly';
 
-export type LocalAgentTurn = { prompt: string; images: string[]; workingDirectory: string; threadId?: string };
+type LocalAgentTurn = { prompt: string; images: string[]; workingDirectory: string; threadId?: string };
 export type LocalAgentToolUpdate = Pick<AgentToolPart, 'callId' | 'state'> & Partial<Pick<AgentToolPart, 'name' | 'input' | 'inputText' | 'native' | 'output' | 'error'>>;
-export type LocalAgentApprovalResponse = ApprovalResponseOptions & { approved: boolean };
-export type LocalAgentTurnEvents = {
+type LocalAgentApprovalResponse = ApprovalResponseOptions & { approved: boolean };
+type LocalAgentTurnEvents = {
   /** Persist the native thread identity before the agent continues. */
   thread: (threadId: string) => Promise<void>;
   status: (label: string) => void;

@@ -1,4 +1,8 @@
 type PointerListenerType = "pointermove" | "pointerup" | "pointercancel";
+type PointerListenerWindow = {
+  addEventListener?: (type: string, listener: EventListenerOrEventListenerObject) => void;
+  removeEventListener?: (type: string, listener: EventListenerOrEventListenerObject) => void;
+};
 
 export function createElementStub(): HTMLElement {
   const classes = new Set<string>();
@@ -55,19 +59,15 @@ export function installWindowPointerListenerHarness(): {
   has: (type: PointerListenerType) => boolean;
   restore: () => void;
 } {
-  const globalRef = globalThis as { window?: Record<string, unknown> };
-  const hadWindow = Boolean(globalRef.window);
-  const windowRef = (globalRef.window || {}) as {
-    addEventListener?: (type: string, listener: EventListenerOrEventListenerObject) => void;
-    removeEventListener?: (type: string, listener: EventListenerOrEventListenerObject) => void;
-  };
+  const hadWindow = typeof window !== "undefined";
+  const windowRef: PointerListenerWindow = hadWindow ? window : {};
   const originalAdd = windowRef.addEventListener;
   const originalRemove = windowRef.removeEventListener;
   const listeners = new Map<string, EventListener>();
 
   windowRef.addEventListener = (type, listener) => {
     if (typeof listener === "function") {
-      listeners.set(String(type), listener as EventListener);
+      listeners.set(String(type), listener);
     }
   };
   windowRef.removeEventListener = (type, listener) => {
@@ -80,14 +80,16 @@ export function installWindowPointerListenerHarness(): {
     }
   };
 
-  globalRef.window = windowRef as unknown as Record<string, unknown>;
+  if (!hadWindow) {
+    Object.defineProperty(globalThis, "window", { configurable: true, writable: true, value: windowRef });
+  }
   return {
     emit: (type, event) => {
       const listener = listeners.get(type);
       if (!listener) {
         throw new Error(`Missing listener for ${type}`);
       }
-      listener(event as unknown as Event);
+      listener(event);
     },
     has: (type) => listeners.has(type),
     restore: () => {
@@ -102,7 +104,7 @@ export function installWindowPointerListenerHarness(): {
         delete windowRef.removeEventListener;
       }
       if (!hadWindow) {
-        delete globalRef.window;
+        Reflect.deleteProperty(globalThis, "window");
       }
     },
   };

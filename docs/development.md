@@ -47,12 +47,15 @@ adapters unavailable. It does not launch Android or iOS.
 
 ## Production reachability
 
-`npm run check:knip`, also run by `check:ci`, checks for unused production files
-and dependencies, plus unlisted and unresolved imports, starting at `src/main.ts`.
-It excludes test fixtures and development scripts, which are not plugin entry
-points. Named-export findings are outside this runtime-cleanup gate:
-`npx knip --production` additionally reports the existing unused-export and
-test-only-export backlog tracked in #402. That broader cleanup remains separate.
+`npm run check:knip`, also run by `check:ci`, runs `knip --production` from
+`src/main.ts`: it fails on unused production files, dependencies and exported
+values or types, and on unlisted or unresolved imports. Tests and development
+scripts are not entry points, so an export only a test imports is a finding.
+Delete it with its tests, or stop exporting it when its own file uses it. Keep a
+deliberate test seam (a pure function unit-tested directly, an error class or
+limit a test asserts) with a JSDoc `@internal` tag and a one-line reason, for
+example `/** @internal Unit-tested directly. */`. knip.jsonc exempts
+`src/views/chatview/**` exports until its refactor (#398) lands.
 
 ## Checkpoints
 
@@ -62,8 +65,8 @@ npm run check:ci
 npm run check:compat
 ~~~
 
-check:plugin adds TypeScript, mobile compatibility, sync, artifact, and release
-guards. test:chatview:critical runs the thin Bridge, session transport,
+check:plugin adds TypeScript for sources and tests (tsconfig.test.json, see
+testing/README.md), mobile compatibility, sync, artifact, and release guards. test:chatview:critical runs the thin Bridge, session transport,
 transcript persistence, approvals, queue and recovery controls, and
 restored-history UI with strict console, randomized order, open-handle
 detection, adversarial race cases, and a global coverage floor over the
@@ -77,8 +80,10 @@ that tree run as ordinary unit tests. Standalone mobile checks retain all their
 scenarios. Every Jest config shares the same transform and setup base.
 check:compat is the smaller Node and operating-system compatibility contract.
 It runs the same critical ChatView suites without repeating coverage collection
-or OS-independent ESLint already enforced by check:ci. Fast ESLint passes use
-separate local cache files, including lint:community. Full check:plugin/check:ci
+or OS-independent ESLint already enforced by check:ci. lint:obsidian runs the
+repository's source rules and the community-directory scan in one type-aware
+pass over one TypeScript program; lint:community still runs the directory scan
+alone. Fast ESLint passes use separate local cache files. Full check:plugin/check:ci
 (and therefore pre-push and release) disable ESLint caches: a changed import's
 types can introduce lint errors in an otherwise unchanged caller.
 

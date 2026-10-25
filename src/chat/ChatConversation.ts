@@ -7,7 +7,7 @@ export type AgentRunPhase =
   | "settling"
   | "complete";
 
-export type AgentRunStatus =
+type AgentRunStatus =
   | "idle"
   | "running"
   | "waiting"
@@ -15,7 +15,7 @@ export type AgentRunStatus =
   | "cancelled"
   | "failed";
 
-export type AgentToolState =
+type AgentToolState =
   | "input-streaming"
   | "input-ready"
   | "approval-required"
@@ -68,7 +68,7 @@ export type AgentTextPart = AgentPartBase & Readonly<{
   markdown: string;
 }>;
 
-export type AgentReasoningPart = AgentPartBase & Readonly<{
+type AgentReasoningPart = AgentPartBase & Readonly<{
   kind: "reasoning";
   messageId: string;
   state: "streaming" | "complete";
@@ -108,7 +108,7 @@ export type AgentToolPart = AgentPartBase & Readonly<{
   error?: ManagedAgentError;
 }>;
 
-export type AgentErrorPart = AgentPartBase & Readonly<{
+type AgentErrorPart = AgentPartBase & Readonly<{
   kind: "error";
   error: ManagedAgentError;
   retryable: boolean;
@@ -121,7 +121,7 @@ export type AgentPart =
   | AgentToolPart
   | AgentErrorPart;
 
-export type AgentMessageProjection = Readonly<{
+type AgentMessageProjection = Readonly<{
   id: string;
   role: "assistant";
   partIds: readonly string[];

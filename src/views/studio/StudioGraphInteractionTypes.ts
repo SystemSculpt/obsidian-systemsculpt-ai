@@ -50,7 +50,7 @@ export type StudioGraphProjectMutationOptions = {
   captureHistory?: boolean;
 };
 
-export type StudioGraphProjectMutator = (project: StudioProjectV1) => boolean | void;
+type StudioGraphProjectMutator = (project: StudioProjectV1) => boolean | void;
 
 export type StudioGraphInteractionHost = {
   isBusy: () => boolean;

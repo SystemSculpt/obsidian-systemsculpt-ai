@@ -28,7 +28,6 @@ import { legacyCredentialNotice, protectLegacyCredentials } from "./core/securit
 import { ResumeChatService } from "./views/chatview/ResumeChatService";
 import { nativeChatSessions } from "./views/chatview/NativeChatSessions";
 import { EmbeddingsManager } from "./services/embeddings/EmbeddingsManager";
-import { VaultFileCache } from "./utils/VaultFileCache";
 import { EmbeddingsStatusBar } from "./components/EmbeddingsStatusBar";
 import { ResourceMonitorService } from "./services/ResourceMonitorService";
 import { PluginLogger } from "./utils/PluginLogger";
@@ -175,7 +174,6 @@ export default class SystemSculptPlugin extends Plugin {
   private pluginLogger: PluginLogger | null = null;
   private initializationTracer: InitializationTracer | null = null;
   public embeddingsManager: EmbeddingsManager | null = null;
-  public vaultFileCache: VaultFileCache | undefined;
   public embeddingsStatusBar: EmbeddingsStatusBar | null = null;
   private resourceMonitor: ResourceMonitorService | null = null;
   private loadedPluginBuildIdPromise: Promise<`sha256:${string}`> | null = null;
@@ -727,6 +725,26 @@ export default class SystemSculptPlugin extends Plugin {
       },
     });
 
+    // Studio before 6.10 left per-save snapshots in .systemsculpt/studio/projects;
+    // each device offers once to delete those of projects that open now (#354).
+    coordinator.registerTask("layout", {
+      id: "studio.legacyGenerations",
+      label: "old Studio history check",
+      optional: true,
+      run: () => {
+        void waitForIdle(DEFERRED_STARTUP_IDLE_TIMEOUT_MS, this.deferredStartup.signal).then(async (idle) => {
+          if (!idle || this.isUnloading) return;
+          const { offerStudioLegacyGenerationsCleanup } = await import("./studio/StudioLegacyGenerations");
+          await offerStudioLegacyGenerationsCleanup(this.app.vault, this.deferredStartup.signal);
+        }).catch((error: unknown) => {
+          this.getLogger().warn("Could not check for old Studio history", {
+            source: "SystemSculptPlugin",
+            metadata: { error: error instanceof Error ? error.message : String(error) },
+          });
+        });
+      },
+    });
+
     coordinator.registerTask("layout", {
       id: "embeddings.autostart",
       label: "embeddings auto-start",
@@ -1024,7 +1042,6 @@ export default class SystemSculptPlugin extends Plugin {
 
       const parallelTasks = [
         this.initializeDirectories(),
-        this.initializeVaultFileCache(),
         this.initializeBasicServices(),
       ];
 
@@ -1112,35 +1129,6 @@ export default class SystemSculptPlugin extends Plugin {
 
       logger.error("Directory manager failed to initialize", error, {
         source: "SystemSculptPlugin",
-      });
-    }
-  }
-
-  private async initializeVaultFileCache() {
-    const tracer = this.getInitializationTracer();
-    const phase = tracer.startPhase("cache.vaultFile.initialize", {
-      slowThresholdMs: 600,
-      timeoutMs: 6000,
-    });
-    const logger = this.getLogger();
-
-    try {
-      this.vaultFileCache = new VaultFileCache(this.app);
-      await this.vaultFileCache.initialize();
-
-      logger.info("Vault file cache primed", {
-        source: "SystemSculptPlugin",
-      });
-
-      phase.complete();
-    } catch (error) {
-      phase.fail(error);
-
-      logger.warn("Vault file cache unavailable", {
-        source: "SystemSculptPlugin",
-        metadata: {
-          error: error instanceof Error ? error.message : String(error),
-        },
       });
     }
   }
@@ -1657,6 +1645,8 @@ export default class SystemSculptPlugin extends Plugin {
   private async unloadAsync(): Promise<void> {
     this.deferredStartup.abort();
     this.phoneHandoffInbox?.dispose();
+    // Studio's unsaved typing starts saving now; the service's later close awaits it.
+    void this.studioService?.flushProjectSessions();
     // Microphone privacy is the first teardown action and must never wait on
     // diagnostics disk I/O or an unrelated service cleanup.
     const recorder = this.recorderService;
@@ -1824,7 +1814,6 @@ export default class SystemSculptPlugin extends Plugin {
     // every fallible teardown step above.
     await safely("transcription service", () => this.transcriptionService?.unload());
     await safely("resume chat service", () => this.resumeChatService?.cleanup());
-    await safely("vault file cache", () => this.vaultFileCache?.destroy());
     await safely("service singletons", () => {
       SystemSculptService.clearInstance();
       this.managedCapabilityGraph = null;
@@ -2275,7 +2264,10 @@ export default class SystemSculptPlugin extends Plugin {
 
   getStudioService(): StudioService {
     if (!this.studioService) {
-      this.studioService = new StudioService(this);
+      const studioService = new StudioService(this);
+      this.studioService = studioService;
+      // The app can quit without closing views or unloading plugins: save Studio typing that has not paused yet.
+      this.registerEvent(this.app.workspace.on("quit", tasks => tasks.add(() => studioService.flushProjectSessions())));
     }
     return this.studioService;
   }

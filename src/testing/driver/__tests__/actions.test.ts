@@ -4,16 +4,17 @@
 
 import type { App } from "obsidian";
 
-import type { ChatMessage, MessagePart } from "../../../types";
+import type { ChatMessage } from "../../../types";
 import type { SupportDiagnosticEvent } from "../../../utils/PluginLogger";
 import { canonicalAgentToolInput } from "../../../chat/managed/MutationJournal";
 import {
-  DEVELOPMENT_TEST_ROOT,
   DRIVER_ACTIONS,
   runDriverAction,
   type ActionContext,
 } from "../actions";
 import { CHAT_DEVELOPMENT_STATE_ACTIONS } from "../chatDevelopmentState";
+
+const DEVELOPMENT_TEST_ROOT = "SystemSculpt/Development Tests";
 import { CHAT_TOOL_LIFECYCLE_ACTIONS } from "../chatToolLifecycle";
 import { DIAGNOSTICS_EXPORT_ACTIONS } from "../diagnosticsExports";
 import { DOM_ACTIONS } from "../domActions";
@@ -96,9 +97,9 @@ function makeDevelopmentHarness(options: { chatId?: string; draft?: string } = {
     containerEl: container,
     chatId: options.chatId ?? "",
     messages: [] as ChatMessage[],
-    getExpectedChatHistoryFilePath: jest.fn(() =>
+    getExpectedChatHistoryFilePath: jest.fn((): string | null =>
       view.chatId ? `SystemSculpt/Chats/${view.chatId}.md` : null),
-    getChatHistoryFilePath: jest.fn(() =>
+    getChatHistoryFilePath: jest.fn((): string | null =>
       view.chatId ? `SystemSculpt/Chats/${view.chatId}.md` : null),
     loadChatById: jest.fn(async (chatId: string) => {
       view.chatId = chatId;
@@ -151,15 +152,15 @@ function makeDevelopmentHarness(options: { chatId?: string; draft?: string } = {
   container.append(newChat);
 
   const leaf = { view };
-  const adapterRead = jest.fn(async () => "EXPECTED");
-  const adapterExists = jest.fn(async () => false);
-  const adapterRename = jest.fn(async () => undefined);
-  const adapterRmdir = jest.fn(async () => undefined);
+  const adapterRead = jest.fn<Promise<string>, [string]>(async () => "EXPECTED");
+  const adapterExists = jest.fn<Promise<boolean>, [string]>(async () => false);
+  const adapterRename = jest.fn<Promise<void>, [string, string]>(async () => undefined);
+  const adapterRmdir = jest.fn<Promise<void>, [string, boolean]>(async () => undefined);
   const getAbstractFileByPath = jest.fn<unknown, [string]>(() => null);
-  const trashFile = jest.fn(async () => undefined);
+  const trashFile = jest.fn<Promise<void>, [unknown]>(async () => undefined);
   const workspace = {
     activeLeaf: leaf,
-    getMostRecentLeaf: jest.fn(() => workspace.activeLeaf),
+    getMostRecentLeaf: jest.fn((): typeof leaf => workspace.activeLeaf),
     getLeavesOfType: jest.fn(() => [leaf]),
     revealLeaf: jest.fn(async () => undefined),
     getLeaf: jest.fn(),
@@ -222,7 +223,7 @@ function supportDiagnostic(
     timestamp: `2026-08-09T22:00:00.${String(sequence).padStart(3, "0")}Z`,
     severity: "info",
     code,
-    phase: "test",
+    phase: "tool_execution",
     sequence,
     ...(toolExecutionOrdinal !== null ? {
       tool_execution_ordinal: toolExecutionOrdinal,
@@ -477,92 +478,6 @@ function exactSequentialPlanParams(
   };
 }
 
-function persistedExactAssistantMessage(
-  turnId: string,
-  tools: readonly ExactToolSeed[],
-  marker: string,
-  assistantMessageId = `assistant:${turnId}`,
-  content: string | null = marker,
-): ChatMessage {
-  const toolCalls = tools.map((tool, index) => ({
-    id: tool.callId,
-    messageId: assistantMessageId,
-    request: {
-      id: tool.callId,
-      type: "function" as const,
-      function: {
-        name: tool.name,
-        arguments: JSON.stringify(tool.input),
-      },
-    },
-    result: { success: true, data: {} },
-    state: "completed" as const,
-    timestamp: index + 1,
-  }));
-  const messageParts: MessagePart[] = toolCalls.map((tool, index) => ({
-    id: `tool:${tool.id}`,
-    type: "tool_call" as const,
-    timestamp: index + 1,
-    data: tool,
-  }));
-  if (typeof content === "string" && content.length > 0) {
-    messageParts.push({
-      id: `text:${assistantMessageId}:0`,
-      type: "content",
-      timestamp: toolCalls.length + 1,
-      data: content,
-    });
-  }
-  return {
-    role: "assistant",
-    content,
-    message_id: assistantMessageId,
-    messageParts,
-    tool_calls: toolCalls,
-  };
-}
-
-async function replaceWithPersistedExactTurn(
-  harness: ReturnType<typeof makeDevelopmentHarness>,
-  liveTurn: HTMLElement,
-  tools: readonly ExactToolSeed[],
-  marker: string,
-  turnId: string,
-  groupTools = false,
-): Promise<HTMLDivElement> {
-  const historicalTurn = document.createElement("div");
-  historicalTurn.className = "systemsculpt-agent-turn is-assistant";
-  historicalTurn.dataset.turnId = turnId;
-  if (groupTools) {
-    const first = tools[0];
-    if (!first) throw new Error("Expected at least one exact tool.");
-    const grouped = exactToolElement(first.callId, "succeeded");
-    grouped.classList.add("is-grouped");
-    grouped.dataset.toolCount = String(tools.length);
-    const label = grouped.querySelector(".systemsculpt-agent-tool-label");
-    if (label) label.textContent = `Read ${String(tools.length)} files`;
-    historicalTurn.append(grouped);
-  } else {
-    for (const seed of tools) historicalTurn.append(exactToolElement(seed.callId, "succeeded"));
-  }
-  const text = document.createElement("div");
-  text.className = "systemsculpt-agent-part is-text";
-  text.textContent = marker;
-  historicalTurn.append(text);
-  harness.container.prepend(historicalTurn);
-  liveTurn.remove();
-  harness.view.messages = [
-    {
-      role: "user",
-      content: "PRIVATE USER REQUEST",
-      message_id: turnId,
-    },
-    persistedExactAssistantMessage(turnId, tools, marker),
-  ];
-  await new Promise((resolve) => window.setTimeout(resolve, 0));
-  return historicalTurn;
-}
-
 async function rejectionError(promise: Promise<unknown>): Promise<Error> {
   try {
     await promise;
@@ -722,7 +637,7 @@ describe("test driver actions", () => {
   });
 
   it("proves exact vault content without returning the content", async () => {
-    const read = jest.fn(async () => "EXPECTED");
+    const read = jest.fn<Promise<string>, [string]>(async () => "EXPECTED");
     const { ctx } = makeContext(read);
 
     await expect(runDriverAction(ctx, "vault.assertText", {
@@ -747,7 +662,7 @@ describe("test driver actions", () => {
       path: folderPath,
       children: [],
     }));
-    const { ctx } = makeContext(jest.fn(async () => ""), getAbstractFileByPath);
+    const { ctx } = makeContext(jest.fn<Promise<string>, [string]>(async () => ""), getAbstractFileByPath);
 
     await expect(runDriverAction(ctx, "vault.assertFolder", {
       path: folderPath,
@@ -4641,7 +4556,7 @@ describe("incident report and reload ownership bridges", () => {
     if (originalClipboardDescriptor) {
       Object.defineProperty(window.navigator, "clipboard", originalClipboardDescriptor);
     } else {
-      delete (window.navigator as Navigator & { clipboard?: Clipboard }).clipboard;
+      Reflect.deleteProperty(window.navigator, "clipboard");
     }
   });
 

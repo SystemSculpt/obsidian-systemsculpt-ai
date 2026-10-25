@@ -32,13 +32,17 @@ import { buildVectorId } from "../utils/vectorId";
 import { dequantizeInt8, quantizeInt8Into } from "../utils/quantization";
 import { base64ToBytes as decodeBase64 } from "../../../utils/base64";
 
-/** The single-envelope format older releases write. Read-only here. */
+/**
+ * The single-envelope format older releases write. Read-only here.
+ * @internal Tests assert against this value.
+ */
 export const LEGACY_EMBEDDINGS_INDEX_FORMAT = 3;
 /** The manifest-plus-shards format this release writes. */
-export const PORTABLE_INDEX_FORMAT = 4;
+const PORTABLE_INDEX_FORMAT = 4;
 export const PORTABLE_SHARD_COUNT = 32;
-export const PORTABLE_VECTOR_ENCODING = "int8-scaled-v1" as const;
+const PORTABLE_VECTOR_ENCODING = "int8-scaled-v1" as const;
 
+/** @internal Tests type their fixtures with this. */
 export interface SerializedEmbeddingVector {
   id: string;
   path: string;
@@ -48,7 +52,10 @@ export interface SerializedEmbeddingVector {
   metadata: EmbeddingVector["metadata"];
 }
 
-/** A format-3 envelope as written by older releases. */
+/**
+ * A format-3 envelope as written by older releases.
+ * @internal Tests type their fixtures with this.
+ */
 export interface SerializedEmbeddingsIndex {
   format: number;
   /** Snapshot creation time (caller-supplied; null when unknown). */

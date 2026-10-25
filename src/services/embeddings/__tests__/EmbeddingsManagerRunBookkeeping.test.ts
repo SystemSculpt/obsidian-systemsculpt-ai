@@ -2,14 +2,14 @@ import { Mutex } from "async-mutex";
 import { TFile } from "obsidian";
 import { EmbeddingsManager } from "../EmbeddingsManager";
 import { ManagedEmbeddingsError } from "../gateway/ManagedEmbeddingsIndexAdapter";
-import { createLocalEmptyEmbeddingMarker } from "../LocalEmptyEmbeddingMarker";
+import { createLocalEmptyEmbeddingMarkerForRevision } from "../LocalEmptyEmbeddingMarker";
 import { SemanticIndexLifecycle } from "../SemanticIndexLifecycle";
 import { SemanticWorkQueue } from "../SemanticWorkQueue";
 import type { EmbeddingVector, ProcessingResult } from "../types";
-import { buildManagedNamespace } from "../utils/namespace";
+import { managedNamespace } from "./support/managedNamespace";
 import { buildVectorId } from "../utils/vectorId";
 
-const namespace = buildManagedNamespace(2);
+const namespace = managedNamespace(2);
 
 function root(file: TFile): EmbeddingVector {
   return {
@@ -109,7 +109,11 @@ describe("EmbeddingsManager run bookkeeping", () => {
   it("commits a searchable generation when normalized-empty notes have current local markers", async () => {
     const { files, roots, manager } = await harness(2);
     roots.set(root(files[0]).id, root(files[0]));
-    const marker = createLocalEmptyEmbeddingMarker(files[1], "---\ntags: [image]\n---\n![[cover.png]]");
+    const { path, basename, stat } = files[1];
+    const marker = createLocalEmptyEmbeddingMarkerForRevision(
+      { path, basename, mtime: stat.mtime },
+      "---\ntags: [image]\n---\n![[cover.png]]",
+    );
     roots.set(marker.id, marker);
     manager.searchNamespace = null;
 

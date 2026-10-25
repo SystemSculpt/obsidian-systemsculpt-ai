@@ -50,8 +50,6 @@ const NODE_PURPOSES: Readonly<Record<string, string>> = {
 const builtInRegistry = new StudioNodeRegistry();
 registerBuiltInStudioNodes(builtInRegistry);
 
-export const builtInStudioNodeRegistry = builtInRegistry;
-
 /**
  * v2 documents spell kinds without the "studio." namespace and never persist
  * node versions; both are restored here. A kind that is not built in keeps its
@@ -287,7 +285,7 @@ export function validateStudioProjectForAgentEdit(project: StudioProjectV1): voi
   // compile when the user actually runs the graph.
   //
   // graph.entryNodeIds is deliberately not validated here. It is derived
-  // data: the canvas recomputes it on every mutation and scopeProjectForRun
+  // data: the canvas recomputes it on every mutation and planStudioRun
   // re-derives real entry points from executable-graph structure, ignoring
   // the persisted list. The visual-only classification also changes across
   // plugin versions (studio.text became executable in 6.2.x), so rejecting

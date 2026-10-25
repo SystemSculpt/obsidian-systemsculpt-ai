@@ -2,7 +2,7 @@ import type SystemSculptPlugin from "../main";
 import type { ManagedAdmission } from "./managed/ManagedAdmission";
 import type { ManagedLicenseRejectReason } from "./managed/ManagedAdmissionResponse";
 
-export type LicenseRejectReason = ManagedLicenseRejectReason | "missing";
+type LicenseRejectReason = ManagedLicenseRejectReason | "missing";
 export type LicenseValidationResult =
   | Readonly<{ outcome: "valid"; isValid: true }>
   | Readonly<{ outcome: "rejected"; isValid: false; reason: LicenseRejectReason }>

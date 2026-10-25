@@ -3,7 +3,7 @@ export interface UiRadioBinding<T extends string = string> {
   button: HTMLButtonElement;
 }
 
-export type UiRadioChangeSource = "click" | "keyboard" | "programmatic";
+type UiRadioChangeSource = "click" | "keyboard" | "programmatic";
 
 export interface UiRadioGroupOptions<T extends string = string> {
   value: T;
@@ -19,7 +19,7 @@ export interface UiRadioGroupOptions<T extends string = string> {
   onError?: (error: unknown, attemptedValue: T, previousValue: T) => void;
 }
 
-export interface UiRadioSelectOptions {
+interface UiRadioSelectOptions {
   focus?: boolean;
   source?: UiRadioChangeSource;
 }

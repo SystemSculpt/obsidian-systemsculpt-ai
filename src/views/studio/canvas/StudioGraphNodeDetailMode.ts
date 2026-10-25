@@ -22,6 +22,7 @@ export function normalizeStudioNodeDetailMode(value: unknown): StudioNodeDetailM
   return raw === "collapsed" ? "collapsed" : STUDIO_NODE_DETAIL_DEFAULT_MODE;
 }
 
+/** @internal Unit-tested directly. */
 export function readStudioNodeCollapsedVisibilityOverrides(
   node: Pick<StudioNodeInstance, "config">
 ): Partial<Record<StudioCollapsedDetailSection, boolean>> {

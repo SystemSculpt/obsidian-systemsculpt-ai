@@ -1,5 +1,5 @@
 import { MANAGED_MULTIPART_PART_LIMITS, ManagedJobRecoveryStore, ManagedRecoveryAdapter } from "../ManagedJobRecoveryStore";
-import { ManagedJobCapability, ManagedRecoveryPhase } from "../ManagedTypes";
+import { ManagedJobCapability } from "../ManagedTypes";
 
 class MemoryAdapter implements ManagedRecoveryAdapter {
   capabilities = { read: true, write: true, list: true, mkdir: true, atomicRename: true, remove: true };
@@ -17,7 +17,7 @@ class MemoryAdapter implements ManagedRecoveryAdapter {
   clone() { return new MemoryAdapter(new Map(this.files)); }
 }
 const initial = { capability: "transcription", operationId: "op-1", source: { identity: "vault:a.wav", fingerprint: `sha256:${"a".repeat(64)}` } } as const;
-const create = async (store: ManagedJobRecoveryStore, value = initial) => store.createAdmitted(value);
+const create = async (store: ManagedJobRecoveryStore, value: Parameters<ManagedJobRecoveryStore["createAdmitted"]>[0] = initial) => store.createAdmitted(value);
 const createRequest = {
   filename: "a".repeat(64) + ".webm",
   contentType: "audio/webm",

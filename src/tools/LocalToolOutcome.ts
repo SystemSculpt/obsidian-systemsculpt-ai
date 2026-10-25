@@ -1,4 +1,4 @@
-export type LocalToolFailure = Readonly<{
+type LocalToolFailure = Readonly<{
   location: string;
   message: string;
 }>;

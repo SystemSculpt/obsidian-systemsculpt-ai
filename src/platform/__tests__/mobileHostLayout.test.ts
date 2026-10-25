@@ -4,11 +4,18 @@ import { Platform } from "obsidian";
 import {
   disposeMobileHostLayoutStates,
   ensureMobileHostLayoutState,
-  MOBILE_HOST_LAYOUT_CLASSES,
   readMobileHostLayout,
 } from "../mobileHostLayout";
 
-type MutablePlatform = typeof Platform & {
+/** The body classes mobileHostLayout publishes for feature CSS. */
+const MOBILE_HOST_LAYOUT_CLASSES = {
+  layout: "ss-mobile-layout",
+  navbarVisible: "ss-mobile-navbar-visible",
+  navbarHidden: "ss-mobile-navbar-hidden",
+  navbarSuppressed: "ss-mobile-navbar-suppressed",
+} as const;
+
+type MutablePlatform = Omit<typeof Platform, "isDesktopApp" | "isMobile" | "isMobileApp" | "isTablet"> & {
   isDesktopApp?: boolean;
   isMobile?: boolean;
   isMobileApp?: boolean;
@@ -38,7 +45,7 @@ async function waitForOwnedClass(className: string, present: boolean): Promise<v
 }
 
 describe("mobile host layout adapter", () => {
-  const platform = Platform as MutablePlatform;
+  const platform: MutablePlatform = Platform;
 
   beforeEach(() => {
     platform.isDesktopApp = false;
@@ -123,9 +130,9 @@ describe("mobile host layout adapter", () => {
   });
 
   it("falls back to the platform instanceof check when the Obsidian helper is unavailable", async () => {
-    const nodePrototype = window.Node.prototype as Node & {
-      instanceOf?: (constructor: typeof Element) => boolean;
-    };
+    const nodePrototype: Omit<Node, "instanceOf"> & {
+      instanceOf?: Node["instanceOf"];
+    } = window.Node.prototype;
     const instanceOf = nodePrototype.instanceOf;
     delete nodePrototype.instanceOf;
     try {
@@ -226,7 +233,7 @@ describe("mobile host layout adapter", () => {
 });
 
 describe("mobile host layout observation scope", () => {
-  const platform = Platform as MutablePlatform;
+  const platform: MutablePlatform = Platform;
   const NativeMutationObserver = window.MutationObserver;
   type Observation = { target: Node; options: MutationObserverInit };
   const active = new Map<MutationObserver, Observation[]>();

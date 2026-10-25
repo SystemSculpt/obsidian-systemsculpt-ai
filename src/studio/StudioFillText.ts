@@ -52,7 +52,10 @@ export function studioFillTextFont(style: StudioFillTextStyle, sizePx: number): 
   return `${style === "plain" ? 600 : 700} ${sizePx}px ${SANS_FONT_STACK}`;
 }
 
-/** The text as it is shown: the meme style is always capitals. */
+/**
+ * The text as it is shown: the meme style is always capitals.
+ * @internal Unit-tested directly.
+ */
 export function studioFillTextDisplay(text: string, style: StudioFillTextStyle): string {
   return style === "meme" ? text.toUpperCase() : text;
 }

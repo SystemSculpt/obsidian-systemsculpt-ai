@@ -8,6 +8,7 @@ import { PHONE_CAPTURE_MIN_SYNC_GAP_MS, PHONE_CAPTURE_POLL_INTERVAL_MS } from ".
 
 export type HandoffAgent = "systemsculpt" | "claude_code" | "codex";
 type HandoffStatus = "pending" | "claimed" | "running" | "needs_approval" | "completed" | "failed" | "cancelled";
+/** @internal Tests type their fixtures with this. */
 export type PhoneHandoff = Readonly<{
   id: string;
   capture_id: string;
@@ -65,6 +66,7 @@ function relativeMarkdownPath(value: unknown): value is string {
   return typeof value === "string" && !value.includes("\\") && ![...value].some(char => char.charCodeAt(0) < 32) && !value.startsWith("/")
     && !value.includes(":") && value.endsWith(".md") && value.split("/").every(part => part !== ".." && part !== "." && part !== "");
 }
+/** @internal Unit-tested directly. */
 export function decodePhoneHandoff(value: unknown): PhoneHandoff | null {
   if (!record(value) || typeof value.id !== "string" || !UUID.test(value.id)
     || typeof value.capture_id !== "string" || !UUID.test(value.capture_id)

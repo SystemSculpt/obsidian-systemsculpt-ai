@@ -28,7 +28,7 @@ function pointerEventAt(
 describe("resolveStudioTextNodeFocusTarget", () => {
   afterEach(() => {
     document.body.innerHTML = "";
-    delete (document as Document & { caretRangeFromPoint?: unknown }).caretRangeFromPoint;
+    Reflect.deleteProperty(document, "caretRangeFromPoint");
   });
 
   it("maps a rendered table cell character to its Markdown source cell", () => {
@@ -414,7 +414,7 @@ describe("resolveStudioTextNodeFocusTarget", () => {
     const display = document.body.createDiv();
     display.innerHTML = "<p>multiline text</p>";
     const paragraph = display.querySelector<HTMLElement>("p")!;
-    delete (document as Document & { caretRangeFromPoint?: unknown }).caretRangeFromPoint;
+    Reflect.deleteProperty(document, "caretRangeFromPoint");
     const event = new MouseEvent("dblclick", { clientX: 12, clientY: 34 });
     Object.defineProperty(event, "target", { configurable: true, value: paragraph });
 

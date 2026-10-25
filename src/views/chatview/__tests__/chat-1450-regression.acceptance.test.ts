@@ -30,7 +30,6 @@ function workspace(parent: HTMLElement): AgentWorkspace {
     onCopyArtifactPath: jest.fn(),
     onNewChat: jest.fn(),
     onOpenHistory: jest.fn(),
-    onOpenSettings: jest.fn(),
   });
   value.load();
   return value;

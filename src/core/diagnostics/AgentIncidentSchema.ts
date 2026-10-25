@@ -18,8 +18,8 @@ export type AgentIncidentFailureAuthority = "server" | "client" | "unknown";
 export type AgentIncidentTerminalValidation = "validated" | "unvalidated" | "validation_failed" | "not_recorded";
 export type AgentIncidentTerminalEvidence = "server_protocol_validated" | "client_observed" | "unvalidated";
 export type AgentIncidentTerminalSource = "session_terminal" | "message_reconstruction" | "local_failure" | "not_recorded";
-export type AgentIncidentHttpStatusClass = "1xx" | "2xx" | "3xx" | "4xx" | "5xx" | "not_recorded";
-export const AGENT_INCIDENT_FAILURE_STAGES = Object.freeze([
+type AgentIncidentHttpStatusClass = "1xx" | "2xx" | "3xx" | "4xx" | "5xx" | "not_recorded";
+const AGENT_INCIDENT_FAILURE_STAGES = Object.freeze([
   "submission_admission",
   "response_prepare",
   "context_prepare",
@@ -32,7 +32,7 @@ export const AGENT_INCIDENT_FAILURE_STAGES = Object.freeze([
 export type AgentIncidentFailureStage = typeof AGENT_INCIDENT_FAILURE_STAGES[number];
 export type AgentIncidentReportFailureStage = AgentIncidentFailureStage | "not_recorded";
 
-export const AGENT_INCIDENT_FAILURE_MECHANISMS = Object.freeze([
+const AGENT_INCIDENT_FAILURE_MECHANISMS = Object.freeze([
   "concurrent_run",
   "service_terminal",
   "http_rejection",
@@ -63,6 +63,7 @@ export function isAgentIncidentFailureMechanism(
   return typeof value === "string" && AGENT_INCIDENT_FAILURE_MECHANISM_SET.has(value);
 }
 
+/** @internal Tests assert against this value. */
 export const AGENT_INCIDENT_EXPORTED_FAILURE_CODES = Object.freeze([
   "agent_turn_failed",
   "approval_failed",
@@ -139,7 +140,7 @@ export function deriveAgentIncidentTerminalEvidence(
   return authority === "client" ? "client_observed" : "unvalidated";
 }
 
-export function agentIncidentHttpStatusClass(
+function agentIncidentHttpStatusClass(
   status: number | undefined,
 ): AgentIncidentHttpStatusClass {
   if (!Number.isInteger(status) || status === undefined || status < 100 || status > 599) {

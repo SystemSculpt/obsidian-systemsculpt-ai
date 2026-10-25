@@ -64,17 +64,11 @@ import {
 } from "./AgentIncidentSchema";
 
 export {
-  AGENT_INCIDENT_MAX_EVENTS,
-  AGENT_INCIDENT_MAX_RENDER_COUNT,
-  AGENT_INCIDENT_MAX_RENDER_DURATION_MS,
-  AGENT_INCIDENT_MAX_REPORT_BYTES,
   AGENT_INCIDENT_MAX_RESOURCE_SAMPLES,
-  AGENT_INCIDENT_MAX_TOOLS,
   AGENT_INCIDENT_MAX_TRANSPORT_SEGMENTS,
-  AGENT_INCIDENT_MISSING_FIELD_CODES,
-  AGENT_INCIDENT_SCHEMA_VERSION,
 } from "./AgentIncidentSchema";
 
+/** @internal Tests assert against this value. */
 export const AGENT_INCIDENT_MAX_ACTIVE_RUNS = 32;
 
 const AGENT_INCIDENT_TIMELINE_PREFIX_EVENTS = 16;
@@ -100,8 +94,7 @@ const TRANSPORT_SEGMENT_CLOSE_REASON_SET = new Set<string>(
 const CAPTURE_FAILURE_CODE_SET = new Set<string>(CAPTURE_FAILURE_CODES);
 
 export type AgentIncidentCaptureFailureCode = typeof CAPTURE_FAILURE_CODES[number];
-export type { AgentIncidentMissingFieldCode } from "./AgentIncidentCompleteness";
-export type AgentIncidentTerminalReceipt =
+type AgentIncidentTerminalReceipt =
   | "client_received_server_terminal"
   | "client_emitted_local_failure"
   | "unknown";
@@ -131,7 +124,7 @@ export type AgentIncidentResourceSampleInput = Readonly<{
   freeze_delta_ms?: number;
 }>;
 
-export type AgentIncidentTransportSegmentCloseReason =
+type AgentIncidentTransportSegmentCloseReason =
   typeof TRANSPORT_SEGMENT_CLOSE_REASONS[number];
 
 export type AgentIncidentTransportSegmentInput = Readonly<{
@@ -231,7 +224,7 @@ export type AgentIncidentCaptureContext = Readonly<{
   rendering?: AgentIncidentRenderingEvidenceInput;
 }>;
 
-export type AgentIncidentRenderingEvidenceInput = Readonly<{
+type AgentIncidentRenderingEvidenceInput = Readonly<{
   beforeTerminalPublish?: AgentIncidentRenderingInput;
   afterTerminalCommit?: AgentIncidentRenderingInput;
   failureSurfaceDomCommitted: boolean;
@@ -280,7 +273,7 @@ export type AgentIncidentTimelineEvent = Readonly<{
   credits_refresh_server_timing_clock_domain?: "server_response_headers_monotonic_duration";
 }>;
 
-export type AgentIncidentToolSummary = Readonly<{
+type AgentIncidentToolSummary = Readonly<{
   ordinal: number;
   tool_name?: FirstPartyToolName;
   started_at?: string;
@@ -297,7 +290,7 @@ export type AgentIncidentToolSummary = Readonly<{
   lifecycle_event_count: number;
 }>;
 
-export type AgentIncidentResourceSample = Readonly<{
+type AgentIncidentResourceSample = Readonly<{
   ordinal: number;
   captured_at: string;
   heap_used_mb?: number;
@@ -308,7 +301,7 @@ export type AgentIncidentResourceSample = Readonly<{
   freeze_delta_ms?: number;
 }>;
 
-export type AgentIncidentTransportSegment = Readonly<{
+type AgentIncidentTransportSegment = Readonly<{
   command_kind: ThinAgentCommandKind;
   segment_ordinal: number;
   server_latency_correlation_id?: string;
@@ -323,7 +316,7 @@ export type AgentIncidentTransportSegment = Readonly<{
   metrics_truncated: boolean;
 }>;
 
-export type AgentIncidentRunState = Readonly<{
+type AgentIncidentRunState = Readonly<{
   terminal_source: "session_terminal" | "message_reconstruction" | "local_failure";
   run_origin: "submitted" | "recovered";
   run_phase: "submitted" | "thinking" | "working" | "waiting" | "retrying" | "settling" | "complete";
@@ -380,7 +373,7 @@ export type AgentIncidentRenderingSnapshot = Readonly<{
   }>;
 }>;
 
-export type AgentIncidentRenderingEvidence = Readonly<{
+type AgentIncidentRenderingEvidence = Readonly<{
   before_terminal_publish?: AgentIncidentRenderingSnapshot;
   after_terminal_commit?: AgentIncidentRenderingSnapshot;
   failure_surface_dom_committed: boolean;

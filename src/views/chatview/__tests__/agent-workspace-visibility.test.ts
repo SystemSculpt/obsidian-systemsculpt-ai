@@ -206,7 +206,7 @@ describe("chat leaf visibility", () => {
     await render("Partial response");
     shown(false);
     const failed: AgentConversationSnapshot = {
-      ...snapshot(""), status: "failed", phase: "failed",
+      ...snapshot(""), status: "failed",
       terminalError: { code: "connection_lost", message: "Connection lost" },
       parts: [{ id: "error", kind: "error", error: { code: "connection_lost", message: "Connection lost" }, retryable: true, order: 1 }],
     };

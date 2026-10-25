@@ -38,7 +38,7 @@ jest.mock("obsidian", () => {
 function appHarness(markdown: string) {
   const binaryFiles = new Map<string, Uint8Array>();
   const directories = new Set<string>();
-  const adapter: ChatAttachmentStoreAdapter & { read: jest.Mock; exists: jest.Mock; mkdir: jest.Mock } = {
+  const adapter: ChatAttachmentStoreAdapter & { read: jest.Mock; exists: jest.Mock; mkdir: jest.Mock; readBinary: jest.Mock<Promise<ArrayBuffer>, [path: string]> } = {
     exists: jest.fn(async (path: string) => directories.has(path) || binaryFiles.has(path) || path === "SystemSculpt/Chats"),
     mkdir: jest.fn(async (path: string) => { directories.add(path); }),
     read: jest.fn(async () => markdown),

@@ -52,18 +52,19 @@ const STAGE_ICON: Partial<Record<DocumentProcessingStage | "complete" | "error",
   error: "x-circle",
 };
 
-export interface DocumentProcessingSuccessPayload {
+interface DocumentProcessingSuccessPayload {
   extractionPath: string;
   durationMs: number;
   file: TFile;
   openOutput: () => Promise<void> | void;
 }
 
-export interface DocumentProcessingFailurePayload {
+interface DocumentProcessingFailurePayload {
   error: unknown;
   file: TFile;
 }
 
+/** @internal Unit-tested directly. */
 export function describeDocumentProcessingFailure(error: unknown): string {
   const code = typeof error === "object" && error !== null && "code" in error
     ? String((error).code)
@@ -98,7 +99,7 @@ export interface DocumentProcessingPanelHandle {
   close(): void;
 }
 
-export interface DocumentProcessingPanelOptions {
+interface DocumentProcessingPanelOptions {
   plugin: SystemSculptPlugin;
   file: TFile;
   onCancel?: () => void;

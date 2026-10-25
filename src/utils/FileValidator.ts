@@ -1,4 +1,4 @@
-import { App, TFile } from "obsidian";
+import { App } from "obsidian";
 import { showPrompt } from "../core/ui/modals/PromptModal";
 
 // Maximum file size for uploads (500 MiB)
@@ -14,14 +14,6 @@ export interface FileSizeValidationOptions {
 const DEFAULT_POPUP_TITLE = "File Size Limit Exceeded";
 const DEFAULT_POPUP_DESCRIPTION =
   "Please reduce the file size or choose a smaller file.";
-
-export function validateFileSize(
-  file: TFile,
-  app: App,
-  options: FileSizeValidationOptions = {},
-): Promise<boolean> {
-  return validateSize(file.name, file.stat.size, app, options);
-}
 
 export function validateBrowserFileSize(
   file: File,

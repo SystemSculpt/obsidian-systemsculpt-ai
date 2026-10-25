@@ -14,7 +14,14 @@ function fixture() {
     }],
   })) }));
   const plugin = { settings: {}, getManagedCapabilityGraph: jest.fn(() => ({ transport: { request } })) };
-  const node = { id: "video", kind: "studio.video_generation", config: { model: "maker/video" } } as StudioNodeInstance;
+  const node: StudioNodeInstance = {
+    id: "video",
+    kind: "studio.video_generation",
+    version: "1.0.0",
+    title: "Video",
+    position: { x: 0, y: 0 },
+    config: { model: "maker/video" },
+  };
   return { plugin: plugin as unknown as SystemSculptPlugin, request, node };
 }
 

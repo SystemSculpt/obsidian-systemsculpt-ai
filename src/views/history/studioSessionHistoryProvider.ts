@@ -46,6 +46,7 @@ async function toggleFavoriteStudioSession(plugin: SystemSculptPlugin, projectPa
   return next.includes(normalizedPath);
 }
 
+/** @internal Unit-tested directly. */
 export async function loadStudioSessionRecords(plugin: SystemSculptPlugin): Promise<StudioSessionRecord[]> {
   const projectFiles = plugin.app.vault
     .getFiles()

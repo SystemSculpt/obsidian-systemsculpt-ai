@@ -18,7 +18,7 @@ describe('directory Studio entries', () => {
     expect(await resolveStudioEntry(f.adapter, 'Benchmarks.systemsculpt')).toEqual({ path: 'Benchmarks.studio/views/graph.systemsculpt', raw: f.graph, entryRaw: f.entry });
     const entry = await resolveStudioEntry(f.adapter, 'Benchmarks.systemsculpt');
     const changed = f.graph.replace('"nodes":[]', '"nodes":[{"id":"new"}]');
-    expect(await writeStudioDocumentAtomically(f.adapter as any, entry.path, entry.raw, changed)).toBe(true);
+    expect(await writeStudioDocumentAtomically(f.adapter as any, entry.path, entry.raw, changed)).toEqual({ fileStamp: null });
     expect(f.files.get('Benchmarks.systemsculpt')).toBe(f.entry);
     expect((await resolveStudioEntry(f.adapter, 'Benchmarks.systemsculpt')).raw).toBe(changed);
     expect(await writeStudioDocumentAtomically(f.adapter as any, entry.path, f.graph, '{}')).toBe(false);

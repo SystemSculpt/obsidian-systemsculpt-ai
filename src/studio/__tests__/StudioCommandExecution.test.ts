@@ -1,6 +1,6 @@
 import { readStudioCommandExecution, studioAgentExecution } from '../StudioCommandExecution';
-import type { StudioNodeInstance } from '../types';
-const center = (execution?: unknown) => ({ id: 'center', kind: 'studio.command_center', config: { execution, actions: { items: [{ kind: 'run', target: 'worker' }] } } }) as StudioNodeInstance;
+import type { StudioJsonValue, StudioNodeInstance } from '../types';
+const center = (execution?: StudioJsonValue): StudioNodeInstance => ({ id: 'center', kind: 'studio.command_center', version: '1.0.0', title: 'Command Center', position: { x: 0, y: 0 }, config: { ...(execution === undefined ? {} : { execution }), actions: { items: [{ kind: 'run', target: 'worker' }] } } });
 it('defaults to Astra high and overrides priority role/global options for command roles', () => {
   expect(studioAgentExecution([center()], 'worker', { model: 'other', effort: 'low', serviceTier: 'priority' })).toEqual({ model: 'gpt-6-astra', effort: 'high', serviceTier: 'default' });
   expect(studioAgentExecution([center({ model: 'custom-model', effort: 'medium' })], 'worker', { serviceTier: 'fast' })).toEqual({ model: 'custom-model', effort: 'medium', serviceTier: 'default' });

@@ -42,7 +42,7 @@ describe("MicrophoneDeviceCatalog", () => {
     if (originalMediaDevices) {
       Object.defineProperty(navigator, "mediaDevices", originalMediaDevices);
     } else {
-      delete (navigator as Navigator & { mediaDevices?: MediaDevices }).mediaDevices;
+      Reflect.deleteProperty(navigator, "mediaDevices");
     }
   });
 

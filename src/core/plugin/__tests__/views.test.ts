@@ -7,6 +7,19 @@ import {
   EMBEDDINGS_VIEW_TYPE,
   SYSTEMSCULPT_STUDIO_VIEW_TYPE,
 } from "../viewTypes";
+import { PendingStudioView } from "../../../views/studio/PendingStudioView";
+
+let mockStudioLoadError: Error | null = null;
+// The real view is exercised by the Studio view suites and the bundle tests.
+jest.mock("../../../views/studio/SystemSculptStudioView", () => {
+  if (mockStudioLoadError) throw mockStudioLoadError;
+  const { ItemView } = jest.requireActual("obsidian");
+  return {
+    SystemSculptStudioView: class LoadedStudioView extends ItemView {
+      constructor(leaf: unknown, readonly plugin: unknown) { super(leaf); }
+    },
+  };
+});
 
 type TestApp = App & {
   viewRegistry?: {
@@ -28,7 +41,14 @@ const createFixture = (registeredViewTypes: string[] = []): ViewManagerFixture =
     viewByType: Object.fromEntries(registeredViewTypes.map((type) => [type, jest.fn()])),
   };
 
-  const plugin = new Plugin(app, { id: "systemsculpt-ai", version: "0.0.0" }) as any;
+  const plugin = new Plugin(app, {
+    id: "systemsculpt-ai",
+    name: "SystemSculpt AI",
+    author: "SystemSculpt",
+    version: "0.0.0",
+    minAppVersion: "1.7.2",
+    description: "",
+  }) as any;
   plugin.settings = { selectedModelId: "model" };
   plugin.load();
 
@@ -268,6 +288,59 @@ describe("ViewManager", () => {
     await expect(quiescing).resolves.toBeUndefined();
     expect(settled).toBe(true);
     expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it("evaluates the Studio view only when something first opens Studio", async () => {
+    const { plugin, manager } = createFixture();
+    manager.registerView();
+    const createStudio = (plugin as any)._views.get(SYSTEMSCULPT_STUDIO_VIEW_TYPE);
+    const leaf = { app: plugin.app } as any;
+
+    expect(createStudio(leaf)).toBeInstanceOf(PendingStudioView);
+    const loading = manager.loadStudioView();
+    expect(manager.loadStudioView()).toBe(loading);
+    await loading;
+
+    const studio = createStudio(leaf);
+    expect(studio.constructor.name).toBe("LoadedStudioView");
+    expect(studio.leaf).toBe(leaf);
+    expect(studio.plugin).toBe(plugin);
+  });
+
+  it("opens Studio from its commands with the real view, never the placeholder", async () => {
+    const { app, plugin, manager } = createFixture();
+    manager.registerView();
+    const leaf: any = { app };
+    leaf.setViewState = jest.fn(async ({ type }: { type: string }) => {
+      leaf.view = (plugin as any)._views.get(type)(leaf);
+    });
+    const revealLeaf = jest.fn();
+    Object.assign(app.workspace, { getLeaf: jest.fn(() => leaf), revealLeaf });
+
+    await manager.activateSystemSculptStudioView("Studio/Plan.systemsculpt");
+
+    expect(leaf.setViewState).toHaveBeenCalledWith({
+      type: SYSTEMSCULPT_STUDIO_VIEW_TYPE,
+      active: true,
+      state: { file: "Studio/Plan.systemsculpt" },
+    });
+    expect(leaf.view.constructor.name).toBe("LoadedStudioView");
+    expect(revealLeaf).toHaveBeenCalledWith(leaf);
+  });
+
+  it("loads Studio again after a failed attempt", async () => {
+    const { manager } = createFixture();
+    // Another test may already have evaluated the module in this registry.
+    jest.resetModules();
+    mockStudioLoadError = new Error("evaluation failed");
+    try {
+      await expect(manager.loadStudioView()).rejects.toThrow("evaluation failed");
+    } finally {
+      mockStudioLoadError = null;
+    }
+
+    const create = await manager.loadStudioView();
+    expect(create({} as any).constructor.name).toBe("LoadedStudioView");
   });
 
   it("keeps normal view and ribbon teardown after producer quiescence", () => {

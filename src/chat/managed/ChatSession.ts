@@ -94,7 +94,6 @@ export type {
   AgentLifecycleCode,
   AgentLifecycleInput,
   AgentLifecyclePhase,
-  AgentLifecycleRecord,
 } from "./Lifecycle";
 
 function toolRequestedItemCount(call: LocalToolCall): number | undefined {

@@ -117,9 +117,4 @@ export class ManagedAdmission {
     if (operation.requestContract && !requestContract) return { outcome: "capability_unavailable", descriptor, diagnostics: server.diagnostics };
     return { outcome: "allowed", descriptor, requestContract, diagnostics: server.diagnostics };
   }
-
-  async withLease<T>(operation: ManagedOperation, callback: (lease: ManagedLease) => Promise<T> | T): Promise<T | ManagedLease> {
-    const lease = await this.acquireLease(operation);
-    return lease.outcome === "allowed" ? callback(lease) : lease;
-  }
 }

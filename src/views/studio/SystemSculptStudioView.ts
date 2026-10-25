@@ -465,6 +465,9 @@ export class SystemSculptStudioView extends ItemView {
 
   private detachSurfaceActivity: (() => void) | null = null;
   private detachLeafVisibility: (() => void) | null = null;
+  private detachLeaveHandlers: (() => void) | null = null;
+  /** Typing saves once it pauses; leaving Studio's focus, window or leaf saves it at once. */
+  private readonly saveOnLeave = (): void => { void this.flushPendingProjectSaveWork(); };
   private leafVisible = true;
   private readonly presentation = new StudioPresentation();
   private readonly markdownPreviewRequests = new WeakMap<HTMLElement, () => void>();
@@ -474,6 +477,7 @@ export class SystemSculptStudioView extends ItemView {
     this.leafVisible = visible;
     this.activity.setVisible(visible);
     if (!visible) {
+      this.saveOnLeave();
       this.presentation.setVisible(false);
       this.outputContainers.dispose();
       this.resetViewportScrollingState();
@@ -490,6 +494,18 @@ export class SystemSculptStudioView extends ItemView {
     this.detachSurfaceActivity = bindSurfaceActivity(this.contentEl);
     this.detachLeafVisibility?.();
     this.detachLeafVisibility = observeLeafVisibility(this.containerEl, this.app.workspace, visible => this.setLeafVisible(visible));
+    this.detachLeaveHandlers?.();
+    this.contentEl.addEventListener("focusout", this.saveOnLeave);
+    const leafChange = this.app.workspace.on("active-leaf-change", leaf => {
+      if (leaf === this.leaf) return;
+      this.saveOnLeave();
+      // A connection started here ends once another leaf takes over.
+      if (this.graphInteraction.getPendingConnection()) this.graphInteraction.clearPendingConnection();
+    });
+    this.detachLeaveHandlers = () => {
+      this.contentEl.removeEventListener("focusout", this.saveOnLeave);
+      this.app.workspace.offref(leafChange);
+    };
     this.runObservation.bind(this.plugin.getStudioService());
     this.activity.bind(this.plugin.getStudioService().agentRuns);
     this.bindOwnerWindowEvents(getStudioOwnerWindow(this.contentEl));
@@ -530,6 +546,8 @@ export class SystemSculptStudioView extends ItemView {
     this.detachSurfaceActivity = null;
     this.detachLeafVisibility?.();
     this.detachLeafVisibility = null;
+    this.detachLeaveHandlers?.();
+    this.detachLeaveHandlers = null;
     this.presentation.dispose();
     this.mediaModelPicker.dispose();
     this.shapeController.cancelDrawGesture();
@@ -558,6 +576,7 @@ export class SystemSculptStudioView extends ItemView {
 
   private unbindOwnerWindowEvents(): void {
     this.clipboardAndDropController.unbindOwnerWindow();
+    this.listenerWindow?.removeEventListener("blur", this.saveOnLeave);
     this.listenerWindow = null;
   }
 
@@ -567,6 +586,7 @@ export class SystemSculptStudioView extends ItemView {
     }
     this.unbindOwnerWindowEvents();
     this.clipboardAndDropController.bindOwnerWindow(ownerWindow);
+    ownerWindow.addEventListener("blur", this.saveOnLeave);
     this.listenerWindow = ownerWindow;
   }
 

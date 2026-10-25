@@ -21,7 +21,7 @@ test("package scripts preserve fast edit and exhaustive verification tiers", () 
   );
   assert.equal(
     packageJson.scripts["check:plugin:obsidian"],
-    "npm run lint:obsidian && npm run lint:obsidian:meta && npm run lint:community",
+    "npm run lint:obsidian && npm run lint:obsidian:meta",
   );
   assert.equal(
     packageJson.scripts["check:ci"],
@@ -76,6 +76,7 @@ test("fast plugin checks stay on the measured Obsidian-native tier", () => {
   assert.match(source, /scripts\/git-hooks\.test\.mjs/);
   assert.match(source, /scripts\/lint-css\.test\.mjs/);
   assert.match(source, /scripts\/module-ownership\.test\.mjs/);
+  assert.match(source, /scripts\/eslint-config\.test\.mjs/);
   assert.match(source, /fast \? "check:plugin:obsidian" : "check:plugin:obsidian:ci"/);
   assert.match(source, /buildProductionPlugin/);
   assert.match(source, /if \(!fast\) \{/);
@@ -232,8 +233,9 @@ test("Jest configs share transforms and setup without changing the bundle host",
   assert.ok(integration.transformIgnorePatterns.includes("<rootDir>/main\\.js$"));
   assert.match(packageJson.scripts["lint:community"], /--cache --cache-location \.cache\/eslint\/community\.cache/);
   assert.match(source, /if \(!skipLint\) \{/);
+  // lint:obsidian runs the community scan in the same type-aware pass.
   assert.equal(packageJson.scripts["check:plugin:obsidian:ci"],
-    "npm run lint:obsidian -- --no-cache && npm run lint:obsidian:meta -- --no-cache && npm run lint:community -- --no-cache");
+    "npm run lint:obsidian -- --no-cache && npm run lint:obsidian:meta -- --no-cache");
 });
 
 test("TypeScript and Jest resolve the source alias to the same tree", () => {
@@ -244,4 +246,19 @@ test("TypeScript and Jest resolve the source alias to the same tree", () => {
   const result = ts.resolveModuleName("@/constants/api", path.join(root, "src/main.ts"), parsed.options, ts.sys);
   assert.equal(path.normalize(result.resolvedModule.resolvedFileName), path.join(root, "src/constants/api.ts"));
   assert.equal(require(path.join(root, "jest.config.cjs")).moduleNameMapper["^@/(.*)$"], "<rootDir>/src/$1");
+});
+
+test("tests type-check against the declaration of the Obsidian mock Jest loads", () => {
+  assert.match(packageJson.scripts["check:types"], /&& npm run check:types:tests$/);
+  assert.match(packageJson.scripts["check:types:tests"], /^tsc -p tsconfig\.test\.json --noEmit /);
+  const ts = require("typescript");
+  const config = ts.readConfigFile(path.join(root, "tsconfig.test.json"), ts.sys.readFile);
+  assert.equal(config.error, undefined);
+  const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, root);
+  assert.ok(parsed.fileNames.some((file) => file.endsWith("/src/views/chatview/__tests__/agent-composer.test.ts")));
+  assert.ok(parsed.fileNames.some((file) => file.endsWith("/testing/integration/bundle-load.test.ts")));
+  const testFile = path.join(root, "src/__tests__/main-startup-phases.test.ts");
+  const result = ts.resolveModuleName("obsidian", testFile, parsed.options, ts.sys);
+  assert.equal(path.normalize(result.resolvedModule.resolvedFileName), path.join(root, "src/tests/mocks/obsidian.d.ts"));
+  assert.equal(require(path.join(root, "jest.config.cjs")).moduleNameMapper["^obsidian$"], "<rootDir>/src/tests/mocks/obsidian.js");
 });

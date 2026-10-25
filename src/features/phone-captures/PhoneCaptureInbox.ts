@@ -19,6 +19,7 @@ export type PhoneCapture = Readonly<{
   source: string;
 } & PhoneCaptureFormat>;
 
+/** @internal Tests type their fixtures with this. */
 export type PhoneCaptureSettings = Readonly<{
   licenseKey: string;
   enabled: boolean;
@@ -66,7 +67,10 @@ export const DEFAULT_PHONE_MEETING_FOLDER = "SystemSculpt/Meetings";
 export const PHONE_CAPTURE_POLL_INTERVAL_MS = 5 * 60_000;
 /** Focus and resume events closer together than this share one sync. */
 export const PHONE_CAPTURE_MIN_SYNC_GAP_MS = 60_000;
-/** Before the account has used the iOS app, background triggers ask about the link this often. */
+/**
+ * Before the account has used the iOS app, background triggers ask about the link this often.
+ * @internal Tests assert against this value.
+ */
 export const PHONE_CAPTURE_LINK_CHECK_GAP_MS = 30 * 60_000;
 const PAGE_LIMIT = 50;
 const MAX_PAGES_PER_SYNC = 10;
@@ -85,7 +89,7 @@ const MAX_IDENTITY_READ_BYTES_PER_SYNC = 32 * 1024 * 1024;
 const MAX_TITLE_CHARS = 200;
 const MAX_COLLISION_SUFFIX = 100;
 
-export class PhoneCaptureApiError extends Error {
+class PhoneCaptureApiError extends Error {
   constructor(message: string, readonly status: number, readonly code: string) {
     super(message);
     this.name = "PhoneCaptureApiError";
@@ -103,7 +107,7 @@ function normalizeTag(tag: unknown): string | null {
 }
 
 /** Reads one inbox item; anything malformed is dropped rather than written. */
-export function decodePhoneCapture(value: unknown): PhoneCapture | null {
+function decodePhoneCapture(value: unknown): PhoneCapture | null {
   if (!isRecord(value)) return null;
   const { id, created_at: createdAt, title, markdown, tags, source } = value;
   if (typeof id !== "string" || !CAPTURE_ID.test(id)) return null;
@@ -147,7 +151,7 @@ function localDate(iso: string): string {
 }
 
 /** The note body: frontmatter that identifies the capture, then its markdown. */
-export function renderPhoneCaptureNote(capture: PhoneCapture): string {
+function renderPhoneCaptureNote(capture: PhoneCapture): string {
   // Meeting metadata and body are rendered by the server. Keep the canonical
   // bytes shared with the iPhone export; parsing above validates identity only.
   const frontmatter = capture.meetingFrontmatter ?? stringifyYaml({

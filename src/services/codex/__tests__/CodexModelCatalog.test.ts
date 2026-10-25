@@ -1,5 +1,5 @@
 import { readCodexCatalog } from '../CodexModelCatalog';
-import { connectCodex } from '../CodexAppServer';
+import { connectCodex, type CodexJson } from '../CodexAppServer';
 jest.mock('../CodexAppServer', () => ({ connectCodex: jest.fn() }));
 let now = Date.now();
 beforeEach(() => { jest.clearAllMocks(); now += 120_000; jest.spyOn(Date, 'now').mockReturnValue(now); });
@@ -25,9 +25,9 @@ it('reads bounded native pages and excludes hidden safety-helper models from the
   expect(refreshed.models.map(model => model.model)).toEqual(['workspace-model']);
 });
 it('shares simultaneous catalog reads without letting one picker cancel the others', async () => {
-  let resolveConfig!: (value: unknown) => void;
+  let resolveConfig!: (value: CodexJson) => void;
   const request = jest.fn((method: string) => method === 'config/read'
-    ? new Promise(resolve => { resolveConfig = resolve; })
+    ? new Promise<CodexJson>(resolve => { resolveConfig = resolve; })
     : Promise.resolve({ data: [] }));
   const close = jest.fn(); jest.mocked(connectCodex).mockResolvedValue({ request, close, closed: Promise.resolve() });
   const firstController = new AbortController(), secondController = new AbortController();

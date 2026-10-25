@@ -77,7 +77,6 @@ describe("search index memory benchmark", () => {
         embeddingsEnabled: false,
         embeddingsExclusions: { ignoreChatHistory: false, respectObsidianExclusions: false },
       },
-      vaultFileCache: undefined,
     };
 
     const baseline = settledMemory();

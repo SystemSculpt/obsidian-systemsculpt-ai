@@ -3,7 +3,7 @@
  */
 import { PluginLogger } from "../PluginLogger";
 import { LogLevel } from "../errorHandling";
-import { THIN_AGENT_LIFECYCLE_CODES } from "../../chat/managed/Lifecycle";
+import { THIN_AGENT_LIFECYCLE_CODES } from "../ThinAgentLifecycleSchema";
 
 const FIRST_PARTY_LIFECYCLE_CODES = THIN_AGENT_LIFECYCLE_CODES.filter(
   (code) => !code.startsWith("response_resume_"),
@@ -780,23 +780,6 @@ describe("PluginLogger", () => {
       expect(logger.getSupportDiagnostics(1)).toEqual([
         expect.objectContaining({ code: "run_started" }),
       ]);
-    });
-  });
-
-  describe("setLogFileName", () => {
-    it("updates log file name", () => {
-      logger.setLogFileName("new-log.log");
-
-      // File name should be updated (verified by flush behavior)
-      expect(() => logger.setLogFileName("another.log")).not.toThrow();
-    });
-
-    it("ignores empty string", () => {
-      logger.setLogFileName("test.log");
-      logger.setLogFileName("");
-
-      // Should not throw or change behavior
-      expect(() => logger.setLogFileName("")).not.toThrow();
     });
   });
 

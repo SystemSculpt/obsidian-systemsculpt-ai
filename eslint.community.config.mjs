@@ -3,40 +3,43 @@ import obsidianmd from "eslint-plugin-obsidianmd";
 
 // Mirror the public community-directory source scan instead of applying the
 // repository's narrower edit-loop policy. The directory owns this ignore list.
-export default defineConfig(
-  globalIgnores([
-    "**/node_modules/**",
-    "**/dist/**",
-    "**/build/**",
-    "**/pkg/**",
-    "**/test-vault/**",
-    "**/.pnpm-store/**",
-    "**/.obsidian/**",
-    "**/automation/**",
-    "**/test/**",
-    "**/tests/**",
-    "**/__tests__/**",
-    "**/testUtils/**",
-    "**/e2e-tests/**",
-    "**/mocks/**",
-    "**/__mocks__/**",
-    "**/scripts/**",
-    "**/docs/**",
-    "**/i18n/**",
-    "**/i18next/**",
-    "**/locale/**",
-    "**/locales/**",
-    "**/translations/**",
-    "**/l10n/**",
-    "**/*.test.*",
-    "**/*.tests.*",
-    "**/*.spec.*",
-    "**/*.specs.*",
-    "**/*.cjs",
-    "**/*.mjs",
-    "**/*.cts",
-    "**/*.mts",
-  ]),
+// eslint.config.mjs runs this exact scan inside the repository's lint pass, so
+// both share one TypeScript program.
+export const communityScanIgnores = [
+  "**/node_modules/**",
+  "**/dist/**",
+  "**/build/**",
+  "**/pkg/**",
+  "**/test-vault/**",
+  "**/.pnpm-store/**",
+  "**/.obsidian/**",
+  "**/automation/**",
+  "**/test/**",
+  "**/tests/**",
+  "**/__tests__/**",
+  "**/testUtils/**",
+  "**/e2e-tests/**",
+  "**/mocks/**",
+  "**/__mocks__/**",
+  "**/scripts/**",
+  "**/docs/**",
+  "**/i18n/**",
+  "**/i18next/**",
+  "**/locale/**",
+  "**/locales/**",
+  "**/translations/**",
+  "**/l10n/**",
+  "**/*.test.*",
+  "**/*.tests.*",
+  "**/*.spec.*",
+  "**/*.specs.*",
+  "**/*.cjs",
+  "**/*.mjs",
+  "**/*.cts",
+  "**/*.mts",
+];
+
+export const communityScan = [
   ...obsidianmd.configs.recommended,
   {
     languageOptions: {
@@ -64,4 +67,6 @@ export default defineConfig(
       ],
     },
   },
-);
+];
+
+export default defineConfig(globalIgnores(communityScanIgnores), ...communityScan);

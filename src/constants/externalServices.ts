@@ -3,7 +3,7 @@ export function withPluginAttribution(href: string, surface: string): string {
   try {
     const url = new URL(href);
     if (!["https://systemsculpt.com", "https://www.systemsculpt.com"].includes(url.origin)
-      || !["/pricing", "/lifetime", "/subscribe", "/checkout", "/buy-credits"].includes(url.pathname)) return href;
+      || !["/pricing", "/subscribe", "/checkout", "/buy-credits"].includes(url.pathname)) return href;
     url.searchParams.set("utm_source", "obsidian-plugin");
     url.searchParams.set("utm_medium", surface);
     url.searchParams.set("utm_campaign", "upgrade");
@@ -16,7 +16,7 @@ export function withPluginAttribution(href: string, surface: string): string {
 /** External destinations owned by the plugin UI. */
 export const SYSTEMSCULPT_WEBSITE = {
   BASE_URL: "https://systemsculpt.com",
-  LIFETIME: "https://systemsculpt.com/lifetime",
+  YEARLY: "https://systemsculpt.com/checkout?resourceId=2b96b063-3ed9-4e5a-972c-6910fb611ab8",
   SUBSCRIBE: "https://systemsculpt.com/subscribe",
   DOCS: "https://systemsculpt.com/obsidian-ai-plugin-docs",
   BILLING: "https://systemsculpt.com/dashboard/billing",

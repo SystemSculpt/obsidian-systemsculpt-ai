@@ -53,20 +53,6 @@ export interface ListDirectoryResult {
 /**
  * Tool operation result types
  */
-export interface ToolResult {
-  success: boolean;
-  error?: string;
-}
-
-export interface FileOperationResult extends ToolResult {
-  path: string;
-}
-
-export interface MoveOperationResult extends ToolResult {
-  source: string;
-  destination: string;
-}
-
 export interface ContextManagementResult {
   action: string;
   processed: number;
@@ -78,10 +64,6 @@ export interface ContextManagementResult {
 export interface WorkspaceManagementResult {
   opened: string[];
   errors: string[];
-}
-
-export interface DuplicateSearchResult {
-  duplicate_sets: string[][];
 }
 
 /**
@@ -136,7 +118,7 @@ export interface EditFileParams {
   strict?: boolean | null;
 }
 
-export interface MultiEditFileParams {
+interface MultiEditFileParams {
   path: string;
   edits: FileEdit[];
   strict?: boolean | null;

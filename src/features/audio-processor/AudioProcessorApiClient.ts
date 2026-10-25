@@ -50,7 +50,7 @@ export interface AudioProcessorUploadedPart {
   etag: string;
 }
 
-export interface AudioProcessorRemoteUploadPart {
+interface AudioProcessorRemoteUploadPart {
   part_number: number;
   etag: string;
   size_bytes: number;

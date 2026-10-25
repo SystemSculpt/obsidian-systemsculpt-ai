@@ -1,4 +1,4 @@
-import type { StudioNodeInstance, StudioProjectV1 } from "./types";
+import type { StudioProjectV1 } from "./types";
 
 export type DeepReadonly<T> = T extends (...args: unknown[]) => unknown
   ? T
@@ -9,7 +9,6 @@ export type DeepReadonly<T> = T extends (...args: unknown[]) => unknown
       : T;
 
 export type ReadonlyStudioProjectSnapshot = DeepReadonly<StudioProjectV1>;
-export type ReadonlyStudioNodeSnapshot = DeepReadonly<StudioNodeInstance>;
 
 export function cloneStudioProjectSnapshot(project: StudioProjectV1): StudioProjectV1 {
   return JSON.parse(JSON.stringify(project)) as StudioProjectV1;

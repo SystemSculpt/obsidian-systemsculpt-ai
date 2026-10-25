@@ -57,6 +57,7 @@ export function readManagedToolCallFunction(call: unknown): ManagedToolCallFunct
   };
 }
 
+/** @internal Unit-tested directly. */
 export function isServerExecutedManagedToolName(name: unknown): boolean {
   return typeof name === "string" && SERVER_EXECUTED_MANAGED_TOOL_NAMES.has(name);
 }

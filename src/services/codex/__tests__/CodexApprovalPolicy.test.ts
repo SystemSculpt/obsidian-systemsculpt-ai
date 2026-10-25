@@ -20,6 +20,7 @@ it.each(CODEX_APPROVAL_MODES)('uses generated app-server field names and values 
     expect(turn).toEqual({});
     return;
   }
+  if (!('approvalPolicy' in thread) || !('sandboxPolicy' in turn)) throw new Error('Expected native approval parameters.');
   for (const fields of [schema.ThreadStartParams, schema.ThreadResumeParams]) {
     expect(Object.keys(thread).sort()).toEqual(Object.keys(fields).sort());
     expect(fields.approvalPolicy.anyOf[0].$ref).toBe('#/definitions/AskForApproval');

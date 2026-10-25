@@ -12,14 +12,10 @@ const OBSERVATION_RETRY_MAX_MS = 5 * 60_000;
 const DISPATCH_MAX_ATTEMPTS = 4;
 
 /** A status read failed transiently; the observer waits and reads again. */
-export type ManagedJobObservationRetry = Readonly<{
+type ManagedJobObservationRetry = Readonly<{
   consecutiveFailures: number;
   retryInMs: number;
   error: unknown;
-}>;
-
-export type ManagedJobPollHint = Readonly<{
-  poll_after_ms?: number;
 }>;
 
 export type ManagedJobObservationOptions<T> = Readonly<{
@@ -66,6 +62,7 @@ export async function waitForManagedJob(
   throwIfAborted(signal);
 }
 
+/** @internal Unit-tested directly. */
 export function normalizedPollAfterMs(
   value: unknown,
   fallback = DEFAULT_POLL_AFTER_MS,
@@ -81,7 +78,7 @@ function isHostOffline(): boolean {
 }
 
 /** Waits, abortably, for the host's `online` event when it reports being offline. */
-export async function waitForManagedJobHostOnline(signal: AbortSignal): Promise<void> {
+async function waitForManagedJobHostOnline(signal: AbortSignal): Promise<void> {
   throwIfAborted(signal);
   if (!isHostOffline() || typeof window === "undefined") return;
   await new Promise<void>((resolve, reject) => {

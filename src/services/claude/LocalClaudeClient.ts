@@ -3,7 +3,7 @@ import { isRecord } from '../../studio/utils';
 import { readLocalAgentLaunchConfig, resolveLocalAgentCommand } from '../codex/LocalAgentLaunch';
 import { LocalAgentUsageLimitError } from '../codex/LocalAgents';
 
-export const CLAUDE_PERMISSION_MODES = ['auto', 'manual', 'acceptEdits', 'plan', 'settings'] as const;
+const CLAUDE_PERMISSION_MODES = ['auto', 'manual', 'acceptEdits', 'plan', 'settings'] as const;
 export type ClaudePermissionMode = typeof CLAUDE_PERMISSION_MODES[number];
 export type ClaudeExecutionOptions = { model?: string; permissionMode?: string };
 export type ClaudeRequest = ClaudeExecutionOptions & { prompt: string; workingDirectory: string; sessionId?: string; images?: readonly string[] };
@@ -12,8 +12,8 @@ export type ClaudePermissionRequest = {
   toolName: string; description: string; input: Record<string, unknown>;
   requestId?: string; toolUseId?: string; permissionSuggestions?: readonly Record<string, unknown>[];
 };
-export type ClaudePermissionDecision = boolean | { approved: boolean; rememberForSession?: boolean; answers?: Record<string, string[]> };
-export type ClaudeToolActivity = {
+type ClaudePermissionDecision = boolean | { approved: boolean; rememberForSession?: boolean; answers?: Record<string, string[]> };
+type ClaudeToolActivity = {
   id: string; name?: string; input?: unknown; inputText?: string;
   state: 'input-streaming' | 'running' | 'succeeded' | 'failed'; output?: unknown;
 };
@@ -34,7 +34,10 @@ export function claudeSessionPermissionUpdates(request: ClaudePermissionRequest)
   return request.permissionSuggestions?.filter(suggestion => !(suggestion.type === 'setMode' && ['bypassPermissions', 'dontAsk'].includes(String(suggestion.mode)))).map(suggestion => ({ ...suggestion, destination: 'session' })) ?? [];
 }
 
-/** Claude Code 2.1.309's public PermissionResult / PermissionUpdate protocol. No settings writes. */
+/**
+ * Claude Code 2.1.309's public PermissionResult / PermissionUpdate protocol. No settings writes.
+ * @internal Unit-tested directly.
+ */
 export function claudePermissionResponse(request: ClaudePermissionRequest, decision: ClaudePermissionDecision): Record<string, unknown> {
   const approved = typeof decision === 'boolean' ? decision : decision.approved;
   if (!approved) return { behavior: 'deny', message: 'The user declined this action in SystemSculpt.' };
@@ -45,11 +48,12 @@ export function claudePermissionResponse(request: ClaudePermissionRequest, decis
   return { behavior: 'allow', updatedInput, ...(updates?.length ? { updatedPermissions: updates } : {}) };
 }
 
+/** @internal Tests assert against this value. */
 export const CLAUDE_SIGN_IN_MESSAGE = 'Claude Code is not signed in. Open a terminal, run `claude`, then type /login. Send your message again after signing in.';
 const SESSION_PATTERN = /^[A-Za-z0-9][A-Za-z0-9-]{7,79}$/;
 const MAX_LINE = 16 * 1024 * 1024;
 const activeSessions = new Set<string>();
-export const CLAUDE_AUTO_FALLBACK_NOTICE = "Claude Code's Auto mode isn't available here, so edits are accepted automatically and other actions ask. Update Claude Code to use Auto.";
+const CLAUDE_AUTO_FALLBACK_NOTICE = "Claude Code's Auto mode isn't available here, so edits are accepted automatically and other actions ask. Update Claude Code to use Auto.";
 class ClaudeAutoUnavailable extends Error {}
 function rejectsAutoMode(message: string): boolean {
   return /(?:permission.?mode[^\n]*auto|auto[^\n]*(?:mode|permission))/i.test(message)
@@ -66,7 +70,10 @@ export function resolveClaudeOptions(options: ClaudeExecutionOptions): Required<
   return { model, permissionMode: permissionMode as ClaudePermissionMode };
 }
 
-/** Print mode with JSON streams on both ends; permission prompts come back to the plugin over stdio. */
+/**
+ * Print mode with JSON streams on both ends; permission prompts come back to the plugin over stdio.
+ * @internal Unit-tested directly.
+ */
 export function claudeLaunchArgs(options: ClaudeExecutionOptions, sessionId?: string): string[] {
   const { model, permissionMode } = resolveClaudeOptions(options);
   if (sessionId !== undefined && !SESSION_PATTERN.test(sessionId)) throw new Error('Invalid saved Claude Code session identity.');

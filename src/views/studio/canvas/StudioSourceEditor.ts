@@ -1,16 +1,25 @@
-import { EditorState } from '@codemirror/state';
+import { Compartment, EditorState } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers, highlightActiveLine } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { syntaxHighlighting, HighlightStyle } from '@codemirror/language';
-import { javascript } from '@codemirror/lang-javascript';
-import { json } from '@codemirror/lang-json';
-import { yaml } from '@codemirror/lang-yaml';
-import { markdown } from '@codemirror/lang-markdown';
 import { classHighlighter, highlightTree, tags } from '@lezer/highlight';
 import type { StudioSourceLanguage } from '../../../studio/StudioNodeSource';
 import { markStudioNodeCardInteractive } from './StudioGraphNodeCardPointer';
 
-const language = (name: StudioSourceLanguage) => name === 'javascript' ? javascript() : name === 'json' ? json() : name === 'markdown' ? markdown() : yaml();
+type Languages = typeof import('./StudioSourceLanguages');
+let languages: Languages | null = null;
+let languagesLoad: Promise<Languages> | null = null;
+/**
+ * The language packs are evaluated when a card first shows source, not when Studio opens.
+ * @internal Unit-tested directly.
+ */
+export function loadStudioSourceLanguages(): Promise<Languages> {
+  languagesLoad ??= import('./StudioSourceLanguages').then(
+    loaded => (languages = loaded),
+    (error: unknown) => { languagesLoad = null; throw error; },
+  );
+  return languagesLoad;
+}
 const highlightStyle = HighlightStyle.define([
   { tag: tags.keyword, class: 'tok-keyword' }, { tag: [tags.string, tags.special(tags.string)], class: 'tok-string' },
   { tag: [tags.number, tags.bool, tags.null], class: 'tok-number' }, { tag: tags.comment, class: 'tok-comment' },
@@ -24,14 +33,23 @@ export function renderStudioHighlightedSource(root: HTMLElement, source: string,
   const pre = root.createEl('pre', { cls: 'ss-studio-source-code', attr: { tabindex: '0', 'aria-label': `${name} source` } });
   markStudioNodeCardInteractive(pre);
   const code = pre.createEl('code');
-  let cursor = 0;
-  const tree = language(name).language.parser.parse(preview);
-  highlightTree(tree, classHighlighter, (from, to, classes) => {
-    if (from > cursor) code.appendText(preview.slice(cursor, from));
-    code.createSpan({ text: preview.slice(from, to), cls: classes }); cursor = to;
-  });
-  if (cursor < preview.length) code.appendText(preview.slice(cursor));
+  const paint = (loaded: Languages) => {
+    code.empty();
+    let cursor = 0;
+    const tree = loaded.studioSourceLanguage(name).language.parser.parse(preview);
+    highlightTree(tree, classHighlighter, (from, to, classes) => {
+      if (from > cursor) code.appendText(preview.slice(cursor, from));
+      code.createSpan({ text: preview.slice(from, to), cls: classes }); cursor = to;
+    });
+    if (cursor < preview.length) code.appendText(preview.slice(cursor));
+  };
   if (!preview) code.appendText('// Empty source');
+  else if (languages) paint(languages);
+  else {
+    // Plain text until the packs load, then the same highlighted markup.
+    code.appendText(preview);
+    void loadStudioSourceLanguages().then(paint, () => undefined);
+  }
   if (source.length > preview.length) root.createDiv({ cls: 'ss-studio-source-note', text: 'Preview shortened. Edit source to inspect the complete document.' });
 }
 
@@ -42,11 +60,12 @@ export function mountStudioSourceEditor(root: HTMLElement, options: {
 }): { read: () => string; destroy: () => StudioSourceEditorSnapshot } {
   markStudioNodeCardInteractive(root);
   const size = options.source.length;
+  const languageSlot = new Compartment();
   const view = new EditorView({
     parent: root, root: root.ownerDocument,
     state: EditorState.create({ doc: options.source,
       selection: options.snapshot ? { anchor: Math.min(options.snapshot.anchor, size), head: Math.min(options.snapshot.head, size) } : undefined,
-      extensions: [language(options.language), syntaxHighlighting(highlightStyle), lineNumbers(), highlightActiveLine(), history(),
+      extensions: [languageSlot.of(languages ? languages.studioSourceLanguage(options.language) : []), syntaxHighlighting(highlightStyle), lineNumbers(), highlightActiveLine(), history(),
         EditorView.contentAttributes.of({ 'aria-label': options.label, 'data-testid': 'studio.source.editor', spellcheck: 'false' }),
         EditorView.updateListener.of(update => { if (update.docChanged) options.onChange(update.state.doc.toString()); }),
         keymap.of([{ key: 'Mod-Enter', run: () => { options.onApply(); return true; } }, ...defaultKeymap, ...historyKeymap, indentWithTab]),
@@ -61,6 +80,10 @@ export function mountStudioSourceEditor(root: HTMLElement, options: {
     event.preventDefault(); event.stopPropagation(); options.onApply();
   };
   ownerWindow?.addEventListener('keydown', applyKey, true);
+  let destroyed = false;
+  if (!languages) void loadStudioSourceLanguages().then(loaded => {
+    if (!destroyed) view.dispatch({ effects: languageSlot.reconfigure(loaded.studioSourceLanguage(options.language)) });
+  }, () => undefined);
   view.scrollDOM.scrollTop = options.snapshot?.scrollTop ?? 0;
   view.scrollDOM.scrollLeft = options.snapshot?.scrollLeft ?? 0;
   if (!options.snapshot || options.snapshot.focused) view.focus();
@@ -68,6 +91,6 @@ export function mountStudioSourceEditor(root: HTMLElement, options: {
     const { anchor, head } = view.state.selection.main;
     const snapshot = { anchor, head, scrollTop: view.scrollDOM.scrollTop, scrollLeft: view.scrollDOM.scrollLeft, focused: view.hasFocus };
     ownerWindow?.removeEventListener('keydown', applyKey, true);
-    view.destroy(); return snapshot;
+    destroyed = true; view.destroy(); return snapshot;
   } };
 }

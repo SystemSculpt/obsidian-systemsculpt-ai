@@ -441,7 +441,7 @@ function insertAfterFrontmatter(markdown: string, block: string): string {
   return `${markdown.slice(0, afterClosing + 1)}\n${block}\n${markdown.slice(afterClosing + 1)}`;
 }
 
-export function assertAudioArtifact(
+function assertAudioArtifact(
   markdown: string,
   artifactJobId: string,
   kind: DeliveryArtifact,

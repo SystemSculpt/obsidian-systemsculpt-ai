@@ -75,16 +75,6 @@ async function tryOpenLocalFolder(
   return false;
 }
 
-const CAPABILITIES: readonly HostCapability[] = [
-  "node-runtime",
-  "local-filesystem",
-  "absolute-paths",
-  "native-file-picker",
-  "file-manager-reveal",
-  "local-cli",
-  "status-bar",
-];
-
 function isWindow(value: unknown): value is Window {
   return Boolean(
     value &&
@@ -175,10 +165,6 @@ export function hasHostCapability(
         typeof shell?.openExternal === "function";
     }
   }
-}
-
-export function getHostCapabilities(owner?: HostCapabilityOwner): ReadonlySet<HostCapability> {
-  return new Set(CAPABILITIES.filter((capability) => hasHostCapability(capability, owner)));
 }
 
 /** Open a desktop folder through the same shell methods that advertise support. */

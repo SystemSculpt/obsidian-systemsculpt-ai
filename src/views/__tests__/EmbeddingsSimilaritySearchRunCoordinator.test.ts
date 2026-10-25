@@ -21,7 +21,7 @@ describe("SimilaritySearchRunCoordinator", () => {
   it("defers hidden sources and flushes the latest source once visible", async () => {
     jest.useFakeTimers();
     let visible = false;
-    const execute = jest.fn(async () => undefined);
+    const execute = jest.fn(async (_run: SimilaritySearchRun) => undefined);
     const coordinator = new SimilaritySearchRunCoordinator({
       isVisible: () => visible,
       getOwnerWindow: ownerWindow,

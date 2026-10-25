@@ -197,7 +197,7 @@ describe("UpgradePlanModal", () => {
 
     expect(modal.modalEl.textContent).toContain("Signed in as user@example.com.");
     expect(modal.modalEl.textContent).toContain("Create a free account for 500 starter credits, or choose a plan.");
-    expect(findButtonByText(modal.modalEl, "Get lifetime license")).toBeTruthy();
+    expect(findButtonByText(modal.modalEl, "Subscribe yearly")).toBeTruthy();
     expect(findButtonByText(modal.modalEl, "Subscribe monthly")).toBeTruthy();
     modal.onClose();
   });
@@ -208,10 +208,10 @@ describe("UpgradePlanModal", () => {
     const modal = new UpgradePlanModal(plugin);
     modal.onOpen();
 
-    findButtonByText(modal.modalEl, "Get lifetime license").click();
+    findButtonByText(modal.modalEl, "Subscribe yearly").click();
 
     expect(hrefs).toEqual([
-      "https://systemsculpt.com/lifetime?utm_source=obsidian-plugin&utm_medium=modal&utm_campaign=upgrade",
+      "https://systemsculpt.com/checkout?resourceId=2b96b063-3ed9-4e5a-972c-6910fb611ab8&utm_source=obsidian-plugin&utm_medium=modal&utm_campaign=upgrade",
     ]);
     expect(modal.modalEl.textContent).toContain("Finish your purchase in the browser");
     expect(findButtonByText(modal.modalEl, "I've purchased — Sync license")).toBeTruthy();
@@ -331,7 +331,7 @@ describe("UpgradePlanModal", () => {
     expect(modal.modalEl.textContent).toContain("Signed in as user@example.test.");
     expect(modal.modalEl.textContent).not.toContain("Welcome");
     expect(modal.modalEl.textContent).not.toContain("license is being confirmed");
-    expect(Array.from(modal.footerEl.querySelectorAll("button")).map((button) => button.textContent)).toEqual(["Done"]);
+    expect(Array.from(modal["footerEl"].querySelectorAll("button")).map((button) => button.textContent)).toEqual(["Done"]);
     findButtonByText(modal.modalEl, "Done").click();
     modal.onClose();
     expect(plugin.pollInBackground).not.toHaveBeenCalled();
@@ -359,7 +359,7 @@ describe("UpgradePlanModal", () => {
 
     expect(modal.modalEl.textContent).toContain("Signed in as user@example.test.");
     expect(modal.modalEl.textContent).toContain(PLAN_REQUIRED_MESSAGE);
-    expect(findButtonByText(modal.modalEl, "Get lifetime license")).toBeTruthy();
+    expect(findButtonByText(modal.modalEl, "Subscribe yearly")).toBeTruthy();
     modal.onClose();
     expect(plugin.pollInBackground).not.toHaveBeenCalled();
   });

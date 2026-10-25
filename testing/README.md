@@ -1,6 +1,6 @@
 # Testing architecture
 
-The plugin has four local test layers:
+The plugin has three local test layers:
 
 1. src/**/__tests__ proves module behavior with Jest, including seeded
    lifecycle, persistence, rendering, approval, queue, and recovery races.
@@ -8,10 +8,13 @@ The plugin has four local test layers:
    contracts plus Obsidian host composition.
 3. scripts/*.test.mjs proves build, release, workflow, mobile-import, sync, and
    repository policy.
-4. The retired managed-chat replay fixture remains hash-pinned as a released
-   compatibility artifact. Behavioral validation of that legacy server route
-   belongs to the website API; the plugin does not replay it through a second
-   client-owned projector.
+
+Tests are type-checked too. tsconfig.test.json checks src and testing in one
+program in which obsidian resolves to src/tests/mocks/obsidian.d.ts: the real
+obsidian.d.ts types plus the constructors the Jest mock accepts (for example
+`new TFile({ path })`). Give fakes the real shape instead of casting them;
+reach a private member with `view["member"]`, which keeps its declared type.
+`npm run check:types:tests` runs that program alone.
 
 Managed fixtures live in testing/fixtures/managed; versioned settings inputs
 live in testing/fixtures/settings. Default tests need no provider key, hosted
@@ -57,7 +60,8 @@ npm run check:compat
   update does: every window and document listener, timer, observer and
   workspace, vault and metadataCache event ref returns to its count before
   load, and the first instance must be collected.
-- check:plugin adds types, mobile, sync, artifact, and release guards.
+- check:plugin adds source and test types, mobile, sync, artifact, and release
+  guards.
 - test:chatview:critical uses strict console, randomized test order with a
   printed replay seed, open-handle detection, adversarial thin-session and
   local-persistence cases, and a global coverage floor on the high-risk

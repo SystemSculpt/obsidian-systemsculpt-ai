@@ -41,7 +41,7 @@ export interface EmbeddingsIndicator {
   total?: number;
 }
 
-export interface SearchStats {
+interface SearchStats {
   totalMs: number;
   lexMs?: number;
   semMs?: number;
@@ -720,9 +720,7 @@ export class SystemSculptSearchEngine {
       return this.eligibleFilesCache;
     }
 
-    const cached = this.plugin.vaultFileCache?.getAllFilesView?.() ?? this.plugin.vaultFileCache?.getAllFiles?.();
-    const files = Array.isArray(cached) ? cached : this.app.vault.getFiles();
-    this.eligibleFilesCache = Array.from(files).filter((f) => this.isEligible(f, exclusions));
+    this.eligibleFilesCache = this.app.vault.getFiles().filter((f) => this.isEligible(f, exclusions));
     this.eligibleFilesCacheSignature = exclusions.signature;
     return this.eligibleFilesCache;
   }

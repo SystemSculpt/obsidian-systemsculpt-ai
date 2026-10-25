@@ -120,6 +120,7 @@ const PICTURE_BAND_PIXELS = 1 << 20;
 /**
  * Whether two rows of RGBA pixels show the same thing. Colour is weighed by
  * its alpha: what lies under near-zero alpha does not survive a round trip.
+ * @internal Unit-tested directly.
  */
 export function isSameClipboardPixels(first: ArrayLike<number>, second: ArrayLike<number>): boolean {
   if (first.length !== second.length) {

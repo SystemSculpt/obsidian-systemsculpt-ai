@@ -3,6 +3,7 @@ import { CodexChatTransport, runLocalCodex } from '../LocalCodexClient';
 import { CodexThreadLocator } from '../CodexThreadLocator';
 import { AgentChatSession } from '../../../chat/managed/ChatSession';
 import type { AgentToolPart } from '../../../chat/ChatConversation';
+import type { ChatMessage } from '../../../types';
 import { codexActivity } from '../CodexActivity';
 import { answerCodexRequest } from '../CodexRequestModal';
 jest.mock('../CodexRequestModal', () => ({ answerCodexRequest: jest.fn() }));
@@ -18,9 +19,9 @@ function setup() {
   let threadId: string | undefined;
   const locator = { read: jest.fn(async () => threadId), write: jest.fn(async (_id, id) => { threadId = id; }) };
   (CodexThreadLocator as jest.Mock).mockImplementation(() => locator);
-  const persistAssistant = jest.fn(async () => {});
+  const persistAssistant = jest.fn(async (_message: ChatMessage) => {});
   const session = new CodexChatSession({} as never, { persistAssistant });
-  native.mockImplementation(async (input, _signal, callbacks) => { await callbacks.thread('native-thread'); callbacks.text('hello'); return { text: 'hello', threadId: 'native-thread', turnId: 'turn', status: 'completed' }; });
+  native.mockImplementation(async (_input, _signal, callbacks) => { await callbacks.thread('native-thread'); callbacks.text('hello'); return { text: 'hello', threadId: 'native-thread', turnId: 'turn', status: 'completed' }; });
   return { session, locator, persistAssistant };
 }
 const input = (id = 'message_1') => ({ conversationId: 'conversation_1', turnId: id, message: { id, role: 'user' as const, parts: [{ type: 'text' as const, text: 'hello' }] } });

@@ -18,6 +18,7 @@ import type {
   AgentRunInput,
   AgentRunResult,
 } from "../../../chat/managed/ChatSession";
+import type { ChatSession } from "../../../chat/ChatSession";
 import type { ChatMessage } from "../../../types";
 import { requiresUserApproval } from "../../../utils/toolPolicy";
 import { DEFAULT_THIN_AGENT_INPUT_LIMITS } from "../../../services/managed/ThinAgentInputLimits";
@@ -27,6 +28,10 @@ import {
   type MeasuredThinAgentContext,
   type ThinAgentContextSource,
 } from "../../../services/managed/ThinAgentV1Contract";
+
+type SetHistory = AgentWorkspace["setHistory"];
+type SetAgentSnapshot = AgentWorkspace["setAgentSnapshot"];
+type SettleUnfinishedRun = AgentWorkspace["settleUnfinishedRun"];
 
 const EMPTY_CONTEXT: MeasuredThinAgentContext = {
   sources: [],
@@ -65,7 +70,7 @@ jest.mock("obsidian", () => {
   };
 });
 
-const ORIGINAL_ATTACHMENT: ChatMessageAttachment = Object.freeze({
+const ORIGINAL_ATTACHMENT: ChatMessageAttachment = Object.freeze<ChatMessageAttachment>({
   status: "ready",
   id: "original-attachment",
   name: "original.md",
@@ -84,7 +89,7 @@ const ORIGINAL_ATTACHMENT: ChatMessageAttachment = Object.freeze({
   },
 });
 
-const NEWER_ATTACHMENT: ChatMessageAttachment = Object.freeze({
+const NEWER_ATTACHMENT: ChatMessageAttachment = Object.freeze<ChatMessageAttachment>({
   status: "ready",
   id: "newer-attachment",
   name: "newer.md",
@@ -186,7 +191,7 @@ function createHarness(failure: "before-start" | "before-commit" | "after-commit
     }),
     setBanner: jest.fn(),
     settleCompletedRun: jest.fn(async () => undefined),
-    settleUnfinishedRun: jest.fn(async () => undefined),
+    settleUnfinishedRun: jest.fn<ReturnType<SettleUnfinishedRun>, Parameters<SettleUnfinishedRun>>(async () => undefined),
     restoreRejectedSubmission,
     resetMessageEditor: jest.fn(),
   };
@@ -622,13 +627,13 @@ function createSavedChatLoadHarness(
     resetMessageEditor: jest.fn(),
     setApprovalMode: jest.fn(),
     setTitle: jest.fn(),
-    setHistory: jest.fn(async () => undefined),
-    setAgentSnapshot: jest.fn(async () => undefined),
+    setHistory: jest.fn<ReturnType<SetHistory>, Parameters<SetHistory>>(async () => undefined),
+    setAgentSnapshot: jest.fn<ReturnType<SetAgentSnapshot>, Parameters<SetAgentSnapshot>>(async () => undefined),
     setComposerReadOnly: jest.fn(),
   };
   const agent = {
     cancel: jest.fn(async () => undefined),
-    detach: jest.fn(async () => undefined),
+    detach: jest.fn<ReturnType<ChatSession["detach"]>, Parameters<ChatSession["detach"]>>(async () => undefined),
     disconnect: jest.fn(),
     hydrate: jest.fn(options.hydrate ?? (async () => undefined)),
     getSnapshot: jest.fn(() => ({ status: "idle" })),
@@ -841,10 +846,22 @@ describe("AgentChatView composer admission", () => {
 
   it("restores a deferred submission and attachments when the balance rejects it after a transition", async () => {
     const harness = createHarness("before-start");
-    const transition = deferred();
-    harness.view.activeSubmissionOperation = { kind: "transition", finished: transition.promise };
+    const transition = harness.view["createSubmissionOperation"]("transition", "origin-admission", null, false, 0);
+    harness.view["activeSubmissionOperation"] = transition;
     harness.view.refreshCreditsBalance = jest.fn(async () => undefined);
-    harness.view.creditsBalance = { totalRemaining: 0, availableUnreserved: 0, usageClass: "customer" };
+    harness.view.creditsBalance = {
+      includedRemaining: 0,
+      addOnRemaining: 0,
+      totalRemaining: 0,
+      availableUnreserved: 0,
+      includedPerMonth: 2_000,
+      usageClass: "customer",
+      cycleEndsAt: "2026-08-01T00:00:00.000Z",
+      cycleStartedAt: "2026-07-01T00:00:00.000Z",
+      cycleAnchorAt: "2026-07-01T00:00:00.000Z",
+      turnInFlightUntil: null,
+      purchaseUrl: null,
+    };
     harness.composer.setValue("Original request");
     harness.composer.restoreMessageAttachments([ORIGINAL_ATTACHMENT]);
 
@@ -852,9 +869,9 @@ describe("AgentChatView composer admission", () => {
     expect(harness.composer.getValue()).toBe("");
     harness.composer.setValue("Newer draft");
     harness.composer.restoreMessageAttachments([NEWER_ATTACHMENT]);
-    harness.view.activeSubmissionOperation = null;
-    transition.resolve();
-    await transition.promise;
+    harness.view["activeSubmissionOperation"] = null;
+    transition.resolveFinished();
+    await transition.finished;
 
     expect(harness.agent.start).not.toHaveBeenCalled();
     expect(harness.composer.getValue()).toBe("Original request\n\nNewer draft");
@@ -1939,10 +1956,10 @@ describe("AgentChatView composer admission", () => {
     });
     expect(view.getExpectedChatHistoryFilePath()).toBe("SystemSculpt/Chats/2026-09-24 10-00-00.md");
 
-    view.plugin = { settings: { chatsDirectory: "Archive/Chats/" } };
+    view.plugin.settings.chatsDirectory = "Archive/Chats/";
     expect(view.getExpectedChatHistoryFilePath()).toBe("Archive/Chats/2026-09-24 10-00-00.md");
 
-    view.plugin = { settings: { chatsDirectory: "" } };
+    view.plugin.settings.chatsDirectory = "";
     expect(view.getExpectedChatHistoryFilePath()).toBe("SystemSculpt/Chats/2026-09-24 10-00-00.md");
   });
 
@@ -2029,7 +2046,7 @@ describe("AgentChatView composer admission", () => {
     });
     renderedTurn.createDiv({ cls: "systemsculpt-agent-part is-text" });
     const render = deferred();
-    let paint: FrameRequestCallback | null = null;
+    let paint: FrameRequestCallback = () => {};
     const requestAnimationFrame = jest.fn((callback: FrameRequestCallback) => {
       paint = callback;
       return 7;
@@ -2092,7 +2109,7 @@ describe("AgentChatView composer admission", () => {
         expect.anything(),
       );
 
-      (paint as FrameRequestCallback)(321.5);
+      paint(321.5);
       expect(recordClientRenderMilestone).toHaveBeenLastCalledWith(
         "response_first_paint_opportunity",
         "user-render",
@@ -2116,7 +2133,7 @@ describe("AgentChatView composer admission", () => {
   it("forwards failed-surface DOM and paint evidence without awaiting diagnostics", async () => {
     const host = document.body.createDiv();
     const render = deferred();
-    let paint: FrameRequestCallback | null = null;
+    let paint: FrameRequestCallback = () => {};
     const requestAnimationFrame = jest.fn((callback: FrameRequestCallback) => {
       paint = callback;
       return 71;
@@ -2205,7 +2222,7 @@ describe("AgentChatView composer admission", () => {
       });
       expect(requestAnimationFrame).toHaveBeenCalledTimes(1);
 
-      (paint as FrameRequestCallback)(512.5);
+      paint(512.5);
 
       expect(recordIncidentFailureSurfacePaintOpportunity).toHaveBeenCalledWith(
         "user-failure-surface",
@@ -2312,7 +2329,7 @@ describe("AgentChatView composer admission", () => {
       attr: { "data-part-key": "text:text-continuation-render" },
     });
     const render = deferred();
-    let paint: FrameRequestCallback | null = null;
+    let paint: FrameRequestCallback = () => {};
     const requestAnimationFrame = jest.fn((callback: FrameRequestCallback) => {
       paint = callback;
       return 8;
@@ -2393,7 +2410,7 @@ describe("AgentChatView composer admission", () => {
       ]);
       expect(requestAnimationFrame).toHaveBeenCalledTimes(1);
 
-      (paint as FrameRequestCallback)(400.25);
+      paint(400.25);
       expect(recordClientToolRenderMilestone.mock.calls.slice(2)).toEqual([
         [
           "local_tool_terminal_paint_opportunity",
@@ -2435,11 +2452,12 @@ describe("AgentChatView composer admission", () => {
       now: { configurable: true, value: () => 20 },
     });
     const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
-    Object.assign(view, { workspace: { setPlanOfferVisible: jest.fn(), element: firstHost } });
+    const workspace = { setPlanOfferVisible: jest.fn(), element: firstHost };
+    Object.assign(view, { workspace });
 
     try {
       expect((view as any).clientMonotonicNow()).toBe(1_100);
-      view.workspace.element = secondHost;
+      workspace.element = secondHost;
       expect((view as any).clientMonotonicNow()).toBe(1_110);
     } finally {
       firstFrame.remove();
@@ -3442,7 +3460,6 @@ describe("AgentChatView controls", () => {
         }
       },
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
       documentAttachmentProcessor: {
         prepare: jest.fn(async (_input, { signal }) => {
           prepareAttempt += 1;
@@ -3626,7 +3643,6 @@ describe("AgentChatView controls", () => {
         }
       },
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
 
@@ -3723,7 +3739,6 @@ describe("AgentChatView controls", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const session = {
@@ -3831,7 +3846,6 @@ describe("AgentChatView controls", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
       onRunQueuedNow: async (id) => {
         try {
           await (view as any).runQueuedFollowUpNow(id);
@@ -3985,7 +3999,6 @@ describe("AgentChatView controls", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
       onRunQueuedNow: async (id) => {
         await (view as any).runQueuedFollowUpNow(id);
         runNowFinished.resolve();
@@ -4122,7 +4135,6 @@ describe("AgentChatView controls", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
       onCancelQueued: async (id) => {
         try {
           await (view as any).cancelQueuedFollowUp(id);
@@ -5000,7 +5012,7 @@ describe("AgentChatView thin conversation lifecycle", () => {
       app: view.app, sourcePath: () => "", onSubmit: jest.fn(), onStop: jest.fn(),
       onAttach: jest.fn(), onRemoveAttachment: jest.fn(), onApprove: jest.fn(),
       onOpenArtifact: jest.fn(), onCopyArtifactPath: jest.fn(), onNewChat: jest.fn(),
-      onOpenHistory: jest.fn(), onOpenSettings: jest.fn(),
+      onOpenHistory: jest.fn(),
       documentAttachmentProcessor: {
         prepare: jest.fn(async (_input, { signal }) => {
           attachmentSignal = signal;
@@ -5064,7 +5076,7 @@ describe("AgentChatView thin conversation lifecycle", () => {
       app: view.app, sourcePath: () => "", onSubmit: jest.fn(), onStop: jest.fn(),
       onAttach: jest.fn(), onRemoveAttachment: jest.fn(), onApprove: jest.fn(),
       onOpenArtifact: jest.fn(), onCopyArtifactPath: jest.fn(), onNewChat: jest.fn(),
-      onOpenHistory: jest.fn(), onOpenSettings: jest.fn(),
+      onOpenHistory: jest.fn(),
     });
     workspace.load();
     view.workspace = workspace;
@@ -5668,7 +5680,7 @@ describe("AgentChatView thin conversation lifecycle", () => {
       app: new App(), sourcePath: () => "", onSubmit: jest.fn(), onStop: jest.fn(),
       onAttach: jest.fn(), onRemoveAttachment: jest.fn(), onApprove: jest.fn(),
       onOpenArtifact: jest.fn(), onCopyArtifactPath: jest.fn(), onNewChat: jest.fn(),
-      onOpenHistory: jest.fn(), onOpenSettings: jest.fn(),
+      onOpenHistory: jest.fn(),
     });
     workspace.load();
     view.workspace = workspace;

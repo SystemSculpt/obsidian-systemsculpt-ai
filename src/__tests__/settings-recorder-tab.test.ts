@@ -132,7 +132,8 @@ describe("Recorder settings tab", () => {
     if (originalMediaDevices) {
       Object.defineProperty(navigator, "mediaDevices", originalMediaDevices);
     } else {
-      delete (navigator as Navigator & { mediaDevices?: MediaDevices }).mediaDevices;
+      const mutableNavigator: Omit<Navigator, "mediaDevices"> & { mediaDevices?: MediaDevices } = navigator;
+      delete mutableNavigator.mediaDevices;
     }
     jest.clearAllMocks();
   });
@@ -378,7 +379,7 @@ describe("Recorder settings tab", () => {
     expect(mainEnumerate).not.toHaveBeenCalled();
 
     select.value = "popout";
-    select.dispatchEvent(new foreignWindow.Event("change"));
+    select.dispatchEvent(new foreignWindow.window.Event("change"));
     await flush();
     expect(getCurrentHostPreferredMicrophoneId(
       foreignWindow,

@@ -25,12 +25,6 @@ import {
 } from "../../utils/ThinAgentLifecycleSchema";
 import type { AgentCommandKind } from "./Protocol";
 
-export {
-  CREDITS_REFRESH_REASONS,
-  HISTORY_SYNC_KINDS,
-  THIN_AGENT_LIFECYCLE_CODES,
-  THIN_AGENT_LIFECYCLE_PHASES,
-} from "../../utils/ThinAgentLifecycleSchema";
 export type {
   AgentLifecycleCode,
   AgentLifecyclePhase,

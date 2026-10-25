@@ -1,5 +1,6 @@
 import type { DataAdapter } from "obsidian";
 import { getHostDeviceType, getHostOperatingSystem } from "../../platform/hostCapabilities";
+import { isMissingPathError } from "../../utils/errors";
 
 const AUTOMATIC_DIAGNOSTICS_ARCHIVE_PATTERN = /^(?:systemsculpt-\d{8}-\d{6}\.log|resource-metrics-\d{8}-\d{6}\.ndjson|session-\d{8}-\d{6}\.json)$/u;
 const DIAGNOSTICS_ARCHIVE_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1_000;
@@ -24,7 +25,7 @@ type DiagnosticsCleanupOperationResult<T> =
   | Readonly<{ kind: "success"; value: T }>
   | Readonly<{ kind: "failed" | "missing" | "stopped" | "timed_out" }>;
 
-export type DiagnosticsSessionMetadata = Readonly<{
+type DiagnosticsSessionMetadata = Readonly<{
   schemaVersion: 2;
   sessionId: string;
   startedAt: string;
@@ -36,7 +37,7 @@ export type DiagnosticsSessionMetadata = Readonly<{
   }>;
 }>;
 
-export interface DiagnosticsSessionStorage {
+interface DiagnosticsSessionStorage {
   initialize(): Promise<void>;
   getPath(type: "diagnostics"): string;
   writeFile(type: "diagnostics", fileName: string, data: string | object): Promise<unknown>;
@@ -212,7 +213,7 @@ export class DiagnosticsSessionLifecycle {
         .then(operation)
         .then<DiagnosticsCleanupOperationResult<T>, DiagnosticsCleanupOperationResult<T>>(
           (value) => ({ kind: "success", value }),
-          (error: unknown) => ({ kind: error instanceof Error && /ENOENT|not found|does not exist/i.test(error.message) ? "missing" : "failed" }),
+          (error: unknown) => ({ kind: isMissingPathError(error) ? "missing" : "failed" }),
         );
       const operationTimeout = new Promise<DiagnosticsCleanupOperationResult<T>>((resolve) => {
         operationTimer = window.setTimeout(() => resolve({ kind: "timed_out" }), DIAGNOSTICS_ARCHIVE_OPERATION_TIMEOUT_MS);

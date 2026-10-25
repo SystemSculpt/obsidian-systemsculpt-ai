@@ -427,7 +427,7 @@ export interface RestoreResult {
   reason: "restored" | "store-not-empty" | "no-snapshot" | "empty-snapshot";
 }
 
-export interface PortableSnapshot {
+interface PortableSnapshot {
   committedNamespace: string | null;
   vectors: EmbeddingVector[];
   /** What each readable shard file held when it was read. */
@@ -482,6 +482,7 @@ function mergeNewestPerNote(sharded: EmbeddingVector[], legacy: EmbeddingVector[
  * whenever they exist, even when `index.json` is missing, unparseable, not
  * yet synced, or an older release's file. A corrupt or partially synced shard
  * is skipped; its notes are re-embedded.
+ * @internal Unit-tested directly.
  */
 export async function readPortableSnapshot(file: PortableIndexFile): Promise<PortableSnapshot | null> {
   const index = await file.read();
@@ -563,6 +564,7 @@ export async function restoreEmbeddingsIndexIfEmpty(deps: {
  * most recently written one, which is the generation an interrupted rebuild
  * was moving to. Older snapshots carried every generation a vault ever used
  * (#324); restoring them would only resurrect vectors nothing can query.
+ * @internal Unit-tested directly.
  */
 export function retainRestorableGenerations(
   vectors: EmbeddingVector[],

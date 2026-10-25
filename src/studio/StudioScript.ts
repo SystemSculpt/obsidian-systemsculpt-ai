@@ -4,7 +4,7 @@ import type { StudioJsonValue } from './types';
 import { isStudioDynamicPortId, isStudioPortDataType, STUDIO_PROCESS_FIXED_OUTPUT_PORTS } from './types';
 import { isRecord } from './utils';
 
-export const STUDIO_SCRIPT_MAX_BYTES = 256 * 1024;
+const STUDIO_SCRIPT_MAX_BYTES = 256 * 1024;
 export const STUDIO_SCRIPT_TEMPLATE = `/* studio
 inputs:
   value: {type: json, required: false}

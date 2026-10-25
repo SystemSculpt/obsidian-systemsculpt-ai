@@ -20,7 +20,7 @@ export type LocalToolCall = Readonly<{
   input: AgentJsonValue;
 }>;
 
-export type ToolTarget = Readonly<{
+type ToolTarget = Readonly<{
   name: string;
   input: AgentJsonValue;
 }>;

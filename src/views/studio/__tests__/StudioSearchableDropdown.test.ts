@@ -381,7 +381,7 @@ describe("renderStudioSearchableDropdown", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
 
-    let releaseOptions: (() => void) | null = null;
+    let releaseOptions = (): void => {};
     renderStudioSearchableDropdown({
       containerEl: host,
       ariaLabel: "Model",
@@ -405,7 +405,7 @@ describe("renderStudioSearchableDropdown", () => {
     const list = host.querySelector(".ss-studio-searchable-select-list") as HTMLElement;
 
     await flush();
-    releaseOptions?.();
+    releaseOptions();
     await flush();
 
     const listMaxHeight = Number.parseInt(list.style.maxHeight || "0", 10);
@@ -415,7 +415,7 @@ describe("renderStudioSearchableDropdown", () => {
   it("does not refocus or render a dropdown closed while options load", async () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
-    let releaseOptions: (() => void) | null = null;
+    let releaseOptions = (): void => {};
     const pendingOptions = new Promise<StudioNodeConfigSelectOption[]>((resolve) => {
       releaseOptions = () => resolve([{ value: "model-a", label: "Model A" }]);
     });
@@ -442,7 +442,7 @@ describe("renderStudioSearchableDropdown", () => {
     const focusSpy = jest.spyOn(search!, "focus");
 
     trigger?.click();
-    releaseOptions?.();
+    releaseOptions();
     await flush();
 
     expect(panel?.style.display).toBe("none");

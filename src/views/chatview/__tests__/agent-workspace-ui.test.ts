@@ -92,7 +92,7 @@ describe("AgentWorkspace", () => {
       Object.defineProperty(window.navigator, "clipboard", originalClipboardDescriptor);
       return;
     }
-    delete (window.navigator as Navigator & { clipboard?: Clipboard }).clipboard;
+    Reflect.deleteProperty(window.navigator, "clipboard");
   });
 
   it("renders tool status as static non-focusable content without raw payload disclosure", async () => {
@@ -607,7 +607,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const history = deepFreeze<ChatMessage[]>([
@@ -752,7 +751,7 @@ describe("AgentWorkspace", () => {
       phase: "completed",
       busy: false,
       composerRunning: false,
-      tailStatus: null,
+      progressActive: false,
       visibleParts: [{
         id: "text-adopted-lease",
         kind: "text",
@@ -761,6 +760,7 @@ describe("AgentWorkspace", () => {
         markdown: "Open adopted action",
         order: 0,
       }],
+      activityStatus: "Done",
     });
     const liveAction = host.querySelector<HTMLButtonElement>(
       ".systemsculpt-agent-active-run button",
@@ -1019,7 +1019,6 @@ describe("AgentWorkspace", () => {
       onCopyText: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const tool = (id: string, messageId: string, timestamp: number) => ({
@@ -1093,7 +1092,6 @@ describe("AgentWorkspace", () => {
       onCancelMessageEdit,
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     await workspace.setHistory([
@@ -1176,7 +1174,6 @@ describe("AgentWorkspace", () => {
       onCancelMessageEdit: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     await workspace.setHistory([
@@ -1243,7 +1240,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const firstTool = {
@@ -1340,7 +1336,6 @@ describe("AgentWorkspace", () => {
       onCopyText: jest.fn(async () => true),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const tool = (id: string, timestamp: number) => ({
@@ -1490,7 +1485,6 @@ describe("AgentWorkspace", () => {
       onCopyText: jest.fn(async () => true),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const tool = (id: string, messageId: string, timestamp: number, path: string) => ({
@@ -1612,7 +1606,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const turnId = "user-live-history";
@@ -1750,7 +1743,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const turnId = "user-atomic-boundary";
@@ -1905,7 +1897,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     await workspace.setHistory([
@@ -1949,7 +1940,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     workspace.composer.setAgentName("Claude Code");
@@ -2025,7 +2015,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
       onCancelQueued: jest.fn(),
       onRunQueuedNow: jest.fn(),
     });
@@ -2094,7 +2083,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
       onCancelQueued: jest.fn(),
       onRunQueuedNow: jest.fn(),
     });
@@ -2207,7 +2195,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
       onCancelQueued,
       onRunQueuedNow,
     });
@@ -2300,7 +2287,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
 
@@ -2353,7 +2339,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
 
@@ -2586,7 +2571,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const activity: readonly AgentPart[] = [{
@@ -2707,7 +2691,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const reasoning: Extract<AgentPart, { kind: "reasoning" }> = {
@@ -2859,7 +2842,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const textPart = {
@@ -2978,7 +2960,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
 
@@ -3037,7 +3018,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
 
@@ -3162,7 +3142,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
 
@@ -3472,7 +3451,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const snapshot = (markdown: string): AgentConversationSnapshot => ({
@@ -3543,7 +3521,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const snapshot = (input: unknown, output?: unknown): AgentConversationSnapshot => ({
@@ -3604,7 +3581,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const running: AgentConversationSnapshot = {
@@ -3679,7 +3655,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const running: AgentConversationSnapshot = {
@@ -3727,7 +3702,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const tools: readonly AgentPart[] = [{
@@ -3860,7 +3834,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const snapshot = (complete: boolean): AgentConversationSnapshot => ({
@@ -3928,7 +3901,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const running: AgentConversationSnapshot = {
@@ -3993,7 +3965,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
 
@@ -4048,7 +4019,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const runningTool: Extract<AgentPart, { kind: "tool" }> = {
@@ -4150,7 +4120,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
 
@@ -4292,7 +4261,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
 
@@ -4360,7 +4328,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
 
@@ -4414,7 +4381,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
 
@@ -4487,7 +4453,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
 
@@ -4591,7 +4556,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const user = { role: "user" as const, message_id: "user-settle", content: "Finish this" };
@@ -4646,7 +4610,6 @@ describe("AgentWorkspace", () => {
       onRetryFailedTurn,
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const user = {
@@ -4749,7 +4712,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const user = {
@@ -4831,7 +4793,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const user = { role: "user" as const, message_id: "user-stale", content: "Finish this" };
@@ -4903,7 +4864,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     workspace.setRunPending(true);
@@ -4940,7 +4900,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
 
@@ -5034,7 +4993,6 @@ describe("AgentWorkspace", () => {
           onCopyArtifactPath: jest.fn(),
           onNewChat: jest.fn(),
           onOpenHistory: jest.fn(),
-          onOpenSettings: jest.fn(),
         });
         workspace.load();
         try {
@@ -5124,7 +5082,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const render = jest.spyOn(workspace.renderer, "renderActive");
@@ -5199,7 +5156,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const terminalError = {
@@ -5276,7 +5232,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const notifyTurnStarted = jest.spyOn((workspace as any).scroller, "notifyTurnStarted");
@@ -5323,7 +5278,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const viewportState = {
@@ -5368,7 +5322,7 @@ describe("AgentWorkspace", () => {
       runId: "run-pending",
       turnId: "user-pending",
       status: "running",
-      phase: "responding",
+      phase: "working",
       messages: [{
         id: "assistant-pending",
         role: "assistant",
@@ -5408,7 +5362,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const input = parent.querySelector<HTMLTextAreaElement>(
@@ -5496,7 +5449,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const viewportState = {
@@ -5571,7 +5523,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
 
@@ -5698,7 +5649,6 @@ describe("AgentWorkspace", () => {
       onRetryMessage,
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const continuing: AgentConversationSnapshot = {
@@ -5765,7 +5715,6 @@ describe("AgentWorkspace", () => {
       onRetryMessage,
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const turnId = "user-reloaded-capacity";
@@ -5835,7 +5784,6 @@ describe("AgentWorkspace", () => {
       onRetryMessage: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
 
@@ -5932,7 +5880,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const writeCall = {
@@ -5991,7 +5938,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const input = { files: [{ path: "Changed.md" }, { path: "Failed.md" }] };
@@ -6135,7 +6081,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
 

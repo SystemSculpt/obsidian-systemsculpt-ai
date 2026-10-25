@@ -62,6 +62,55 @@ export function showActionNotice(
   });
 }
 
+/**
+ * One notice that stays until the user answers a yes-or-no question. It
+ * resolves true for the confirm action and false for the other action or a
+ * dismissed notice. It resolves null, and hides, when `signal` aborts first.
+ */
+export function askInNotice(
+  message: string,
+  labels: { confirm: string; cancel: string },
+  signal?: AbortSignal,
+): Promise<boolean | null> {
+  if (signal?.aborted) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const fragment = createSurfaceFragment(resolveSurfaceDomContext().document);
+    fragment.createDiv({ cls: "systemsculpt-notice-message", text: message });
+    const actions = fragment.createDiv({ cls: "systemsculpt-notice-actions" });
+    const confirm = actions.createEl("button", {
+      cls: "systemsculpt-notice-action mod-warning",
+      text: labels.confirm,
+      attr: { type: "button", "data-testid": "notice.confirm" },
+    });
+    const cancel = actions.createEl("button", {
+      cls: "systemsculpt-notice-action",
+      text: labels.cancel,
+      attr: { type: "button", "data-testid": "notice.cancel" },
+    });
+    const notice = new Notice(fragment, 0);
+    let settled = false;
+    const settle = (answer: boolean | null, hide: boolean) => {
+      if (settled) return;
+      settled = true;
+      signal?.removeEventListener("abort", onAbort);
+      if (hide) notice.hide();
+      resolve(answer);
+    };
+    const onAbort = () => settle(null, true);
+    signal?.addEventListener("abort", onAbort, { once: true });
+    for (const [button, answer] of [[confirm, true], [cancel, false]] as const) {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        settle(answer, true);
+      });
+    }
+    // Obsidian hides a notice the user clicks. Use the public 1.7.2 element;
+    // its .notice ancestor is the whole notice on newer hosts.
+    const messageElement = (notice as { noticeEl?: HTMLElement }).noticeEl;
+    (messageElement?.closest(".notice") ?? messageElement)?.addEventListener("click", () => settle(false, false));
+  });
+}
+
 const BUTTON_RESULT_MS = 1_500;
 const buttonResults = new WeakMap<HTMLElement, { label: string; timer: number }>();
 

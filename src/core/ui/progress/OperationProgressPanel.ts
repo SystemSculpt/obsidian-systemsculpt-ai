@@ -26,7 +26,7 @@ export interface OperationProgressStatusOptions {
   state?: OperationProgressState;
 }
 
-export interface OperationProgressStepDefinition {
+interface OperationProgressStepDefinition {
   id: string;
   label: string;
 }

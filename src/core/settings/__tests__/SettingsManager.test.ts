@@ -74,7 +74,7 @@ function createPlugin(loadDataResult: unknown = {}) {
 describe("SettingsManager managed settings contract", () => {
   beforeEach(() => jest.clearAllMocks());
   afterEach(() => {
-    delete (globalThis as typeof globalThis & { window?: Window }).window;
+    Reflect.deleteProperty(globalThis, "window");
   });
 
   it("loads current settings, stamps v4, and prunes retired client authority", async () => {
@@ -199,7 +199,7 @@ describe("SettingsManager managed settings contract", () => {
 
     await manager.updateSettings({});
     await manager.updateSettings({ chatFontSize: "medium" });
-    await manager.updateSettings({ knownChatsDirectories: [...manager.settings.knownChatsDirectories] });
+    await manager.updateSettings({ knownChatsDirectories: [...(manager.settings.knownChatsDirectories ?? [])] });
     await manager.updateSettings({ workflowEngine: JSON.parse(JSON.stringify(manager.settings.workflowEngine)) });
     await manager.updateSettings({ workflowEngine: Object.fromEntries(Object.entries(manager.settings.workflowEngine).reverse()) as any });
     await manager.saveSettings();

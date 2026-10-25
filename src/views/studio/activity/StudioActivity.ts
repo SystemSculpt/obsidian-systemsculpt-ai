@@ -22,17 +22,6 @@ export type StudioActivityPhase =
   | "failed"
   | "stopped";
 
-export const STUDIO_ACTIVITY_PHASES: readonly StudioActivityPhase[] = [
-  "idle",
-  "queued",
-  "active",
-  "waiting",
-  "done",
-  "cached",
-  "failed",
-  "stopped",
-];
-
 /** Cable state derived from the node that feeds it. */
 export type StudioEdgeActivityPhase = "idle" | "surging" | "delivered" | "failed";
 
@@ -49,6 +38,7 @@ export type StudioNodeActivity = Readonly<{
   progress: number | null;
 }>;
 
+/** @internal Tests assert against this value. */
 export const IDLE_NODE_ACTIVITY: StudioNodeActivity = Object.freeze({
   phase: "idle",
   label: "Idle",
@@ -159,8 +149,13 @@ export function activityPhaseFromAgentRunStatus(
   }
 }
 
-/** Native Codex run record → activity for the role card that started it. */
-export function nodeActivityFromAgentRun(run: StudioAgentRunActivitySource): StudioNodeActivity {
+/**
+ * Native Codex run record → activity for the role card that started it. A
+ * stale run (another machine's active run whose record stopped changing)
+ * settles without motion.
+ */
+export function nodeActivityFromAgentRun(run: StudioAgentRunActivitySource, stale = false): StudioNodeActivity {
+  if (stale) return createNodeActivity("stopped", { label: "Stale" });
   const phase = activityPhaseFromAgentRunStatus(run.status);
   const detail = String(run.error || run.currentActivity || "").trim();
   return createNodeActivity(phase, {

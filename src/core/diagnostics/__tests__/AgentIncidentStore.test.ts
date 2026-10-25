@@ -1,9 +1,7 @@
 import {
   AGENT_INCIDENT_MAX_DIRECTORY_ENTRIES,
-  AGENT_INCIDENT_MAX_REPORT_BYTES,
   AGENT_INCIDENT_MAX_SCAN_BYTES,
   AGENT_INCIDENT_MAX_SCAN_CANDIDATES,
-  AGENT_INCIDENT_SCHEMA_VERSION,
   AGENT_INCIDENT_STORE_PATH,
   AgentIncidentStore,
   AgentIncidentStoreError,
@@ -17,6 +15,8 @@ import {
 } from "../AgentIncidentRecorder";
 import {
   AGENT_INCIDENT_GROUPING_STRATEGY,
+  AGENT_INCIDENT_MAX_REPORT_BYTES,
+  AGENT_INCIDENT_SCHEMA_VERSION,
   buildAgentIncidentGroupingFingerprint,
   type AgentIncidentExportedFailureCode,
   type AgentIncidentFailureAuthority,
@@ -106,14 +106,14 @@ class MemoryAdapter implements AgentIncidentStoreAdapter {
     this.files.delete(path);
   }
 
-  async rename(path: string, newPath: string): Promise<void> {
+  rename?: (path: string, newPath: string) => Promise<void> = async (path, newPath) => {
     this.renameCalls += 1;
     const file = this.files.get(path);
     if (!file) throw new Error("missing-source");
     if (this.files.has(newPath)) throw new Error("target-exists");
     this.files.set(newPath, file);
     this.files.delete(path);
-  }
+  };
 
   put(path: string, data: string, mtime = this.clock): void {
     this.files.set(path, { data, ctime: mtime, mtime });
@@ -930,7 +930,6 @@ describe("AgentIncidentStore", () => {
     const stale = now - 15 * 24 * 60 * 60 * 1000;
     const recent = now - 60 * 60 * 1000;
     const future = now + 365 * 24 * 60 * 60 * 1000;
-    const store = new AgentIncidentStore(adapter, { now: () => now });
     adapter.directories.add(".systemsculpt");
     adapter.directories.add(".systemsculpt/diagnostics");
     adapter.directories.add(AGENT_INCIDENT_STORE_PATH);

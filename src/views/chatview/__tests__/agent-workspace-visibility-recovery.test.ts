@@ -94,7 +94,7 @@ describe("chat visibility recovery", () => {
       ...snapshot(""), status: "waiting", phase: "waiting", waitingReason: "approval",
       parts: [{
         id: "tool", kind: "tool", messageId: "assistant", callId: "call", name: "Bash", location: "server",
-        native: { agent: "claude" }, input: { command: "pwd" }, state: "approval-required", approvalId: "approve", order: 0,
+        native: { agent: "claude", workingDirectory: "/vault" }, input: { command: "pwd" }, state: "approval-required", approvalId: "approve", order: 0,
       }],
     };
     await workspace.setAgentSnapshot(pending);

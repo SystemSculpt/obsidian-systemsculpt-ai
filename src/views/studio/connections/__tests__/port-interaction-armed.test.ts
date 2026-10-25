@@ -47,7 +47,37 @@ function makeHost() {
     describeConnectionAutoCreate: () => null,
   };
 }
+// Armed moves are drawn on the next animation frame; tests run the frames themselves.
+let frames = new Map<number, FrameRequestCallback>();
+let nextFrame = 1;
+beforeEach(() => {
+  frames = new Map();
+  nextFrame = 1;
+  jest.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+    frames.set(nextFrame, callback);
+    return nextFrame++;
+  });
+  jest.spyOn(window, "cancelAnimationFrame").mockImplementation((handle) => {
+    frames.delete(handle);
+  });
+});
+afterEach(() => {
+  jest.restoreAllMocks();
+  document.body.replaceChildren();
+});
+function runFrames(): void {
+  const due = [...frames.values()];
+  frames.clear();
+  for (const callback of due) callback(0);
+}
+
 function makeInteraction(store: StudioLinkStore) {
+  const workspace = document.createElement("div");
+  const viewport = workspace.appendChild(document.createElement("div"));
+  const controls = workspace.appendChild(document.createElement("div"));
+  controls.className = "ss-studio-graph-workspace-controls";
+  const zoomOut = controls.appendChild(document.createElement("button"));
+  const elsewhere = document.createElement("div");
   const canvas = document.createElement("div");
   (canvas as unknown as { getBoundingClientRect: () => DOMRect }).getBoundingClientRect =
     () => rectOf({ left: 0, top: 0, width: 1000, height: 1000 });
@@ -63,17 +93,19 @@ function makeInteraction(store: StudioLinkStore) {
     width: 12,
     height: 12,
   });
-  document.body.append(canvas, outPin, inPin);
+  viewport.append(canvas, outPin, inPin);
+  document.body.append(workspace, elsewhere);
   const interaction = new StudioPortInteraction(makeHost() as never, store, {
     onConnectionCommit: () => {},
     onAutoCreateHint: () => {},
     onAutoCreateRelease: () => false,
     onDragStateChange: () => {},
   });
+  interaction.registerViewport(viewport);
   interaction.registerCanvas(canvas);
   interaction.registerPortElement("src", "out", "out", outPin);
   interaction.registerPortElement("dst", "in", "in", inPin);
-  return { interaction, outPin, inPin };
+  return { interaction, outPin, inPin, viewport, canvas, zoomOut, elsewhere };
 }
 
 describe("StudioPortInteraction armed (click-to-connect)", () => {
@@ -89,15 +121,46 @@ describe("StudioPortInteraction armed (click-to-connect)", () => {
     expect(store.getDragState()?.source).toEqual({ nodeId: "src", portId: "out" });
   });
 
-  it("the preview follows the cursor while armed", () => {
+  it("the preview follows the cursor over the viewport, once per frame", () => {
     const store = new StudioLinkStore();
-    const { interaction } = makeInteraction(store);
+    const { interaction, viewport, canvas } = makeInteraction(store);
     interaction.arm("src", "out");
+    const emitted = jest.fn();
+    store.subscribe(emitted);
+    const measure = jest.spyOn(canvas, "getBoundingClientRect");
 
-    window.dispatchEvent(new MouseEvent("pointermove", { clientX: 206, clientY: 206 }));
+    for (const point of [80, 120, 160, 206]) {
+      viewport.dispatchEvent(new MouseEvent("pointermove", { bubbles: true, clientX: point, clientY: point }));
+    }
+    expect(window.requestAnimationFrame).toHaveBeenCalledTimes(1);
+    expect(measure).not.toHaveBeenCalled();
+    expect(emitted).not.toHaveBeenCalled();
 
-    // Cursor is over the input port center -> it should snap to it.
+    runFrames();
+
+    // One measurement and one store update, at the last point: over the input port's center.
+    expect(measure).toHaveBeenCalledTimes(1);
+    expect(emitted).toHaveBeenCalledTimes(1);
     expect(store.getDragState()?.snapTarget).toEqual({ nodeId: "dst", portId: "in" });
+
+    viewport.dispatchEvent(new MouseEvent("pointermove", { bubbles: true, clientX: 500, clientY: 500 }));
+    expect(window.requestAnimationFrame).toHaveBeenCalledTimes(2);
+  });
+
+  it("moves outside the viewport cost nothing while armed", () => {
+    const store = new StudioLinkStore();
+    const { interaction, canvas, elsewhere } = makeInteraction(store);
+    interaction.arm("src", "out");
+    const before = store.getDragState();
+    const measure = jest.spyOn(canvas, "getBoundingClientRect");
+
+    elsewhere.dispatchEvent(new MouseEvent("pointermove", { bubbles: true, clientX: 206, clientY: 206 }));
+    window.dispatchEvent(new MouseEvent("pointermove", { clientX: 206, clientY: 206 }));
+    runFrames();
+
+    expect(window.requestAnimationFrame).not.toHaveBeenCalled();
+    expect(measure).not.toHaveBeenCalled();
+    expect(store.getDragState()).toBe(before);
   });
 
   it("clicking the same output again cancels (toggle off)", () => {
@@ -121,6 +184,80 @@ describe("StudioPortInteraction armed (click-to-connect)", () => {
 
     expect(interaction.getPendingConnectionSourceKey()).toBeNull();
     expect(store.getDragState()).toBeNull();
+  });
+
+  function expectDisarmed(store: StudioLinkStore, interaction: StudioPortInteraction, inPin: HTMLElement) {
+    expect(interaction.getPendingConnectionSourceKey()).toBeNull();
+    expect(store.getDragState()).toBeNull();
+    // No compatible input keeps its halo running.
+    expect(inPin.classList.contains("is-drop-target")).toBe(false);
+  }
+
+  it("the window losing focus cancels the armed connection", () => {
+    const store = new StudioLinkStore();
+    const { interaction, inPin } = makeInteraction(store);
+    interaction.arm("src", "out");
+    expect(inPin.classList.contains("is-drop-target")).toBe(true);
+
+    window.dispatchEvent(new FocusEvent("blur"));
+
+    expectDisarmed(store, interaction, inPin);
+  });
+
+  it("a press outside the viewport cancels the armed connection", () => {
+    const store = new StudioLinkStore();
+    const { interaction, inPin, elsewhere } = makeInteraction(store);
+    interaction.arm("src", "out");
+
+    elsewhere.dispatchEvent(new FakePointerEvent("pointerdown", { bubbles: true, button: 0 }));
+
+    expectDisarmed(store, interaction, inPin);
+  });
+
+  it("presses inside the viewport and on the graph's zoom controls keep the connection", () => {
+    const store = new StudioLinkStore();
+    const { interaction, inPin, canvas, zoomOut } = makeInteraction(store);
+    interaction.arm("src", "out");
+
+    canvas.dispatchEvent(new FakePointerEvent("pointerdown", { bubbles: true, button: 0 }));
+    inPin.dispatchEvent(new FakePointerEvent("pointerdown", { bubbles: true, button: 0 }));
+    zoomOut.dispatchEvent(new FakePointerEvent("pointerdown", { bubbles: true, button: 0 }));
+
+    expect(interaction.getPendingConnectionSourceKey()).toBe("src:out:out");
+    expect(inPin.classList.contains("is-drop-target")).toBe(true);
+  });
+
+  it("another graph's controls are outside this viewport", () => {
+    const store = new StudioLinkStore();
+    const { interaction, inPin } = makeInteraction(store);
+    interaction.arm("src", "out");
+    const otherControls = document.body.appendChild(document.createElement("div"));
+    otherControls.className = "ss-studio-graph-workspace-controls";
+
+    otherControls.dispatchEvent(new FakePointerEvent("pointerdown", { bubbles: true, button: 0 }));
+
+    expectDisarmed(store, interaction, inPin);
+  });
+
+  it("cancelling drops a pending frame and every armed listener", () => {
+    const store = new StudioLinkStore();
+    const { interaction, viewport, canvas, elsewhere } = makeInteraction(store);
+    interaction.arm("src", "out");
+    viewport.dispatchEvent(new MouseEvent("pointermove", { bubbles: true, clientX: 206, clientY: 206 }));
+    expect(frames.size).toBe(1);
+
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(frames.size).toBe(0);
+
+    const emitted = jest.fn();
+    store.subscribe(emitted);
+    const measure = jest.spyOn(canvas, "getBoundingClientRect");
+    viewport.dispatchEvent(new MouseEvent("pointermove", { bubbles: true, clientX: 100, clientY: 100 }));
+    window.dispatchEvent(new FocusEvent("blur"));
+    elsewhere.dispatchEvent(new FakePointerEvent("pointerdown", { bubbles: true, button: 0 }));
+    runFrames();
+    expect(measure).not.toHaveBeenCalled();
+    expect(emitted).not.toHaveBeenCalled();
   });
 
   it("a plain output click (press-release, no drag) is NOT suppressed", () => {

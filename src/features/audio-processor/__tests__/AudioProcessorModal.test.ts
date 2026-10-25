@@ -32,7 +32,6 @@ function createPlugin(
       audioProcessorOutputPreset: "detailed",
       ...settings,
     },
-    vaultFileCache: null,
     directoryManager: { ensureDirectoryByPath: jest.fn() },
     register: jest.fn(),
     addChild: jest.fn((child) => child),

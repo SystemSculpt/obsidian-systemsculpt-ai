@@ -20,7 +20,7 @@ const REQUEST_TIMEOUT_MS = 8_000;
 const UPDATE_URI = "obsidian://show-plugin?id=systemsculpt-ai";
 const RELEASE_URL_PREFIX = "https://github.com/SystemSculpt/obsidian-systemsculpt-ai/releases/tag/";
 
-export type PluginReleaseInfo = Readonly<{
+type PluginReleaseInfo = Readonly<{
   contractVersion: typeof RELEASE_CONTRACT;
   pluginId: typeof PLUGIN_ID;
   latestVersion: string;
@@ -39,7 +39,10 @@ export type PluginUpdateCheckResult =
  */
 export type PluginReleaseFetch = Readonly<{ body: unknown; freshForMs?: number }>;
 
-/** A failed release read; retryAfterMs carries the server's Retry-After. */
+/**
+ * A failed release read; retryAfterMs carries the server's Retry-After.
+ * @internal Tests match this error class.
+ */
 export class PluginReleaseRequestError extends Error {
   constructor(message: string, public readonly retryAfterMs?: number) {
     super(message);
@@ -48,7 +51,7 @@ export class PluginReleaseRequestError extends Error {
 }
 
 /** The one follow-up a manual check's result can offer. */
-export type PluginUpdateNoticeAction = Readonly<{ label: string; onSelect: () => void }>;
+type PluginUpdateNoticeAction = Readonly<{ label: string; onSelect: () => void }>;
 
 type PluginUpdateServiceOptions = Readonly<{
   request?: () => Promise<PluginReleaseFetch>;
@@ -62,7 +65,10 @@ function boundedDelayMs(value: number | undefined): number {
   return Math.min(MAX_CHECK_DELAY_MS, Math.floor(value));
 }
 
-/** Reads `max-age` from Cache-Control; `no-store`/`no-cache` give no hint. */
+/**
+ * Reads `max-age` from Cache-Control; `no-store`/`no-cache` give no hint.
+ * @internal Unit-tested directly.
+ */
 export function cacheControlMaxAgeMs(value: string | null): number | undefined {
   if (!value) return undefined;
   const directives = value.toLowerCase().split(",").map((part) => part.trim());
@@ -80,6 +86,7 @@ function hasExactKeys(record: Record<string, unknown>, expected: readonly string
   return actual.length === wanted.length && actual.every((key, index) => key === wanted[index]);
 }
 
+/** @internal Unit-tested directly. */
 export function parsePluginReleaseInfo(value: unknown): PluginReleaseInfo | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;

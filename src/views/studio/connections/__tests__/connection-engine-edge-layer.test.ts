@@ -75,3 +75,76 @@ it("measures pins on a full render and on a drag's first frame, then reuses thos
   expect(reads).toBe(4);
   world.remove();
 });
+
+it("draws an armed connection's moves as one preview redraw per frame and leaves the cables alone", () => {
+  const frames: FrameRequestCallback[] = [];
+  const requestFrame = jest.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => frames.push(callback));
+  const project = {
+    graph: {
+      nodes: [
+        { id: "a", kind: "studio.text", version: "1.0.0", title: "A", position: { x: 0, y: 0 }, config: {} },
+        { id: "b", kind: "studio.text", version: "1.0.0", title: "B", position: { x: 600, y: 0 }, config: {} },
+      ],
+      edges: [{ id: "e1", fromNodeId: "a", fromPortId: "out", toNodeId: "b", toPortId: "in" }],
+      groups: [],
+    },
+  };
+  const engine = new StudioGraphConnectionEngine({
+    isBusy: () => false,
+    getCurrentProject: () => project as any,
+    setError: jest.fn(),
+    commitProjectMutation: jest.fn(() => true),
+    requestRender: jest.fn(),
+    getGraphZoom: () => 1,
+    getPortType: () => "text",
+    portTypeCompatible: () => true,
+  } as any);
+  const viewport = document.body.appendChild(document.createElement("div"));
+  const world = viewport.appendChild(document.createElement("div"));
+  const layer = document.createElementNS(SVG_NS, "svg") as SVGSVGElement;
+  world.appendChild(layer);
+  engine.registerViewportElement(viewport);
+  engine.registerCanvasElement(world);
+  engine.registerEdgesLayerElement(layer);
+  let pinReads = 0;
+  for (const [nodeId, direction] of [["a", "out"], ["b", "in"]] as const) {
+    const cardEl = world.appendChild(document.createElement("div"));
+    cardEl.className = "ss-studio-node-card";
+    const pin = cardEl.appendChild(document.createElement("button"));
+    cardEl.getBoundingClientRect = () => { pinReads += 1; return rect(0, 0, 280, 200); };
+    pin.getBoundingClientRect = () => { pinReads += 1; return rect(direction === "in" ? -5 : 275, 95, 10, 10); };
+    engine.registerPortElement(nodeId, direction, direction, pin);
+  }
+  engine.renderEdgeLayer();
+  engine.beginConnection("a", "out");
+
+  const cable = [...layer.querySelectorAll(".ss-studio-edge-group path")];
+  const cableWrites = cable.map((path) => jest.spyOn(path, "setAttribute"));
+  const preview = layer.querySelector(".ss-studio-edge-preview")!;
+  const previewWrites = jest.spyOn(preview, "setAttribute");
+  const worldReads = jest.spyOn(world, "getBoundingClientRect");
+  pinReads = 0;
+
+  for (const x of [320, 340, 360, 380]) {
+    viewport.dispatchEvent(new MouseEvent("pointermove", { bubbles: true, clientX: x, clientY: 400 }));
+  }
+  expect(frames).toHaveLength(1);
+  expect(previewWrites).not.toHaveBeenCalled();
+
+  frames.shift()!(0);
+
+  // One frame: the world is measured once and the preview is redrawn once, to
+  // the last point. Only the preview's source pin is measured, not the cable's two.
+  expect(worldReads).toHaveBeenCalledTimes(1);
+  expect(pinReads).toBe(2);
+  const previewPaths = previewWrites.mock.calls.filter(([name]) => name === "d").map(([, d]) => d);
+  expect(previewPaths).toHaveLength(1);
+  expect(previewPaths[0].endsWith("380 400")).toBe(true);
+  for (const writes of cableWrites) expect(writes).not.toHaveBeenCalled();
+  expect(layer.querySelectorAll(".ss-studio-edge-group")).toHaveLength(1);
+
+  engine.clearPendingConnection();
+  expect(layer.querySelector(".ss-studio-edge-preview")).toBeNull();
+  requestFrame.mockRestore();
+  viewport.remove();
+});

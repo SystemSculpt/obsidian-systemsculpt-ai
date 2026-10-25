@@ -27,7 +27,7 @@ function mockNextSelection(options: {
   files: File[];
   value?: string;
 }): jest.SpyInstance {
-  return jest.spyOn(HTMLInputElement.prototype, "click").mockImplementation(function mockClick() {
+  return jest.spyOn(HTMLInputElement.prototype, "click").mockImplementation(function mockClick(this: HTMLInputElement) {
     Object.defineProperty(this, "files", {
       configurable: true,
       value: options.files,

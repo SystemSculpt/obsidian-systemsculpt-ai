@@ -1,12 +1,12 @@
 import { ManagedVideoGenerationAdapter } from "../ManagedVideoGenerationAdapter";
-import type { ManagedJobRecoveryRecord } from "../../managed/ManagedTypes";
+import type { ManagedJobRecoveryRecord, ManagedVideoOutputMetadata } from "../../managed/ManagedTypes";
 
 const HASH_A = "a".repeat(64);
 const HASH_B = "b".repeat(64);
 const JOB_ID = "123e4567-e89b-42d3-a456-426614174000";
 const METADATA = { index: 0, mime_type: "video/mp4" as const, size_bytes: 2, sha256: HASH_A, width: 1920, height: 1080, duration_seconds: 8 };
 const DOWNLOAD_STARTED_AT = "2026-07-12T00:00:10.000Z";
-const delivered = (metadata = METADATA) => ({
+const delivered = (metadata: ManagedVideoOutputMetadata = METADATA) => ({
   metadata,
   bytes: new Uint8Array([1, 2]).buffer,
   delivery: { download_started_at: DOWNLOAD_STARTED_AT, download_completed_offset_ms: 100 },
@@ -269,6 +269,7 @@ describe("ManagedVideoGenerationAdapter", () => {
         create: jest.fn(async () => ({ job: { id: JOB_ID, status: "queued" } })),
         status: jest.fn().mockRejectedValue(terminal),
         downloadOutput: jest.fn(),
+        acknowledgeDelivery: jest.fn(),
       },
       prepareFrames: jest.fn(),
       createRequestId: () => "request-1",

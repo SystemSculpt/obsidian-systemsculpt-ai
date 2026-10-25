@@ -58,16 +58,15 @@ function buildQueries(vault: GeneratedVault): string[] {
 function makeEngine(vault: GeneratedVault, overrides: Map<string, string> = new Map()) {
   const app = new App();
   const files = vault.files;
-  app.vault.getFiles.mockImplementation(() => files);
-  app.vault.cachedRead.mockImplementation(async (file: TFile) => overrides.get(file.path) ?? vault.read(file));
-  app.vault.getAbstractFileByPath.mockImplementation((path: string) => files.find((file) => file.path === path) ?? null);
+  jest.spyOn(app.vault, "getFiles").mockImplementation(() => files);
+  jest.spyOn(app.vault, "cachedRead").mockImplementation(async (file: TFile) => overrides.get(file.path) ?? vault.read(file));
+  jest.spyOn(app.vault, "getAbstractFileByPath").mockImplementation((path: string) => files.find((file) => file.path === path) ?? null);
   const plugin = {
     app,
     settings: {
       embeddingsEnabled: false,
       embeddingsExclusions: { ignoreChatHistory: false, respectObsidianExclusions: false },
     },
-    vaultFileCache: undefined,
   };
   const engine = new SystemSculptSearchEngine(app as never, plugin as never);
   const listener = (event: string) =>

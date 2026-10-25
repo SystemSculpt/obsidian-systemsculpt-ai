@@ -7,6 +7,7 @@ import { createDefaultWorkflowEngineSettings } from "./types/workflows";
 import { CURRENT_SCHEMA_VERSION } from "./core/settings/migrations/schemaVersion";
 
 export { LogLevel };
+/** @internal Tests import ToolCall beside the other chat message types. */
 export type { ToolCall };
 
 export type {
@@ -44,7 +45,7 @@ export interface PendingRecorderCapture {
   discarded?: true;
 }
 
-export interface PendingAudioProcessorUploadPart {
+interface PendingAudioProcessorUploadPart {
   partNumber: number;
   etag: string;
 }
@@ -360,14 +361,14 @@ Please:
 
 export type ChatRole = "user" | "assistant" | "system" | "tool";
 
-export interface ImageContent {
+interface ImageContent {
   type: "image_url";
   image_url: {
     url: string;
   };
 }
 
-export interface TextContent {
+interface TextContent {
   type: "text";
   text: string;
 }
@@ -392,7 +393,7 @@ export interface ChatAttachmentMetadata {
   contentRef?: ChatAttachmentContentRef;
 }
 
-export interface UrlCitation {
+interface UrlCitation {
   url: string;
   title: string;
   content?: string;
@@ -400,7 +401,7 @@ export interface UrlCitation {
   end_index?: number;
 }
 
-export interface Annotation {
+interface Annotation {
   type: string;
   url_citation?: UrlCitation;
 }

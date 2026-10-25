@@ -2,8 +2,9 @@
  * @jest-environment jsdom
  */
 
-import { EmbeddingsView, EMBEDDINGS_VIEW_TYPE } from "../EmbeddingsView";
-import { WorkspaceLeaf, TFile } from "obsidian";
+import { EmbeddingsView } from "../EmbeddingsView";
+import { EMBEDDINGS_VIEW_TYPE } from "../../core/plugin/viewTypes";
+import { TFile } from "obsidian";
 import { MANAGED_EMBEDDINGS_INDEX_MAX_QUERY_CHARS } from "../../services/embeddings/gateway/ManagedEmbeddingsIndexAdapter";
 import { emitChatTranscriptCommitted } from "../chatview/ChatTranscriptEvents";
 
@@ -480,14 +481,19 @@ describe("EmbeddingsView", () => {
       (view as any).registerEvents();
       (view as any).currentFile = new TFile({ path: "notes/current.md", stat: { mtime: 1, size: 100 } });
       (view as any).currentResults = [{ path: "Projects/result.md", score: 0.9, metadata: {} }];
-      const handlers = new Map(mockPlugin.app.vault.on.mock.calls.map(([eventName, handler]: [string, any]) => [eventName, handler]));
+      const handlers = new Map<string, (...args: unknown[]) => unknown>(mockPlugin.app.vault.on.mock.calls.map(([eventName, handler]: [string, any]) => [eventName, handler]));
+      const handler = (eventName: string) => {
+        const registered = handlers.get(eventName);
+        if (!registered) throw new Error(`Missing ${eventName} handler`);
+        return registered;
+      };
       const check = jest.spyOn(view as any, "debouncedCheckActiveFile");
 
-      handlers.get("rename")(new TFile({ path: "Elsewhere/new.md" }), "Elsewhere/old.md");
-      handlers.get("delete")({ path: "Elsewhere/gone.md" });
+      handler("rename")(new TFile({ path: "Elsewhere/new.md" }), "Elsewhere/old.md");
+      handler("delete")({ path: "Elsewhere/gone.md" });
       expect(check).not.toHaveBeenCalled();
 
-      handlers.get("delete")({ path: "Projects" });
+      handler("delete")({ path: "Projects" });
       expect(check).toHaveBeenCalledTimes(1);
       expect((view as any).currentResults).toEqual([]);
     });
@@ -722,13 +728,12 @@ describe("EmbeddingsView", () => {
         { path: "notes/remaining.md", score: 0.8 },
       ];
       (view as any).currentFile = new TFile({ path: "notes/current.md", stat: { mtime: Date.now(), size: 100 } });
-      (view as any).updateResults = jest.fn();
+      view["updateResults"] = jest.fn(async () => undefined);
 
       const mockDeletedFile = { path: deletedPath };
 
       (view as any).isDragging = false;
-      const filtered = (view as any).currentResults.filter((r: any) => r.path !== deletedPath);
-      (view as any).currentResults = filtered;
+      view["handleVaultDelete"](mockDeletedFile);
 
       expect((view as any).currentResults).toHaveLength(1);
       expect((view as any).currentResults[0].path).toBe("notes/remaining.md");

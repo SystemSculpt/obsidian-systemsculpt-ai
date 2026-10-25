@@ -3,7 +3,6 @@ import { desktopHost, hasNodeRuntime } from "../../platform/desktopOnly";
 import { joinFilesystemPath, normalizeVaultRelativePath } from "../../utils/vaultPathUtils";
 import { toSafeVaultFileName } from "../../utils/vaultFileName";
 import { FILESYSTEM_LIMITS } from "./constants";
-export { fuzzyMatchScore } from "./searchUtils";
 
 type VaultDataAdapter = DataAdapter & {
   getBasePath?: () => string;
@@ -55,6 +54,7 @@ export function isHiddenSystemPath(path: string): boolean {
  * Resolve a vault path to an absolute filesystem path for the Node fast-path
  * (desktop only). Returns null when there is no Node runtime or the adapter
  * exposes no base path — callers then fall back to the adapter API.
+ * @internal Unit-tested directly.
  */
 export function resolveAdapterPath(adapter: VaultDataAdapter, vaultPath: string): string | null {
   if (!hasNodeRuntime() || !adapter || typeof adapter.getBasePath !== "function") return null;

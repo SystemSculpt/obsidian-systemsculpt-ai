@@ -24,7 +24,7 @@ export interface ActionContext {
   settingsRoot?: () => HTMLElement | null;
 }
 
-export type DriverActionHandler = (
+type DriverActionHandler = (
   ctx: ActionContext,
   params: Record<string, unknown>,
 ) => unknown;

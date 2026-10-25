@@ -63,6 +63,7 @@ type Harness = {
   app: App;
   controller: StudioClipboardAndDropController;
   host: StudioClipboardAndDropHost & {
+    getSelectedNodeIds: jest.Mock<string[], []>;
     finalizeCreatedNodes: jest.Mock;
     removeNodes: jest.Mock;
     removeDiagramSelection: jest.Mock;
@@ -849,7 +850,7 @@ describe("telling a pasted picture from the one that was copied", () => {
       (yieldToEventLoop as jest.Mock).mockClear();
       // A canvas that hands back the rows it was asked to draw.
       getContext = jest.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(() => {
-        let drawn = new Uint8ClampedArray(0);
+        let drawn: Uint8ClampedArray = new Uint8ClampedArray(0);
         return {
           drawImage: (source: FakeBitmap, _sx: number, sy: number, sw: number, sh: number) => {
             drawn = source.pixels.subarray(sy * sw * 4, (sy + sh) * sw * 4);

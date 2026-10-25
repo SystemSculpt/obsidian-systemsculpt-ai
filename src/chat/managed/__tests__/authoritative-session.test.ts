@@ -2,7 +2,6 @@ import {
   AgentSession,
   AgentSessionError,
   type AgentApprovalCommand,
-  type AgentAuthoritativeEvent,
   type AgentCancelCommand,
   type AgentCommandAckEvent,
   type AgentConnectionPort,
@@ -10,6 +9,7 @@ import {
   type AgentSubmitCommand,
   type AgentToolResultCommand,
 } from "../AuthoritativeSession";
+import type { AgentServerEvent } from "../Protocol";
 
 type Message = Readonly<{
   id: string;
@@ -91,7 +91,7 @@ function event<T extends Record<string, unknown>>(
 
 class FakeConnection implements AgentConnectionPort {
   public state: AgentConnectionState = "open";
-  private listener: ((frame: AgentAuthoritativeEvent) => void) | null = null;
+  private listener: ((frame: AgentServerEvent) => void) | null = null;
   private stateListener: ((state: AgentConnectionState) => void) | null = null;
 
   public readonly sendSubmit = jest.fn<
@@ -115,7 +115,7 @@ class FakeConnection implements AgentConnectionPort {
   >(async () => undefined);
 
   public addAuthoritativeFrameListener(
-    listener: (frame: AgentAuthoritativeEvent) => void,
+    listener: (frame: AgentServerEvent) => void,
   ): () => void {
     this.listener = listener;
     return () => {
@@ -133,7 +133,7 @@ class FakeConnection implements AgentConnectionPort {
   }
 
   public emit(frame: unknown): void {
-    this.listener?.(frame as AgentAuthoritativeEvent);
+    this.listener?.(frame as AgentServerEvent);
   }
 
   public setState(state: AgentConnectionState): void {

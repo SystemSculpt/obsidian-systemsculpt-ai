@@ -180,15 +180,15 @@ npm run check:compat
   runs focused narrow-pane, touch, accessibility, and Studio capability tests
   before opening settings, Chat, Similar Notes, and Studio from that artifact
   with desktop adapters unavailable.
-- check:plugin adds TypeScript, mobile compatibility, sync, artifact, and
-  release guards.
+- check:plugin adds TypeScript for sources and tests (tsconfig.test.json),
+  mobile compatibility, sync, artifact, and release guards.
 - test:chatview:critical runs the persistence, managed-request projection,
   controller/runtime/transport, storage, and restored-history UI suites with
   strict console, randomized order, open-handle detection, seeded generative
   histories, and a global coverage floor over the critical ChatView modules
   (the small identity and tool-execution modules stay at 100%).
-- check:ci is the exact exhaustive PR gate. It adds the production file/dependency
-  Knip audit (check:knip), strict-console randomized mobile interactions, critical ChatView coverage, the partitioned unit
+- check:ci is the exact exhaustive PR gate. It adds the production Knip audit of
+  unused files, dependencies and exports (check:knip), strict-console randomized mobile interactions, critical ChatView coverage, the partitioned unit
   remainder, embeddings, already-built integration, and open-handle detection.
   Each source suite runs exactly once: the mobile CI subset excludes
   critical-owned suites, and the unit remainder excludes both focused sets

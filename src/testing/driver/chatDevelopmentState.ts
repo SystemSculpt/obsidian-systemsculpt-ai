@@ -42,7 +42,7 @@ import {
  * final reset may touch only what that ownership covers.
  */
 
-export const DEVELOPMENT_TEST_ROOT = "SystemSculpt/Development Tests";
+const DEVELOPMENT_TEST_ROOT = "SystemSculpt/Development Tests";
 
 const DEVELOPMENT_TEST_PREFIX = `${DEVELOPMENT_TEST_ROOT}/`;
 

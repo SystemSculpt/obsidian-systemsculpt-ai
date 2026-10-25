@@ -27,8 +27,6 @@ import {
   type FileContextStateChangedEvent,
 } from './chatview/FileContextManager';
 
-export { EMBEDDINGS_VIEW_TYPE };
-
 export class EmbeddingsView extends ItemView {
   private plugin: SystemSculptPlugin;
   private presentation: SimilarNotesPresentation | null = null;

@@ -1,7 +1,11 @@
 import { posix, win32 } from 'node:path';
-import { isLocalAgentInstalled, readLocalAgentLaunchConfig, resolveLocalAgentBinary } from '../LocalAgentLaunch';
+import { readLocalAgentLaunchConfig, resolveLocalAgentBinary } from '../LocalAgentLaunch';
+import type { LocalAgentId } from '../LocalAgents';
 import { desktopHost } from '../../../platform/desktopOnly';
 jest.mock('../../../platform/desktopOnly', () => ({ desktopHost: { fs: jest.fn(), os: jest.fn(), path: jest.fn(), environment: jest.fn() } }));
+
+/** Found means a binary resolved; a launch-settings failure counts as not found. */
+const isLocalAgentInstalled = (agent: LocalAgentId) => resolveLocalAgentBinary(agent).then(binary => binary !== null, () => false);
 
 const missing = Object.assign(new Error('missing'), { code: 'ENOENT' });
 const executable = { isFile: () => true, mode: 0o100755 };

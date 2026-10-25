@@ -75,7 +75,7 @@ const source = (
 
 function harness(statuses: Array<{ job: { id: string; status: string }; transcript: string | null; progress: number }> = [
   { job: { id: jobId, status: "succeeded" }, transcript: "managed transcript", progress: 1 },
-], wait = async (_milliseconds: number, _signal: AbortSignal) => undefined) {
+], wait: (milliseconds: number, signal: AbortSignal) => Promise<void> = async () => undefined) {
   const events: string[] = [];
   const storage = new MemoryRecoveryAdapter();
   const recovery = new ManagedJobRecoveryStore(storage, () => "2026-07-12T12:00:00.000Z");
@@ -127,7 +127,7 @@ describe("ManagedTranscriptionAdapter", () => {
     it.each([503, 429])("replays a %s with unchanged identity and bytes after Retry-After", async (status) => {
       jest.useFakeTimers();
       const h = harness(undefined, waitForManagedJob);
-      const send = h.jobs[step];
+      const send = jest.spyOn(h.jobs, step);
       const original = send.getMockImplementation()!;
       send.mockImplementationOnce(async (...args) => {
         await original(...args);
@@ -1043,7 +1043,7 @@ describe("ManagedTranscriptionAdapter", () => {
   });
 
   it("does not stop acknowledged processing at the historical 900-poll boundary", async () => {
-    const statuses = Array.from({ length: 900 }, () => ({
+    const statuses: NonNullable<Parameters<typeof harness>[0]> = Array.from({ length: 900 }, () => ({
       job: { id: jobId, status: "processing" },
       transcript: null,
       progress: 0.5,

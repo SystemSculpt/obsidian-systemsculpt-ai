@@ -22,6 +22,7 @@ const CURRENT_MARKER_CLASS = "ss-relative-line-number--current";
  * Pure mapping from a line number to the text shown in the gutter, given which
  * line currently holds the cursor. Kept side-effect free so it can be unit
  * tested without a live editor.
+ * @internal Unit-tested directly.
  */
 export function formatRelativeLineNumber(lineNumber: number, cursorLineNumber: number): string {
   if (lineNumber === cursorLineNumber) {

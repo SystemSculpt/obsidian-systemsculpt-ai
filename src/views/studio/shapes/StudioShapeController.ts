@@ -444,4 +444,3 @@ export class StudioShapeController {
   }
 }
 
-export { EMPTY_STUDIO_SHAPE_SELECTION };
