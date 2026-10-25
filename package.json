@@ -44,6 +44,11 @@
   "license": "MIT",
   "main": "main.js",
   "name": "systemsculpt-ai",
+  "overrides": {
+    "obsidian": {
+      "moment": "2.31.0"
+    }
+  },
   "scripts": {
     "prepare": "node scripts/install-git-hooks.mjs",
     "build": "node esbuild.config.mjs production",
