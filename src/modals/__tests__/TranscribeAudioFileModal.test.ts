@@ -129,7 +129,7 @@ describe("TranscribeAudioFileModal", () => {
     modal.onOpen();
 
     const tabs = modal.modalEl.querySelectorAll<HTMLButtonElement>(
-      '.ss-transcribe-audio__tab[role="tab"]',
+      '.ss-audio-source__tab[role="tab"]',
     );
     expect(tabs).toHaveLength(2);
     expect(tabs[0].textContent).toContain("Vault");
@@ -143,10 +143,10 @@ describe("TranscribeAudioFileModal", () => {
     expect(tabs[1].getAttribute("aria-selected")).toBe("true");
 
     const input = modal.modalEl.querySelector<HTMLInputElement>(
-      ".ss-transcribe-audio__file-input",
+      ".ss-audio-source__file-input",
     );
     const label = modal.modalEl.querySelector<HTMLLabelElement>(
-      ".ss-transcribe-audio__choose-file",
+      ".ss-audio-source__choose-file",
     );
     expect(input).toBeTruthy();
     expect(input?.type).toBe("file");
@@ -169,10 +169,10 @@ describe("TranscribeAudioFileModal", () => {
     modal.onOpen();
 
     const initialOptions = modal.modalEl.querySelectorAll<HTMLButtonElement>(
-      '.ss-transcribe-audio__file[role="option"]',
+      '.ss-audio-source__file[role="option"]',
     );
     expect(initialOptions).toHaveLength(50);
-    expect(modal.modalEl.textContent).toContain("Showing the first 50 of 75");
+    expect(modal.modalEl.textContent).toContain("Showing 50 of 75");
 
     initialOptions[0].focus();
     initialOptions[0].dispatchEvent(new KeyboardEvent("keydown", {
@@ -188,7 +188,7 @@ describe("TranscribeAudioFileModal", () => {
     search.value = "clip-7.mp3";
     search.dispatchEvent(new Event("input", { bubbles: true }));
     const filteredOptions = modal.modalEl.querySelectorAll<HTMLButtonElement>(
-      ".ss-transcribe-audio__file",
+      ".ss-audio-source__file",
     );
     expect(filteredOptions).toHaveLength(1);
     expect(filteredOptions[0].dataset.path).toBe("Audio/clip-7.mp3");
@@ -210,7 +210,7 @@ describe("TranscribeAudioFileModal", () => {
     outputOptions[1].click();
     await Promise.resolve();
     modal.modalEl.querySelector<HTMLButtonElement>(
-      `.ss-transcribe-audio__file[data-path="${file.path}"]`,
+      `.ss-audio-source__file[data-path="${file.path}"]`,
     )!.click();
     await (modal as any).handleTranscribe();
 
@@ -240,7 +240,7 @@ describe("TranscribeAudioFileModal", () => {
     )!;
     remember.checked = true;
     remember.dispatchEvent(new Event("change", { bubbles: true }));
-    modal.modalEl.querySelector<HTMLButtonElement>(".ss-transcribe-audio__file")!.click();
+    modal.modalEl.querySelector<HTMLButtonElement>(".ss-audio-source__file")!.click();
     await (modal as any).handleTranscribe();
 
     expect(updateSettings).toHaveBeenCalledTimes(1);
@@ -269,7 +269,7 @@ describe("TranscribeAudioFileModal", () => {
       size: deviceBytes.byteLength,
       arrayBuffer: jest.fn().mockResolvedValue(deviceBytes),
     } as unknown as File;
-    await (modal as any).handleDeviceSelection(deviceFile);
+    await (modal as any).picker.selectDeviceFile(deviceFile);
     expect(modal.modalEl.querySelector("audio")?.src).toContain("blob:audio-preview");
 
     (app.vault.getAbstractFileByPath as jest.Mock).mockImplementation((path: string) =>
@@ -314,7 +314,7 @@ describe("TranscribeAudioFileModal", () => {
     } as unknown as File;
     const modal = new TranscribeAudioFileModal(plugin);
     modal.onOpen();
-    await (modal as any).handleDeviceSelection(deviceFile);
+    await (modal as any).picker.selectDeviceFile(deviceFile);
 
     await (modal as any).handleTranscribe();
 
@@ -333,7 +333,7 @@ describe("TranscribeAudioFileModal", () => {
     const occupiedPath = "SystemSculpt/Recordings/long-recording.m4a";
     const occupied = audioFile(occupiedPath);
     h.files.set(occupiedPath, occupied);
-    await (h.modal as any).handleDeviceSelection(h.deviceFile);
+    await (h.modal as any).picker.selectDeviceFile(h.deviceFile);
     try {
       await (h.modal as any).handleTranscribe();
       expect(h.wholeRead).not.toHaveBeenCalled();
@@ -369,7 +369,7 @@ describe("TranscribeAudioFileModal", () => {
     Object.assign(h.app.vault, { appendBinary: undefined });
     const bytes = new ArrayBuffer(h.deviceFile.size);
     h.wholeRead.mockResolvedValueOnce(bytes);
-    await (h.modal as any).handleDeviceSelection(h.deviceFile);
+    await (h.modal as any).picker.selectDeviceFile(h.deviceFile);
     await (h.modal as any).handleTranscribe();
     expect(h.wholeRead).toHaveBeenCalledTimes(1);
     expect(h.slice).not.toHaveBeenCalled();
@@ -386,7 +386,7 @@ describe("TranscribeAudioFileModal", () => {
       h.files.set(path, audioFile(path));
       throw new Error("File already exists");
     });
-    await (h.modal as any).handleDeviceSelection(h.deviceFile);
+    await (h.modal as any).picker.selectDeviceFile(h.deviceFile);
     await (h.modal as any).handleTranscribe();
     expect(h.rename).toHaveBeenCalledTimes(2);
     expect(h.rename.mock.calls.map(([, path]) => path)).toEqual([
@@ -416,7 +416,7 @@ describe("TranscribeAudioFileModal", () => {
     } else {
       h.rename.mockImplementationOnce(async () => { entered(); await pending; });
     }
-    await (h.modal as any).handleDeviceSelection(h.deviceFile);
+    await (h.modal as any).picker.selectDeviceFile(h.deviceFile);
     const running = (h.modal as any).handleTranscribe();
     // A missing slice implementation must fail instead of hanging this test.
     await Promise.race([started, running]);
@@ -436,7 +436,7 @@ describe("TranscribeAudioFileModal", () => {
     const notice = jest.spyOn(console, "log").mockImplementation(() => {});
     const h = slicedImport(4 * 1024 * 1024 + 1);
     h.append.mockRejectedValueOnce(new Error("Storage unavailable"));
-    await (h.modal as any).handleDeviceSelection(h.deviceFile);
+    await (h.modal as any).picker.selectDeviceFile(h.deviceFile);
     await (h.modal as any).handleTranscribe();
     expect(h.wholeRead).not.toHaveBeenCalled();
     expect(h.slice).toHaveBeenCalledTimes(1);
@@ -454,7 +454,7 @@ describe("TranscribeAudioFileModal", () => {
     const modal = new TranscribeAudioFileModal(plugin);
     modal.onOpen();
 
-    await (modal as any).handleDeviceSelection(
+    await (modal as any).picker.selectDeviceFile(
       new File(["voice"], "voice.webm", { type: "audio/webm" }),
     );
     expect(createObjectUrl).toHaveBeenCalledTimes(1);
@@ -478,7 +478,7 @@ describe("TranscribeAudioFileModal", () => {
     const modal = new TranscribeAudioFileModal(plugin);
     modal.onOpen();
 
-    await (modal as any).handleDeviceSelection(deviceFile);
+    await (modal as any).picker.selectDeviceFile(deviceFile);
     await (modal as any).handleTranscribe();
 
     expect(mockShowPrompt).toHaveBeenCalledWith(
@@ -504,7 +504,7 @@ describe("TranscribeAudioFileModal", () => {
     const modal = new TranscribeAudioFileModal(plugin);
     modal.onOpen();
     try {
-      await (modal as any).handleDeviceSelection(file);
+      await (modal as any).picker.selectDeviceFile(file);
       await (modal as any).handleTranscribe();
       expect(mockShowPrompt).toHaveBeenCalledTimes(1);
       expect(mockShowPrompt).toHaveBeenCalledWith(app, expect.stringContaining(limitLabel), expect.objectContaining({ title: "Audio File Size Limit Exceeded" }));
@@ -531,7 +531,7 @@ describe("TranscribeAudioFileModal", () => {
     } as unknown as File;
     const modal = new TranscribeAudioFileModal(plugin);
     modal.onOpen();
-    await (modal as any).handleDeviceSelection(deviceFile);
+    await (modal as any).picker.selectDeviceFile(deviceFile);
 
     const running = (modal as any).handleTranscribe();
     await Promise.resolve();
@@ -562,7 +562,7 @@ describe("TranscribeAudioFileModal", () => {
     const staged = audioFile("SystemSculpt/Recordings/staged.m4a", deviceBytes.byteLength);
     const modal = new TranscribeAudioFileModal(plugin);
     modal.onOpen();
-    await (modal as any).handleDeviceSelection(deviceFile);
+    await (modal as any).picker.selectDeviceFile(deviceFile);
 
     const running = (modal as any).handleTranscribe();
     for (let attempt = 0; attempt < 10 && !resolveCreate; attempt += 1) {
