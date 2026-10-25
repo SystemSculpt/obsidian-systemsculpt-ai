@@ -23,6 +23,7 @@
 @import 'components/chat-attachments.css';
 @import 'components/history.css';
 @import 'components/recorder.css';
+@import 'components/audio-source-picker.css';
 @import 'components/diff-viewer.css';
 
 /* Modal system */
