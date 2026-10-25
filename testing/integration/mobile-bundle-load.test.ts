@@ -79,11 +79,11 @@ describe("built bundle in Obsidian Mobile", () => {
     const styles = readFileSync(STYLES_PATH, "utf8");
     expect(styles).toMatch(/--ss-touch-target:\s*44px/);
     expect(styles).toMatch(/--ss-safe-bottom:[^;]*safe-area-inset-bottom/s);
-    expect(styles).toContain("@media (pointer: coarse)");
+    expect(styles).toMatch(/@media\s*\(pointer:\s*coarse\)/);
     expect(styles).toContain("@container ss-surface (max-width: 500px)");
     expect(styles).toMatch(/\.ss-mobile-layout \.systemsculpt-agent-workspace\s*\{[^}]*padding-bottom:\s*var\(--ss-mobile-bottom-clearance\)/s);
     expect(styles).toMatch(/\.ss-mobile-layout \.systemsculpt-agent-composer\s*\{/);
-    expect(styles).toMatch(/@media \(pointer: coarse\)\s*\{[^@]*\.systemsculpt-agent-attachment-open\s*\{[^}]*min-height:\s*var\(--ss-touch-target\)/s);
+    expect(styles).toMatch(/@media\s*\(pointer:\s*coarse\)\s*\{[^@]*\.systemsculpt-agent-attachment-open\s*\{[^}]*min-height:\s*var\(--ss-touch-target\)/s);
     expect(styles).toMatch(/\.ss-mobile-layout \.ss-settings-surface\s*\{/);
     expect(styles).toMatch(/\.ss-mobile-layout \.ss-embeddings-view__results-list\s*\{/);
     expect(styles).not.toMatch(/\.is-mobile|\.mobile-navbar-action/);

@@ -218,13 +218,17 @@ test("source CI partitions cover every suite exactly once", () => {
 
 test("Jest configs share transforms and setup without changing the bundle host", () => {
   const base = require(path.join(root, "jest.base.config.cjs"));
-  for (const file of ["jest.config.cjs", "jest.embeddings.config.cjs", "jest.integration.config.cjs"]) {
+  for (const file of ["jest.config.cjs", "jest.embeddings.config.cjs"]) {
     const config = require(path.join(root, file));
     assert.equal(config.transform, base.transform);
     assert.equal(config.setupFilesAfterEnv, base.setupFilesAfterEnv);
     assert.equal(config.moduleNameMapper["^@/(.*)$"], base.moduleNameMapper["^@/(.*)$"]);
   }
   const integration = require(path.join(root, "jest.integration.config.cjs"));
+  assert.equal(integration.transform, base.transform);
+  assert.equal(integration.moduleNameMapper["^@/(.*)$"], base.moduleNameMapper["^@/(.*)$"]);
+  // The built bundle's host takes the shared setup minus its Node module loader.
+  assert.deepEqual(integration.setupFilesAfterEnv, [...base.setupFilesAfterEnv, "<rootDir>/testing/integration/host-setup.ts"]);
   assert.equal(integration.moduleNameMapper["^obsidian$"], "<rootDir>/testing/integration/mocks/obsidian-host.js");
   assert.ok(integration.transformIgnorePatterns.includes("<rootDir>/main\\.js$"));
   assert.match(packageJson.scripts["lint:community"], /--cache --cache-location \.cache\/eslint\/community\.cache/);

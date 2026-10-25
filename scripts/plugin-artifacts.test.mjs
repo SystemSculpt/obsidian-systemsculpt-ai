@@ -277,7 +277,7 @@ test("CSS builds preserve entry rules after imports, including focus and touch i
   const css = await buildCssArtifact({ indexPath, outputPath, logger: {} });
   assert.equal(fs.readFileSync(outputPath, "utf8"), css);
   assert.equal(css.includes("\r"), false);
-  assert.equal(css, ".base{color:#000}.control{box-shadow:none}.control:focus-visible{box-shadow:var(--ss-ring)}@media (pointer: coarse){.control{min-height:44px}}\n");
+  assert.equal(css, ".base{color:#000}.control{box-shadow:none}.control:focus-visible{box-shadow:var(--ss-ring)}@media(pointer:coarse){.control{min-height:44px}}\n");
 });
 
 test("CSS bundling resolves nested and qualified imports and minifies only production", async (t) => {
