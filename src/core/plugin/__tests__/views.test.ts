@@ -28,7 +28,14 @@ const createFixture = (registeredViewTypes: string[] = []): ViewManagerFixture =
     viewByType: Object.fromEntries(registeredViewTypes.map((type) => [type, jest.fn()])),
   };
 
-  const plugin = new Plugin(app, { id: "systemsculpt-ai", version: "0.0.0" }) as any;
+  const plugin = new Plugin(app, {
+    id: "systemsculpt-ai",
+    name: "SystemSculpt AI",
+    author: "SystemSculpt",
+    version: "0.0.0",
+    minAppVersion: "1.7.2",
+    description: "",
+  }) as any;
   plugin.settings = { selectedModelId: "model" };
   plugin.load();
 

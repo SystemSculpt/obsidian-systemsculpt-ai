@@ -1,9 +1,9 @@
 /**
  * @jest-environment jsdom
  */
-import { StorageManager, StorageLocationType } from "../StorageManager";
+import { StorageManager } from "../StorageManager";
 import { StorageManager as StorageManagerExport } from "../index";
-import { App, FileSystemAdapter, TFolder } from "obsidian";
+import { FileSystemAdapter } from "obsidian";
 
 // Create mock vault adapter
 const createMockAdapter = () => Object.assign(new FileSystemAdapter("/vault"), {

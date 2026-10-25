@@ -789,7 +789,7 @@ describe("AgentIncidentCoordinator", () => {
 
   it("contains recorder attachment and finalization failures", async () => {
     const ids = correlation(8);
-    const { coordinator, recorder } = fakeDependencies();
+    const { recorder } = fakeDependencies();
     recorder.attachEnvironment.mockImplementation(() => { throw new Error("attach-environment"); });
     recorder.attachResourceSamples.mockImplementation(() => { throw new Error("attach-resources"); });
     recorder.finalize.mockImplementation(() => { throw new Error("finalize"); });

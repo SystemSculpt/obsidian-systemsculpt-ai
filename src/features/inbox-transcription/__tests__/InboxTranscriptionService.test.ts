@@ -70,7 +70,11 @@ describe("InboxTranscriptionService through its host interface", () => {
   async function flushInbox() { await jest.advanceTimersByTimeAsync(800); }
   function confirmation() { return confirmations.mock.calls.at(-1)![0]; }
   function widget() { return widgets.mock.results.at(-1)!.value; }
-  function stop() { widgets.mock.calls.at(-1)![0].onStop(); }
+  function stop() {
+    const onStop = widgets.mock.calls.at(-1)![0].onStop;
+    expect(onStop).toEqual(expect.any(Function));
+    onStop?.();
+  }
 
   async function queueBulk(count = 4) {
     const files = Array.from({ length: count }, (_, i) => audio(`Inbox/${i + 1}.mp3`));

@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { App, TFile, TFolder, Vault } from "obsidian";
+import { App, TFile } from "obsidian";
 import { VaultFileCache } from "../VaultFileCache";
 
 // Helper to create a mock TFile

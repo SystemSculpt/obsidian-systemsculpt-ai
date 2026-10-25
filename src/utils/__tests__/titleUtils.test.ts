@@ -11,10 +11,11 @@ describe("titleUtils", () => {
     });
 
     it("generates a title with current date", () => {
-      const title = generateDefaultChatTitle();
       const now = new Date();
+      const title = generateDefaultChatTitle();
       // The date portion should be present in some locale format
       expect(title).toMatch(/Chat .+/);
+      expect(title).toContain(now.toLocaleDateString());
     });
 
     it("generates unique titles when called at different times", () => {

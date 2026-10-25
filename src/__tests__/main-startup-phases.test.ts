@@ -41,7 +41,10 @@ function runTask(plugin: SystemSculptPlugin, phase: string, id: string): Promise
 }
 
 describe("SystemSculptPlugin startup phases", () => {
-  const idleWindow = window as Window & { requestIdleCallback?: unknown; cancelIdleCallback?: unknown };
+  const idleWindow: Omit<Window, "requestIdleCallback" | "cancelIdleCallback"> & {
+    requestIdleCallback?: unknown;
+    cancelIdleCallback?: unknown;
+  } = window;
   let idleCallbacks: Array<() => void>;
 
   beforeEach(() => {

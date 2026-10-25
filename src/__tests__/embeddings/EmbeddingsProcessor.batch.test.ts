@@ -7,6 +7,7 @@ import {
   type ManagedEmbeddingsIndexResult,
 } from "../../services/embeddings/gateway/ManagedEmbeddingsIndexAdapter";
 import { EmbeddingsProcessor } from "../../services/embeddings/processing/EmbeddingsProcessor";
+import type { EmbeddingVector } from "../../services/embeddings/types";
 import { buildVectorId } from "../../services/embeddings/utils/vectorId";
 import { createHash } from "crypto";
 
@@ -68,7 +69,7 @@ function fixture(result = indexedResult()) {
     return result;
   });
   const storage = {
-    publishPath: jest.fn(async () => undefined),
+    publishPath: jest.fn(async (_path: string, _namespace: string, _vectors: EmbeddingVector[]) => undefined),
     replacePath: jest.fn(async () => undefined),
   };
   const processor = new EmbeddingsProcessor({ index } as never, storage as never);
@@ -78,9 +79,9 @@ function fixture(result = indexedResult()) {
     stat: { mtime: 123, size: 20 },
   };
   let content = "# Heading\n\nPrivate note";
-  const read = jest.fn(async (_file?: unknown) => content);
+  const read = jest.fn(async (_file: { path: string }) => content);
   // Obsidian's cache holds what is on disk now; mirror read's current behavior.
-  const cachedRead = jest.fn(async (file?: unknown) => (read.getMockImplementation() ?? (async () => content))(file));
+  const cachedRead = jest.fn(async (file: { path: string }) => (read.getMockImplementation() ?? (async () => content))(file));
   const app = { vault: { read, cachedRead } };
   return {
     app,

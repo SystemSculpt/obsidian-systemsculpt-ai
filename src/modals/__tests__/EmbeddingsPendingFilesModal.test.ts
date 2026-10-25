@@ -19,24 +19,31 @@ const createMockPendingFiles = (): PendingEmbeddingFile[] => [
     path: "notes/machine-learning.md",
     reason: "missing",
     lastModified: NOW - 1000 * 60 * 30,
+    lastEmbedded: null,
+    size: 1024,
   },
   {
     path: "notes/deep-learning.md",
     reason: "modified",
     lastModified: NOW - 1000 * 60 * 60 * 2,
     lastEmbedded: NOW - 1000 * 60 * 60 * 24,
+    size: 1024,
   },
   {
     path: "folder/nested/file.md",
     reason: "schema-mismatch",
     lastModified: NOW - 1000 * 60 * 60 * 48,
     lastEmbedded: NOW - 1000 * 60 * 60 * 72,
+    size: 1024,
   },
   {
     path: "failed-file.md",
     reason: "failed",
     lastModified: NOW - 1000 * 60 * 10,
+    lastEmbedded: null,
+    size: 1024,
     failureInfo: {
+      code: "rate_limited",
       message: "API rate limit exceeded",
       failedAt: NOW - 1000 * 60 * 5,
     },
@@ -162,6 +169,8 @@ describe("EmbeddingsPendingFilesModal", () => {
           path: "notes/stale.md",
           reason: "missing",
           lastModified: NOW,
+          lastEmbedded: null,
+          size: 1024,
         },
       ]);
       await firstOpen;
@@ -512,6 +521,8 @@ describe("EmbeddingsPendingFilesModal", () => {
         path: "folder/test.md",
         reason: "missing",
         lastModified: NOW - 1000,
+        lastEmbedded: null,
+        size: 1024,
       };
       const desc = (modal as any).buildDescription(entry);
       expect(desc).toContain("folder");
@@ -522,6 +533,8 @@ describe("EmbeddingsPendingFilesModal", () => {
         path: "test.md",
         reason: "missing",
         lastModified: NOW - 1000,
+        lastEmbedded: null,
+        size: 1024,
       };
       const desc = (modal as any).buildDescription(entry);
       expect(desc).toContain("Modified");
@@ -532,6 +545,8 @@ describe("EmbeddingsPendingFilesModal", () => {
         path: "test.md",
         reason: "modified",
         lastModified: NOW - 1000,
+        lastEmbedded: null,
+        size: 1024,
       };
       const desc = (modal as any).buildDescription(entry);
       expect(desc).toContain("Needs refresh after edits");
@@ -542,7 +557,10 @@ describe("EmbeddingsPendingFilesModal", () => {
         path: "test.md",
         reason: "failed",
         lastModified: NOW - 1000,
+        lastEmbedded: null,
+        size: 1024,
         failureInfo: {
+          code: "rate_limited",
           message: "Rate limit",
           failedAt: NOW - 5000,
         },
@@ -558,6 +576,7 @@ describe("EmbeddingsPendingFilesModal", () => {
         reason: "modified",
         lastModified: NOW - 1000,
         lastEmbedded: NOW - 60000,
+        size: 1024,
       };
       const desc = (modal as any).buildDescription(entry);
       expect(desc).toContain("Last embedded");

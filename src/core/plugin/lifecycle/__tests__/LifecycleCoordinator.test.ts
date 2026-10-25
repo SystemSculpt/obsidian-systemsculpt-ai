@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { LifecycleCoordinator, LifecycleTask, LifecyclePhase, LifecycleFailureEvent } from "../LifecycleCoordinator";
+import { LifecycleCoordinator, LifecycleTask } from "../LifecycleCoordinator";
 
 describe("LifecycleCoordinator", () => {
   let coordinator: LifecycleCoordinator;
