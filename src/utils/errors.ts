@@ -46,6 +46,18 @@ export function toError(reason: unknown, fallbackMessage = "Operation failed."):
   return error;
 }
 
+/**
+ * True when a vault adapter call failed because its file or folder is not
+ * there. Desktop adapters raise Node's ENOENT; the message forms cover
+ * adapters that only say the path does not exist.
+ */
+export function isMissingPathError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  if ((error as { code?: unknown }).code === "ENOENT") return true;
+  const message = (error as { message?: unknown }).message;
+  return typeof message === "string" && /ENOENT|not found|does not exist|doesn't exist/i.test(message);
+}
+
 export class SystemSculptError extends Error {
   constructor(
     message: string,

@@ -1,5 +1,6 @@
 import { App, FileSystemAdapter, TFolder } from "obsidian";
 import SystemSculptPlugin from "../../main";
+import { isMissingPathError } from "../../utils/errors";
 
 /**
  * Storage location types
@@ -80,15 +81,18 @@ export class StorageManager {
 
   /**
    * Initialize the storage system
-   * Creates necessary directories and ensures everything is ready
+   * Creates necessary directories and ensures everything is ready. Once that
+   * succeeds it returns at once until the vault moves or a write finds its
+   * folder gone (see mutateInLocation).
    */
   async initialize(): Promise<void> {
     const currentBasePath = this.getAdapterBasePath();
 
-    // If already initialized, return immediately
     if (this.initialized) {
-      const shouldReinitialize = await this.shouldReinitialize(currentBasePath);
-      if (!shouldReinitialize) {
+      const moved = this.initializedBasePath !== null
+        && currentBasePath !== null
+        && this.initializedBasePath !== currentBasePath;
+      if (!moved) {
         return;
       }
       this.resetInitializationState();
@@ -142,26 +146,33 @@ export class StorageManager {
     }
   }
 
-  private async shouldReinitialize(currentBasePath: string | null): Promise<boolean> {
-    if (this.initializedBasePath && currentBasePath && this.initializedBasePath !== currentBasePath) {
-      return true;
-    }
-    const adapter = this.app.vault.adapter;
-    try {
-      const exists = await adapter.exists(this.hiddenBasePath);
-      if (!exists) {
-        return true;
-      }
-    } catch {
-      return true;
-    }
-    return false;
-  }
-
   private resetInitializationState(): void {
     this.initialized = false;
     this.initializedBasePath = null;
     this.createdDirectories.clear();
+  }
+
+  /**
+   * Run one adapter mutation inside an ensured location. Folders are checked
+   * once per session, so a mutation that finds its folder gone (deleted while
+   * Obsidian runs) recreates the folders and runs once more. Resolves false
+   * when the plugin began unloading first.
+   */
+  private async mutateInLocation(
+    type: StorageLocationType,
+    mutate: () => Promise<boolean>
+  ): Promise<boolean> {
+    await this.ensureLocation(type);
+    try {
+      return await mutate();
+    } catch (error) {
+      if (!isMissingPathError(error)) {
+        throw error;
+      }
+      this.resetInitializationState();
+      await this.ensureLocation(type);
+      return mutate();
+    }
   }
   
   /**
@@ -270,24 +281,23 @@ export class StorageManager {
 
     try {
       await this.passWriteGate(type);
-      // Ensure storage and the target location are initialized
-      await this.ensureLocation(type);
-      
+
       // Get full path
       const path = this.getPath(type, fileName);
       
       // Convert object to JSON if needed
       const content = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
 
-      // Re-check after the await: unload may have begun mid-flight (#214).
-      if (this.isUnloading()) {
-        return { success: false, error: "plugin-unloading" };
-      }
+      const written = await this.mutateInLocation(type, async () => {
+        // Re-check after the await: unload may have begun mid-flight (#214).
+        if (this.isUnloading()) {
+          return false;
+        }
+        await this.app.vault.adapter.write(path, content);
+        return true;
+      });
 
-      // Write the file
-      await this.app.vault.adapter.write(path, content);
-      
-      return { success: true, path };
+      return written ? { success: true, path } : { success: false, error: "plugin-unloading" };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       return { success: false, error: errorMessage };
@@ -309,26 +319,28 @@ export class StorageManager {
 
     try {
       await this.passWriteGate(type);
-      await this.ensureLocation(type);
 
       const path = this.getPath(type, fileName);
       const payload = data.endsWith('\n') ? data : `${data}\n`;
       const adapter = this.app.vault.adapter;
 
-      const exists = await this.app.vault.adapter.exists(path);
+      const written = await this.mutateInLocation(type, async () => {
+        const exists = await adapter.exists(path);
 
-      // Re-check after the await: unload may have begun mid-flight (#214).
-      if (this.isUnloading()) {
-        return { success: false, error: "plugin-unloading" };
-      }
+        // Re-check after the await: unload may have begun mid-flight (#214).
+        if (this.isUnloading()) {
+          return false;
+        }
 
-      if (!exists) {
-        await this.app.vault.adapter.write(path, payload);
-      } else {
-        await adapter.append(path, payload);
-      }
+        if (!exists) {
+          await adapter.write(path, payload);
+        } else {
+          await adapter.append(path, payload);
+        }
+        return true;
+      });
 
-      return { success: true, path };
+      return written ? { success: true, path } : { success: false, error: "plugin-unloading" };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       return { success: false, error: errorMessage };
@@ -348,17 +360,8 @@ export class StorageManager {
     parseJson: boolean = false
   ): Promise<T | string | null> {
     try {
-      // Get full path
-      const path = this.getPath(type, fileName);
-      
-      // Check if file exists
-      const exists = await this.app.vault.adapter.exists(path);
-      if (!exists) {
-        return null;
-      }
-      
-      // Read the file
-      const content = await this.app.vault.adapter.read(path);
+      // A missing file rejects like any other failed read: both return null.
+      const content = await this.app.vault.adapter.read(this.getPath(type, fileName));
       
       // Parse as JSON if requested
       if (parseJson) {
@@ -381,21 +384,14 @@ export class StorageManager {
     type: StorageLocationType, 
     fileName: string
   ): Promise<StorageOperationResult> {
+    const path = this.getPath(type, fileName);
     try {
-      // Get full path
-      const path = this.getPath(type, fileName);
-      
-      // Check if file exists
-      const exists = await this.app.vault.adapter.exists(path);
-      if (!exists) {
-        return { success: true, path }; // File doesn't exist, consider it deleted
-      }
-      
-      // Delete the file
       await this.app.vault.adapter.remove(path);
-      
       return { success: true, path };
     } catch (error) {
+      if (isMissingPathError(error)) {
+        return { success: true, path }; // File doesn't exist, consider it deleted
+      }
       const errorMessage = error instanceof Error ? error.message : String(error);
       return { success: false, error: errorMessage };
     }
@@ -412,16 +408,9 @@ export class StorageManager {
     subPath: string = ''
   ): Promise<string[]> {
     try {
-      // Get full path
       const path = subPath ? this.getPath(type, subPath) : this.getPath(type);
-      
-      // Check if directory exists
-      const exists = await this.app.vault.adapter.exists(path);
-      if (!exists) {
-        return [];
-      }
-      
-      // List files
+
+      // A missing folder rejects like any other failed listing: both return [].
       const files = await this.app.vault.adapter.list(path);
       
       // Return only file names, not directories

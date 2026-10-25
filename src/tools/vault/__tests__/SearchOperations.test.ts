@@ -808,42 +808,6 @@ Body content here`;
       expect(result).toBeDefined();
     });
 
-    it("uses vault file cache when available", async () => {
-      const cachedFiles = [new TFile({ path: "cached.md" })];
-      (cachedFiles[0].stat as any) = { ctime: Date.now(), mtime: Date.now(), size: 100 };
-
-      const mockVaultFileCache = {
-        getAllFiles: jest.fn().mockReturnValue(cachedFiles),
-      };
-      (app as any).plugins = {
-        plugins: {
-          "systemsculpt-ai": {
-            vaultFileCache: mockVaultFileCache,
-          },
-        },
-      };
-      (app.vault.cachedRead as jest.Mock).mockResolvedValue("test content");
-
-      const result = await searchOps.grepVault({ patterns: ["test"] });
-
-      expect(result).toBeDefined();
-    });
-
-    it("falls back to vault.getFiles when cache unavailable", async () => {
-      (app as any).plugins = {
-        plugins: {
-          "systemsculpt-ai": {
-            vaultFileCache: null,
-          },
-        },
-      };
-      (app.vault.cachedRead as jest.Mock).mockResolvedValue("test content");
-
-      const result = await searchOps.grepVault({ patterns: ["test"] });
-
-      expect(result).toBeDefined();
-    });
-
     describe("candidate order", () => {
       const DAY = 86400000;
       const note = (path: string, size: number, mtime: number) => {

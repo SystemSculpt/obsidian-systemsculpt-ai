@@ -118,6 +118,31 @@ describe("EmbeddingsManager startup work (#343)", () => {
     seed.close();
   });
 
+  it("lists a note created 3 s after load at once, before any file event (#395)", async () => {
+    // Obsidian Sync often delivers notes in the first seconds after load. The
+    // vault's own list is the only source, so nothing waits for a 'create'
+    // event or a cache refresh before the note counts.
+    jest.useFakeTimers({ doNotFake: ["queueMicrotask", "nextTick", "setImmediate"] });
+    try {
+      const files = [file()];
+      const { manager, seed } = await harness(files);
+      const process = jest.spyOn(manager, "processVault").mockResolvedValue({ status: "complete", processed: 0 });
+
+      await jest.advanceTimersByTimeAsync(3_000);
+      files.push(file("Synced.md", Date.now()));
+      await manager.initialize();
+      await jest.advanceTimersByTimeAsync(0);
+
+      expect(process).toHaveBeenCalledTimes(1);
+      expect(manager.getStats()).toMatchObject({ total: 2, needsProcessing: 1 });
+      expect((await manager.listPendingFiles()).map((pending) => pending.path)).toEqual(["Synced.md"]);
+      await manager.cleanup();
+      seed.close();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it("does not connect for empty notes or current local-empty markers", async () => {
     const blank = file("Blank.md", 1, 0);
     const noText = file("Frontmatter.md");
