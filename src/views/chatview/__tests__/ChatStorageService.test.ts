@@ -665,6 +665,22 @@ Hello`);
 
     it.each([
       [
+        "legacy multipart metadata nested in reasoning",
+        (serializer: typeof import("../storage/ChatMarkdownSerializer").ChatMarkdownSerializer) => [
+          serializer.serializeMessages([{ role: "user", message_id: "user-1", content: "Keep the full history" }]),
+          '<!-- SYSTEMSCULPT-MESSAGE-START role="assistant" message-id="assistant-1" -->',
+          "Original answer",
+          "<!-- REASONING",
+          "before",
+          "<!-- SYSTEMSCULPT-CONTENT-PARTS base64",
+          btoa(JSON.stringify([{ type: "text", text: "Replacement answer" }])),
+          "-->",
+          "after",
+          "-->",
+          "<!-- SYSTEMSCULPT-MESSAGE-END -->",
+        ].join("\n"),
+      ],
+      [
         "legacy stored multipart payload",
         (serializer: typeof import("../storage/ChatMarkdownSerializer").ChatMarkdownSerializer) => (
           serializer.serializeMessages([{
