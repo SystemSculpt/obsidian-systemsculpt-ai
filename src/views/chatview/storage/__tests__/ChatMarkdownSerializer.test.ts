@@ -1001,24 +1001,56 @@ Using tools...
         ["BOM plus LF", "\n", true],
         ["BOM plus CRLF", "\r\n", true],
       ])("preserves top-level metadata and neighboring blocks with %s framing", (_label, newline, bom) => {
-        for (const body of [
-          multipart,
-          `${multipart}\n${reasoning}\n${tools}\nOriginal answer`,
-          `${reasoning}\n${multipart}\n${tools}\nOriginal answer`,
-          `${reasoning}\n${tools}\nOriginal answer\n${multipart}`,
-        ]) {
+        for (const [body, order] of [
+          [multipart, undefined],
+          [`${multipart}\n${reasoning}\n${tools}\nOriginal answer`, ["content", "reasoning", "tool_call"]],
+          [`${reasoning}\n${multipart}\n${tools}\nOriginal answer`, ["reasoning", "content", "tool_call"]],
+          [`${reasoning}\n${tools}\nOriginal answer\n${multipart}`, ["reasoning", "tool_call", "content"]],
+        ] as const) {
           const parsed = ChatMarkdownSerializer.parseMarkdown(normalizeMarkdown(
             createMarkdown({ id: "legacy-placement" }, frame(body)), newline, bom,
           ));
           expect(parsed?.messages[0]).toMatchObject({
             role: "assistant", message_id: "assistant-1", content,
           });
-          expect(parsed?.messages[0].messageParts).toBeUndefined();
+          // The stored content stands once, where the note first shows it.
+          expect(parsed?.messages[0].messageParts?.map((part) => part.type)).toEqual(order);
+          expect(parsed?.messages[0].messageParts?.find((part) => part.type === "content")?.data).toEqual(order && content);
           if (body !== multipart) {
             expect(parsed?.messages[0].reasoning).toBe("Original reasoning");
             expect(parsed?.messages[0].tool_calls).toEqual([{ id: "legacy-tool" }]);
           }
           expect(ChatMarkdownSerializer.readBack(parsed!.messages)?.[0].content).toEqual(content);
+        }
+      });
+
+      it.each([
+        ["LF", "\n", false],
+        ["CRLF", "\r\n", false],
+        ["BOM plus LF", "\n", true],
+        ["BOM plus CRLF", "\r\n", true],
+      ])("keeps reasoning and tool calls beside legacy metadata when the chat is saved again with %s framing", (_label, newline, bom) => {
+        for (const body of [
+          `${reasoning}\n${tools}\nOriginal answer\n${multipart}`,
+          `${multipart}\n${reasoning}\n${tools}\nOriginal answer`,
+          `${reasoning}\n${multipart}\n${tools}\nOriginal answer`,
+        ]) {
+          const loaded = ChatMarkdownSerializer.parseMarkdown(normalizeMarkdown(
+            createMarkdown({ id: "legacy-rewrite" }, frame(body)), newline, bom,
+          ))!;
+          const rewritten = ChatMarkdownSerializer.serializeMessages(loaded.messages);
+          const reloaded = ChatMarkdownSerializer.parseMarkdown(createMarkdown({ id: "legacy-rewrite" }, rewritten));
+          expect(reloaded?.messages).toHaveLength(1);
+          expect(reloaded?.messages[0]).toMatchObject({
+            role: "assistant",
+            message_id: "assistant-1",
+            content,
+            reasoning: "Original reasoning",
+            tool_calls: [{ id: "legacy-tool" }],
+          });
+          expect(reloaded?.messages[0].messageParts?.map((part) => part.type))
+            .toEqual(loaded.messages[0].messageParts?.map((part) => part.type));
+          expect(ChatMarkdownSerializer.serializeMessages(reloaded!.messages)).toBe(rewritten);
         }
       });
     });
@@ -1613,6 +1645,22 @@ Valid message
       expect(rewritten).not.toContain('payload-format=');
       expect(rewritten).toContain('Quoted &lt;!-- SYSTEMSCULPT-MESSAGE-END -->');
       expect(ChatMarkdownSerializer.readBack(loaded.messages)?.[0].messageParts?.[0].data).toEqual(data);
+      expect(loaded.messages[0].content).toEqual(data);
+      expect(ChatMarkdownSerializer.readBack(loaded.messages)?.[0].content).toEqual(data);
+    });
+
+    it("keeps attachment parts in the content of an ordered message beside its text", () => {
+      const image = { type: "image_url" as const, image_url: { url: "data:image/png;base64,YWJj" } };
+      const restored = ChatMarkdownSerializer.readBack([{
+        role: "assistant", message_id: "ordered-attachment-text", content: "",
+        messageParts: [
+          { id: "r", type: "reasoning", data: "Look first", timestamp: 1 },
+          { id: "a", type: "content", data: "Here it is:", timestamp: 2 },
+          { id: "b", type: "content", data: [image], timestamp: 3 },
+        ],
+      }]);
+      expect(restored?.[0].content).toEqual([{ type: "text", text: "Here it is:" }, image]);
+      expect(restored?.[0].reasoning).toBe("Look first");
     });
 
     it("rejects an unterminated tool block instead of silently losing the tool call", () => {

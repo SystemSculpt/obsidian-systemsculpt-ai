@@ -259,6 +259,16 @@ export class ChatMarkdownSerializer {
       }
       if (RESERVED_MARKERS.some((marker) => body.slice(checkedThrough).includes(marker))) return { success: false, messages: [] };
 
+      // Legacy metadata holds the whole message's content, and its prose is
+      // only the display of it. The stored content stands once, where the
+      // note first shows it, so reasoning and tools around it keep their order.
+      const storedContent = storedMultipart.content;
+      let storedContentPlaced = false;
+      const placeStoredContent = () => {
+        if (!storedContent || storedContentPlaced) return;
+        storedContentPlaced = true;
+        parts.push({ id: `content-${ts}`, type: "content", data: storedContent, timestamp: ts++ });
+      };
       const pushContentChunk = (
         rawChunk: string,
         options: { trimLeadingBoundary: boolean; trimTrailingBoundary: boolean },
@@ -267,7 +277,8 @@ export class ChatMarkdownSerializer {
         if (normalizedChunk.length === 0) {
           return;
         }
-        parts.push({ id: `content-${ts}`, type: "content", data: restoreMarkers(normalizedChunk), timestamp: ts++ });
+        if (storedContent) placeStoredContent();
+        else parts.push({ id: `content-${ts}`, type: "content", data: restoreMarkers(normalizedChunk), timestamp: ts++ });
       };
 
       let cursor = 0;
@@ -283,6 +294,8 @@ export class ChatMarkdownSerializer {
           parts.push({ id: `reasoning-${ts}`, type: "reasoning", data: block.data, timestamp: ts++ });
         } else if (block.type === "content") {
           parts.push({ id: `content-${ts}`, type: "content", data: block.data, timestamp: ts++ });
+        } else if (block.type === "stored_multipart") {
+          placeStoredContent();
         } else if (block.type === "tool_calls") {
           for (const toolCall of block.data) {
             const toolId = typeof toolCall.id === "string" ? toolCall.id : String(ts);
@@ -314,8 +327,9 @@ export class ChatMarkdownSerializer {
       const reconstructed: ChatMessage = parts.length > 0
         ? this.reconstructMessageFromParts(role, message_id, parts)
         : { role, message_id, content: "" as const };
-      const restored = storedMultipart.state === "valid"
-        ? { ...reconstructed, content: storedMultipart.content, messageParts: undefined }
+      // Metadata alone stays the plain multipart message it was written as.
+      const restored = storedMultipart.state === "valid" && extractedBlocks.length === 1
+        ? { ...reconstructed, messageParts: undefined }
         : reconstructed;
       const withMetadata = this.withAdditiveMetadata(restored, attrs);
       messages.push(attachmentMetadata.state === "valid" ? { ...withMetadata, attachmentMetadata: attachmentMetadata.metadata } : withMetadata);
@@ -328,13 +342,20 @@ export class ChatMarkdownSerializer {
   }
 
   private static reconstructMessageFromParts(role: ChatRole, message_id: string, messageParts: MessagePart[]): ChatMessage {
-    let content = "", reasoning = "";
+    let reasoning = "";
+    const contents: Array<string | MultiPartContent[]> = [];
     const tool_calls: ToolCall[] = [];
     for (const part of messageParts) {
-      if (part.type === "content") content += String(part.data ?? "");
+      if (part.type === "content") contents.push(part.data ?? "");
       else if (part.type === "reasoning") reasoning += String(part.data ?? "");
       else if (part.type === "tool_call") tool_calls.push(part.data);
     }
+    // Attached images and files keep the message multipart; text alone is one string.
+    const content = contents.some((data) => Array.isArray(data))
+      ? contents.flatMap((data): MultiPartContent[] => typeof data !== "string"
+        ? data
+        : data ? [{ type: "text", text: data }] : [])
+      : contents.join("");
     return { role, message_id, content, reasoning, tool_calls, messageParts };
   }
 
