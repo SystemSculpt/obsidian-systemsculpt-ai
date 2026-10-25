@@ -43,7 +43,8 @@ export class StudioOutputContainerController {
     if (!this.owner || this.timer !== null) return;
     this.timer = this.owner.setTimeout(() => {
       this.timer = null;
-      if (this.host.isDragging()) { this.schedule(); return; }
+      // The view schedules again when the drag ends; nothing polls meanwhile.
+      if (this.host.isDragging()) return;
       let moved: string[] = [];
       this.host.commit(project => {
         moved = arrangeManagedOutputContainers(project, this.measure);
