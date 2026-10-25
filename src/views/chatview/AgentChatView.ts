@@ -563,7 +563,7 @@ export class AgentChatView extends ItemView {
       onContextChange: async () => {
         this.syncAttachments();
         if (!this.contextLoading && this.chatId && !this.legacyHistoryViewOnly) {
-          const snapshot = await this.transcript.saveMetadata();
+          const snapshot = await this.transcript.saveMetadata(this);
           this.applyTranscriptIdentity(snapshot);
         }
       },
@@ -636,7 +636,7 @@ export class AgentChatView extends ItemView {
   private bindTranscript(transcript: AgentTranscriptRepository): void {
     this.transcriptCommitUnsubscribe?.();
     this.transcript = transcript;
-    const unbindOptions = transcript.bindSaveOptions(() => this.transcriptSaveOptions());
+    const unbindOptions = transcript.bindSaveOptions(this, () => this.transcriptSaveOptions());
     const unsubscribe = transcript.subscribeToCommits(({ snapshot, role }) => {
       this.applyTranscriptIdentity(snapshot);
       if (role === "user" && this.agent instanceof LocalAgentChatSession) {
@@ -793,25 +793,30 @@ export class AgentChatView extends ItemView {
     const binding = this.agentSessionBinding;
     if (!binding) throw new Error("The chat session binding is unavailable.");
     const sessions = nativeChatSessions(this.plugin);
-    const leavingNative = this.agent instanceof LocalAgentChatSession;
+    const origin = this.conversationOriginToken;
     // Acquire before awaiting the outgoing connection: completion during that
     // await must not retire the selected session and leave us with stale disk data.
     const retained = chatId ? sessions.attach(chatId, this) : undefined;
-    let replacement: ChatSession;
+    let replacement: ChatSession | null;
     try {
       replacement = await binding.replace(() => {
+        if (this.closing || this.conversationOriginToken !== origin) return null;
         if (retained) {
           this.bindTranscript(retained.transcript);
           return retained.session;
         }
         // Navigation gets its own repository even if deletion already removed
         // the old registry entry. A second, target-backend replacement keeps it.
-        if (leavingNative && !chatId) this.bindTranscript(this.createTranscript());
+        if (!chatId) this.bindTranscript(this.createTranscript());
         return this.createAgentSession();
       });
     } catch (error) {
       if (retained) await sessions.release(retained.session, this);
       throw error;
+    }
+    if (!replacement) {
+      if (retained) await sessions.release(retained.session, this);
+      return;
     }
     const wasNative = this.agent instanceof LocalAgentChatSession;
     this.agent = replacement;
@@ -1215,7 +1220,7 @@ export class AgentChatView extends ItemView {
 
   public async saveChat(): Promise<void> {
     if (!this.chatId || this.legacyHistoryViewOnly) return;
-    const snapshot = await this.transcript.saveMetadata();
+    const snapshot = await this.transcript.saveMetadata(this);
     this.applyTranscriptIdentity(snapshot);
   }
 

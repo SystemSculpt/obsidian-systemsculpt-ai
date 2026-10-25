@@ -33,11 +33,12 @@ export class AgentConversationSessionBinding<
     this.attach(initialSession);
   }
 
-  public replace(createSession: () => TSession): Promise<TSession> {
+  public replace(createSession: () => TSession | null): Promise<TSession | null> {
     return this.enqueue(async () => {
       await this.detachActive();
       const next = createSession();
-      this.attach(next);
+      // A navigation superseded during detach must not acquire presentation.
+      if (next) this.attach(next);
       return next;
     });
   }

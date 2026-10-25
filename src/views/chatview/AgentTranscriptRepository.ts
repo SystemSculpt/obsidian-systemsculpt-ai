@@ -397,16 +397,19 @@ export class AgentTranscriptRepository {
     private getSaveOptions: () => AgentTranscriptSaveOptions,
   ) {}
 
-  private readonly saveOptionsProviders = new Set<() => AgentTranscriptSaveOptions>();
+  private readonly saveOptionsProviders = new Map<object, () => AgentTranscriptSaveOptions>();
 
   /** Attached panes supply metadata; the last departure leaves an owned snapshot. */
-  public bindSaveOptions(provider: () => AgentTranscriptSaveOptions): () => void {
-    this.saveOptionsProviders.add(provider);
+  public bindSaveOptions(owner: object, provider: () => AgentTranscriptSaveOptions): () => void {
+    this.saveOptionsProviders.set(owner, provider);
     this.getSaveOptions = provider;
     return () => {
+      if (this.saveOptionsProviders.get(owner) !== provider) return;
       const retained = this.getSaveOptions();
-      this.saveOptionsProviders.delete(provider);
-      this.getSaveOptions = [...this.saveOptionsProviders].pop() ?? (() => retained);
+      this.saveOptionsProviders.delete(owner);
+      if (this.getSaveOptions === provider) {
+        this.getSaveOptions = [...this.saveOptionsProviders.values()].pop() ?? (() => retained);
+      }
     };
   }
 
@@ -640,7 +643,9 @@ export class AgentTranscriptRepository {
     });
   }
 
-  public saveMetadata(): Promise<AgentTranscriptSnapshot> {
+  public saveMetadata(owner?: object): Promise<AgentTranscriptSnapshot> {
+    const provider = owner ? this.saveOptionsProviders.get(owner) : undefined;
+    if (provider) this.getSaveOptions = provider;
     const generation = this.generation;
     return this.serializeForGeneration(generation, async () => {
       if (!this.chatId) return this.snapshot();

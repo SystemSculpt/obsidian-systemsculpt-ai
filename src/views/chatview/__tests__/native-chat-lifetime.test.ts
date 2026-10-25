@@ -276,6 +276,62 @@ it('updates every attached pane with committed history before the next live turn
   await nativeChatSessions(h.plugin).dispose();
 });
 
+it('saves metadata from the pane that edits it, not the last pane attached', async () => {
+  const h = harness('codex');
+  const run = h.view.executeSubmission({ text: 'Original task', mode: 'send' });
+  await h.started.promise;
+  const chatId = h.view.chatId;
+  const second = h.createView();
+  await second.loadChatById(chatId);
+  await h.view.setChatFontSize('small');
+  expect((await h.storage.loadChat(chatId))?.chatFontSize).toBe('small');
+  h.finish.resolve({ text: 'Original answer' });
+  await run;
+  expect((await h.storage.loadChat(chatId))?.chatFontSize).toBe('small');
+  await nativeChatSessions(h.plugin).dispose();
+});
+
+it.each(['new-chat', 'close'] as const)('fences a reattachment superseded by %s while outgoing detach is pending', async action => {
+  const h = harness('codex');
+  const run = h.view.executeSubmission({ text: 'Original task', mode: 'send' });
+  await h.started.promise;
+  const chatId = h.view.chatId;
+  await h.view.startNewChat(false, undefined, undefined, { backend: 'systemsculpt' });
+  const peer = h.createView();
+  await peer.loadChatById(chatId);
+  const detaching = deferred(), allowDetach = deferred(), nextQueued = deferred();
+  const replace = h.view.replaceAgentSession.bind(h.view);
+  let superseding = false;
+  h.view.replaceAgentSession = async (target?: string) => {
+    if (target === chatId) {
+      const detach = h.view.agent.detach.bind(h.view.agent);
+      h.view.agent.detach = async () => { detaching.resolve(); await allowDetach.promise; await detach(); };
+    }
+    const replacement = replace(target);
+    if (superseding) nextQueued.resolve();
+    await replacement;
+  };
+  const loading = h.view.loadChatById(chatId);
+  await detaching.promise;
+  superseding = true;
+  const departing = action === 'close' ? h.view.onClose() : h.view.startNewChat(false);
+  if (action === 'new-chat') await nextQueued.promise;
+  allowDetach.resolve();
+  await Promise.all([loading, departing]);
+  const departedIdentity = h.view.chatId;
+  // A closed/superseded pane must not regain a transcript or metadata subscription.
+  peer.chatFontSize = 'small';
+  h.finish.resolve({ text: 'Answer after superseded reattachment' });
+  await run;
+  expect(h.view.chatId).toBe(departedIdentity);
+  if (action === 'new-chat') expect(h.view.messages).toEqual([]);
+  expect(await h.storage.loadChat(chatId)).toMatchObject({ chatFontSize: 'small', messages: [
+    expect.objectContaining({ content: 'Original task' }),
+    expect.objectContaining({ content: expect.stringContaining('Answer after superseded reattachment') }),
+  ] });
+  await nativeChatSessions(h.plugin).dispose();
+});
+
 it('closing the last view preserves the native run and its save target', async () => {
   const h = harness('claude');
   const run = h.view.executeSubmission({ text: 'Original task', mode: 'send' });
