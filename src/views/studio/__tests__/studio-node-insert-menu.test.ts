@@ -95,7 +95,7 @@ describe("buildNodeInsertMenuItems", () => {
 
     const capabilitiesByKind = Object.fromEntries(
       registry.list()
-        .map((definition) => [definition.kind, definition.requiredHostCapabilities])
+        .map((definition) => [definition.kind, definition.requiredHostCapabilities] as const)
         .sort(([left], [right]) => left.localeCompare(right)),
     );
 

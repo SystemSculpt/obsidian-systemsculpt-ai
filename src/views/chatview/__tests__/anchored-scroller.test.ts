@@ -1064,7 +1064,7 @@ describe("AnchoredScroller", () => {
 
   it("coalesces content and viewport geometry changes while respecting manual reading", () => {
     const originalResizeObserver = Object.getOwnPropertyDescriptor(window, "ResizeObserver");
-    let resizeCallback: ResizeObserverCallback | null = null;
+    let resizeCallback: ResizeObserverCallback | undefined;
     const observe = jest.fn();
     const disconnect = jest.fn();
     class TestResizeObserver {
@@ -1279,7 +1279,7 @@ describe("AnchoredScroller", () => {
 
   it("suppresses ResizeObserver end correction while a disclosure settles", () => {
     const originalResizeObserver = Object.getOwnPropertyDescriptor(window, "ResizeObserver");
-    let resizeCallback: ResizeObserverCallback | null = null;
+    let resizeCallback: ResizeObserverCallback | undefined;
     class TestResizeObserver {
       public constructor(callback: ResizeObserverCallback) {
         resizeCallback = callback;

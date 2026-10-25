@@ -18,6 +18,7 @@ describe("SurfacePrimitives", () => {
     const onSelect = jest.fn();
     const button = createUiAction(parent, {
       label: "Delete note",
+      testId: "test.delete",
       icon: "trash",
       size: "icon",
       tone: "danger",
@@ -36,6 +37,7 @@ describe("SurfacePrimitives", () => {
     const parent = document.createElement("div");
     const button = createUiAction(parent, {
       label: "Send message",
+      testId: "test.send",
       icon: "arrow-up",
       size: "icon",
     });
@@ -60,6 +62,7 @@ describe("SurfacePrimitives", () => {
     const parent = document.createElement("div");
     const button = createUiAction(parent, {
       label: "Chat history",
+      testId: "test.history",
       icon: "history",
       size: "icon",
       tooltip: false,
@@ -98,6 +101,7 @@ describe("SurfacePrimitives", () => {
     const search = createUiSearch(parent, {
       label: "Search vault notes",
       placeholder: "Search notes",
+      testId: "test.search",
       value: "inbox",
       onQuery,
     });
@@ -130,6 +134,7 @@ describe("SurfacePrimitives", () => {
     const search = createUiSearch(parent, {
       label: "Search notes",
       placeholder: "Search notes",
+      testId: "test.search",
       onQuery,
     });
     expect(parent.contains(search.root)).toBe(true);

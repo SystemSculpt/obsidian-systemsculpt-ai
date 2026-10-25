@@ -3,10 +3,20 @@ import { detectLocalAgents } from '../LocalAgentDetection';
 import { hasHostCapability } from '../../../platform/hostCapabilities';
 import { DEFAULT_SETTINGS } from '../../../types';
 import { migrateSettingsToCurrentSchema } from '../../../core/settings/migrations/SettingsMigrator';
+import { isLocalAgentId } from '../LocalAgents';
 
 jest.mock('../LocalAgentDetection', () => ({ detectLocalAgents: jest.fn() }));
 jest.mock('../../../platform/hostCapabilities', () => ({ hasHostCapability: jest.fn(() => true) }));
 const settings = { ...DEFAULT_SETTINGS };
+/** Narrows migrated persisted settings to the backend fields production validates before use. */
+function migratedBackendSettings(raw: Record<string, unknown>): Parameters<typeof resolveDefaultChatBackend>[0] {
+  const { textExecutionBackend, textExecutionBackendExplicit, licenseKey } = raw;
+  if (!(isLocalAgentId(textExecutionBackend) || textExecutionBackend === 'systemsculpt')
+    || typeof textExecutionBackendExplicit !== 'boolean' || typeof licenseKey !== 'string') {
+    throw new Error('Expected migrated backend settings.');
+  }
+  return { textExecutionBackend, textExecutionBackendExplicit, licenseKey };
+}
 beforeEach(() => { jest.clearAllMocks(); jest.mocked(hasHostCapability).mockReturnValue(true); jest.mocked(detectLocalAgents).mockResolvedValue({ preferred: 'claude' } as never); });
 
 it('detects for a fresh desktop chat without calling the hosted account service', async () => {
@@ -30,17 +40,17 @@ it.each([{ licenseValid: true }, { subscriptionStatus: 'active' }, { subscriptio
   expect(detectLocalAgents).not.toHaveBeenCalled();
 });
 it('detects for an upgraded starter account even when its license is valid and active', async () => {
-  const migrated = migrateSettingsToCurrentSchema({
+  const migrated = migratedBackendSettings(migrateSettingsToCurrentSchema({
     schemaVersion: 14, textExecutionBackend: 'systemsculpt', licenseKey: 'starter',
     licenseValid: true, subscriptionStatus: 'active',
-  }, DEFAULT_SETTINGS).settings;
+  }, DEFAULT_SETTINGS).settings);
   expect(await resolveDefaultChatBackend(migrated, async () => ({ includedCreditsEntitled: false }))).toBe('claude');
 });
 it('preserves an upgraded paid account through its live entitlement', async () => {
-  const migrated = migrateSettingsToCurrentSchema({
+  const migrated = migratedBackendSettings(migrateSettingsToCurrentSchema({
     schemaVersion: 14, textExecutionBackend: 'systemsculpt', licenseKey: 'paid',
     licenseValid: true, subscriptionStatus: 'active',
-  }, DEFAULT_SETTINGS).settings;
+  }, DEFAULT_SETTINGS).settings);
   expect(await resolveDefaultChatBackend(migrated, async () => ({ includedCreditsEntitled: true }))).toBe('systemsculpt');
   expect(detectLocalAgents).not.toHaveBeenCalled();
 });

@@ -3,6 +3,7 @@ import {
   DocumentProcessingService,
   ManagedDocumentLocalEffectError,
   type DocumentProcessingDependencies,
+  type DocumentProcessingReceipt,
 } from "../DocumentProcessingService";
 import { sha256HexFromArrayBuffer, sha256HexFromBytesPortable } from "../../utils/sha256";
 import { createVaultFileSource } from "../../platform/fileSource";
@@ -81,7 +82,7 @@ function harness(options: { images?: boolean; exists?: boolean; existingMarkdown
   };
   let artifacts: ReadonlyArray<{ kind: "image" | "markdown"; bytes: ArrayBuffer }> = [];
   const staging = {
-    stage: jest.fn(async (_operationId: string, values: typeof artifacts) => {
+    stage: jest.fn(async (_operationId: string, values: typeof artifacts, _signal?: AbortSignal) => {
       events.push("stage");
       artifacts = values;
       return values.map((value, index) => ({
@@ -163,7 +164,7 @@ describe("DocumentProcessingService managed local effects", () => {
     const { app, dependencies, events, managed, plugin, staging } = harness({ images: true });
     const service = new DocumentProcessingService(app, plugin, dependencies);
     const controller = new AbortController();
-    const context = jest.fn(async () => { events.push("context-effect"); });
+    const context = jest.fn(async (_receipt: DocumentProcessingReceipt, _signal: AbortSignal) => { events.push("context-effect"); });
 
     const receipt = await service.processDocumentWithReceipt(file(), {
       signal: controller.signal,

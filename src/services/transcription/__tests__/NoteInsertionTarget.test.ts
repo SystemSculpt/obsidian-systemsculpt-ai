@@ -9,6 +9,13 @@ describe("captureNoteInsertionTarget", () => {
     let to = { line: 2, ch: 4 };
     let selection = "";
     return {
+      // The rest of Obsidian's Editor surface; validation reads only the selection.
+      getDoc: jest.fn(), refresh: jest.fn(), getValue: jest.fn(), setValue: jest.fn(), getLine: jest.fn(),
+      setLine: jest.fn(), lineCount: jest.fn(), lastLine: jest.fn(), somethingSelected: jest.fn(), getRange: jest.fn(),
+      replaceRange: jest.fn(), listSelections: jest.fn(), setCursor: jest.fn(), setSelection: jest.fn(),
+      setSelections: jest.fn(), focus: jest.fn(), blur: jest.fn(), hasFocus: jest.fn(), getScrollInfo: jest.fn(),
+      scrollTo: jest.fn(), scrollIntoView: jest.fn(), undo: jest.fn(), redo: jest.fn(), exec: jest.fn(),
+      transaction: jest.fn(), wordAt: jest.fn(), posToOffset: jest.fn(), offsetToPos: jest.fn(), processLines: jest.fn(),
       replaceSelection: jest.fn(),
       getCursor: jest.fn((side?: "from" | "to") => side === "to" ? to : from),
       getSelection: jest.fn(() => selection),

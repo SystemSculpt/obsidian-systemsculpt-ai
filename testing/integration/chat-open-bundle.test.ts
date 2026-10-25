@@ -3,6 +3,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { App, Menu, Platform, TFile, WorkspaceLeaf, requestUrl } from "obsidian";
+import { hostRequest } from "./host-request";
 import { captureStartupIdentity, expectProductionStartupIdentity } from "./startup-identity-assertions";
 
 const BUNDLE_PATH = path.resolve(__dirname, "../../main.js");
@@ -86,7 +87,7 @@ describe.each(["desktop", "mobile"])("chat-open entry points in the built bundle
     });
 
     const manifest = JSON.parse(readFileSync(path.resolve(__dirname, "../../manifest.json"), "utf8"));
-    jest.mocked(requestUrl).mockImplementation(async (input) => {
+    jest.mocked(requestUrl).mockImplementation(hostRequest(async (input) => {
       const url = typeof input === "string" ? input : input.url;
       if (url.endsWith("/credits/balance")) {
         creditsRequests.push(url);
@@ -108,7 +109,7 @@ describe.each(["desktop", "mobile"])("chat-open entry points in the built bundle
       }
       unexpectedRequests.push(url);
       throw new Error(`Unexpected host request: ${url}`);
-    });
+    }));
     jest.spyOn(window, "fetch").mockImplementation(async (input) => {
       unexpectedRequests.push(String(input));
       throw new Error("Unexpected fetch in chat-open integration test");
@@ -178,7 +179,7 @@ describe.each(["desktop", "mobile"])("chat-open entry points in the built bundle
     } else {
       const event = entry === "file menu" ? "file-menu" : "files-menu";
       const menu = new Menu() as any;
-      const registrations = jest.mocked(app.workspace.on).mock.calls.filter(([name]) => name === event);
+      const registrations = jest.mocked(app.workspace.on).mock.calls.filter(([name]: unknown[]) => name === event);
       expect(registrations).toHaveLength(1);
       (registrations[0][1] as Function)(menu, event === "file-menu" ? file : [file], "file-explorer");
       menu.items.find((item: any) => item.title === "Chat with file").click();

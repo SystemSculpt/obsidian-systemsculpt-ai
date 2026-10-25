@@ -7,37 +7,8 @@ import type {
   StudioNodeInstance,
 } from "../types";
 
-type InMemoryApp = {
-  vault: {
-    adapter: {
-      exists: (path: string) => Promise<boolean>;
-      mkdir: (path: string) => Promise<void>;
-      write: (path: string, data: string) => Promise<void>;
-      read: (path: string) => Promise<string>;
-    };
-  };
-};
-
 function createCacheStore() {
   const files = new Map<string, string>();
-  const dirs = new Set<string>();
-
-  const adapter = {
-    exists: jest.fn(async (path: string) => files.has(path) || dirs.has(path)),
-    mkdir: jest.fn(async (path: string) => {
-      dirs.add(path);
-    }),
-    write: jest.fn(async (path: string, data: string) => {
-      files.set(path, data);
-    }),
-    read: jest.fn(async (path: string) => {
-      const value = files.get(path);
-      if (typeof value === "undefined") {
-        throw new Error(`File not found: ${path}`);
-      }
-      return value;
-    }),
-  };
 
   const projectStore = {
     readSupportFile: jest.fn(async (_projectPath: string, path: string) => {

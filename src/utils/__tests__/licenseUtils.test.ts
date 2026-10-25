@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { checkPremiumUserStatus, PremiumUserStatus } from "../licenseUtils";
+import { checkPremiumUserStatus } from "../licenseUtils";
 import { SystemSculptSettings } from "../../types";
 
 // Create a minimal settings object for testing

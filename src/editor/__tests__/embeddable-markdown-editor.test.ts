@@ -101,7 +101,7 @@ class FakeNativeMarkdownEmbedBase {
     this.editMode?.set(value);
   }
 
-  save(value: string): void {
+  save(value: string, _clear?: boolean): void {
     this.set(value);
   }
 

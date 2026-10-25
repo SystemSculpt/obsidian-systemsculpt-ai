@@ -5,7 +5,7 @@ import { StudioSandboxRunner } from "../StudioSandboxRunner";
 import { StudioRuntime } from "../StudioRuntime";
 import { retiredImageGenerationNode } from "../nodes/retiredImageGenerationNode";
 import { workflowNode } from "../nodes/workflowNode";
-import type { StudioNodeDefinition, StudioProjectV1, StudioRunEvent } from "../types";
+import type { StudioJsonValue, StudioNodeDefinition, StudioNodeInputMap, StudioProjectV1, StudioRunEvent } from "../types";
 
 function project(): StudioProjectV1 {
   return {
@@ -33,12 +33,12 @@ function project(): StudioProjectV1 {
 function harness(cacheEntries: Record<string, unknown> = {}, supportFiles: Record<string, string> = {}) {
   const executed: string[] = [];
   const registry = new StudioNodeRegistry();
-  const define = (kind: string, cachePolicy: "never" | "by_inputs", inputs: StudioNodeDefinition["inputPorts"], output: string, produce: (inputs: Record<string, unknown>, config: Record<string, unknown>) => unknown): StudioNodeDefinition => ({
+  const define = (kind: string, cachePolicy: "never" | "by_inputs", inputs: StudioNodeDefinition["inputPorts"], output: string, produce: (inputs: StudioNodeInputMap, config: Record<string, StudioJsonValue>) => StudioJsonValue): StudioNodeDefinition => ({
     kind, version: "1.0.0", requiredHostCapabilities: [], capabilityClass: "local_cpu", cachePolicy,
     inputPorts: inputs, outputPorts: [{ id: output, type: "any" }], configDefaults: {}, configSchema: { fields: [] },
     async execute(context) {
       executed.push(context.node.id);
-      return { outputs: { [output]: produce(context.inputs as Record<string, unknown>, context.node.config as Record<string, unknown>) } };
+      return { outputs: { [output]: produce(context.inputs, context.node.config) } };
     },
   });
   registry.register(define("test.seed", "by_inputs", [], "text", (_inputs, config) => config.value));

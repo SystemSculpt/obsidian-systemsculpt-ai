@@ -106,14 +106,14 @@ class MemoryAdapter implements AgentIncidentStoreAdapter {
     this.files.delete(path);
   }
 
-  async rename(path: string, newPath: string): Promise<void> {
+  rename?: (path: string, newPath: string) => Promise<void> = async (path, newPath) => {
     this.renameCalls += 1;
     const file = this.files.get(path);
     if (!file) throw new Error("missing-source");
     if (this.files.has(newPath)) throw new Error("target-exists");
     this.files.set(newPath, file);
     this.files.delete(path);
-  }
+  };
 
   put(path: string, data: string, mtime = this.clock): void {
     this.files.set(path, { data, ctime: mtime, mtime });
@@ -930,7 +930,6 @@ describe("AgentIncidentStore", () => {
     const stale = now - 15 * 24 * 60 * 60 * 1000;
     const recent = now - 60 * 60 * 1000;
     const future = now + 365 * 24 * 60 * 60 * 1000;
-    const store = new AgentIncidentStore(adapter, { now: () => now });
     adapter.directories.add(".systemsculpt");
     adapter.directories.add(".systemsculpt/diagnostics");
     adapter.directories.add(AGENT_INCIDENT_STORE_PATH);

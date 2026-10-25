@@ -280,7 +280,7 @@ describe("ContextSelectionModal", () => {
     onSelect.mockImplementationOnce(() => new Promise<void>(() => undefined));
     modal.modalEl.querySelector<HTMLButtonElement>('[data-testid="modal.context.pin"]')!.click();
     const signal = onSelect.mock.calls[0][1] as AbortSignal;
-    expect(signal).toBeInstanceOf(frame.contentWindow!.AbortSignal);
+    expect(signal).toBeInstanceOf(frame.contentWindow!.window.AbortSignal);
     modal.modalEl.querySelector<HTMLButtonElement>('[data-testid="modal.context.cancel"]')!.click();
     expect(signal.aborted).toBe(true);
     frame.remove();

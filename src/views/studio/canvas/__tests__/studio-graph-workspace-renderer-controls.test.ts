@@ -47,6 +47,7 @@ function shapeLayerStub() {
     onMoveSelection: jest.fn(),
     onResizeShape: jest.fn(),
     onLabelChange: jest.fn(),
+    onArrowLabelChange: jest.fn(),
     onConnectShapes: jest.fn(),
     registerLayerHandle: jest.fn(),
   };

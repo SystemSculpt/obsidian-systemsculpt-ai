@@ -21,7 +21,7 @@ function jsonResponse(value: unknown, status = 200, requestId = "textreq_1"): Re
   });
 }
 
-function success(content = "Generated text"): unknown {
+function success(content = "Generated text") {
   return {
     id: "chatcmpl_1",
     object: "chat.completion",
@@ -149,7 +149,7 @@ describe("ManagedTextGenerationAdapter", () => {
     ["invalid operation key", { ...operation(), operationId: "workflow/key" }],
     ["empty messages", operation(jest.fn(() => []))],
     ["too many messages", operation(jest.fn(() => Array.from({ length: 9 }, () => ({ role: "user" as const, content: "x" }))))],
-    ["unsupported role", operation(jest.fn(() => [{ role: "assistant" as const, content: "x" }]))],
+    ["unsupported role", { ...operation(), buildMessages: jest.fn(() => [{ role: "assistant" as const, content: "x" }]) }],
     ["empty content", operation(jest.fn(() => [{ role: "user" as const, content: "" }]))],
     ["oversized content", operation(jest.fn(() => [{ role: "user" as const, content: "é".repeat(262_145) }]))],
   ])("rejects %s before transport", async (_name, input) => {

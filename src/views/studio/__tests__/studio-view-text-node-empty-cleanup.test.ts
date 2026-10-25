@@ -191,6 +191,7 @@ function createTextNodeDefinition(): StudioNodeDefinition {
   return {
     kind: "studio.text",
     version: "1.0.0",
+    requiredHostCapabilities: [],
     capabilityClass: "local_cpu",
     cachePolicy: "never",
     inputPorts: [],

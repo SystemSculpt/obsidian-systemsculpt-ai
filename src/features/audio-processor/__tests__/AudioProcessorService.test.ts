@@ -143,7 +143,7 @@ function createPlugin() {
 function createAudioSource(
   bytes: Uint8Array,
   options: Readonly<{ resumable?: boolean }> = {},
-): AudioProcessorAudioSource {
+): AudioProcessorAudioSource & { release: jest.Mock<void, []> } {
   return {
     filename: "product-sync.m4a",
     contentType: "audio/mp4",
@@ -170,7 +170,7 @@ function createApi() {
     }),
     createYouTubeJob: jest.fn(),
     getPartUrl: jest.fn(async (_jobId: string, partNumber: number) => signedPart(partNumber)),
-    uploadPart: jest.fn(async (part: AudioProcessorSignedPart) => ({
+    uploadPart: jest.fn(async (part: AudioProcessorSignedPart, _bytes: ArrayBuffer, _signal?: AbortSignal) => ({
       part_number: part.partNumber,
       etag: `etag-${part.partNumber}`,
     })),
@@ -548,7 +548,7 @@ describe("AudioProcessorService", () => {
     expect(audio.readSlice).toHaveBeenCalledWith(0, 4);
     expect(audio.readSlice).toHaveBeenCalledWith(4, 8);
     expect(audio.readSlice).toHaveBeenCalledWith(8, 10);
-    expect(api.uploadPart.mock.calls.map((call) => (call[1] as ArrayBuffer).byteLength))
+    expect(api.uploadPart.mock.calls.map((call) => call[1].byteLength))
       .toEqual([4, 4, 2]);
     expect(api.completeUpload).toHaveBeenCalledWith(
       "audio_job_123",

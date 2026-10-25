@@ -7,7 +7,7 @@ import {
   resolveMobileLayoutDocument,
 } from "../mobileLayout";
 
-type MutablePlatform = typeof Platform & {
+type MutablePlatform = Omit<typeof Platform, "isDesktopApp" | "isMobile" | "isMobileApp" | "isTablet"> & {
   isDesktopApp?: boolean;
   isMobile?: boolean;
   isMobileApp?: boolean;
@@ -15,7 +15,7 @@ type MutablePlatform = typeof Platform & {
 };
 
 describe("mobile layout host seam", () => {
-  const platform = Platform as MutablePlatform;
+  const platform: MutablePlatform = Platform;
 
   beforeEach(() => {
     platform.isDesktopApp = true;

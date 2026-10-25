@@ -84,7 +84,7 @@ describe('group background selection and fit',()=>{
   it('includes grouped shapes and their label in the fit even without node members',()=>{
     const h=harness();cleanup=()=>h.engine.clearRenderBindings();
     h.project.graph.groups![0].nodeIds=[];h.project.graph.groups![0].shapeIds=['shape'];
-    h.project.diagram={shapes:[{id:'shape',kind:'rectangle',position:{x:200,y:200},size:{width:1200,height:500},text:'Diagram',style:{}}],arrows:[]};
+    h.project.diagram={shapes:[{id:'shape',shape:'rectangle',position:{x:200,y:200},size:{width:1200,height:500},label:'Diagram',style:{}}],arrows:[]};
     h.engine.renderGroupLayer();h.select();expect(h.engine.fitSelectedNodesInViewport({paddingPx:40})).toBe(true);
     expect(h.engine.getGraphZoom()).toBeLessThan(0.8);expect(h.engine.getGraphZoom()).toBeGreaterThan(0.5);
   });

@@ -243,3 +243,18 @@ test("TypeScript and Jest resolve the source alias to the same tree", () => {
   assert.equal(path.normalize(result.resolvedModule.resolvedFileName), path.join(root, "src/constants/api.ts"));
   assert.equal(require(path.join(root, "jest.config.cjs")).moduleNameMapper["^@/(.*)$"], "<rootDir>/src/$1");
 });
+
+test("tests type-check against the declaration of the Obsidian mock Jest loads", () => {
+  assert.match(packageJson.scripts["check:types"], /&& npm run check:types:tests$/);
+  assert.match(packageJson.scripts["check:types:tests"], /^tsc -p tsconfig\.test\.json --noEmit /);
+  const ts = require("typescript");
+  const config = ts.readConfigFile(path.join(root, "tsconfig.test.json"), ts.sys.readFile);
+  assert.equal(config.error, undefined);
+  const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, root);
+  assert.ok(parsed.fileNames.some((file) => file.endsWith("/src/views/chatview/__tests__/agent-composer.test.ts")));
+  assert.ok(parsed.fileNames.some((file) => file.endsWith("/testing/integration/bundle-load.test.ts")));
+  const testFile = path.join(root, "src/__tests__/main-startup-phases.test.ts");
+  const result = ts.resolveModuleName("obsidian", testFile, parsed.options, ts.sys);
+  assert.equal(path.normalize(result.resolvedModule.resolvedFileName), path.join(root, "src/tests/mocks/obsidian.d.ts"));
+  assert.equal(require(path.join(root, "jest.config.cjs")).moduleNameMapper["^obsidian$"], "<rootDir>/src/tests/mocks/obsidian.js");
+});

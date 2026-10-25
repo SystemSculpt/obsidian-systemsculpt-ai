@@ -1,5 +1,5 @@
 /** @jest-environment jsdom */
-import { App, type WorkspaceLeaf } from "obsidian";
+import { App, WorkspaceLeaf } from "obsidian";
 import { SystemSculptStudioView } from "../SystemSculptStudioView";
 import { createEmptyStudioProject } from "../../../studio/schema";
 import { installWindowPointerListenerHarness } from "./studio-graph-pointer-test-helpers";
@@ -12,7 +12,7 @@ function harness() {
     { id: "drawing", shape: "rectangle", label: "Drawing", position: { x: 150, y: 0 }, size: { width: 100, height: 100 } },
     { id: "target", shape: "rectangle", label: "Target", position: { x: 500, y: 0 }, size: { width: 100, height: 100 } },
   ], arrows: [] };
-  const view = new SystemSculptStudioView({ app: new App() } as WorkspaceLeaf, {} as any) as any;
+  const view = new SystemSculptStudioView(new WorkspaceLeaf(new App()), {} as any) as any;
   jest.spyOn(view, "currentProject", "get").mockReturnValue(project);
   jest.spyOn(view, "render").mockImplementation(() => undefined);
   jest.spyOn(view.projectSessionController, "commitMutation").mockImplementation((_reason, mutate) => (mutate as Function)(project) !== false);

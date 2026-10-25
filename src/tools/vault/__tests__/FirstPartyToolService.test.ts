@@ -201,10 +201,12 @@ describe("FirstPartyToolService", () => {
         const result = await server.executeTool("edit", params);
 
         // The model must not see a phantom success when nothing was applied.
-        expect(result.success).toBe(false);
-        expect(result.appliedCount).toBe(0);
-        expect(result.requestedCount).toBe(1);
-        expect(result.skipped).toEqual([{ index: 0, reason: "Edit produced no changes" }]);
+        expect(result).toEqual(expect.objectContaining({
+          success: false,
+          appliedCount: 0,
+          requestedCount: 1,
+          skipped: [{ index: 0, reason: "Edit produced no changes" }],
+        }));
       });
     });
 

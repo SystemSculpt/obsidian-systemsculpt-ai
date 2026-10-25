@@ -187,7 +187,7 @@ describe("StudioService session-backed mutation commands", () => {
       .mockResolvedValue(reloadedProject);
     const saveProject = jest
       .spyOn((service as any).projectStore, "saveProject")
-      .mockResolvedValue();
+      .mockResolvedValue(undefined);
     jest.spyOn((service as any).projectStore, "readProjectRawText").mockResolvedValue("{}");
     jest.spyOn(service as any, "ensureDefaultPolicy").mockResolvedValue(undefined);
 
@@ -402,7 +402,7 @@ describe("StudioService session-backed mutation commands", () => {
       serializeStudioProject(renamedProject)
     );
 
-    const renamed = await service.adoptVisibleProjectRename(
+    await service.adoptVisibleProjectRename(
       "Studio/Test.systemsculpt",
       "Studio/Moved.systemsculpt"
     );
@@ -455,7 +455,7 @@ describe("StudioService session-backed mutation commands", () => {
       serializeStudioProject(renamedProject)
     );
 
-    const renamed = await service.adoptVisibleProjectRename(
+    await service.adoptVisibleProjectRename(
       "Studio/Test.systemsculpt",
       "Studio/Moved.systemsculpt"
     );

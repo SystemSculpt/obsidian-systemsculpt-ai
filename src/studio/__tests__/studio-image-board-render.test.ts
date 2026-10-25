@@ -10,6 +10,7 @@ import {
   resolveStudioImageBoardOutputSize,
   STUDIO_IMAGE_BOARD_MAX_OUTPUT_SIDE,
 } from "../StudioImageBoardRenderer";
+import type { StudioAssetRef } from "../types";
 
 const sourceBytes = new TextEncoder().encode("private original image").buffer;
 const source = { path: "assets/original.png", hash: "a".repeat(64), sizeBytes: sourceBytes.byteLength, mimeType: "image/png" };
@@ -138,7 +139,7 @@ describe("image board export", () => {
     const encoded = encodeAs([7, 8, 9]);
     const stored = { ...source, path: "assets/edited.png" };
     const storeAsset = jest.fn(async () => stored);
-    const readAsset = jest.fn(async () => sourceBytes);
+    const readAsset = jest.fn(async (_asset: StudioAssetRef) => sourceBytes);
     const board = boardWith(
       { kind: "image", asset: sticker },
       { kind: "image", asset: sticker, x: 0.6 },

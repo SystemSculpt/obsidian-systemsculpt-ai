@@ -2,26 +2,15 @@
  * @jest-environment jsdom
  */
 
-import { JSDOM } from "jsdom";
+import { JSDOM, type DOMWindow } from "jsdom";
 import { disposeMobileHostLayoutStates } from "../../../platform/mobileHostLayout";
 import {
   RecorderUIManager,
   type RecorderUiActions,
-  type RecorderUiModel,
 } from "../RecorderUIManager";
 
-function installDomHelpers(targetWindow: Window): void {
-  const prototype = targetWindow.HTMLElement.prototype as typeof HTMLElement.prototype & {
-    createDiv?: (options?: unknown) => HTMLDivElement;
-    createSpan?: (options?: unknown) => HTMLSpanElement;
-    createEl?: (tag: string, options?: unknown) => HTMLElement;
-    setAttrs?: (attributes: Record<string, unknown>) => HTMLElement;
-    setAttr?: (name: string, value: unknown) => HTMLElement;
-    setCssStyles?: (styles: Record<string, string>) => HTMLElement;
-    setText?: (text: string) => HTMLElement;
-    toggleClass?: (className: string, value: boolean) => void;
-    instanceOf?: (constructor: typeof Element) => boolean;
-  };
+function installDomHelpers(targetWindow: DOMWindow): void {
+  const prototype = targetWindow.HTMLElement.prototype;
   const applyAttributes = (element: HTMLElement, attributes?: Record<string, unknown>): void => {
     Object.entries(attributes ?? {}).forEach(([name, value]) => {
       if (value !== null && value !== undefined && value !== false) {
@@ -29,26 +18,29 @@ function installDomHelpers(targetWindow: Window): void {
       }
     });
   };
-  prototype.createEl = function (tag: string, options?: unknown): HTMLElement {
+  const createChild = <K extends keyof HTMLElementTagNameMap>(parent: HTMLElement, tag: K, options?: unknown): HTMLElementTagNameMap[K] => {
     const normalized = typeof options === "string" ? { cls: options } : (options ?? {}) as {
       cls?: string;
       text?: string;
       attr?: Record<string, unknown>;
     };
-    const element = this.ownerDocument.createElement(tag);
+    const element = parent.ownerDocument.createElement(tag);
     if (normalized.cls) {
       element.classList.add(...normalized.cls.split(/\s+/).filter(Boolean));
     }
     if (normalized.text !== undefined) element.textContent = normalized.text;
     applyAttributes(element, normalized.attr);
-    this.appendChild(element);
+    parent.appendChild(element);
     return element;
   };
+  prototype.createEl = function <K extends keyof HTMLElementTagNameMap>(tag: K, options?: unknown): HTMLElementTagNameMap[K] {
+    return createChild(this, tag, options);
+  };
   prototype.createDiv = function (options?: unknown): HTMLDivElement {
-    return this.createEl!("div", options) as HTMLDivElement;
+    return createChild(this, "div", options);
   };
   prototype.createSpan = function (options?: unknown): HTMLSpanElement {
-    return this.createEl!("span", options) as HTMLSpanElement;
+    return createChild(this, "span", options);
   };
   prototype.setAttrs = function (attributes: Record<string, unknown>): HTMLElement {
     applyAttributes(this, attributes);
@@ -66,11 +58,12 @@ function installDomHelpers(targetWindow: Window): void {
     this.textContent = text;
     return this;
   };
-  prototype.toggleClass = function (className: string, value: boolean): void {
+  prototype.toggleClass = function (className: string, value: boolean): HTMLElement {
     this.classList.toggle(className, value);
+    return this;
   };
-  prototype.instanceOf = function (constructor: typeof Element): boolean {
-    return this instanceof constructor;
+  prototype.instanceOf = function <T>(this: Node, type: new () => T): this is T {
+    return this instanceof type;
   };
 }
 
@@ -250,7 +243,8 @@ describe("RecorderUIManager state-driven contract", () => {
 
   it("keeps one stable owner-window timer across recording status rerenders", () => {
     let tick: (() => void) | null = null;
-    const setInterval = jest.spyOn(window, "setInterval").mockImplementation((handler) => {
+    const ownerWindow: Window = window;
+    const setInterval = jest.spyOn(ownerWindow, "setInterval").mockImplementation((handler) => {
       tick = handler as () => void;
       return 73;
     });
@@ -288,7 +282,7 @@ describe("RecorderUIManager state-driven contract", () => {
       url: "https://systemsculpt.local/mobile-recorder",
       pretendToBeVisual: true,
     });
-    installDomHelpers(popout.window as unknown as Window);
+    installDomHelpers(popout.window);
     Object.defineProperty(popout.window, "innerWidth", { configurable: true, value: 390 });
 
     let animationId = 0;

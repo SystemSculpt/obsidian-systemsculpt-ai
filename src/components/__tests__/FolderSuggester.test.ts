@@ -3,7 +3,7 @@
 import { AbstractInputSuggest, App, TFolder } from "obsidian";
 import { attachFolderSuggester } from "../FolderSuggester";
 
-const mockSuggesters: AbstractInputSuggest<string>[] = [];
+const mockSuggesters: unknown[] = [];
 
 jest.mock("obsidian", () => {
   const actual = jest.requireActual("obsidian");
@@ -12,12 +12,17 @@ jest.mock("obsidian", () => {
     AbstractInputSuggest: class extends actual.AbstractInputSuggest {
       constructor(app: App, input: HTMLInputElement) {
         super(app, input);
-        mockSuggesters.push(this as AbstractInputSuggest<string>);
+        mockSuggesters.push(this);
       }
       close = jest.fn();
     },
   };
 });
+
+function folderSuggester(value: unknown): AbstractInputSuggest<string> {
+  if (!(value instanceof AbstractInputSuggest)) throw new Error("expected a folder suggester");
+  return value;
+}
 
 function harness() {
   const app = new App();
@@ -30,7 +35,7 @@ function harness() {
   const input = document.body.createEl("input");
   const onSelect = jest.fn();
   attachFolderSuggester(input, onSelect, app);
-  return { app, getAllFolders, input, onSelect, suggester: mockSuggesters.at(-1)! };
+  return { app, getAllFolders, input, onSelect, suggester: folderSuggester(mockSuggesters.at(-1)) };
 }
 
 describe("folder suggestions", () => {
@@ -42,9 +47,9 @@ describe("folder suggestions", () => {
   it("reads folders once for 30 queries and refreshes after refocusing", () => {
     const { app, getAllFolders, input, suggester } = harness();
     input.focus();
-    expect(suggester.getSuggestions("")).toEqual(["/", "notes", "notes/Projects"]);
+    expect(suggester["getSuggestions"]("")).toEqual(["/", "notes", "notes/Projects"]);
     for (let pass = 0; pass < 30; pass++) {
-      expect(suggester.getSuggestions("PROJ")).toEqual(["notes/Projects"]);
+      expect(suggester["getSuggestions"]("PROJ")).toEqual(["notes/Projects"]);
     }
     expect(getAllFolders).toHaveBeenCalledTimes(1);
     expect(getAllFolders).toHaveBeenCalledWith(true);
@@ -53,7 +58,7 @@ describe("folder suggestions", () => {
     getAllFolders.mockReturnValue([new TFolder({ path: "new-folder" })]);
     input.blur();
     input.focus();
-    expect(suggester.getSuggestions("")).toEqual(["new-folder"]);
+    expect(suggester["getSuggestions"]("")).toEqual(["new-folder"]);
     expect(getAllFolders).toHaveBeenCalledTimes(2);
   });
 

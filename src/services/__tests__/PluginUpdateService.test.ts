@@ -7,6 +7,7 @@ import {
   PluginUpdateService,
   cacheControlMaxAgeMs,
   parsePluginReleaseInfo,
+  type PluginReleaseFetch,
 } from "../PluginUpdateService";
 import fixture from "../../../testing/fixtures/retry-after.json";
 
@@ -39,8 +40,8 @@ function createPlugin(overrides: Record<string, unknown> = {}) {
   const settings = {
     ...overrides,
   };
-  const statusBarEl = document.createElement("div") as HTMLElement & { setText?: (text: string) => void };
-  statusBarEl.setText = (text) => { statusBarEl.textContent = text; };
+  const statusBarEl = document.createElement("div");
+  statusBarEl.setText = (text) => { statusBarEl.textContent = typeof text === "string" ? text : text.textContent; };
   const updateSettings = jest.fn(async (patch: Record<string, unknown>) => Object.assign(settings, patch));
   return {
     manifest: { id: "systemsculpt-ai", version: "6.6.1" },
@@ -323,8 +324,8 @@ describe("PluginUpdateService", () => {
   it("adds manual feedback to an in-flight background check", async () => {
     const plugin = createPlugin();
     const notify = jest.fn();
-    let resolveRequest!: (value: unknown) => void;
-    const request = jest.fn(() => new Promise<unknown>((resolve) => {
+    let resolveRequest!: (value: PluginReleaseFetch) => void;
+    const request = jest.fn(() => new Promise<PluginReleaseFetch>((resolve) => {
       resolveRequest = resolve;
     }));
     const service = new PluginUpdateService(plugin, { request, notify });

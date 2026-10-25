@@ -8,15 +8,15 @@ import {
   wrapPromptBundleFence,
 } from "../systemsculpt-studio-view/StudioPromptBundleUtils";
 
-const buildTextGenerationNode = (config: Record<string, unknown>): StudioNodeInstance =>
-  ({
-    id: "node-1",
-    kind: "studio.text_generation",
-    label: "Text Generation",
-    position: { x: 0, y: 0 },
-    width: 320,
-    config,
-  }) as StudioNodeInstance;
+const buildTextGenerationNode = (config: Record<string, StudioJsonValue>): StudioNodeInstance => ({
+  id: "node-1",
+  kind: "studio.text_generation",
+  version: "1.0.0",
+  title: "Text Generation",
+  position: { x: 0, y: 0 },
+  size: { width: 320 },
+  config,
+});
 
 describe("StudioPromptBundleUtils", () => {
   it("coerces prompt bundle values to stable text", () => {

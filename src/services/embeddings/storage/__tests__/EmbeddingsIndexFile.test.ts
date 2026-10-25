@@ -94,19 +94,17 @@ describe("EmbeddingsIndexFile", () => {
   });
 
   it("atomically replaces an existing checkpoint on adapters that cannot rename over a target", async () => {
-    const adapter = makeAdapter() as ReturnType<typeof makeAdapter> & {
-      rename: jest.Mock;
-      remove: jest.Mock;
-    };
-    adapter.files.set(".systemsculpt/embeddings/index.json", JSON.stringify({ old: true }));
-    adapter.rename = jest.fn(async (from: string, to: string) => {
-      if (adapter.files.has(to)) throw new Error("target exists");
-      const value = adapter.files.get(from);
-      if (value === undefined) throw new Error("source missing");
-      adapter.files.delete(from);
-      adapter.files.set(to, value);
+    const adapter = Object.assign(makeAdapter(), {
+      rename: jest.fn(async (from: string, to: string) => {
+        if (adapter.files.has(to)) throw new Error("target exists");
+        const value = adapter.files.get(from);
+        if (value === undefined) throw new Error("source missing");
+        adapter.files.delete(from);
+        adapter.files.set(to, value);
+      }),
+      remove: jest.fn(async (path: string) => { adapter.files.delete(path); }),
     });
-    adapter.remove = jest.fn(async (path: string) => { adapter.files.delete(path); });
+    adapter.files.set(".systemsculpt/embeddings/index.json", JSON.stringify({ old: true }));
     const file = new EmbeddingsIndexFile(adapter as never);
 
     await file.write(sampleIndex());
@@ -211,29 +209,27 @@ describe("EmbeddingsIndexFile", () => {
   });
 
   it("rethrows the original replace error and removes the temp file when rollback also fails", async () => {
-    const adapter = makeAdapter() as ReturnType<typeof makeAdapter> & {
-      rename: jest.Mock;
-      remove: jest.Mock;
-    };
     const primary = ".systemsculpt/embeddings/index.json";
     const previous = `${primary}.previous`;
     const next = `${primary}.next`;
-    adapter.files.set(primary, JSON.stringify({ old: true }));
     const renames: Array<[string, string]> = [];
-    adapter.rename = jest.fn(async (from: string, to: string) => {
-      renames.push([from, to]);
-      // 1: next -> primary refused because the target exists.
-      if (renames.length === 1) throw new Error("target exists");
-      // 2: primary -> previous succeeds.
-      if (renames.length === 2) {
-        adapter.files.set(to, adapter.files.get(from) as string);
-        adapter.files.delete(from);
-        return;
-      }
-      // 3: next -> primary fails; 4: rollback previous -> primary fails too.
-      throw new Error(renames.length === 3 ? "disk detached" : "rollback failed");
+    const adapter = Object.assign(makeAdapter(), {
+      rename: jest.fn(async (from: string, to: string) => {
+        renames.push([from, to]);
+        // 1: next -> primary refused because the target exists.
+        if (renames.length === 1) throw new Error("target exists");
+        // 2: primary -> previous succeeds.
+        if (renames.length === 2) {
+          adapter.files.set(to, adapter.files.get(from) as string);
+          adapter.files.delete(from);
+          return;
+        }
+        // 3: next -> primary fails; 4: rollback previous -> primary fails too.
+        throw new Error(renames.length === 3 ? "disk detached" : "rollback failed");
+      }),
+      remove: jest.fn(async (path: string) => { adapter.files.delete(path); }),
     });
-    adapter.remove = jest.fn(async (path: string) => { adapter.files.delete(path); });
+    adapter.files.set(primary, JSON.stringify({ old: true }));
     const file = new EmbeddingsIndexFile(adapter as never);
 
     await expect(file.write(sampleIndex())).rejects.toThrow("target exists");

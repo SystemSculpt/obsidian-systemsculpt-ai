@@ -218,7 +218,7 @@ describe("SystemSculptPlugin diagnostics session wiring", () => {
   it.each([
     {
       operation: "list",
-      configure: (adapter: any, path: string) => {
+      configure: (adapter: any, _path: string) => {
         adapter.list.mockImplementation(async (listedPath: string) => {
           expect(listedPath).toBe(DIAGNOSTICS_PATH);
           throw new Error("PRIVATE_LIST_FAILURE");

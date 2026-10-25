@@ -144,8 +144,8 @@ describe("ChatStorageService", () => {
 
   describe("saveChat", () => {
     const testMessages: ChatMessage[] = [
-      { role: "user" as ChatRole, content: "Hello" },
-      { role: "assistant" as ChatRole, content: "Hi there!" },
+      { role: "user" as ChatRole, message_id: "user-1", content: "Hello" },
+      { role: "assistant" as ChatRole, message_id: "assistant-1", content: "Hi there!" },
     ];
 
     it("saves chat and returns version", async () => {
@@ -423,10 +423,11 @@ describe("ChatStorageService resume descriptor contract", () => {
     const service = new ChatStorageService(new App(), "SystemSculpt/Chats");
     jest.spyOn(service, "loadChat").mockResolvedValue({
       id: "chat-9",
-      messages: [{ role: "user" as ChatRole, content: "Hello" }],
+      messages: [{ role: "user" as ChatRole, message_id: "user-1", content: "Hello" }],
       lastModified: 1741600800000,
       title: "Chat 9",
       chatPath: "SystemSculpt/Chats/chat-9.md",
+      chatDirectory: "SystemSculpt/Chats",
     });
 
     await expect(service.getChatResumeDescriptor("chat-9")).resolves.toEqual({
@@ -819,7 +820,7 @@ version: 1
 
       await service.saveChat(
         "existing",
-        [{ role: "user" as ChatRole, content: "Hello" }]
+        [{ role: "user" as ChatRole, message_id: "user-1", content: "Hello" }]
       );
 
       expect(mockVault.modify).toHaveBeenCalled();
@@ -883,7 +884,7 @@ Hello
     it("includes title in save", async () => {
       await service.saveChat(
         "titled-chat",
-        [{ role: "user" as ChatRole, content: "Hello" }],
+        [{ role: "user" as ChatRole, message_id: "user-1", content: "Hello" }],
         { title: "My Custom Title" }
       );
 
@@ -895,7 +896,7 @@ Hello
     it("includes chatFontSize in save", async () => {
       await service.saveChat(
         "font-size-chat",
-        [{ role: "user" as ChatRole, content: "Hello" }],
+        [{ role: "user" as ChatRole, message_id: "user-1", content: "Hello" }],
         { chatFontSize: "large" }
       );
 

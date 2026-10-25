@@ -27,7 +27,7 @@ describe("ManagedMediaJobClient managed-job-protocol-v2 wire contract", () => {
 
   it.each(retryFixture.cases)("carries $name through media HTTP errors and status hints", async ({ header, milliseconds }) => {
     const now = jest.spyOn(Date, "now").mockReturnValue(retryFixture.now);
-    const headers = header === null ? {} : { "Retry-After": header };
+    const headers: Record<string, string> = header === null ? {} : { "Retry-After": header };
     try {
       for (const kind of ["images", "videos"] as const) {
         request.mockResolvedValueOnce(json({}, 503, headers));
@@ -108,7 +108,7 @@ describe("ManagedMediaJobClient managed-job-protocol-v2 wire contract", () => {
     ["download metadata", () => client.videos.downloadOutput(JOB_ID, 0, { ...videoOutput, sha256: "not-hex" })],
     ["delivery timing order", () => client.images.acknowledgeDelivery(JOB_ID, { download_completed_offset_ms: 3, displayed_offset_ms: 2, vault_write_completed_offset_ms: 4 })],
     ["video delivery outputs", () => client.videos.acknowledgeDelivery(JOB_ID, { download_completed_offset_ms: 1, displayed_offset_ms: 2, vault_write_completed_offset_ms: 3, outputs: [] })],
-  ])("rejects invalid request matrix: %s", async (_name, invoke) => { await expect(Promise.resolve().then(invoke)).rejects.toMatchObject({ code: "invalid_request" }); expect(request).not.toHaveBeenCalled(); });
+  ])("rejects invalid request matrix: %s", async (_name, invoke) => { await expect(Promise.resolve().then(async () => invoke())).rejects.toMatchObject({ code: "invalid_request" }); expect(request).not.toHaveBeenCalled(); });
 
   it.each([
     ["create relative poll_url", () => client.images.create({ prompt: "x" }, "op"), { job: createJob(), poll_url: "https://evil/poll" }],
@@ -204,7 +204,7 @@ describe("ManagedMediaJobClient managed-job-protocol-v2 wire contract", () => {
   });
 
   it("prepares v2 inputs with exact upload headers and returns keys in index order", async () => {
-    const signed = jest.spyOn(transport as any, "uploadSignedInput").mockResolvedValue(undefined);
+    const signed = jest.spyOn(transport, "uploadSignedInput").mockResolvedValue(undefined);
     request.mockResolvedValue(json({ contract: "systemsculpt-image-input-upload-v1", upload_id: "up-1", expires_at: futureUploadExpiry(), input_uploads: [
       { index: 1, upload: { method: "PUT", url: "https://signed/b", headers: { "content-type": "image/webp" }, expires_in_seconds: 900, expires_at: futureUploadExpiry() }, input_image: { type: "uploaded", key: "key-b", mime_type: "image/webp", size_bytes: 2, sha256: "b".repeat(64) } },
       { index: 0, upload: { method: "PUT", url: "https://signed/a", headers: { "content-type": "image/png" }, expires_in_seconds: 900, expires_at: futureUploadExpiry() }, input_image: { type: "uploaded", key: "key-a", mime_type: "image/png", size_bytes: 1, sha256: "a".repeat(64) } },

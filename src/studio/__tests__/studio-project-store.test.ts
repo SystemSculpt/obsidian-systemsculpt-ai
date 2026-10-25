@@ -279,7 +279,7 @@ describe("StudioProjectStore", () => {
   });
 
   it("publishes a renamed projection and retires the old visible paths safely", async () => {
-    const { store, files, dirs } = createStore();
+    const { store, files } = createStore();
 
     const created = await store.createProject({
       name: "Original",
@@ -370,7 +370,7 @@ describe("Studio concurrent workspace writers", () => {
     external.name = "External title";
     files.set(path, serializeStudioProject(external));
     project.name = "Local title";
-    project.graph.nodes.push({ id: "local", kind: "studio.text", version: "1.0.0", position: { x: 0, y: 0 }, config: { value: "keep me" } });
+    project.graph.nodes.push({ id: "local", kind: "studio.text", version: "1.0.0", title: "Text", position: { x: 0, y: 0 }, config: { value: "keep me" } });
     const saved = await store.saveProject(path, project, { baseProject: base });
     // The session preserves its own version of a reported field as an Undo step.
     expect(saved.conflicts).toEqual(["name"]);
@@ -557,7 +557,7 @@ describe("single authored file", () => {
       return update(files.get(file)!);
     });
     const draft = cloneStudioProjectSnapshot(project);
-    draft.graph.nodes.push({id: "n", kind: "studio.text", version: "1.0.0", position: {x: 0, y: 0}, config: {value: "persist"}});
+    draft.graph.nodes.push({id: "n", kind: "studio.text", version: "1.0.0", title: "Text", position: {x: 0, y: 0}, config: {value: "persist"}});
     await store.saveProject(path, draft, {baseProject: project});
     adapter.process.mockImplementation(original);
     const saved = await store.loadProject(path);

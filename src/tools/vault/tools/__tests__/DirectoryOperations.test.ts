@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { App, TFile, TFolder, Notice, normalizePath } from "obsidian";
+import { App, TFile, TFolder, Notice } from "obsidian";
 import { DirectoryOperations } from "../DirectoryOperations";
 
 jest.mock("obsidian", () => {
@@ -13,7 +13,7 @@ const mockedNotice = Notice as unknown as jest.Mock;
 
 // Mock utils
 jest.mock("../../utils", () => ({
-  validatePath: jest.fn((path, allowedPaths) => {
+  validatePath: jest.fn((path, _allowedPaths) => {
     if (path === "blocked/dir" || path === "blocked/file.md") return false;
     return true;
   }),

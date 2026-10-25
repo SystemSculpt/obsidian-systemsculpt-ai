@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 
-import { App, Scope, type WorkspaceLeaf } from "obsidian";
+import { App, Scope, WorkspaceLeaf } from "obsidian";
 import { SystemSculptStudioView } from "../SystemSculptStudioView";
 
 type KeydownContext = {
@@ -43,8 +43,8 @@ const handleCanvasKeyDown = (SystemSculptStudioView as any).prototype.handleCanv
 
 function createContext(overrides?: Partial<KeydownContext>): KeydownContext {
   return {
-    ownsKeyboardTarget: jest.fn(() => true),
-    isEditableKeyboardTarget: jest.fn(() => false),
+    ownsKeyboardTarget: jest.fn((_target: EventTarget | null) => true),
+    isEditableKeyboardTarget: jest.fn((_target: EventTarget | null) => false),
     fitSelectedGraphNodesInViewport: jest.fn(() => true),
     fitGraphOverviewInViewport: jest.fn(() => true),
     clipboardAndDropController: {
@@ -85,7 +85,7 @@ describe("SystemSculptStudioView fit-selection keyboard shortcut", () => {
   it.each(["a", "f"])("handles Mod+%s in the view scope before host bindings, only once", (key) => {
     const app = new App();
     app.scope = new Scope();
-    const view = new SystemSculptStudioView({ app } as WorkspaceLeaf, {} as any);
+    const view = new SystemSculptStudioView(new WorkspaceLeaf(app), {} as any);
     document.body.appendChild(view.containerEl);
     const fit = jest.spyOn(view as any, "fitSelectedGraphNodesInViewport").mockReturnValue(true);
     const select = jest.spyOn((view as any).graphInteraction, "setSelectedNodeIds").mockImplementation(() => undefined);
@@ -140,7 +140,7 @@ describe("SystemSculptStudioView fit-selection keyboard shortcut", () => {
   });
 
   it.each(["a", "f"])("preserves Mod+%s in text fields and embedded editors", (key) => {
-    const context = createContext({ isEditableKeyboardTarget: jest.fn(() => true) });
+    const context = createContext({ isEditableKeyboardTarget: jest.fn((_target: EventTarget | null) => true) });
     const event = createKeydownEvent({ key, code: `Key${key.toUpperCase()}`, shiftKey: false });
 
     handleCanvasKeyDown.call(context, event);
@@ -152,7 +152,7 @@ describe("SystemSculptStudioView fit-selection keyboard shortcut", () => {
   });
 
   it.each(["a", "f"])("ignores Mod+%s aimed outside the Studio view", (key) => {
-    const context = createContext({ ownsKeyboardTarget: jest.fn(() => false) });
+    const context = createContext({ ownsKeyboardTarget: jest.fn((_target: EventTarget | null) => false) });
     const event = createKeydownEvent({ key, code: `Key${key.toUpperCase()}`, shiftKey: false });
 
     handleCanvasKeyDown.call(context, event);
@@ -165,7 +165,7 @@ describe("SystemSculptStudioView fit-selection keyboard shortcut", () => {
 
   it("handles Mod+Shift+1 even when focus is inside an editable studio target", () => {
     const context = createContext({
-      isEditableKeyboardTarget: jest.fn(() => true),
+      isEditableKeyboardTarget: jest.fn((_target: EventTarget | null) => true),
     });
     const event = createKeydownEvent();
 
@@ -192,7 +192,7 @@ describe("SystemSculptStudioView fit-selection keyboard shortcut", () => {
 
   it("keeps copy shortcut blocked while editing text targets", () => {
     const context = createContext({
-      isEditableKeyboardTarget: jest.fn(() => true),
+      isEditableKeyboardTarget: jest.fn((_target: EventTarget | null) => true),
       clipboardAndDropController: {
         copySelectedGraphNodes: jest.fn(() => true),
         cutSelectedGraphNodes: jest.fn(() => false),

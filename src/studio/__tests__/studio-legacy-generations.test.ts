@@ -1,3 +1,4 @@
+import type { Stat } from "obsidian";
 import { createEmptyStudioProject, serializeStudioProject } from "../schema";
 import {
   STUDIO_LEGACY_CHECK_PATH,
@@ -31,7 +32,7 @@ function memoryVault(files: Map<string, Bytes>, options: { failRmdir?: string } 
       }
       return result;
     }),
-    stat: jest.fn(async (path: string) => files.has(path) ? { type: "file", ctime: 0, mtime: 0, size: size(files.get(path)!) } : null),
+    stat: jest.fn(async (path: string): Promise<Stat | null> => files.has(path) ? { type: "file", ctime: 0, mtime: 0, size: size(files.get(path)!) } : null),
     read: jest.fn(async (path: string) => {
       const value = files.get(path);
       if (typeof value !== "string") throw new Error(`File not found: ${path}`);

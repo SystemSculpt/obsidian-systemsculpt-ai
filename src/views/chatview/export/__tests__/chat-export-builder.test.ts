@@ -43,8 +43,7 @@ describe('ChatExportBuilder', () => {
       { id: 'tool-1', type: 'tool_call', timestamp: 11, data: toolCall },
       { id: 'content-1', type: 'content', timestamp: 12, data: 'Here is the answer with code.\n```ts\nconst value = 1;\n```' }
     ],
-    tool_calls: [toolCall],
-    webSearchEnabled: true
+    tool_calls: [toolCall]
   };
 
   const context: ChatExportContext = {

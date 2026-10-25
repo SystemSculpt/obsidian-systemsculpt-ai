@@ -65,8 +65,8 @@ npm run check:ci
 npm run check:compat
 ~~~
 
-check:plugin adds TypeScript, mobile compatibility, sync, artifact, and release
-guards. test:chatview:critical runs the thin Bridge, session transport,
+check:plugin adds TypeScript for sources and tests (tsconfig.test.json, see
+testing/README.md), mobile compatibility, sync, artifact, and release guards. test:chatview:critical runs the thin Bridge, session transport,
 transcript persistence, approvals, queue and recovery controls, and
 restored-history UI with strict console, randomized order, open-handle
 detection, adversarial race cases, and a global coverage floor over the

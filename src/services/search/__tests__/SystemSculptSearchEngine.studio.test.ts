@@ -1,4 +1,4 @@
-import { App, TFile } from "obsidian";
+import { App, TFile, type Events } from "obsidian";
 import { SystemSculptSearchEngine } from "../SystemSculptSearchEngine";
 
 const NOW = Date.now();
@@ -18,18 +18,20 @@ function fixture() {
     contents.set(path, text);
     return file;
   };
-  app.vault.getFiles.mockReturnValue(files);
-  app.vault.getAbstractFileByPath.mockImplementation((path) => files.find((file) => file.path === path) ?? null);
-  app.vault.cachedRead.mockImplementation(async (file) => contents.get(file.path) ?? "");
+  jest.spyOn(app.vault, "getFiles").mockReturnValue(files);
+  jest.spyOn(app.vault, "getAbstractFileByPath").mockImplementation((path) => files.find((file) => file.path === path) ?? null);
+  const cachedRead = jest.spyOn(app.vault, "cachedRead").mockImplementation(async (file) => contents.get(file.path) ?? "");
+  const vaultEvents: Events = app.vault;
+  const on = jest.spyOn(vaultEvents, "on");
   const plugin = {
     app,
     settings: { embeddingsEnabled: false, embeddingsExclusions: { ignoreChatHistory: false, respectObsidianExclusions: false, folders: [] as string[] } },
   } as any;
   const engine = new SystemSculptSearchEngine(app, plugin);
   const emit = (event: string, file: TFile, oldPath?: string) => {
-    const listener = app.vault.on.mock.calls.find(([name]) => name === event)?.[1];
+    const listener = on.mock.calls.find(([name]) => name === event)?.[1];
     expect(listener).toBeDefined();
-    listener(file, oldPath);
+    listener?.(file, oldPath);
   };
   const update = (file: TFile, text: string, mtime: number) => {
     contents.set(file.path, text);
@@ -44,7 +46,7 @@ function fixture() {
     const projection = add("Projects/Launch.studio/views/graph.systemsculpt", project("Launch", "quartz brief"), NOW);
     return { entry, projection };
   };
-  return { app, files, contents, add, engine, emit, update, linked, plugin };
+  return { app, files, contents, add, engine, emit, update, linked, plugin, cachedRead };
 }
 
 describe("SystemSculpt search Studio projects", () => {
@@ -61,12 +63,12 @@ describe("SystemSculpt search Studio projects", () => {
   });
 
   it("includes Studio in cold recents and applies its edit time to relevance ranking", async () => {
-    const { add, engine, app } = fixture();
+    const { add, engine, cachedRead } = fixture();
     const note = add("Notes/Launch.md", "Launch quartz", NOW - 90 * 86_400_000);
     const studio = add("Projects/Launch.systemsculpt", project("Launch", "quartz"));
     try {
       expect((await engine.getRecent(2)).map((hit) => hit.path)).toEqual([studio.path, note.path]);
-      expect(app.vault.cachedRead.mock.calls.map(([file]) => file.path)).not.toContain(note.path);
+      expect(cachedRead.mock.calls.map(([file]) => file.path)).not.toContain(note.path);
       expect((await engine.search("Launch", { mode: "lexical" })).results[0].path).toBe(studio.path);
     } finally { engine.destroy(); }
   });
@@ -134,10 +136,10 @@ describe("SystemSculpt search Studio projects", () => {
   });
 
   it("retries Studio content invalidated during the initial read", async () => {
-    const { linked, app, contents, engine, update } = fixture();
+    const { linked, cachedRead, contents, engine, update } = fixture();
     const { entry, projection } = linked();
     let changed = false;
-    app.vault.cachedRead.mockImplementation(async (file) => {
+    cachedRead.mockImplementation(async (file) => {
       const text = contents.get(file.path) ?? "";
       if (file.path === projection.path && !changed) {
         changed = true;

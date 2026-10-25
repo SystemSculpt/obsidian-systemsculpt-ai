@@ -46,11 +46,10 @@ describe("SystemSculptSearchEngine lexical mode", () => {
       "notes/cyrillic.md": "Привет мир from the multilingual search fixture.",
     };
 
-    app.vault.getFiles.mockReturnValue(files);
-    // @ts-expect-error mock injected for tests
+    jest.spyOn(app.vault, "getFiles").mockReturnValue(files);
     app.vault.cachedRead = jest.fn((file) => Promise.resolve(contents[file.path] ?? ""));
-    app.vault.read.mockImplementation(app.vault.cachedRead);
-    app.vault.getAbstractFileByPath.mockImplementation((p) => files.find((f) => f.path === p) ?? null);
+    jest.spyOn(app.vault, "read").mockImplementation(app.vault.cachedRead);
+    jest.spyOn(app.vault, "getAbstractFileByPath").mockImplementation((p) => files.find((f) => f.path === p) ?? null);
     app.workspace.offref = jest.fn();
 
     return { app, files };
@@ -628,11 +627,10 @@ describe("SystemSculptSearchEngine lexical mode", () => {
       "notes/co-op.md": "The co-op meeting is tomorrow.",
       "notes/unrelated.md": "Nothing relevant here.",
     };
-    app.vault.getFiles.mockReturnValue(files);
-    // @ts-expect-error mock injected for tests
+    jest.spyOn(app.vault, "getFiles").mockReturnValue(files);
     app.vault.cachedRead = jest.fn((file) => Promise.resolve(contents[file.path] ?? ""));
-    app.vault.read.mockImplementation(app.vault.cachedRead);
-    app.vault.getAbstractFileByPath.mockImplementation((p) => files.find((f) => f.path === p) ?? null);
+    jest.spyOn(app.vault, "read").mockImplementation(app.vault.cachedRead);
+    jest.spyOn(app.vault, "getAbstractFileByPath").mockImplementation((p) => files.find((f) => f.path === p) ?? null);
 
     const plugin = makePlugin(app);
     const engine = new SystemSculptSearchEngine(app as any, plugin);

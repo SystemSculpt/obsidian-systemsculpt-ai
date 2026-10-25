@@ -2,13 +2,17 @@
  * @jest-environment jsdom
  */
 import { findLeafByPath, openFileInMainWorkspace } from "../workspaceUtils";
-import { App, Notice, TFile, WorkspaceLeaf, Platform } from "obsidian";
+import { Notice, TFile, WorkspaceLeaf } from "obsidian";
 
 // Opening a file is its own feedback: no navigation notices.
 jest.mock("obsidian", () => ({ ...jest.requireActual("obsidian"), Notice: jest.fn() }));
 
+// Production compares leaf parents by identity only, so a plain object stands
+// in for a tab group.
+type MockLeafOverrides = Omit<Partial<WorkspaceLeaf>, "parent"> & { parent?: object | null };
+
 // Create mock leaf
-const createMockLeaf = (overrides: Partial<WorkspaceLeaf> = {}): WorkspaceLeaf =>
+const createMockLeaf = (overrides: MockLeafOverrides = {}): WorkspaceLeaf =>
   ({
     view: { file: null },
     getViewState: jest.fn().mockReturnValue({ type: "empty", state: {} }),
@@ -25,7 +29,7 @@ const createMockWorkspace = (leaves: WorkspaceLeaf[] = []) => {
       leaves.forEach(callback);
     }),
     activeLeaf: null as WorkspaceLeaf | null,
-    getMostRecentLeaf: jest.fn(() => workspace.activeLeaf),
+    getMostRecentLeaf: jest.fn((): WorkspaceLeaf | null => workspace.activeLeaf),
     rootSplit: { id: "root" },
     setActiveLeaf: jest.fn(),
     getLeaf: jest.fn().mockReturnValue(createMockLeaf()),

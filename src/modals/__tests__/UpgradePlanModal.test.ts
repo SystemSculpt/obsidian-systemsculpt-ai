@@ -331,7 +331,7 @@ describe("UpgradePlanModal", () => {
     expect(modal.modalEl.textContent).toContain("Signed in as user@example.test.");
     expect(modal.modalEl.textContent).not.toContain("Welcome");
     expect(modal.modalEl.textContent).not.toContain("license is being confirmed");
-    expect(Array.from(modal.footerEl.querySelectorAll("button")).map((button) => button.textContent)).toEqual(["Done"]);
+    expect(Array.from(modal["footerEl"].querySelectorAll("button")).map((button) => button.textContent)).toEqual(["Done"]);
     findButtonByText(modal.modalEl, "Done").click();
     modal.onClose();
     expect(plugin.pollInBackground).not.toHaveBeenCalled();
