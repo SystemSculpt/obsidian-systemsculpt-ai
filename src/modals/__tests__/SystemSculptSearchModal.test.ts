@@ -352,7 +352,10 @@ describe("SystemSculptSearchModal", () => {
       expect((modal as any).listEl?.querySelector('[data-path="notes/body-hit.md"]')).not.toBeNull();
     });
 
-    it("stabilizes fast metadata-to-index refreshes without waiting for interaction", async () => {
+    const renderedPaths = () => Array.from((modal as any).listEl.querySelectorAll(".ss-search__item"))
+      .map((item) => (item as HTMLElement).getAttribute("data-path"));
+
+    const metadataThenIndex = () => {
       const first = createMockSearchResponse({
         results: [
           { path: "notes/a.md", title: "A", score: 0.8, origin: "lexical", updatedAt: Date.now() },
@@ -377,17 +380,123 @@ describe("SystemSculptSearchModal", () => {
       });
       modal = new SystemSculptSearchModal(plugin);
       modal.onOpen();
+    };
+
+    it("shows the content index's order when nobody is choosing a result yet", async () => {
+      metadataThenIndex();
 
       await (modal as any).executeSearch("body");
       expect(modal.contentEl.querySelector(".ss-search__status")?.textContent).toBe("2 results");
       jest.advanceTimersByTime(0);
       await flush(4);
 
-      expect(Array.from((modal as any).listEl.querySelectorAll<HTMLElement>(".ss-search__item")).map((item) => item.getAttribute("data-path"))).toEqual([
-        "notes/a.md",
-        "notes/b.md",
-        "notes/c.md",
+      expect(renderedPaths()).toEqual(["notes/c.md", "notes/b.md", "notes/a.md"]);
+    });
+
+    it("keeps rows still for a refresh once the pointer moves over the results", async () => {
+      metadataThenIndex();
+
+      await (modal as any).executeSearch("body");
+      (modal as any).listEl.dispatchEvent(new Event("pointermove", { bubbles: true }));
+      jest.advanceTimersByTime(0);
+      await flush(4);
+
+      expect(renderedPaths()).toEqual(["notes/a.md", "notes/b.md", "notes/c.md"]);
+    });
+
+    it("keeps rows still for a refresh once the results are scrolled", async () => {
+      metadataThenIndex();
+
+      await (modal as any).executeSearch("body");
+      (modal as any).listEl.scrollTop = 40;
+      jest.advanceTimersByTime(0);
+      await flush(4);
+
+      expect(renderedPaths()).toEqual(["notes/a.md", "notes/b.md", "notes/c.md"]);
+    });
+
+    it("shows words first once the content index finishes, then asks for meaning after a pause", async () => {
+      metadataThenIndex();
+
+      await (modal as any).executeSearch("body");
+      jest.advanceTimersByTime(0);
+      await flush(4);
+      expect(plugin._testEngine.search).toHaveBeenLastCalledWith("body", expect.objectContaining({ semantic: false }));
+
+      await jest.advanceTimersByTimeAsync(400);
+      expect(plugin._testEngine.search).toHaveBeenLastCalledWith(
+        "body",
+        expect.not.objectContaining({ semantic: false }),
+      );
+    });
+
+    it("puts notes that match words and meaning on top when the meaning pass arrives", async () => {
+      modal.onOpen();
+      const words = createMockSearchResponse({
+        results: [
+          { path: "Research/Commuter interviews.md", title: "Commuter interviews", score: 0.162, origin: "lexical", updatedAt: Date.now() },
+          { path: "People/Marcus Oyelaran.md", title: "Marcus Oyelaran", score: 0.162, origin: "lexical", updatedAt: Date.now() },
+        ],
+      });
+      const meaning = createMockSearchResponse({
+        results: [
+          { path: "People/Marcus Oyelaran.md", title: "Marcus Oyelaran", score: 0.56, origin: "blend", updatedAt: Date.now() },
+          { path: "Research/Commuter interviews.md", title: "Commuter interviews", score: 0.514, origin: "blend", updatedAt: Date.now() },
+          { path: "Research/Timetable page ideas.md", title: "Timetable page ideas", score: 0.444, origin: "semantic", updatedAt: Date.now() },
+        ],
+        stats: { ...createMockSearchResponse().stats, usedEmbeddings: true },
+      });
+      plugin._testEngine.search.mockImplementation(async (_query: string, options: { semantic?: boolean }) => (
+        options.semantic === false ? words : meaning
+      ));
+      const input = (modal as any).searchInputEl as HTMLInputElement;
+
+      input.value = "older passengers who don't like apps";
+      input.dispatchEvent(new Event("input"));
+      await jest.advanceTimersByTimeAsync(180);
+      expect(renderedPaths()).toEqual(["Research/Commuter interviews.md", "People/Marcus Oyelaran.md"]);
+
+      await jest.advanceTimersByTimeAsync(400);
+      expect(renderedPaths()).toEqual([
+        "People/Marcus Oyelaran.md",
+        "Research/Commuter interviews.md",
+        "Research/Timetable page ideas.md",
       ]);
+    });
+
+    it("stops waiting for a meaning pass as soon as the query changes and never shows its results", async () => {
+      modal.onOpen();
+      let meaningSignal: AbortSignal | undefined;
+      let answerMeaning!: (response: SearchResponse) => void;
+      plugin._testEngine.search.mockImplementation((query: string, options: { semantic?: boolean; signal: AbortSignal }) => {
+        if (options.semantic === false) {
+          return Promise.resolve(createMockSearchResponse({
+            results: [{ path: `notes/${query}.md`, title: query, score: 0.5, origin: "lexical", updatedAt: Date.now() }],
+          }));
+        }
+        meaningSignal = options.signal;
+        return new Promise<SearchResponse>((resolve) => { answerMeaning = resolve; });
+      });
+      const input = (modal as any).searchInputEl as HTMLInputElement;
+
+      input.value = "older";
+      input.dispatchEvent(new Event("input"));
+      await jest.advanceTimersByTimeAsync(400);
+      expect(meaningSignal?.aborted).toBe(false);
+
+      input.value = "older p";
+      input.dispatchEvent(new Event("input"));
+      expect(meaningSignal?.aborted).toBe(true);
+
+      answerMeaning(createMockSearchResponse({
+        results: [{ path: "notes/stale-meaning.md", title: "Stale", score: 0.9, origin: "semantic", updatedAt: Date.now() }],
+        stats: { ...createMockSearchResponse().stats, usedEmbeddings: true },
+      }));
+      await flush(4);
+      expect(renderedPaths()).toEqual(["notes/older.md"]);
+
+      await jest.advanceTimersByTimeAsync(180);
+      expect(renderedPaths()).toEqual(["notes/older p.md"]);
     });
   });
 
