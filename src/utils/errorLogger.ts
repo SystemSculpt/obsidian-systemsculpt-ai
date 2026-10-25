@@ -1,5 +1,7 @@
+/** @internal Tests type their fixtures with this. */
 export type ErrorLevel = 'error' | 'warn' | 'info' | 'debug';
 
+/** @internal Tests type their fixtures with this. */
 export interface ErrorContext {
   source?: string;
   method?: string;

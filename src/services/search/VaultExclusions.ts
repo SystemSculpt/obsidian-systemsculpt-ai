@@ -31,6 +31,7 @@ import { normalizeVaultRelativePath } from "../../utils/vaultPathUtils";
 
 export type VaultExclusionSurface = "embeddings" | "search";
 
+/** @internal Tests type their fixtures with this. */
 export type VaultExclusionSettings = Readonly<{
   folders?: readonly unknown[] | null;
   patterns?: readonly unknown[] | null;

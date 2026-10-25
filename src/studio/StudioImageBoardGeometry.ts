@@ -45,6 +45,7 @@ export function scaleAffine(x: number, y: number): StudioImageBoardAffine {
   return [x, 0, 0, y, 0, 0];
 }
 
+/** @internal Unit-tested directly. */
 export function rotateAffine(degrees: number): StudioImageBoardAffine {
   const radians = (degrees * Math.PI) / 180;
   const cos = Math.cos(radians);

@@ -16,7 +16,7 @@ import type { StudioShapeKind } from "../../../studio/types";
  * in SVG: a diamond, a cylinder and a folded note are all outline, not chrome.
  */
 
-export type StudioShapeOutlinePoint = { x: number; y: number };
+type StudioShapeOutlinePoint = { x: number; y: number };
 
 export type StudioShapeOutlineSize = { width: number; height: number };
 

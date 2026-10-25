@@ -5,6 +5,7 @@ import { resolveStudioGraphNodeWidth } from "../../../studio/StudioNodeGeometry"
  * Horizontal inset (world px) of a port pin's centre from the card's vertical
  * edge. Used only as a fallback before a pin has been measured: pins straddle
  * the card border, so their centres sit on the edge itself.
+ * @internal Tests assert against this value.
  */
 export const STUDIO_PORT_EDGE_INSET = 0;
 
@@ -12,6 +13,7 @@ export const STUDIO_PORT_EDGE_INSET = 0;
  * Vertical offset (world px) of a port pin's centre from the card's top, used
  * only as a fallback before a pin has been measured. Ports sit just below the
  * card header; the measured offset replaces this on the first laid-out render.
+ * @internal Tests assert against this value.
  */
 export const STUDIO_PORT_FALLBACK_LOCAL_Y = 52;
 

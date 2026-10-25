@@ -7,6 +7,7 @@ import { isBase64 } from "../../utils/base64";
 
 export const THIN_AGENT_COMMAND_TYPE =
   "systemsculpt.agent.command.v1" as const;
+/** @internal Tests assert against this value. */
 export const THIN_AGENT_EVENT_TYPE =
   "systemsculpt.agent.event.v1" as const;
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/u;
@@ -135,13 +136,13 @@ export type AgentKnownRunState =
       root_message_id: string;
     }>;
 
-export type AgentUnknownRunState = Readonly<{
+type AgentUnknownRunState = Readonly<{
   version: 1 | null;
   cursor: number | null;
   state: "unknown";
 }>;
 
-export type AgentRunState =
+type AgentRunState =
   | AgentKnownRunState
   | AgentUnknownRunState;
 
@@ -151,7 +152,7 @@ type ServerEventBase = Readonly<{
   conversation_id: string;
 }>;
 
-export type AgentSessionSnapshotEvent = ServerEventBase & Readonly<{
+type AgentSessionSnapshotEvent = ServerEventBase & Readonly<{
   kind: "session_snapshot";
   snapshot_epoch?: number;
   snapshot_sequence?: number;
@@ -161,7 +162,7 @@ export type AgentSessionSnapshotEvent = ServerEventBase & Readonly<{
   cancelled_queued_request_ids: readonly string[];
 }>;
 
-export type AgentAssistantSnapshotEvent = ServerEventBase & Readonly<{
+type AgentAssistantSnapshotEvent = ServerEventBase & Readonly<{
   kind: "assistant_snapshot";
   request_id: string;
   snapshot_epoch?: number;
@@ -175,7 +176,7 @@ export type AgentAssistantSnapshotEvent = ServerEventBase & Readonly<{
  * matches the local part text exactly, and any missed or dropped delta is
  * healed by the next assistant snapshot.
  */
-export type AgentAssistantDeltaEvent = ServerEventBase & Readonly<{
+type AgentAssistantDeltaEvent = ServerEventBase & Readonly<{
   kind: "assistant_delta";
   request_id: string;
   message_id: string;
@@ -185,7 +186,7 @@ export type AgentAssistantDeltaEvent = ServerEventBase & Readonly<{
   delta: string;
 }>;
 
-export type AgentRunStateEvent = ServerEventBase & Readonly<{
+type AgentRunStateEvent = ServerEventBase & Readonly<{
   kind: "run_state";
   run_state: AgentRunState;
 }>;
@@ -196,7 +197,7 @@ export type AgentTerminalEvent = ServerEventBase & Readonly<{
   terminal: ThinAgentRunTerminalData;
 }>;
 
-export type AgentQueuedTurn =
+type AgentQueuedTurn =
   | Readonly<{
       kind: "submit";
       request_id: string;
@@ -233,7 +234,7 @@ export type AgentCommandAckEvent = ServerEventBase & (
     }>
 );
 
-export type AgentUnknownEvent = ServerEventBase & Readonly<{
+type AgentUnknownEvent = ServerEventBase & Readonly<{
   kind: "unknown";
   raw_kind: string;
   raw: Readonly<Record<string, unknown>>;
@@ -249,6 +250,7 @@ export type AgentServerEvent =
   | AgentCommandAckEvent
   | AgentUnknownEvent;
 
+/** @internal Tests match this error class. */
 export class AgentProtocolError extends Error {
   public constructor(
     public readonly code: string,
@@ -732,7 +734,7 @@ export function parseAgentCommand(
   return fail("unsupported_command", "The client command kind is unsupported.");
 }
 
-export function parseAgentRunState(
+function parseAgentRunState(
   value: unknown,
 ): AgentRunState {
   if (!isRecord(value)) {

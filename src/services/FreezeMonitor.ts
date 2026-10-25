@@ -31,7 +31,10 @@ const PREFERRED_ENTRY_TYPES: readonly FreezeEntryType[] = ["long-animation-frame
 const DEFAULT_THRESHOLD_MS = 200;
 const DEFAULT_MIN_REPORT_INTERVAL_MS = 2_000;
 
-/** Picks the richest long-frame entry type the host can observe, if any. */
+/**
+ * Picks the richest long-frame entry type the host can observe, if any.
+ * @internal Unit-tested directly.
+ */
 export function resolveFreezeEntryType(
   observerConstructor: PerformanceObserverConstructor | undefined,
 ): FreezeEntryType | null {

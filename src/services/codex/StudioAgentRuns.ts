@@ -27,6 +27,7 @@ const MAX_ACTIVE = 8, MAX_PENDING = 100;
  * The presentation cache holds at most this many runs across projects. Paging
  * past it evicts the least recently changed runs that are not live, and the
  * board then says it shows only the newest runs.
+ * @internal Tests assert against this value.
  */
 export const MAX_LOADED_AGENT_RUNS = 1000;
 /** Saves after a state change; streamed text and activity wait longer, so a long turn isn't rewritten per delta. */

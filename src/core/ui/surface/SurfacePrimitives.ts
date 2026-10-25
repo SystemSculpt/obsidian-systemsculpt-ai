@@ -1,7 +1,7 @@
 import { SearchComponent, setIcon, setTooltip } from "obsidian";
 
 export type UiActionTone = "default" | "primary" | "danger" | "warning";
-export type UiActionSize = "default" | "small" | "icon";
+type UiActionSize = "default" | "small" | "icon";
 
 export interface UiActionOptions {
   label: string;

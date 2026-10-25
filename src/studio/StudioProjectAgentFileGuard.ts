@@ -18,6 +18,7 @@ export function isStudioProjectDocumentPath(path: string): boolean {
   return normalizeVaultRelativePath(path, { preserveCharacters: true }).toLowerCase().endsWith(".systemsculpt");
 }
 
+/** @internal Unit-tested directly. */
 export function isStudioOwnedPersistencePath(path: string): boolean {
   const normalized = normalizeVaultRelativePath(path, { preserveCharacters: true }).toLowerCase();
   return normalized === ".systemsculpt/studio"

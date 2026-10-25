@@ -57,7 +57,10 @@ const RESERVED_KEYS = ["__proto__", "constructor", "prototype"];
 class StudioWriteRace extends Error {}
 class StudioOriginalCopyError extends Error {}
 
-/** An agent revision: the SHA-256 of the canonical document text. */
+/**
+ * An agent revision: the SHA-256 of the canonical document text.
+ * @internal Unit-tested directly.
+ */
 export async function studioDocumentRevision(text: string): Promise<string> {
   return sha256HexFromArrayBuffer(new TextEncoder().encode(text).buffer);
 }

@@ -28,7 +28,7 @@ function selectedModelId(node: Pick<StudioNodeInstance, "config">): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
-export function planStudioVideoNodeInputs(model: ManagedVideoModel | null, modelId = model?.id ?? ""): StudioMediaNodeInputPlan {
+function planStudioVideoNodeInputs(model: ManagedVideoModel | null, modelId = model?.id ?? ""): StudioMediaNodeInputPlan {
   if (!model) {
     return { kind: "video", modelId, model: null, hiddenInputPortIds: [], inputPortNotes: {}, hiddenFieldKeys: [] };
   }

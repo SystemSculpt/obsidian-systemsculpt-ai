@@ -16,7 +16,7 @@ export type EdgeIdentity = {
  */
 export type EdgeState = EdgeIdentity;
 
-export type DragValidity = "valid" | "near" | "invalid";
+type DragValidity = "valid" | "near" | "invalid";
 
 export type DragState = {
   source: PortAnchor;

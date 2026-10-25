@@ -1,11 +1,12 @@
 import YAML from "yaml";
 
-export type ObsidianBasesYamlValidationResult =
+type ObsidianBasesYamlValidationResult =
   | { ok: true }
   | { ok: false; problems: string[]; hint?: string };
 
 const UNRESOLVED_TAG_RE = /\bUnresolved tag:/;
 
+/** @internal Unit-tested directly. */
 export function validateObsidianBasesYaml(yamlText: string): ObsidianBasesYamlValidationResult {
   const src = String(yamlText ?? "");
   const doc = YAML.parseDocument(src);

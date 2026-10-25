@@ -97,6 +97,7 @@ type RecorderWakeLockSentinel = {
 
 const SPEECH_BITRATE = 96_000;
 const CHUNK_INTERVAL_MS = 1_000;
+/** @internal Tests assert against this value. */
 export const RECORDER_STOP_WATCHDOG_MS = 2_000;
 /** Desktop capture remains bounded even for long meetings. */
 export const MAX_ENCODED_CAPTURE_BYTES = 64 * 1024 * 1024;
@@ -109,6 +110,7 @@ export const MOBILE_MAX_ENCODED_CAPTURE_BYTES = 24 * 1024 * 1024;
 /**
  * A capture streamed to disk holds only its unflushed tail in memory, so this
  * bound only stops a forgotten recorder: about 12 hours at the speech bitrate.
+ * @internal Tests assert against this value.
  */
 export const STREAMED_MAX_ENCODED_CAPTURE_BYTES = 512 * 1024 * 1024;
 /**
@@ -127,6 +129,7 @@ type BinaryAppendAdapter = DataAdapter & {
  * Obsidian 1.12.3 added binary appends. Older hosts keep the in-memory capture
  * and its bounds. Capture streams into a hidden in-progress file through the
  * adapter, because the vault API does not reach dot-folders.
+ * @internal Unit-tested directly.
  */
 export function canStreamRecordingToDisk(app: App): boolean {
   return typeof (app.vault.adapter as BinaryAppendAdapter).appendBinary === "function";

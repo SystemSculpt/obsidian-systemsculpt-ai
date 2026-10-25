@@ -1,4 +1,4 @@
-export const FIRST_PARTY_TOOL_NAMES = [
+const FIRST_PARTY_TOOL_NAMES = [
   "read",
   "write",
   "edit",

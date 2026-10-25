@@ -667,6 +667,7 @@ export class ResourceMonitorService {
 
 /**
  * Projects an internal sample through the only resource fields allowed in incident reports.
+ * @internal Unit-tested directly.
  */
 export function projectIncidentResourceSample(sample: unknown): IncidentResourceSample | null {
   try {

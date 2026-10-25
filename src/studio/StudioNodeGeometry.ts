@@ -14,27 +14,39 @@ import type { StudioNodeInstance, StudioNodeSize } from "./types";
 
 export const STUDIO_GRAPH_DEFAULT_NODE_WIDTH = 280;
 export const STUDIO_GRAPH_DEFAULT_NODE_HEIGHT = 164;
+/** @internal Tests assert against this value. */
 export const STUDIO_GRAPH_LARGE_TEXT_NODE_WIDTH = STUDIO_GRAPH_DEFAULT_NODE_WIDTH * 2;
+/** @internal Tests assert against this value. */
 export const STUDIO_GRAPH_LARGE_TEXT_NODE_MIN_HEIGHT = STUDIO_GRAPH_DEFAULT_NODE_HEIGHT * 2;
+/** @internal Tests assert against this value. */
 export const STUDIO_GRAPH_NODE_MIN_WIDTH = 220;
 const STUDIO_GRAPH_NODE_MAX_WIDTH = 2000;
+/** @internal Tests assert against this value. */
 export const STUDIO_GRAPH_NODE_MIN_HEIGHT = 120;
 const STUDIO_GRAPH_NODE_MAX_HEIGHT = 2000;
+/** @internal Tests assert against this value. */
 export const STUDIO_GRAPH_TERMINAL_DEFAULT_WIDTH = 640;
+/** @internal Tests assert against this value. */
 export const STUDIO_GRAPH_TERMINAL_DEFAULT_HEIGHT = 420;
+/** @internal Tests assert against this value. */
 export const STUDIO_GRAPH_TERMINAL_MIN_WIDTH = 360;
 const STUDIO_GRAPH_TERMINAL_MAX_WIDTH = 2000;
+/** @internal Tests assert against this value. */
 export const STUDIO_GRAPH_TERMINAL_MIN_HEIGHT = 220;
 const STUDIO_GRAPH_TERMINAL_MAX_HEIGHT = 1600;
 
 // Text scales poster-large (tldraw-style): the caps exist only to keep truly
 // absurd values from wrecking canvas math, not to constrain design intent.
+/** @internal Tests assert against this value. */
 export const STUDIO_GRAPH_TEXT_NODE_MIN_WIDTH = 140;
 const STUDIO_GRAPH_TEXT_NODE_MAX_WIDTH = 4000;
 // One line of default-size text plus the vertical chrome — the card is
 // chromeless (no toolbar), so a single-line text node is genuinely short.
+/** @internal Tests assert against this value. */
 export const STUDIO_GRAPH_TEXT_NODE_MIN_HEIGHT = 32;
+/** @internal Tests assert against this value. */
 export const STUDIO_GRAPH_TEXT_NODE_MAX_HEIGHT = 4000;
+/** @internal Tests assert against this value. */
 export const STUDIO_GRAPH_TEXT_NODE_DEFAULT_HEIGHT = STUDIO_GRAPH_TEXT_NODE_MIN_HEIGHT + 50;
 export const STUDIO_GRAPH_TEXT_NODE_MIN_FONT_SIZE = 10;
 export const STUDIO_GRAPH_TEXT_NODE_MAX_FONT_SIZE = 512;
@@ -188,6 +200,7 @@ function countStudioTextNodeLines(text: unknown): number {
   return Math.max(1, value.split(/\r\n|\r|\n/).length);
 }
 
+/** @internal Unit-tested directly. */
 export function estimateStudioTextNodeHeight(lineCount: number): number {
   const lines = Number.isFinite(lineCount) ? Math.max(1, Math.floor(lineCount)) : 1;
   return clampStudioNodeDimension(

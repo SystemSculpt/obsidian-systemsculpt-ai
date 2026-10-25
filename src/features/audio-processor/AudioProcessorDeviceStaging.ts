@@ -43,6 +43,7 @@ export interface AudioProcessorDeviceStagingTestSeam {
   now?: () => number;
 }
 
+/** @internal Tests match this error class. */
 export class AudioProcessorDeviceStagingError extends Error {
   constructor(
     public readonly code: "invalid_staging_request" | "staging_corrupt",

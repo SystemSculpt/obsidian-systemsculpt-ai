@@ -24,7 +24,7 @@ import {
 /** A caption is fill text; on a picture every style carries its own contrast. */
 export type StudioImageBoardTextStyle = Exclude<StudioFillTextStyle, "plain">;
 export type StudioImageBoardTextAlign = StudioFillTextAlign;
-export type StudioImageBoardShape = "rect" | "ellipse" | "arrow";
+type StudioImageBoardShape = "rect" | "ellipse" | "arrow";
 export type StudioImageBoardRedactStyle = "blur" | "pixelate" | "solid";
 export type StudioImageBoardLensShape = "rect" | "ellipse";
 
@@ -34,7 +34,7 @@ type StudioImageBoardLayerBase = StudioImageBoardBox & { id: string };
 export type StudioImageBoardBaseLayer = StudioImageBoardLayerBase & { kind: "base" };
 
 /** An extra image stacked onto the board. */
-export type StudioImageBoardImageLayer = StudioImageBoardLayerBase & {
+type StudioImageBoardImageLayer = StudioImageBoardLayerBase & {
   kind: "image";
   asset: StudioAssetRef;
 };
@@ -56,7 +56,7 @@ export type StudioImageBoardShapeLayer = StudioImageBoardLayerBase & {
   strokeWidth: number;
 };
 
-export type StudioImageBoardHighlightLayer = StudioImageBoardLayerBase & {
+type StudioImageBoardHighlightLayer = StudioImageBoardLayerBase & {
   kind: "highlight";
   color: string;
 };
@@ -357,6 +357,7 @@ export function createStudioImageBoardLayer(
   return layer;
 }
 
+/** @internal Unit-tested directly. */
 export function createEmptyStudioImageBoard(): StudioImageBoard {
   return {
     version: BOARD_VERSION,

@@ -1,3 +1,4 @@
+/** @internal Tests assert against this value. */
 export const CODEX_APPROVAL_MODES = ['auto', 'ask', 'read-only', 'settings'] as const;
 export type CodexApprovalMode = typeof CODEX_APPROVAL_MODES[number];
 

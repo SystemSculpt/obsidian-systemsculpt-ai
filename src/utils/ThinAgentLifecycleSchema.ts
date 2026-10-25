@@ -103,6 +103,7 @@ export const THIN_AGENT_LIFECYCLE_PHASES = [
 
 export type AgentLifecyclePhase = typeof THIN_AGENT_LIFECYCLE_PHASES[number];
 
+/** @internal Tests assert against this value. */
 export const CREDITS_REFRESH_REASONS = [
   "view_open",
   "post_terminal",
@@ -113,6 +114,7 @@ export const CREDITS_REFRESH_REASONS = [
 
 export type CreditsRefreshReason = typeof CREDITS_REFRESH_REASONS[number];
 
+/** @internal Tests assert against this value. */
 export const HISTORY_SYNC_KINDS = [
   "before_send",
   "authoritative_prefix",
@@ -122,7 +124,7 @@ export const HISTORY_SYNC_KINDS = [
 
 export type HistorySyncKind = typeof HISTORY_SYNC_KINDS[number];
 
-export const TOOL_DIAGNOSTIC_OUTCOMES = [
+const TOOL_DIAGNOSTIC_OUTCOMES = [
   "succeeded",
   "failed",
   "cancelled",
@@ -131,7 +133,7 @@ export const TOOL_DIAGNOSTIC_OUTCOMES = [
 
 export type ToolDiagnosticOutcome = typeof TOOL_DIAGNOSTIC_OUTCOMES[number];
 
-export const TOOL_DIAGNOSTIC_FAILURE_CLASSES = [
+const TOOL_DIAGNOSTIC_FAILURE_CLASSES = [
   "partial_failure",
   "operation_failed",
   "execution_failed",

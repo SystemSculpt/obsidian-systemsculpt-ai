@@ -13,8 +13,12 @@ import type { ToolCall, ToolCallResult } from "../../types/toolCalls";
  * Bounding is idempotent: a bounded result bounds to itself, so a result read
  * back from a saved chat compares equal to the server's bounded copy.
  */
+/** @internal Tests assert against this value. */
 export const DURABLE_TOOL_TEXT_LIMIT = 512;
-/** Twice the most operations a vault batch tool accepts. */
+/**
+ * Twice the most operations a vault batch tool accepts.
+ * @internal Tests assert against this value.
+ */
 export const DURABLE_TOOL_LIST_LIMIT = 2 * MAX_BATCH_OPERATIONS;
 const DURABLE_TOOL_DEPTH_LIMIT = 6;
 const OMITTED_VALUE = "[omitted]";

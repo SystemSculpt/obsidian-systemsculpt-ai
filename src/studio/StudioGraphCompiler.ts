@@ -11,7 +11,7 @@ import { validateNodeConfig } from "./StudioNodeConfigValidation";
 import { StudioNodeRegistry } from "./StudioNodeRegistry";
 import { resolveNodeDefinitionPorts } from "./StudioNodePortResolution";
 
-export type StudioCompiledNode = {
+type StudioCompiledNode = {
   node: StudioNodeInstance;
   definition: StudioNodeDefinition;
   inboundEdges: StudioEdge[];

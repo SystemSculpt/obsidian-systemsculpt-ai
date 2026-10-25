@@ -10,6 +10,7 @@ import type { StudioGraphInteractionEngine } from "../StudioGraphInteractionEngi
  * (toolbars, floating panels) opts in declaratively with
  * markStudioNodeCardInteractive — never by growing this selector with
  * one-off class names.
+ * @internal Tests assert against this value.
  */
 export const STUDIO_NODE_CARD_INTERACTIVE_ATTR = "data-studio-interactive";
 

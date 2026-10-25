@@ -1,10 +1,10 @@
 import { getSurfaceOwnerDocument, getSurfaceOwnerWindow } from "./SurfaceDomContext";
 
-export type SurfaceComboboxNavigation = "clamp" | "wrap";
-export type SurfaceComboboxActiveMode = "first" | "none" | "selected";
-export type SurfaceComboboxCommitEvent = "click" | "pointerdown";
-export type SurfaceComboboxFocusMode = "input" | "options";
-export type SurfaceComboboxOptionActivationEvent = "pointermove" | "mouseenter" | false;
+type SurfaceComboboxNavigation = "clamp" | "wrap";
+type SurfaceComboboxActiveMode = "first" | "none" | "selected";
+type SurfaceComboboxCommitEvent = "click" | "pointerdown";
+type SurfaceComboboxFocusMode = "input" | "options";
+type SurfaceComboboxOptionActivationEvent = "pointermove" | "mouseenter" | false;
 
 export interface SurfaceComboboxCollectionUpdate {
   preserveActive?: boolean;
@@ -18,7 +18,7 @@ export interface SurfaceComboboxStateOptions {
   retainListboxRole?: boolean;
 }
 
-export interface SurfaceComboboxRenderContext<T> {
+interface SurfaceComboboxRenderContext<T> {
   item: T;
   index: number;
   query: string;
@@ -27,13 +27,13 @@ export interface SurfaceComboboxRenderContext<T> {
   ownerDocument: Document;
 }
 
-export interface SurfaceComboboxEmptyContext {
+interface SurfaceComboboxEmptyContext {
   query: string;
   listbox: HTMLElement;
   ownerDocument: Document;
 }
 
-export interface SurfaceComboboxCommitContext<T> {
+interface SurfaceComboboxCommitContext<T> {
   item: T;
   index: number;
   event: Event;

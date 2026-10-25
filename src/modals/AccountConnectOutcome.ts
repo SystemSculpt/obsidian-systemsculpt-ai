@@ -24,7 +24,7 @@ export const RETRYABLE_CONNECT_REASONS: ReadonlySet<ConnectErrorReason> = new Se
 export const LICENSE_CONFIRMING_COPY =
   "Your license is being confirmed. If AI features stay locked, open SystemSculpt settings and retry validation.";
 
-export const NO_PLAN_COPY =
+const NO_PLAN_COPY =
   "Your account has no active plan yet. Choose a plan to enable SystemSculpt AI features.";
 
 export function signedInLine(email: string | null): string {

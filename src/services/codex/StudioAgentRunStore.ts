@@ -22,12 +22,19 @@ export type AgentRunMessageView = DeepReadonly<AgentRunMessage>;
 export type AgentRunPage = { records: StudioAgentRun[]; before: string | null; olderRemaining: number };
 
 export const isActiveAgentRun = (status: AgentRunStatus): boolean => ['queued', 'running', 'waiting'].includes(status);
+/** @internal Unit-tested directly. */
 export const agentRunFolder = (projectPath: string): string => `${deriveStudioAssetsDir(projectPath)}/agent-runs`;
-/** Records read when a board opens; older pages load on request. */
+/**
+ * Records read when a board opens; older pages load on request.
+ * @internal Tests assert against this value.
+ */
 export const AGENT_RUN_PAGE_SIZE = 50;
-/** On-disk retention mirrors the in-memory cap, plus an age limit. Live runs are never removed. */
+/**
+ * On-disk retention mirrors the in-memory cap, plus an age limit. Live runs are never removed.
+ * @internal Tests assert against this value.
+ */
 export const AGENT_RUN_RETAINED_RECORDS = 1000;
-export const AGENT_RUN_RETAINED_DAYS = 90;
+const AGENT_RUN_RETAINED_DAYS = 90;
 /** Background retention yields to the host after this many records. */
 const RECORD_BATCH = 50;
 const INDEX_WRITE_DELAY_MS = 1000;

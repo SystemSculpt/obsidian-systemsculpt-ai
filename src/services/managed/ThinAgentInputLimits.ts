@@ -100,6 +100,7 @@ export function parseThinAgentInputLimits(value: unknown): ThinAgentInputLimits 
   return Object.freeze(parsed);
 }
 
+/** @internal Tests build wire-format limits with it. */
 export function thinAgentInputLimitsWireValue(
   limits: ThinAgentInputLimits,
 ): Readonly<Record<string, unknown>> {

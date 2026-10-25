@@ -117,6 +117,7 @@ export const LEGACY_CLIENT_MODEL_KEYS_REMOVED_IN_V4: readonly string[] = [
   "mcpServers",
 ] as const;
 
+/** @internal Tests assert against this value. */
 export const LEGACY_CHAT_KEYS_REMOVED_IN_V5: readonly string[] = [
   "systemPromptsDirectory",
   "lastUsedPromptPath",
@@ -125,6 +126,7 @@ export const LEGACY_CHAT_KEYS_REMOVED_IN_V5: readonly string[] = [
   "preserveReasoningVerbatim",
 ] as const;
 
+/** @internal Tests assert against this value. */
 export const LEGACY_DIRECTORY_KEYS_REMOVED_IN_V5: readonly string[] = [
   "webResearchDirectory",
   "verifiedDirectories",
@@ -154,6 +156,7 @@ export const LEGACY_FEATURE_KEYS_REMOVED_IN_V6: readonly string[] = [
   "youtubeCanvasToggles",
 ] as const;
 
+/** @internal Tests assert against this value. */
 export const LEGACY_SEMANTIC_INDEX_KEYS_REMOVED_IN_V7: readonly string[] = [
   "embeddingsAutoProcess",
 ] as const;
@@ -163,6 +166,7 @@ export const LEGACY_UPDATE_KEYS_REMOVED_IN_V8: readonly string[] = [
   "lastKnownVersion",
 ] as const;
 
+/** @internal Tests assert against this value. */
 export const LEGACY_AUDIO_KEYS_REMOVED_IN_V9: readonly string[] = [
   "postProcessingPromptType",
   "postProcessingPromptPresetId",
@@ -171,6 +175,7 @@ export const LEGACY_AUDIO_KEYS_REMOVED_IN_V9: readonly string[] = [
   "enableAutoAudioResampling",
 ] as const;
 
+/** @internal Tests assert against this value. */
 export const LEGACY_RECORDER_KEYS_REMOVED_IN_V10: readonly string[] = [
   "preferredMicrophoneId",
   "preferredMicrophoneIdsByHost",
@@ -181,12 +186,14 @@ export const LEGACY_RECORDER_KEYS_REMOVED_IN_V10: readonly string[] = [
  * no current settings surface populated them. Only the top-level data.json
  * keys are removed: language metadata inside managed-job records remains part
  * of the internal recovery/transport contract.
+ * @internal Tests assert against this value.
  */
 export const LEGACY_TRANSCRIPTION_LANGUAGE_KEYS_REMOVED_IN_V11: readonly string[] = [
   "language",
   "langs",
 ] as const;
 
+/** @internal Tests assert against this value. */
 export const LEGACY_WORKFLOW_AUTOMATION_KEYS_REMOVED_IN_V12: readonly string[] = [
   "automations",
   "templates",
@@ -194,18 +201,21 @@ export const LEGACY_WORKFLOW_AUTOMATION_KEYS_REMOVED_IN_V12: readonly string[] =
 ] as const;
 
 /** Write-only: nothing ever read it back, yet every indexing run saved settings to update it. */
-export const LEGACY_EMBEDDINGS_KEYS_REMOVED_IN_V14: readonly string[] = [
+const LEGACY_EMBEDDINGS_KEYS_REMOVED_IN_V14: readonly string[] = [
   "embeddingsRebuildPending",
 ] as const;
 
-/** State of the retired automatic welcome, release announcement, and post-update toast. */
+/**
+ * State of the retired automatic welcome, release announcement, and post-update toast.
+ * @internal Tests assert against this value.
+ */
 export const LEGACY_ANNOUNCEMENT_KEYS_REMOVED_IN_V16: readonly string[] = [
   "accountOnboardingShown",
   "lastAnnouncedPluginRelease",
   "lastLoadedPluginVersion",
 ] as const;
 
-export interface SettingsMigrationStep {
+interface SettingsMigrationStep {
   /** The schema version this step upgrades the settings TO (from `to - 1`). */
   readonly to: number;
   readonly describe: string;
@@ -404,6 +414,7 @@ function cloneDefault(value: unknown): unknown {
  * This closes the "update wiped my nested setting" class (#112, #100): when a
  * release adds a sub-key to a nested settings object, old data gains it instead
  * of having the whole object replaced by a shallow `{ ...DEFAULT, ...raw }`.
+ * @internal Unit-tested directly.
  */
 export function deepMergeDefaults(
   defaults: Record<string, unknown>,
@@ -470,6 +481,7 @@ export function migrateSettingsToCurrentSchema(
  * fully migrated while silently skipping the missing step. Guarded permanently
  * by SettingsMigrator.test.ts so a future schema bump that forgets a step fails
  * CI instead of shipping (#212).
+ * @internal Tests guard the migration chain with it (#212).
  */
 export function findMissingMigrationVersions(
   migrations: readonly SettingsMigrationStep[] = SETTINGS_MIGRATIONS,

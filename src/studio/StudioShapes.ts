@@ -40,13 +40,14 @@ export const STUDIO_SHAPE_DEFAULT_WIDTH = 180;
 export const STUDIO_SHAPE_DEFAULT_HEIGHT = 120;
 export const STUDIO_SHAPE_MIN_WIDTH = 48;
 export const STUDIO_SHAPE_MIN_HEIGHT = 48;
-export const STUDIO_SHAPE_MAX_WIDTH = 4000;
-export const STUDIO_SHAPE_MAX_HEIGHT = 4000;
+const STUDIO_SHAPE_MAX_WIDTH = 4000;
+const STUDIO_SHAPE_MAX_HEIGHT = 4000;
 
 export function createEmptyStudioDiagram(): StudioDiagram {
   return { shapes: [], arrows: [] };
 }
 
+/** @internal Unit-tested directly. */
 export function resolveStudioShapeKind(value: unknown): StudioShapeKind {
   const raw = String(value ?? "").trim();
   return STUDIO_SHAPE_KINDS.includes(raw as StudioShapeKind)

@@ -2,12 +2,14 @@ import type { ManagedAdmission } from "./ManagedAdmission";
 import type { ManagedAdmissionOutcome, ManagedLease, ManagedTransportResult } from "./ManagedTypes";
 import type { HostedTransportAdapter } from "./adapters/HostedTransportAdapter";
 
-export type ManagedTextGenerationPurpose = "transcript_postprocess" | "workflow_automation";
+type ManagedTextGenerationPurpose = "transcript_postprocess" | "workflow_automation";
+/** @internal Tests assert against this value. */
 export const MANAGED_TRANSCRIPT_POSTPROCESSING_CONTRACT_HEADER =
   "x-systemsculpt-transcript-postprocessing-contract" as const;
+/** @internal Tests assert against this value. */
 export const MANAGED_TRANSCRIPT_POSTPROCESSING_CONTRACT =
   "managed-transcript-postprocessing-v1" as const;
-export type ManagedTextGenerationMessage = Readonly<{
+type ManagedTextGenerationMessage = Readonly<{
   role: "system" | "user";
   content: string;
 }>;
@@ -32,7 +34,7 @@ export type ManagedTextGenerationResult = Readonly<{
   }>;
 }>;
 
-export type ManagedTextGenerationErrorCode =
+type ManagedTextGenerationErrorCode =
   | Exclude<ManagedAdmissionOutcome, "allowed">
   | "invalid_request"
   | "insufficient_credits"
@@ -47,7 +49,7 @@ export type ManagedTextGenerationErrorCode =
   | "invalid_response"
   | "local_aborted";
 
-export type ManagedTextGenerationErrorOptions = Readonly<{
+type ManagedTextGenerationErrorOptions = Readonly<{
   code: ManagedTextGenerationErrorCode;
   message: string;
   operationId: string;
@@ -59,6 +61,7 @@ export type ManagedTextGenerationErrorOptions = Readonly<{
   abort?: boolean;
 }>;
 
+/** @internal Tests match this error class. */
 export class ManagedTextGenerationError extends Error {
   public readonly code: ManagedTextGenerationErrorCode;
   public readonly operationId: string;

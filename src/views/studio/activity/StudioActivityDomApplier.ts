@@ -3,7 +3,7 @@ import { updateStudioActivityBadge } from "./StudioActivityBadge";
 import type { StudioActivitySnapshot } from "./StudioActivityProjector";
 
 /** Runtime CSS contract written here and read by views/studio/activity.css. */
-export const STUDIO_ACTIVITY_PROGRESS_PROPERTY = "--ss-activity-progress";
+const STUDIO_ACTIVITY_PROGRESS_PROPERTY = "--ss-activity-progress";
 
 export type StudioEdgeActivityUpdate = Readonly<{ phase: StudioEdgeActivityPhase; pulse: boolean }>;
 

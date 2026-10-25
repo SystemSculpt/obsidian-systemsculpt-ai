@@ -1,4 +1,4 @@
-export type SettingsIndexEntryKind = "setting" | "anchor";
+type SettingsIndexEntryKind = "setting" | "anchor";
 
 export interface SettingsIndexEntry {
   tabId: string;

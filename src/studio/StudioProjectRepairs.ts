@@ -6,6 +6,7 @@ import {
 } from "./StudioManagedOutputNodes";
 import type { StudioProjectV1 } from "./types";
 
+/** @internal Unit-tested directly. */
 export function normalizeLegacyMediaNodeTitles(project: StudioProjectV1): boolean {
   let changed = false;
   for (const node of project.graph.nodes) {

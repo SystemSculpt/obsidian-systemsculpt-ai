@@ -24,7 +24,7 @@ type DiagnosticsCleanupOperationResult<T> =
   | Readonly<{ kind: "success"; value: T }>
   | Readonly<{ kind: "failed" | "missing" | "stopped" | "timed_out" }>;
 
-export type DiagnosticsSessionMetadata = Readonly<{
+type DiagnosticsSessionMetadata = Readonly<{
   schemaVersion: 2;
   sessionId: string;
   startedAt: string;
@@ -36,7 +36,7 @@ export type DiagnosticsSessionMetadata = Readonly<{
   }>;
 }>;
 
-export interface DiagnosticsSessionStorage {
+interface DiagnosticsSessionStorage {
   initialize(): Promise<void>;
   getPath(type: "diagnostics"): string;
   writeFile(type: "diagnostics", fileName: string, data: string | object): Promise<unknown>;

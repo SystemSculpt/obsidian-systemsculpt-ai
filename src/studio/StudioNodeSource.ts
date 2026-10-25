@@ -9,7 +9,7 @@ export type StudioSourceLanguage = 'javascript' | 'json' | 'yaml' | 'markdown';
 export type StudioNodeSource = { language: StudioSourceLanguage; text: string; externalData: boolean };
 export const STUDIO_NODE_SOURCE_MAX_BYTES = 1024 * 1024;
 const internal = (key: string) => key.startsWith('__studio_');
-export function studioNodeSourceConfig(node: StudioNodeInstance): Record<string, StudioJsonValue> {
+function studioNodeSourceConfig(node: StudioNodeInstance): Record<string, StudioJsonValue> {
   const managed = node.kind === 'studio.collection' && readCollectionField(node.config.value, 'source.schema') === 'studio.source.v1';
   return Object.fromEntries(Object.entries(node.config).filter(([key]) => !internal(key) && !(managed && key === 'value')));
 }

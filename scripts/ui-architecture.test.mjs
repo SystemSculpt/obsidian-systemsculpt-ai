@@ -452,7 +452,7 @@ test("Janitor owns one typed confirmation-list implementation", () => {
     janitor,
     /class (?:ConfirmationModal|EmptyContentConfirmationModal)|calculateSize/,
   );
-  assert.match(confirmation, /export interface ConfirmationListGroup/);
+  assert.match(confirmation, /interface ConfirmationListGroup \{/);
   assert.match(confirmation, /private resolver: \(\(confirmed: boolean\) => void\) \| null/);
   assert.equal(
     [...confirmation.matchAll(/private resolver:/g)].length,
