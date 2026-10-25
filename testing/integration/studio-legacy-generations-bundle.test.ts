@@ -73,7 +73,7 @@ async function until<T>(read: () => T | null | undefined | false, label: string)
 }
 
 describe("built bundle legacy Studio history check", () => {
-  const idleWindow = window as Window & { requestIdleCallback?: (callback: () => void) => number };
+  const idleWindow: Omit<Window, "requestIdleCallback"> & { requestIdleCallback?: (callback: () => void) => number } = window;
 
   beforeAll(() => {
     if (!existsSync(BUNDLE_PATH)) throw new Error("Built bundle not found; run `npm run build` first.");
