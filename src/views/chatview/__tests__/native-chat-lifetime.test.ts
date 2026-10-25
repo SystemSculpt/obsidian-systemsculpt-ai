@@ -339,11 +339,15 @@ it.each([false, true])('preserves a background rename or restores it on failure 
   await h.started.promise;
   const chatId = h.view.chatId, chatPath = h.view.transcript.chatPath(chatId);
   await h.view.startNewChat(false);
-  if (failRename) jest.spyOn(h.storage, 'renameChat').mockRejectedValueOnce(new Error('Write failed'));
+  if (failRename) {
+    jest.spyOn(h.storage, 'renameChat').mockRejectedValueOnce(new Error('Write failed'));
+    jest.spyOn(console, 'log').mockImplementation(() => {});
+  }
   await h.view.renameSavedChat({ chatId, chatPath, title: 'Original task' }, 'Renamed task');
   h.finish.resolve({ text: 'Background answer' });
   await run;
   expect((await h.storage.loadChat(chatId))?.title).toBe(failRename ? 'Original task' : 'Renamed task');
+  if (failRename) expect(console.log).toHaveBeenCalledWith("Notice: This chat couldn't be renamed.");
   await nativeChatSessions(h.plugin).dispose();
 });
 
