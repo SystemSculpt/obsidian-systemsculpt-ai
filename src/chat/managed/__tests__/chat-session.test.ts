@@ -85,6 +85,16 @@ function reloadSavedMessage(message: ChatMessage): ChatMessage {
   return parsed.messages[0]!;
 }
 
+function toolCallPart(
+  message: ChatMessage | undefined,
+  callId: string,
+): ToolCall | undefined {
+  for (const part of message?.messageParts ?? []) {
+    if (part.type === "tool_call" && part.data.id === callId) return part.data;
+  }
+  return undefined;
+}
+
 function projectReloadedTool(tool: ToolCall): AgentToolPart {
   const prototype = AgentConversationRenderer.prototype as unknown as {
     historicalToolPart(input: ToolCall): AgentToolPart;
@@ -542,7 +552,7 @@ function createHarness(input: Readonly<{
   const persistAssistant = jest.fn(
     input.persistAssistant ?? (async () => undefined),
   );
-  const reconcileHistory = jest.fn(async () => undefined);
+  const reconcileHistory = jest.fn<Promise<void>, [readonly ChatMessage[]]>(async () => undefined);
   const reportError = jest.fn();
   const onLifecycle = jest.fn();
   const onTransportSegmentSummary = jest.fn(
@@ -4616,11 +4626,9 @@ describe("AgentChatSession", () => {
           state: outcome.expectedToolState,
           result: outcome.expectedResult,
         });
-        expect(persisted?.messageParts?.find((part) =>
-          part.type === "tool_call" && part.data.id === callId)?.data.result)
+        expect(toolCallPart(persisted, callId)?.result)
           .toEqual(outcome.expectedResult);
-        expect(reconciledAssistant?.messageParts?.find((part) =>
-          part.type === "tool_call" && part.data.id === callId)?.data.result)
+        expect(toolCallPart(reconciledAssistant, callId)?.result)
           .toEqual(outcome.expectedResult);
         expect(JSON.stringify({ persisted, reconciledAssistant }))
           .not.toContain(privateFailure);
@@ -5123,7 +5131,7 @@ describe("AgentChatSession", () => {
       });
       const server = await harness.open();
       const turnId = "user_recovery_scheduling";
-      const user = wireUser(turnId, "Keep my response alive");
+      const user = userMessage(turnId, "Keep my response alive");
       const run = harness.agent.start({
         conversationId: CONVERSATION_ID, turnId, message: user,
       });
@@ -6398,7 +6406,7 @@ describe("AgentChatSession", () => {
   });
 
   it("replays an acknowledged tool result after clean EOF without authoritative projection", async () => {
-    const resynchronizationDelayMs = jest.fn(() => 10);
+    const resynchronizationDelayMs = jest.fn((_attempt: number) => 10);
     const harness = trackedHarness({ resynchronizationDelayMs });
     const server = await harness.open();
     const turnId = "user_tool_result_ack_clean_eof_pending";
@@ -6460,7 +6468,7 @@ describe("AgentChatSession", () => {
   });
 
   it("replays an acknowledged output error after clean EOF without authoritative projection", async () => {
-    const resynchronizationDelayMs = jest.fn(() => 10);
+    const resynchronizationDelayMs = jest.fn((_attempt: number) => 10);
     const harness = trackedHarness({
       resynchronizationDelayMs,
       executeLocalTool: async () => {
@@ -6553,7 +6561,7 @@ describe("AgentChatSession", () => {
       shouldReplay: false,
     },
   ] as const)("$scenario", async ({ localOutcome, authority, shouldReplay }) => {
-    const resynchronizationDelayMs = jest.fn(() => 10);
+    const resynchronizationDelayMs = jest.fn((_attempt: number) => 10);
     const harness = trackedHarness({
       resynchronizationDelayMs,
       ...(localOutcome === "output-error"
@@ -6674,7 +6682,7 @@ describe("AgentChatSession", () => {
   });
 
   it("reconnects and replays an unacknowledged tool result after clean EOF", async () => {
-    const resynchronizationDelayMs = jest.fn(() => 10);
+    const resynchronizationDelayMs = jest.fn((_attempt: number) => 10);
     const harness = trackedHarness({ resynchronizationDelayMs });
     const server = await harness.open();
     const turnId = "user_tool_result_clean_eof_without_ack";
@@ -6768,7 +6776,7 @@ describe("AgentChatSession", () => {
   });
 
   it("reconnects and replays an unacknowledged denial after clean EOF", async () => {
-    const resynchronizationDelayMs = jest.fn(() => 10);
+    const resynchronizationDelayMs = jest.fn((_attempt: number) => 10);
     const harness = trackedHarness({ resynchronizationDelayMs });
     const server = await harness.open();
     const turnId = "user_denial_clean_eof_without_ack";
