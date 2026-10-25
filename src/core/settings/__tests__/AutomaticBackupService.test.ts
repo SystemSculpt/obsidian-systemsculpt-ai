@@ -282,14 +282,15 @@ describe("AutomaticBackupService", () => {
       );
     });
 
-    it("saves to vault storage when available", async () => {
+    it("writes each backup once, to settings-backups only", async () => {
+      jest.setSystemTime(new Date("2025-01-15T12:00:00Z"));
+
       await service.createAutomaticBackup();
 
-      expect(mockPlugin.storage.writeFile).toHaveBeenCalledWith(
-        "settings",
-        expect.stringContaining("backups/"),
-        expect.any(Object)
-      );
+      expect(mockPlugin.app.vault.adapter.write.mock.calls.map(([path]: [string]) => path)).toEqual([
+        ".systemsculpt/settings-backups/settings-backup-2025-01-15.json",
+      ]);
+      expect(mockPlugin.storage.writeFile).not.toHaveBeenCalled();
     });
 
     it("updates lastAutomaticBackup timestamp", async () => {
@@ -322,9 +323,6 @@ describe("AutomaticBackupService", () => {
       mockPlugin.app.vault.adapter.write.mockRejectedValue(
         new Error("Write failed")
       );
-      mockPlugin.storage.writeFile.mockRejectedValue(
-        new Error("Storage write failed")
-      );
 
       const result = await service.createAutomaticBackup();
 
@@ -335,9 +333,6 @@ describe("AutomaticBackupService", () => {
       mockPlugin.app.vault.adapter.write.mockRejectedValue(
         new Error("Write failed")
       );
-      mockPlugin.storage.writeFile.mockRejectedValue(
-        new Error("Storage write failed")
-      );
 
       await service.createAutomaticBackup();
 
@@ -347,24 +342,15 @@ describe("AutomaticBackupService", () => {
       );
     });
 
-    it("succeeds if only vault adapter works", async () => {
-      mockPlugin.storage.writeFile.mockRejectedValue(
-        new Error("Storage write failed")
-      );
-
-      const result = await service.createAutomaticBackup();
-
-      expect(result).toBe(true);
-    });
-
-    it("succeeds if only vault storage works", async () => {
+    it("does not fall back to the hidden folder when the backup cannot be written", async () => {
       mockPlugin.app.vault.adapter.write.mockRejectedValue(
         new Error("Adapter write failed")
       );
 
       const result = await service.createAutomaticBackup();
 
-      expect(result).toBe(true);
+      expect(result).toBe(false);
+      expect(mockPlugin.storage.writeFile).not.toHaveBeenCalled();
     });
 
     it("handles missing storage gracefully", async () => {
@@ -375,10 +361,8 @@ describe("AutomaticBackupService", () => {
       expect(result).toBe(true);
     });
 
-    it.each(["absent", "failed result"])("does not report a saved backup when primary write fails and storage is %s", async (state) => {
+    it("does not report a saved backup when the write fails", async () => {
       mockPlugin.app.vault.adapter.write.mockRejectedValue(new Error("disk full"));
-      if (state === "absent") mockPlugin.storage = null;
-      else mockPlugin.storage.writeFile.mockResolvedValue({ success: false, error: "disk full" });
 
       expect(await service.createAutomaticBackup()).toBe(false);
       expect(mockPlugin._updateSettings).not.toHaveBeenCalled();
@@ -487,7 +471,7 @@ describe("AutomaticBackupService", () => {
       await expect(service.createAutomaticBackup()).resolves.toBe(true);
     });
 
-    it("cleans up from vault storage", async () => {
+    it("still prunes old copies an older version wrote to the hidden folder", async () => {
       const oldBackup = "settings-backup-2024-01-01.json";
       mockPlugin.storage.listFiles.mockResolvedValue([oldBackup]);
 
@@ -499,7 +483,7 @@ describe("AutomaticBackupService", () => {
       );
     });
 
-    it("deletes old backups from vault storage", async () => {
+    it("deletes old hidden copies past retention", async () => {
       const oldBackup = "settings-backup-2024-01-01.json";
       mockPlugin.storage.listFiles.mockResolvedValue([oldBackup]);
 

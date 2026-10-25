@@ -90,8 +90,7 @@ export class AutomaticBackupService {
             const dateStr = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
             const fileName = `settings-backup-${dateStr}.json`;
             
-            // Create backup in multiple locations for redundancy
-            await this.saveBackupToMultipleLocations(fileName, backupData);
+            await this.saveBackup(fileName, backupData);
             
             // Update the last backup timestamp
             await this.plugin.getSettingsManager().updateSettings({
@@ -109,33 +108,19 @@ export class AutomaticBackupService {
     }
 
     /**
-     * Save backup to multiple locations for redundancy
+     * Save the backup to .systemsculpt/settings-backups, the folder the
+     * backup settings open and restore from
      */
-    private async saveBackupToMultipleLocations(fileName: string, backupData: object): Promise<void> {
-        let saved = false;
+    private async saveBackup(fileName: string, backupData: object): Promise<void> {
+        const backupDir = ".systemsculpt/settings-backups";
         try {
-            const backupDir = ".systemsculpt/settings-backups";
-            try {
-                await this.plugin.app.vault.createFolder(backupDir);
-            } catch {
-                // The write below determines whether this location is usable.
-            }
-            await this.plugin.app.vault.adapter.write(
-                `${backupDir}/${fileName}`, JSON.stringify(backupData, null, 2),
-            );
-            saved = true;
+            await this.plugin.app.vault.createFolder(backupDir);
         } catch {
-            // Still attempt the second independent backup location.
+            // The write below determines whether the folder is usable.
         }
-        if (this.plugin.storage) {
-            try {
-                const result = await this.plugin.storage.writeFile('settings', `backups/${fileName}`, backupData);
-                saved = result.success || saved;
-            } catch {
-                // A successful first copy remains a valid backup.
-            }
-        }
-        if (!saved) throw new Error("Failed to save backup to any location.");
+        await this.plugin.app.vault.adapter.write(
+            `${backupDir}/${fileName}`, JSON.stringify(backupData, null, 2),
+        );
     }
 
     /**
@@ -150,7 +135,7 @@ export class AutomaticBackupService {
             // Clean up from vault root directory
             await this.cleanupVaultRootBackups(cutoffTime);
 
-            // Clean up from vault storage
+            // Prune the copies older versions also wrote to the hidden folder
             await this.cleanupVaultStorageBackups(cutoffTime);
 
         } catch {
@@ -201,7 +186,9 @@ export class AutomaticBackupService {
     }
 
     /**
-     * Clean up old backups from vault storage
+     * Clean up old copies in the hidden .systemsculpt/settings/backups folder.
+     * Nothing writes there any more; settings load still restores from these
+     * copies, and they age out under the same retention.
      */
     private async cleanupVaultStorageBackups(cutoffTime: number): Promise<void> {
         try {
