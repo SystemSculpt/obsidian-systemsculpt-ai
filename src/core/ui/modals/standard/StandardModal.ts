@@ -144,30 +144,6 @@ export class StandardModal extends Modal {
   }
 
   /**
-   * Add an element to the header section
-   * @param el Element to add
-   */
-  addToHeader(el: HTMLElement) {
-    this.headerEl.appendChild(el);
-  }
-
-  /**
-   * Add an element to the content section
-   * @param el Element to add
-   */
-  addToContent(el: HTMLElement) {
-    this.contentEl.appendChild(el);
-  }
-
-  /**
-   * Add an element to the footer section
-   * @param el Element to add
-   */
-  addToFooter(el: HTMLElement) {
-    this.footerEl.appendChild(el);
-  }
-
-  /**
    * Add a title to the header
    * @param title Title text
    * @param description Optional description text

@@ -523,7 +523,9 @@ describe("EmbeddingsManager local empty-note lifecycle", () => {
       },
     });
 
-    await expect(state.manager.retryFailedFiles()).resolves.toMatchObject({
+    // The Similar notes view's Start processing path: clear failures, then run.
+    await state.manager.resumeProcessing("prepare");
+    await expect(state.manager.processVault()).resolves.toMatchObject({
       status: "complete",
       processed: 1,
     });
