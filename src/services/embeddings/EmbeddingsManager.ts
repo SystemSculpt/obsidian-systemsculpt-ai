@@ -177,6 +177,8 @@ export class EmbeddingsManager {
   private readonly processingMutex = new Mutex();
   private readonly failedFiles = new Map<string, FailedEmbeddingFile>();
   private readonly queryCache = new Map<string, { vector: Float32Array; namespace: string; expiresAt: number }>();
+  /** Managed query requests still running, by query text. */
+  private readonly pendingQueries = new Map<string, Promise<Float32Array | null>>();
   /** Recent Similar Notes answers, least recently used first. */
   private readonly similarCache = new Map<string, SearchResult[]>();
   private readonly lifecycle = new SemanticIndexLifecycle();
@@ -445,39 +447,10 @@ export class EmbeddingsManager {
     const prepared = String(query || "").trim();
     if (!prepared || signal?.aborted) return [];
 
-    let namespace = this.getSearchNamespace();
-    let cacheKey = `${namespace ?? "unnegotiated"}:${this.hashQuery(prepared)}`;
-    const cached = this.queryCache.get(cacheKey);
-    let queryVector: Float32Array;
-    if (
-      cached
-      && namespace
-      && cached.namespace === namespace
-      && cached.expiresAt > Date.now()
-      && this.cachedQueryCompatibleWithNamespace(cached.vector, namespace)
-    ) {
-      queryVector = cached.vector;
-    } else {
-      if (cached) this.queryCache.delete(cacheKey);
-      const indexedQuery = await this.gateway.query(prepared, signal);
-      if (signal?.aborted) return [];
-      queryVector = indexedQuery.vector;
-      // With no launch-time metadata request for an unchanged vault, managed
-      // use discovers generation changes. Keep serving a compatible committed
-      // index while the new generation is prepared; never mix vector spaces.
-      if (this.plugin.settings.embeddingsEnabled && indexedQuery.generation.indexNamespace !== namespace) {
-        this.gateway.activeGeneration = indexedQuery.generation;
-        this.requestAutomaticProcessing();
-      }
-      // A newly-written namespace is not searchable until the full eligible
-      // corpus has committed. An older schema remains queryable only when it
-      // shares the exact generation id and vector dimensions.
-      if (!namespace || !this.queryCompatibleWithNamespace(indexedQuery.generation, namespace)) return [];
-      cacheKey = `${namespace}:${this.hashQuery(prepared)}`;
-      this.rememberQuery(cacheKey, queryVector, namespace);
-      this.refreshLifecycle({ generation: this.currentGenerationSnapshot() });
-    }
-
+    const queryVector = this.cachedQueryVector(prepared)
+      ?? await this.untilAborted(this.requestQueryVector(prepared), signal);
+    if (!queryVector || signal?.aborted) return [];
+    const namespace = this.getSearchNamespace();
     if (!namespace || parseNamespaceDimension(namespace) !== queryVector.length) return [];
     const [rawResults] = await this.searchIndexedNamespace(
       namespace,
@@ -487,6 +460,70 @@ export class EmbeddingsManager {
     );
     if (signal?.aborted) return [];
     return this.applyLexicalSignals(prepared, this.mergeChunkResults([rawResults ?? []], limit));
+  }
+
+  private cachedQueryVector(prepared: string): Float32Array | null {
+    const namespace = this.getSearchNamespace();
+    if (!namespace) return null;
+    const cacheKey = `${namespace}:${this.hashQuery(prepared)}`;
+    const cached = this.queryCache.get(cacheKey);
+    if (!cached) return null;
+    if (
+      cached.namespace === namespace
+      && cached.expiresAt > Date.now()
+      && this.cachedQueryCompatibleWithNamespace(cached.vector, namespace)
+    ) {
+      return cached.vector;
+    }
+    this.queryCache.delete(cacheKey);
+    return null;
+  }
+
+  /**
+   * One managed request per query text, shared by every search waiting for
+   * it. A cancelled search only stops waiting: the transport cannot stop the
+   * request, so it finishes and its vector is kept for the next search. The
+   * server refuses an identical query while the first is still running, which
+   * a pause, a typed space and another pause would otherwise send.
+   */
+  private requestQueryVector(prepared: string): Promise<Float32Array | null> {
+    const pending = this.pendingQueries.get(prepared);
+    if (pending) return pending;
+    const request = this.gateway.query(prepared).then((indexedQuery) => {
+      // With no launch-time metadata request for an unchanged vault, managed
+      // use discovers generation changes. Keep serving a compatible committed
+      // index while the new generation is prepared; never mix vector spaces.
+      const namespace = this.getSearchNamespace();
+      if (this.plugin.settings.embeddingsEnabled && indexedQuery.generation.indexNamespace !== namespace) {
+        this.gateway.activeGeneration = indexedQuery.generation;
+        this.requestAutomaticProcessing();
+      }
+      // A newly-written namespace is not searchable until the full eligible
+      // corpus has committed. An older schema remains queryable only when it
+      // shares the exact generation id and vector dimensions.
+      if (!namespace || !this.queryCompatibleWithNamespace(indexedQuery.generation, namespace)) return null;
+      this.rememberQuery(`${namespace}:${this.hashQuery(prepared)}`, indexedQuery.vector, namespace);
+      this.refreshLifecycle({ generation: this.currentGenerationSnapshot() });
+      return indexedQuery.vector;
+    }).finally(() => {
+      this.pendingQueries.delete(prepared);
+    });
+    this.pendingQueries.set(prepared, request);
+    // Every search waiting for it may have been cancelled by the time it fails.
+    request.catch(() => undefined);
+    return request;
+  }
+
+  /** Resolves null as soon as `signal` aborts, leaving `work` to finish on its own. */
+  private untilAborted<T>(work: Promise<T>, signal?: AbortSignal): Promise<T | null> {
+    if (!signal) return work;
+    if (signal.aborted) return Promise.resolve(null);
+    let onAbort = (): void => undefined;
+    const aborted = new Promise<null>((resolve) => {
+      onAbort = () => resolve(null);
+      signal.addEventListener("abort", onAbort, { once: true });
+    });
+    return Promise.race([work, aborted]).finally(() => signal.removeEventListener("abort", onAbort));
   }
 
   async findSimilar(filePath: string, limit = 15, signal?: AbortSignal): Promise<SearchResult[]> {
