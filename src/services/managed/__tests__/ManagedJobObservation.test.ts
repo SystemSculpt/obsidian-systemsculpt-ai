@@ -240,6 +240,25 @@ describe("ManagedJobObservation", () => {
  * abandoned recordings that had already finished uploading.
  */
 describe("dispatchManagedJob", () => {
+  it("cancels the real backoff timer without replaying or leaving a timer behind", async () => {
+    jest.useFakeTimers();
+    try {
+      const controller = new AbortController();
+      const send = jest.fn().mockRejectedValue(Object.assign(new Error("Try later"), { status: 503, retryAfterMs: 5_000 }));
+      const running = dispatchManagedJob({ send, signal: controller.signal });
+      const stopped = expect(running).rejects.toMatchObject({ name: "AbortError" });
+      await jest.advanceTimersByTimeAsync(4_999);
+      expect(send).toHaveBeenCalledTimes(1);
+      controller.abort();
+      await stopped;
+      await jest.advanceTimersByTimeAsync(60_000);
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(jest.getTimerCount()).toBe(0);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it("replays an idempotent dispatch until the transient fault clears", async () => {
     const waits: number[] = [];
     let attempts = 0;

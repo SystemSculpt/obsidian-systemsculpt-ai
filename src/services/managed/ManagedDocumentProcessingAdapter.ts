@@ -11,6 +11,7 @@ import type {
   ManagedRecoveryPhase,
 } from "./ManagedTypes";
 import {
+  dispatchManagedJob,
   isRetryableManagedJobObservationError,
   observeManagedJob,
   waitForManagedJob,
@@ -408,7 +409,11 @@ export class ManagedDocumentProcessingAdapter {
           throwIfAborted(signal);
         }
         // Replay the recorded request with the original supported create key.
-        const created = await this.dependencies.jobs.create(createRequest, operationId, signal);
+        const created = await dispatchManagedJob({
+          send: () => this.dependencies.jobs.create(createRequest, operationId, signal),
+          signal,
+          wait: this.wait,
+        });
         throwIfAborted(signal);
         const documentId = readDocumentId(created);
         const upload = readUpload(created);
@@ -446,7 +451,11 @@ export class ManagedDocumentProcessingAdapter {
           throwIfAborted(signal);
         }
         // A fresh signed URL targets the same document/part with the same bytes.
-        const part = await this.dependencies.jobs.uploadPart(documentId, partNumber, bytes, signal);
+        const part = await dispatchManagedJob({
+          send: () => this.dependencies.jobs.uploadPart(documentId, partNumber, bytes, signal),
+          signal,
+          wait: this.wait,
+        });
         throwIfAborted(signal);
         record = await this.dependencies.recovery.acknowledgePart(CAPABILITY, operationId, record.revision, part);
         throwIfAborted(signal);
@@ -461,10 +470,15 @@ export class ManagedDocumentProcessingAdapter {
     }
     const documentId = record.jobId;
     if (record.phase === "complete_dispatching") {
-      if (!record.completedParts?.length) {
+      const completedParts = record.completedParts;
+      if (!completedParts?.length) {
         throw new Error("Managed document upload completion cannot resume without acknowledged parts.");
       }
-      await this.dependencies.jobs.complete(documentId, record.completedParts, operationId, signal);
+      await dispatchManagedJob({
+        send: () => this.dependencies.jobs.complete(documentId, completedParts, operationId, signal),
+        signal,
+        wait: this.wait,
+      });
       throwIfAborted(signal);
       record = await this.dependencies.recovery.acknowledgeComplete(CAPABILITY, operationId, record.revision);
       throwIfAborted(signal);
@@ -475,7 +489,11 @@ export class ManagedDocumentProcessingAdapter {
       throwIfAborted(signal);
     }
     if (record.phase === "start_dispatching") {
-      await this.dependencies.jobs.start(documentId, operationId, signal);
+      await dispatchManagedJob({
+        send: () => this.dependencies.jobs.start(documentId, operationId, signal),
+        signal,
+        wait: this.wait,
+      });
       throwIfAborted(signal);
       record = await this.dependencies.recovery.acknowledgeStarted(CAPABILITY, operationId, record.revision);
       throwIfAborted(signal);
