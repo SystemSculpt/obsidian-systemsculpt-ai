@@ -118,7 +118,7 @@ describe("EmbeddingsStorage.storeVectors", () => {
     const getAllKeys: any = {};
     const store = {
       delete: jest.fn(),
-      put: jest.fn(),
+      put: jest.fn((_vector: EmbeddingVector) => undefined),
       index: jest.fn(() => ({ getAllKeys: jest.fn(() => getAllKeys) })),
     };
     const transaction: any = { objectStore: jest.fn(() => store) };

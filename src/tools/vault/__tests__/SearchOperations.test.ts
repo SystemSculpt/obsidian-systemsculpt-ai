@@ -51,6 +51,23 @@ jest.mock("../../../utils/tokenCounting", () => ({
   countTextTokens: jest.fn((text: string) => Math.ceil(text.length / 4)),
 }));
 
+// Search tools return untyped tool output; read it the way a tool caller does.
+function field(value: unknown, key: string): unknown {
+  if (typeof value !== "object" || value === null) {
+    throw new Error(`Expected an object with "${key}".`);
+  }
+  return Reflect.get(value, key);
+}
+
+function list(value: unknown): unknown[] {
+  if (!Array.isArray(value)) throw new Error("Expected an array.");
+  return value;
+}
+
+function resultPaths(value: unknown): unknown[] {
+  return list(field(value, "results")).map((entry) => field(entry, "path"));
+}
+
 describe("SearchOperations", () => {
   let app: App;
   let plugin: any;
@@ -170,7 +187,7 @@ describe("SearchOperations", () => {
 
       expect(app.vault.getFiles).toHaveBeenCalled();
       expect(result).toBeDefined();
-      expect(result.results).toBeDefined();
+      expect(field(result, "results")).toBeDefined();
     });
 
     it("searches folders recursively", async () => {
@@ -195,7 +212,7 @@ describe("SearchOperations", () => {
 
       const result = await hiddenSearch.findFiles({ patterns: ["Note"] });
 
-      expect(result.results.some((r: any) => r.path === hiddenPath)).toBe(true);
+      expect(resultPaths(result).some((path) => path === hiddenPath)).toBe(true);
     });
 
     it("excludes chat history files", async () => {
@@ -212,10 +229,11 @@ describe("SearchOperations", () => {
     it("adds metadata to results", async () => {
       const result = await searchOps.findFiles({ patterns: ["test"] });
 
-      expect(result.results).toBeDefined();
-      if (result.results.length > 0) {
-        expect(result.results[0]).toHaveProperty("path");
-        expect(result.results[0]).toHaveProperty("score");
+      expect(field(result, "results")).toBeDefined();
+      const results = list(field(result, "results"));
+      if (results.length > 0) {
+        expect(results[0]).toHaveProperty("path");
+        expect(results[0]).toHaveProperty("score");
       }
     });
 
@@ -234,8 +252,8 @@ describe("SearchOperations", () => {
 
       const result = await searchOps.findFiles({ patterns: ["file"] });
 
-      expect(result.results).toHaveLength(FILESYSTEM_LIMITS.MAX_SEARCH_RESULTS * 3);
-      expect(result.totalFound).toBe(100);
+      expect(field(result, "results")).toHaveLength(FILESYSTEM_LIMITS.MAX_SEARCH_RESULTS * 3);
+      expect(field(result, "totalFound")).toBe(100);
     });
 
     it("honors a smaller positive maxResults request", async () => {
@@ -243,8 +261,8 @@ describe("SearchOperations", () => {
 
       const result = await searchOps.findFiles({ patterns: ["file"], maxResults: 1 });
 
-      expect(result.results).toHaveLength(1);
-      expect(result.totalFound).toBe(100);
+      expect(field(result, "results")).toHaveLength(1);
+      expect(field(result, "totalFound")).toBe(100);
     });
 
     it("clamps maxResults to the existing global result ceiling", async () => {
@@ -252,7 +270,7 @@ describe("SearchOperations", () => {
 
       const result = await searchOps.findFiles({ patterns: ["file"], maxResults: Number.MAX_SAFE_INTEGER });
 
-      expect(result.results).toHaveLength(FILESYSTEM_LIMITS.MAX_SEARCH_RESULTS * 3);
+      expect(field(result, "results")).toHaveLength(FILESYSTEM_LIMITS.MAX_SEARCH_RESULTS * 3);
     });
 
     it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
@@ -267,9 +285,9 @@ describe("SearchOperations", () => {
       const restrictedSearch = new SearchOperations(app, ["notes"], plugin);
       const result = await restrictedSearch.findFiles({ patterns: ["md"] });
 
-      const paths = result.results.map((r: any) => r.path);
+      const paths = resultPaths(result);
       expect(paths.length).toBeGreaterThan(0);
-      expect(paths.every((path: string) => path.startsWith("notes"))).toBe(true);
+      expect(paths.every((path) => typeof path === "string" && path.startsWith("notes"))).toBe(true);
     });
 
     it("includes .base files in name search results", async () => {
@@ -279,7 +297,7 @@ describe("SearchOperations", () => {
 
       const result = await searchOps.findFiles({ patterns: [".base"] });
 
-      expect(result.results.some((r: any) => r.path === "bases/Projects.base")).toBe(true);
+      expect(resultPaths(result).some((path) => path === "bases/Projects.base")).toBe(true);
     });
   });
 
@@ -334,11 +352,11 @@ describe("SearchOperations", () => {
         "Research/Nested/two.md",
         "Research/one.md",
       ]);
-      expect(result.results.map((entry: any) => entry.path).sort()).toEqual([
+      expect(resultPaths(result).sort()).toEqual([
         "Research/Nested/two.md",
         "Research/one.md",
       ]);
-      expect(result.scope).toEqual({ paths: ["Research"] });
+      expect(field(result, "scope")).toEqual({ paths: ["Research"] });
     });
 
     it("supports exact-file and multiple normalized search scopes", async () => {
@@ -373,7 +391,7 @@ describe("SearchOperations", () => {
         "Projects/architecture.md",
         "Research/Nested/two.md",
       ]);
-      expect(result.scope).toEqual({
+      expect(field(result, "scope")).toEqual({
         paths: ["Projects/architecture.md", "Research/Nested"],
       });
     });
@@ -388,8 +406,8 @@ describe("SearchOperations", () => {
       });
 
       expect(app.vault.cachedRead).not.toHaveBeenCalled();
-      expect(result.scope).toEqual({ paths: ["projects"] });
-      expect(result.metaInfo).toEqual(expect.arrayContaining([
+      expect(field(result, "scope")).toEqual({ paths: ["projects"] });
+      expect(field(result, "metaInfo")).toEqual(expect.arrayContaining([
         expect.objectContaining({ file: "_no_matches" }),
       ]));
     });
@@ -430,7 +448,7 @@ describe("SearchOperations", () => {
       const result = await searchOps.grepVault({ patterns: ["needle"] });
 
       expect(app.vault.cachedRead).toHaveBeenCalledTimes(3);
-      expect(result.scope).toBeUndefined();
+      expect(field(result, "scope")).toBeUndefined();
     });
 
     it("searches hidden adapter file contents when allowed", async () => {
@@ -459,8 +477,8 @@ describe("SearchOperations", () => {
 
       const result = await searchOps.grepVault({ patterns: ["xyz123"] });
 
-      expect(result.metaInfo).toBeDefined();
-      const noMatchesInfo = result.metaInfo.find((m: any) => m.file === "_no_matches");
+      expect(field(result, "metaInfo")).toBeDefined();
+      const noMatchesInfo = list(field(result, "metaInfo")).find((m) => field(m, "file") === "_no_matches");
       expect(noMatchesInfo).toEqual(expect.objectContaining({
         notice: expect.stringContaining('No matches found for: "xyz123". Try different words'),
       }));
@@ -570,7 +588,7 @@ Body content here`;
 
       const result = await searchOps.grepVault({ patterns: ["test"] });
 
-      expect(result.results.length).toBeLessThanOrEqual(FILESYSTEM_LIMITS.MAX_SEARCH_RESULTS);
+      expect(list(field(result, "results")).length).toBeLessThanOrEqual(FILESYSTEM_LIMITS.MAX_SEARCH_RESULTS);
     });
 
     it("handles empty files", async () => {
@@ -643,8 +661,8 @@ Body content here`;
       } as any);
 
       expect(result).toBeDefined();
-      expect(result.page).toBeDefined();
-      expect(result.page.tokensBudget).toBe(1024);
+      expect(field(result, "page")).toBeDefined();
+      expect(field(field(result, "page"), "tokensBudget")).toBe(1024);
     });
 
     it("enforces minimum pageTokens of 512", async () => {
@@ -655,7 +673,7 @@ Body content here`;
         pageTokens: 100,
       } as any);
 
-      expect(result.page.tokensBudget).toBe(512);
+      expect(field(field(result, "page"), "tokensBudget")).toBe(512);
     });
 
     it("enforces maximum pageTokens of 4096", async () => {
@@ -666,7 +684,7 @@ Body content here`;
         pageTokens: 10000,
       } as any);
 
-      expect(result.page.tokensBudget).toBe(4096);
+      expect(field(field(result, "page"), "tokensBudget")).toBe(4096);
     });
 
     it("handles cursor for pagination", async () => {
@@ -674,7 +692,7 @@ Body content here`;
 
       const result = await searchOps.grepVault({ patterns: ["test"] });
 
-      expect(result.page).toBeDefined();
+      expect(field(result, "page")).toBeDefined();
       // First page may have next_cursor if there are more results
     });
 
@@ -848,8 +866,8 @@ Body content here`;
         const result = await searchOps.grepVault({ patterns: ["launch"] });
 
         expect(readPaths()[0]).toBe(large.path);
-        expect(result.results.map((entry: any) => entry.path)).toContain(large.path);
-        expect(result.metaInfo).toEqual(expect.arrayContaining([
+        expect(resultPaths(result)).toContain(large.path);
+        expect(field(result, "metaInfo")).toEqual(expect.arrayContaining([
           expect.objectContaining({ file: "_summary" }),
         ]));
       });
@@ -862,7 +880,7 @@ Body content here`;
         const result = await searchOps.grepVault({ patterns: ["launch"] });
 
         expect(readPaths()[0]).toBe(titled.path);
-        expect(result.results.map((entry: any) => entry.path)).toContain(titled.path);
+        expect(resultPaths(result)).toContain(titled.path);
       });
 
       it("ranks a title hit, then a folder hit, then recency, then path", async () => {
@@ -894,8 +912,8 @@ Body content here`;
 
         const result = await searchOps.grepVault({ patterns: ["launch"] });
 
-        expect(result.results.map((entry: any) => entry.path)).toEqual(["Launch.md"]);
-        expect(result.snippets).toEqual(["Launch.md:1  【launch】 day"]);
+        expect(resultPaths(result)).toEqual(["Launch.md"]);
+        expect(field(result, "snippets")).toEqual(["Launch.md:1  【launch】 day"]);
       });
 
       it("compiles each pattern once, however many files and matches it scans", async () => {
@@ -909,7 +927,7 @@ Body content here`;
         const CountingRegExp = function (this: unknown, ...args: [string | RegExp, string?]) {
           constructed++;
           return new NativeRegExp(...args);
-        } as unknown as RegExpConstructor;
+        };
         CountingRegExp.prototype = NativeRegExp.prototype;
         (globalThis as any).RegExp = CountingRegExp;
         try {

@@ -118,7 +118,11 @@ describe("normalizeLocalToolOutcome", () => {
       data,
       error: { code: "TOOL_OPERATION_FAILED", message: "Nothing changed" },
     });
-    expect(result.error?.details.result).toBe(data);
+    const details = result.error?.details;
+    if (typeof details !== "object" || details === null || !("result" in details)) {
+      throw new Error("Expected failure details with the original result.");
+    }
+    expect(details.result).toBe(data);
   });
 
   it("promotes aggregate partial failures and retains their details", () => {

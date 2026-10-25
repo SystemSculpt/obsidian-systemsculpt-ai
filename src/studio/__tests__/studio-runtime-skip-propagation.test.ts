@@ -2,7 +2,7 @@ import { Platform } from "obsidian";
 import { StudioGraphCompiler } from "../StudioGraphCompiler";
 import { StudioNodeRegistry } from "../StudioNodeRegistry";
 import { StudioRuntime } from "../StudioRuntime";
-import type { StudioNodeDefinition, StudioProjectV1, StudioRunEvent } from "../types";
+import type { StudioJsonValue, StudioNodeDefinition, StudioNodeInputMap, StudioProjectV1, StudioRunEvent } from "../types";
 
 /**
  * seed -> gen -> clip, where `clip.frame` is a required port. Disabling `gen`
@@ -43,14 +43,14 @@ function harness(overrides: { disabledNodeId?: string } = {}) {
     kind: string,
     inputs: StudioNodeDefinition["inputPorts"],
     output: string,
-    produce: (inputs: Record<string, unknown>, config: Record<string, unknown>) => unknown,
+    produce: (inputs: StudioNodeInputMap, config: Record<string, StudioJsonValue>) => StudioJsonValue,
   ): StudioNodeDefinition => ({
     kind, version: "1.0.0", requiredHostCapabilities: [], capabilityClass: "local_cpu", cachePolicy: "never",
     inputPorts: inputs, outputPorts: [{ id: output, type: "any" }], configDefaults: {}, configSchema: { fields: [] },
     async execute(context) {
       executed.push(context.node.id);
       seenInputs.set(context.node.id, context.inputs as Record<string, unknown>);
-      return { outputs: { [output]: produce(context.inputs as Record<string, unknown>, context.node.config as Record<string, unknown>) } };
+      return { outputs: { [output]: produce(context.inputs, context.node.config) } };
     },
   });
   registry.register(define("test.seed", [], "text", (_inputs, config) => config.value));

@@ -1737,7 +1737,7 @@ describe("AgentConversationRenderer tail status", () => {
       ...initial[0]!,
       content: "Corrected final answer",
       messageParts: initial[0]!.messageParts!.map((part) =>
-        part.id === "answer-lazy-stale"
+        part.type === "content" && part.id === "answer-lazy-stale"
           ? { ...part, data: "Corrected final answer" }
           : { ...part }),
     }];
@@ -1987,7 +1987,7 @@ describe("AgentConversationRenderer tail status", () => {
       ...initial[0]!,
       content: "Corrected answer",
       messageParts: initial[0]!.messageParts!.map((part) =>
-        part.id === "answer-late-correction"
+        part.type === "content" && part.id === "answer-late-correction"
           ? { ...part, data: "Corrected answer" }
           : { ...part }),
     }]);
@@ -2026,7 +2026,7 @@ describe("AgentConversationRenderer tail status", () => {
       ...initial[0]!,
       content: "Second corrected answer",
       messageParts: initial[0]!.messageParts!.map((part) =>
-        part.id === "answer-late-correction"
+        part.type === "content" && part.id === "answer-late-correction"
           ? { ...part, data: "Second corrected answer" }
           : { ...part }),
     }]);
@@ -2047,7 +2047,7 @@ describe("AgentConversationRenderer tail status", () => {
       ...initial[0]!,
       content: "Third corrected answer",
       messageParts: initial[0]!.messageParts!.map((part) =>
-        part.id === "answer-late-correction"
+        part.type === "content" && part.id === "answer-late-correction"
           ? { ...part, data: "Third corrected answer" }
           : { ...part }),
     }]);
@@ -2071,7 +2071,7 @@ describe("AgentConversationRenderer tail status", () => {
       ...initial[0]!,
       content: "Activity corrected answer",
       messageParts: initial[0]!.messageParts!.map((part) => {
-        if (part.id === "reasoning-late-correction") {
+        if (part.type === "reasoning" && part.id === "reasoning-late-correction") {
           return { ...part, data: "Corrected reasoning detail" };
         }
         if (part.type === "tool_call" && part.data.id === "call-late-one") {
@@ -2086,7 +2086,7 @@ describe("AgentConversationRenderer tail status", () => {
             },
           };
         }
-        if (part.id === "answer-late-correction") {
+        if (part.type === "content" && part.id === "answer-late-correction") {
           return { ...part, data: "Activity corrected answer" };
         }
         return { ...part };
@@ -2113,7 +2113,7 @@ describe("AgentConversationRenderer tail status", () => {
       content: "Removed reasoning answer",
       messageParts: initial[0]!.messageParts!
         .filter((part) => part.id !== "reasoning-late-correction")
-        .map((part) => part.id === "answer-late-correction"
+        .map((part) => part.type === "content" && part.id === "answer-late-correction"
           ? { ...part, data: "Removed reasoning answer" }
           : { ...part }),
     }]);
@@ -2124,19 +2124,21 @@ describe("AgentConversationRenderer tail status", () => {
       ...initial[0]!,
       message_id: "assistant-cold-correction",
       content: "Cold initial",
-      messageParts: initial[0]!.messageParts!.map((part, index) => ({
+      messageParts: initial[0]!.messageParts!.map((part, index) => part.type === "tool_call" ? {
         ...part,
         id: `${part.id}-cold`,
         timestamp: index + 1,
-        ...(part.type === "tool_call" ? {
-          data: {
-            ...part.data,
-            id: `${part.data.id}-cold`,
-            messageId: "assistant-cold-correction",
-            request: { ...part.data.request, id: `${part.data.id}-cold` },
-          },
-        } : {}),
-      })),
+        data: {
+          ...part.data,
+          id: `${part.data.id}-cold`,
+          messageId: "assistant-cold-correction",
+          request: { ...part.data.request, id: `${part.data.id}-cold` },
+        },
+      } : {
+        ...part,
+        id: `${part.id}-cold`,
+        timestamp: index + 1,
+      }),
     }] satisfies ChatMessage[];
     await renderer.renderHistory(cold);
     const coldWorked = parent.querySelector<HTMLDetailsElement>(

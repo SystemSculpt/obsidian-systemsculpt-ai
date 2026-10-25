@@ -2,7 +2,7 @@ import { Platform } from "obsidian";
 import { StudioGraphCompiler } from "../StudioGraphCompiler";
 import { StudioNodeRegistry } from "../StudioNodeRegistry";
 import { StudioRuntime } from "../StudioRuntime";
-import type { StudioNodeDefinition, StudioNodeInputMap, StudioProjectV1 } from "../types";
+import type { StudioNodeDefinition, StudioNodeInputMap, StudioNodeInstance, StudioProjectV1 } from "../types";
 
 it("preserves array-valued producer outputs across fan-in, sibling consumers and persistence", async () => {
   (Platform as { isDesktopApp: boolean }).isDesktopApp = false;
@@ -22,7 +22,7 @@ it("preserves array-valued producer outputs across fan-in, sibling consumers and
     schema: "studio.project.v1", projectId: "inputs", name: "Inputs", createdAt: "2026-09-01", updatedAt: "2026-09-01",
     engine: { apiMode: "systemsculpt_only", minPluginVersion: "1.0.0" },
     graph: {
-      nodes: ["array", "scalar", "joined", "sibling"].map((id) => ({
+      nodes: ["array", "scalar", "joined", "sibling"].map((id): StudioNodeInstance => ({
         id, kind: definition.kind, version: definition.version, title: id, position: { x: 0, y: 0 },
         config: id === "array" ? { value: ["original"] } : id === "scalar" ? { value: "other" } : {},
       })),

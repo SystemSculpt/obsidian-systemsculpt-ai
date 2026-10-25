@@ -1,5 +1,5 @@
 import { StudioApiExecutionAdapter } from '../../../studio/StudioApiExecutionAdapter';
-import { runLocalCodex } from '../LocalCodexClient';
+import { runLocalCodex, type CodexRequest, type CodexResult } from '../LocalCodexClient';
 import { codexNode } from '../../../studio/nodes/codexNode';
 import { runLocalClaude } from '../../claude/LocalClaudeClient';
 jest.mock('../LocalCodexClient', () => ({ runLocalCodex: jest.fn() }));
@@ -16,7 +16,7 @@ it('routes selected Studio text generation to Codex with no managed request or m
   expect(runLocalCodex).toHaveBeenCalledWith(expect.objectContaining({ prompt: 'Be concise\n\nQuestion', workingDirectory: '/vault' }), expect.any(AbortSignal), expect.any(Object));
 });
 it('executes a Codex task card with its prompt, task input and connected context', async () => {
-  const codex = jest.fn(async () => ({ threadId: 'native', turnId: 'turn', text: 'done', status: 'completed' }));
+  const codex = jest.fn(async (_input: CodexRequest, _signal: AbortSignal, _log: (text: string) => void): Promise<CodexResult> => ({ threadId: 'native', turnId: 'turn', text: 'done', status: 'completed' }));
   const result = await codexNode.execute({ node: { config: { prompt: 'Investigate', workingDirectory: '/repo', input: { ticket: 'BLA-1' } } }, services: { codex }, inputs: { context: { observation: 'new' } }, signal: new AbortController().signal, log: jest.fn() } as never);
   expect(codex.mock.calls[0][0]).toMatchObject({ prompt: expect.stringContaining('BLA-1'), workingDirectory: '/repo' });
   expect(result.outputs.json).toMatchObject({ threadId: 'native' });

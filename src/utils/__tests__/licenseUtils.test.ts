@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { checkPremiumUserStatus, verifyPremiumAccess, PremiumUserStatus } from "../licenseUtils";
+import { checkPremiumUserStatus, verifyPremiumAccess } from "../licenseUtils";
 import { SystemSculptSettings } from "../../types";
 
 // Mock obsidian Notice

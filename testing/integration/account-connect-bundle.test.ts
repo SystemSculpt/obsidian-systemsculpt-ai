@@ -13,6 +13,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { App, requestUrl } from "obsidian";
 import type SystemSculptPlugin from "../../src/main";
+import { hostRequest } from "./host-request";
 import { captureStartupIdentity, expectProductionStartupIdentity } from "./startup-identity-assertions";
 
 const BUNDLE_PATH = path.resolve(__dirname, "..", "..", "main.js");
@@ -75,7 +76,7 @@ describe("account connection in the built bundle", () => {
       throw new Error("Unexpected fetch in account-connect integration test");
     });
     request.mockReset();
-    request.mockImplementation(async (input) => {
+    request.mockImplementation(hostRequest(async (input) => {
       const url = typeof input === "string" ? input : input.url;
       if (url === POLL_URL) return hostResponse(CONNECTED_ACCOUNT);
       if (url === "https://systemsculpt.com/api/plugin/releases/latest") {
@@ -89,7 +90,7 @@ describe("account connection in the built bundle", () => {
       }
       unexpectedRequests.push(url);
       throw new Error(`Unexpected host request: ${url}`);
-    });
+    }));
 
     const bundleModule = require(BUNDLE_PATH);
     const PluginClass = bundleModule?.default ?? bundleModule;

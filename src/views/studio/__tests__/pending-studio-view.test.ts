@@ -1,5 +1,5 @@
 /** @jest-environment jsdom */
-import { App, ItemView, WorkspaceLeaf } from "obsidian";
+import { App, ItemView, type View, WorkspaceLeaf } from "obsidian";
 import { SYSTEMSCULPT_STUDIO_VIEW_TYPE } from "../../../core/plugin/viewTypes";
 import { PendingStudioView, type StudioViewCreator } from "../PendingStudioView";
 
@@ -10,23 +10,25 @@ class FakeStudioView extends ItemView {
   readonly states: unknown[] = [];
   readonly events: string[] = [];
   getViewType(): string { return SYSTEMSCULPT_STUDIO_VIEW_TYPE; }
+  getDisplayText(): string { return "Studio"; }
   async onOpen(): Promise<void> { this.events.push("open"); }
   async setState(state: unknown): Promise<void> { this.events.push("state"); this.states.push(state); }
 }
 
-type Leaf = WorkspaceLeaf & { view: ItemView | null; open: jest.Mock };
-
-/** Obsidian's leaf.open: close the shown view, then open the next one. */
-function createLeaf(): Leaf {
-  const leaf = new WorkspaceLeaf(new App()) as unknown as Leaf;
-  leaf.view = null;
-  leaf.open = jest.fn(async (view: ItemView) => {
-    const previous = leaf.view;
-    if (previous) await previous.onClose();
-    leaf.view = view;
-    await view.onOpen();
+/** Obsidian's leaf.open: close the shown view, then open the next one. The mock leaf starts with no view. */
+class FakeLeaf extends WorkspaceLeaf {
+  async open(view: View): Promise<View> {
+    const previous = this.view;
+    if (previous) await previous["onClose"]();
+    this.view = view;
+    await view["onOpen"]();
     return view;
-  });
+  }
+}
+
+function createLeaf(): FakeLeaf {
+  const leaf = new FakeLeaf(new App());
+  jest.spyOn(leaf, "open");
   return leaf;
 }
 

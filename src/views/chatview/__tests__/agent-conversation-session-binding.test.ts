@@ -42,7 +42,7 @@ describe("AgentConversationSessionBinding", () => {
     const presented: string[] = [];
     const binding = new AgentConversationSessionBinding(
       outgoing,
-      (_session, snapshot) => presented.push(snapshot.source),
+      (_session, snapshot: Snapshot) => presented.push(snapshot.source),
     );
 
     await binding.detach();
@@ -61,7 +61,7 @@ describe("AgentConversationSessionBinding", () => {
     const presented: Snapshot[] = [];
     const binding = new AgentConversationSessionBinding(
       outgoing,
-      (_session, snapshot) => presented.push(snapshot),
+      (_session, snapshot: Snapshot) => presented.push(snapshot),
     );
 
     outgoing.emit();
@@ -93,7 +93,7 @@ describe("AgentConversationSessionBinding", () => {
     const presented: string[] = [];
     const binding = new AgentConversationSessionBinding(
       first,
-      (_session, snapshot) => presented.push(snapshot.source),
+      (_session, snapshot: Snapshot) => presented.push(snapshot.source),
     );
 
     const switchToSecond = binding.replace(() => second);
@@ -174,7 +174,7 @@ describe("AgentConversationSessionBinding", () => {
     const presented: string[] = [];
     const binding = new AgentConversationSessionBinding(
       outgoing,
-      (_session, snapshot) => presented.push(snapshot.source),
+      (_session, snapshot: Snapshot) => presented.push(snapshot.source),
     );
 
     binding.unsubscribe();
@@ -194,7 +194,7 @@ describe("AgentConversationSessionBinding", () => {
     const presented: string[] = [];
     const binding = new AgentConversationSessionBinding(
       outgoing,
-      (_session, snapshot) => presented.push(snapshot.source),
+      (_session, snapshot: Snapshot) => presented.push(snapshot.source),
     );
 
     await expect(binding.replace(() => broken)).rejects.toThrow("subscribe failed");

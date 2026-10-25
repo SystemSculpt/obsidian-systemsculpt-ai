@@ -22,6 +22,7 @@ function createDefinition(
   return {
     kind: "studio.test",
     version: "1.0.0",
+    requiredHostCapabilities: [],
     capabilityClass: "local_cpu",
     inputPorts: [],
     outputPorts: [],

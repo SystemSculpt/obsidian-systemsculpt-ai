@@ -2,14 +2,8 @@
 
 import { AgentChatView } from "../AgentChatView";
 
-type LeafStateView = {
-  getState(): Record<string, unknown>;
-  updateViewState(): void;
-  setState(state: Record<string, unknown>): Promise<void>;
-};
-
 function view() {
-  const chat = Object.create(AgentChatView.prototype) as AgentChatView & LeafStateView;
+  const chat: AgentChatView = Object.create(AgentChatView.prototype);
   // As Obsidian does, applying a view state calls back into the view's setState.
   const setViewState = jest.fn(async (viewState: { state: Record<string, unknown> }) => { await chat.setState(viewState.state); });
   Object.assign(chat, {
@@ -33,13 +27,13 @@ describe("AgentChatView leaf state", () => {
     const { chat, setViewState } = view();
     expect(chat.getState()).not.toHaveProperty("version");
 
-    chat.updateViewState();
-    (chat as unknown as { chatVersion: number }).chatVersion = 4;
-    chat.updateViewState();
+    chat["updateViewState"]();
+    chat.chatVersion = 4;
+    chat["updateViewState"]();
     expect(setViewState).toHaveBeenCalledTimes(1);
 
-    (chat as unknown as { chatTitle: string }).chatTitle = "Renamed plan";
-    chat.updateViewState();
+    chat.chatTitle = "Renamed plan";
+    chat["updateViewState"]();
     expect(setViewState).toHaveBeenCalledTimes(2);
     expect(setViewState).toHaveBeenLastCalledWith(
       { type: expect.any(String), state: expect.objectContaining({ chatTitle: "Renamed plan" }) },
@@ -48,12 +42,12 @@ describe("AgentChatView leaf state", () => {
 
     // Obsidian echoing the pushed state back does not force another push.
     await setViewState.mock.results[1].value;
-    chat.updateViewState();
+    chat["updateViewState"]();
     expect(setViewState).toHaveBeenCalledTimes(2);
 
     // Obsidian restoring a different state makes the next push authoritative again.
     await chat.setState({ chatId: "chat-1" });
-    chat.updateViewState();
+    chat["updateViewState"]();
     expect(setViewState).toHaveBeenCalledTimes(3);
   });
 });

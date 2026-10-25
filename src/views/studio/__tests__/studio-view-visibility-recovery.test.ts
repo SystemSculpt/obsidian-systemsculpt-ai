@@ -155,7 +155,7 @@ describe("Studio visibility recovery", () => {
         expect(cleanups).toHaveLength(index + 1);
         expect(cleanups.filter(cleanup => cleanup.mock.calls.length === 0)).toHaveLength(1);
       }
-      f.session.mutate("node.remove", project => { project.graph.nodes = project.graph.nodes.filter(node => node.id !== "text"); });
+      f.session.mutate("graph.node.remove", project => { project.graph.nodes = project.graph.nodes.filter(node => node.id !== "text"); });
       jest.advanceTimersByTime(50); await flush();
       for (const cleanup of cleanups) expect(cleanup).toHaveBeenCalledTimes(1);
     } finally { await f.close(); }

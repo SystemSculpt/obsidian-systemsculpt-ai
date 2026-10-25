@@ -60,7 +60,7 @@ function setup(now?: () => number) {
   };
   const app = { vault, metadataCache: { getFileCache: () => null } } as unknown as App;
   const requests: PlatformRequestInput[] = [];
-  let override: ((request: PlatformRequestInput) => Response | Promise<Response> | undefined) | undefined;
+  let override: ((request: PlatformRequestInput) => Response | Promise<Response> | undefined | void) | undefined;
   const response = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
   const requestClient = { request: jest.fn(async (input: PlatformRequestInput) => {
     requests.push(input);

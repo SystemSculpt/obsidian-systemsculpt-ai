@@ -32,11 +32,11 @@ function userFileMessage(mediaType: string, url: string) {
 }
 
 describe("thin-agent protocol parsing", () => {
-  it.each([
+  it.each<[unknown, unknown]>([
     [null, { version: null, cursor: null, state: "unknown" }],
     [{ version: 2, cursor: 7, state: "future" }, { version: null, cursor: 7, state: "unknown" }],
     [{ version: 1, cursor: 3, state: "idle" }, { version: 1, cursor: 3, state: "idle" }],
-    ...["running", "waiting_for_client"].map(state => {
+    ...["running", "waiting_for_client"].map((state): [unknown, unknown] => {
       const run = { version: 1, cursor: 4, state, request_id: "request_1", run_id: `run_${"a".repeat(32)}`, root_message_id: "message_1" };
       return [run, run];
     }),

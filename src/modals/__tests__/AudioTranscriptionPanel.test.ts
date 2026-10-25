@@ -67,11 +67,11 @@ function createPanel(options: { openOnComplete?: boolean; targetEditor?: any; pl
     editor: typeof activeEditor;
     file: TFile | null;
   };
-  activeView.editor = activeEditor;
+  Object.assign(activeView, { editor: activeEditor });
   activeView.file = activeFile;
   const activeLeaf = { view: activeView };
   activeView.leaf = activeLeaf as any;
-  const leaf = { openFile: jest.fn(async () => undefined) };
+  const leaf = { openFile: jest.fn(async (): Promise<void> => undefined) };
   (app.workspace as any).activeLeaf = activeLeaf;
   (app.workspace.getActiveViewOfType as jest.Mock).mockReturnValue(activeView);
   (app.workspace as any).getLeaf = jest.fn(() => leaf);
@@ -366,7 +366,7 @@ describe("AudioTranscriptionPanel", () => {
   it("keeps an ambiguous dispatch discoverable after the panel was hidden, without retrying", async () => {
     const { running } = hideRunningPanel();
 
-    running.reject(new ManagedTranscriptionRetryError("ambiguous-op", "blocked", "dispatching", new Error("connection lost")));
+    running.reject(new ManagedTranscriptionRetryError("ambiguous-op", "blocked", "part_dispatching", new Error("connection lost")));
     await flushPromises();
 
     expect(mockStart).toHaveBeenCalledTimes(1);

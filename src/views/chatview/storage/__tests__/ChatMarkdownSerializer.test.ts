@@ -6,7 +6,7 @@ import {
   hasChatIdentityFrontmatter,
   hasChatIdentityMetadata,
 } from "../ChatFrontmatterIdentity";
-import { ChatMessage, MessagePart } from "../../../../types";
+import { ChatMessage, MessagePart, ToolCall } from "../../../../types";
 import { parseYaml } from "obsidian";
 
 // Mock obsidian's parseYaml
@@ -37,6 +37,11 @@ jest.mock("obsidian", () => ({
     return result;
   }),
 }));
+
+function required<T>(value: T | null | undefined): T {
+  if (value == null) throw new Error("expected a value");
+  return value;
+}
 
 describe("ChatMarkdownSerializer", () => {
   it.each(['auto', 'ask', 'full-access', 'future'])('parses persisted %s mode conservatively', mode => {
@@ -113,7 +118,13 @@ describe("ChatMarkdownSerializer", () => {
     });
 
     it("serializes message with tool_call part", () => {
-      const toolCallData = { id: "call-1", name: "search", arguments: { query: "test" } };
+      const toolCallData: ToolCall = {
+        id: "call-1",
+        messageId: "asst-1",
+        request: { id: "call-1", type: "function", function: { name: "search", arguments: '{"query":"test"}' } },
+        state: "completed",
+        timestamp: 1,
+      };
       const parts: MessagePart[] = [
         { id: "tc1", type: "tool_call", data: toolCallData, timestamp: 1 },
       ];
@@ -126,7 +137,7 @@ describe("ChatMarkdownSerializer", () => {
       expect(result).toContain("<!-- TOOL-CALLS");
       // Tool calls are stored as compact JSON on one line.
       expect(result).toContain(
-        '<!-- TOOL-CALLS\n[{"id":"call-1","name":"search","arguments":{"query":"test"}}]\n-->',
+        '<!-- TOOL-CALLS\n[{"id":"call-1","messageId":"asst-1","request":{"id":"call-1","type":"function","function":{"name":"search","arguments":"{\\"query\\":\\"test\\"}"}},"state":"completed","timestamp":1}]\n-->',
       );
       expect(result).toContain('has-tool-calls="true"');
       expect(ChatMarkdownSerializer.parseMarkdown(
@@ -1500,7 +1511,7 @@ Valid message
 
         const serialized = ChatMarkdownSerializer.serializeMessages(messages);
         const parsed = ChatMarkdownSerializer.parseMarkdown(`---\nid: generated-${iteration}\n---\n\n${serialized}`);
-        const [userStart, assistantStart] = serialized.match(/<!-- SYSTEMSCULPT-MESSAGE-START [^\n]*-->/g) ?? [];
+        const [userStart, assistantStart] = required(serialized.match(/<!-- SYSTEMSCULPT-MESSAGE-START [^\n]*-->/g));
 
         for (const start of [userStart, assistantStart]) {
           expect(start).not.toContain("payload-format=");
@@ -1875,7 +1886,13 @@ ${serialized}`;
     });
 
     it("preserves tool calls through serialize and parse", () => {
-      const toolCallData = { id: "call-1", name: "search", arguments: { query: "test" } };
+      const toolCallData: ToolCall = {
+        id: "call-1",
+        messageId: "asst-1",
+        request: { id: "call-1", type: "function", function: { name: "search", arguments: '{"query":"test"}' } },
+        state: "completed",
+        timestamp: 1,
+      };
       const parts: MessagePart[] = [
         { id: "tc1", type: "tool_call", data: toolCallData, timestamp: 1 },
       ];
@@ -1897,7 +1914,7 @@ ${serialized}`;
     });
 
     it("preserves web_search tool metadata for reload rendering", () => {
-      const webSearchToolCall = {
+      const webSearchToolCall: ToolCall = {
         id: "call-web-1",
         messageId: "asst-1",
         request: {

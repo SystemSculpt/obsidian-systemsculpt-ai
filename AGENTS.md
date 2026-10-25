@@ -180,8 +180,8 @@ npm run check:compat
   runs focused narrow-pane, touch, accessibility, and Studio capability tests
   before opening settings, Chat, Similar Notes, and Studio from that artifact
   with desktop adapters unavailable.
-- check:plugin adds TypeScript, mobile compatibility, sync, artifact, and
-  release guards.
+- check:plugin adds TypeScript for sources and tests (tsconfig.test.json),
+  mobile compatibility, sync, artifact, and release guards.
 - test:chatview:critical runs the persistence, managed-request projection,
   controller/runtime/transport, storage, and restored-history UI suites with
   strict console, randomized order, open-handle detection, seeded generative

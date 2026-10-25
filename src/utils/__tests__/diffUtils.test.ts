@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 import { generateDiff, parseUnifiedDiff, isFileOpen, getFileContent, DiffLine, DiffResult } from "../diffUtils";
-import { MarkdownView, TFile } from "obsidian";
+import { App, MarkdownView, TFile, WorkspaceLeaf } from "obsidian";
 
 function createMarkdownView(path: string, editor: { getValue: jest.Mock } | null = null): MarkdownView {
   const view = new MarkdownView();
@@ -11,6 +11,13 @@ function createMarkdownView(path: string, editor: { getValue: jest.Mock } | null
     editor,
   });
   return view;
+}
+
+/** A markdown leaf showing `view`; `null` leaves the mock leaf's view empty. */
+function createLeaf(app: App, view: MarkdownView | null): WorkspaceLeaf {
+  const leaf = new WorkspaceLeaf(app);
+  if (view) leaf.view = view;
+  return leaf;
 }
 
 describe("diffUtils", () => {
@@ -379,65 +386,46 @@ describe("diffUtils", () => {
 
   describe("isFileOpen", () => {
     it("returns false when no leaves match", () => {
-      const mockApp = {
-        workspace: {
-          getLeavesOfType: jest.fn().mockReturnValue([]),
-        },
-      };
+      const mockApp = new App();
+      jest.spyOn(mockApp.workspace, "getLeavesOfType").mockReturnValue([]);
 
       expect(isFileOpen(mockApp, "test.md")).toBe(false);
     });
 
     it("returns true when file is found in a leaf", () => {
-      const mockApp = {
-        workspace: {
-          getLeavesOfType: jest.fn().mockReturnValue([
-            {
-              view: createMarkdownView("test.md"),
-            },
-          ]),
-        },
-      };
+      const mockApp = new App();
+      jest.spyOn(mockApp.workspace, "getLeavesOfType").mockReturnValue([
+        createLeaf(mockApp, createMarkdownView("test.md")),
+      ]);
 
       expect(isFileOpen(mockApp, "test.md")).toBe(true);
     });
 
     it("returns false when path does not match", () => {
-      const mockApp = {
-        workspace: {
-          getLeavesOfType: jest.fn().mockReturnValue([
-            {
-              view: {
-                file: { path: "other.md" },
-              },
-            },
-          ]),
-        },
-      };
+      const mockApp = new App();
+      jest.spyOn(mockApp.workspace, "getLeavesOfType").mockReturnValue([
+        createLeaf(mockApp, createMarkdownView("other.md")),
+      ]);
 
       expect(isFileOpen(mockApp, "test.md")).toBe(false);
     });
 
     it("handles leaf with no view", () => {
-      const mockApp = {
-        workspace: {
-          getLeavesOfType: jest.fn().mockReturnValue([
-            { view: null },
-          ]),
-        },
-      };
+      const mockApp = new App();
+      jest.spyOn(mockApp.workspace, "getLeavesOfType").mockReturnValue([
+        createLeaf(mockApp, null),
+      ]);
 
       expect(isFileOpen(mockApp, "test.md")).toBe(false);
     });
 
     it("handles leaf with no file in view", () => {
-      const mockApp = {
-        workspace: {
-          getLeavesOfType: jest.fn().mockReturnValue([
-            { view: { file: null } },
-          ]),
-        },
-      };
+      const mockApp = new App();
+      const view = new MarkdownView();
+      view.file = null;
+      jest.spyOn(mockApp.workspace, "getLeavesOfType").mockReturnValue([
+        createLeaf(mockApp, view),
+      ]);
 
       expect(isFileOpen(mockApp, "test.md")).toBe(false);
     });
@@ -445,21 +433,12 @@ describe("diffUtils", () => {
 
   describe("getFileContent", () => {
     it("returns content from editor if file is open", async () => {
-      const mockApp = {
-        workspace: {
-          getLeavesOfType: jest.fn().mockReturnValue([
-            {
-              view: createMarkdownView("test.md", {
-                getValue: jest.fn().mockReturnValue("editor content"),
-              }),
-            },
-          ]),
-        },
-        vault: {
-          getAbstractFileByPath: jest.fn(),
-          read: jest.fn(),
-        },
-      };
+      const mockApp = new App();
+      jest.spyOn(mockApp.workspace, "getLeavesOfType").mockReturnValue([
+        createLeaf(mockApp, createMarkdownView("test.md", {
+          getValue: jest.fn().mockReturnValue("editor content"),
+        })),
+      ]);
 
       const content = await getFileContent(mockApp, "test.md");
       expect(content).toBe("editor content");
@@ -467,30 +446,19 @@ describe("diffUtils", () => {
 
     it("falls back to vault when file not in editor", async () => {
       const mockFile = new TFile({ path: "test.md" });
-      const mockApp = {
-        workspace: {
-          getLeavesOfType: jest.fn().mockReturnValue([]),
-        },
-        vault: {
-          getAbstractFileByPath: jest.fn().mockReturnValue(mockFile),
-          read: jest.fn().mockResolvedValue("vault content"),
-        },
-      };
+      const mockApp = new App();
+      jest.spyOn(mockApp.workspace, "getLeavesOfType").mockReturnValue([]);
+      jest.spyOn(mockApp.vault, "getAbstractFileByPath").mockReturnValue(mockFile);
+      jest.spyOn(mockApp.vault, "read").mockResolvedValue("vault content");
 
       const content = await getFileContent(mockApp, "test.md");
       expect(content).toBe("vault content");
     });
 
     it("returns empty string when file not found", async () => {
-      const mockApp = {
-        workspace: {
-          getLeavesOfType: jest.fn().mockReturnValue([]),
-        },
-        vault: {
-          getAbstractFileByPath: jest.fn().mockReturnValue(null),
-          read: jest.fn(),
-        },
-      };
+      const mockApp = new App();
+      jest.spyOn(mockApp.workspace, "getLeavesOfType").mockReturnValue([]);
+      jest.spyOn(mockApp.vault, "getAbstractFileByPath").mockReturnValue(null);
 
       const content = await getFileContent(mockApp, "test.md");
       expect(content).toBe("");
@@ -498,15 +466,10 @@ describe("diffUtils", () => {
 
     it("handles read error gracefully", async () => {
       const mockFile = new TFile({ path: "test.md" });
-      const mockApp = {
-        workspace: {
-          getLeavesOfType: jest.fn().mockReturnValue([]),
-        },
-        vault: {
-          getAbstractFileByPath: jest.fn().mockReturnValue(mockFile),
-          read: jest.fn().mockRejectedValue(new Error("Read error")),
-        },
-      };
+      const mockApp = new App();
+      jest.spyOn(mockApp.workspace, "getLeavesOfType").mockReturnValue([]);
+      jest.spyOn(mockApp.vault, "getAbstractFileByPath").mockReturnValue(mockFile);
+      jest.spyOn(mockApp.vault, "read").mockRejectedValue(new Error("Read error"));
 
       const content = await getFileContent(mockApp, "test.md");
       expect(content).toBe("");
@@ -514,19 +477,12 @@ describe("diffUtils", () => {
 
     it("handles open file without editor", async () => {
       const mockFile = new TFile({ path: "test.md" });
-      const mockApp = {
-        workspace: {
-          getLeavesOfType: jest.fn().mockReturnValue([
-            {
-              view: createMarkdownView("test.md"),
-            },
-          ]),
-        },
-        vault: {
-          getAbstractFileByPath: jest.fn().mockReturnValue(mockFile),
-          read: jest.fn().mockResolvedValue("vault content"),
-        },
-      };
+      const mockApp = new App();
+      jest.spyOn(mockApp.workspace, "getLeavesOfType").mockReturnValue([
+        createLeaf(mockApp, createMarkdownView("test.md")),
+      ]);
+      jest.spyOn(mockApp.vault, "getAbstractFileByPath").mockReturnValue(mockFile);
+      jest.spyOn(mockApp.vault, "read").mockResolvedValue("vault content");
 
       const content = await getFileContent(mockApp, "test.md");
       expect(content).toBe("vault content");

@@ -76,6 +76,8 @@ describe("minimal text output graph lifecycle", () => {
       nextNodeId: () => nodeIds.next().value!,
       nextEdgeId: () => "pasted-edge",
       nextGroupId: () => "unused-group",
+      nextShapeId: () => "unused-shape",
+      nextArrowId: () => "unused-arrow",
     });
 
     expect(pasted?.newEdges).toEqual([{

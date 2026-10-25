@@ -63,7 +63,7 @@ describe("Studio text settings with real settings persistence", () => {
     };
     const saveData = jest.fn(async (settings: Partial<SystemSculptSettings>) => persist(settings));
     let manager!: SettingsManager;
-    const plugin = {
+    const host = {
       app,
       storage: null,
       _internal_settings_systemsculpt_plugin: {} as SystemSculptSettings,
@@ -72,7 +72,8 @@ describe("Studio text settings with real settings persistence", () => {
       saveData,
       getLogger: () => ({ error: jest.fn(), warn: jest.fn() }),
       getSettingsManager: () => manager,
-    } as unknown as SystemSculptPlugin;
+    };
+    const plugin = host as unknown as SystemSculptPlugin;
     manager = new SettingsManager(plugin);
     await manager.loadSettings();
     saveData.mockClear();

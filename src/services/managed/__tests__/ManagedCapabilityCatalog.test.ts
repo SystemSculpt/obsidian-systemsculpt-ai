@@ -3,7 +3,7 @@ import fixture from "../../../../testing/fixtures/managed/managed-capabilities-v
 import { ManagedCapabilityCatalog } from "../ManagedCapabilityCatalog";
 import type { ManagedAdmissionContract, ManagedCapabilityCatalogContract } from "../ManagedTypes";
 
-const typedCatalog: ManagedCapabilityCatalogContract = fixture as ManagedCapabilityCatalogContract;
+const typedCatalog: ManagedCapabilityCatalogContract = ManagedCapabilityCatalog.parse(fixture);
 const typedAdmission: ManagedAdmissionContract = admissionFixture as ManagedAdmissionContract;
 
 describe("ManagedCapabilityCatalog", () => {
@@ -26,8 +26,10 @@ describe("ManagedCapabilityCatalog", () => {
       "chat_turn", "text_generation", "embeddings",
     ]);
     const chat = catalog.capabilities[0].request_contracts[0];
-    expect(chat.request?.body).toEqual(fixture.capabilities[0].request_contracts[0].request.body);
-    expect(chat.response?.definitions).toEqual(fixture.capabilities[0].request_contracts[0].response.definitions);
+    const fixtureChat = fixture.capabilities[0].request_contracts[0];
+    if (!fixtureChat.request || !("definitions" in fixtureChat.response)) throw new Error("Expected the fixture chat contract.");
+    expect(chat.request?.body).toEqual(fixtureChat.request.body);
+    expect(chat.response?.definitions).toEqual(fixtureChat.response.definitions);
     expect(catalog.capabilities[1].generation).toEqual({
       id: "semantic-v1",
       index_schema_version: 2,

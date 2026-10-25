@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { App, TFile, TFolder, Notice } from "obsidian";
+import { App, TFile, TFolder } from "obsidian";
 import { ManagementOperations } from "../ManagementOperations";
 import { normalizeLocalToolOutcome } from "../../../../services/SystemSculptService";
 import { safeOutboundVaultToolResult } from "../../../../chat/managed/WireConversation";

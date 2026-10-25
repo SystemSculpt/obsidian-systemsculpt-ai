@@ -18,7 +18,7 @@ const CLEANUP_TOTAL_TIMEOUT_MS = 2_000;
 
 function makeStorage(writeFile: jest.Mock = jest.fn(async () => ({ success: true, path: "saved" }))) {
   return {
-    initialize: jest.fn(async () => undefined),
+    initialize: jest.fn(async (): Promise<void> => undefined),
     getPath: jest.fn(() => DIAGNOSTICS_PATH),
     writeFile,
     appendToFile: jest.fn(async () => ({ success: true, path: "saved" })),

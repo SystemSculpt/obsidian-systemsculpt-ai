@@ -52,7 +52,7 @@ describe("StudioSandboxRunner", () => {
 
     child.stdout = stdout;
     child.stderr = stderr;
-    child.kill = jest.fn(() => true);
+    child.kill = jest.fn((_signal: string) => true);
     child.stdin = {
       end: jest.fn(() => {
         queueMicrotask(() => {

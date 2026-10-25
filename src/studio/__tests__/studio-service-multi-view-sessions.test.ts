@@ -184,7 +184,7 @@ describe("StudioService multi-view session ownership", () => {
     const projectPath = "Studio/P1.systemsculpt";
     let visibleProject = projectFixtureForPath(projectPath, "node_p1");
     let cachedProject: StudioProjectV1 | null = null;
-    jest.spyOn(service as any, "loadProjectForSession").mockImplementation(async (
+    service["loadProjectForSession"] = jest.fn(async (
       _path: string,
       options?: { forceReload?: boolean }
     ) => {
@@ -224,9 +224,9 @@ describe("StudioService multi-view session ownership", () => {
     });
     session.mutate("project.repair", project => {
       project.graph.nodes = [
-        { id: "saved", kind: "test.expensive", version: "1.0.0", position: { x: 0, y: 0 }, config: {} },
-        { id: "fresh", kind: "studio.json", version: "1.0.0", position: { x: 0, y: 0 }, config: { value: { fresh: true } } },
-        { id: "role", kind: "studio.codex", version: "1.0.0", position: { x: 0, y: 0 }, config: { prompt: "Review both sources", workingDirectory: "." } },
+        { id: "saved", kind: "test.expensive", version: "1.0.0", title: "Saved", position: { x: 0, y: 0 }, config: {} },
+        { id: "fresh", kind: "studio.json", version: "1.0.0", title: "Fresh", position: { x: 0, y: 0 }, config: { value: { fresh: true } } },
+        { id: "role", kind: "studio.codex", version: "1.0.0", title: "Role", position: { x: 0, y: 0 }, config: { prompt: "Review both sources", workingDirectory: "." } },
       ];
       project.graph.edges = ["saved", "fresh"].map(id => ({ id: `edge-${id}`, fromNodeId: id, fromPortId: "json", toNodeId: "role", toPortId: "context" }));
     });
@@ -234,9 +234,9 @@ describe("StudioService multi-view session ownership", () => {
       schema: "studio.node-cache.v1", projectId: session.getProject().projectId, updatedAt: "2026-09-17T00:00:00.000Z",
       entries: { saved: { nodeId: "saved", nodeKind: "test.expensive", nodeVersion: "1.0.0", inputFingerprint: "earlier", runId: "earlier", updatedAt: "2026-09-17T00:00:00.000Z", outputs: { json: [{ saved: true }] } } },
     };
-    jest.spyOn((service as any).projectStore, "readSupportFile").mockImplementation(async (_path: string, file: string) => file.endsWith("node-results.json") ? new TextEncoder().encode(JSON.stringify(cache)) : null);
+    jest.spyOn(service["projectStore"], "readSupportFile").mockImplementation(async (_path: string, file: string) => file.endsWith("node-results.json") ? new TextEncoder().encode(JSON.stringify(cache)) : null);
     jest.spyOn((service as any).projectStore, "loadPolicy").mockResolvedValue({ schema: "studio.policy.v1", version: 1, grants: [] });
-    const publish = jest.spyOn((service as any).projectStore, "publishRun").mockResolvedValue(undefined);
+    const publish = jest.spyOn(service["projectStore"], "publishRun").mockResolvedValue(undefined);
     jest.spyOn((service as any).apiAdapter, "beginLocalCommit").mockResolvedValue(undefined);
     jest.spyOn((service as any).apiAdapter, "completeLocalCommit").mockResolvedValue(undefined);
     let prompt = "";

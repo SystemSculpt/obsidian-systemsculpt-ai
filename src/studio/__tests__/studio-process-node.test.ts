@@ -26,10 +26,10 @@ function harness(config: Record<string, StudioJsonValue> = {}) {
     node: { id: "process", kind: "studio.process", version: "1.0.0", title: "Process", position: { x: 0, y: 0 }, config: { ...processNode.configDefaults, executable: "/bin/helper", workingDirectory: "/vault", ...config } },
     inputs: {}, signal: controller.signal, log: jest.fn(), reportProgress: jest.fn(),
     services: {
-      api: { generateText: jest.fn(), generateImage: jest.fn(), transcribeAudio: jest.fn(), beginLocalCommit: jest.fn(), completeLocalCommit: jest.fn() },
+      api: { generateText: jest.fn(), generateVideo: jest.fn(), transcribeAudio: jest.fn(), beginLocalCommit: jest.fn(), completeLocalCommit: jest.fn() },
       storeAsset: jest.fn(async (bytes, mimeType) => ({ path: "assets/staged", hash: "hash", sizeBytes: bytes.byteLength, mimeType })),
       readAsset: jest.fn(), resolveAbsolutePath: (path) => path.startsWith("/") ? path : `/vault/${path}`,
-      readVaultText: jest.fn(), statVaultFileSize: jest.fn(), readVaultBinary: jest.fn(), statLocalFileSize: jest.fn(),
+      readVaultText: jest.fn(), statVaultFileSize: jest.fn(), openVaultFileSource: jest.fn(), readVaultBinary: jest.fn(), statLocalFileSize: jest.fn(), openLocalFileSource: jest.fn(),
       readLocalFileBinary: jest.fn(async (path, limit) => { const bytes = files.get(path)!; if (!bytes) throw new Error("Missing file"); if (limit && bytes.byteLength > limit) throw new Error("File exceeds limit"); return bytes; }),
       writeTempFile: jest.fn(async (bytes, options) => { const path = `/tmp/studio/${options?.prefix}-${files.size}.json`; files.set(path, bytes); return path; }),
       deleteLocalFile: jest.fn(), runCli: execute, assertFilesystemPath: jest.fn(),
@@ -45,19 +45,19 @@ function output(h: ReturnType<typeof harness>, request: StudioCliExecutionReques
 
 describe("typed process nodes", () => {
   it("compiles a saved v2 process project and preserves its typed edges on save", () => {
-    const project = parseStudioProject(projectText, { projectPath, registry });
+    const project = parseStudioProject(projectText, { projectPath });
     const compiled = new StudioGraphCompiler().compile(project, registry);
     expect(compiled.executionOrder).toEqual(["capture", "render", "publish"]);
     expect(compiled.nodesById.get("capture")!.definition.outputPorts).toContainEqual(expect.objectContaining({ id: "snapshot", type: "json", required: true }));
     expect(compiled.nodesById.get("publish")!.definition.inputPorts.map((port) => port.id)).toEqual(["report", "expected_sha"]);
-    const restored = parseStudioProject(serializeStudioProject(project), { projectPath, registry });
+    const restored = parseStudioProject(serializeStudioProject(project), { projectPath });
     expect(new StudioGraphCompiler().compile(restored, registry).executionOrder).toEqual(compiled.executionOrder);
     expect(restored.graph.edges).toEqual(project.graph.edges);
     expect(processNode.cachePolicy).toBe("never");
   });
 
   it("executes capture → render → publish with actual v1 manifests, typed connections, and no managed API", async () => {
-    const compiled = new StudioGraphCompiler().compile(parseStudioProject(projectText, { projectPath, registry }), registry);
+    const compiled = new StudioGraphCompiler().compile(parseStudioProject(projectText, { projectPath }), registry);
     const h = harness();
     const observed: string[] = [];
     h.execute.mockImplementation(async (request) => {
@@ -100,7 +100,7 @@ describe("typed process nodes", () => {
     expect(request.args![3]).toBe(`prefix=${request.env!.STUDIO_INPUTS}`);
   });
 
-  it.each([
+  it.each<Record<string, StudioJsonValue>>([
     { outputs: [{ id: "stdout", type: "text" }] },
     { inputs: [{ id: "x", type: "json" }, { id: "x", type: "text" }] },
     { outputs: [{ id: "x", type: "unknown" }] },

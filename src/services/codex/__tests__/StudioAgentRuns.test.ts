@@ -26,9 +26,9 @@ beforeEach(() => {
   jest.useFakeTimers(); sessions = []; turn.mockReset();
   turn.mockImplementation((request, signal, cb) => new Promise((resolve, reject) => {
     const threadId = request.threadId || `thread-${sessions.length}`;
-    const session = { cb, threadId, send: jest.fn(async () => {}), resolve: () => resolve({ threadId, text: 'Done', status: 'completed' }) };
+    const session = { cb, threadId, send: jest.fn(async () => {}), resolve: () => resolve({ threadId, turnId: `turn-${sessions.length}`, text: 'Done', status: 'completed' }) };
     sessions.push(session);
-    void cb.thread(threadId).then(() => cb.ready?.({ turnId: `turn-${sessions.length}`, send: session.send }));
+    void Promise.resolve(cb.thread(threadId)).then(() => cb.ready?.({ turnId: `turn-${sessions.length}`, send: session.send }));
     signal?.addEventListener('abort', () => reject(new Error('Canceled')), { once: true });
   }));
 });
@@ -163,7 +163,7 @@ it('projects commands and public plans but excludes reasoning internals', () => 
 function workflowFixture(files = new Map<string, string>()) {
   const adapter = { exists: async (path: string) => files.has(path) || !path.endsWith('.json'), mkdir: jest.fn(), write: async (path: string, content: string) => { files.set(path, content); }, read: async (path: string) => files.get(path), stat: async (path: string) => ({ size: files.get(path)?.length || 0 }), list: async (folder: string) => ({ files: [...files.keys()].filter(path => path.startsWith(folder + '/')) }) };
   const plugin = { app: { vault: { adapter } }, getLogger: () => ({ error: jest.fn() }) } as any;
-  const runs = new StudioAgentRuns(plugin, {
+  const runs: StudioAgentRuns = new StudioAgentRuns(plugin, {
     templates: async () => [{ id: 'worker', title: 'Worker' }],
     workflowSpecification: async (_path, center, objective) => ({ ...spec('project', center), request: { prompt: objective, workingDirectory: '/tmp' } }),
     startPeer: (_path, nodeId, objective, parentRunId, assignmentId) => runs.start({ ...spec('project', nodeId), parentRunId, assignmentId, request: { prompt: objective, workingDirectory: '/tmp' } }),
@@ -198,7 +198,7 @@ it('deduplicates concurrent and replayed assignment dispatches and preserves sto
   expect(sessions).toHaveLength(2); expect(reloaded.runs.get(root.id)?.workflow?.status).toBe('stopped'); await reloaded.runs.dispose();
 });
 it('recovers the same workflow and child thread after reload without a duplicate child', async () => {
-  const { runs, files } = workflowFixture(); const root = await runs.startWorkflow('project.systemsculpt', 'center', 'Inspect fixture'); await tick();
+  const { runs, files } = workflowFixture(); await runs.startWorkflow('project.systemsculpt', 'center', 'Inspect fixture'); await tick();
   await call(0, 'studio_workflow_plan', { boundaries: 'Read only', steps });
   const args = { nodeId: 'worker', objective: 'Read fixture', assignmentId: 'inspect' };
   const original = await call(0, 'studio_start_run', args); await tick();

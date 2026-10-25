@@ -53,7 +53,7 @@ const createRequest = {
   contentLengthBytes: 6,
 } as const;
 
-function managedHarness(wait = async (_milliseconds: number, _signal: AbortSignal) => undefined) {
+function managedHarness(wait: (milliseconds: number, signal: AbortSignal) => Promise<void> = async () => undefined) {
   const events: string[] = [];
   const storage = new MemoryRecoveryAdapter();
   const recovery = new ManagedJobRecoveryStore(storage, () => "2026-07-12T12:00:00.000Z");
@@ -95,7 +95,7 @@ describe("managed document processing adapter contract", () => {
     it.each([503, 429])("replays a %s with unchanged identity and bytes after Retry-After", async (status) => {
       jest.useFakeTimers();
       const h = managedHarness(waitForManagedJob);
-      const send = h.jobs[step];
+      const send = jest.spyOn(h.jobs, step);
       const original = send.getMockImplementation()!;
       send.mockImplementationOnce(async (...args) => {
         await original(...args);
@@ -619,7 +619,7 @@ describe("managed document processing adapter contract", () => {
     app.vault.readBinary = jest.fn(async () => { throw new Error("Whole-file document reads are forbidden."); });
     jest.mocked(createVaultFileSource).mockImplementation(() => documentContent());
     const plugin = { settings: { extractionsDirectory: "Extractions" }, createDirectory: jest.fn() } as any;
-    const file = new TFile({ path: "documents/report.pdf", name: "report.pdf", basename: "report", extension: "pdf", stat: { size: 6 } });
+    const file = new TFile({ path: "documents/report.pdf", name: "report.pdf", extension: "pdf", stat: { size: 6 } });
     const requestClient = new PlatformRequestClient();
     const request = jest.spyOn(requestClient, "request");
     const documents = new ManagedJobClient(new HostedTransportAdapter({
@@ -678,7 +678,7 @@ describe("managed document processing adapter contract", () => {
     app.vault.adapter.read = jest.fn(async (path: string) => notes.get(path)!);
     app.vault.create = jest.fn(async (path: string, text: string) => { notes.set(path, text); return new TFile({ path }); });
     const plugin = { settings: { extractionsDirectory: "Extractions" }, createDirectory: jest.fn() } as any;
-    const file = new TFile({ path: "documents/report.pdf", name: "report.pdf", basename: "report", extension: "pdf", stat: { size: 6 } });
+    const file = new TFile({ path: "documents/report.pdf", name: "report.pdf", extension: "pdf", stat: { size: 6 } });
     const events: string[] = [];
     let staged: Array<{ kind: "markdown" | "image"; bytes: ArrayBuffer }> = [];
     // The context tool pins through the plugin's one service.

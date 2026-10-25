@@ -88,7 +88,7 @@ describe("ManagedAdmission", () => {
       .mockReturnValueOnce(new Promise((resolve) => { resolveFirst = resolve; }))
       .mockReturnValueOnce(new Promise((resolve) => { resolveSecond = resolve; }));
     const stale = structuredClone(catalog);
-    stale.capabilities[0].availability = "unavailable";
+    stale.capabilities[0] = { ...stale.capabilities[0], availability: "unavailable" };
     const admission = create();
     const pending = admission.acquireLease({ alias: "systemsculpt/chat", requestContract: "chat_turn" });
     licenseKey.mockReturnValue("mutated-during-fetch");
