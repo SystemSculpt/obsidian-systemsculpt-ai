@@ -37,6 +37,7 @@ const STATE_SAVE_DELAY_MS = 400, STREAM_SAVE_DELAY_MS = 5000;
  * An active run this machine isn't executing is shown as stale once its saved
  * record has gone this long without a change. Presentation only: runs this
  * machine executes have no time limit.
+ * @internal Tests assert against this value.
  */
 export const STALE_AGENT_RUN_MS = 10 * 60_000;
 const tools: CodexJson[] = [
