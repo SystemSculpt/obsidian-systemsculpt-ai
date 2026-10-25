@@ -127,6 +127,12 @@ references; concurrent deletion removes references added by another writer.
 Every publication validates the project before atomically replacing its single
 visible file. Invalid documents remain untouched until corrected.
 
+Typing and drags save once they pause for 1.5 s; other edits save within 40 ms.
+Leaving a Studio field, its window or its tab, closing the view, quitting and
+unloading the plugin save at once. On desktop, a save whose file still has the
+modification time and size of this device's last write publishes without
+reading it again; any other writer changes them, so its file is read and merged.
+
 Assets and run files arrive independently of the canvas. A canvas save never
 requires the support tree to match an older snapshot and never prunes files
 created by another writer. Cache and run indexes combine independent results.

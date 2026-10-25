@@ -19,6 +19,12 @@ export type PlatformRequestInput = {
   signal?: AbortSignal;
   cache?: RequestCache;
   licenseKey?: string;
+  /**
+   * Resends the request through requestUrl when direct fetch fails before any
+   * response, where the server may already have received it. Defaults to true,
+   * except for streaming requests, which carry state-changing commands such as
+   * a chat turn and are never sent twice unless the caller opts in.
+   */
   allowTransportFallback?: boolean;
   transport?: PlatformTransport;
   bodyEncoding?: "json" | "raw";
@@ -284,7 +290,8 @@ export class PlatformRequestClient {
           throw error;
         }
         // A body that failed after the server answered is never replayed.
-        if (responded || directLoopbackFetch || input.allowTransportFallback === false) throw error;
+        const fallback = input.allowTransportFallback ?? input.stream !== true;
+        if (responded || directLoopbackFetch || !fallback) throw error;
       }
     }
     if (directLoopbackFetch) {
@@ -321,11 +328,13 @@ export class PlatformRequestClient {
     });
 
     const status = result.status || 500;
-    const responseBody = input.responseEncoding === "arrayBuffer"
-      ? result.arrayBuffer
-      : typeof result.text === "string"
-        ? result.text
-        : JSON.stringify(result.json || {});
+    const responseBody = NULL_BODY_STATUSES.has(status)
+      ? null
+      : input.responseEncoding === "arrayBuffer"
+        ? result.arrayBuffer
+        : typeof result.text === "string"
+          ? result.text
+          : JSON.stringify(result.json || {});
     if (
       input.maxResponseBytes !== undefined
       && input.responseEncoding === "arrayBuffer"

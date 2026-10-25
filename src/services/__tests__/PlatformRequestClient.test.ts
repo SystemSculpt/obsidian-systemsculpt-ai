@@ -337,6 +337,32 @@ describe("PlatformRequestClient", () => {
     expect(requestUrl).not.toHaveBeenCalled();
   });
 
+  it("replays a failed streaming POST through requestUrl only when the caller allows it", async () => {
+    const client = new PlatformRequestClient();
+    const failure = new TypeError("CORS response unavailable");
+    global.fetch = jest.fn().mockRejectedValue(failure) as any;
+    (requestUrl as jest.Mock).mockResolvedValue({
+      status: 200,
+      text: "data: [DONE]\n\n",
+      json: null,
+      headers: {},
+    });
+    const turn = {
+      url: "https://systemsculpt.com/api/plugin/agent/turn",
+      method: "POST",
+      body: { private: true },
+      stream: true,
+    };
+
+    await expect(client.request(turn)).rejects.toBe(failure);
+    expect(requestUrl).not.toHaveBeenCalled();
+
+    await expect(client.request({ ...turn, allowTransportFallback: true }))
+      .resolves.toMatchObject({ status: 200 });
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(requestUrl).toHaveBeenCalledTimes(1);
+  });
+
   it("lets the host derive a validated Content-Length for raw requestUrl uploads", async () => {
     const client = new PlatformRequestClient();
     const fetchMock = jest.fn();
@@ -445,6 +471,32 @@ describe("PlatformRequestClient", () => {
     expect(response.headers.get("x-request-id")).toBe("output-1");
     expect(response.headers.get("x-systemsculpt-contract")).toBe("managed-capabilities-v2");
     expect(response.headers.get("x-systemsculpt-image-output-contract")).toBe("managed-image-output-v1");
+  });
+
+  it.each([204, 205, 304].flatMap((status) => [
+    [status, "text"],
+    [status, "arrayBuffer"],
+  ] as const))("returns a native %i response without a body (%s encoding)", async (status, responseEncoding) => {
+    const client = new PlatformRequestClient();
+    (requestUrl as jest.Mock).mockResolvedValue({
+      status,
+      headers: {},
+      arrayBuffer: new ArrayBuffer(0),
+      text: "",
+      json: null,
+    });
+
+    const response = await client.request({
+      url: "https://systemsculpt.com/api/plugin/embeddings/index",
+      method: "DELETE",
+      licenseKey: "license",
+      responseEncoding,
+    });
+
+    expect(requestUrl).toHaveBeenCalledTimes(1);
+    expect(response.status).toBe(status);
+    expect(response.body).toBeNull();
+    await expect(response.text()).resolves.toBe("");
   });
 
   it("rejects an oversized native binary response before reconstructing another body", async () => {

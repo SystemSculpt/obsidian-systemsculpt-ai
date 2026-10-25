@@ -329,6 +329,11 @@ export class StudioService {
     await this.projectSessionManager.releaseSession(path);
   }
 
+  /** Save every open project's pending edits now, as the app quits or the plugin unloads. */
+  async flushProjectSessions(): Promise<void> {
+    await this.projectSessionManager.flushAll();
+  }
+
   private getProjectsFolder(): string {
     return String(this.plugin.settings.studioDefaultProjectsFolder || "").trim() || DEFAULT_STUDIO_PROJECTS_DIR;
   }
