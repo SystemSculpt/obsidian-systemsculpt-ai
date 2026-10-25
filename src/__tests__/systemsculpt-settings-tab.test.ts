@@ -279,14 +279,13 @@ describe("SystemSculptSettingTab native layout", () => {
       secondaryButton: "Cancel",
     }));
     expect(plugin.getSettingsManagerInstance.updateSettings).toHaveBeenCalledTimes(1);
-    // Chat text size, audio output, Similar notes, four output folders, and debug: nothing else.
+    // Chat text size, audio output, Similar notes, two output folders, and debug: nothing else.
+    // The retired saved-chats and attachments settings keep whatever an older version saved.
     expect(plugin.getSettingsManagerInstance.updateSettings).toHaveBeenCalledWith({
       chatFontSize: "medium",
       audioProcessorOutputPreset: "detailed",
       embeddingsEnabled: false,
       chatsDirectory: "SystemSculpt/Chats",
-      savedChatsDirectory: "SystemSculpt/Saved Chats",
-      attachmentsDirectory: "SystemSculpt/Attachments",
       extractionsDirectory: "SystemSculpt/Extractions",
       debugMode: false,
     });

@@ -596,18 +596,10 @@ export class SettingsManager {
       validatedSettings.recordingsDirectory = defaultSettings.recordingsDirectory;
     }
 
-    if (typeof validatedSettings.attachmentsDirectory !== 'string') {
-      validatedSettings.attachmentsDirectory = defaultSettings.attachmentsDirectory;
-    }
-
     if (typeof validatedSettings.extractionsDirectory !== 'string') {
       validatedSettings.extractionsDirectory = defaultSettings.extractionsDirectory;
     }
 
-    // Validate saved chats directory
-    if (typeof validatedSettings.savedChatsDirectory !== 'string') {
-      validatedSettings.savedChatsDirectory = defaultSettings.savedChatsDirectory;
-    }
     // Validate boolean settings - using a simpler approach to avoid TypeScript errors
     if (typeof validatedSettings.licenseValid !== 'boolean') {
       validatedSettings.licenseValid = defaultSettings.licenseValid;

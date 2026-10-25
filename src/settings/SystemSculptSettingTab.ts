@@ -205,8 +205,6 @@ export class SystemSculptSettingTab extends PluginSettingTab {
             audioProcessorOutputPreset: "detailed",
             embeddingsEnabled: false,
             chatsDirectory: "SystemSculpt/Chats",
-            savedChatsDirectory: "SystemSculpt/Saved Chats",
-            attachmentsDirectory: "SystemSculpt/Attachments",
             extractionsDirectory: "SystemSculpt/Extractions",
             debugMode: false,
           });

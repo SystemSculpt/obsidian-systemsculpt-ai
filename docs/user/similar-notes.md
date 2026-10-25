@@ -45,8 +45,9 @@ Core controls:
   empty, or partly excluded. A file named explicitly can still be pinned; the
   result explains that override when the file is excluded from search.
   Exclusions can come from SystemSculpt settings, Obsidian's Excluded files,
-  or the Recordings, Attachments, and Extractions directories chosen in
-  SystemSculpt's Directories settings.
+  or the Recordings and Extractions directories chosen in SystemSculpt's
+  Directories settings. An Attachments directory set in an older version
+  stays excluded.
 - Excluded patterns are globs, such as `*.png`, `Daily/**`, or `**/Archive/*`.
   A pattern without `/` matches file names. Obsidian exclusions follow
   Obsidian's own rules.
