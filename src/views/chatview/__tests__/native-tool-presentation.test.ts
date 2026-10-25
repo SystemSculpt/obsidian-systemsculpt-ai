@@ -2,7 +2,8 @@
 import { TFile, type App } from "obsidian";
 import type { AgentToolPart } from "../../../chat/ChatConversation";
 import { nativeToolPresentation, renderNativeToolPreview } from "../NativeToolPresentation";
-import { nativeToolPath, prepareNativeWriteEditPreview } from "../ToolCallPreview";
+import { nativeToolPath } from "../../../utils/nativeToolPath";
+import { prepareNativeWriteEditPreview } from "../ToolCallPreview";
 import { presentAgentTool, presentAgentToolDetails, presentAgentToolFailure } from "../AgentToolPresentation";
 import { desktopHost } from "../../../platform/desktopOnly";
 
@@ -79,6 +80,28 @@ describe("native tool paths", () => {
     ["/Users/me/Vault/Plan.md", "Plan.md"],
   ])("shows %s relative to home only when it is outside the vault", (path, displayPath) => {
     expect(nativeToolPath(path, "/Users/me/Vault", "/Users/me/Vault", undefined, "/Users/me/").displayPath).toBe(displayPath);
+  });
+});
+
+describe("portable saved native activity", () => {
+  it("does not resolve a command's saved cwd against itself twice", () => {
+    const saved = part("Bash", { command: "pwd" }, {
+      native: { agent: "claude", workingDirectory: "Notes", vaultRoot: "." },
+    });
+    expect(nativeToolPresentation(saved)?.meta).toBe("in Notes");
+  });
+
+  it("keeps vault-relative labels and links without treating saved roots as file-read authority", async () => {
+    const saved = part("Edit", { file_path: "Plan.md", old_string: "before", new_string: "after" }, {
+      native: { agent: "claude", workingDirectory: "Notes", vaultRoot: "." }, state: "succeeded",
+    });
+    expect(nativeToolPresentation(saved)).toMatchObject({ title: "Edit Plan.md", meta: "Notes", targetPath: "Notes/Plan.md" });
+    const { app, read } = vault({ "Notes/Plan.md": "before" });
+    const preview = await prepareNativeWriteEditPreview(app, saved);
+    expect(preview?.status).toBe("unavailable");
+    expect(read).not.toHaveBeenCalled();
+    expect(nativeToolPath("../../outside.md", "Notes", ".").vaultPath).toBeNull();
+    expect(nativeToolPath("/private/outside.md", "Notes", ".").vaultPath).toBeNull();
   });
 });
 

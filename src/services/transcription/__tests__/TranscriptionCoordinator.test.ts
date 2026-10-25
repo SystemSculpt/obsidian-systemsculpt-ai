@@ -24,18 +24,6 @@ jest.mock("../../PostProcessingService", () => ({
   },
 }));
 
-const mockTryRename = jest.fn(async (_app: unknown, file: TFile) => file.path);
-jest.mock("../TranscriptionTitleService", () => ({
-  TranscriptionTitleService: {
-    getInstance: jest.fn(() => ({
-      buildFallbackBasename: (name: string) => `${name} - transcript`,
-      buildTitledBasename: (prefix: string, title: string) => `${prefix} - transcript - ${title}`,
-      tryGenerateTitle: jest.fn(async () => null),
-      tryRenameTranscriptionFile: mockTryRename,
-    })),
-  },
-}));
-
 interface HarnessOverrides {
   autoPaste?: boolean;
   clean?: boolean;
@@ -134,7 +122,6 @@ describe("TranscriptionCoordinator", () => {
     jest.clearAllMocks();
     Object.assign(Platform, { isDesktopApp: true, isMobileApp: false });
     mockProcessTranscription.mockImplementation(async (text: string) => ({ text: `processed:${text}` }));
-    mockTryRename.mockImplementation(async (_app: unknown, file: TFile) => file.path);
   });
 
   it("commits one Markdown output before optionally deleting the recoverable source", async () => {
@@ -150,13 +137,13 @@ describe("TranscriptionCoordinator", () => {
       "remote",
       "commit:begin",
       "commit:receipt",
-      "write:Recordings/demo - transcript.md",
+      "write:Recordings/demo.md",
       "commit:complete",
       "delete-source",
     ]);
     expect(result).toMatchObject({
       operationId: "transcription-op-1",
-      outputPath: "Recordings/demo - transcript.md",
+      outputPath: "Recordings/demo.md",
       sourceDisposition: "trashed",
     });
     expect(adapter.completeLocalCommit).toHaveBeenCalledWith("transcription-op-1");
@@ -185,7 +172,7 @@ describe("TranscriptionCoordinator", () => {
     });
 
     expect(app.vault.create).toHaveBeenCalledWith(
-      "Recordings/demo - transcript.md",
+      "Recordings/demo.md",
       "processed:managed transcript",
     );
     expect(app.vault.create).not.toHaveBeenCalledWith(
@@ -208,14 +195,14 @@ describe("TranscriptionCoordinator", () => {
     });
 
     expect(app.vault.create).toHaveBeenCalledWith(
-      "Recordings/demo - transcript.md",
+      "Recordings/demo.md",
       "managed transcript",
     );
     expect(events).toEqual([
       "remote",
       "commit:begin",
       "commit:receipt",
-      "write:Recordings/demo - transcript.md",
+      "write:Recordings/demo.md",
       "commit:complete",
       "delete-source",
     ]);
@@ -421,11 +408,11 @@ describe("TranscriptionCoordinator", () => {
     expect(mockClipboardWrite).not.toHaveBeenCalled();
     expect(result.insertedIntoOrigin).toBe(true);
     expect(app.vault.create).toHaveBeenCalledWith(
-      "Recordings/demo - transcript.md",
+      "Recordings/demo.md",
       expect.stringContaining("## Raw transcript\nmanaged transcript"),
     );
     expect(app.vault.create).toHaveBeenCalledWith(
-      "Recordings/demo - transcript.md",
+      "Recordings/demo.md",
       expect.stringContaining("## Cleaned transcript\nprocessed:managed transcript"),
     );
   });
@@ -443,7 +430,7 @@ describe("TranscriptionCoordinator", () => {
 
     expect(originEditor.replaceSelection).not.toHaveBeenCalled();
     expect(result).toMatchObject({
-      outputPath: "Recordings/demo - transcript.md",
+      outputPath: "Recordings/demo.md",
       insertedIntoOrigin: false,
       warning: expect.stringContaining("note where transcription started changed or closed"),
     });
@@ -548,7 +535,7 @@ describe("TranscriptionCoordinator", () => {
 
   it("allocates a new Markdown path instead of modifying an unrelated transcript", async () => {
     const { app, coordinator, file } = harness();
-    const existing = new TFile({ path: "Recordings/demo - transcript.md" });
+    const existing = new TFile({ path: "Recordings/demo.md" });
     (existing as any).parent = { path: "Recordings" };
     (app.vault.getFiles as jest.Mock).mockReturnValue([existing]);
     (app.vault.read as jest.Mock).mockResolvedValue("unrelated notes");
@@ -565,10 +552,69 @@ describe("TranscriptionCoordinator", () => {
 
     expect(app.vault.modify).not.toHaveBeenCalled();
     expect(app.vault.create).toHaveBeenCalledWith(
-      "Recordings/demo - transcript (2).md",
+      "Recordings/demo (2).md",
       expect.stringContaining("managed transcript"),
     );
-    expect(result.outputPath).toBe("Recordings/demo - transcript (2).md");
+    expect(result.outputPath).toBe("Recordings/demo (2).md");
+  });
+
+  it.each([false, true])("allocates a collision suffix for a fresh identical-text output (SRT: %s)", async (timestamped) => {
+    const { app, coordinator, file } = harness({ clean: true });
+    const extension = timestamped ? "srt" : "md";
+    const existing = new TFile({ path: `Recordings/demo.${extension}` });
+    (existing as any).parent = { path: "Recordings" };
+    (app.vault.getFiles as jest.Mock).mockReturnValue([existing]);
+    (app.vault.read as jest.Mock).mockResolvedValue("managed transcript");
+    (app.vault.getAbstractFileByPath as jest.Mock).mockImplementation((path: string) => {
+      if (path === file.path) return file;
+      return path === existing.path ? existing : null;
+    });
+
+    const result = await coordinator.start({ filePath: file.path, destination: "note", timestamped });
+
+    expect(result.outputPath).toBe(`Recordings/demo (2).${extension}`);
+    expect(app.vault.create).toHaveBeenCalledWith(result.outputPath, "managed transcript");
+    expect(app.vault.modify).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])("does not adopt an identical numbered output when the base path is free (SRT: %s)", async (timestamped) => {
+    const { app, coordinator, file } = harness({ clean: true });
+    const extension = timestamped ? "srt" : "md";
+    const existing = new TFile({ path: `Recordings/demo (2).${extension}` });
+    (existing as any).parent = { path: "Recordings" };
+    (app.vault.getFiles as jest.Mock).mockReturnValue([existing]);
+    (app.vault.read as jest.Mock).mockResolvedValue("managed transcript");
+
+    const result = await coordinator.start({ filePath: file.path, destination: "note", timestamped });
+
+    expect(result.outputPath).toBe(`Recordings/demo.${extension}`);
+    expect(app.vault.create).toHaveBeenCalledWith(result.outputPath, "managed transcript");
+  });
+
+  it("uses the audio name in its existing folder, not the first words of the transcript", async () => {
+    const { app, coordinator, file } = harness({ clean: false });
+    file.path = "Custom recordings/Gull Point timetable review.m4a";
+    file.name = "Gull Point timetable review.m4a";
+    file.basename = "Gull Point timetable review";
+    file.extension = "m4a";
+
+    const result = await coordinator.start({ filePath: file.path, destination: "note" });
+
+    expect(result.outputPath).toBe("Custom recordings/Gull Point timetable review.md");
+    expect(app.vault.create).toHaveBeenCalledWith(result.outputPath, expect.stringContaining("managed transcript"));
+  });
+
+  it("does not mistake a similarly named clean note for an already committed output", async () => {
+    const { app, coordinator, file } = harness({ clean: true });
+    const unrelated = new TFile({ path: "Recordings/demo notes.md" });
+    (unrelated as any).parent = { path: "Recordings" };
+    (app.vault.getFiles as jest.Mock).mockReturnValue([unrelated]);
+    (app.vault.read as jest.Mock).mockResolvedValue("managed transcript");
+
+    const result = await coordinator.start({ filePath: file.path, destination: "note" });
+
+    expect(result.outputPath).toBe("Recordings/demo.md");
+    expect(app.vault.create).toHaveBeenCalledTimes(1);
   });
 
   it("allocates a new SRT path instead of reusing or overwriting an unrelated subtitle", async () => {
@@ -615,7 +661,7 @@ describe("TranscriptionCoordinator", () => {
     release();
 
     await expect(running).resolves.toMatchObject({
-      outputPath: "Recordings/demo - transcript.md",
+      outputPath: "Recordings/demo.md",
     });
     expect(adapter.completeLocalCommit).toHaveBeenCalledWith("transcription-op-1");
   });
@@ -643,10 +689,10 @@ describe("TranscriptionCoordinator", () => {
     expect(adapter.completeLocalCommit).toHaveBeenCalledWith(operationId);
   });
 
-  it("reuses exact clean Markdown on same-operation local-commit recovery", async () => {
+  it.each(["demo.md", "demo - transcript - Existing.md"])("reuses exact clean Markdown %s on same-operation local-commit recovery", async (name) => {
     const { adapter, app, coordinator, file } = harness({ clean: true });
     const operationId = "transcription-clean-resume-1";
-    const existing = new TFile({ path: "Recordings/demo - transcript.md" });
+    const existing = new TFile({ path: `Recordings/${name}` });
     (existing as any).parent = { path: "Recordings" };
     (app.vault.getFiles as jest.Mock).mockReturnValue([existing]);
     (app.vault.read as jest.Mock).mockResolvedValue("managed transcript");
@@ -661,6 +707,41 @@ describe("TranscriptionCoordinator", () => {
     expect(app.vault.create).not.toHaveBeenCalled();
     expect(result.outputPath).toBe(existing.path);
     expect(adapter.completeLocalCommit).toHaveBeenCalledWith(operationId);
+  });
+
+  it("recovers exact clean output after the adapter explicitly adopts a preserved operation", async () => {
+    const { adapter, app, coordinator, file } = harness({ clean: true });
+    const existing = new TFile({ path: "Recordings/demo.md" });
+    (existing as any).parent = { path: "Recordings" };
+    (app.vault.getFiles as jest.Mock).mockReturnValue([existing]);
+    (app.vault.read as jest.Mock).mockResolvedValue("managed transcript");
+    adapter.transcribe.mockImplementation(async (_source: unknown, context: any) => {
+      await context.onOperationIdAdopted("preserved-operation");
+      return { kind: "transcript", operationId: "preserved-operation", text: "managed transcript" };
+    });
+
+    const result = await coordinator.start({ filePath: file.path, destination: "note" });
+
+    expect(result.outputPath).toBe(existing.path);
+    expect(app.vault.create).not.toHaveBeenCalled();
+  });
+
+  it("does not claim identical clean output when the requested recovery operation no longer exists", async () => {
+    const { adapter, app, coordinator, file } = harness({ clean: true });
+    const existing = new TFile({ path: "Recordings/demo.md" });
+    (existing as any).parent = { path: "Recordings" };
+    (app.vault.getFiles as jest.Mock).mockReturnValue([existing]);
+    (app.vault.read as jest.Mock).mockResolvedValue("managed transcript");
+    (app.vault.getAbstractFileByPath as jest.Mock).mockImplementation((path: string) => {
+      if (path === file.path) return file;
+      return path === existing.path ? existing : null;
+    });
+    adapter.hasRecoveryOperation.mockResolvedValue(false);
+
+    const result = await coordinator.start({ filePath: file.path, destination: "note", resumeOperationId: "expired-operation" });
+
+    expect(result.outputPath).toBe("Recordings/demo (2).md");
+    expect(app.vault.create).toHaveBeenCalledWith(result.outputPath, "managed transcript");
   });
 
   it("reuses an exact SRT output on same-operation resume instead of creating a duplicate", async () => {
@@ -949,7 +1030,7 @@ describe("TranscriptionCoordinator", () => {
       "persist:preserved-exact-source-operation",
       "commit:begin",
       "commit:receipt",
-      "write:Recordings/demo - transcript.md",
+      "write:Recordings/demo.md",
       "commit:complete",
     ]);
     expect(result.operationId).toBe("preserved-exact-source-operation");
@@ -1021,7 +1102,7 @@ describe("TranscriptionCoordinator", () => {
 
     expect(mockProcessTranscription).toHaveBeenCalledTimes(1);
     expect(app.vault.create).toHaveBeenCalledWith(
-      "Recordings/demo - transcript.md",
+      "Recordings/demo.md",
       expect.stringContaining("## Cleaned transcript\nprocessed:managed transcript"),
     );
     expect(originEditor.replaceSelection).toHaveBeenCalledWith("processed:managed transcript");

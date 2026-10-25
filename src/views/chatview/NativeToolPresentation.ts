@@ -3,8 +3,8 @@ import type { AgentToolPart } from "../../chat/ChatConversation";
 import { DiffViewer } from "../../components/DiffViewer";
 import { createSurfaceElement, createUiAction } from "../../core/ui/surface";
 import { generateDiff, parseUnifiedDiff } from "../../utils/diffUtils";
+import { nativeToolPath } from "../../utils/nativeToolPath";
 import {
-  nativeToolPath,
   prepareNativeWriteEditPreview,
   renderPreparedWriteEditPreviews,
 } from "./ToolCallPreview";
@@ -54,7 +54,7 @@ function displayPath(part: AgentToolPart, path: string): string {
 }
 /** Spec 3.5 meta: "in vault", or the vault-relative / ~-relative folder. */
 function cwdMeta(part: AgentToolPart, cwd: string | undefined): string {
-  const display = displayPath(part, cwd ?? part.native!.workingDirectory);
+  const display = displayPath(part, cwd ?? (part.native!.vaultRoot === "." ? "." : part.native!.workingDirectory));
   return `in ${display === "Vault root" ? "vault" : display}`;
 }
 function basename(path: string): string { return path.split(/[\\/]/u).filter(Boolean).pop() ?? path; }

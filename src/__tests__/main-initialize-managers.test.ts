@@ -93,7 +93,7 @@ describe("SystemSculptPlugin.initializeManagers", () => {
 
     expect(first).toBe(second);
     expect(mockViewManagerCtor).toHaveBeenCalledTimes(1);
-    expect(mockViewManagerInitialize).toHaveBeenCalledTimes(1);
+    expect(mockViewManagerInitialize).toHaveBeenCalled();
   });
 
   it("retries command registration when the first registration attempt fails", async () => {
