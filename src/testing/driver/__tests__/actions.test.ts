@@ -9,9 +9,15 @@ import type { SupportDiagnosticEvent } from "../../../utils/PluginLogger";
 import { canonicalAgentToolInput } from "../../../chat/managed/MutationJournal";
 import {
   DEVELOPMENT_TEST_ROOT,
+  DRIVER_ACTIONS,
   runDriverAction,
   type ActionContext,
 } from "../actions";
+import { CHAT_DEVELOPMENT_STATE_ACTIONS } from "../chatDevelopmentState";
+import { CHAT_TOOL_LIFECYCLE_ACTIONS } from "../chatToolLifecycle";
+import { DIAGNOSTICS_EXPORT_ACTIONS } from "../diagnosticsExports";
+import { DOM_ACTIONS } from "../domActions";
+import { SNAPSHOT_AND_WAIT_ACTIONS } from "../snapshotsAndWaits";
 
 function rect(visible = true): DOMRect {
   return {
@@ -761,6 +767,66 @@ describe("test driver actions", () => {
     await expect(runDriverAction(ctx, "vault.assertFolder", {
       path: folderPath,
     })).rejects.toThrow(/not an exact folder/);
+  });
+});
+
+describe("driver action registry", () => {
+  const areas = [
+    DOM_ACTIONS,
+    SNAPSHOT_AND_WAIT_ACTIONS,
+    CHAT_TOOL_LIFECYCLE_ACTIONS,
+    CHAT_DEVELOPMENT_STATE_ACTIONS,
+    DIAGNOSTICS_EXPORT_ACTIONS,
+  ];
+
+  it("names every registered action when an action is unknown", async () => {
+    const { ctx } = makeContext();
+    const failure = await runDriverAction(ctx, "chat.noSuchAction", {}).then(
+      () => null,
+      (error: unknown) => (error instanceof Error ? error.message : String(error)),
+    );
+    const listed = /^Unknown driver action "chat\.noSuchAction"\. Available: (.+)\.$/u
+      .exec(failure ?? "")?.[1]
+      .split(", ");
+
+    expect(listed).toEqual(Object.keys(DRIVER_ACTIONS));
+    expect(listed).toEqual(expect.arrayContaining([
+      "chat.reopenOwnedDevelopmentHistory",
+      "diagnostics.baselineExports",
+      "diagnostics.attributeNewExport",
+      "diagnostics.trashAttributedExport",
+    ]));
+  });
+
+  it("registers every area's actions under one name each", () => {
+    const names = areas.flatMap((area) => Object.keys(area));
+
+    expect(new Set(names).size).toBe(names.length);
+    expect(Object.keys(DRIVER_ACTIONS)).toHaveLength(names.length);
+    for (const area of areas) {
+      for (const [name, handler] of Object.entries(area)) {
+        expect(DRIVER_ACTIONS[name]).toBe(handler);
+      }
+    }
+  });
+
+  it("treats inherited object keys as unknown actions", async () => {
+    const { ctx } = makeContext();
+    for (const action of ["toString", "constructor", "hasOwnProperty", "__proto__"]) {
+      await expect(runDriverAction(ctx, action, {}))
+        .rejects.toThrow(`Unknown driver action "${action}".`);
+    }
+  });
+
+  it("refuses a cancelled action before looking it up", async () => {
+    const { ctx } = makeContext();
+    const controller = new AbortController();
+    controller.abort();
+    const cancelled = { ...ctx, signal: controller.signal };
+
+    await expect(runDriverAction(cancelled, "status", {})).rejects.toThrow("Driver action cancelled.");
+    await expect(runDriverAction(cancelled, "chat.noSuchAction", {}))
+      .rejects.toThrow("Driver action cancelled.");
   });
 });
 
