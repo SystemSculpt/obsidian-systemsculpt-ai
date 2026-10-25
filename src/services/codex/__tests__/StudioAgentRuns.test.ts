@@ -1,4 +1,5 @@
-import { MAX_LOADED_AGENT_RUNS, StudioAgentRuns } from '../StudioAgentRuns';
+import { requireApiVersion } from 'obsidian';
+import { MAX_LOADED_AGENT_RUNS, STALE_AGENT_RUN_MS, StudioAgentRuns } from '../StudioAgentRuns';
 import { createStudioWorkflow } from '../StudioWorkflow';
 import { agentRunFolder } from '../StudioAgentRunStore';
 import { runLocalCodex } from '../LocalCodexClient';
@@ -6,16 +7,18 @@ import { codexActivity } from '../CodexActivity';
 import { answerCodexRequest } from '../CodexRequestModal';
 jest.mock('../LocalCodexClient', () => ({ runLocalCodex: jest.fn() }));
 jest.mock('../CodexRequestModal', () => ({ answerCodexRequest: jest.fn(async () => ({ decision: 'decline' })) }));
-jest.mock('../../../platform/desktopOnly', () => ({ desktopHost: { os: async () => ({ hostname: () => 'test-machine' }) } }));
+let mockHostname = 'test-machine';
+jest.mock('../../../platform/desktopOnly', () => ({ desktopHost: { os: async () => ({ hostname: () => mockHostname }) } }));
 jest.mock('../../../platform/hostCapabilities', () => ({ hasHostCapability: () => true }));
 jest.mock('../CodexExecutionSettings', () => ({ codexWorkingDirectory: (_app: unknown, path: string) => path }));
 const turn = jest.mocked(runLocalCodex);
 const spec = (projectId = 'project', nodeId = 'worker') => ({ projectId, projectPath: `${projectId}.systemsculpt`, nodeId, title: 'Worker', request: { prompt: 'Test task', workingDirectory: '/tmp' } });
 const tick = async () => { for (let index = 0; index < 30; index++) await Promise.resolve(); };
-function fixture() {
-  const files = new Map<string, string>();
+/** `storage` stands in for vault-scoped local storage, where the machine's stable ID lives. */
+function fixture(files = new Map<string, string>(), storage?: Map<string, unknown>) {
   const adapter = { exists: jest.fn(async (path: string) => files.has(path) || !path.endsWith('.json')), mkdir: jest.fn(), write: jest.fn(async (path: string, content: string) => { files.set(path, content); }), read: jest.fn(async (path: string) => files.get(path)), stat: jest.fn(async (path: string) => ({ size: files.get(path)?.length || 0 })), list: jest.fn(async (folder: string) => ({ files: [...files.keys()].filter(path => path.startsWith(folder + '/')) })) };
-  const runs = new StudioAgentRuns({ app: { vault: { adapter } }, getLogger: () => ({ error: jest.fn() }) } as any, { templates: async () => [{ id: 'worker', title: 'Worker' }], startPeer: jest.fn() });
+  const localStorage = storage ? { loadLocalStorage: (key: string) => storage.get(key) ?? null, saveLocalStorage: (key: string, value: unknown) => { storage.set(key, value); } } : {};
+  const runs = new StudioAgentRuns({ app: { vault: { adapter }, ...localStorage }, getLogger: () => ({ error: jest.fn() }) } as any, { templates: async () => [{ id: 'worker', title: 'Worker' }], startPeer: jest.fn() });
   return { runs, files, adapter };
 }
 let sessions: { cb: any; resolve: () => void; send: jest.Mock; threadId: string }[];
@@ -403,4 +406,111 @@ it('releases execution capacity while coordinators wait, so queued children cann
   expect((await Promise.all(waiting)).every(result => result.success)).toBe(true);
   expect(roots.every(root => root.status === 'running')).toBe(true);
   await runs.dispose();
+});
+
+describe('machine identity', () => {
+  const folder = agentRunFolder('project.systemsculpt'), api = jest.mocked(requireApiVersion), hostApi = api.getMockImplementation()!;
+  const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
+  const saved = (files: Map<string, string>, id: string) => JSON.parse(files.get(`${folder}/${id}.json`)!);
+  /** A run another machine with a stable ID is executing, or was when it last saved. */
+  const elsewhere = (index: number, overrides: Record<string, unknown> = {}) => savedRun(index, { status: 'running', machine: 'laptop.local', machineId: 'a1b2c3d4e5f6', currentActivity: 'Codex is working', ...overrides });
+  beforeEach(() => { api.mockImplementation(() => true); mockHostname = 'mac.local'; });
+  afterEach(() => { api.mockImplementation(hostApi); mockHostname = 'test-machine'; });
+
+  it('keeps its own runs across a hostname change and still owns older records saved under its current hostname', async () => {
+    const storage = new Map<string, unknown>(), first = fixture(new Map(), storage);
+    const run = await first.runs.start(spec()); await tick();
+    const machineId = storage.get('systemsculpt-studio-device');
+    expect(machineId).toMatch(/^[0-9a-f]{12}$/);
+    expect(saved(first.files, run.id)).toMatchObject({ machine: 'mac.local', machineId, status: 'running' });
+
+    // Obsidian ends without a clean shutdown, and macOS then renames the host after a name conflict.
+    const crashed = new Map(first.files);
+    const current = savedRun(1, { status: 'running', machine: 'mac-2.local' });
+    const previous = savedRun(2, { status: 'running', machine: 'mac.local' });
+    const sameName = elsewhere(3, { machine: 'mac-2.local' });
+    for (const record of [current, previous, sameName]) crashed.set(`${folder}/${record.id}.json`, record.content);
+    mockHostname = 'mac-2.local';
+    const second = fixture(crashed, storage); await second.runs.load('project.systemsculpt', 'project');
+
+    // Its stable ID still names this machine's run, so it is settled and controllable here.
+    expect(second.runs.get(run.id)?.status).toBe('interrupted'); expect(second.runs.canControl(run.id)).toBe(true);
+    // A record saved before machines had an ID belongs to whichever machine has its hostname now.
+    expect(second.runs.get(current.id)?.status).toBe('interrupted'); expect(second.runs.canControl(current.id)).toBe(true);
+    expect(second.runs.get(previous.id)?.status).toBe('running'); expect(second.runs.canControl(previous.id)).toBe(false);
+    expect(second.runs.isStale(previous.id)).toBe(true); expect(second.runs.canMarkStopped(previous.id)).toBe(true);
+    // Another machine with the same hostname but its own ID keeps its run.
+    expect(second.runs.get(sameName.id)?.status).toBe('running'); expect(second.runs.canControl(sameName.id)).toBe(false);
+
+    // Resuming the run records the new hostname under the same ID.
+    await first.runs.dispose();
+    const message = await second.runs.send(run.id, 'Continue'); await tick();
+    expect(message.status).toBe('delivered');
+    expect(saved(crashed, run.id)).toMatchObject({ machine: 'mac-2.local', machineId, status: 'running' });
+    expect(turn.mock.calls.at(-1)?.[0].threadId).toBe(run.threadId);
+    await second.runs.dispose();
+  });
+
+  it("shows another machine's active run as stale only once its saved record stops changing", async () => {
+    const files = new Map<string, string>(), run = elsewhere(1, { updatedAt: minutesAgo(2) }), path = `${folder}/${run.id}.json`;
+    files.set(path, run.content);
+    const { runs, adapter } = fixture(files, new Map()), updates: string[] = [];
+    runs.subscribe(projectId => updates.push(projectId));
+    await runs.load('project.systemsculpt', 'project');
+    expect(runs.get(run.id)?.status).toBe('running'); expect(runs.canControl(run.id)).toBe(false); expect(runs.isStale(run.id)).toBe(false);
+
+    // The laptop saves again before the run would turn stale here, so it stays live.
+    jest.advanceTimersByTime(5 * 60_000);
+    files.set(path, elsewhere(1, { updatedAt: new Date().toISOString(), currentActivity: 'Running tests' }).content);
+    adapter.read.mockClear();
+    jest.advanceTimersByTime(3 * 60_000); await tick();
+    expect(adapter.read).toHaveBeenCalledWith(path);
+    expect(runs.get(run.id)?.currentActivity).toBe('Running tests'); expect(runs.isStale(run.id)).toBe(false);
+
+    // Then it stops saving: ten minutes after its last change, the run is stale and open boards hear of it.
+    updates.length = 0;
+    jest.advanceTimersByTime(STALE_AGENT_RUN_MS); await tick();
+    expect(runs.isStale(run.id)).toBe(true); expect(updates).toContain('project');
+    // Presentation only: the record still says what the laptop last saved.
+    expect(runs.get(run.id)?.status).toBe('running'); expect(saved(files, run.id).status).toBe('running');
+    await runs.dispose();
+  });
+
+  it('marks stopped only runs this machine cannot stop, saving the record and admitting nothing', async () => {
+    const files = new Map<string, string>(), stale = elsewhere(1);
+    const root = elsewhere(2, { nodeId: 'center', status: 'completed', workflow: { ...createStudioWorkflow('Elsewhere'), status: 'waiting' } });
+    const rootId = JSON.parse(root.content).id;
+    const child = elsewhere(3, { workflowId: rootId, parentRunId: rootId, assignmentId: 'inspect' });
+    for (const record of [stale, root, child]) files.set(`${folder}/${record.id}.json`, record.content);
+    const { runs } = fixture(files, new Map()); await runs.load('project.systemsculpt', 'project');
+    const own = await runs.start(spec()); await tick();
+
+    expect(runs.canMarkStopped(own.id)).toBe(false); runs.markStopped(own.id); expect(own.status).toBe('running');
+    // Agents see the same state through studio_runs.
+    const listed = JSON.parse((await call(0, 'studio_runs')).contentItems[0].text).runs;
+    expect(listed.find((run: { id: string }) => run.id === stale.id)).toMatchObject({ status: 'running', controllable: false, stale: true });
+    expect(listed.find((run: { id: string }) => run.id === own.id)).toMatchObject({ controllable: true }); expect(listed.find((run: { id: string }) => run.id === own.id).stale).toBeUndefined();
+    // Stop still refuses another machine's run; Mark stopped is the way to clear it.
+    runs.stop(stale.id); expect(runs.get(stale.id)?.status).toBe('running');
+    expect(runs.canMarkStopped(stale.id)).toBe(true);
+    runs.markStopped(stale.id); await tick();
+    expect(runs.get(stale.id)).toMatchObject({ status: 'stopped', currentActivity: 'Marked stopped' });
+    expect(runs.isStale(stale.id)).toBe(false); expect(runs.canMarkStopped(stale.id)).toBe(false);
+    expect(saved(files, stale.id)).toMatchObject({ status: 'stopped', machine: 'laptop.local', machineId: 'a1b2c3d4e5f6' });
+
+    // An open workflow settles with its active assignments.
+    expect(runs.canMarkStopped(rootId)).toBe(true);
+    runs.markStopped(rootId); await tick();
+    expect(runs.get(rootId)?.workflow?.status).toBe('stopped'); expect(runs.get(child.id)?.status).toBe('stopped');
+    expect(saved(files, rootId).workflow.status).toBe('stopped'); expect(saved(files, child.id).status).toBe('stopped');
+    expect(turn).toHaveBeenCalledTimes(1);
+    await runs.dispose();
+  });
+
+  it('adds no time limit to a run this machine is executing', async () => {
+    const { runs } = fixture(new Map(), new Map()); const run = await runs.start(spec()); await tick();
+    jest.advanceTimersByTime(6 * 60 * 60_000); await tick();
+    expect(run.status).toBe('running'); expect(runs.isStale(run.id)).toBe(false); expect(runs.canMarkStopped(run.id)).toBe(false);
+    sessions[0].resolve(); await tick(); expect(run.status).toBe('completed'); await runs.dispose();
+  });
 });
