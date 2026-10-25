@@ -93,7 +93,9 @@ type StudioProjectSessionOptions = {
 };
 
 const DEFAULT_DISCRETE_DELAY_MS = 40;
-const DEFAULT_CONTINUOUS_DELAY_MS = 120;
+/** Typing saves once it pauses: every save is a disk write and a sync upload.
+ * The view saves at once when focus, the window or the leaf is left. */
+const DEFAULT_CONTINUOUS_DELAY_MS = 1500;
 
 type StudioProjectSessionMutator = (project: StudioProjectV1) => boolean | void;
 type StudioProjectSessionAsyncMutator = (project: StudioProjectV1) => Promise<boolean | void>;

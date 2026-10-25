@@ -1657,6 +1657,8 @@ export default class SystemSculptPlugin extends Plugin {
   private async unloadAsync(): Promise<void> {
     this.deferredStartup.abort();
     this.phoneHandoffInbox?.dispose();
+    // Studio's unsaved typing starts saving now; the service's later close awaits it.
+    void this.studioService?.flushProjectSessions();
     // Microphone privacy is the first teardown action and must never wait on
     // diagnostics disk I/O or an unrelated service cleanup.
     const recorder = this.recorderService;
@@ -2275,7 +2277,10 @@ export default class SystemSculptPlugin extends Plugin {
 
   getStudioService(): StudioService {
     if (!this.studioService) {
-      this.studioService = new StudioService(this);
+      const studioService = new StudioService(this);
+      this.studioService = studioService;
+      // The app can quit without closing views or unloading plugins: save Studio typing that has not paused yet.
+      this.registerEvent(this.app.workspace.on("quit", tasks => tasks.add(() => studioService.flushProjectSessions())));
     }
     return this.studioService;
   }
