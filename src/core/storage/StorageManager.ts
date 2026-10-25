@@ -4,10 +4,8 @@ import SystemSculptPlugin from "../../main";
 /**
  * Storage location types
  */
-export type StorageLocationType = 
-  | 'settings'    // Settings backups
-  | 'cache'       // Various cache data
-  | 'temp'        // Temporary processing files
+export type StorageLocationType =
+  | 'settings'    // Read only: dated settings backups older versions copied to settings/backups
   | 'diagnostics'; // Logs, metrics, and other diagnostics artifacts
 
 /**
@@ -117,18 +115,10 @@ export class StorageManager {
    * Internal initialization method
    */
   private async _initialize(): Promise<void> {
-    // Ensure base hidden directory exists
+    // Only the base hidden directory. Diagnostics is created by its first
+    // write (ensureLocation) so a session that records nothing leaves no
+    // trace (#337); settings backups live in .systemsculpt/settings-backups.
     await this.ensureDirectory(this.hiddenBasePath);
-
-    // Create core subdirectories. Diagnostics is created by its first write
-    // (ensureLocation) so a session that records nothing leaves no trace (#337).
-    await Promise.all([
-      this.ensureDirectory(this.getPath('settings')),
-      this.ensureDirectory(this.getPath('settings', 'backups')),
-      this.ensureDirectory(this.getPath('settings', 'emergency')),
-      this.ensureDirectory(this.getPath('cache')),
-      this.ensureDirectory(this.getPath('temp')),
-    ]);
   }
 
   /**

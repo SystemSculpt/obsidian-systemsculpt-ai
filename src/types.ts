@@ -139,9 +139,10 @@ export interface SystemSculptSettings {
    */
   knownChatsDirectories?: string[];
   /**
-   * Directory where notes created via the "Save chat as note" feature are stored
+   * Retired: nothing writes here and the plugin no longer creates the folder.
+   * A value saved by an older version keeps that folder out of search.
    */
-  savedChatsDirectory: string;
+  savedChatsDirectory?: string;
   /** Session-local validation freshness; omitted from saved settings and backups. */
   lastValidated: number;
   recordingsDirectory: string;
@@ -173,7 +174,11 @@ export interface SystemSculptSettings {
    * - "srt": Save as an SRT subtitle file
    */
   transcriptionOutputFormat?: "markdown" | "srt";
-  attachmentsDirectory: string;
+  /**
+   * Retired: nothing writes here and the plugin no longer creates the folder.
+   * A value saved by an older version keeps that folder out of search.
+   */
+  attachmentsDirectory?: string;
   extractionsDirectory: string;
   workflowEngine: WorkflowEngineSettings;
   /** Save captures from the SystemSculpt iPhone app into the vault. */
@@ -272,7 +277,6 @@ export const DEFAULT_SETTINGS: SystemSculptSettings = {
   licenseValid: false,
   suppressLicenseUpgradePrompt: false,
   chatsDirectory: "SystemSculpt/Chats",
-  savedChatsDirectory: "SystemSculpt/Saved Chats",
   lastValidated: 0,
   recordingsDirectory: "SystemSculpt/Recordings",
   pendingRecorderCaptures: [],
@@ -296,7 +300,6 @@ Please:
   audioProcessorOutputPreset: "detailed",
   autoSubmitAfterTranscription: false,
   transcriptionOutputFormat: "markdown",
-  attachmentsDirectory: "SystemSculpt/Attachments",
   extractionsDirectory: "SystemSculpt/Extractions",
   workflowEngine: createDefaultWorkflowEngineSettings(),
   phoneCapturesEnabled: true,

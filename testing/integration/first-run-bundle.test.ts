@@ -568,6 +568,26 @@ describe.each(["desktop", "mobile"])("a new user's first run in the built bundle
     expect(control("chat.phone-handoff.result", leaves[0].view.containerEl).textContent).toContain(resultPath);
   });
 
+  it("creates only the folders and backup copies it uses in a fresh vault", async () => {
+    const exists = (vaultPath: string): Promise<boolean> => plugin.app.vault.adapter.exists(vaultPath);
+    for (const unused of [
+      "SystemSculpt/Saved Chats", "SystemSculpt/Attachments",
+      ".systemsculpt/settings", ".systemsculpt/cache", ".systemsculpt/temp",
+    ]) {
+      await expect(exists(unused)).resolves.toBe(false);
+    }
+    await expect(exists("SystemSculpt/Chats")).resolves.toBe(true);
+    // The first automatic backup and the copy of the last save, one file each.
+    const backups = [...files.keys()].filter((name) => name.startsWith(".systemsculpt/settings")).sort();
+    expect(backups).toEqual([
+      expect.stringMatching(/^\.systemsculpt\/settings-backups\/settings-backup-\d{4}-\d{2}-\d{2}\.json$/),
+      ".systemsculpt/settings-backups/settings-backup-latest.json",
+    ]);
+    const saved = await plugin.loadData();
+    expect(saved).not.toHaveProperty("savedChatsDirectory");
+    expect(saved).not.toHaveProperty("attachmentsDirectory");
+  });
+
   it("installs, signs up from chat's offer, and streams the first answer", async () => {
     await signUpFromChat();
     server.holdAnswers = true;

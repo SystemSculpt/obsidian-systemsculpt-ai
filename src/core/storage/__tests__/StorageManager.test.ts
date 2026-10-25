@@ -87,13 +87,13 @@ describe("StorageManager", () => {
       expect(storage.isInitialized()).toBe(true);
     });
 
-    it("does not create the diagnostics directory until something is written there", async () => {
+    it("creates only the base folder, and diagnostics only once something is written there", async () => {
       mockApp.vault.adapter.exists.mockImplementation(async (path: string) => path === ".systemsculpt");
       await storage.initialize();
 
+      // No settings, settings/backups, settings/emergency, cache or temp folder.
       const createdFolders = mockApp.vault.createFolder.mock.calls.map(([path]) => path);
-      expect(createdFolders).toContain(".systemsculpt/settings");
-      expect(createdFolders).not.toContain(".systemsculpt/diagnostics");
+      expect(createdFolders.filter((path) => path !== ".systemsculpt")).toEqual([]);
       expect(mockApp.vault.adapter.write).not.toHaveBeenCalled();
 
       await storage.appendToFile("diagnostics", "log.txt", "line");
@@ -133,8 +133,6 @@ describe("StorageManager", () => {
   describe("getPath", () => {
     it("returns path for storage location", () => {
       expect(storage.getPath("settings")).toBe(".systemsculpt/settings");
-      expect(storage.getPath("cache")).toBe(".systemsculpt/cache");
-      expect(storage.getPath("temp")).toBe(".systemsculpt/temp");
       expect(storage.getPath("diagnostics")).toBe(".systemsculpt/diagnostics");
     });
 
@@ -148,8 +146,8 @@ describe("StorageManager", () => {
     });
 
     it("handles multiple subpath components", () => {
-      expect(storage.getPath("cache", "a", "b", "c")).toBe(
-        ".systemsculpt/cache/a/b/c"
+      expect(storage.getPath("diagnostics", "a", "b", "c")).toBe(
+        ".systemsculpt/diagnostics/a/b/c"
       );
     });
   });

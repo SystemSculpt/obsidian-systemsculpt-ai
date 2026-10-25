@@ -781,6 +781,66 @@ describe("SettingsManager managed settings contract", () => {
       expect(manager.settings.defaultChatTag).toBe("restored-from-backup");
     });
 
+    function installHiddenBackups(plugin: ReturnType<typeof createPlugin>, backups: Record<string, unknown>) {
+      // The hidden .systemsculpt/settings/backups copies older versions wrote.
+      plugin.storage = {
+        listFiles: jest.fn(async (type: string, subPath: string) =>
+          type === "settings" && subPath === "backups" ? Object.keys(backups) : []),
+        readFile: jest.fn(async (_type: string, fileName: string) => backups[fileName.replace(/^backups\//, "")] ?? null),
+        writeFile: jest.fn(),
+      };
+    }
+
+    it("restores from an old hidden backup copy when it is the only backup left", async () => {
+      const plugin = createPlugin(null);
+      installHiddenBackups(plugin, { "settings-backup-2026-09-01.json": restoredBackup });
+      const manager = new SettingsManager(plugin);
+
+      await manager.loadSettings();
+
+      expect(manager.settings.defaultChatTag).toBe("restored-from-backup");
+      expect(plugin.storage.readFile).toHaveBeenCalledWith("settings", "backups/settings-backup-2026-09-01.json", true);
+    });
+
+    it("restores the newest dated backup from either folder, the visible copy first on the same day", async () => {
+      const visible = (day: string) => `.systemsculpt/settings-backups/settings-backup-2026-09-${day}.json`;
+      const visibleBackups: Record<string, unknown> = {
+        [visible("10")]: { ...restoredBackup, defaultChatTag: "visible-10" },
+        [visible("12")]: { ...restoredBackup, defaultChatTag: "visible-12" },
+      };
+      const restore = async (hidden: Record<string, unknown>) => {
+        const plugin = createPlugin(null);
+        plugin.app.vault.adapter.exists.mockImplementation(async (path: string) => path in visibleBackups);
+        plugin.app.vault.adapter.list.mockResolvedValue({ files: Object.keys(visibleBackups), folders: [] });
+        plugin.app.vault.adapter.read.mockImplementation(async (path: string) => JSON.stringify(visibleBackups[path]));
+        installHiddenBackups(plugin, hidden);
+        const manager = new SettingsManager(plugin);
+        await manager.loadSettings();
+        return manager.settings.defaultChatTag;
+      };
+
+      await expect(restore({
+        "settings-backup-2026-09-11.json": { ...restoredBackup, defaultChatTag: "hidden-11" },
+        "settings-backup-2026-09-12.json": { ...restoredBackup, defaultChatTag: "hidden-12" },
+      })).resolves.toBe("visible-12");
+      await expect(restore({
+        "settings-backup-2026-09-13.json": { ...restoredBackup, defaultChatTag: "hidden-13" },
+      })).resolves.toBe("hidden-13");
+    });
+
+    it("writes the pre-migration backup once, to settings-backups only", async () => {
+      const plugin = createPlugin({ schemaVersion: 3, licenseKey: "license_test" });
+      installHiddenBackups(plugin, {});
+      const manager = new SettingsManager(plugin);
+
+      await manager.loadSettings();
+
+      expect(plugin.app.vault.adapter.write.mock.calls.map(([path]: [string]) => path)
+        .filter((path: string) => path.includes("premigration")))
+        .toEqual([".systemsculpt/settings-backups/settings-backup-premigration-v3.json"]);
+      expect(plugin.storage.writeFile).not.toHaveBeenCalled();
+    });
+
     it("still ends up with defaults on a fresh install with no data and no backup", async () => {
       const plugin = createPlugin(null);
       plugin.app.vault.adapter.list.mockRejectedValue(new Error("ENOENT: .systemsculpt/settings-backups"));
@@ -795,6 +855,49 @@ describe("SettingsManager managed settings contract", () => {
       Object.entries(manager.settings).filter(([key]) => key !== "lastValidated"),
     ));
       expect(plugin.logger.warn).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("automatic backups timer", () => {
+    it("re-checks the timer whenever an update switches automatic backups, and only then", async () => {
+      const plugin = createPlugin({ schemaVersion: CURRENT_SCHEMA_VERSION });
+      const manager = new SettingsManager(plugin);
+      await manager.loadSettings();
+      expect(backupStart).toHaveBeenCalledTimes(1);
+
+      await manager.updateSettings({ chatFontSize: "large" });
+      await manager.updateSettings({ automaticBackupsEnabled: true });
+      expect(backupStart).toHaveBeenCalledTimes(1);
+
+      await manager.updateSettings({ automaticBackupsEnabled: false });
+      expect(backupStart).toHaveBeenCalledTimes(2);
+      // A restored backup or an import can turn them back on.
+      await manager.restoreFromExternalSettings({ schemaVersion: CURRENT_SCHEMA_VERSION, automaticBackupsEnabled: true });
+      expect(backupStart).toHaveBeenCalledTimes(3);
+    });
+  });
+
+  describe("retired saved-chats and attachments folders", () => {
+    it("seeds neither setting on a fresh vault and keeps a value an older version saved", async () => {
+      const fresh = new SettingsManager(createPlugin(null));
+      await fresh.loadSettings();
+      expect(fresh.settings).not.toHaveProperty("savedChatsDirectory");
+      expect(fresh.settings).not.toHaveProperty("attachmentsDirectory");
+
+      const plugin = createPlugin({
+        schemaVersion: CURRENT_SCHEMA_VERSION,
+        savedChatsDirectory: "Archive/Saved Chats",
+        attachmentsDirectory: "Archive/Attachments",
+      });
+      const upgraded = new SettingsManager(plugin);
+      await upgraded.loadSettings();
+      await upgraded.updateSettings({ chatFontSize: "large" });
+
+      // Search keeps excluding the folders those values name.
+      expect(plugin.saveData.mock.calls.at(-1)?.[0]).toMatchObject({
+        savedChatsDirectory: "Archive/Saved Chats",
+        attachmentsDirectory: "Archive/Attachments",
+      });
     });
   });
 

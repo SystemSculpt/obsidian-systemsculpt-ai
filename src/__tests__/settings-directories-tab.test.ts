@@ -16,9 +16,7 @@ jest.mock("../components/FolderSuggester", () => ({
 
 const directoryKeys = [
   "chatsDirectory",
-  "savedChatsDirectory",
   "recordingsDirectory",
-  "attachmentsDirectory",
   "extractionsDirectory",
 ] as const;
 
@@ -87,17 +85,23 @@ describe("Directories tab managed-only layout", () => {
     expect(Notice).not.toHaveBeenCalled();
   });
 
-  it("shows durable local output directories without retired web-research storage", () => {
-    const { container } = render();
+  it("shows only the output directories the plugin writes to", () => {
+    const { container, inputs } = render();
     const names = Array.from(container.querySelectorAll(".setting-item-name"))
       .map((element) => element.textContent?.trim());
     expect(names).toEqual(expect.arrayContaining([
       "Chats directory",
-      "Saved chats directory",
       "Recordings directory",
-      "Attachments directory",
       "Extractions directory",
     ]));
+    expect(inputs.map((input) => input.value)).toEqual([
+      "SystemSculpt/Chats",
+      "SystemSculpt/Recordings",
+      "SystemSculpt/Extractions",
+    ]);
+    expect(names).not.toContain("Saved chats directory");
+    expect(names).not.toContain("Attachments directory");
+    expect(container.textContent).not.toContain("empty = Attachments");
     expect(names).not.toContain("Web Research Directory");
     expect(container.textContent).not.toContain("web search and fetch corpus files");
   });
@@ -122,12 +126,12 @@ describe("Directories tab managed-only layout", () => {
   it("keeps typed directory drafts independent until each field blurs", async () => {
     const { inputs, updateSettings, handleDirectorySettingChange } = render();
     typeValue(inputs[0], "New/Chats");
-    typeValue(inputs[1], "New/Saved Chats");
+    typeValue(inputs[1], "New/Recordings");
     inputs[1].dispatchEvent(new Event("blur"));
     await Promise.resolve();
 
-    expect(updateSettings.mock.calls).toEqual([[{ savedChatsDirectory: "New/Saved Chats" }]]);
-    expect(handleDirectorySettingChange.mock.calls).toEqual([["savedChatsDirectory", "New/Saved Chats"]]);
+    expect(updateSettings.mock.calls).toEqual([[{ recordingsDirectory: "New/Recordings" }]]);
+    expect(handleDirectorySettingChange.mock.calls).toEqual([["recordingsDirectory", "New/Recordings"]]);
     inputs[0].dispatchEvent(new Event("blur"));
     await Promise.resolve();
     expect(updateSettings).toHaveBeenNthCalledWith(2, { chatsDirectory: "New/Chats" });
@@ -179,22 +183,22 @@ describe("Directories tab managed-only layout", () => {
     });
     jest.runOnlyPendingTimers();
     await Promise.resolve();
-    expect(updateSettings).toHaveBeenCalledTimes(5);
-    expect(handleDirectorySettingChange).toHaveBeenCalledTimes(5);
+    expect(updateSettings).toHaveBeenCalledTimes(directoryKeys.length);
+    expect(handleDirectorySettingChange).toHaveBeenCalledTimes(directoryKeys.length);
     expect(jest.getTimerCount()).toBe(0);
   });
 
   it("preserves validation while flushing directory drafts on hide", async () => {
     const { tab, inputs, updateSettings, handleDirectorySettingChange } = render();
     typeValue(inputs[0], "../outside");
-    typeValue(inputs[1], "Work/Saved Chats");
+    typeValue(inputs[1], "Work/Recordings");
 
     tab.hide();
     await Promise.resolve();
 
     expect(Notice).toHaveBeenCalledWith("Use a vault-relative path without '..' or a leading slash.");
-    expect(updateSettings.mock.calls).toEqual([[{ savedChatsDirectory: "Work/Saved Chats" }]]);
-    expect(handleDirectorySettingChange.mock.calls).toEqual([["savedChatsDirectory", "Work/Saved Chats"]]);
+    expect(updateSettings.mock.calls).toEqual([[{ recordingsDirectory: "Work/Recordings" }]]);
+    expect(handleDirectorySettingChange.mock.calls).toEqual([["recordingsDirectory", "Work/Recordings"]]);
   });
 
   it("retries the final directory on blur after a failed save without creating it prematurely", async () => {

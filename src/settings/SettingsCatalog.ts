@@ -167,20 +167,10 @@ const SETTINGS_CATALOG = {
     title: "Chats directory",
     description: "Where new chats are saved. Existing chats stay in the folder they were saved in.",
   },
-  "workspace.saved-chats-directory": {
-    tabId: "workspace",
-    title: "Saved chats directory",
-    description: "Where chats saved as notes are stored.",
-  },
   "workspace.recordings-directory": {
     tabId: "workspace",
     title: "Recordings directory",
     description: "Where recordings are stored.",
-  },
-  "workspace.attachments-directory": {
-    tabId: "workspace",
-    title: "Attachments directory",
-    description: "Where saved images and attachments are stored.",
   },
   "workspace.extractions-directory": {
     tabId: "workspace",

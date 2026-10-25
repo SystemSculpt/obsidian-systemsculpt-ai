@@ -323,8 +323,11 @@ export class SettingsManager {
    */
 
   /**
-   * Attempt to restore settings from the latest backup
-   * Checks both the new vault-based location and the old plugin directory location
+   * Restore settings from the newest readable backup: the copy of the last
+   * save in .systemsculpt/settings-backups, then dated backups newest first.
+   * Older versions also copied each dated backup to the hidden
+   * .systemsculpt/settings/backups folder; those copies are still read, and
+   * on the same day the visible copy wins.
    * @returns The restored settings or null if restoration failed
    */
   private async restoreFromBackup(): Promise<Record<string, unknown> | null> {
@@ -341,24 +344,7 @@ export class SettingsManager {
         return null;
       }
     };
-    const datedBackups = (paths: string[]) => paths
-      .filter(path => /settings-backup-\d{4}-\d{2}-\d{2}\.json$/.test(path))
-      .sort()
-      .reverse();
-
-    const storage = this.plugin.storage;
-    if (storage) {
-      const latest = await readBackup(() => storage.readFile("settings", "backups/settings-backup-latest.json", true));
-      if (latest) return latest;
-      try {
-        for (const name of datedBackups(await storage.listFiles("settings", "backups"))) {
-          const backup = await readBackup(() => storage.readFile("settings", `backups/${name}`, true));
-          if (backup) return backup;
-        }
-      } catch {
-        // Continue with the legacy vault-root backup directory.
-      }
-    }
+    const backupDate = (path: string) => /settings-backup-(\d{4}-\d{2}-\d{2})\.json$/.exec(path)?.[1];
 
     const adapter = this.plugin.app.vault.adapter;
     const directory = ".systemsculpt/settings-backups";
@@ -368,13 +354,32 @@ export class SettingsManager {
     });
     const latest = await readVaultBackup(`${directory}/settings-backup-latest.json`);
     if (latest) return latest;
+
+    const dated: { date: string; read: () => Promise<Record<string, unknown> | null> }[] = [];
     try {
-      for (const path of datedBackups((await adapter.list(directory)).files)) {
-        const backup = await readVaultBackup(path);
-        if (backup) return backup;
+      for (const path of (await adapter.list(directory)).files) {
+        const date = backupDate(path);
+        if (date) dated.push({ date, read: () => readVaultBackup(path) });
       }
     } catch {
       // No readable vault-root backup directory is available.
+    }
+    const storage = this.plugin.storage;
+    if (storage) {
+      try {
+        for (const name of await storage.listFiles("settings", "backups")) {
+          const date = backupDate(name);
+          if (date) dated.push({ date, read: () => readBackup(() => storage.readFile("settings", `backups/${name}`, true)) });
+        }
+      } catch {
+        // Hidden copies exist only in vaults an older version wrote to.
+      }
+    }
+    // The sort is stable, so a visible backup stays ahead of its hidden copy.
+    dated.sort((left, right) => right.date.localeCompare(left.date));
+    for (const { read } of dated) {
+      const backup = await read();
+      if (backup) return backup;
     }
     return null;
   }
@@ -558,13 +563,6 @@ export class SettingsManager {
         // directory already exists
       }
       await this.plugin.app.vault.adapter.write(`${dir}/${fileName}`, JSON.stringify(payload, null, 2));
-      if (this.plugin.storage) {
-        try {
-          await this.plugin.storage.writeFile("settings", `backups/${fileName}`, payload);
-        } catch {
-          // vault storage optional
-        }
-      }
     } catch {
       // best-effort only
     }
@@ -596,18 +594,10 @@ export class SettingsManager {
       validatedSettings.recordingsDirectory = defaultSettings.recordingsDirectory;
     }
 
-    if (typeof validatedSettings.attachmentsDirectory !== 'string') {
-      validatedSettings.attachmentsDirectory = defaultSettings.attachmentsDirectory;
-    }
-
     if (typeof validatedSettings.extractionsDirectory !== 'string') {
       validatedSettings.extractionsDirectory = defaultSettings.extractionsDirectory;
     }
 
-    // Validate saved chats directory
-    if (typeof validatedSettings.savedChatsDirectory !== 'string') {
-      validatedSettings.savedChatsDirectory = defaultSettings.savedChatsDirectory;
-    }
     // Validate boolean settings - using a simpler approach to avoid TypeScript errors
     if (typeof validatedSettings.licenseValid !== 'boolean') {
       validatedSettings.licenseValid = defaultSettings.licenseValid;
@@ -966,6 +956,7 @@ export class SettingsManager {
     if (!this.isInitialized) {
       await this.loadSettingsNow(); // Ensure settings are loaded before update
     }
+    const backupsWereEnabled = this.settings.automaticBackupsEnabled;
     const newSettings = typeof update === "function" ? update(this.settings) : update;
     // Merge new settings into the manager's internal copy
     const updatedSettings = { ...this.settings, ...newSettings };
@@ -995,7 +986,13 @@ export class SettingsManager {
 
     // Persist, update plugin._settings, and dispatch the event. This already
     // runs inside the persistence queue, so call the unqueued variant.
-    return this.saveSettingsNow();
+    const saved = await this.saveSettingsNow();
+    // The toggle, a restored backup or an import can switch backups; the
+    // hourly check runs only while they are on.
+    if (this.settings.automaticBackupsEnabled !== backupsWereEnabled) {
+      this.automaticBackupService.start();
+    }
+    return saved;
   }
 
   /**
@@ -1017,12 +1014,5 @@ export class SettingsManager {
     if (this.automaticBackupService) {
       this.automaticBackupService.stop();
     }
-  }
-
-  /**
-   * Get the automatic backup service instance for external access
-   */
-  public getAutomaticBackupService(): AutomaticBackupService {
-    return this.automaticBackupService;
   }
 }

@@ -15,12 +15,23 @@ export class AutomaticBackupService {
     }
 
     /**
-     * Start the automatic backup service
+     * Arm the hourly check while automatic backups are enabled and clear it
+     * while they are off. Safe to call again after any settings change.
      */
     public start(): void {
-        this.stop(); // Clean up any existing timer
-        
-        // Start the periodic check
+        let enabled = false;
+        try {
+            enabled = this.plugin.isPluginUnloading?.() !== true
+                && this.plugin.getSettingsManager().getSettings().automaticBackupsEnabled === true;
+        } catch {
+            // Unreadable settings arm nothing; the next load or toggle retries.
+        }
+        if (!enabled) {
+            this.stop();
+            return;
+        }
+        if (this.backupTimer !== null) return;
+
         // registerInterval also lets Obsidian clear the timer on plugin
         // unload, so a teardown path that never reaches stop() cannot leak it.
         this.backupTimer = this.plugin.registerInterval(window.setInterval(() => {
@@ -35,7 +46,7 @@ export class AutomaticBackupService {
      * Stop the automatic backup service
      */
     public stop(): void {
-        if (this.backupTimer) {
+        if (this.backupTimer !== null) {
             window.clearInterval(this.backupTimer);
             this.backupTimer = null;
         }
@@ -90,8 +101,7 @@ export class AutomaticBackupService {
             const dateStr = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
             const fileName = `settings-backup-${dateStr}.json`;
             
-            // Create backup in multiple locations for redundancy
-            await this.saveBackupToMultipleLocations(fileName, backupData);
+            await this.saveBackup(fileName, backupData);
             
             // Update the last backup timestamp
             await this.plugin.getSettingsManager().updateSettings({
@@ -109,33 +119,19 @@ export class AutomaticBackupService {
     }
 
     /**
-     * Save backup to multiple locations for redundancy
+     * Save the backup to .systemsculpt/settings-backups, the folder the
+     * backup settings open and restore from
      */
-    private async saveBackupToMultipleLocations(fileName: string, backupData: object): Promise<void> {
-        let saved = false;
+    private async saveBackup(fileName: string, backupData: object): Promise<void> {
+        const backupDir = ".systemsculpt/settings-backups";
         try {
-            const backupDir = ".systemsculpt/settings-backups";
-            try {
-                await this.plugin.app.vault.createFolder(backupDir);
-            } catch {
-                // The write below determines whether this location is usable.
-            }
-            await this.plugin.app.vault.adapter.write(
-                `${backupDir}/${fileName}`, JSON.stringify(backupData, null, 2),
-            );
-            saved = true;
+            await this.plugin.app.vault.createFolder(backupDir);
         } catch {
-            // Still attempt the second independent backup location.
+            // The write below determines whether the folder is usable.
         }
-        if (this.plugin.storage) {
-            try {
-                const result = await this.plugin.storage.writeFile('settings', `backups/${fileName}`, backupData);
-                saved = result.success || saved;
-            } catch {
-                // A successful first copy remains a valid backup.
-            }
-        }
-        if (!saved) throw new Error("Failed to save backup to any location.");
+        await this.plugin.app.vault.adapter.write(
+            `${backupDir}/${fileName}`, JSON.stringify(backupData, null, 2),
+        );
     }
 
     /**
@@ -150,7 +146,7 @@ export class AutomaticBackupService {
             // Clean up from vault root directory
             await this.cleanupVaultRootBackups(cutoffTime);
 
-            // Clean up from vault storage
+            // Prune the copies older versions also wrote to the hidden folder
             await this.cleanupVaultStorageBackups(cutoffTime);
 
         } catch {
@@ -201,7 +197,9 @@ export class AutomaticBackupService {
     }
 
     /**
-     * Clean up old backups from vault storage
+     * Clean up old copies in the hidden .systemsculpt/settings/backups folder.
+     * Nothing writes there any more; settings load still restores from these
+     * copies, and they age out under the same retention.
      */
     private async cleanupVaultStorageBackups(cutoffTime: number): Promise<void> {
         try {

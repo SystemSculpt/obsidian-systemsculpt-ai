@@ -5,11 +5,9 @@ import { attachFolderSuggester } from "../components/FolderSuggester";
 import { beginTextSettings } from "./TextSettings";
 
 const DIRECTORY_SETTING_IDS = {
-    attachmentsDirectory: "workspace.attachments-directory",
     recordingsDirectory: "workspace.recordings-directory",
     chatsDirectory: "workspace.chats-directory",
     extractionsDirectory: "workspace.extractions-directory",
-    savedChatsDirectory: "workspace.saved-chats-directory",
 } as const;
 
 function validateDirectory(path: string): boolean {
@@ -93,24 +91,8 @@ export function displayDirectoriesTabContent(containerEl: HTMLElement, tabInstan
         containerEl,
         tabInstance,
         bindTextSetting,
-        "savedChatsDirectory",
-        "Path relative to vault root (empty = SystemSculpt/Saved Chats)"
-    );
-
-    createDirectorySetting(
-        containerEl,
-        tabInstance,
-        bindTextSetting,
         "recordingsDirectory",
         "Path relative to vault root (empty = SystemSculpt/Recordings)"
-    );
-
-    createDirectorySetting(
-        containerEl,
-        tabInstance,
-        bindTextSetting,
-        "attachmentsDirectory",
-        "Path relative to vault root (empty = Attachments)"
     );
 
     createDirectorySetting(
