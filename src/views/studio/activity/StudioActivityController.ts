@@ -13,6 +13,7 @@ import {
 export type StudioActivityRunSource = Readonly<{
   list: (projectId: string) => ReadonlyArray<StudioActivityAgentRun>;
   subscribe: (listener: (projectId: string) => void) => () => void;
+  isStale: (runId: string) => boolean;
 }>;
 
 export type StudioActivityControllerHost = Readonly<{
@@ -93,6 +94,7 @@ export class StudioActivityController {
       getNodeRunState: (nodeId) => this.host.presentation.getNodeState(nodeId),
       agentRuns: this.runs?.list(project.projectId) ?? [],
       isPlaceholder: (nodeId) => placeholders.has(nodeId),
+      isStaleAgentRun: (runId) => this.runs?.isStale(runId) ?? false,
     });
     return this.snapshot;
   }

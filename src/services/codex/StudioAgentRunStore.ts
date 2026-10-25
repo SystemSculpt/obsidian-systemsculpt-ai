@@ -11,7 +11,10 @@ export type AgentRunMessage = { id: string; from: string; to: string; text: stri
 export type StudioAgentRun = {
   schema: 'studio.agent-run.v1'; id: string; projectId: string; projectPath: string; nodeId: string; title: string;
   workflow?: StudioWorkflow; workflowId?: string; assignmentId?: string; preparationPending?: boolean;
-  parentRunId?: string; owner: string; machine: string; status: AgentRunStatus; createdAt: string; updatedAt: string; finishedAt?: string;
+  parentRunId?: string; owner: string;
+  /** The executing machine: its hostname, shown to people, and its stable device ID, absent on records saved before machines had one. */
+  machine: string; machineId?: string;
+  status: AgentRunStatus; createdAt: string; updatedAt: string; finishedAt?: string;
   threadId: string; turnId: string; request: CodexRequest; result: string; error: string; currentActivity: string;
   activity: CodexActivity[]; messages: AgentRunMessage[]; persistenceError?: string;
 };
@@ -82,7 +85,7 @@ function parseRunRecord(raw: string, projectPath: string, projectId: string): St
   const record: unknown = JSON.parse(raw);
   if (!isRecord(record) || record.schema !== 'studio.agent-run.v1' || record.projectId !== projectId || record.projectPath !== projectPath || !/^agent_[0-9]+_[a-f0-9-]+$/.test(String(record.id)) || !isRecord(record.request) || typeof record.request.prompt !== 'string' || typeof record.request.workingDirectory !== 'string' || !Array.isArray(record.activity) || !Array.isArray(record.messages) || !['queued','running','waiting','completed','failed','stopped','interrupted'].includes(String(record.status))) throw new Error('A saved run record is invalid; it was left unchanged.');
   const stringFields = ['id','projectId','projectPath','nodeId','title','owner','machine','createdAt','updatedAt','threadId','turnId','result','error','currentActivity'];
-  if (stringFields.some(key => typeof record[key] !== 'string') || record.activity.length > 40 || record.messages.length > 100
+  if (stringFields.some(key => typeof record[key] !== 'string') || (record.machineId !== undefined && typeof record.machineId !== 'string') || record.activity.length > 40 || record.messages.length > 100
     || record.activity.some(item => !isRecord(item) || ['id','kind','title','detail','status','at'].some(key => typeof item[key] !== 'string') || !['command','file','tool','plan','message'].includes(String(item.kind)))
     || record.messages.some(item => !isRecord(item) || ['id','from','to','text','at','status'].some(key => typeof item[key] !== 'string') || !['pending','delivered','failed'].includes(String(item.status)))) throw new Error('A saved run has invalid presentation fields; it was left unchanged.');
   if ((record.workflow !== undefined && !validStudioWorkflow(record.workflow)) || ['workflowId','assignmentId'].some(key => record[key] !== undefined && typeof record[key] !== 'string')) throw new Error('Saved workflow state is invalid; it was left unchanged.');
@@ -126,6 +129,17 @@ export class StudioAgentRunStore {
     }
     for (const record of records) this.noteRecord(projectPath, index, record);
     return { records, before: page[0] ?? null, olderRemaining: older.length - page.length };
+  }
+  /** One saved record as it is on disk now, or null when it is gone or unreadable. */
+  async read(projectPath: string, projectId: string, id: string): Promise<StudioAgentRun | null> {
+    const adapter = this.app.vault.adapter, path = `${agentRunFolder(projectPath)}/${id}.json`;
+    try {
+      const stat = await adapter.stat(path);
+      if (!stat || stat.size > 2_000_000) return null;
+      const record = parseRunRecord(await adapter.read(path), projectPath, projectId);
+      this.noteRecord(projectPath, await this.index(projectPath), record);
+      return record;
+    } catch { return null; }
   }
   write(record: StudioAgentRun): Promise<void> {
     const snapshot = JSON.stringify(record);

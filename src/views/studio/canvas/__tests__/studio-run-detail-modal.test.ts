@@ -6,9 +6,9 @@ function fixture() {
   const run = { id: 'run-1', title: 'Scout', projectId: 'p', projectPath: 'Benchmarks/graph.systemsculpt', status: 'completed', currentActivity: 'Completed', request: { prompt: 'Read the registry.', model: 'gpt-6-astra', effort: 'high', serviceTier: 'default' }, machine: 'mac', result: markdown, activity: [{ kind: 'message', title: 'Response', detail: markdown, status: 'completed', at: '2026-09-09' }, { kind: 'command', title: 'Inspect', detail: 'echo **literal**', status: 'completed', at: '2026-09-09' }], messages: [] };
   let listener!: (projectId: string) => void;
   const unsubscribe = jest.fn();
-  const runs = { app: new App(), get: () => run, canControl: () => true, hasRequest: () => false, subscribe: (callback: typeof listener) => { listener = callback; return unsubscribe; } } as any;
+  const runs = { app: new App(), get: () => run, canControl: () => true, hasRequest: () => false, isStale: () => false, canMarkStopped: () => false, subscribe: (callback: typeof listener) => { listener = callback; return unsubscribe; } } as any;
   const modal = new StudioRunDetailModal(runs, run.id); modal.onOpen();
-  return { modal, run, listener: () => listener('p'), unsubscribe };
+  return { modal, run, runs, listener: () => listener('p'), unsubscribe };
 }
 afterEach(() => jest.restoreAllMocks());
 it('opens completed output in Markdown, toggles exact source, and keeps unchanged content stable', async () => {
@@ -41,4 +41,20 @@ it('unloads Markdown components on replacement and close, ignoring late render c
 it('falls back to exact text if the host Markdown renderer fails', async () => {
   jest.spyOn(MarkdownRenderer, 'render').mockRejectedValue(new Error('Render failed')); const f = fixture();
   await Promise.resolve(); await Promise.resolve(); expect(f.modal.modalEl.querySelector('pre')?.textContent).toBe(markdown); f.modal.onClose();
+});
+it('says a stale run went quiet on its machine and offers Mark stopped instead of Stop', () => {
+  jest.spyOn(MarkdownRenderer, 'render').mockResolvedValue(); const f = fixture();
+  Object.assign(f.run, { status: 'running', machine: 'laptop.local', updatedAt: '2026-09-09T10:00:00.000Z' });
+  Object.assign(f.runs, { canControl: () => false, isStale: () => true, canMarkStopped: () => true, markStopped: jest.fn(async () => {}) });
+  f.listener();
+  expect(f.modal.modalEl.querySelector('.ss-studio-run-status')?.textContent).toBe(`Stale · No update from laptop.local since ${new Date('2026-09-09T10:00:00.000Z').toLocaleString()}`);
+  expect(f.modal.modalEl.querySelector('[data-testid="studio.run.stop"]')).toBeNull();
+  const mark = f.modal.modalEl.querySelector<HTMLButtonElement>('[data-testid="studio.run.mark-stopped"]')!;
+  expect(mark.getAttribute('title')).toContain('Only laptop.local can stop it.');
+  mark.click(); expect(f.runs.markStopped).toHaveBeenCalledWith('run-1');
+  // This machine's own active run keeps Stop and never offers Mark stopped.
+  Object.assign(f.runs, { canControl: () => true, isStale: () => false, canMarkStopped: () => false }); f.listener();
+  expect(f.modal.modalEl.querySelector('[data-testid="studio.run.stop"]')).not.toBeNull();
+  expect(f.modal.modalEl.querySelector('[data-testid="studio.run.mark-stopped"]')).toBeNull();
+  f.modal.onClose();
 });

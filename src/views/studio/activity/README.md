@@ -5,7 +5,9 @@ One contract for everything that shows execution on the canvas.
 - StudioActivity.ts — the phase vocabulary (`idle`, `queued`, `active`,
   `waiting`, `done`, `cached`, `failed`, `stopped`) plus pure mappers from
   graph-run state, native Codex runs, and workflow steps. Cable and port
-  phases derive from node phases here too.
+  phases derive from node phases here too. A stale Codex run (another
+  machine's active run whose record stopped changing) is `stopped`, labelled
+  Stale, so it never animates or surges its cables.
 - StudioActivityProjector.ts — `projectStudioActivity` turns the run
   presentation, the graph topology, and Codex run records into one
   snapshot: node → activity, edge → cable phase, port → pin phase. It is
