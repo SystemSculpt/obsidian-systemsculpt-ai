@@ -48,7 +48,7 @@ export function presentAccountConnectOutcome(plugin: SystemSculptPlugin, outcome
 /**
  * The one place a user lands when SystemSculpt AI needs a plan: signed-out
  * users get the sign-in/create-account path, signed-in free accounts get the
- * lifetime/monthly purchase path, and both get a manual-code fallback so the
+ * yearly/monthly purchase path, and both get a manual-code fallback so the
  * flow completes even when the browser cannot deep-link back into Obsidian
  * (common on iOS). A sign-in started here finishes here.
  */
@@ -194,9 +194,9 @@ export class UpgradePlanModal extends StandardModal {
     }
     this.addLink("upgrade-plan.sync", "Already purchased? Sync your license", () => this.beginConnect("sign-in"));
     this.addActionButton(
-      "upgrade-plan.lifetime",
-      "Get lifetime license",
-      () => this.openPurchase(SYSTEMSCULPT_WEBSITE.LIFETIME),
+      "upgrade-plan.yearly",
+      "Subscribe yearly",
+      () => this.openPurchase(SYSTEMSCULPT_WEBSITE.YEARLY),
       true,
       "external-link",
     );

@@ -162,7 +162,7 @@ describe("account connection in the built bundle", () => {
     expect(modals[0].textContent).not.toContain("Welcome");
     expect(modals[0].textContent).not.toContain("Waiting for you to finish in the browser");
     expect(modals[0].textContent).not.toContain("expired");
-    expect(button("upgrade-plan.lifetime").textContent).toContain("Get lifetime license");
+    expect(button("upgrade-plan.yearly").textContent).toContain("Subscribe yearly");
     expect(plugin!.getAccountConnectService().hasPendingRequest()).toBe(false);
   }
 
