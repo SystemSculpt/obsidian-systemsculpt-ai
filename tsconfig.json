@@ -1,6 +1,5 @@
 {
   "compilerOptions": {
-    "baseUrl": ".",
     "inlineSourceMap": true,
     "inlineSources": true,
     "module": "ESNext",
@@ -21,13 +20,15 @@
       "src/types",
       "node_modules/@types"
     ],
+    "types": ["node", "jest"],
     "paths": {
-      "@/*": ["src/*"],
-      "obsidian": ["node_modules/obsidian"]
+      "@/*": ["./src/*"],
+      "obsidian": ["./node_modules/obsidian"]
     },
     "jsx": "react-jsx",
     "lib": [
       "DOM",
+      "DOM.Iterable",
       "ES2018"
     ]
   },
