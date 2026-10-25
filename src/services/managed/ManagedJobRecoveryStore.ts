@@ -15,7 +15,7 @@ export interface ManagedRecoveryAdapter {
   read(path: string): Promise<string>; write(path: string, contents: string): Promise<void>; exists(path: string): Promise<boolean>;
   list(path: string): Promise<string[]>; mkdir(path: string): Promise<void>; rename(from: string, to: string): Promise<void>; remove(path: string): Promise<void>;
 }
-export class ManagedRecoveryError extends Error { constructor(public readonly code: "recovery_unavailable" | "recovery_corrupt" | "invalid_record" | "stale_revision" | "record_mismatch" | "illegal_transition" | "reconciliation_error", message: string) { super(message); this.name = "ManagedRecoveryError"; } }
+class ManagedRecoveryError extends Error { constructor(public readonly code: "recovery_unavailable" | "recovery_corrupt" | "invalid_record" | "stale_revision" | "record_mismatch" | "illegal_transition" | "reconciliation_error", message: string) { super(message); this.name = "ManagedRecoveryError"; } }
 
 type WireStatus = "uploading" | "queued" | "processing" | "succeeded" | "completed" | "failed" | "expired" | "unknown";
 type WriteJournal = { schemaVersion: 1; phase: "prepared" | "original_moved" | "promoted"; capability: ManagedRecoveryCapability; operationId: string; fromRevision: number; toRevision: number };
@@ -25,6 +25,7 @@ const capabilities: ManagedRecoveryCapability[] = ["transcription", "document_pr
 // multipart parts and must report delivery timing after local commit.
 const mediaCapabilities: ManagedRecoveryCapability[] = ["image_generation", "video_generation"];
 const isMediaCapability = (c: ManagedRecoveryCapability): c is "image_generation" | "video_generation" => mediaCapabilities.includes(c);
+/** @internal Tests assert against this value. */
 export const MANAGED_MULTIPART_PART_LIMITS: Readonly<Record<ManagedRecoveryCapability, number>> = { transcription: 50, document_processing: 3, image_generation: 0, video_generation: 0 };
 const phases: ManagedRecoveryPhase[] = ["admitted", "content_ready", "prepare_dispatching", "prepared", "create_dispatching", "created", "part_dispatching", "uploading", "abort_dispatching", "upload_aborted", "complete_dispatching", "upload_completed", "start_dispatching", "processing", "result_ready", "local_commit_pending", "completed", "blocked_ambiguous", "abandoned"];
 const recordKeys = new Set(["schemaVersion", "revision", "capability", "operationId", "source", "jobId", "multipartUpload", "completedParts", "phase", "pendingDispatch", "localCommitReceipt", "mediaDelivery", "createdAt", "updatedAt"]);

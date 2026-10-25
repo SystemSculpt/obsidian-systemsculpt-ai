@@ -1,9 +1,7 @@
 import {
   AGENT_INCIDENT_MAX_DIRECTORY_ENTRIES,
-  AGENT_INCIDENT_MAX_REPORT_BYTES,
   AGENT_INCIDENT_MAX_SCAN_BYTES,
   AGENT_INCIDENT_MAX_SCAN_CANDIDATES,
-  AGENT_INCIDENT_SCHEMA_VERSION,
   AGENT_INCIDENT_STORE_PATH,
   AgentIncidentStore,
   AgentIncidentStoreError,
@@ -17,6 +15,8 @@ import {
 } from "../AgentIncidentRecorder";
 import {
   AGENT_INCIDENT_GROUPING_STRATEGY,
+  AGENT_INCIDENT_MAX_REPORT_BYTES,
+  AGENT_INCIDENT_SCHEMA_VERSION,
   buildAgentIncidentGroupingFingerprint,
   type AgentIncidentExportedFailureCode,
   type AgentIncidentFailureAuthority,

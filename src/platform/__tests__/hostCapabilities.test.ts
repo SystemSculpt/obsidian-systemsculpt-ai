@@ -2,13 +2,28 @@
 
 import { Platform } from "obsidian";
 import {
-  getHostCapabilities,
+  type HostCapability,
+  type HostCapabilityOwner,
   getHostDeviceType,
   getHostOperatingSystem,
   hasHostCapability,
   openLocalFolder,
   resolveElectronModule,
 } from "../hostCapabilities";
+
+const CAPABILITIES: readonly HostCapability[] = [
+  "node-runtime",
+  "local-filesystem",
+  "absolute-paths",
+  "native-file-picker",
+  "file-manager-reveal",
+  "local-cli",
+  "status-bar",
+];
+
+function supportedCapabilities(owner?: HostCapabilityOwner): Set<HostCapability> {
+  return new Set(CAPABILITIES.filter((capability) => hasHostCapability(capability, owner)));
+}
 
 describe("host capabilities", () => {
   const platform = Platform as typeof Platform & {
@@ -81,7 +96,7 @@ describe("host capabilities", () => {
 
     expect(resolveElectronModule()).toBeNull();
     expect(runtimeRequire).not.toHaveBeenCalled();
-    expect(getHostCapabilities()).toEqual(new Set());
+    expect(supportedCapabilities()).toEqual(new Set());
     expect(getHostDeviceType()).toBe("Mobile");
   });
 
@@ -131,7 +146,7 @@ describe("host capabilities", () => {
     expect(resolveElectronModule(ownerWindow.document.body)).toBe(electron);
     expect(hasHostCapability("native-file-picker", ownerWindow)).toBe(true);
     expect(hasHostCapability("file-manager-reveal", ownerWindow.document.body)).toBe(true);
-    expect(getHostCapabilities(ownerWindow)).toEqual(new Set([
+    expect(supportedCapabilities(ownerWindow)).toEqual(new Set([
       "node-runtime",
       "local-filesystem",
       "absolute-paths",

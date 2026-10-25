@@ -58,6 +58,7 @@ export type PlatformResponseDeliveryMode =
  * Obsidian's native request gateway may attempt TLS for a loopback HTTP URL.
  * Direct fetch is both the browser-native transport and the only correct local
  * development path for these exact loopback origins.
+ * @internal Unit-tested directly.
  */
 export function isSafeLoopbackHttpUrl(value: string): boolean {
   try {
@@ -116,6 +117,7 @@ export function platformTransferTimeoutMs(bytes: number): number {
 /**
  * The client stopped waiting at its deadline. The server may still have
  * received and processed the request, exactly as after a dropped connection.
+ * @internal Tests match this error class.
  */
 export class PlatformRequestTimeoutError extends Error {
   readonly name = "TimeoutError";

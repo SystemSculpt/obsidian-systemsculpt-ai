@@ -48,6 +48,7 @@ export type StudioTextNodeMarkdownEditorSnapshot = {
   focused: boolean;
 };
 
+/** @internal Tests type their fixtures with this. */
 export type StudioTextNodeMarkdownEditorHandle = {
   readonly value: string;
   set(value: string): void;

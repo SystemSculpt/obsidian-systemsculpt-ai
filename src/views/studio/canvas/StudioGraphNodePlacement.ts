@@ -6,11 +6,14 @@ import {
   STUDIO_GRAPH_DEFAULT_NODE_WIDTH,
 } from "../../../studio/StudioNodeGeometry";
 
-/** Horizontal breathing room between a selected node and the one added beside it. */
+/**
+ * Horizontal breathing room between a selected node and the one added beside it.
+ * @internal Tests assert against this value.
+ */
 export const STUDIO_NEW_NODE_GAP = 64;
 const MAX_OVERLAP_STEPS = 32;
 
-export type StudioNodeMeasure = (node: StudioNodeInstance) => { width: number; height: number } | null;
+type StudioNodeMeasure = (node: StudioNodeInstance) => { width: number; height: number } | null;
 
 export type StudioNewNodePlacementInput = {
   project: StudioProjectV1;

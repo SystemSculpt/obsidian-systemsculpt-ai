@@ -40,14 +40,6 @@ export function isCurrentLocalEmptyEmbeddingMarker(
     && (vector?.metadata.mtime ?? 0) >= file.stat.mtime;
 }
 
-export function createLocalEmptyEmbeddingMarker(file: TFile, source: string): EmbeddingVector {
-  return createLocalEmptyEmbeddingMarkerForRevision({
-    path: file.path,
-    basename: file.basename,
-    mtime: file.stat?.mtime ?? Date.now(),
-  }, source);
-}
-
 export function createLocalEmptyEmbeddingMarkerForRevision(
   revision: LocalEmptyEmbeddingRevision,
   source: string,

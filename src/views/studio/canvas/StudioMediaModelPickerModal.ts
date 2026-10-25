@@ -44,7 +44,10 @@ function defaultVideoEstimate(model: ManagedVideoModel) {
   });
 }
 
-/** Short price for a trigger chip or card heading. */
+/**
+ * Short price for a trigger chip or card heading.
+ * @internal Unit-tested directly.
+ */
 export function studioMediaModelPriceLabel(model: StudioMediaModelPickerModel): string {
   const estimate = defaultVideoEstimate(model);
   if (!estimate) return "Priced per job";
@@ -56,6 +59,7 @@ export function studioMediaModelPriceLabel(model: StudioMediaModelPickerModel): 
  * selection (durations differ, so a per-clip number would make long-clip
  * models look expensive). Null when the server published no usable estimate;
  * those sort last under either order.
+ * @internal Unit-tested directly.
  */
 export function studioMediaModelPriceKey(model: StudioMediaModelPickerModel): number | null {
   const estimate = defaultVideoEstimate(model);
@@ -69,6 +73,7 @@ function releasedAtMs(model: StudioMediaModelPickerModel): number | null {
   return Number.isNaN(parsed) ? null : parsed;
 }
 
+/** @internal Unit-tested directly. */
 export function sortStudioMediaModels(models: readonly StudioMediaModelPickerModel[], sort: StudioMediaModelSortKey): StudioMediaModelPickerModel[] {
   const list = [...models];
   if (sort === "recommended") return list;
@@ -90,6 +95,7 @@ export function sortStudioMediaModels(models: readonly StudioMediaModelPickerMod
   });
 }
 
+/** @internal Unit-tested directly. */
 export function filterStudioMediaModels(models: readonly StudioMediaModelPickerModel[], query: string): StudioMediaModelPickerModel[] {
   const normalized = query.trim().toLowerCase();
   if (!normalized) return [...models];
@@ -104,7 +110,7 @@ export function filterStudioMediaModels(models: readonly StudioMediaModelPickerM
  * who stars a model is saying it should be the first thing they see. The sort
  * is stable, so the chosen order still decides the run inside each group.
  */
-export function pinFavoriteStudioMediaModels(models: readonly StudioMediaModelPickerModel[], favoriteIds: ReadonlySet<string>): StudioMediaModelPickerModel[] {
+function pinFavoriteStudioMediaModels(models: readonly StudioMediaModelPickerModel[], favoriteIds: ReadonlySet<string>): StudioMediaModelPickerModel[] {
   if (favoriteIds.size === 0) return [...models];
   const favorites = models.filter(model => favoriteIds.has(model.id));
   return favorites.length === 0 ? [...models] : [...favorites, ...models.filter(model => !favoriteIds.has(model.id))];
@@ -130,6 +136,7 @@ function releaseMonthLabel(key: string): string {
  * The release order is the only one where a heading means anything, so it is
  * the only one that gets sections. Favorites lead as their own section rather
  * than inside their month; a model appears exactly once.
+ * @internal Unit-tested directly.
  */
 export function groupStudioMediaModels(models: readonly StudioMediaModelPickerModel[], sort: StudioMediaModelSortKey, favoriteIds: ReadonlySet<string>): StudioMediaModelGroup[] {
   if (sort !== "released") {
@@ -173,7 +180,10 @@ function formatDurationRange(values: readonly number[]): string {
   return `${sorted[0]}–${sorted[sorted.length - 1]}s clips`;
 }
 
-/** Capability tags: what the model takes first, then what it can produce. */
+/**
+ * Capability tags: what the model takes first, then what it can produce.
+ * @internal Unit-tested directly.
+ */
 export function studioMediaModelTags(model: StudioMediaModelPickerModel): string[] {
   const tags = describeStudioMediaModelInputs(model);
   if (model.resolutions.length > 0) tags.push(model.resolutions.join(" · "));

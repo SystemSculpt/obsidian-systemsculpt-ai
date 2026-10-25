@@ -11,7 +11,7 @@ const LEGACY_TEXT_NODE_MODEL_MIGRATION_ID = "studio.pi-text-model-selector.v1";
 const IMAGE_NODE_LEVERS_MIGRATION_ID = "studio.image-node-levers.v1";
 const MANAGED_NODE_CONFIG_MIGRATION_ID = "studio.managed-node-config.v1";
 const RETIRED_HTTP_NODE_MIGRATION_ID = "studio.retire-http-request.v1";
-export const TEXT_NODE_KINDS_MIGRATION_ID = "studio.text-node-kinds.v1";
+const TEXT_NODE_KINDS_MIGRATION_ID = "studio.text-node-kinds.v1";
 
 /**
  * Every migration stamp a born-current project starts with. v2 documents do

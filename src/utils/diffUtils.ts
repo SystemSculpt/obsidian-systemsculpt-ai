@@ -2,8 +2,6 @@
  * Diff utilities for generating git-like diffs
  */
 
-import { App, MarkdownView, TFile } from "obsidian";
-
 export interface DiffLine {
   type: 'added' | 'removed' | 'unchanged';
   content: string;
@@ -399,50 +397,3 @@ function replacedBlock(
     ...newLines.slice(start, newEnd).map((line): DiffOperation => ({ type: 'added', line })),
   ];
 }
-
-/**
- * Check if a file is currently open in any Obsidian workspace leaf
- */
-export function isFileOpen(app: App, filePath: string): boolean {
-  // Check all markdown leaves to see if the file is open
-  const markdownLeaves = app.workspace.getLeavesOfType('markdown');
-  
-  for (const leaf of markdownLeaves) {
-    const view = leaf.view;
-    if (view instanceof MarkdownView && view.file?.path === filePath) {
-      return true;
-    }
-  }
-  
-  return false;
-}
-
-/**
- * Get the content of an open file from the editor (if modified) or from vault
- */
-export async function getFileContent(app: App, filePath: string): Promise<string> {
-  // First try to get from open editor (may have unsaved changes)
-  const markdownLeaves = app.workspace.getLeavesOfType('markdown');
-  
-  for (const leaf of markdownLeaves) {
-    const view = leaf.view;
-    if (view instanceof MarkdownView && view.file?.path === filePath) {
-      // Get content from editor if available
-      if (view.editor && typeof view.editor.getValue === "function") {
-        return view.editor.getValue();
-      }
-    }
-  }
-  
-  // Fallback to reading from vault
-  try {
-    const file = app.vault.getAbstractFileByPath(filePath);
-    if (file instanceof TFile) {
-      return await app.vault.read(file);
-    }
-  } catch {
-    // Fall back to an empty comparison when the vault read fails.
-  }
-  
-  return '';
-} 

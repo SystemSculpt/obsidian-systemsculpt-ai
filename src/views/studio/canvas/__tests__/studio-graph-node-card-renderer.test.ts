@@ -5,6 +5,7 @@ import type { StudioNodeDefinition, StudioNodeInstance } from "../../../../studi
 import type { StudioNodeRunDisplayState } from "../../StudioRunPresentationState";
 import type { StudioNodeActivity } from "../../activity/StudioActivity";
 import { renderStudioGraphNodeCard } from "../StudioGraphNodeCardRenderer";
+import { loadStudioSourceLanguages } from "../StudioSourceEditor";
 import { retiredImageGenerationNode } from "../../../../studio/nodes/retiredImageGenerationNode";
 import { workflowNode } from "../../../../studio/nodes/workflowNode";
 import { EditorView } from "@codemirror/view";
@@ -341,8 +342,11 @@ describe("content-aware Studio cards", () => {
     expect(nodeEl.style.getPropertyValue("--ss-activity-progress")).toBe("0.500");
     expect(nodeEl.querySelector('.ss-studio-node-activity-progress')?.textContent).toBe("50%");
   });
-  it("highlights syntax and treats markup in source as literal text", () => {
+  it("highlights syntax and treats markup in source as literal text", async () => {
     const nodeEl = renderNodeCard({kind:"studio.script", config:{source:'export default () => ({result:"<img src=x onerror=alert(1)>"});'}});
+    // The language packs load on first use, so wait for the highlighted repaint whichever test ran first.
+    await loadStudioSourceLanguages();
+    await Promise.resolve();
     expect(nodeEl.querySelector('.tok-keyword')).not.toBeNull();
     expect(nodeEl.querySelector('img')).toBeNull();
     expect(nodeEl.querySelector('.ss-studio-source-code')?.textContent).toContain('<img');

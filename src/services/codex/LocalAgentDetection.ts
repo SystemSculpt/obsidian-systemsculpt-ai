@@ -186,6 +186,7 @@ export function subscribeLocalAgentDetection(workingDirectory: string | undefine
   };
 }
 
+/** @internal Unit-tested directly. */
 export function invalidateLocalAgentDetection(): void {
   cachedDetections.clear();
 }

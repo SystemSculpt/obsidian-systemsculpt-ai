@@ -41,7 +41,7 @@ export interface EmbeddingsIndicator {
   total?: number;
 }
 
-export interface SearchStats {
+interface SearchStats {
   totalMs: number;
   lexMs?: number;
   semMs?: number;

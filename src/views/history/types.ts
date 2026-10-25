@@ -1,6 +1,6 @@
 import type { TFile, WorkspaceLeaf } from "obsidian";
 
-export type SystemSculptHistoryEntryKind = "chat" | "studio_session";
+type SystemSculptHistoryEntryKind = "chat" | "studio_session";
 
 export type SystemSculptHistoryEntry = {
   id: string;

@@ -11,7 +11,6 @@ import { DOM_ACTIONS } from "./domActions";
 import { SNAPSHOT_AND_WAIT_ACTIONS } from "./snapshotsAndWaits";
 
 export type { ActionContext } from "./actionCore";
-export { DEVELOPMENT_TEST_ROOT } from "./chatDevelopmentState";
 
 /**
  * DOM-level action engine for the E2E test driver.
@@ -21,6 +20,7 @@ export { DEVELOPMENT_TEST_ROOT } from "./chatDevelopmentState";
  * shortcuts, so a scripted run exercises the same code paths as a human.
  * Each area module registers its actions by name; this registry is the only
  * list of what the driver accepts.
+ * @internal Tests assert against this value.
  */
 export const DRIVER_ACTIONS: DriverActionHandlers = {
   ...DOM_ACTIONS,

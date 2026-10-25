@@ -1,7 +1,6 @@
 /** @jest-environment node */
 import {
   API_BASE_URL,
-  IS_DEVELOPMENT_BUILD,
   SYSTEMSCULPT_API_ENDPOINTS,
   SYSTEMSCULPT_API_HEADERS,
 } from "../api";
@@ -13,7 +12,6 @@ describe("managed API constants", () => {
     // enforced by scripts/plugin-build-options.mjs and the artifact gate in
     // scripts/plugin-artifacts.mjs, both covered by test:release-script.
     expect(API_BASE_URL).toBe("https://systemsculpt.com/api/plugin");
-    expect(IS_DEVELOPMENT_BUILD).toBe(false);
   });
 
   it("exposes only current license and credits endpoints", () => {

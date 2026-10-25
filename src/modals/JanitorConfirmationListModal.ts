@@ -2,13 +2,13 @@ import { App, setIcon } from "obsidian";
 import { StandardModal } from "../core/ui/modals/standard/StandardModal";
 import { isAudioFileExtension } from "../constants/fileTypes";
 
-export interface ConfirmationListItem {
+interface ConfirmationListItem {
   path: string;
   icon: string;
   detail?: string;
 }
 
-export interface ConfirmationListGroup {
+interface ConfirmationListGroup {
   title?: string;
   items: readonly ConfirmationListItem[];
   previewLimit?: number;

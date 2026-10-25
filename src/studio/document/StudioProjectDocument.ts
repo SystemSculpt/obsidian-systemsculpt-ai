@@ -72,7 +72,10 @@ export function readStudioProjectFile(raw: string, projectPath: string): {record
   return {record: parsed as Record<string, unknown>, project};
 }
 
-/** An agent revision: the SHA-256 of the canonical document text. */
+/**
+ * An agent revision: the SHA-256 of the canonical document text.
+ * @internal Unit-tested directly.
+ */
 export async function studioDocumentRevision(text: string): Promise<string> {
   return sha256HexFromArrayBuffer(new TextEncoder().encode(text).buffer);
 }

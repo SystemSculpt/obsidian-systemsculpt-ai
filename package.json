@@ -68,7 +68,7 @@
     "check:plugin:fast": "node scripts/check-plugin.mjs --fast",
     "check:types": "tsc --noEmit --skipLibCheck --incremental --tsBuildInfoFile .cache/tsc.check.tsbuildinfo && npm run check:types:tests",
     "check:types:tests": "tsc -p tsconfig.test.json --noEmit --skipLibCheck --incremental --tsBuildInfoFile .cache/tsc.test.tsbuildinfo",
-    "check:knip": "knip --production --include files,dependencies,unlisted,unresolved",
+    "check:knip": "knip --production",
     "check:mobile": "node --test scripts/mobile-compatibility.test.mjs && npm run test:mobile:interactions && npm run build && npm run test:mobile:bundle",
     "check:ci": "npm run check:plugin && npm run check:knip && npm run test:mobile:ci && npm run test:chatview:critical && npm run test:unit:ci && npm run test:embeddings:ci && npm run test:integration:ci",
     "check:compat": "npm run check:plugin:fast -- --skip-lint && npm run test:chatview:compat && npm run test:local-agent:compat && npm run test:integration:ci",

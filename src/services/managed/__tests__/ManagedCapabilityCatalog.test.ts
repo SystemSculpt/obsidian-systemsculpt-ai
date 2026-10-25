@@ -1,7 +1,22 @@
 import admissionFixture from "../../../../testing/fixtures/managed/admission-v1.json";
 import fixture from "../../../../testing/fixtures/managed/managed-capabilities-v2.json";
 import { ManagedCapabilityCatalog } from "../ManagedCapabilityCatalog";
-import type { ManagedAdmissionContract, ManagedCapabilityCatalogContract } from "../ManagedTypes";
+import type { MANAGED_ADMISSION_CONTRACT, ManagedCapabilityCatalogContract, ManagedServerOutcome } from "../ManagedTypes";
+
+/** The shape of testing/fixtures/managed/admission-v1.json, shared with the server. */
+interface ManagedAdmissionContractResponse {
+  status: number; code: ManagedServerOutcome; message: string;
+  reasons?: string[]; retryable?: boolean; grace_eligible?: boolean;
+}
+interface ManagedAdmissionContract {
+  contract_version: typeof MANAGED_ADMISSION_CONTRACT;
+  negotiation_header: { name: "x-systemsculpt-admission-contract"; value: typeof MANAGED_ADMISSION_CONTRACT };
+  responses: Record<ManagedServerOutcome, ManagedAdmissionContractResponse>;
+  required_response_body_fields: string[];
+  required_response_headers: string[];
+  conditional_response_headers: Record<string, ManagedServerOutcome[]>;
+  forbidden_response_fields: string[];
+}
 
 const typedCatalog: ManagedCapabilityCatalogContract = ManagedCapabilityCatalog.parse(fixture);
 const typedAdmission: ManagedAdmissionContract = admissionFixture as ManagedAdmissionContract;

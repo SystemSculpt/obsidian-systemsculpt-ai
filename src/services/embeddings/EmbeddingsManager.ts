@@ -52,7 +52,7 @@ import {
 } from "./SemanticWorkQueue";
 import { resolveVaultExclusions, type VaultExclusions } from "../search/VaultExclusions";
 
-export type EmbeddingsRunStatus = "complete" | "aborted";
+type EmbeddingsRunStatus = "complete" | "aborted";
 
 export interface EmbeddingsRunResult {
   status: EmbeddingsRunStatus;

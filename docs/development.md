@@ -47,12 +47,15 @@ adapters unavailable. It does not launch Android or iOS.
 
 ## Production reachability
 
-`npm run check:knip`, also run by `check:ci`, checks for unused production files
-and dependencies, plus unlisted and unresolved imports, starting at `src/main.ts`.
-It excludes test fixtures and development scripts, which are not plugin entry
-points. Named-export findings are outside this runtime-cleanup gate:
-`npx knip --production` additionally reports the existing unused-export and
-test-only-export backlog tracked in #402. That broader cleanup remains separate.
+`npm run check:knip`, also run by `check:ci`, runs `knip --production` from
+`src/main.ts`: it fails on unused production files, dependencies and exported
+values or types, and on unlisted or unresolved imports. Tests and development
+scripts are not entry points, so an export only a test imports is a finding.
+Delete it with its tests, or stop exporting it when its own file uses it. Keep a
+deliberate test seam (a pure function unit-tested directly, an error class or
+limit a test asserts) with a JSDoc `@internal` tag and a one-line reason, for
+example `/** @internal Unit-tested directly. */`. knip.jsonc exempts
+`src/views/chatview/**` exports until its refactor (#398) lands.
 
 ## Checkpoints
 

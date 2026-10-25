@@ -14,19 +14,19 @@ import { createSurfaceElement, resolveSurfaceDomContext } from "../core/ui/surfa
  * fallback.
  */
 
-export type EmbeddableMarkdownEditorPoint = {
+type EmbeddableMarkdownEditorPoint = {
   x: number;
   y: number;
   /** Exact source offset captured from a rendered Markdown semantic target. */
   sourceOffset?: number;
 };
 
-export type EmbeddableMarkdownEditorSelection = {
+type EmbeddableMarkdownEditorSelection = {
   anchor: number;
   head: number;
 };
 
-export type EmbeddableMarkdownEditorSnapshot = {
+type EmbeddableMarkdownEditorSnapshot = {
   selection: EmbeddableMarkdownEditorSelection;
   scrollTop: number;
   focused: boolean;
@@ -570,10 +570,6 @@ function getEmbeddableMarkdownClass(
   const built = EmbeddableMarkdownSurface as unknown as InternalMarkdownEmbedConstructor;
   embeddableClassByBase.set(Base, built);
   return built;
-}
-
-export function isEmbeddableMarkdownEditorSupported(app: App): boolean {
-  return resolveInternalMarkdownEmbedClass(app) !== null;
 }
 
 export function createEmbeddableMarkdownEditor(

@@ -1,10 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import {
-  createEmbeddableMarkdownEditor,
-  isEmbeddableMarkdownEditorSupported,
-} from "../embeddable-markdown-editor";
+import { createEmbeddableMarkdownEditor } from "../embeddable-markdown-editor";
 
 class FakeNativeMarkdownEditMode {
   editorEl: HTMLElement;
@@ -804,11 +801,5 @@ describe("createEmbeddableMarkdownEditor", () => {
     expect((handle!.editor as { linktext?: string }).linktext).toBe(
       "Projects/Launch.systemsculpt#^text_1"
     );
-  });
-
-  it("reports support based on whether the native markdown embed resolves", () => {
-    const { app } = createFakeApp();
-    expect(isEmbeddableMarkdownEditorSupported(app)).toBe(true);
-    expect(isEmbeddableMarkdownEditorSupported({} as never)).toBe(false);
   });
 });

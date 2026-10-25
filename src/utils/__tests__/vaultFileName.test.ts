@@ -1,10 +1,9 @@
-import {
-  MAX_VAULT_FILE_NAME_BYTES,
-  isSafeVaultFileName,
-  toSafeVaultFileName,
-} from "../vaultFileName";
+import { toSafeVaultFileName } from "../vaultFileName";
 
 const utf8Length = (value: string): number => new TextEncoder().encode(value).byteLength;
+/** True when toSafeVaultFileName would keep this name unchanged. */
+const isSafeVaultFileName = (name: string): boolean =>
+  name.length > 0 && toSafeVaultFileName(name, { fallback: "" }) === name;
 
 describe("toSafeVaultFileName", () => {
   it("keeps names that already work on every device", () => {
@@ -61,7 +60,8 @@ describe("toSafeVaultFileName", () => {
   it("bounds the UTF-8 length without splitting characters or dropping the extension", () => {
     const long = `${"é".repeat(300)}.md`;
     const safe = toSafeVaultFileName(long);
-    expect(utf8Length(safe)).toBeLessThanOrEqual(MAX_VAULT_FILE_NAME_BYTES);
+    // 200 bytes leaves room under the 255-byte filesystem limit for sync suffixes.
+    expect(utf8Length(safe)).toBeLessThanOrEqual(200);
     expect(safe.endsWith(".md")).toBe(true);
     expect(safe).toMatch(/^é+\.md$/);
 

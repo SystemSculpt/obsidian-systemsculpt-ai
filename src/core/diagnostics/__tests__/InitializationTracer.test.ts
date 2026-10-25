@@ -84,41 +84,6 @@ describe("InitializationTracer", () => {
     });
   });
 
-  describe("trackPromise", () => {
-    it("tracks successful promise", async () => {
-      const result = await tracer.trackPromise("test-task", async () => {
-        return "success";
-      });
-
-      expect(result).toBe("success");
-      const doneEntries = logger.entries.filter((e) => e.message === "init:done");
-      expect(doneEntries.length).toBeGreaterThan(0);
-    });
-
-    it("tracks failed promise and rethrows", async () => {
-      const error = new Error("Task failed");
-
-      await expect(
-        tracer.trackPromise("test-task", async () => {
-          throw error;
-        })
-      ).rejects.toThrow("Task failed");
-
-      const failEntries = logger.entries.filter((e) => e.message === "init:fail");
-      expect(failEntries.length).toBeGreaterThan(0);
-    });
-
-    it("passes options to phase", async () => {
-      await tracer.trackPromise(
-        "test-task",
-        async () => "done",
-        { slowThresholdMs: 500, metadata: { custom: true } }
-      );
-
-      expect(logger.entries.length).toBeGreaterThan(0);
-    });
-  });
-
   describe("markMilestone", () => {
     it("logs milestone as info", () => {
       tracer.markMilestone("test-milestone");

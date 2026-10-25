@@ -285,10 +285,3 @@ export function readMobileHostLayout(owner?: MobileLayoutOwner): MobileHostLayou
 export function disposeMobileHostLayoutStates(): void {
   [...controllers.values()].forEach((controller) => controller.dispose());
 }
-
-export const MOBILE_HOST_LAYOUT_CLASSES = Object.freeze({
-  layout: MOBILE_LAYOUT_CLASS,
-  navbarVisible: MOBILE_NAV_VISIBLE_CLASS,
-  navbarHidden: MOBILE_NAV_HIDDEN_CLASS,
-  navbarSuppressed: MOBILE_NAV_SUPPRESSED_CLASS,
-});

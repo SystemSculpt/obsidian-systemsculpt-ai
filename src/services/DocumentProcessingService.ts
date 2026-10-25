@@ -101,6 +101,7 @@ interface NormalizedManagedDocumentResult {
   images: ManagedDocumentDownloadResult["images"] | Record<string, string>;
 }
 
+/** @internal Tests match this error class. */
 export class ManagedDocumentLocalEffectError extends Error {
   readonly code = "local_output_conflict" as const;
   constructor(message: string) {

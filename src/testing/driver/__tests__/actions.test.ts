@@ -8,12 +8,13 @@ import type { ChatMessage } from "../../../types";
 import type { SupportDiagnosticEvent } from "../../../utils/PluginLogger";
 import { canonicalAgentToolInput } from "../../../chat/managed/MutationJournal";
 import {
-  DEVELOPMENT_TEST_ROOT,
   DRIVER_ACTIONS,
   runDriverAction,
   type ActionContext,
 } from "../actions";
 import { CHAT_DEVELOPMENT_STATE_ACTIONS } from "../chatDevelopmentState";
+
+const DEVELOPMENT_TEST_ROOT = "SystemSculpt/Development Tests";
 import { CHAT_TOOL_LIFECYCLE_ACTIONS } from "../chatToolLifecycle";
 import { DIAGNOSTICS_EXPORT_ACTIONS } from "../diagnosticsExports";
 import { DOM_ACTIONS } from "../domActions";

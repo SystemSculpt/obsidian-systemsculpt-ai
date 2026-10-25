@@ -16,11 +16,14 @@ export type StudioWorldRect = Readonly<{ left: number; top: number; right: numbe
 export type StudioWorldExtent = Readonly<{ left: number; top: number; width: number; height: number }>;
 
 /** Largest scroll box per axis (world px). Layout engines cap around 33M px; keep well under that at max zoom. */
-export const STUDIO_WORLD_EXTENT_MAX_SIZE = 2_000_000;
-/** Smallest chunk the extent grows by, so tiny viewports still get real room. */
+const STUDIO_WORLD_EXTENT_MAX_SIZE = 2_000_000;
+/**
+ * Smallest chunk the extent grows by, so tiny viewports still get real room.
+ * @internal Tests assert against this value.
+ */
 export const STUDIO_WORLD_EXTENT_MIN_CHUNK = 1_200;
 
-export function unionWorldRects(a: StudioWorldRect | null, b: StudioWorldRect | null): StudioWorldRect | null {
+function unionWorldRects(a: StudioWorldRect | null, b: StudioWorldRect | null): StudioWorldRect | null {
   if (!a) return b;
   if (!b) return a;
   return {
@@ -31,10 +34,11 @@ export function unionWorldRects(a: StudioWorldRect | null, b: StudioWorldRect | 
   };
 }
 
-export function padWorldRect(rect: StudioWorldRect, padX: number, padY: number): StudioWorldRect {
+function padWorldRect(rect: StudioWorldRect, padX: number, padY: number): StudioWorldRect {
   return { left: rect.left - padX, top: rect.top - padY, right: rect.right + padX, bottom: rect.bottom + padY };
 }
 
+/** @internal Unit-tested directly. */
 export function worldExtentContains(extent: StudioWorldExtent, rect: StudioWorldRect): boolean {
   return (
     rect.left >= extent.left &&
@@ -44,7 +48,7 @@ export function worldExtentContains(extent: StudioWorldExtent, rect: StudioWorld
   );
 }
 
-export function worldExtentToRect(extent: StudioWorldExtent): StudioWorldRect {
+function worldExtentToRect(extent: StudioWorldExtent): StudioWorldRect {
   return { left: extent.left, top: extent.top, right: extent.left + extent.width, bottom: extent.top + extent.height };
 }
 

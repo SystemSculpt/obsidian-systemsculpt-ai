@@ -10,13 +10,18 @@ import { STUDIO_PROJECT_EXTENSION } from "./types";
  * Nothing reads them now. Studio offers once to delete the folders of
  * projects that open in the current format. A folder whose project is missing
  * or fails to open stays as it is.
+ * @internal Tests assert against this value.
  */
 export const STUDIO_LEGACY_PROJECTS_DIR = ".systemsculpt/studio/projects";
-/** The recorded check. It sits beside the folders it covers, so it syncs exactly when they do. */
+/**
+ * The recorded check. It sits beside the folders it covers, so it syncs exactly when they do.
+ * @internal Tests assert against this value.
+ */
 export const STUDIO_LEGACY_CHECK_PATH = ".systemsculpt/studio/legacy-generations-check.json";
 
 type Adapter = Pick<DataAdapter, "exists" | "list" | "stat" | "read" | "write" | "rmdir">;
 type Vault = { adapter: Adapter; getFiles(): ReadonlyArray<{ path: string }> };
+/** @internal Tests type their fixtures with this. */
 export type StudioLegacyGenerationsOffer = Readonly<{ folders: readonly string[]; bytes: number }>;
 export type StudioLegacyGenerationsResult =
   | { status: "none" | "checked" | "unanswered" }
@@ -83,6 +88,7 @@ async function recordCheck(adapter: Adapter, outcome: "deleted" | "kept" | "noth
  * Offer once to delete the legacy folders of projects that open now. `ask`
  * returns true to delete, false to keep, or null when no answer came, which
  * leaves the offer for the next check.
+ * @internal Unit-tested directly.
  */
 export async function checkStudioLegacyGenerations(options: {
   vault: Vault;
@@ -121,17 +127,22 @@ export async function checkStudioLegacyGenerations(options: {
   return { status: "deleted", offer, deletedBytes, failed };
 }
 
-/** Decimal units, as a file manager shows sizes. */
+/**
+ * Decimal units, as a file manager shows sizes.
+ * @internal Unit-tested directly.
+ */
 export function formatStudioLegacyBytes(bytes: number): string {
   if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(1)} GB`;
   if (bytes >= 1e6) return `${Math.round(bytes / 1e6)} MB`;
   return `${Math.max(1, Math.round(bytes / 1e3))} KB`;
 }
 
+/** @internal Unit-tested directly. */
 export function studioLegacyGenerationsOfferMessage(offer: StudioLegacyGenerationsOffer): string {
   return `SystemSculpt Studio no longer uses the project history saved before version 6.10. Delete it to free ${formatStudioLegacyBytes(offer.bytes)}? Your projects stay as they are.`;
 }
 
+/** @internal Unit-tested directly. */
 export function studioLegacyGenerationsResultMessage(result: Extract<StudioLegacyGenerationsResult, { status: "deleted" }>): string {
   const count = result.failed.length;
   if (count === result.offer.folders.length) return `Studio couldn't delete its old project history in ${STUDIO_LEGACY_PROJECTS_DIR}.`;

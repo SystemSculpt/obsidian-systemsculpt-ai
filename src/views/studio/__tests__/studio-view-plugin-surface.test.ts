@@ -1,6 +1,5 @@
 /** @jest-environment jsdom */
 
-import { isPluginSurface } from "../../../core/ui/surface";
 import { SystemSculptStudioView } from "../SystemSculptStudioView";
 
 const renderStudioView = (SystemSculptStudioView as any).prototype.render as (
@@ -98,7 +97,8 @@ describe("SystemSculptStudioView Plugin surface", () => {
 
     const root = contentEl.querySelector<HTMLElement>(".ss-studio-view");
     expect(root).not.toBeNull();
-    expect(isPluginSurface(root!, "view")).toBe(true);
+    expect(root?.classList.contains("ss-surface")).toBe(true);
+    expect(root?.getAttribute("data-ss-surface")).toBe("view");
     expect(root?.contains(geometry)).toBe(true);
     expect(geometry.style.width).toBe("16000px");
     expect(geometry.style.height).toBe("10000px");

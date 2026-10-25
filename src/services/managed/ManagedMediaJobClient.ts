@@ -19,11 +19,12 @@ import type { ManagedUploadedImageInput } from "./ManagedJobClient";
  * (typical_duration_ms). managed-job-protocol-v1 and its client
  * (ManagedJobClient) stay frozen for released artifacts; this sibling client
  * never shares parsing state with it.
+ * @internal Tests assert against this value.
  */
 export const MANAGED_MEDIA_JOB_PROTOCOL = "managed-job-protocol-v2" as const;
 
 export type ManagedMediaKind = "image" | "video";
-export type ManagedMediaJobStatus = "queued" | "processing" | "succeeded" | "failed" | "expired";
+type ManagedMediaJobStatus = "queued" | "processing" | "succeeded" | "failed" | "expired";
 export type ManagedVideoFrameRole = "first_frame" | "last_frame";
 export type ManagedVideoFrameImage = ManagedUploadedImageInput & Readonly<{ role: ManagedVideoFrameRole }>;
 

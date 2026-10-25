@@ -27,6 +27,7 @@ export interface ManagedDocumentStagingTestSeam {
   digest?: (bytes: ArrayBuffer) => Promise<string>;
 }
 
+/** @internal Tests match this error class. */
 export class ManagedDocumentLocalStagingError extends Error {
   constructor(
     public readonly code: "local_staging_corrupt" | "invalid_staging_request",

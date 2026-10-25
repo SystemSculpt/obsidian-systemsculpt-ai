@@ -82,7 +82,7 @@ import {
   MANAGED_EMBEDDINGS_INDEX_VECTOR_ENCODING,
   ManagedEmbeddingsError,
 } from "../embeddings/gateway/ManagedEmbeddingsIndexAdapter";
-import { buildManagedNamespace } from "../embeddings/utils/namespace";
+import { managedNamespace } from "../embeddings/__tests__/support/managedNamespace";
 import { buildVectorId } from "../embeddings/utils/vectorId";
 
 const managedMetadata: ManagedEmbeddingsIndexMetadata = {
@@ -108,7 +108,7 @@ function nonEmptyIndexResult(markdown: string): ManagedEmbeddingsIndexResult {
     generation: {
       id: "semantic-v1",
       indexSchemaVersion: 3,
-      indexNamespace: buildManagedNamespace(3),
+      indexNamespace: managedNamespace(3),
       dimensions: 3,
     },
     chunks: [{
@@ -583,7 +583,7 @@ describe("EmbeddingsManager local empty-note lifecycle", () => {
     releaseResponse?.();
     await processing;
 
-    const storedRoot = mockVectors.get(buildVectorId(buildManagedNamespace(3), state.file.path, 0));
+    const storedRoot = mockVectors.get(buildVectorId(managedNamespace(3), state.file.path, 0));
     expect(storedRoot).toBeUndefined();
     expect(queue.get(state.file.path)).toMatchObject({
       revision: newer.revision,

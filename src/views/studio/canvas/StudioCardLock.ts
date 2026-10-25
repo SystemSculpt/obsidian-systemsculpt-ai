@@ -4,6 +4,7 @@
  * whenever it changes, so a run starting or ending patches a mounted card in
  * place instead of remounting it. A plain boolean is a lock that never
  * changes (tests and one-off surfaces).
+ * @internal Tests type their fixtures with this.
  */
 export type StudioCardLock = {
   readonly locked: boolean;

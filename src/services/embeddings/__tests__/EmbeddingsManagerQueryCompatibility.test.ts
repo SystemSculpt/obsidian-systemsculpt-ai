@@ -4,9 +4,9 @@ import {
   MANAGED_EMBEDDINGS_INDEX_VECTOR_ENCODING,
   type ManagedEmbeddingsIndexQueryResult,
 } from "../gateway/ManagedEmbeddingsIndexAdapter";
-import { buildManagedNamespace } from "../utils/namespace";
+import { managedNamespace } from "./support/managedNamespace";
 
-const committedNamespace = buildManagedNamespace(2, "semantic-v1", 3);
+const committedNamespace = managedNamespace(2, "semantic-v1", 3);
 
 function queryResult(
   generationId: string,
@@ -19,7 +19,7 @@ function queryResult(
     generation: {
       id: generationId,
       indexSchemaVersion: schema,
-      indexNamespace: buildManagedNamespace(vector.length, generationId, schema),
+      indexNamespace: managedNamespace(vector.length, generationId, schema),
       dimensions: vector.length,
     },
     vector,

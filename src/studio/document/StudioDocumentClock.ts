@@ -7,6 +7,7 @@ import { isStudioProseFieldPath, mergeStudioText } from "./StudioTextMerge";
  * empty string is older than every stamp and marks an unknown or pruned time.
  */
 const WALL_DIGITS = 9, COUNTER_DIGITS = 4, MAX_COUNTER = 36 ** COUNTER_DIGITS - 1;
+/** @internal Tests assert against this value. */
 export const STUDIO_MERGE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const MAX_TOMBSTONES = 1000, MAX_FUTURE_MS = 24 * 60 * 60 * 1000;
 const NESTED_FIELDS = new Set(["config", "nodes", "shapes"]);
@@ -16,6 +17,7 @@ const STAMP_PATTERN = new RegExp(`^${STAMP}$`);
 /** A field's stamp and, after "/", the common-base stamp before its local edit sequence. */
 const FIELD_STAMP_PATTERN = new RegExp(`^${STAMP}(/${STAMP})?$`);
 
+/** @internal Unit-tested directly. */
 export function studioStamp(wall: number, counter = 0, device = ""): string {
   return `${Math.max(0, Math.floor(wall)).toString(36).padStart(WALL_DIGITS, "0")}${counter.toString(36).padStart(COUNTER_DIGITS, "0")}${device}`;
 }
@@ -51,7 +53,7 @@ export class StudioHybridClock {
  * fields, each as "stamp" or "stamp/replaced", where `replaced` stamps the
  * value that change replaced.
  */
-export type StudioEntityStamps = Record<string, string | Record<string, string>>;
+type StudioEntityStamps = Record<string, string | Record<string, string>>;
 export type StudioDocumentClockState = {
   stamps: Record<string, StudioEntityStamps>;
   /** Entity key to deletion stamp. */
@@ -352,5 +354,3 @@ export function mergeStudioExternalEntities(options: {
   }
   return {entities: canonical(merged) === canonical(incoming) ? null : merged, kept, dropped};
 }
-
-export { canonical as canonicalStudioEntities };

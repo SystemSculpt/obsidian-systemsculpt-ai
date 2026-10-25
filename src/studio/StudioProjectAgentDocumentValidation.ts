@@ -949,28 +949,3 @@ export function assertStableStudioProjectAgentDocumentFieldsUnchanged(
     throw new Error("schema may only move from studio.project.v1 to studio.project.v2.");
   }
 }
-
-/**
- * Generated authoring references describe the current plugin rather than the
- * user's canvas. Persistence uses this signal to refresh only those blocks
- * when an older valid project file is restored over a newer generation. A
- * schema mismatch always reports stale so the store rewrites the canonical
- * dialect.
- */
-export function studioProjectGeneratedFieldsMatch(
-  document: unknown,
-  previousDocument: unknown
-): boolean {
-  if (!isRecord(document) || !isRecord(previousDocument)) {
-    return false;
-  }
-  if (document.schema !== previousDocument.schema) {
-    return false;
-  }
-  if (document.schema === PROJECT_SCHEMA_V2) {
-    return stableJson(document.docs) === stableJson(previousDocument.docs);
-  }
-  return GENERATED_PROJECT_FIELDS.every(
-    (field) => stableJson(document[field]) === stableJson(previousDocument[field])
-  );
-}

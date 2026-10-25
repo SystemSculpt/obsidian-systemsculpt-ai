@@ -1,8 +1,6 @@
 import { registerBuiltInStudioNodes } from "../StudioBuiltInNodes";
 import {
-  getUnknownNodeConfigKeys,
   mergeNodeConfigWithDefaults,
-  rebuildConfigWithUnknownKeys,
   validateNodeConfig,
 } from "../StudioNodeConfigValidation";
 import { StudioNodeRegistry } from "../StudioNodeRegistry";
@@ -63,7 +61,7 @@ describe("Studio node config validation", () => {
     expect(result.errors).toHaveLength(0);
   });
 
-  it("preserves unknown keys while rebuilding config", () => {
+  it("preserves unknown keys while merging defaults", () => {
     const registry = registryWithBuiltIns();
     const definition = registry.get("studio.text_generation", "1.0.0");
     expect(definition).not.toBeNull();
@@ -75,18 +73,7 @@ describe("Studio node config validation", () => {
 
     const merged = mergeNodeConfigWithDefaults(definition!, baseConfig);
     expect(merged.modelId).toBe("openai/gpt-5-mini");
-
-    const unknown = getUnknownNodeConfigKeys(definition!, baseConfig);
-    expect(unknown.custom_internal_key).toBe("keep-me");
-
-    const rebuilt = rebuildConfigWithUnknownKeys(definition!, baseConfig, {
-      custom_internal_key: "still-here",
-      next_unknown: 42,
-    });
-
-    expect(rebuilt).not.toHaveProperty("modelId");
-    expect(rebuilt.custom_internal_key).toBe("still-here");
-    expect(rebuilt.next_unknown).toBe(42);
+    expect(merged.custom_internal_key).toBe("keep-me");
   });
 
   it("validates media ingest source path field types", () => {

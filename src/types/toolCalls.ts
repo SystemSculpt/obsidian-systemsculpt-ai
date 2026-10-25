@@ -8,7 +8,7 @@ import type { AgentApprovalDecision, NativeToolMetadata } from '../chat/ChatConv
 /**
  * Represents the state of a tool call throughout its lifecycle
  */
-export type ToolCallState = 
+type ToolCallState = 
   | 'executing'    // Tool is currently executing
   | 'completed'    // Tool execution completed successfully
   | 'failed';      // Tool execution failed
@@ -30,10 +30,6 @@ export interface ToolCallRequest {
 /**
  * Tool execution result
  */
-export type ToolCancellationErrorCode =
-  | 'TOOL_CANCELLED_BEFORE_START'
-  | 'TOOL_CANCEL_REQUESTED_OUTCOME_UNKNOWN';
-
 export interface ToolCallResult {
   success: boolean;
   data?: unknown;

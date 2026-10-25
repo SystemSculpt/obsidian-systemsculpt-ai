@@ -1,17 +1,17 @@
-export type SemanticIndexPhase =
+type SemanticIndexPhase =
   | "initializing"
   | "idle"
   | "reconciling"
   | "paused"
   | "error";
 
-export interface SemanticIndexGenerationSnapshot {
+interface SemanticIndexGenerationSnapshot {
   id: string;
   namespace: string;
   dimensions: number;
 }
 
-export interface SemanticIndexFailureSnapshot {
+interface SemanticIndexFailureSnapshot {
   code: string;
   message: string;
 }
@@ -29,7 +29,7 @@ export interface SemanticIndexSnapshot {
   updatedAt: number;
 }
 
-export type SemanticIndexFileState =
+type SemanticIndexFileState =
   | "ready"
   | "stale"
   | "missing"

@@ -101,11 +101,3 @@ export function planStudioRun(
     providedNodeIds: nodes.filter((node) => provided.has(node.id)).map((node) => node.id),
   };
 }
-
-/** Legacy shape: the entry nodes plus every upstream ancestor, all executable. */
-export function scopeProjectForRun(
-  project: StudioProjectV1,
-  entryNodeIds?: string[]
-): StudioProjectV1 {
-  return planStudioRun(project, entryNodeIds, () => "by_inputs").project;
-}

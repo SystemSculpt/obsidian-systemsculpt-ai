@@ -10,7 +10,7 @@
 
 export const TEST_DRIVER_MARKER = "SystemSculptTestDriver/v1";
 
-export const TEST_DRIVER_PROTOCOL_VERSION = 1;
+const TEST_DRIVER_PROTOCOL_VERSION = 1;
 
 /** Handshake file name inside `<configDir>/plugins/<plugin-id>/`. */
 export const TEST_DRIVER_HANDSHAKE_FILE = "e2e-driver.json";
@@ -19,7 +19,7 @@ export const TEST_DRIVER_HANDSHAKE_FILE = "e2e-driver.json";
 export const TEST_DRIVER_POLL_INTERVAL_MS = 1000;
 
 /** Handshake files older than this are ignored as stale. */
-export const TEST_DRIVER_HANDSHAKE_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+const TEST_DRIVER_HANDSHAKE_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 
 export interface TestDriverHandshake {
   version: number;
@@ -48,6 +48,7 @@ export interface TestDriverActionRequest {
   params?: Record<string, unknown>;
 }
 
+/** @internal scripts/e2e/driver-session.mjs types its cancel message with it. */
 export interface TestDriverActionCancel {
   type: "cancel";
   id: number;

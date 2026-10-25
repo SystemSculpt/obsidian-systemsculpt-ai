@@ -6,9 +6,9 @@ import {
 } from "../core/ui/surface";
 import { isMobileLayout } from "../platform/mobileLayout";
 
-export type HoverShellActionVariant = "default" | "primary" | "danger";
+type HoverShellActionVariant = "default" | "primary" | "danger";
 
-export interface HoverShellAction {
+interface HoverShellAction {
   id: string;
   label: string;
   icon?: string;
@@ -18,7 +18,7 @@ export interface HoverShellAction {
   onClick: () => void;
 }
 
-export interface HoverShellPosition {
+interface HoverShellPosition {
   top?: string;
   right?: string;
   bottom?: string;

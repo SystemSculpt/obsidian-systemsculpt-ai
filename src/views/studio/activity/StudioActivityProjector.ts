@@ -13,7 +13,7 @@ import {
   type StudioPortActivityPhase,
 } from "./StudioActivity";
 
-export type StudioActivityGraph = Readonly<{
+type StudioActivityGraph = Readonly<{
   nodes: ReadonlyArray<Readonly<{ id: string; kind: string }>>;
   edges: ReadonlyArray<
     Readonly<{ id: string; fromNodeId: string; fromPortId: string; toNodeId: string; toPortId: string }>
@@ -41,6 +41,7 @@ export type StudioActivityProjectionInput = Readonly<{
   isStaleAgentRun?: (runId: string) => boolean;
 }>;
 
+/** @internal Unit-tested directly. */
 export function portActivityKey(nodeId: string, direction: "in" | "out", portId: string): string {
   return `${nodeId}:${direction}:${portId}`;
 }

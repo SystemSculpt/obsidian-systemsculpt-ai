@@ -2,10 +2,7 @@ import {
   PlatformRequestClient,
   type PlatformRequestInput,
 } from "../../PlatformRequestClient";
-import {
-  canRunVideoGeneration,
-  getVideoGenerationAvailability,
-} from "../VideoGenerationAvailability";
+import { getVideoGenerationAvailability } from "../VideoGenerationAvailability";
 
 class QueueClient extends PlatformRequestClient {
   readonly inputs: PlatformRequestInput[] = [];
@@ -89,20 +86,20 @@ describe("VideoGenerationAvailability", () => {
       headers: { "Content-Type": "application/json" },
     }));
 
-    await expect(canRunVideoGeneration(createPlugin(), {
+    await expect(getVideoGenerationAvailability(createPlugin(), {
       requestClient,
       baseUrl: "https://systemsculpt.test/api/plugin",
-    })).resolves.toBe(true);
-    await expect(canRunVideoGeneration(createPlugin(), {
+    })).resolves.toMatchObject({ canOpen: true });
+    await expect(getVideoGenerationAvailability(createPlugin(), {
       requestClient,
       baseUrl: "https://systemsculpt.test/api/plugin",
       now: () => 5 * 60_000 + 1,
-    })).resolves.toBe(true);
-    await expect(canRunVideoGeneration(createPlugin(), {
+    })).resolves.toMatchObject({ canOpen: true });
+    await expect(getVideoGenerationAvailability(createPlugin(), {
       requestClient,
       baseUrl: "https://systemsculpt.test/api/plugin",
       now: () => 10 * 60_000 + 2,
-    })).resolves.toBe(true);
+    })).resolves.toMatchObject({ canOpen: true });
   });
 
   it("caches the last decision for five minutes to avoid repeated config probes", async () => {
@@ -119,24 +116,24 @@ describe("VideoGenerationAvailability", () => {
       capabilities: { hosted_videos: true },
     }));
 
-    await expect(canRunVideoGeneration(plugin, {
+    await expect(getVideoGenerationAvailability(plugin, {
       requestClient,
       baseUrl: "https://systemsculpt.test/api/plugin",
       now: () => currentTime,
-    })).resolves.toBe(false);
-    await expect(canRunVideoGeneration(plugin, {
+    })).resolves.toMatchObject({ canOpen: false });
+    await expect(getVideoGenerationAvailability(plugin, {
       requestClient,
       baseUrl: "https://systemsculpt.test/api/plugin",
       now: () => currentTime + (5 * 60_000) - 1,
-    })).resolves.toBe(false);
+    })).resolves.toMatchObject({ canOpen: false });
     expect(requestClient.inputs).toHaveLength(1);
 
     currentTime += (5 * 60_000) + 1;
-    await expect(canRunVideoGeneration(plugin, {
+    await expect(getVideoGenerationAvailability(plugin, {
       requestClient,
       baseUrl: "https://systemsculpt.test/api/plugin",
       now: () => currentTime,
-    })).resolves.toBe(true);
+    })).resolves.toMatchObject({ canOpen: true });
     expect(requestClient.inputs).toHaveLength(2);
   });
 });

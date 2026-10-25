@@ -11,10 +11,10 @@
  */
 import {
   AgentSession,
-  type AgentAuthoritativeEvent,
   type AgentConnectionPort,
   type AgentConnectionState,
 } from "../../src/chat/managed/AuthoritativeSession";
+import type { AgentServerEvent } from "../../src/chat/managed/Protocol";
 
 type Message = Readonly<{
   id: string;
@@ -38,7 +38,7 @@ function isMessage(value: unknown): value is Message {
 
 class BenchConnection implements AgentConnectionPort {
   public state: AgentConnectionState = "open";
-  private listener: ((frame: AgentAuthoritativeEvent) => void) | null = null;
+  private listener: ((frame: AgentServerEvent) => void) | null = null;
 
   public readonly sendSubmit = async (): Promise<void> => undefined;
   public readonly sendToolResult = async (): Promise<void> => undefined;
@@ -46,7 +46,7 @@ class BenchConnection implements AgentConnectionPort {
   public readonly sendCancel = async (): Promise<void> => undefined;
 
   public addAuthoritativeFrameListener(
-    listener: (frame: AgentAuthoritativeEvent) => void,
+    listener: (frame: AgentServerEvent) => void,
   ): () => void {
     this.listener = listener;
     return () => {
@@ -59,7 +59,7 @@ class BenchConnection implements AgentConnectionPort {
   }
 
   public emit(frame: unknown): void {
-    this.listener?.(frame as AgentAuthoritativeEvent);
+    this.listener?.(frame as AgentServerEvent);
   }
 }
 

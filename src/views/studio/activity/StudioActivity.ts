@@ -22,17 +22,6 @@ export type StudioActivityPhase =
   | "failed"
   | "stopped";
 
-export const STUDIO_ACTIVITY_PHASES: readonly StudioActivityPhase[] = [
-  "idle",
-  "queued",
-  "active",
-  "waiting",
-  "done",
-  "cached",
-  "failed",
-  "stopped",
-];
-
 /** Cable state derived from the node that feeds it. */
 export type StudioEdgeActivityPhase = "idle" | "surging" | "delivered" | "failed";
 
@@ -49,6 +38,7 @@ export type StudioNodeActivity = Readonly<{
   progress: number | null;
 }>;
 
+/** @internal Tests assert against this value. */
 export const IDLE_NODE_ACTIVITY: StudioNodeActivity = Object.freeze({
   phase: "idle",
   label: "Idle",

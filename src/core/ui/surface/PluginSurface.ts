@@ -30,15 +30,3 @@ export function applyPluginSurface(
   root.setAttribute(SURFACE_ATTRIBUTE, kind);
   ensureMobileHostLayoutState(root);
 }
-
-export function isPluginSurface(
-  root: Element,
-  kind?: PluginSurfaceKind,
-): boolean {
-  if (!root.classList.contains(SURFACE_CLASS)) {
-    return false;
-  }
-
-  const mountedKind = root.getAttribute(SURFACE_ATTRIBUTE);
-  return kind ? mountedKind === kind : mountedKind !== null;
-}

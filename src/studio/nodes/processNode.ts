@@ -24,7 +24,7 @@ import { isRecord } from '../utils'
 import { validateNodeConfig } from '../StudioNodeConfigValidation'
 import { getText, inferMimeTypeFromPath } from './shared'
 
-export const STUDIO_PROCESS_KIND = 'studio.process' as const
+const STUDIO_PROCESS_KIND = 'studio.process' as const
 
 const PROCESS_INPUT_SCHEMA = 'studio.process.inputs.v1'
 const PROCESS_OUTPUT_SCHEMA = 'studio.process.outputs.v1'
@@ -39,13 +39,13 @@ const ARGUMENT_TEMPLATE = new RegExp(
   'g'
 )
 
-export type StudioProcessPortConfig = {
+type StudioProcessPortConfig = {
   id: string
   type: StudioPortDataType
   required: boolean
 }
 
-export function readStudioProcessPorts(
+function readStudioProcessPorts(
   value: StudioJsonValue | undefined,
   direction: 'input' | 'output'
 ): StudioProcessPortConfig[] {

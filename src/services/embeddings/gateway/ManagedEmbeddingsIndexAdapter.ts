@@ -40,6 +40,7 @@ export const MANAGED_EMBEDDINGS_INDEX_CONTRACT = "managed-embeddings-index-v1" a
 export const MANAGED_EMBEDDINGS_INDEX_MAX_SOURCE_BYTES = 8 * 1024 * 1024;
 export const MANAGED_EMBEDDINGS_INDEX_MAX_RESULT_BYTES = 16 * 1024 * 1024;
 export const MANAGED_EMBEDDINGS_INDEX_MAX_JSON_BYTES = 64 * 1024;
+/** @internal Tests assert against this value. */
 export const MANAGED_EMBEDDINGS_INDEX_VECTOR_ENCODING = "float32-le-base64" as const;
 
 const MANAGED_EMBEDDINGS_INDEX_MAX_QUERY_BYTES = 16 * 1024;
@@ -78,7 +79,7 @@ type ManagedEmbeddingsErrorPayload = Readonly<{
   creditsRemaining?: number;
 }>;
 
-export type ManagedEmbeddingsIndexSource = Readonly<{
+type ManagedEmbeddingsIndexSource = Readonly<{
   markdown: string;
 }>;
 
@@ -94,7 +95,7 @@ export type ManagedEmbeddingsIndexGeneration = Readonly<{
   dimensions: number;
 }>;
 
-export type ManagedEmbeddingsIndexChunk = Readonly<{
+type ManagedEmbeddingsIndexChunk = Readonly<{
   ordinal: number;
   textHash: string;
   headingPath: readonly string[];

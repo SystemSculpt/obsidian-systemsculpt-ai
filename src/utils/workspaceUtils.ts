@@ -8,6 +8,7 @@ import { App, normalizePath, WorkspaceLeaf, TFile } from 'obsidian';
  * @param app The application instance.
  * @param path The normalized path of the file to find.
  * @returns The WorkspaceLeaf if found, otherwise null.
+ * @internal Unit-tested directly.
  */
 export function findLeafByPath(app: App, path: string): WorkspaceLeaf | null {
   const matchingLeaves: WorkspaceLeaf[] = [];

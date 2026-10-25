@@ -26,15 +26,18 @@ type MutationJournalAdapter = Pick<DataAdapter, "exists" | "read" | "write" | "m
 const KEYED_RECORD_VERSION = 1;
 const LEGACY_MIGRATION_MARKER = "_legacy-v2-migrated.json";
 const RECORD_FILE_NAME = /^[a-f0-9]{64}\.json$/;
+/** @internal Tests assert against this value. */
 export const MAX_LEGACY_JOURNAL_CHARACTERS = 4 * 1024 * 1024;
-export const MAX_LEGACY_JOURNAL_BYTES = 4 * 1024 * 1024;
+const MAX_LEGACY_JOURNAL_BYTES = 4 * 1024 * 1024;
+/** @internal Tests assert against this value. */
 export const MAX_LEGACY_JOURNAL_RECORDS = 10_000;
 /**
  * A receipt only matters while the server may still ask for its tool call
  * again after a reconnect, which is minutes, not weeks.
+ * @internal Tests assert against this value.
  */
 export const MUTATION_RECEIPT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
-export const MAX_RETAINED_MUTATION_RECEIPTS = 5_000;
+const MAX_RETAINED_MUTATION_RECEIPTS = 5_000;
 /** The size bound only removes completed receipts, and never one from the last day. */
 const MIN_TRIMMED_RECEIPT_AGE_MS = 24 * 60 * 60 * 1000;
 /** Cleanup yields to claims between batches. */

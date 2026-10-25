@@ -96,7 +96,7 @@ export function createUnavailableAttachmentPart(name: string, mimeType: string):
   });
 }
 
-export function createImageAttachmentPart(mimeType: string, bytes: Uint8Array): MultiPartContent {
+function createImageAttachmentPart(mimeType: string, bytes: Uint8Array): MultiPartContent {
   return Object.freeze({
     type: "image_url" as const,
     image_url: Object.freeze({ url: `data:${mimeType};base64,${bytesToBase64(bytes)}` }),
@@ -117,7 +117,7 @@ export function parseImageDataUrl(url: string): Readonly<{ mimeType: string; byt
   return Object.freeze({ mimeType: match[1], bytes });
 }
 
-export function attachmentPartPayloadBytes(part: MultiPartContent): Uint8Array | null {
+function attachmentPartPayloadBytes(part: MultiPartContent): Uint8Array | null {
   if (part.type === "image_url") {
     return parseImageDataUrl(part.image_url.url)?.bytes ?? null;
   }

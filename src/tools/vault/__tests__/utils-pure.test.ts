@@ -9,8 +9,8 @@ import {
   runWithConcurrency,
   createLineCalculator,
   wouldExceedCharLimit,
-  fuzzyMatchScore,
 } from "../utils";
+import { fuzzyMatchScore } from "../searchUtils";
 import { desktopHost } from "../../../platform/desktopOnly";
 
 beforeEach(() => {

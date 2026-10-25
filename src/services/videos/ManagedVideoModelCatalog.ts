@@ -113,6 +113,7 @@ function parseModel(raw: unknown, ids: Set<string>): ManagedVideoModel | null {
  * fields are ignored. Models the server marks unbillable are dropped, and a
  * model whose entry does not parse is skipped rather than blanking the whole
  * picker; only a wrong contract or a duplicate identity rejects the catalog.
+ * @internal Unit-tested directly.
  */
 export function parseManagedVideoModelCatalog(value: unknown): ManagedVideoModelCatalogSnapshot {
   const body = record(value);

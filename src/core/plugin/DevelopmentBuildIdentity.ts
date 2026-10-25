@@ -1,6 +1,6 @@
 import type { PluginManifest } from "obsidian";
 
-export const DEVELOPMENT_BUILD_MANIFEST_KEY = "systemsculptDevBuild" as const;
+const DEVELOPMENT_BUILD_MANIFEST_KEY = "systemsculptDevBuild" as const;
 
 export type DevelopmentBuildIdentity = Readonly<{
   schemaVersion: 1;
