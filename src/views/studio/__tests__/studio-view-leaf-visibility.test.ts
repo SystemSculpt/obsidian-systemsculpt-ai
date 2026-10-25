@@ -60,7 +60,7 @@ async function fixture(initiallyHidden = false, pendingLoad?: Promise<void>) {
     get: (id: string) => records.find(run => run.id === id),
     subscribe: (listener: (projectId: string) => void) => { listeners.add(listener); return () => listeners.delete(listener); },
     load: jest.fn(async () => { await pendingLoad; }), hasOlder: () => false, isCapped: () => false,
-    canControl: () => true, hasRequest: () => false,
+    canControl: () => true, hasRequest: () => false, isStale: () => false, canMarkStopped: () => false,
   };
   const service = {
     subscribeRunEvents: (listener: Parameters<StudioRunObserver["subscribe"]>[0]) => observer.subscribe(listener),

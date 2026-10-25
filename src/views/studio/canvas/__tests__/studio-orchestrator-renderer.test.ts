@@ -4,11 +4,11 @@ import { StudioPresentation } from '../../StudioPresentation';
 import { hasHostCapability } from '../../../../platform/hostCapabilities';
 import { createStudioWorkflow } from '../../../../services/codex/StudioWorkflow';
 jest.mock('../../../../platform/hostCapabilities', () => ({ hasHostCapability: jest.fn(() => true) }));
-jest.mock('../StudioRunDetailModal', () => ({ StudioRunDetailModal: jest.fn(() => ({ open: jest.fn() })) }));
+jest.mock('../StudioRunDetailModal', () => ({ StudioRunDetailModal: jest.fn(() => ({ open: jest.fn() })), markStoppedHint: (machine: string) => `Only ${machine} can stop it.` }));
 function fixture(presentation?: StudioPresentation) {
   const record = { id: 'root', nodeId: 'center', title: 'Orchestrator', status: 'running', currentActivity: 'Planning', workflow: createStudioWorkflow('Verify a local branch') };
   let listener!: (id: string) => void;
-  const runs: any = { list: () => [record], get: () => record, canControl: () => true, hasRequest: () => false, subscribe: (fn: any) => { listener = fn; return jest.fn(); }, load: async () => {}, startWorkflow: jest.fn(async () => record), send: jest.fn(async () => ({ status: 'delivered' })), stop: jest.fn() };
+  const runs: any = { list: () => [record], get: () => record, canControl: () => true, hasRequest: () => false, isStale: () => false, canMarkStopped: () => false, subscribe: (fn: any) => { listener = fn; return jest.fn(); }, load: async () => {}, startWorkflow: jest.fn(async () => record), send: jest.fn(async () => ({ status: 'delivered' })), stop: jest.fn() };
   const root = document.createElement('div');
   const dispose = renderStudioOrchestrator(root, { runs, presentation, projectId: 'p', projectPath: 'p.systemsculpt', centerId: 'center', execution: () => () => {} });
   return { root, runs, record, update: () => listener('p'), dispose };
@@ -58,4 +58,16 @@ it('shows saved plans on mobile without a desktop launch control', () => {
   expect(root.querySelector('[data-testid="studio.workflow.prompt"]')).toBeNull();
   expect(root.querySelector('[data-testid="studio.workflow.start"]')).toBeNull();
   expect(root.textContent).toContain('Verify a local branch'); dispose();
+});
+it("offers Mark stopped, not Stop, for another machine's workflow and shows it stale without motion", async () => {
+  const { root, runs, update, dispose } = fixture();
+  await Promise.resolve();
+  const stop = root.querySelector<HTMLButtonElement>('[data-testid="studio.workflow.stop"]')!, mark = root.querySelector<HTMLButtonElement>('[data-testid="studio.workflow.mark-stopped"]')!;
+  expect(stop.hidden).toBe(false); expect(mark.hidden).toBe(true);
+  Object.assign(runs, { canControl: () => false, isStale: () => true, canMarkStopped: () => true, markStopped: jest.fn() }); update();
+  expect(stop.hidden).toBe(true); expect(mark.hidden).toBe(false);
+  const card = root.querySelector<HTMLElement>('.ss-studio-workflow-card')!;
+  expect(card.dataset.activity).toBe('stopped'); expect(card.querySelector('.ss-studio-workflow-status')?.textContent).toBe('Stale');
+  mark.click(); expect(runs.markStopped).toHaveBeenCalledWith('root');
+  dispose();
 });
