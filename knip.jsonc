@@ -1,0 +1,9 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": ["src/main.ts!"],
+  "project": ["src/**/*.ts!", "!src/**/__tests__/**", "!src/tests/**"],
+  // The chat view's exports wait for its refactor (#398), which owns that tree.
+  "ignoreIssues": {
+    "src/views/chatview/**": ["exports", "types"]
+  }
+}
