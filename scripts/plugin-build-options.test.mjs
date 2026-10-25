@@ -263,6 +263,47 @@ test("full driver and release bundles enforce the executable provenance boundary
   });
 });
 
+// Modules a module evaluates with it: static imports, transitively. An import()
+// target is wrapped by esbuild and evaluated only when that call first runs.
+function evaluatedWith(metafile, entry) {
+  const evaluated = new Set();
+  const pending = [entry];
+  while (pending.length > 0) {
+    const file = pending.pop();
+    if (evaluated.has(file)) continue;
+    evaluated.add(file);
+    for (const dependency of metafile.inputs[file]?.imports ?? []) {
+      if (!dependency.external && dependency.kind !== "dynamic-import") pending.push(dependency.path);
+    }
+  }
+  return evaluated;
+}
+
+test("plugin load evaluates no Studio view code, and Studio loads its language packs only for source", async () => {
+  const { metafile } = await esbuild.build(createPluginBuildOptions({
+    write: false,
+    overrides: { metafile: true },
+  }));
+  const studioView = "src/views/studio/SystemSculptStudioView.ts";
+  const languagePacks = /^node_modules\/(@codemirror\/lang-|@lezer\/(javascript|json|yaml|markdown|html|css)\/)/;
+  const atLoad = evaluatedWith(metafile, "src/main.ts");
+  const atStudioOpen = evaluatedWith(metafile, studioView);
+
+  assert.ok(metafile.inputs[studioView], "the bundle must still contain the Studio view");
+  assert.equal(atLoad.has(studioView), false, `${studioView} must be reached only through import()`);
+  assert.deepEqual([...atLoad].filter((file) => file.startsWith("src/views/studio/canvas/StudioSource")), []);
+  assert.deepEqual([...atLoad].filter((file) => file.startsWith("node_modules/@codemirror/lang-")), []);
+  assert.deepEqual(
+    [...atStudioOpen].filter((file) => languagePacks.test(file) && !atLoad.has(file)),
+    [],
+    "Studio's editor language packs load with the first source card, not with the view",
+  );
+  assert.ok(
+    [...evaluatedWith(metafile, "src/views/studio/canvas/StudioSourceLanguages.ts")].some((file) => languagePacks.test(file)),
+    "the source editor still bundles its language packs",
+  );
+});
+
 test("named build targets select fixed release and development routes", () => {
   assert.deepEqual(resolvePluginBuildTarget("production"), {
     name: "production",

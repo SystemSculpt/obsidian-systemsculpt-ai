@@ -73,6 +73,12 @@ describe("CommandManager studio fit-selection command", () => {
     expect(fitCommand.checkCallback(true)).toBe(false);
   });
 
+  it("is unavailable while the active Studio tab is still loading its canvas", () => {
+    const { fitCommand, overviewCommand } = registerStudioViewportCommands({ getState: () => ({}) });
+    expect(fitCommand.checkCallback(true)).toBe(false);
+    expect(overviewCommand.checkCallback(true)).toBe(false);
+  });
+
   it("runs overview on the active studio view", () => {
     const showGraphOverviewFromCommand = jest.fn();
     const { overviewCommand } = registerStudioViewportCommands({
