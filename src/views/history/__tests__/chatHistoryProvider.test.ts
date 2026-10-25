@@ -196,6 +196,28 @@ describe("chatHistoryProvider", () => {
     expect((await provider.loadEntries()).map((entry) => entry.id)).toEqual(["chat:chat-new", "chat:chat-old"]);
   });
 
+  it("searches the text of messages with attached images, not the contents of attached files", async () => {
+    const { plugin } = vaultHarness();
+    const { ChatMarkdownSerializer } = jest.requireMock("../../chatview/storage/ChatMarkdownSerializer");
+    const actual = jest.requireActual("../../chatview/storage/ChatMarkdownSerializer").ChatMarkdownSerializer;
+    const image = { type: "image_url", image_url: { url: "data:image/png;base64,YWJj" } };
+    // The messages exactly as the reader loads them from the saved note.
+    ChatMarkdownSerializer.parseMarkdown.mockReturnValueOnce({ metadata: {}, messages: actual.readBack([
+      { role: "user", message_id: "user-1", content: [
+        { type: "text", text: "Compare the Kino chart" },
+        image,
+        { type: "text", text: "--- BEGIN ATTACHED FILE: notes.md (text/markdown) ---\nAttached body\n--- END ATTACHED FILE: notes.md ---" },
+      ] },
+      { role: "assistant", message_id: "assistant-1", content: "", messageParts: [
+        { id: "text", type: "content", data: "Here is the chart for Kino", timestamp: 1 },
+        { id: "image", type: "content", data: [image], timestamp: 2 },
+      ] },
+    ]) });
+    const [entry] = await createChatHistoryProvider(plugin).loadEntries();
+
+    expect(await entry.loadSearchText!()).toBe("compare the kino chart\nhere is the chart for kino");
+  });
+
   it("reads a chat again for search when a read failed, and keeps a corrupt chat's empty text", async () => {
     const { plugin, vault, older } = vaultHarness();
     const { ChatMarkdownSerializer } = jest.requireMock("../../chatview/storage/ChatMarkdownSerializer");

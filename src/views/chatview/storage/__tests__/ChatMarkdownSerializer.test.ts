@@ -1006,6 +1006,7 @@ Using tools...
           [`${multipart}\n${reasoning}\n${tools}\nOriginal answer`, ["content", "reasoning", "tool_call"]],
           [`${reasoning}\n${multipart}\n${tools}\nOriginal answer`, ["reasoning", "content", "tool_call"]],
           [`${reasoning}\n${tools}\nOriginal answer\n${multipart}`, ["reasoning", "tool_call", "content"]],
+          [`${reasoning}\n\n\n${tools}\nOriginal answer\n${multipart}`, ["reasoning", "tool_call", "content"]],
         ] as const) {
           const parsed = ChatMarkdownSerializer.parseMarkdown(normalizeMarkdown(
             createMarkdown({ id: "legacy-placement" }, frame(body)), newline, bom,

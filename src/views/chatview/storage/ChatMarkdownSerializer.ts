@@ -277,8 +277,10 @@ export class ChatMarkdownSerializer {
         if (normalizedChunk.length === 0) {
           return;
         }
-        if (storedContent) placeStoredContent();
-        else parts.push({ id: `content-${ts}`, type: "content", data: restoreMarkers(normalizedChunk), timestamp: ts++ });
+        // Blank lines between blocks are layout, not the display of the content.
+        if (storedContent) {
+          if (normalizedChunk.trim()) placeStoredContent();
+        } else parts.push({ id: `content-${ts}`, type: "content", data: restoreMarkers(normalizedChunk), timestamp: ts++ });
       };
 
       let cursor = 0;
