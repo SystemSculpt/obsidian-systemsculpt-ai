@@ -26,7 +26,10 @@ export type DragState = {
   validity: DragValidity;
 };
 
-export type LinkStoreListener = () => void;
+/** "drag" means only the pending connection changed; every cable is where it was. */
+export type LinkStoreChange = "edges" | "drag";
+
+export type LinkStoreListener = (change: LinkStoreChange) => void;
 
 function edgeKey(edge: EdgeIdentity): string {
   return `${edge.id}|${edge.source.nodeId}:${edge.source.portId}->${edge.target.nodeId}:${edge.target.portId}`;
@@ -72,7 +75,7 @@ export class StudioLinkStore {
       }
     }
     this.edges = nextMap;
-    this.emit();
+    this.emit("edges");
   }
 
   setDragState(next: DragState | null): void {
@@ -95,7 +98,7 @@ export class StudioLinkStore {
       return;
     }
     this.dragState = next;
-    this.emit();
+    this.emit("drag");
   }
 
   removeEdgesForNode(nodeId: string): void {
@@ -107,7 +110,7 @@ export class StudioLinkStore {
       }
     }
     if (changed) {
-      this.emit();
+      this.emit("edges");
     }
   }
 
@@ -116,13 +119,13 @@ export class StudioLinkStore {
     this.edges.clear();
     this.dragState = null;
     if (hadState) {
-      this.emit();
+      this.emit("edges");
     }
   }
 
-  private emit(): void {
+  private emit(change: LinkStoreChange): void {
     for (const listener of this.listeners) {
-      listener();
+      listener(change);
     }
   }
 }

@@ -121,7 +121,12 @@ export class StudioEdgeRenderer {
       this.drawnByEdgeId.delete(edgeId);
     }
 
-    this.renderPreview(preview);
+    this.drawPreview(preview);
+  }
+
+  /** Redraws the pending connection's preview alone: a cursor move leaves every cable where it was. */
+  renderPreview(): void {
+    this.drawPreview(this.resolvePreview(this.options.createPortAnchorResolver(), this.options.getCursorAnchorPoint));
   }
 
   /** Stamp a cable's phase; `pulse` marks a real transition for one-shot emphasis. */
@@ -202,7 +207,7 @@ export class StudioEdgeRenderer {
     return { path: buildCubicLinkCurve(source, end).path, validity: drag.validity };
   }
 
-  private renderPreview(preview: { path: string; validity: string } | null): void {
+  private drawPreview(preview: { path: string; validity: string } | null): void {
     const { layer, store } = this.options;
     if (!preview) {
       // A drag whose source can't be resolved keeps its last preview, as before.

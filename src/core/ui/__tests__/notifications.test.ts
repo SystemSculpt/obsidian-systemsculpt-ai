@@ -13,7 +13,7 @@ jest.mock("../modals/PromptModal", () => ({
 }));
 
 import { showPrompt } from "../modals/PromptModal";
-import { flashButtonResult, showActionNotice, showConfirm } from "../notifications";
+import { askInNotice, flashButtonResult, showActionNotice, showConfirm } from "../notifications";
 
 describe("notifications", () => {
   const app = {} as App;
@@ -79,6 +79,66 @@ describe("notifications", () => {
     expect(onSelect).not.toHaveBeenCalled();
     button.click();
     expect(onSelect).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("askInNotice", () => {
+  /** Obsidian's notice: the message sits in noticeEl, and clicking the notice hides it. */
+  function emulateNotice() {
+    const hide = jest.fn();
+    (Notice as unknown as jest.Mock).mockImplementation(function (this: { noticeEl: HTMLElement; hide: () => void }, message: DocumentFragment) {
+      const notice = document.body.createDiv({ cls: "notice" });
+      this.noticeEl = notice;
+      notice.appendChild(message);
+      this.hide = () => { hide(); notice.remove(); };
+      notice.addEventListener("click", () => this.hide());
+    });
+    return hide;
+  }
+  const button = (testId: string) => document.querySelector<HTMLButtonElement>(`[data-testid="${testId}"]`)!;
+
+  beforeEach(() => jest.clearAllMocks());
+  afterEach(() => { document.body.innerHTML = ""; });
+
+  it("stays until answered and resolves the chosen answer", async () => {
+    const hide = emulateNotice();
+    const answer = askInNotice("Delete it to free 822 MB?", { confirm: "Delete", cancel: "Keep" });
+
+    expect(Notice).toHaveBeenCalledWith(expect.anything(), 0);
+    expect(document.querySelector(".systemsculpt-notice-message")?.textContent).toBe("Delete it to free 822 MB?");
+    expect(button("notice.confirm").textContent).toBe("Delete");
+    expect(button("notice.cancel").textContent).toBe("Keep");
+    button("notice.confirm").click();
+    await expect(answer).resolves.toBe(true);
+    expect(hide).toHaveBeenCalledTimes(1);
+
+    const kept = askInNotice("Delete it?", { confirm: "Delete", cancel: "Keep" });
+    button("notice.cancel").click();
+    await expect(kept).resolves.toBe(false);
+    expect(hide).toHaveBeenCalledTimes(2);
+  });
+
+  it("counts a dismissed notice as no", async () => {
+    const hide = emulateNotice();
+    const answer = askInNotice("Delete it?", { confirm: "Delete", cancel: "Keep" });
+
+    document.querySelector<HTMLElement>(".systemsculpt-notice-message")!.click();
+
+    await expect(answer).resolves.toBe(false);
+    expect(hide).toHaveBeenCalledTimes(1);
+  });
+
+  it("hides without an answer when its signal aborts", async () => {
+    const hide = emulateNotice();
+    const controller = new AbortController();
+    const answer = askInNotice("Delete it?", { confirm: "Delete", cancel: "Keep" }, controller.signal);
+
+    controller.abort();
+
+    await expect(answer).resolves.toBeNull();
+    expect(hide).toHaveBeenCalledTimes(1);
+    await expect(askInNotice("Delete it?", { confirm: "Delete", cancel: "Keep" }, controller.signal)).resolves.toBeNull();
+    expect(Notice).toHaveBeenCalledTimes(1);
   });
 });
 

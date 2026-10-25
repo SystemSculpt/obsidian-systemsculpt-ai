@@ -169,6 +169,8 @@
     "modal.prompt.primary",
     "modal.prompt.secondary",
     "notice.action",
+    "notice.cancel",
+    "notice.confirm",
     "progress.dismiss",
     "search.clear",
     "search.retry",
