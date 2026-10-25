@@ -37,10 +37,11 @@ function fixture() {
     }),
   });
   const listeners = new Set<(projectId: string) => void>();
-  let runs: Array<{ nodeId: string; status: "running" | "completed"; currentActivity: string; updatedAt: string }> = [];
+  let runs: Array<{ id: string; nodeId: string; status: "running" | "completed"; currentActivity: string; updatedAt: string }> = [];
   controller.bind({
     list: (projectId) => (projectId === "p1" ? runs : []),
     subscribe: (listener) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
+    isStale: () => false,
   });
   return { project, presentation, cards, edgeUpdates, controller, listeners, setRuns: (next: typeof runs) => { runs = next; } };
 }
@@ -71,7 +72,7 @@ describe("StudioActivityController", () => {
 
   it("follows native Codex runs for the open project only and stops after dispose", () => {
     const { cards, controller, listeners, setRuns } = fixture();
-    setRuns([{ nodeId: "n2", status: "running", currentActivity: "Codex is working", updatedAt: AT }]);
+    setRuns([{ id: "run-1", nodeId: "n2", status: "running", currentActivity: "Codex is working", updatedAt: AT }]);
     for (const listener of listeners) listener("other-project");
     expect(cards.get("n2")?.dataset.activity).toBeUndefined();
     for (const listener of listeners) listener("p1");

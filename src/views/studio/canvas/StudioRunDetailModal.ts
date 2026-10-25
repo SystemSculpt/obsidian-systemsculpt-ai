@@ -6,6 +6,8 @@ import { createStudioAction } from '../StudioAction';
 const statusLabels: Record<StudioAgentRun['status'], string> = { queued: 'Queued', running: 'Working', waiting: 'Needs input', completed: 'Done', failed: 'Failed', stopped: 'Stopped', interrupted: 'Interrupted' };
 const shortId = (id: string): string => id.slice(-8);
 const report = (error: unknown): void => { new Notice(error instanceof Error ? error.message : 'The run action failed.'); };
+/** Mark stopped changes only the saved record; the machine running it, if any, is not reached. */
+export const markStoppedHint = (machine: string): string => `Only ${machine || 'its machine'} can stop it. This updates the saved record only; if it is still running there, it reappears.`;
 
 export class StudioRunDetailModal extends StandardModal {
   private unsubscribe?: () => void;
@@ -40,13 +42,15 @@ export class StudioRunDetailModal extends StandardModal {
       for (const button of tabs.querySelectorAll<HTMLElement>('[data-run-tab]')) button.setAttribute('aria-pressed', String(button.dataset.runTab === selected));
       format.setText(source ? 'Show Markdown' : 'Show source'); format.setAttribute('aria-pressed', String(source));
       summary.empty();
-      summary.createDiv({ cls: `ss-studio-run-status is-${run.status}`, text: `${run.workflow?.status === 'waiting' ? 'Waiting for results' : statusLabels[run.status]} · ${run.currentActivity}` });
+      const stale = this.runs.isStale(run.id);
+      summary.createDiv({ cls: `ss-studio-run-status is-${run.status}`, text: stale ? `Stale · No update from ${run.machine || 'its machine'} since ${new Date(run.updatedAt).toLocaleString()}` : `${run.workflow?.status === 'waiting' ? 'Waiting for results' : statusLabels[run.status]} · ${run.currentActivity}` });
       summary.createDiv({ cls: 'ss-studio-run-meta', text: `${run.request.model || 'Native model'} · ${run.request.effort || 'Native thinking'} · ${['priority', 'fast'].includes(run.request.serviceTier || '') ? 'Fast' : 'Standard'} · ${run.machine}` });
       if (run.threadId) summary.createEl('code', { text: run.threadId });
       if (run.error || run.persistenceError) summary.createDiv({ cls: 'ss-studio-run-error', text: run.error || run.persistenceError });
       actions.empty();
       if (run.parentRunId && this.runs.get(run.parentRunId)) createStudioAction(actions, { label: 'Parent run', testId: 'studio.run.parent', onSelect: () => new StudioRunDetailModal(this.runs, run.parentRunId!).open() });
       if (this.runs.canControl(run.id) && isActiveAgentRun(run.status)) createStudioAction(actions, { label: 'Stop', testId: 'studio.run.stop', onSelect: () => this.runs.stop(run.id) });
+      else if (this.runs.canMarkStopped(run.id)) createStudioAction(actions, { label: 'Mark stopped', testId: 'studio.run.mark-stopped', title: markStoppedHint(run.machine), onSelect: () => { void this.runs.markStopped(run.id).catch(report); } });
       if (this.runs.hasRequest(run.id)) createStudioAction(actions, { label: 'Review request', testId: 'studio.run.review', onSelect: () => { void this.runs.review(run.id).catch(report); } });
       composer.disabled = !this.runs.canControl(run.id); send.disabled = sending || composer.disabled;
       const nextViewKey = `${selected}:${source}`;

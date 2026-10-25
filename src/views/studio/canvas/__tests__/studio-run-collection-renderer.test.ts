@@ -7,7 +7,7 @@ import { isStudioVisualOnlyNodeKind } from '../../../../studio/StudioNodeKinds';
 it('shows distinct instances, keeps their DOM stable during activity, opens details and unsubscribes', async () => {
   const records = ['one','two'].map(id => ({ id, title: 'Worker', nodeId: 'worker', status: 'running', createdAt: new Date().toISOString(), currentActivity: 'Starting', messages: [] })) as unknown as StudioAgentRun[];
   let listener!: (project: string) => void; const unsubscribe = jest.fn();
-  const runs = { app: {}, list: () => records, load: async () => {}, hasOlder: () => false, isCapped: () => false, subscribe: (callback: typeof listener) => { listener = callback; return unsubscribe; } } as any;
+  const runs = { app: {}, list: () => records, load: async () => {}, hasOlder: () => false, isCapped: () => false, isStale: () => false, subscribe: (callback: typeof listener) => { listener = callback; return unsubscribe; } } as any;
   const open = jest.spyOn(StudioRunDetailModal.prototype, 'open').mockImplementation(() => {});
   const root = document.createElement('div');
   const dispose = renderStudioRunCollection(root, { runs, projectId: 'p', projectPath: 'p.systemsculpt' }); await Promise.resolve();
@@ -25,7 +25,7 @@ it('offers older runs only while more remain on disk', async () => {
   let listener!: (project: string) => void; let more = true;
   const loadOlder = jest.fn(async () => { records.push({ ...records[0], id: 'old' }); more = false; listener('p'); });
   let capped = false;
-  const runs = { app: {}, list: () => records, load: async () => {}, hasOlder: () => more, isCapped: () => capped, loadOlder, subscribe: (callback: typeof listener) => { listener = callback; return () => {}; } } as any;
+  const runs = { app: {}, list: () => records, load: async () => {}, hasOlder: () => more, isCapped: () => capped, isStale: () => false, loadOlder, subscribe: (callback: typeof listener) => { listener = callback; return () => {}; } } as any;
   const root = document.createElement('div');
   const dispose = renderStudioRunCollection(root, { runs, projectId: 'p', projectPath: 'p.systemsculpt' }); await Promise.resolve();
 
@@ -46,4 +46,16 @@ it('offers older runs only while more remain on disk', async () => {
 it('declares bounded observation ports on a visual-only collection', () => {
   expect(isStudioVisualOnlyNodeKind('studio.run_collection')).toBe(true);
   expect(runCollectionPorts(['worker', 'worker', '../bad', 'scout'])).toEqual([{ id: 'worker', type: 'json', required: false }, { id: 'scout', type: 'json', required: false }]);
+});
+it('shows a stale run settled, and repaints it when it turns stale', async () => {
+  const records = [{ id: 'quiet', title: 'Worker', nodeId: 'worker', status: 'running', createdAt: new Date().toISOString(), currentActivity: 'Codex is working', messages: [] }] as unknown as StudioAgentRun[];
+  let listener!: (project: string) => void, stale = false;
+  const runs = { app: {}, list: () => records, load: async () => {}, hasOlder: () => false, isCapped: () => false, isStale: () => stale, subscribe: (callback: typeof listener) => { listener = callback; return () => {}; } } as any;
+  const root = document.createElement('div');
+  const dispose = renderStudioRunCollection(root, { runs, projectId: 'p', projectPath: 'p.systemsculpt' }); await Promise.resolve();
+  expect(root.querySelector('[data-run-id="quiet"]')?.getAttribute('data-activity')).toBe('active');
+  stale = true; listener('p');
+  const card = root.querySelector('[data-run-id="quiet"]')!;
+  expect(card.getAttribute('data-activity')).toBe('stopped'); expect(card.getAttribute('aria-label')).toContain('Stale');
+  dispose();
 });

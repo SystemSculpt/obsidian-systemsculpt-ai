@@ -30,7 +30,7 @@ export function renderStudioRunCollection(root: HTMLElement, options: { runs: St
     if (loadError) { layoutSignature = ''; liveCards.clear(); body.setText(loadError); return; }
     const records = runs.list(options.projectId, options.sources).filter(run => (showCompleted || isActiveAgentRun(run.status)) && `${run.title} ${run.id} ${run.currentActivity}`.toLowerCase().includes(query));
     const hasOlder = runs.hasOlder(options.projectPath), capped = runs.isCapped(options.projectPath);
-    const signature = JSON.stringify([groupBy, query, showCompleted, limit, hasOlder, capped, records.map(run => [run.id, run.status])]);
+    const signature = JSON.stringify([groupBy, query, showCompleted, limit, hasOlder, capped, records.map(run => [run.id, run.status, runs.isStale(run.id)])]);
     if (signature === layoutSignature) {
       for (const run of records) {
         const card = liveCards.get(run.id); if (!card) continue;
@@ -53,13 +53,14 @@ export function renderStudioRunCollection(root: HTMLElement, options: { runs: St
       const lane = body.createDiv({ cls: 'ss-studio-run-lane' });
       lane.createEl('h3', { text: `${groupBy === 'status' ? statusLabels[group as StudioAgentRun['status']] : members[0].title} · ${members.length}` });
       for (const run of members.slice(0, limit)) {
-        const card = lane.createEl('article', { cls: `ss-studio-run-card is-${run.status}`, attr: { tabindex: '0', 'aria-label': `${run.title}, ${statusLabels[run.status]}, ${shortId(run.id)}`, 'data-run-id': run.id, 'data-activity': activityPhaseFromAgentRunStatus(run.status) } });
+        const stale = runs.isStale(run.id), status = stale ? 'Stale' : statusLabels[run.status];
+        const card = lane.createEl('article', { cls: `ss-studio-run-card is-${run.status}`, attr: { tabindex: '0', 'aria-label': `${run.title}, ${status}, ${shortId(run.id)}`, 'data-run-id': run.id, 'data-activity': stale ? 'stopped' : activityPhaseFromAgentRunStatus(run.status) } });
         liveCards.set(run.id, card);
         const open = (): void => { new StudioRunDetailModal(runs, run.id).open(); };
         card.addEventListener('dblclick', event => { event.stopPropagation(); open(); });
         card.addEventListener('keydown', event => { if (event.target === card && ['Enter', ' '].includes(event.key)) { event.preventDefault(); event.stopPropagation(); open(); } });
         card.createEl('strong', { text: run.title });
-        card.createDiv({ cls: 'ss-studio-run-meta', text: `${shortId(run.id)} · ${new Date(run.createdAt).toLocaleTimeString()} · ${statusLabels[run.status]}` });
+        card.createDiv({ cls: 'ss-studio-run-meta', text: `${shortId(run.id)} · ${new Date(run.createdAt).toLocaleTimeString()} · ${status}` });
         card.createDiv({ cls: 'ss-studio-run-current', text: run.currentActivity });
         card.createDiv({ cls: 'ss-studio-run-meta ss-studio-run-message-count', text: run.messages.length ? `${run.messages.length} ${run.messages.length === 1 ? 'message' : 'messages'}` : '' });
         if (run.persistenceError) card.createDiv({ cls: 'ss-studio-run-error', text: run.persistenceError });
@@ -89,9 +90,9 @@ export function renderStudioRunCollection(root: HTMLElement, options: { runs: St
 export function renderStudioRunStatus(root: HTMLElement, runs: StudioAgentRuns, projectId: string, nodeId: string, presentation = new StudioPresentation()): () => void {
   const el = root.createDiv({ cls: 'ss-studio-run-inline' }); markStudioNodeCardInteractive(el);
   const render = (): void => {
-    el.empty(); const records = runs.list(projectId, [nodeId]), active = records.filter(run => isActiveAgentRun(run.status));
+    el.empty(); const records = runs.list(projectId, [nodeId]), active = records.filter(run => isActiveAgentRun(run.status) && !runs.isStale(run.id));
     const latest = active[0] || records[0]; if (!latest) return;
-    createStudioAction(el, { label: `${active.length ? `${active.length} active` : statusLabels[latest.status]} · ${latest.currentActivity.slice(0, 120)}`, testId: 'studio.run.latest', size: 'small', onSelect: () => new StudioRunDetailModal(runs, latest.id).open() });
+    createStudioAction(el, { label: `${active.length ? `${active.length} active` : runs.isStale(latest.id) ? 'Stale' : statusLabels[latest.status]} · ${latest.currentActivity.slice(0, 120)}`, testId: 'studio.run.latest', size: 'small', onSelect: () => new StudioRunDetailModal(runs, latest.id).open() });
   };
   return presentation.watch(render, refresh => runs.subscribe(id => { if (id === projectId) refresh(); })).dispose;
 }
