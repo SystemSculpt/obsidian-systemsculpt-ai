@@ -31,8 +31,9 @@ type ActiveAudioArtifactReference = {
 type StudioCommandViewLike = {
   getViewType(): string;
   getState(): unknown;
-  fitSelectionInViewportFromCommand(): void;
-  showGraphOverviewFromCommand(): void;
+  /** Absent while a Studio tab is still loading its canvas. */
+  fitSelectionInViewportFromCommand?(): void;
+  showGraphOverviewFromCommand?(): void;
 };
 
 type ChatCommandViewLike = {
@@ -654,7 +655,7 @@ export class CommandManager {
       name: "Studio: fit selection in viewport",
       checkCallback: (checking: boolean) => {
         const activeStudioView = this.getActiveStudioView();
-        if (!activeStudioView) {
+        if (!activeStudioView?.fitSelectionInViewportFromCommand) {
           return false;
         }
         if (!checking) {
@@ -669,7 +670,7 @@ export class CommandManager {
       name: "Studio: overview graph in viewport",
       checkCallback: (checking: boolean) => {
         const activeStudioView = this.getActiveStudioView();
-        if (!activeStudioView) {
+        if (!activeStudioView?.showGraphOverviewFromCommand) {
           return false;
         }
         if (!checking) {

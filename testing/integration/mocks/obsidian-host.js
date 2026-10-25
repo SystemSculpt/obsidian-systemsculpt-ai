@@ -19,6 +19,15 @@ class IntegrationApp extends base.App {
   }
 }
 
+// Obsidian's View supplies these defaults, and the bundle's views call super.setState.
+class IntegrationItemView extends base.ItemView {
+  getState() {
+    return {};
+  }
+
+  async setState() {}
+}
+
 class IntegrationPlugin extends base.Plugin {
   constructor(app, manifest) {
     super(app, manifest);
@@ -42,6 +51,7 @@ module.exports = {
   // installed-plugin lifecycle instead of the old-host recovery path.
   apiVersion: "1.7.2",
   App: IntegrationApp,
+  ItemView: IntegrationItemView,
   Plugin: IntegrationPlugin,
   // Saved chats keep their identity in YAML frontmatter.
   parseYaml: (text) => YAML.parse(text),

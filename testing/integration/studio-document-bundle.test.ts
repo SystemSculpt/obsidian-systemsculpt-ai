@@ -4,14 +4,40 @@
  *
  * Proves the shipped main.js can create, edit through the agent API, reopen
  * and merge one plain-JSON `.systemsculpt` file through an adapter without
- * desktop filesystem access, and that it no longer ships a merge engine.
+ * desktop filesystem access, that it no longer ships a merge engine, and that
+ * a project tab opens and survives a plugin reload while Studio's view code
+ * loads only on first open.
  */
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
+import { createObsidianLeaf, type ObsidianLeaf } from "./obsidian-leaf";
+import { captureStartupIdentity, expectProductionStartupIdentity } from "./startup-identity-assertions";
 
 const BUNDLE_PATH = path.resolve(__dirname, "..", "..", "main.js");
 const MANIFEST_PATH = path.resolve(__dirname, "..", "..", "manifest.json");
+const STUDIO_VIEW_TYPE = "systemsculpt-studio-view";
+
+async function flushAsyncWork(): Promise<void> {
+  await Promise.resolve();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await Promise.resolve();
+}
+
+function createPlugin(bundleModule: any, app: any): any {
+  const PluginClass = bundleModule?.default ?? bundleModule;
+  return new PluginClass(app, JSON.parse(readFileSync(MANIFEST_PATH, "utf8")));
+}
+
+/** Onloads one evaluation of the bundle the way Obsidian starts a plugin. */
+async function startPlugin(plugin: any): Promise<void> {
+  await plugin.onload();
+  await plugin.criticalInitializationPromise;
+  await plugin.deferredInitializationPromise;
+  await plugin.initializeManagers();
+  plugin.ensureViewManager().initialize();
+  await flushAsyncWork();
+}
 
 function inMemoryAdapter() {
   const files = new Map<string, string>();
@@ -99,5 +125,78 @@ describe("built bundle Studio document", () => {
     expect([...adapter.files.keys()].some((f) => f.startsWith(".systemsculpt/studio/"))).toBe(false);
     await studio.dispose?.();
     await reopened.dispose?.();
+  });
+
+  it("opens a project in a tab Obsidian opens before Studio loads, and restores it after a plugin reload", async () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const host = require("obsidian");
+    const app = new host.App();
+    const adapter = inMemoryAdapter();
+    app.vault.adapter = adapter;
+    app.vault.getFiles = () => [...adapter.files.keys()].map((p) => ({ path: p }));
+    const leaves: ObsidianLeaf[] = [];
+    Object.assign(app.workspace, {
+      getLeavesOfType: (type: string) => leaves.filter((leaf) => leaf.view?.getViewType() === type),
+      iterateAllLeaves: (callback: (leaf: ObsidianLeaf) => void) => { leaves.forEach(callback); },
+      getMostRecentLeaf: () => leaves[0] ?? null,
+      getLeaf: jest.fn(),
+      setActiveLeaf: jest.fn(),
+    });
+    const startupIdentity = captureStartupIdentity();
+    let plugin = createPlugin(require(BUNDLE_PATH), app);
+    await startPlugin(plugin);
+    const opened: string[] = [];
+    const handedOver: unknown[] = [];
+    const leaf = createObsidianLeaf(host, app, (type) => plugin._views.get(type), (view: any) => {
+      view.contentEl.onWindowMigrated = () => () => {};
+      opened.push(view.constructor.name);
+      const restoreReloadSnapshot = view.restoreReloadSnapshot?.bind(view);
+      if (restoreReloadSnapshot) {
+        view.restoreReloadSnapshot = (snapshot: unknown) => { handedOver.push(snapshot); return restoreReloadSnapshot(snapshot); };
+      }
+    });
+    leaves.push(leaf);
+    const created = await plugin.getStudioService().createProjectFile({ name: "Reload Tab", projectPath: "Studio/Reload Tab.systemsculpt" });
+
+    // The way Obsidian opens a .systemsculpt file or a restored layout tab.
+    await leaf.setViewState({ type: STUDIO_VIEW_TYPE, state: { file: created.path } });
+    await flushAsyncWork();
+    const firstView = leaf.view as any;
+    expect(firstView.constructor.name).toBe("SystemSculptStudioView");
+    expect(firstView.getState()).toMatchObject({ file: created.path });
+    expect(firstView.getDisplayText()).toBe("Reload Tab.systemsculpt");
+    expect(firstView.contentEl.querySelector(".ss-studio-view")).not.toBeNull();
+
+    // A plugin reload: the old evaluation hands the tab over, Obsidian empties
+    // the leaf, and a fresh evaluation with nothing loaded yet restores it.
+    // (Obsidian's unload runs onunload; the host mock's skips it after onload.)
+    plugin.onunload();
+    await plugin.unloadPromise;
+    await leaf.open(null);
+    let nextBundle: any;
+    jest.isolateModules(() => {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      nextBundle = require(BUNDLE_PATH);
+    });
+    plugin = createPlugin(nextBundle, app);
+    await startPlugin(plugin);
+    for (let attempt = 0; attempt < 20 && !leaf.view; attempt++) await flushAsyncWork();
+    const restored = leaf.view as any;
+    expect(restored).not.toBe(firstView);
+    expect(restored.constructor).not.toBe(firstView.constructor);
+    expect(restored.constructor.name).toBe("SystemSculptStudioView");
+    expect(restored.getState()).toMatchObject({ file: created.path });
+    expect(restored.contentEl.querySelector(".ss-studio-view")).not.toBeNull();
+    expect(app.workspace.getLeaf).not.toHaveBeenCalled();
+    // Both evaluations opened the tab through the placeholder, and the edit
+    // handoff reached the real view rather than stopping at the placeholder.
+    expect(opened).toEqual(["PendingStudioView", "SystemSculptStudioView", "PendingStudioView", "SystemSculptStudioView"]);
+    expect(handedOver).toHaveLength(1);
+    expect(handedOver[0]).toMatchObject({ project: { name: "Reload Tab" } });
+    expectProductionStartupIdentity(startupIdentity, plugin.manifest.version);
+
+    await leaf.detach();
+    plugin.onunload();
+    await plugin.unloadPromise;
   });
 });
