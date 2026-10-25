@@ -16,6 +16,20 @@ import {
 } from "./viewTypes";
 
 const CHAT_VIEW_PRODUCER_QUIESCE_DEADLINE_MS = 1_000;
+
+/** The existing unload window also covers native runs with no remaining pane. */
+export async function waitForChatProducers(barriers: Promise<unknown>): Promise<void> {
+  let deadlineTimer: number | null = null;
+  const deadline = new Promise<void>((resolve) => {
+    deadlineTimer = window.setTimeout(resolve, CHAT_VIEW_PRODUCER_QUIESCE_DEADLINE_MS);
+  });
+  try {
+    await Promise.race([barriers, deadline]);
+  } finally {
+    if (deadlineTimer !== null) window.clearTimeout(deadlineTimer);
+  }
+}
+
 type AppWithViewRegistry = App & {
   viewRegistry?: {
     viewByType?: Record<string, unknown>;
@@ -58,8 +72,8 @@ export class ViewManager {
     }
     this.registerView();
 
-    // Initialize ribbon manager in the background
-    window.setTimeout(() => this.ribbonManager.initialize(), 0);
+    // Obsidian restores ribbon visibility and order after plugin onload.
+    this.ribbonManager.initialize();
 
     // Wait for layout to be ready before minimal initialization
     this.app.workspace.onLayoutReady(() => {
@@ -328,6 +342,17 @@ export class ViewManager {
     }
   }
 
+  /** Own a fresh leaf so phone work never replaces a person's current draft. */
+  async runPhoneHandoff(execution: import("../../features/phone-captures/PhoneHandoffInbox").HandoffExecution): Promise<string> {
+    if (execution.signal.aborted) throw new Error("The handoff was cancelled.");
+    const leaf = this.app.workspace.getLeaf("tab");
+    await leaf.setViewState({ type: CHAT_VIEW_TYPE, active: execution.reveal, state: { chatId: "", chatTitle: "From your iPhone" } });
+    await leaf.loadIfDeferred();
+    if (execution.reveal) await this.app.workspace.revealLeaf(leaf);
+    if (!(leaf.view instanceof AgentChatView)) throw new Error("The agent workspace could not open.");
+    return leaf.view.executePhoneHandoff(execution);
+  }
+
   async activateEmbeddingsView(): Promise<EmbeddingsView> {
     // Check if we already have an embeddings view open
     const existingLeaves = this.app.workspace.getLeavesOfType(EMBEDDINGS_VIEW_TYPE);
@@ -395,18 +420,7 @@ export class ViewManager {
       if (typeof view.quiesceIncidentProducers !== "function") return;
       await view.quiesceIncidentProducers();
     })).then(() => undefined);
-    let deadlineTimer: number | null = null;
-    const deadline = new Promise<void>((resolve) => {
-      deadlineTimer = window.setTimeout(
-        resolve,
-        CHAT_VIEW_PRODUCER_QUIESCE_DEADLINE_MS,
-      );
-    });
-    try {
-      await Promise.race([barriers, deadline]);
-    } finally {
-      if (deadlineTimer !== null) window.clearTimeout(deadlineTimer);
-    }
+    await waitForChatProducers(barriers);
   }
 
   unloadViews() {

@@ -1,4 +1,5 @@
-import { Notice, Setting } from "obsidian";
+import { Notice } from "obsidian";
+import { createCatalogSetting } from "./SettingsCatalog";
 import { SystemSculptSettingTab } from "./SystemSculptSettingTab";
 import { attachFolderSuggester } from "../components/FolderSuggester";
 import { DEFAULT_PHONE_CAPTURE_FOLDER, DEFAULT_PHONE_MEETING_FOLDER } from "../features/phone-captures/PhoneCaptureInbox";
@@ -14,14 +15,10 @@ export function displayPhoneCapturesTabContent(containerEl: HTMLElement, tabInst
   if (plugin.settings.phoneCapturesLinked !== true) return;
   const settingsManager = plugin.getSettingsManager();
 
-  new Setting(containerEl)
-    .setName("iOS captures")
-    .setDesc("Notes and voice memos from the SystemSculpt iOS app arrive in this vault while you are signed in.")
+  createCatalogSetting(containerEl, "workspace.phone-captures")
     .setHeading();
 
-  new Setting(containerEl)
-    .setName("Save iOS captures")
-    .setDesc("Check for new captures when Obsidian opens, when it regains focus and every few minutes.")
+  createCatalogSetting(containerEl, "workspace.save-phone-captures")
     .addToggle((toggle) => toggle
       .setValue(plugin.settings.phoneCapturesEnabled)
       .onChange(async (value) => {
@@ -29,26 +26,29 @@ export function displayPhoneCapturesTabContent(containerEl: HTMLElement, tabInst
         if (value) void plugin.syncPhoneCaptures();
       }));
 
-  new Setting(containerEl)
-    .setName("Ask before saving iOS captures")
-    .setDesc("Show the waiting captures and save them only when you confirm.")
+  createCatalogSetting(containerEl, "workspace.confirm-phone-captures")
     .addToggle((toggle) => toggle
       .setValue(plugin.settings.phoneCapturesAskBeforeSaving)
       .onChange(async (value) => {
         await settingsManager.updateSettings({ phoneCapturesAskBeforeSaving: value });
       }));
 
+  createCatalogSetting(containerEl, "workspace.run-phone-handoffs")
+    .addToggle((toggle) => toggle
+      .setValue(plugin.settings.phoneHandoffsAutoRun === true)
+      .onChange(async (value) => {
+        await settingsManager.updateSettings({ phoneHandoffsAutoRun: value });
+      }));
+
   const folders = [
     {
       key: "phoneCapturesFolder" as const,
-      name: "iOS captures folder",
-      description: "Notes and transcripts become new notes here. Existing notes are never overwritten.",
+      id: "workspace.phone-captures-folder" as const,
       placeholder: DEFAULT_PHONE_CAPTURE_FOLDER,
     },
     {
       key: "phoneCapturesMeetingsFolder" as const,
-      name: "iOS meetings folder",
-      description: "Meeting briefs, action items and transcripts become new notes here.",
+      id: "workspace.phone-meetings-folder" as const,
       placeholder: DEFAULT_PHONE_MEETING_FOLDER,
     },
   ];
@@ -60,9 +60,7 @@ export function displayPhoneCapturesTabContent(containerEl: HTMLElement, tabInst
       }
       await settingsManager.updateSettings({ [folder.key]: value.trim() });
     };
-    new Setting(containerEl)
-      .setName(folder.name)
-      .setDesc(folder.description)
+    createCatalogSetting(containerEl, folder.id)
       .addText((text) => {
         text
           .setPlaceholder(folder.placeholder)

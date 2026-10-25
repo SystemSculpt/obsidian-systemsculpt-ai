@@ -6,9 +6,10 @@ import { THIN_AGENT_CONTRACT_VERSION, type MeasuredThinAgentContext, type ThinAg
 import { isRecord } from '../../studio/utils';
 import { CodexThreadLocator } from './CodexThreadLocator';
 import { localAgentChatDirectory } from './CodexExecutionSettings';
-import { LOCAL_AGENTS, type LocalAgentId } from './LocalAgents';
+import { LOCAL_AGENTS, LocalAgentUsageLimitError, type LocalAgentId } from './LocalAgents';
 import { resolveAbsoluteVaultPath } from '../../utils/vaultPathUtils';
 import { localAgentPromptText } from './LocalAgentMessageParts';
+import { localAgentReplay } from './LocalAgentReplay';
 import { desktopHost } from '../../platform/desktopOnly';
 
 export type LocalAgentTurn = { prompt: string; images: string[]; workingDirectory: string; threadId?: string };
@@ -67,14 +68,14 @@ export class LocalAgentChatSession implements ChatSession {
     this.sources = context.sources;
     return { contract_version: THIN_AGENT_CONTRACT_VERSION, context_ref: `local-${this.agent}-context`, expires_at: new Date(Date.now() + 60_000).toISOString(), bytes: 0, sha256: '' };
   }
-  start(input: AgentRunInput): Promise<AgentRunResult> {
+  start(input: AgentRunInput & { forkHistory?: readonly ChatMessage[] }): Promise<AgentRunResult> {
     if (this.localController) return Promise.reject(new Error(`Wait for the current ${this.agentName} response to finish.`));
     const controller = new AbortController(); this.localController = controller;
     this.sources = [];
     this.localCompletion = this.execute(input, controller).finally(() => { this.localController = null; this.localCompletion = null; });
     return this.localCompletion;
   }
-  private async execute(input: AgentRunInput, controller: AbortController): Promise<AgentRunResult> {
+  private async execute(input: AgentRunInput & { forkHistory?: readonly ChatMessage[] }, controller: AbortController): Promise<AgentRunResult> {
     const name = this.agentName, working = `${name} is working`, messageId = `${input.turnId}_assistant`;
     let accepting = true, receivedText = '', activeTextId: string | undefined, persisted = false;
     let vaultRoot: string | undefined, vaultRootAlias: string | undefined, homeDirectory: string | undefined;
@@ -127,12 +128,13 @@ export class LocalAgentChatSession implements ChatSession {
         });
       }
       const delta = nextText.slice(unchanged), previous = parts.find(part => part.id === activeTextId);
-      if (previous?.kind === 'text') this.publishParts(parts.map(part => part === previous ? { ...previous, markdown: previous.markdown + delta } : part));
-      else if (delta) {
+      if (!delta) this.publishParts(parts.filter(part => part.kind !== 'text' || part.markdown.length > 0));
+      else if (previous?.kind === 'text') this.publishParts(parts.map(part => part === previous ? { ...previous, markdown: previous.markdown + delta } : part));
+      else {
         const order = parts.reduce((last, part) => Math.max(last, part.order + 1), 0);
         activeTextId = `${messageId}_text_${order}`;
         this.publishParts([...parts, { id: activeTextId, order, kind: 'text', messageId, state: 'streaming', markdown: delta }]);
-      } else this.publishParts(parts);
+      }
     };
     const approval = (update: LocalAgentToolUpdate, signal: AbortSignal, grantsSessionScope = true): Promise<LocalAgentApprovalResponse> => {
       if (!live() || signal.aborted) return Promise.reject(new Error('Native approval withdrawn.'));
@@ -197,8 +199,9 @@ export class LocalAgentChatSession implements ChatSession {
         if (source.kind === 'image') { images.push(source.data_url); return `Attached image: ${source.path}`; }
         return source.kind === 'text' ? `File: ${source.path}\n${source.content}` : `Read the attached document from this vault path: ${source.path}`;
       }).join('\n\n');
-      const history = !threadId ? this.forkHistory() : [];
-      const prefix = history.length ? `Previous conversation before this edited message:\n${JSON.stringify(history)}\n\nCurrent message:\n` : '';
+      // A new native session after Retry or an edit gets the earlier chat as the person saw it.
+      const replay = threadId ? '' : localAgentReplay(input.forkHistory ?? this.forkHistory());
+      const prefix = replay ? `${replay}\n\nCurrent message:\n` : '';
       const prompt = `${prefix}${userText}${context ? `\n\nAttached vault context:\n${context}` : ''}`;
       if (prompt.length > 256_000) throw new Error(`This message and its attached context exceed the ${name} input limit.`);
       if (controller.signal.aborted) throw new Error(`${name} response canceled.`);
@@ -220,12 +223,15 @@ export class LocalAgentChatSession implements ChatSession {
       const cancelled = controller.signal.aborted;
       finishParts(cancelled ? 'cancelled' : 'failed');
       try { await this.closeTransport(); } catch { /* Preserve the original turn failure. */ }
-      if (!persisted && this.localSnapshot.parts.length) {
-        try { await this.localOptions.persistAssistant(message(receivedText, cancelled ? 'cancelled' : 'failed')); } catch { /* Preserve the original native failure. */ }
+      const usageLimit = cause instanceof LocalAgentUsageLimitError;
+      const error = { code: `local_${this.agent}_${usageLimit ? 'usage_limit' : 'failed'}`, message: cause instanceof Error ? cause.message : `${name} could not complete this response.`, retryable: !usageLimit };
+      if (!persisted && (!cancelled || this.localSnapshot.parts.length)) {
+        const assistant = message(receivedText, cancelled ? 'cancelled' : 'failed');
+        if (!cancelled) Object.assign(assistant, { terminalFailureCode: error.code, terminalFailureMessage: error.message, terminalRetryable: error.retryable });
+        try { await this.localOptions.persistAssistant(assistant); } catch { /* Preserve the original native failure. */ }
       }
       if (cancelled) { this.publish({ status: 'cancelled', phase: 'complete', waitingReason: undefined, statusLabel: `${name} stopped` }); return { kind: 'cancelled', snapshot: this.localSnapshot }; }
-      const error = { code: `local_${this.agent}_failed`, message: cause instanceof Error ? cause.message : `${name} could not complete this response.`, retryable: true };
-      this.publish({ status: 'failed', phase: 'complete', waitingReason: undefined, terminalError: error, parts: [...this.localSnapshot.parts, { id: `${messageId}_error`, order: this.localSnapshot.parts.length, kind: 'error', error, retryable: true }] });
+      this.publish({ status: 'failed', phase: 'complete', waitingReason: undefined, terminalError: error, parts: [...this.localSnapshot.parts, { id: `${messageId}_error`, order: this.localSnapshot.parts.length, kind: 'error', error, retryable: error.retryable }] });
       return { kind: 'failed', snapshot: this.localSnapshot, error };
     } finally { accepting = false; this.withdrawApprovals(); controller.signal.removeEventListener('abort', stopApprovals); this.sources = []; }
   }

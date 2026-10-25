@@ -34,17 +34,20 @@ describe("buildNodeInsertMenuItems", () => {
     expect(items.some((item) => item.definition.kind === "studio.terminal")).toBe(false);
   });
 
-  it.each([true, false])("keeps saved workflows as portable, hidden compatibility notes (desktop: %s)", (isDesktopApp) => {
+  describe.each(["studio.workflow", "studio.image_generation"])("retired %s", kind => {
+  it.each([true, false])("keeps saved cards as portable, hidden compatibility notes (desktop: %s)", (isDesktopApp) => {
     platform.isDesktopApp = isDesktopApp;
     const registry = new StudioNodeRegistry();
     registerBuiltInStudioNodes(registry);
 
-    expect(registry.get("studio.workflow", "1.0.0")).toMatchObject({
+    expect(registry.get(kind, "1.0.0")).toMatchObject({
       hiddenFromInsertMenu: true,
       requiredHostCapabilities: [],
       capabilityClass: "local_cpu",
     });
-    expect(buildNodeInsertMenuItems(registry.list()).some(item => item.definition.kind === "studio.workflow")).toBe(false);
+    expect(buildNodeInsertMenuItems(registry.list()).some(item => item.definition.kind === kind)).toBe(false);
+  });
+
   });
 
   it("offers the visual text node under the Text display name", () => {

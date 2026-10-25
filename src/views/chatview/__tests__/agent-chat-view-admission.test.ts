@@ -635,6 +635,8 @@ function createSavedChatLoadHarness(
     subscribe: jest.fn(() => jest.fn()),
   };
   const transcript = {
+    bindSaveOptions: jest.fn(() => jest.fn()),
+    subscribeToCommits: jest.fn(() => jest.fn()),
     load: jest.fn(async (_chatId: string) => loaded),
     saveMetadata: jest.fn(async () => loaded),
     snapshot: jest.fn(() => loaded),
@@ -675,6 +677,7 @@ function createSavedChatLoadHarness(
     agentUnsubscribe: null,
     agentSessionBinding: null,
     createAgentSession,
+    createTranscript: jest.fn(() => transcript),
     transcript,
     contextManager: {
       setPinnedFiles: jest.fn(async () => undefined),
@@ -830,6 +833,32 @@ describe("AgentChatView composer admission", () => {
     expect(harness.agent.start).not.toHaveBeenCalled();
     expect(refreshCreditsBalance).toHaveBeenCalledTimes(1);
     expect(harness.workspace.setBanner).toHaveBeenCalledWith(expected, "error");
+    expect(harness.composer.getValue()).toBe("Do not read my pinned note");
+    expect(harness.composer.getMessageAttachments()).toEqual([ORIGINAL_ATTACHMENT]);
+    expect(harness.parent.querySelector<HTMLButtonElement>('[data-testid="chat.composer.send"]')!.disabled).toBe(false);
+    harness.composer.unload();
+  });
+
+  it("restores a deferred submission and attachments when the balance rejects it after a transition", async () => {
+    const harness = createHarness("before-start");
+    const transition = deferred();
+    harness.view.activeSubmissionOperation = { kind: "transition", finished: transition.promise };
+    harness.view.refreshCreditsBalance = jest.fn(async () => undefined);
+    harness.view.creditsBalance = { totalRemaining: 0, availableUnreserved: 0, usageClass: "customer" };
+    harness.composer.setValue("Original request");
+    harness.composer.restoreMessageAttachments([ORIGINAL_ATTACHMENT]);
+
+    await (harness.composer as unknown as { submit: () => Promise<void> }).submit();
+    expect(harness.composer.getValue()).toBe("");
+    harness.composer.setValue("Newer draft");
+    harness.composer.restoreMessageAttachments([NEWER_ATTACHMENT]);
+    harness.view.activeSubmissionOperation = null;
+    transition.resolve();
+    await transition.promise;
+
+    expect(harness.agent.start).not.toHaveBeenCalled();
+    expect(harness.composer.getValue()).toBe("Original request\n\nNewer draft");
+    expect(harness.composer.getMessageAttachments()).toEqual([ORIGINAL_ATTACHMENT, NEWER_ATTACHMENT]);
     harness.composer.unload();
   });
 
@@ -4734,7 +4763,10 @@ describe("AgentChatView thin conversation lifecycle", () => {
         subscribe: jest.fn(() => jest.fn()),
       },
       agentUnsubscribe: null,
+      createTranscript: jest.fn(function (this: { transcript: unknown }) { return this.transcript; }),
       transcript: {
+        bindSaveOptions: jest.fn(() => jest.fn()),
+        subscribeToCommits: jest.fn(() => jest.fn()),
         load: jest.fn(async () => loaded),
       },
       contextManager: {
@@ -4854,42 +4886,29 @@ describe("AgentChatView thin conversation lifecycle", () => {
   it("serializes rapid saved-chat switches and lets only the latest load attach", async () => {
     const firstDetachStarted = deferred();
     const releaseFirstDetach = deferred();
-    const secondDetachStarted = deferred();
-    const releaseSecondDetach = deferred();
     const harness = createSavedChatLoadHarness([]);
     harness.agent.detach.mockImplementationOnce(async () => {
       firstDetachStarted.resolve(undefined);
       await releaseFirstDetach.promise;
     });
-    const secondAgent = {
-      ...harness.agent,
-      detach: jest.fn(async () => {
-        secondDetachStarted.resolve(undefined);
-        await releaseSecondDetach.promise;
-      }),
-      subscribe: jest.fn(() => jest.fn()),
-    };
     const finalAgent = {
       ...harness.agent,
       detach: jest.fn(async () => undefined),
       subscribe: jest.fn(() => jest.fn()),
     };
-    harness.createAgentSession
-      .mockReturnValueOnce(secondAgent)
-      .mockReturnValueOnce(finalAgent);
+    harness.createAgentSession.mockReturnValueOnce(finalAgent);
 
     const firstLoad = harness.view.loadChatById("first-chat");
     await firstDetachStarted.promise;
     const finalLoad = harness.view.loadChatById("final-chat");
-    releaseFirstDetach.resolve(undefined);
-    await secondDetachStarted.promise;
-
     expect(harness.transcript.load).not.toHaveBeenCalled();
     expect(finalAgent.subscribe).not.toHaveBeenCalled();
 
-    releaseSecondDetach.resolve(undefined);
+    releaseFirstDetach.resolve(undefined);
     await Promise.all([firstLoad, finalLoad]);
 
+    // The superseded load never creates an intermediate session to detach.
+    expect(harness.createAgentSession).toHaveBeenCalledTimes(1);
     expect(harness.transcript.load).toHaveBeenCalledTimes(1);
     expect(harness.transcript.load).toHaveBeenCalledWith("final-chat");
     expect(finalAgent.subscribe).toHaveBeenCalledTimes(1);
@@ -5388,6 +5407,8 @@ describe("AgentChatView thin conversation lifecycle", () => {
       setComposerReadOnly: jest.fn(),
     };
     const transcript = {
+      bindSaveOptions: jest.fn(() => jest.fn()),
+      subscribeToCommits: jest.fn(() => jest.fn()),
       load: jest.fn(async () => loaded),
       snapshot: jest.fn(() => loaded),
     };
@@ -5432,6 +5453,7 @@ describe("AgentChatView thin conversation lifecycle", () => {
       agent,
       agentUnsubscribe: null,
       createAgentSession: () => agent,
+      createTranscript: jest.fn(() => transcript),
       transcript,
       contextManager: {
         setPinnedFiles: jest.fn(async () => undefined),

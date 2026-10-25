@@ -74,7 +74,7 @@ type StudioGraphGroupControllerHost = {
   getCurrentProject: () => StudioProjectV1 | null;
   getGraphZoom: () => number;
   getNodeElement: (nodeId: string) => HTMLElement | null;
-  notifyNodePositionsChanged: (options?: { recomputeCanvasBounds?: boolean }) => void;
+  notifyNodePositionsChanged: (options?: { recomputeCanvasBounds?: boolean; translating?: boolean }) => void;
   onNodeDragStateChange?: (isDragging: boolean) => void;
   requestRender: () => void;
   createMovementSnap?: (nodes: readonly string[], shapes: readonly string[]) => StudioMovementSnap;
@@ -884,7 +884,7 @@ export class StudioGraphGroupController {
       }
       this.host.previewShapeTranslation?.();
       this.host.showMovementGuides?.(group.nodeIds, dragShapeIds);
-      this.host.notifyNodePositionsChanged({ recomputeCanvasBounds: false });
+      this.host.notifyNodePositionsChanged({ recomputeCanvasBounds: false, translating: true });
     };
 
     const onPointerMove = (moveEvent: PointerEvent): void => {

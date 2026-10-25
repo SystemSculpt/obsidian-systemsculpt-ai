@@ -26,7 +26,7 @@ import {
   verifyLocalCommitReceipt,
 } from "./LocalCommitReceipt";
 import type { TranscriptionInsertionValidator } from "./NoteInsertionTarget";
-import { TranscriptionTitleService } from "./TranscriptionTitleService";
+import { toSafeVaultFileName } from "../../utils/vaultFileName";
 
 const MIME_TYPES: Readonly<Record<string, string>> = Object.freeze({
   wav: "audio/wav",
@@ -354,6 +354,7 @@ export class TranscriptionCoordinator {
     this.activeOperationId = operationId;
     let retryOperationId = operationId;
     let remoteReady = false;
+    let recoverExactOutput = false;
     const adoptRemoteOperationId = async (adoptedOperationId: string): Promise<void> => {
       const changed = adoptedOperationId !== retryOperationId;
       retryOperationId = adoptedOperationId;
@@ -380,7 +381,10 @@ export class TranscriptionCoordinator {
         language: request.language,
         signal: controller.signal,
         maxAudioBytes: getTranscriptionMaxFileSize(),
-        onOperationIdAdopted: adoptRemoteOperationId,
+        onOperationIdAdopted: async (adoptedOperationId) => {
+          recoverExactOutput = true;
+          await adoptRemoteOperationId(adoptedOperationId);
+        },
         onProgress: (progress, message) => {
           report(progress < 72 ? "uploading" : "transcribing", progress, message);
         },
@@ -403,6 +407,7 @@ export class TranscriptionCoordinator {
           throw new TranscriptionResumeRequiredError(request.resumeOperationId, error);
         }
         if (recoveryAvailable) {
+          recoverExactOutput = true;
           try {
             remote = await this.adapter().resume(request.resumeOperationId, createSource(), managedContext);
           } catch (error) {
@@ -448,12 +453,14 @@ export class TranscriptionCoordinator {
             retryOperationId = replacementOperationId;
             await request.onOperationIdChange?.(replacementOperationId);
             await this.acknowledgeCompleted(remote.operationId);
+            recoverExactOutput = false;
             remote = await this.adapter().transcribe(createSource(), {
               ...managedContext,
               operationId: replacementOperationId,
             });
             recoveryWarning = "The previous transcript was changed or removed, so SystemSculpt preserved that local state and created a fresh transcript.";
           } else if (remote.recoveryPhase === "local_commit_pending") {
+            recoverExactOutput = true;
             try {
               remote = await this.adapter().resume(remote.operationId, createSource(), {
                 ...managedContext,
@@ -467,6 +474,7 @@ export class TranscriptionCoordinator {
                 const replacementOperationId = createOperationId(this.ownerWindow);
                 retryOperationId = replacementOperationId;
                 await request.onOperationIdChange?.(replacementOperationId);
+                recoverExactOutput = false;
                 remote = await this.adapter().transcribe(createSource(), {
                   ...managedContext,
                   operationId: replacementOperationId,
@@ -504,6 +512,7 @@ export class TranscriptionCoordinator {
           outputPolicy,
           report,
           controller.signal,
+          recoverExactOutput,
         );
         finalText = committed.finalText;
         insertionText = committed.insertionText;
@@ -694,6 +703,7 @@ export class TranscriptionCoordinator {
     outputPolicy: TranscriptionOutputPolicy,
     report: (phase: TranscriptionPhase, progress: number, message: string) => void,
     signal: AbortSignal,
+    recoverExactOutput: boolean,
   ): Promise<Readonly<{
     finalText: string;
     insertionText: string;
@@ -734,11 +744,11 @@ export class TranscriptionCoordinator {
     const planned = await this.planTranscriptionOutput(
       file,
       finalText,
-      processedText,
       timestamped,
       signal,
       remote.operationId,
       outputPolicy.cleanOutput,
+      recoverExactOutput,
     );
     await this.adapter().recordLocalCommitReceipt(remote.operationId, planned.receipt, signal);
     throwIfAborted(signal);
@@ -804,19 +814,28 @@ export class TranscriptionCoordinator {
   private async planTranscriptionOutput(
     file: TFile,
     content: string,
-    titleSourceText: string,
     timestamped: boolean,
     signal: AbortSignal,
     operationId: string,
     cleanOutput: boolean,
+    recoverExactOutput: boolean,
   ): Promise<PlannedTranscriptionOutput> {
     throwIfAborted(signal);
-    const titleService = TranscriptionTitleService.getInstance(this.plugin);
     const folderPath = file.path.split("/").slice(0, -1).join("/");
     const extension = timestamped ? "srt" : "md";
-    const fallbackBasename = timestamped
-      ? file.basename
-      : titleService.buildFallbackBasename(file.basename);
+    const basename = timestamped ? file.basename : toSafeVaultFileName(file.basename, {
+      replacement: "-", fallback: "Audio transcript",
+    });
+    // Keep pre-existing local commits recoverable after the naming change.
+    const legacyBasename = timestamped ? file.basename : `${file.basename} - transcript`;
+    const matchesBasename = (name: string, base: string): boolean => name === base || (
+      name.startsWith(`${base} (`) && /^\([1-9]\d*\)$/u.test(name.slice(base.length + 1))
+    );
+    const ownsName = (name: string): boolean => matchesBasename(name, basename) || (
+      !timestamped && (
+        matchesBasename(name, legacyBasename) || name.startsWith(`${legacyBasename} - `)
+      )
+    );
     // Recovery markers are useful metadata for the rich transcript format, but
     // the clean-output contract must remain literal: only the processed text is
     // written to the note. Clean Markdown and SRT recover by exact content
@@ -828,18 +847,21 @@ export class TranscriptionCoordinator {
     const owned = marker
       ? await this.findCommittedOutput(
         folderPath,
-        fallbackBasename,
+        ownsName,
         extension,
         marker,
         signal,
       )
-      : await this.findExactCommittedOutput(
+      // A fresh operation cannot claim an existing user note/subtitle merely
+      // because its text matches. Only explicit or adapter-adopted recovery may
+      // use this compatibility fallback when no local receipt was returned.
+      : recoverExactOutput ? await this.findExactCommittedOutput(
         folderPath,
-        fallbackBasename,
+        ownsName,
         extension,
         storedContent,
         signal,
-      );
+      ) : null;
     if (owned) {
       return {
         outputPath: owned.path,
@@ -848,10 +870,7 @@ export class TranscriptionCoordinator {
         existing: true,
       };
     }
-    const predictedBasename = timestamped
-      ? fallbackBasename
-      : await this.predictOutputBasename(titleService, file.basename, fallbackBasename, titleSourceText);
-    const outputPath = this.findAvailableOutputPath(folderPath, predictedBasename, extension);
+    const outputPath = this.findAvailableOutputPath(folderPath, basename, extension);
     return {
       outputPath,
       storedContent,
@@ -862,7 +881,7 @@ export class TranscriptionCoordinator {
 
   private async findCommittedOutput(
     folderPath: string,
-    fallbackBasename: string,
+    ownsName: (basename: string) => boolean,
     extension: string,
     marker: string,
     signal: AbortSignal,
@@ -870,7 +889,7 @@ export class TranscriptionCoordinator {
     const candidates = this.app.vault.getFiles().filter((candidate) => (
       candidate.extension === extension
       && (candidate.parent?.path ?? "") === folderPath
-      && candidate.basename.startsWith(fallbackBasename)
+      && ownsName(candidate.basename)
     ));
     for (const candidate of candidates) {
       throwIfAborted(signal);
@@ -882,7 +901,7 @@ export class TranscriptionCoordinator {
 
   private async findExactCommittedOutput(
     folderPath: string,
-    fallbackBasename: string,
+    ownsName: (basename: string) => boolean,
     extension: string,
     content: string,
     signal: AbortSignal,
@@ -890,7 +909,7 @@ export class TranscriptionCoordinator {
     const candidates = this.app.vault.getFiles().filter((candidate) => (
       candidate.extension === extension
       && (candidate.parent?.path ?? "") === folderPath
-      && candidate.basename.startsWith(fallbackBasename)
+      && ownsName(candidate.basename)
     ));
     for (const candidate of candidates) {
       throwIfAborted(signal);
@@ -939,16 +958,6 @@ export class TranscriptionCoordinator {
       throw new Error("A different file claimed the transcript output path before save completed.");
     }
     await this.app.vault.create(planned.outputPath, planned.storedContent);
-  }
-
-  private async predictOutputBasename(
-    titleService: TranscriptionTitleService,
-    prefix: string,
-    fallbackBasename: string,
-    transcriptText: string,
-  ): Promise<string> {
-    const title = await titleService.tryGenerateTitle(transcriptText);
-    return title ? titleService.buildTitledBasename(prefix, title) : fallbackBasename;
   }
 
   private findAvailableOutputPath(

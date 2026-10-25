@@ -273,11 +273,11 @@ describe("TranscribeAudioFileModal", () => {
     expect(modal.modalEl.querySelector("audio")?.src).toContain("blob:audio-preview");
 
     (app.vault.getAbstractFileByPath as jest.Mock).mockImplementation((path: string) =>
-      path === "SystemSculpt/Recordings/1234_voice.m4a"
+      path === "SystemSculpt/Recordings/voice.m4a"
         ? audioFile(path, deviceFile.size)
         : null,
     );
-    const created = audioFile("SystemSculpt/Recordings/1234_voice-2.m4a", deviceFile.size);
+    const created = audioFile("SystemSculpt/Recordings/voice-2.m4a", deviceFile.size);
     (app.vault.createBinary as jest.Mock).mockResolvedValue(created);
     const append = jest.fn();
     Object.assign(app.vault, { appendBinary: append });
@@ -287,7 +287,7 @@ describe("TranscribeAudioFileModal", () => {
 
     expect(ensureDirectoryByPath).toHaveBeenCalledWith("SystemSculpt/Recordings");
     expect(app.vault.createBinary).toHaveBeenCalledWith(
-      "SystemSculpt/Recordings/1234_voice-2.m4a",
+      "SystemSculpt/Recordings/voice-2.m4a",
       deviceBytes,
     );
     expect(updateSettings).not.toHaveBeenCalled();
@@ -302,11 +302,35 @@ describe("TranscribeAudioFileModal", () => {
     expect(revokeObjectUrl).toHaveBeenCalledWith("blob:audio-preview");
   });
 
+  it("keeps the readable device filename in the configured recordings folder", async () => {
+    const { app, plugin, ensureDirectoryByPath } = createPlugin({ recordingsDirectory: "My recordings" });
+    (app.vault.getFiles as jest.Mock).mockReturnValue([]);
+    (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(null);
+    (app.vault.createBinary as jest.Mock).mockImplementation(async (path: string) => audioFile(path));
+    const bytes = new Uint8Array([1, 2, 3]).buffer;
+    const deviceFile = {
+      name: "Gull Point timetable review.m4a", type: "audio/mp4", size: bytes.byteLength,
+      arrayBuffer: jest.fn().mockResolvedValue(bytes),
+    } as unknown as File;
+    const modal = new TranscribeAudioFileModal(plugin);
+    modal.onOpen();
+    await (modal as any).handleDeviceSelection(deviceFile);
+
+    await (modal as any).handleTranscribe();
+
+    expect(ensureDirectoryByPath).toHaveBeenCalledWith("My recordings");
+    expect(app.vault.createBinary).toHaveBeenCalledWith("My recordings/Gull Point timetable review.m4a", bytes);
+    expect(launchPanel).toHaveBeenCalledWith(app, expect.objectContaining({
+      file: expect.objectContaining({ path: "My recordings/Gull Point timetable review.m4a" }),
+      timestamped: false,
+    }));
+  });
+
   it("imports large mobile device audio in bounded parts and publishes a unique path only when complete", async () => {
     Object.assign(Platform, { isDesktopApp: false, isMobileApp: true });
     jest.spyOn(Date, "now").mockReturnValue(1234);
     const h = slicedImport();
-    const occupiedPath = "SystemSculpt/Recordings/1234_long-recording.m4a";
+    const occupiedPath = "SystemSculpt/Recordings/long-recording.m4a";
     const occupied = audioFile(occupiedPath);
     h.files.set(occupiedPath, occupied);
     await (h.modal as any).handleDeviceSelection(h.deviceFile);
@@ -328,7 +352,7 @@ describe("TranscribeAudioFileModal", () => {
       expect(h.app.vault.createBinary).toHaveBeenCalledTimes(1);
       expect((h.app.vault.createBinary as jest.Mock).mock.calls[0][0]).toMatch(/\.partial$/);
       expect((h.app.vault.createBinary as jest.Mock).mock.calls[0][1].byteLength).toBe(0);
-      const completed = h.files.get("SystemSculpt/Recordings/1234_long-recording-2.m4a");
+      const completed = h.files.get("SystemSculpt/Recordings/long-recording-2.m4a");
       expect(completed?.stat.size).toBe(h.deviceFile.size);
       expect(h.files.get(occupiedPath)).toBe(occupied);
       expect([...h.files.keys()].some(path => path.endsWith(".partial"))).toBe(false);
@@ -366,8 +390,8 @@ describe("TranscribeAudioFileModal", () => {
     await (h.modal as any).handleTranscribe();
     expect(h.rename).toHaveBeenCalledTimes(2);
     expect(h.rename.mock.calls.map(([, path]) => path)).toEqual([
-      "SystemSculpt/Recordings/1234_long-recording.m4a",
-      "SystemSculpt/Recordings/1234_long-recording-2.m4a",
+      "SystemSculpt/Recordings/long-recording.m4a",
+      "SystemSculpt/Recordings/long-recording-2.m4a",
     ]);
     expect(h.slice).toHaveBeenCalledTimes(2);
     expect(h.app.vault.createBinary).toHaveBeenCalledTimes(1);

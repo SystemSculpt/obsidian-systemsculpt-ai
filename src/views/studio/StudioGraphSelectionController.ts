@@ -59,7 +59,7 @@ const STUDIO_GRAPH_ZOOM_SETTLE_DELAY_MS = 160;
 type StudioGraphSelectionHost = {
   isBusy: () => boolean;
   getCurrentProject: () => StudioProjectV1 | null;
-  renderEdgeLayer: () => void;
+  renderEdgeLayer: (options?: { translating?: boolean }) => void;
   onNodePositionsChanged?: () => void;
   commitProjectMutation: (
     reason: StudioProjectSessionMutationReason,
@@ -86,6 +86,8 @@ type StudioGraphSelectionHost = {
 
 type NotifyNodePositionsChangedOptions = {
   recomputeCanvasBounds?: boolean;
+  /** A drag frame: nodes only moved, so edges reuse their measured port offsets. */
+  translating?: boolean;
 };
 
 export class StudioGraphSelectionController {
@@ -281,7 +283,7 @@ export class StudioGraphSelectionController {
     if (shouldRecomputeCanvasBounds) {
       this.ensureWorldCoverage();
     }
-    this.host.renderEdgeLayer();
+    this.host.renderEdgeLayer({ translating: options?.translating === true });
     this.host.onNodePositionsChanged?.();
   }
 
@@ -1019,7 +1021,7 @@ export class StudioGraphSelectionController {
     for (const nodeId of this.nodeTranslationOrigins.keys()) {
       this.updateNodePosition(nodeId);
     }
-    this.notifyNodePositionsChanged({ recomputeCanvasBounds: false });
+    this.notifyNodePositionsChanged({ recomputeCanvasBounds: false, translating: true });
   }
 
   finishSelectionTranslation(): void {
@@ -1161,7 +1163,7 @@ export class StudioGraphSelectionController {
         this.updateNodePosition(dragNodeId);
       }
       this.host.previewDiagramTranslation?.();
-      this.notifyNodePositionsChanged({ recomputeCanvasBounds: false });
+      this.notifyNodePositionsChanged({ recomputeCanvasBounds: false, translating: true });
       syncHoveredGroup();
     };
 

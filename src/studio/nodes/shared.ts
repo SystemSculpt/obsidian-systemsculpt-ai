@@ -1,4 +1,4 @@
-import type { StudioImageGenerationInput, StudioJsonValue, StudioNodeExecutionContext } from "../types";
+import type { StudioImageInput, StudioJsonValue, StudioNodeExecutionContext } from "../types";
 import { isRecord } from "../utils";
 
 export type StudioImageInputCandidate = {
@@ -270,7 +270,7 @@ export async function resolveStudioImageInput(
   context: StudioNodeExecutionContext,
   candidate: StudioImageInputCandidate,
   inputLabel: string,
-): Promise<StudioImageGenerationInput> {
+): Promise<StudioImageInput> {
   const path = String(candidate.path || "").trim();
   const hash = String(candidate.hash || "").trim().toLowerCase();
   const size = Number(candidate.sizeBytes);

@@ -150,6 +150,21 @@ describe("AgentConversationPresentation product-copy boundary", () => {
     });
   });
 
+  it.each(["license_rejected", "license_required"])("offers recovery for %s without changing failure copy or report ids", (code) => {
+    for (const showPlanOffer of [false, true]) {
+      expect(presentAgentError({
+        code,
+        message: "Private license service detail.",
+        reportId: "report_0123456789abcdef0123456789abcdef",
+      }, false, showPlanOffer)).toEqual({
+        heading: "Could not finish",
+        message: "SystemSculpt could not complete the response.",
+        action: "see-plans",
+        reportId: "report_0123456789abcdef0123456789abcdef",
+      });
+    }
+  });
+
   it("shows actionable first-party copy for a safety filter", () => {
     expect(presentAgentError({
       code: "content_filter",

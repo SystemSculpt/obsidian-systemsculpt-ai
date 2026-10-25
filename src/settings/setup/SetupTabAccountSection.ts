@@ -1,4 +1,5 @@
-import { Notice, Setting, TextComponent } from "obsidian";
+import { Notice, TextComponent } from "obsidian";
+import { createCatalogSetting } from "../SettingsCatalog";
 import { hasHostCapability } from "../../platform/hostCapabilities";
 import { SystemSculptService } from "../../services/SystemSculptService";
 import { SYSTEMSCULPT_LEGAL_URLS, SYSTEMSCULPT_WEBSITE, withPluginAttribution } from "../../constants/externalServices";
@@ -56,7 +57,7 @@ export function renderAccountSection(
         new Notice("License validation is temporarily unavailable. Try again.");
         return result;
       }
-      tabInstance.display();
+      tabInstance.refreshAccountSection();
       return result;
     } catch {
       new Notice("Unable to validate license. Try again.");
@@ -69,8 +70,7 @@ export function renderAccountSection(
     : signedInWithoutPlan
       ? `Signed in as ${signedInEmail}. No active plan yet — choose a plan to enable AI features.`
       : "Activate your license to turn on SystemSculpt chat, search, transcription, and workspace services.";
-  const statusSetting = new Setting(root)
-    .setName("Account")
+  const statusSetting = createCatalogSetting(root, "account.status")
     .setDesc(`${accountDesc}${hasHostCapability("local-cli", root) ? " Claude Code and Codex chat on desktop need no license." : ""}${pendingSignIn ? " Waiting for browser sign-in…" : ""}`);
   renderConnectOutcome(statusSetting.descEl, tabInstance.accountConnectOutcome);
 
@@ -91,7 +91,7 @@ export function renderAccountSection(
               subscriptionStatus: "",
               lastValidated: 0,
             });
-            tabInstance.display();
+            tabInstance.refreshAccountSection();
           } finally {
             button.setDisabled(false).setButtonText("Deactivate");
           }
@@ -130,7 +130,7 @@ export function renderAccountSection(
             displayName: "",
             subscriptionStatus: "",
           });
-          tabInstance.display();
+          tabInstance.refreshAccountSection();
         } finally {
           button.setDisabled(false).setButtonText("Sign out");
         }
@@ -168,9 +168,7 @@ export function renderAccountSection(
   }
 
   if (pendingSignIn) {
-    new Setting(root)
-      .setName("Browser sign-in")
-      .setDesc("Open the same sign-in request again to get a connection code.")
+    createCatalogSetting(root, "account.browser-sign-in")
       .addButton((button) => {
         button.setButtonText("Open the sign-in page again").onClick(async () => {
           button.setDisabled(true);
@@ -187,9 +185,7 @@ export function renderAccountSection(
           }
         });
       });
-    const codeSetting = new Setting(root)
-      .setName("Connection code")
-      .setDesc("If Obsidian did not open automatically, paste the code shown in your browser.");
+    const codeSetting = createCatalogSetting(root, "account.connection-code");
     let codeInput: TextComponent | null = null;
     let submitCode: (() => Promise<void>) | null = null;
     codeSetting.addText((text) => {
@@ -219,13 +215,12 @@ export function renderAccountSection(
     codeSetting.addButton((button) => {
       button.setButtonText("Cancel").onClick(() => {
         connectService.cancelPending();
-        void tabInstance.display();
+        void tabInstance.refreshAccountSection();
       });
     });
   }
 
-  const licenseSetting = new Setting(root)
-    .setName("License key")
+  const licenseSetting = createCatalogSetting(root, "account.license-key")
     .setDesc(
       hasSavedLicense
         ? "Saved key is hidden. Enter a new key only to replace it."
@@ -276,7 +271,7 @@ export function renderAccountSection(
           // Keep a first activation's key so the Retry action remains available
           // after a temporary outage. Existing active keys are restored above.
           await plugin.getSettingsManager().updateSettings({ licenseValid: false });
-          tabInstance.display();
+          tabInstance.refreshAccountSection();
         }
       } catch {
         await plugin.getSettingsManager().updateSettings(priorLicenseState).catch(() => undefined);
@@ -292,7 +287,7 @@ export function renderAccountSection(
   });
 
   if (isProActive && (plugin.settings.licenseKey || "").trim().length > 0) {
-    const creditsSetting = new Setting(root).setName("Credits").setDesc("Fetching credits balance…");
+    const creditsSetting = createCatalogSetting(root, "account.credits").setDesc("Fetching credits balance…");
     const aiService = SystemSculptService.getInstance(plugin);
 
     const formatCredits = (value: number): string => {
@@ -342,6 +337,7 @@ export function renderAccountSection(
     const syncCredits = async () => {
       try {
         creditsSetting.setDesc("Fetching credits balance…");
+        tabInstance.invalidateSearchIndex();
         const balance = await aiService.readCreditsBalance();
         if (
           (
@@ -403,6 +399,8 @@ export function renderAccountSection(
         refreshAnnualUpgradeButton?.();
         refreshBuyCreditsButton?.();
         creditsSetting.setDesc("Unable to fetch credits balance. Try again.");
+      } finally {
+        tabInstance.invalidateSearchIndex();
       }
     };
 
@@ -460,7 +458,7 @@ export function renderAccountSection(
     void syncCredits();
   }
 
-  const managedDataSetting = new Setting(root).setName("AI data");
+  const managedDataSetting = createCatalogSetting(root, "account.ai-data").setDesc("");
   managedDataSetting.descEl.append("AI features send request content to SystemSculpt. See ");
   const termsLink = managedDataSetting.descEl.createEl("a");
   termsLink.href = SYSTEMSCULPT_LEGAL_URLS.TERMS;

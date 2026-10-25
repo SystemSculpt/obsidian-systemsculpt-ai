@@ -650,6 +650,53 @@ describe("single authored file", () => {
 
 });
 
+describe("saved image generation cards", () => {
+  it.each(["v1", "v2"])("opens, saves and reopens %s images with outputs and history intact", async dialect => {
+    const { store, files, reopen } = createStore();
+    const path = "SystemSculpt/Studio/Saved images.systemsculpt";
+    const project = createEmptyStudioProject({
+      name: "Saved images", policyPath: deriveStudioPolicyPath(path),
+      minPluginVersion: "6.14.0", maxRuns: 100, maxArtifactsMb: 1024,
+    });
+    const assetPath = `${deriveStudioAssetsDir(path)}/images/saved.png`;
+    const image = {
+      id: "image", kind: "studio.image_generation", version: "1.0.0", title: "Saved illustration", continueOnError: false, disabled: false,
+      position: { x: 320, y: 140 }, size: { width: 440, height: 360 },
+      config: { prompt: "A lighthouse", model: "saved-model", count: 8, aspectRatio: "16:9", imageSize: "2K", seed: 42, futureField: { retained: true } },
+    };
+    const output = {
+      id: "output", kind: "studio.media_ingest", version: "1.0.0", title: "Saved output", parentId: "image", continueOnError: false, disabled: false,
+      position: { x: 850, y: 140 }, config: {
+        sourcePath: assetPath, __studio_managed_by: "studio.image_generation_output.v1",
+        __studio_source_node_id: "image", __studio_output_slot: 0,
+      },
+    };
+    project.graph.nodes = [image, output];
+    project.graph.edges = [{ id: "image.images->output.media", fromNodeId: "image", fromPortId: "images", toNodeId: "output", toPortId: "media" }];
+    project.graph.entryNodeIds = ["image"];
+    project.graph.groups = [{ id: "saved", name: "Illustrations", nodeIds: ["image", "output"] }];
+    const outputs = { images: [{ path: assetPath, hash: "a".repeat(64), mimeType: "image/png", sizeBytes: 11 }] };
+    const supportFiles = new Map([
+      [assetPath, "saved bytes"],
+      [deriveStudioNodeCachePath(path), JSON.stringify({ schema: "studio.node-cache.v1", projectId: project.projectId, entries: { image: { outputs } } })],
+      [`${deriveStudioRunsDir(path)}/saved/events.ndjson`, JSON.stringify({ type: "node.output", nodeId: "image", runId: "saved", outputs })],
+    ]);
+    for (const [key, value] of supportFiles) files.set(key, value);
+    files.set(path, dialect === "v1" ? JSON.stringify(project) : serializeStudioProject(project));
+
+    const opened = await store.loadProject(path);
+    expect(opened.graph.nodes).toEqual([image, output]);
+    expect(opened.graph.edges).toEqual(project.graph.edges);
+    await store.saveProject(path, { ...opened, name: "Renamed images" });
+    await store.dispose();
+    const next = reopen();
+    const reopened = await next.loadProject(path);
+    expect(reopened.graph).toEqual(opened.graph);
+    for (const [key, value] of supportFiles) expect(files.get(key)).toBe(value);
+    await next.dispose();
+  });
+});
+
 describe("saved workflow notes", () => {
   it.each(["v1", "v2"])("opens and saves %s workflows without losing their definition or relationships", async dialect => {
     const { store, files, reopen } = createStore();

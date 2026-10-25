@@ -2,6 +2,19 @@
 
 Canonical repository guidance for every coding agent working on the SystemSculpt Obsidian client. Edit `AGENTS.md` directly.
 
+## What SystemSculpt is for (read first)
+
+1. Mission: everything a person captures and creates with AI, on any device, ends up as plain Markdown in their own Obsidian vault, on their own machine.
+2. The vault is the home and the source of truth. The plugin, the iPhone app, the desktop app (next) and our servers exist to get data into it and to put AI to work on it there. None of them is a second home.
+3. Plain Markdown always: every feature's output is a readable .md file (plus ordinary attachments) in the vault. No proprietary format or hidden state a person would need to keep their work.
+4. Every device, one vault: a capture is finished only when it's a file in the vault. Say "In your vault" only on a verified receipt.
+5. AI where the data lives: Claude Code or Codex (the person's own account) or SystemSculpt AI reads only what the person allows and writes back as files, with approval before edits.
+6. No lock-in: cancelling, uninstalling or deleting an account never takes anyone's notes. What's in the vault stays.
+7. Be exact about what leaves the machine: hosted AI goes through our server, OpenRouter and model providers; local agents talk to Anthropic or OpenAI; iPhone captures pass through our server. Never write "private AI", "local AI", "offline", "nothing leaves your device", "end-to-end encrypted" or "zero retention". The privacy policy is the source of truth.
+8. "Open source" means the Obsidian plugin (MIT) and the Markdown format. The iPhone app and server are closed; Obsidian is free but not open source.
+9. Rank work by one question: does it get a person's data into their vault as Markdown, or make it more useful there?
+10. Full text: vault "02 Areas/SystemSculpt Business/Product/Mission and positioning 2026-10.md".
+
 ## Repository boundary
 
 The SystemSculpt workspace has three sibling repositories:
@@ -238,17 +251,25 @@ manual mobile exploration is performed.
 
 - New desktop chats honor an explicit execution-backend choice first and preserve
   paid hosted users' selection during migration. Otherwise, choose among installed,
-  signed-in Claude Code and Codex by primary session-file count in the last 30 days
+  usable Claude Code and Codex by primary session-file count in the last 30 days
   (using file modification times), then newest session-file mtime; Claude Code wins
   an exact tie. If neither is usable, use hosted SystemSculpt. Saved chats retain
   their backend. Desktop users need no SystemSculpt account or license to use their
   own agents; mobile uses hosted execution.
-- Agent detection is cached for the Obsidian session. Refresh with **Detect again**
-  or after a native run fails because the agent is missing or signed out; do not
-  poll. Usage detection may only list/stat native session-store names and timestamps,
+- Agent detection is cached for the Obsidian session. A timed-out sign-in probe
+  is unknown, not signed out: an installed agent with sessions in the last 30 days
+  remains usable. Retry unknown probes once in the background with the same 3-second
+  window; refresh status without switching an open chat's backend. Otherwise refresh
+  with **Detect again** or after a native run fails because the agent is missing or
+  signed out; do not poll. Usage detection may only list/stat native session-store names and timestamps,
   never read file contents or credentials. Chat states what runs where in one run
   line under the composer (backend, mode, model or hosted credits), each part a
   one-click menu; **Detect again** lives in its backend menu on desktop.
+- Native chat turns belong to the plugin, not a view. Switching history, starting
+  New chat, or closing a view leaves an admitted Claude Code or Codex turn running
+  and saves its answer to the original Markdown transcript. Reopening attaches to
+  the live session, including pending approvals. Stop, deleting the chat, and
+  unloading the plugin cancel the turn; navigation never implies approval.
 - New Claude Code chats default to **Auto** (`auto`), using Claude Code's native
   safety checks, not permission bypass. Manual choices are **Ask before edits**
   (`manual`), **Accept edits** (`acceptEdits`), **Plan only** (`plan`), and **Claude
@@ -263,6 +284,9 @@ manual mobile exploration is performed.
   writable sandbox. **Codex settings** inherits native approval policy, sandbox,
   permission profiles and reviewer unchanged. Resuming in settings mode resolves
   current native configuration through an ephemeral thread without a model turn.
+- Unset Codex model and thinking selections inherit the installed Codex configuration:
+  omit both overrides from native thread and turn requests. Catalog defaults are
+  display hints, never persisted model overrides. Explicit selections remain overrides.
 - Chat's Codex approval-mode override does not apply to Studio. Studio continues to
   inherit native Codex configuration, including on resume; `CodexExecutionOptions`
   carries model, effort and service tier, not the plugin chat approval mode.

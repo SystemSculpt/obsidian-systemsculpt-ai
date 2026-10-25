@@ -1,5 +1,6 @@
 import { App, TFile, normalizePath } from "obsidian";
 import { DiffViewer } from "../../components/DiffViewer";
+import { comparableNativePath, nativeToolPath, normalizedNativePath } from "../../utils/nativeToolPath";
 import type { ToolCall } from "../../types/toolCalls";
 import type { AgentToolPart } from "../../chat/ChatConversation";
 import { getFunctionDataFromToolCall } from "../../utils/toolDisplay";
@@ -128,46 +129,6 @@ export async function prepareWriteEditPreview(app: App, toolCall: ToolCall): Pro
 function nativeRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown> : {};
-}
-
-/** Lexical only: native-requested paths are never resolved through the filesystem. */
-function normalizedNativePath(path: string): string {
-  const slashPath = path.replace(/\\/gu, "/");
-  const root = /^[A-Za-z]:\//u.exec(slashPath)?.[0]
-    ?? (slashPath.startsWith("//") ? "//" : slashPath.startsWith("/") ? "/" : "");
-  const segments: string[] = [];
-  for (const segment of slashPath.slice(root.length).split("/")) {
-    if (!segment || segment === ".") continue;
-    if (segment === ".." && segments.length && segments[segments.length - 1] !== "..") segments.pop();
-    else if (segment === ".." && root) continue;
-    else segments.push(segment);
-  }
-  return root + segments.join("/");
-}
-
-// Windows drive letters are case-insensitive; preserve the requested spelling.
-function comparableNativePath(value: string): string {
-  return /^[A-Za-z]:/u.test(value) ? value[0].toLowerCase() + value.slice(1) : value;
-}
-
-/** Resolve against the request cwd, but display relative only to Chat's vault roots. */
-export function nativeToolPath(path: string, workingDirectory: string, vaultRoot = workingDirectory, vaultRootAlias?: string, homeDirectory?: string): { displayPath: string; vaultPath: string | null } {
-  const absolute = (value: string) => /^(?:[/\\]|[A-Za-z]:[/\\])/u.test(value);
-  if (!path || path.includes("\0") || !absolute(vaultRoot) || (!absolute(path) && !absolute(workingDirectory)) || /^~(?:\/|\\|$)/u.test(path)) {
-    return { displayPath: `${path} (vault location unverified)`, vaultPath: null };
-  }
-  const target = normalizedNativePath(absolute(path) ? path : `${workingDirectory}/${path}`);
-  for (const value of [vaultRoot, vaultRootAlias]) {
-    if (!value || !absolute(value)) continue;
-    const root = normalizedNativePath(value);
-    const prefix = root.endsWith("/") ? root : `${root}/`;
-    const relative = comparableNativePath(target) === comparableNativePath(root) ? ""
-      : comparableNativePath(target).startsWith(comparableNativePath(prefix)) ? target.slice(prefix.length) : null;
-    if (relative !== null) return { displayPath: relative === "" ? "Vault root" : relative, vaultPath: relative || null };
-  }
-  const home = homeDirectory && absolute(homeDirectory) ? normalizedNativePath(homeDirectory).replace(/\/$/u, "") : undefined;
-  const fromHome = home && comparableNativePath(target).startsWith(comparableNativePath(`${home}/`)) ? `~/${target.slice(home.length + 1)}` : target;
-  return { displayPath: `${fromHome} (outside vault)`, vaultPath: null };
 }
 
 /** Native edits use literal strings, never the hosted tool's fuzzy/range applier. */

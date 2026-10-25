@@ -31,6 +31,11 @@ selection, SystemSculpt checks which agents are installed and signed in:
    an exact tie.
 3. If neither is ready, use hosted SystemSculpt.
 
+A sign-in check that takes longer than three seconds reports **Sign-in status
+unknown**, not signed out. An installed agent with sessions from the last 30 days
+can still be selected automatically. SystemSculpt checks once more in the
+background; that result updates availability without switching the open chat.
+
 Detection is cached for the current Obsidian session, not polled in the background.
 Choose **Detect again** in the chat's backend menu (the first part of the run line
 under the composer), or in an empty chat's install hint, after installing or
@@ -73,6 +78,27 @@ An explicitly selected backend also applies to Studio text generation, but chat
 automatic detection does not change Studio's backend default. **Codex chat modes do
 not apply to Studio**: Studio continues to inherit Codex's native permission
 configuration. See [Studio workspaces](../studio-workspaces.md).
+
+## iPhone handoffs
+
+Once your signed-in account has used the iOS app, Chat shows **From your iPhone**
+cards with the full instruction, source capture and chosen agent. Choose **Run**
+to open a fresh agent workspace without replacing your current draft. Claude Code
+and Codex run on desktop only; hosted SystemSculpt can also run on mobile. The
+plugin reports the agents available in this vault to your iPhone.
+
+Under **Workspace → iOS captures**, **Run iPhone handoffs without asking** is off
+by default, including for existing installations. Turning it on starts incoming
+handoffs in background chat tabs. It skips only the card's Run click: the chosen
+agent's own permission mode and approval requests still apply. Approve or decline
+those requests in that handoff's chat, just as in an ordinary chat.
+
+The plugin checks for handoffs when Obsidian opens, regains focus and every five
+minutes. A completed result is saved as Markdown in `SystemSculpt/Handoffs/`, then
+its result and vault path are reported to the phone. Closing Obsidian, losing queue
+ownership or changing accounts stops local execution. An interrupted handoff is
+not silently run again: its result note records that it started, and its chat
+retains the conversation. Review both before sending the instruction again.
 
 ## Saving changes
 

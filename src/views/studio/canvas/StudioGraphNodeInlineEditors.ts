@@ -12,6 +12,7 @@ import type { StudioNodeDetailMode } from "./StudioGraphNodeDetailMode";
 import { renderInlineConfigPanel, type StudioMediaModelPickerOpener } from "./StudioGraphInlineConfigPanel";
 import { isInlineTextNodeKind, renderTextNodeInlineEditor } from "./StudioGraphTextInlineEditor";
 import type { StudioNodeConfigPathBrowseOptions } from "../StudioPathFieldPicker";
+import type { StudioCardLockState } from "./StudioCardLock";
 
 type RenderStudioNodeInlineEditorOptions = {
   nodeEl: HTMLElement;
@@ -23,7 +24,7 @@ type RenderStudioNodeInlineEditorOptions = {
     fromPortId: string;
     toPortId: string;
   }>;
-  interactionLocked: boolean;
+  interactionLocked: StudioCardLockState;
   onNodeConfigMutated: (node: StudioNodeInstance) => void;
   onNodeConfigValueChange?: (
     nodeId: string,

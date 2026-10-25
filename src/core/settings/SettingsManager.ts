@@ -645,6 +645,10 @@ export class SettingsManager {
       validatedSettings.phoneCapturesLinked = defaultSettings.phoneCapturesLinked;
     }
 
+    if (typeof validatedSettings.phoneHandoffsAutoRun !== 'boolean') {
+      validatedSettings.phoneHandoffsAutoRun = false;
+    }
+
     if (!Array.isArray(validatedSettings.pendingRecorderCaptures)) {
       validatedSettings.pendingRecorderCaptures = [];
     } else {

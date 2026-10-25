@@ -1,5 +1,7 @@
 import { TFile, TFolder, type App, type EventRef, type TAbstractFile } from "obsidian";
 import type SystemSculptPlugin from "../../main";
+import type { ChatMessage } from "../../types";
+import { parseAttachedTextContent } from "../../chat/ChatAttachmentContent";
 import {
   isPathInDirectory,
   resolveKnownChatsDirectories,
@@ -44,8 +46,12 @@ export function chatHistoryIndex(plugin: HistoryHost): ChatHistoryIndex {
   return index;
 }
 
-function messageText(content: unknown): string {
-  return typeof content === "string" ? content : "";
+/** The text a chat shows: attached images and files show as chips, not text. */
+function messageText(content: ChatMessage["content"]): string {
+  if (typeof content === "string") return content;
+  return (content ?? [])
+    .flatMap((part) => part.type === "text" && !parseAttachedTextContent(part.text) ? [part.text] : [])
+    .join("\n");
 }
 
 async function withTimeout<T>(promise: Promise<T>, fallback: T): Promise<T> {

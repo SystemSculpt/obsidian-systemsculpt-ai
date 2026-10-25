@@ -172,4 +172,71 @@ describe("persistent Studio graph workspace", () => {
     expect(initial.root.querySelector('[data-node-id="dragging"]')).toBe(dragging);
     expect(dragging.style.transform).toBe("translate(80px, 0px)");
   });
+
+  it("locks and unlocks cards in place when a run starts and ends, remounting only a command center", () => {
+    const center = { ...node("center"), kind: "studio.command_center" };
+    const initial = options(project([node("worker"), center]));
+    document.body.appendChild(initial.root);
+    const handle = renderStudioGraphWorkspace(initial);
+    const card = (id: string) => initial.root.querySelector<HTMLElement>(`[data-node-id="${id}"]`)!;
+    const worker = card("worker"), firstCenter = card("center");
+    const title = worker.querySelector<HTMLInputElement>(".ss-studio-node-title-input")!;
+    const controls = () => [title, ...worker.querySelectorAll<HTMLButtonElement>('[data-testid="studio.node.run"], [data-testid="studio.node.remove"]')];
+    expect(controls()).toHaveLength(3);
+    expect(controls().map(control => control.disabled)).toEqual([false, false, false]);
+
+    const running = { ...options(initial.currentProject!), root: initial.root, busy: true };
+    expect(handle.refresh(running)).toBe(true);
+    expect(card("worker")).toBe(worker);
+    expect(controls().map(control => control.disabled)).toEqual([true, true, true]);
+    // A command center shows its targets' run status, so it remounts.
+    expect(card("center")).not.toBe(firstCenter);
+
+    const finished = { ...options(initial.currentProject!), root: initial.root, busy: false };
+    expect(handle.refresh(finished)).toBe(true);
+    expect(card("worker")).toBe(worker);
+    expect(controls().map(control => control.disabled)).toEqual([false, false, false]);
+    initial.root.remove();
+  });
+
+  it("locks a focused card only once focus leaves it", async () => {
+    const initial = options(project([node("typing")]));
+    document.body.appendChild(initial.root);
+    const handle = renderStudioGraphWorkspace(initial);
+    const typing = initial.root.querySelector<HTMLElement>('[data-node-id="typing"]')!;
+    const title = typing.querySelector<HTMLInputElement>(".ss-studio-node-title-input")!;
+    title.focus();
+
+    const running = { ...options(initial.currentProject!), root: initial.root, busy: true };
+    expect(handle.refresh(running)).toBe(true);
+    expect(title.disabled).toBe(false);
+    expect(document.activeElement).toBe(title);
+
+    // Focus leaving the card refreshes it on its own.
+    title.blur();
+    await Promise.resolve();
+    expect(initial.root.querySelector('[data-node-id="typing"]')).toBe(typing);
+    expect(title.disabled).toBe(true);
+    initial.root.remove();
+  });
+
+  it("remounts a media card when its model catalog arrives and changes the inputs it offers", () => {
+    let hidden: string[] = [];
+    const video = { ...node("video"), kind: "studio.video_generation" };
+    const withPlan = (base: StudioGraphWorkspaceRendererOptions): StudioGraphWorkspaceRendererOptions => ({
+      ...base,
+      resolveMediaNodeInputPlan: () => ({ kind: "video", modelId: "m", model: null, hiddenInputPortIds: [...hidden], inputPortNotes: {}, hiddenFieldKeys: [] }),
+    });
+    const initial = withPlan(options(project([video])));
+    document.body.appendChild(initial.root);
+    const handle = renderStudioGraphWorkspace(initial);
+    const first = initial.root.querySelector('[data-node-id="video"]');
+    expect(handle.refresh({ ...withPlan(options(initial.currentProject!)), root: initial.root })).toBe(true);
+    expect(initial.root.querySelector('[data-node-id="video"]')).toBe(first);
+
+    hidden = ["image"];
+    expect(handle.refresh({ ...withPlan(options(initial.currentProject!)), root: initial.root })).toBe(true);
+    expect(initial.root.querySelector('[data-node-id="video"]')).not.toBe(first);
+    initial.root.remove();
+  });
 });

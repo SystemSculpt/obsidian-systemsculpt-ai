@@ -109,6 +109,49 @@ describe("StudioRuntime session snapshot runs", () => {
     }]);
   });
 
+  it("reads each published run's events once and retries only cleanup that is still pending", async () => {
+    let runIndex = [{ runId: "run-a", status: "success", startedAt: "2026-03-22T00:00:00.000Z", finishedAt: null, error: null, executedNodeIds: [], cachedNodeIds: [] }];
+    const eventsFor = (operationId: string) => new TextEncoder().encode(JSON.stringify({
+      type: "node.output",
+      managedOperations: [{ capability: "transcription", operationId }],
+    }));
+    const projectStore = {
+      readSupportFile: jest.fn(async (_projectPath: string, path: string) => {
+        if (path.endsWith("/runs/index.json")) return new TextEncoder().encode(JSON.stringify(runIndex));
+        if (path.endsWith("/runs/run-a/events.ndjson")) return eventsFor("op-a");
+        if (path.endsWith("/runs/run-b/events.ndjson")) return eventsFor("op-b");
+        return null;
+      }),
+    } as any;
+    const completeLocalCommit = jest.fn(async (_refs: unknown[]) => undefined);
+    completeLocalCommit.mockRejectedValueOnce(new Error("offline"));
+    const runtime = new StudioRuntime(
+      {} as any,
+      { getLogger: () => ({ warn: jest.fn(), error: jest.fn(), debug: jest.fn() }) } as any,
+      projectStore,
+      {} as any,
+      {} as any,
+      {} as any,
+      { completeLocalCommit } as any,
+    );
+    const eventReads = () => projectStore.readSupportFile.mock.calls.filter(([, path]: [string, string]) => path.endsWith("events.ndjson")).length;
+
+    await runtime.getRecentRuns("Studio/Test.systemsculpt");
+    await runtime.getRecentRuns("Studio/Test.systemsculpt");
+    await runtime.getRecentRuns("Studio/Test.systemsculpt");
+    expect(eventReads()).toBe(1);
+    // The first cleanup failed, the second succeeded, the third had nothing left to send.
+    expect(completeLocalCommit.mock.calls).toEqual([
+      [[{ capability: "transcription", operationId: "op-a" }]],
+      [[{ capability: "transcription", operationId: "op-a" }]],
+    ]);
+
+    runIndex = [...runIndex, { ...runIndex[0], runId: "run-b", startedAt: "2026-03-22T00:05:00.000Z" }];
+    await runtime.getRecentRuns("Studio/Test.systemsculpt");
+    expect(eventReads()).toBe(2);
+    expect(completeLocalCommit).toHaveBeenLastCalledWith([{ capability: "transcription", operationId: "op-b" }]);
+  });
+
   it("runs directly from the provided project snapshot without reloading the project file", async () => {
     const adapter = {
       exists: jest.fn(async (path: string) => path.endsWith("index.json") ? false : true),
@@ -404,7 +447,7 @@ describe("StudioRuntime session snapshot runs", () => {
     }
   });
 
-  it("propagates authored and edited minimal text through the real runtime into an image prompt", async () => {
+  it("propagates authored and edited minimal text through the real runtime into an video prompt", async () => {
     platform.isDesktopApp = false;
     const app = {
       vault: {
@@ -432,14 +475,14 @@ describe("StudioRuntime session snapshot runs", () => {
     registerBuiltInStudioNodes(registry);
     const receivedPrompts: string[] = [];
     const apiAdapter = {
-      generateImage: jest.fn(async (request: { buildPayload: () => Promise<{ prompt: string }> }) => {
+      generateVideo: jest.fn(async (request: { buildPayload: () => Promise<{ prompt: string }> }) => {
         const payload = await request.buildPayload();
         receivedPrompts.push(payload.prompt);
         return {
-          images: [],
+          videos: [],
           operation: {
-            capability: "image_generation",
-            operationId: `image-${receivedPrompts.length}`,
+            capability: "video_generation",
+            operationId: `video-${receivedPrompts.length}`,
           },
         };
       }),
@@ -479,13 +522,13 @@ describe("StudioRuntime session snapshot runs", () => {
         },
       },
       {
-        id: "image",
-        kind: "studio.image_generation",
+        id: "video",
+        kind: "studio.video_generation",
         version: "1.0.0",
-        title: "Image Generation",
+        title: "Video Generation",
         position: { x: 320, y: 0 },
         config: {
-          count: 1,
+          model: "video-model",
           aspectRatio: "1:1",
         },
       },
@@ -494,29 +537,29 @@ describe("StudioRuntime session snapshot runs", () => {
       id: "prompt-edge",
       fromNodeId: "prompt",
       fromPortId: "text",
-      toNodeId: "image",
+      toNodeId: "video",
       toPortId: "prompt",
     }];
     project.graph.entryNodeIds = ["prompt"];
 
     await expect(
       runtime.runProjectSnapshot("Studio/Test.systemsculpt", project, {
-        entryNodeIds: ["image"],
+        entryNodeIds: ["video"],
       })
     ).resolves.toMatchObject({ status: "success" });
 
-    project.graph.nodes[0].config.value = "Edited prompt reaches the image node";
+    project.graph.nodes[0].config.value = "Edited prompt reaches the video node";
     await expect(
       runtime.runProjectSnapshot("Studio/Test.systemsculpt", project, {
-        entryNodeIds: ["image"],
+        entryNodeIds: ["video"],
       })
     ).resolves.toMatchObject({ status: "success" });
 
     expect(receivedPrompts).toEqual([
       "Portrait of a fox in amber light",
-      "Edited prompt reaches the image node",
+      "Edited prompt reaches the video node",
     ]);
-    expect(apiAdapter.generateImage).toHaveBeenCalledTimes(2);
+    expect(apiAdapter.generateVideo).toHaveBeenCalledTimes(2);
     expect(projectStore.publishRun).toHaveBeenCalledTimes(2);
   });
 });

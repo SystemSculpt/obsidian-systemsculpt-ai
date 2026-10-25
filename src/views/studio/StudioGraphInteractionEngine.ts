@@ -21,7 +21,7 @@ export class StudioGraphInteractionEngine {
     this.selectionController = new StudioGraphSelectionController({
       isBusy: () => this.host.isBusy(),
       getCurrentProject: () => this.host.getCurrentProject(),
-      renderEdgeLayer: () => this.connectionEngine.renderEdgeLayer(),
+      renderEdgeLayer: (options) => this.connectionEngine.renderEdgeLayer(options),
       onNodePositionsChanged: () => {
         this.groupController.refreshGroupBounds();
         this.selectionResizeController.refreshSelectionFrame();
@@ -405,7 +405,7 @@ export class StudioGraphInteractionEngine {
     this.connectionEngine.setEdgeActivity(edges);
   }
 
-  notifyNodePositionsChanged(options?: { recomputeCanvasBounds?: boolean }): void {
+  notifyNodePositionsChanged(options?: { recomputeCanvasBounds?: boolean; translating?: boolean }): void {
     this.selectionController.notifyNodePositionsChanged(options);
   }
 }

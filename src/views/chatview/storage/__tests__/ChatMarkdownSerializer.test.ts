@@ -134,6 +134,112 @@ describe("ChatMarkdownSerializer", () => {
       )?.messages[0]?.tool_calls).toEqual([toolCallData]);
     });
 
+    it.each([
+      ["/Users/alex/Vault/Notes", "/Users/alex/Vault", "/Users/alex", "/Users/alex/Vault/Notes/Plan.md"],
+      ["C:\\Users\\alex\\Vault\\Notes", "C:\\Users\\alex\\Vault", "C:\\Users\\alex", "C:\\Users\\alex\\Vault\\Notes\\Plan.md"],
+    ])("stores native paths portably without changing live tool data (%s)", (cwd, root, home, target) => {
+      const tool: any = {
+        id: "native-edit", state: "completed",
+        native: { agent: "claude", workingDirectory: cwd, vaultRoot: root, vaultRootAlias: root, homeDirectory: home,
+          permissionSuggestions: [{ directories: [home] }] },
+        request: { id: "native-edit", type: "function", function: { name: "Edit", arguments: JSON.stringify({ file_path: target, old_string: "before", new_string: "after" }) } },
+        result: { success: true, data: "Edited" },
+      };
+      const before = JSON.stringify(tool);
+      const message: ChatMessage = { role: "assistant", message_id: "native-message", content: "",
+        messageParts: [{ id: "edit", type: "tool_call", data: tool, timestamp: 1 }] };
+      const serialized = ChatMarkdownSerializer.serializeMessages([message]);
+      expect(serialized).not.toContain("homeDirectory");
+      expect(serialized).not.toContain("vaultRootAlias");
+      expect(serialized).not.toContain("permissionSuggestions");
+      expect(serialized).not.toContain("alex");
+      const restored = ChatMarkdownSerializer.readBack([message])?.[0].tool_calls?.[0];
+      expect(restored?.native).toEqual({ agent: "claude", workingDirectory: "Notes", vaultRoot: "." });
+      expect(JSON.parse(restored!.request.function.arguments)).toEqual({ file_path: "Plan.md", old_string: "before", new_string: "after" });
+      expect(JSON.stringify(tool)).toBe(before);
+      const reloaded = ChatMarkdownSerializer.parseMarkdown(`---\nid: portable\n---\n\n${serialized}`);
+      expect(ChatMarkdownSerializer.serializeMessages(reloaded?.messages ?? [])).toBe(serialized);
+    });
+
+    it("stores native tool text without the vault's absolute path or the home folder", () => {
+      const root = "/Users/alex/Demo Vaults/Vale Studio";
+      const created = `${root}/Reviews/2026-10-24 Weekly review.md`;
+      const write: any = {
+        id: "native-write", messageId: "native-message", timestamp: 1, state: "completed", executedOn: "server",
+        native: { agent: "claude", workingDirectory: root, vaultRoot: root, vaultRootAlias: "/Volumes/Data/Vale Studio", homeDirectory: "/Users/alex",
+          description: `Claude wants to create ${created}` },
+        request: { id: "native-write", type: "function", function: { name: "Write", arguments: JSON.stringify({ file_path: created, content: "# Weekly review" }) } },
+        result: { success: true, data: { data: `File created successfully at: ${created} (file state is current in your context)`,
+          summary: `File created successfully at: ${created} (file state is current in your context)` } },
+      };
+      const bash: any = {
+        ...write, id: "native-bash",
+        request: { id: "native-bash", type: "function", function: { name: "Bash", arguments: JSON.stringify({
+          command: `ls "${root}/Daily" && cat /Volumes/Data/Vale Studio/Daily/2026-10-24.md`, description: "List daily notes" }) } },
+        result: { success: false, data: { data: [{ type: "text", text: `${root}/Daily/2026-10-24.md\n/Users/alex/.claude/settings.json` }] },
+          error: { code: "NATIVE_TOOL_FAILED", message: `cat: ${root}/Daily/missing.md: No such file` } },
+      };
+      const live = JSON.stringify([write, bash]);
+      const message: ChatMessage = { role: "assistant", message_id: "native-message", content: "",
+        messageParts: [write, bash].map((data, index) => ({ id: data.id, type: "tool_call" as const, data, timestamp: index + 1 })) };
+      const serialized = ChatMarkdownSerializer.serializeMessages([message]);
+      expect(serialized).not.toContain("alex");
+      expect(serialized).not.toContain("/Volumes");
+      expect(JSON.stringify([write, bash])).toBe(live);
+
+      const [savedWrite, savedBash] = ChatMarkdownSerializer.readBack([message])![0].tool_calls!;
+      expect(savedWrite.native).toEqual({ agent: "claude", workingDirectory: ".", vaultRoot: ".",
+        description: "Claude wants to create ./Reviews/2026-10-24 Weekly review.md" });
+      expect(JSON.parse(savedWrite.request.function.arguments).file_path).toBe("Reviews/2026-10-24 Weekly review.md");
+      expect(savedWrite.result?.data).toEqual({
+        data: "File created successfully at: ./Reviews/2026-10-24 Weekly review.md (file state is current in your context)",
+        summary: "File created successfully at: ./Reviews/2026-10-24 Weekly review.md (file state is current in your context)",
+      });
+      expect(JSON.parse(savedBash.request.function.arguments)).toEqual({ command: 'ls "./Daily" && cat ./Daily/2026-10-24.md', description: "List daily notes" });
+      expect(savedBash.result).toEqual({ success: false,
+        data: { data: [{ type: "text", text: "./Daily/2026-10-24.md\n~/.claude/settings.json" }] },
+        error: { code: "NATIVE_TOOL_FAILED", message: "cat: ./Daily/missing.md: No such file" } });
+
+      const reloaded = ChatMarkdownSerializer.parseMarkdown(`---\nid: portable-text\n---\n\n${serialized}`);
+      expect(ChatMarkdownSerializer.serializeMessages(reloaded?.messages ?? [])).toBe(serialized);
+    });
+
+    it.each([
+      ["C:\\Users\\alex\\Vault\\Notes", "C:\\Users\\alex\\Vault", "C:\\Users\\alex",
+        "C:\\Users\\alex\\Vault\\Notes\\Plan.md C:\\Users\\alex\\Vault\\Other.md C:\\Users\\alex\\Vault", ".\\Plan.md ..\\Other.md .."],
+      ["/vault/Notes", "/vault", undefined, "/vault/Notes/Plan.md /vault/Other.md /vault-copy/Plan.md /vault", "./Plan.md ../Other.md /vault-copy/Plan.md .."],
+      ["/elsewhere", "/vault", "/home/alex", "/vault/Plan.md /elsewhere/Plan.md /home/alex/Plan.md", "/vault/Plan.md /elsewhere/Plan.md ~/Plan.md"],
+    ])("spells Codex output paths from the saved working directory %s", (cwd, root, home, output, saved) => {
+      const tool: any = {
+        id: "codex-command", state: "completed",
+        native: { agent: "codex", workingDirectory: cwd, vaultRoot: root, ...(home ? { homeDirectory: home } : {}) },
+        request: { id: "codex-command", type: "function", function: { name: "commandExecution", arguments: JSON.stringify({ command: "ls" }) } },
+        result: { success: true, data: { data: output, summary: output } },
+      };
+      const restored = ChatMarkdownSerializer.readBack([{
+        role: "assistant", message_id: "codex", content: "",
+        messageParts: [{ id: "codex", type: "tool_call", data: tool, timestamp: 1 }],
+      }])?.[0].tool_calls?.[0];
+      expect(restored?.result?.data).toEqual({ data: saved, summary: saved });
+    });
+
+    it("keeps Codex rename destinations portable with their source paths", () => {
+      const tool: any = {
+        id: "rename", state: "completed",
+        native: { agent: "codex", workingDirectory: "/vault/Notes", vaultRoot: "/vault" },
+        request: { id: "rename", type: "function", function: { name: "fileChange", arguments: JSON.stringify({
+          changes: [{ path: "/vault/Notes/Old.md", kind: { type: "update", move_path: "/vault/Notes/New.md" } }],
+        }) } },
+      };
+      const restored = ChatMarkdownSerializer.readBack([{
+        role: "assistant", message_id: "rename", content: "",
+        messageParts: [{ id: "rename", type: "tool_call", data: tool, timestamp: 1 }],
+      }])?.[0].tool_calls?.[0];
+      expect(JSON.parse(restored!.request.function.arguments).changes[0]).toEqual({
+        path: "Old.md", kind: { type: "update", move_path: "New.md" },
+      });
+    });
+
     it("still reads pretty-printed tool calls written by earlier versions", () => {
       const toolCall = { id: "call-1", name: "search", arguments: { query: "test" } };
       const content = [
@@ -312,6 +418,39 @@ describe("ChatMarkdownSerializer", () => {
       expect(parsed?.messages[1]?.terminalOutcome).toBe("cancelled");
       expect(String(parsed?.messages[1]?.content)).toContain("PARTIAL-STREAM-START");
     });
+
+    it.each(['local_claude_failed', 'local_codex_failed', 'local_claude_usage_limit', 'local_codex_usage_limit'])(
+      'round-trips %s with native error text outside the answer', terminalFailureCode => {
+        for (const content of ['', 'Partial answer', '<!-- SYSTEMSCULPT-MESSAGE-END -->']) {
+          const receipt = { terminalOutcome: 'failed' as const, terminalFailureCode,
+            terminalFailureMessage: 'Not signed in: "résumé"\n<!-- SYSTEMSCULPT-MESSAGE-END -->', terminalRetryable: !terminalFailureCode.endsWith('usage_limit') };
+          const messages: ChatMessage[] = [{ role: 'assistant', message_id: 'native-failed', content, ...receipt }];
+          const markdown = ChatMarkdownSerializer.serializeMessages(messages);
+          expect(markdown).toContain('terminal-failure-message="');
+          expect(markdown).not.toContain(receipt.terminalFailureMessage);
+          expect(markdown).not.toMatch(/terminal-(?:report|incident|server-run)-id/);
+          expect(ChatMarkdownSerializer.parseMarkdown(`---\nid: native-failure\n---\n\n${markdown}`)?.messages[0])
+            .toMatchObject({ content, ...receipt });
+        }
+      },
+    );
+
+    it.each(['missing', 'invalid base64', 'invalid JSON', 'non-string', 'duplicate'])(
+      'ignores %s native error metadata without losing transcript content', corruption => {
+        const markdown = ChatMarkdownSerializer.serializeMessages([{ role: 'assistant', message_id: 'native-failed', content: 'Partial answer',
+          terminalOutcome: 'failed', terminalFailureCode: 'local_claude_failed', terminalFailureMessage: 'Native error', terminalRetryable: true }]);
+        const changed = markdown.replace(/terminal-failure-message="[^"]*"/, attribute => {
+          if (corruption === 'missing') return '';
+          if (corruption === 'duplicate') return `${attribute} ${attribute}`;
+          const payload = corruption === 'invalid base64' ? '!' : corruption === 'invalid JSON' ? btoa('bad json') : btoa('{}');
+          return `terminal-failure-message="${payload}"`;
+        });
+        const restored = ChatMarkdownSerializer.parseMarkdown(`---\nid: native-failure\n---\n\n${changed}`)?.messages[0];
+        expect(restored?.content).toBe('Partial answer');
+        expect(restored).not.toHaveProperty('terminalOutcome');
+        expect(restored).not.toHaveProperty('terminalFailureMessage');
+      },
+    );
 
     it.each([true, false])(
       "round-trips a complete failed terminal receipt when retryable is %s",
@@ -868,6 +1007,117 @@ Using tools...
       ]);
     });
 
+    describe("legacy multipart block placement", () => {
+      const content = [
+        { type: "text" as const, text: "Original answer" },
+        { type: "image_url" as const, image_url: { url: "data:image/png;base64,YWJj" } },
+      ];
+      const encoded = btoa(JSON.stringify(content));
+      const multipart = `<!-- SYSTEMSCULPT-CONTENT-PARTS base64\n${encoded}\n-->`;
+      const reasoning = "<!-- REASONING\nOriginal reasoning\n-->";
+      const tools = '<!-- TOOL-CALLS\n[{"id":"legacy-tool"}]\n-->';
+      const frame = (body: string) => [
+        '<!-- SYSTEMSCULPT-MESSAGE-START role="assistant" message-id="assistant-1" -->',
+        body,
+        "<!-- SYSTEMSCULPT-MESSAGE-END -->",
+      ].join("\n");
+
+      it.each([
+        ["LF", "\n", false],
+        ["CRLF", "\r\n", false],
+        ["BOM plus LF", "\n", true],
+        ["BOM plus CRLF", "\r\n", true],
+      ])("rejects overlapping or duplicate metadata with %s framing", (_label, newline, bom) => {
+        const nested = [
+          `Original answer\n<!-- REASONING\nbefore\n${multipart}\nafter\n-->`,
+          `Original answer\n<!-- REASONING\nbefore\n${multipart}`,
+          `<!-- TOOL-CALLS\n[{"id":"legacy-tool"}]\n${multipart}\n-->`,
+          `<!-- SYSTEMSCULPT-PART-CONTENT base64="${encoded}" -->\n${multipart}\n<!-- SYSTEMSCULPT-PART-CONTENT-END -->`,
+          `${multipart}\n${reasoning}\n${multipart}`,
+          `${multipart}\n<!-- REASONING\nbefore\n${multipart}\nafter\n-->`,
+        ];
+        const validPrefix = ChatMarkdownSerializer.serializeMessages([
+          { role: "user", message_id: "user-1", content: "Keep the whole history" },
+        ]);
+        for (const body of nested) {
+          const markdown = `${validPrefix}\n\n${frame(body)}`;
+          expect(ChatMarkdownSerializer.parseMarkdown(normalizeMarkdown(
+            createMarkdown({ id: "legacy-placement" }, markdown), newline, bom,
+          ))).toBeNull();
+        }
+      });
+
+      it("preserves legacy metadata quoted as a JSON string rather than a structural block", () => {
+        const tool = { id: "quoted-metadata", result: { success: true, data: multipart } };
+        const quotedTools = `<!-- TOOL-CALLS\n${JSON.stringify([tool])}\n-->`;
+        for (const body of [quotedTools, `${multipart}\n${quotedTools}`]) {
+          const parsed = ChatMarkdownSerializer.parseMarkdown(createMarkdown({ id: "legacy-quoted" }, frame(body)));
+          expect(parsed?.messages[0].tool_calls).toEqual([tool]);
+          if (body !== quotedTools) expect(parsed?.messages[0].content).toEqual(content);
+        }
+      });
+
+      it.each([
+        ["LF", "\n", false],
+        ["CRLF", "\r\n", false],
+        ["BOM plus LF", "\n", true],
+        ["BOM plus CRLF", "\r\n", true],
+      ])("preserves top-level metadata and neighboring blocks with %s framing", (_label, newline, bom) => {
+        for (const [body, order] of [
+          [multipart, undefined],
+          [`${multipart}\n${reasoning}\n${tools}\nOriginal answer`, ["content", "reasoning", "tool_call"]],
+          [`${reasoning}\n${multipart}\n${tools}\nOriginal answer`, ["reasoning", "content", "tool_call"]],
+          [`${reasoning}\n${tools}\nOriginal answer\n${multipart}`, ["reasoning", "tool_call", "content"]],
+          [`${reasoning}\n\n\n${tools}\nOriginal answer\n${multipart}`, ["reasoning", "tool_call", "content"]],
+        ] as const) {
+          const parsed = ChatMarkdownSerializer.parseMarkdown(normalizeMarkdown(
+            createMarkdown({ id: "legacy-placement" }, frame(body)), newline, bom,
+          ));
+          expect(parsed?.messages[0]).toMatchObject({
+            role: "assistant", message_id: "assistant-1", content,
+          });
+          // The stored content stands once, where the note first shows it.
+          expect(parsed?.messages[0].messageParts?.map((part) => part.type)).toEqual(order);
+          expect(parsed?.messages[0].messageParts?.find((part) => part.type === "content")?.data).toEqual(order && content);
+          if (body !== multipart) {
+            expect(parsed?.messages[0].reasoning).toBe("Original reasoning");
+            expect(parsed?.messages[0].tool_calls).toEqual([{ id: "legacy-tool" }]);
+          }
+          expect(ChatMarkdownSerializer.readBack(parsed!.messages)?.[0].content).toEqual(content);
+        }
+      });
+
+      it.each([
+        ["LF", "\n", false],
+        ["CRLF", "\r\n", false],
+        ["BOM plus LF", "\n", true],
+        ["BOM plus CRLF", "\r\n", true],
+      ])("keeps reasoning and tool calls beside legacy metadata when the chat is saved again with %s framing", (_label, newline, bom) => {
+        for (const body of [
+          `${reasoning}\n${tools}\nOriginal answer\n${multipart}`,
+          `${multipart}\n${reasoning}\n${tools}\nOriginal answer`,
+          `${reasoning}\n${multipart}\n${tools}\nOriginal answer`,
+        ]) {
+          const loaded = ChatMarkdownSerializer.parseMarkdown(normalizeMarkdown(
+            createMarkdown({ id: "legacy-rewrite" }, frame(body)), newline, bom,
+          ))!;
+          const rewritten = ChatMarkdownSerializer.serializeMessages(loaded.messages);
+          const reloaded = ChatMarkdownSerializer.parseMarkdown(createMarkdown({ id: "legacy-rewrite" }, rewritten));
+          expect(reloaded?.messages).toHaveLength(1);
+          expect(reloaded?.messages[0]).toMatchObject({
+            role: "assistant",
+            message_id: "assistant-1",
+            content,
+            reasoning: "Original reasoning",
+            tool_calls: [{ id: "legacy-tool" }],
+          });
+          expect(reloaded?.messages[0].messageParts?.map((part) => part.type))
+            .toEqual(loaded.messages[0].messageParts?.map((part) => part.type));
+          expect(ChatMarkdownSerializer.serializeMessages(reloaded!.messages)).toBe(rewritten);
+        }
+      });
+    });
+
     it("fails closed when any declared message is missing required attributes", () => {
       const messageBlock = `
 <!-- SYSTEMSCULPT-MESSAGE-START role="user" -->
@@ -992,25 +1242,12 @@ Valid message
       ["BOM plus LF", "\n", true],
       ["BOM plus CRLF", "\r\n", true],
     ])("fails closed on corrupt framed attachment metadata with %s framing", (_label, newline, bom) => {
-      const serialized = ChatMarkdownSerializer.serializeMessages([{
-        role: "user",
-        message_id: "user-framed-attachments",
-        content: [
-          { type: "text", text: "Quoted <!-- SYSTEMSCULPT-MESSAGE-END --> marker" },
-          { type: "image_url", image_url: { url: "data:image/png;base64,YWJj" } },
-        ],
-        attachmentMetadata: [{
-          id: "image-hash",
-          name: "diagram.png",
-          mimeType: "image/png",
-          byteLength: 3,
-          kind: "image",
-          contentPartIndex: 1,
-        }],
-      }]).replace(
-        /attachment-metadata="([A-Za-z0-9+/=]+)"/,
-        'attachment-metadata="W10="',
-      );
+      // Explicit legacy bytes: new writers no longer frame message content.
+      const payload = btoa(JSON.stringify({ version: 1, kind: "content", content: [
+        { type: "text", text: "Quoted <!-- SYSTEMSCULPT-MESSAGE-END --> marker" },
+        { type: "image_url", image_url: { url: "data:image/png;base64,YWJj" } },
+      ] }));
+      const serialized = `<!-- SYSTEMSCULPT-MESSAGE-START role="user" message-id="user-framed-attachments" payload-format="base64-json-v1" attachment-metadata="W10=" -->\n${payload}\n<!-- SYSTEMSCULPT-MESSAGE-END -->`;
 
       expect(serialized).toContain(`payload-format="base64-json-v1"`);
       expect(ChatMarkdownSerializer.parseMarkdown(normalizeMarkdown(
@@ -1201,7 +1438,7 @@ Valid message
       expect((tool?.data as any)?.result?.data?.content).toBe(noteWithComment);
     });
 
-    it("round-trips generated histories exactly and frames only messages that contain a marker", () => {
+    it("round-trips generated histories exactly without making marker-containing replies opaque", () => {
       // Deterministic xorshift so a failure reproduces from this seed.
       let seed = 0x363;
       const random = () => {
@@ -1232,10 +1469,10 @@ Valid message
         return `${value}y`;
       };
       const markers = ["<!-- SYSTEMSCULPT-", "<!-- REASONING", "<!-- TOOL-CALLS"];
-      let framedMessages = 0;
+      let escapedMessages = 0;
       let readableMessages = 0;
       const hasMarker = (...values: string[]) =>
-        values.some((value) => markers.some((marker) => value.includes(marker)));
+        values.some((value) => value.includes("\r") || markers.some((marker) => value.includes(marker)));
 
       for (let iteration = 0; iteration < 300; iteration += 1) {
         const reasoning = text();
@@ -1266,26 +1503,26 @@ Valid message
         const [userStart, assistantStart] = serialized.match(/<!-- SYSTEMSCULPT-MESSAGE-START [^\n]*-->/g) ?? [];
 
         for (const start of [userStart, assistantStart]) {
-          if (start.includes("payload-format=")) framedMessages += 1;
+          expect(start).not.toContain("payload-format=");
+          if (start.includes("marker-escape=")) escapedMessages += 1;
           else readableMessages += 1;
         }
-        expect(userStart.includes("payload-format=")).toBe(hasMarker(userText));
-        expect(assistantStart.includes("payload-format="))
-          .toBe(hasMarker(reasoning, content, toolOutput));
+        expect(userStart.includes("marker-escape=")).toBe(hasMarker(userText));
+        expect(assistantStart.includes("marker-escape="))
+          .toBe(hasMarker(reasoning, content));
         expect(parsed?.messages[0].content).toBe(userText);
         expect(parsed?.messages[1].reasoning).toBe(reasoning);
         expect(parsed?.messages[1].content).toBe(content);
         const tool = parsed?.messages[1].messageParts?.find((part) => part.type === "tool_call");
         expect((tool?.data as any)?.result?.data).toBe(toolOutput);
-        // Saving what was loaded writes the identical note. A framed user
-        // message is re-framed as ordered parts, so compare the next save.
+        // Escapes are stable across repeated saves, including quoted escapes.
         const resaved = ChatMarkdownSerializer.serializeMessages(parsed?.messages ?? []);
-        if (!serialized.includes("payload-format=")) expect(resaved).toBe(serialized);
+        expect(resaved).toBe(serialized);
         const reloaded = ChatMarkdownSerializer.parseMarkdown(`---\nid: resaved-${iteration}\n---\n\n${resaved}`);
         expect(ChatMarkdownSerializer.serializeMessages(reloaded?.messages ?? [])).toBe(resaved);
       }
-      expect(framedMessages).toBeGreaterThan(50);
-      expect(readableMessages).toBeGreaterThan(300);
+      expect(escapedMessages).toBeGreaterThan(50);
+      expect(readableMessages).toBeGreaterThan(200);
     });
 
     it("escapes reasoning reversibly for every short run of comment-closer characters", () => {
@@ -1411,31 +1648,110 @@ Valid message
       expect(ChatMarkdownSerializer.parseMarkdown(markdown)).toBeNull();
     });
 
-    it("stores and restores the exact framed JSON payload through base64", () => {
-      const exactContent = "Unicode 🗿 café\nNUL:\u0000\nReserved: <!-- SYSTEMSCULPT-MESSAGE-END -->\nTrailing spaces:  ";
+    it("keeps quoted markers readable and restores Unicode, entities, and trailing spaces exactly", () => {
+      const exactContent = "Unicode 🗿 café\nNUL:\u0000\nReserved: <!-- SYSTEMSCULPT-MESSAGE-END -->\nEntities: &lt;!-- REASONING &amp; &#60;\nTrailing spaces:  ";
       const serialized = ChatMarkdownSerializer.serializeMessages([{
         role: "user",
         content: exactContent,
-        message_id: "user-exact-base64",
+        message_id: "user-exact-escaped",
       }]);
-      const match = serialized.match(
-        /payload-format="base64-json-v1" -->\n([A-Za-z0-9+/=]+)\n<!-- SYSTEMSCULPT-MESSAGE-END -->/,
-      );
-      expect(match).not.toBeNull();
-      const binary = atob(match?.[1] ?? "");
-      const decoded = JSON.parse(new TextDecoder().decode(
-        Uint8Array.from(binary, (character) => character.charCodeAt(0)),
-      ));
-
-      expect(decoded).toEqual({
-        version: 1,
-        kind: "content",
-        content: exactContent,
-      });
+      expect(serialized).not.toContain("payload-format=");
+      expect(serialized).toContain('marker-escape="v1"');
+      expect(serialized).toContain("Unicode 🗿 café");
+      expect(serialized).toContain("&lt;!-- SYSTEMSCULPT-MESSAGE-END -->");
       expect(ChatMarkdownSerializer.parseMarkdown(
-        `---\nid: exact-base64\n---\n\n${serialized}`,
+        `---\nid: exact-escaped\n---\n\n${serialized}`,
       )?.messages[0].content).toBe(exactContent);
     });
+
+    it("leaves the assistant reply readable when a tool reads the chat's own Markdown", () => {
+      const quotedChat = ChatMarkdownSerializer.serializeMessages([
+        { role: "user", content: "Read every note", message_id: "user-1" },
+      ]);
+      const tool = { id: "read-chat", state: "completed", result: { success: true, data: quotedChat } } as any;
+      const serialized = ChatMarkdownSerializer.serializeMessages([{
+        role: "assistant", message_id: "assistant-1", content: "",
+        messageParts: [
+          { id: "tool", type: "tool_call", data: tool, timestamp: 1 },
+          { id: "reply", type: "content", data: "## Vault review\n\nYour notes are ready.", timestamp: 2 },
+        ],
+      }]);
+      expect(serialized).not.toContain("payload-format=");
+      expect(serialized).toContain("## Vault review\n\nYour notes are ready.");
+      expect(serialized.match(/<!-- SYSTEMSCULPT-MESSAGE-START /g)).toHaveLength(1);
+      const restored = ChatMarkdownSerializer.parseMarkdown(`---\nid: self-read\n---\n\n${serialized}`);
+      expect(restored?.messages[0].tool_calls).toEqual([tool]);
+      expect(restored?.messages[0].content).toBe("## Vault review\n\nYour notes are ready.");
+    });
+
+    it.each(["Quoted <!-- SYSTEMSCULPT-MESSAGE-END -->\r", " \n"])("preserves exact text %j beside a self-read tool and empty reasoning", (text) => {
+      const tool = { id: "read", result: { data: "<!-- SYSTEMSCULPT-MESSAGE-END -->" } } as any;
+      const restored = ChatMarkdownSerializer.readBack([{
+        role: "assistant", message_id: "exact-parts", content: "",
+        messageParts: [
+          { id: "t", type: "tool_call", data: tool, timestamp: 1 },
+          { id: "r", type: "reasoning", data: "", timestamp: 2 },
+          { id: "c", type: "content", data: text, timestamp: 3 },
+        ],
+      }]);
+      expect(restored?.[0].content).toBe(text);
+      expect(restored?.[0].messageParts?.map(part => part.type)).toEqual(["tool_call", "reasoning", "content"]);
+    });
+
+    it("rewrites legacy ordered attachment parts without losing the attachment or hiding prose", () => {
+      const data = [{ type: "text", text: "Quoted <!-- SYSTEMSCULPT-MESSAGE-END -->" },
+        { type: "image_url", image_url: { url: "data:image/png;base64,YWJj" } }];
+      const payload = btoa(JSON.stringify({ version: 1, kind: "parts", parts: [{ type: "content", data }] }));
+      const legacy = `---\nid: ordered-attachment\n---\n\n<!-- SYSTEMSCULPT-MESSAGE-START role="assistant" message-id="a" payload-format="base64-json-v1" -->\n${payload}\n<!-- SYSTEMSCULPT-MESSAGE-END -->`;
+      const loaded = ChatMarkdownSerializer.parseMarkdown(legacy)!;
+      const rewritten = ChatMarkdownSerializer.serializeMessages(loaded.messages);
+      expect(rewritten).not.toContain('payload-format=');
+      expect(rewritten).toContain('Quoted &lt;!-- SYSTEMSCULPT-MESSAGE-END -->');
+      expect(ChatMarkdownSerializer.readBack(loaded.messages)?.[0].messageParts?.[0].data).toEqual(data);
+      expect(loaded.messages[0].content).toEqual(data);
+      expect(ChatMarkdownSerializer.readBack(loaded.messages)?.[0].content).toEqual(data);
+    });
+
+    it("keeps attachment parts in the content of an ordered message beside its text", () => {
+      const image = { type: "image_url" as const, image_url: { url: "data:image/png;base64,YWJj" } };
+      const restored = ChatMarkdownSerializer.readBack([{
+        role: "assistant", message_id: "ordered-attachment-text", content: "",
+        messageParts: [
+          { id: "r", type: "reasoning", data: "Look first", timestamp: 1 },
+          { id: "a", type: "content", data: "Here it is:", timestamp: 2 },
+          { id: "b", type: "content", data: [image], timestamp: 3 },
+        ],
+      }]);
+      expect(restored?.[0].content).toEqual([{ type: "text", text: "Here it is:" }, image]);
+      expect(restored?.[0].reasoning).toBe("Look first");
+    });
+
+    it("rejects an unterminated tool block instead of silently losing the tool call", () => {
+      const serialized = ChatMarkdownSerializer.serializeMessages([{
+        role: "assistant", message_id: "bad-tool", content: "",
+        messageParts: [{ id: "t", type: "tool_call", data: { id: "read", result: { data: "<!-- SYSTEMSCULPT-MESSAGE-END -->" } } as any, timestamp: 1 }],
+      }]);
+      expect(ChatMarkdownSerializer.parseMarkdown(`---\nid: corrupt-tool\n---\n\n${serialized.replace(/\n-->\n/u, "\n")}`)).toBeNull();
+    });
+
+    it("escapes a reserved marker split across adjacent content parts", () => {
+      const text = "<!-- SYSTEMSCULPT-MESSAGE-END -->";
+      const restored = ChatMarkdownSerializer.readBack([{
+        role: "assistant", message_id: "split", content: "",
+        messageParts: [
+          { id: "a", type: "content", data: "<!-- SYSTEM", timestamp: 1 },
+          { id: "b", type: "content", data: "SCULPT-MESSAGE-END -->", timestamp: 2 },
+        ],
+      }]);
+      expect(restored?.[0].content).toBe(text);
+    });
+
+    it.each(['marker-escape="v2"', 'marker-escape="v1" marker-escape="v1"'])(
+      "fails closed on an unsupported marker escape: %s", (attribute) => {
+        const markdown = `---\nid: corrupt-escape\n---\n\n<!-- SYSTEMSCULPT-MESSAGE-START role="user" message-id="u1" ${attribute} -->\nQuoted &lt;!-- REASONING\n<!-- SYSTEMSCULPT-MESSAGE-END -->`;
+        expect(ChatMarkdownSerializer.parseMarkdown(markdown)).toBeNull();
+      },
+    );
 
     it("round-trips data images without creating a DOM image element", () => {
       const createElement = jest.spyOn(document, "createElement");

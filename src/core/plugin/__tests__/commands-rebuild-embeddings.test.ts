@@ -59,7 +59,7 @@ async function runCommand(app: App, plugin: any): Promise<void> {
 /** The Rebuild button in Similar notes settings. */
 async function clickSettingsRebuild(app: App, plugin: any): Promise<void> {
   const container = document.createElement("div");
-  await displayEmbeddingsTabContent(container, { app, plugin, display: jest.fn() } as any);
+  await displayEmbeddingsTabContent(container, { app, plugin, invalidateSearchIndex: jest.fn() } as any);
   const button = Array.from(container.querySelectorAll("button")).find((candidate) => candidate.textContent === "Rebuild");
   expect(button).toBeDefined();
   button!.click();
@@ -112,7 +112,7 @@ describe("Similar notes rebuild button in settings", () => {
     forceRefreshCurrentNamespace.mockReturnValue(new Promise<void>((resolve) => { finish = resolve; }));
     jest.mocked(showConfirm).mockResolvedValue({ confirmed: true });
     const container = document.createElement("div");
-    await displayEmbeddingsTabContent(container, { app, plugin, display: jest.fn() } as any);
+    await displayEmbeddingsTabContent(container, { app, plugin, invalidateSearchIndex: jest.fn() } as any);
     const button = Array.from(container.querySelectorAll("button")).find((candidate) => candidate.textContent === "Rebuild")!;
 
     button.click();

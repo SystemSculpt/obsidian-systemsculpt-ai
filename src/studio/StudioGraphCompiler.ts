@@ -70,6 +70,9 @@ export class StudioGraphCompiler {
         for (const edge of node.inboundEdges) {
           if (providedNodeIds.has(edge.fromNodeId) && !outputs.has(edge.fromNodeId)) {
             const upstream = compiled.nodesById.get(edge.fromNodeId)?.node;
+            if (upstream?.kind === "studio.image_generation") {
+              throw new Error(`Image generation was retired and "${upstream.title || edge.fromNodeId}" has no saved output. Connect an existing image file instead.`);
+            }
             throw new Error(`Run "${upstream?.title || edge.fromNodeId}" first. It has no output yet, and Studio does not rerun it on your behalf.`);
           }
           const value = outputs.get(edge.fromNodeId)?.[edge.fromPortId];

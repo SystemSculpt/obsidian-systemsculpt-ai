@@ -1,7 +1,7 @@
 import { Notice } from "obsidian";
 import type SystemSculptPlugin from "../../../main";
 import { getStudioMediaCatalogs } from "../../../studio/StudioMediaCatalogs";
-import { planStudioMediaNodeInputs, resolveStudioMediaNodeKind, type StudioMediaModelKind, type StudioMediaNodeInputPlan } from "../../../studio/StudioMediaModelCapabilities";
+import { planStudioMediaNodeInputs, resolveStudioMediaNodeKind, type StudioMediaNodeInputPlan } from "../../../studio/StudioMediaModelCapabilities";
 import type { StudioNodeConfigDynamicOptionsSource, StudioNodeInstance } from "../../../studio/types";
 import { openStudioMediaModelPickerModal } from "../canvas/StudioMediaModelPickerModal";
 import { readMediaModelFavorites, toggleMediaModelFavorite } from "../canvas/studioMediaModelFavorites";
@@ -14,13 +14,13 @@ type Host = {
 };
 
 /**
- * Owns the media model picker for the Studio view: opens the catalog modal
+ * Owns the video model picker for the Studio view: opens the catalog modal
  * for a node's model field and answers "what does this node's model accept"
- * from the cached catalogs, kicking off a load (and one re-render) when the
+ * from the cached catalog, kicking off a load (and one re-render) when the
  * catalog has not been fetched yet.
  */
 export class StudioMediaModelPickerController {
-  private readonly loading = new Set<StudioMediaModelKind>();
+  private loading = false;
   private disposed = false;
   private openRevision = 0;
   private modal: ReturnType<typeof openStudioMediaModelPickerModal> | null = null;
@@ -29,17 +29,15 @@ export class StudioMediaModelPickerController {
 
   readonly open = (
     source: StudioNodeConfigDynamicOptionsSource,
-    _node: StudioNodeInstance,
+    node: StudioNodeInstance,
     currentValue: string,
     onValueChange: (value: string, label?: string) => void,
   ): void => {
-    if (this.disposed) return;
+    if (this.disposed || source !== "video_generation_models" || !resolveStudioMediaNodeKind(node.kind)) return;
     const revision = ++this.openRevision;
-    const kind: StudioMediaModelKind = source === "video_generation_models" ? "video" : "image";
     void (async () => {
       try {
-        const catalogs = getStudioMediaCatalogs(this.host.plugin());
-        const snapshot = kind === "image" ? await catalogs.images.load() : await catalogs.videos.load();
+        const snapshot = await getStudioMediaCatalogs(this.host.plugin()).videos.load();
         if (this.disposed || revision !== this.openRevision) return;
         if (snapshot.models.length === 0) {
           new Notice("No generation models are available right now.");
@@ -47,11 +45,10 @@ export class StudioMediaModelPickerController {
         }
         this.modal?.close();
         this.modal = openStudioMediaModelPickerModal(this.host.plugin().app, {
-          kind,
           models: snapshot.models,
-          selectedId: currentValue || ("defaultModelId" in snapshot ? snapshot.defaultModelId : ""),
-          favoriteIds: readMediaModelFavorites(this.host.plugin(), kind),
-          onToggleFavorite: (modelId) => toggleMediaModelFavorite(this.host.plugin(), kind, modelId),
+          selectedId: currentValue,
+          favoriteIds: readMediaModelFavorites(this.host.plugin()),
+          onToggleFavorite: (modelId) => toggleMediaModelFavorite(this.host.plugin(), modelId),
           onSelect: (model) => onValueChange(model.id, model.name),
           onClose: () => { this.modal = null; },
         });
@@ -63,23 +60,19 @@ export class StudioMediaModelPickerController {
   };
 
   planInputs(node: StudioNodeInstance): StudioMediaNodeInputPlan | null {
-    if (this.disposed) return null;
-    const kind = resolveStudioMediaNodeKind(node.kind);
-    if (!kind) return null;
-    const catalogs = getStudioMediaCatalogs(this.host.plugin());
-    const snapshots = { images: catalogs.images.peek(), videos: catalogs.videos.peek() };
-    if ((kind === "image" ? snapshots.images : snapshots.videos) === null) this.warm(kind);
+    if (this.disposed || !resolveStudioMediaNodeKind(node.kind)) return null;
+    const snapshots = { videos: getStudioMediaCatalogs(this.host.plugin()).videos.peek() };
+    if (snapshots.videos === null) this.warm();
     return planStudioMediaNodeInputs(node, snapshots);
   }
 
-  private warm(kind: StudioMediaModelKind): void {
-    if (this.loading.has(kind)) return;
-    this.loading.add(kind);
-    const catalogs = getStudioMediaCatalogs(this.host.plugin());
-    void (kind === "image" ? catalogs.images.load() : catalogs.videos.load())
+  private warm(): void {
+    if (this.loading) return;
+    this.loading = true;
+    void getStudioMediaCatalogs(this.host.plugin()).videos.load()
       .then(() => { if (!this.disposed) this.host.requestRender(); })
       .catch(() => undefined)
-      .finally(() => this.loading.delete(kind));
+      .finally(() => { this.loading = false; });
   }
 
   dispose(): void {

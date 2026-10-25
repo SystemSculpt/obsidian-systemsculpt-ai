@@ -34,6 +34,11 @@ jest.mock("../settings/SettingsTabRegistry", () => ({
   ]),
 }));
 
+jest.mock("../settings/SettingsCatalog", () => ({
+  ...jest.requireActual("../settings/SettingsCatalog"),
+  getSettingsCatalog: () => [{ id: "test.provider-fallback", tabId: "knowledge", title: "Provider fallback", description: "Choose the backup provider for embeddings." }],
+}));
+
 jest.mock("../core/ui/modals/PromptModal", () => ({
   showPrompt: jest.fn(),
 }));
@@ -416,18 +421,27 @@ describe("SystemSculptSettingTab native layout", () => {
     expect(pollInBackground).toHaveBeenCalledTimes(1);
   });
 
-  it("cancels delayed settings indexing when the surface hides", async () => {
+  it("does not index on open, DOM mutation, timers, or hide", async () => {
     jest.useFakeTimers();
     const plugin = createPluginStub();
     const tab = new SystemSculptSettingTab(app, plugin);
     const buildSettingsIndex = jest.spyOn(tab as any, "buildSettingsIndex");
 
     await tab.display();
+    expect(buildSettingsIndex).not.toHaveBeenCalled();
+    tab.containerEl.querySelector(".systemsculpt-tab-content")?.appendChild(document.createElement("div"));
+    await Promise.resolve();
+    jest.advanceTimersByTime(500);
+    expect(buildSettingsIndex).not.toHaveBeenCalled();
+    const input = tab.containerEl.querySelector<HTMLInputElement>("input[type=search]")!;
+    input.value = "account";
+    input.dispatchEvent(new Event("input"));
     expect(buildSettingsIndex).toHaveBeenCalledTimes(1);
-
+    input.value = "account access";
+    input.dispatchEvent(new Event("input"));
+    expect(buildSettingsIndex).toHaveBeenCalledTimes(1);
     tab.hide();
     jest.advanceTimersByTime(500);
-
     expect(buildSettingsIndex).toHaveBeenCalledTimes(1);
   });
 
@@ -501,6 +515,7 @@ describe("SystemSculptSettingTab native layout", () => {
         sections: [
           (parent: HTMLElement) => {
             const setting = parent.createDiv({ cls: "setting-item" });
+            setting.dataset.ssSetting = "test.provider-fallback";
             setting.createDiv({
               cls: "setting-item-name",
               text: "Provider fallback",
@@ -630,6 +645,7 @@ describe("SystemSculptSettingTab native layout", () => {
         sections: [
           (parent: HTMLElement) => {
             const setting = parent.createDiv({ cls: "setting-item" });
+            setting.dataset.ssSetting = "test.provider-fallback";
             setting.createDiv({
               cls: "setting-item-name",
               text: "Provider fallback",

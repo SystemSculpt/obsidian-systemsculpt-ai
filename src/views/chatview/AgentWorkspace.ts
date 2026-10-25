@@ -21,12 +21,13 @@ import {
 import {
   AgentComposer,
   type AgentComposerAttachment,
+  type AgentComposerOptions,
   type AgentComposerSubmit,
 } from "./AgentComposer";
 import type { ChatMessageAttachment } from "./attachments/ChatMessageAttachments";
 import type { ChatDocumentAttachmentProcessor } from "./attachments/ChatMessageAttachments";
 import type { ThinAgentInputLimits } from "../../services/managed/ThinAgentInputLimits";
-import type { AgentArtifact, AgentConversationSnapshot } from "../../chat/ChatConversation";
+import type { AgentArtifact, AgentConversationSnapshot, ManagedAgentError } from "../../chat/ChatConversation";
 import { presentAgentConversation } from "./AgentConversationPresentation";
 import type { ApprovalAnswer } from "./AgentApprovalCards";
 import type { AgentToolPart } from "../../chat/ChatConversation";
@@ -52,7 +53,7 @@ export type AgentWorkspaceOptions = Readonly<{
   visibilityRoot?: HTMLElement;
   sourcePath: () => string;
   reducedMotion?: () => boolean;
-  onSubmit: (submission: AgentComposerSubmit) => void | Promise<void>;
+  onSubmit: AgentComposerOptions["onSubmit"];
   onStop: () => void | Promise<void>;
   onAttach: () => void | Promise<void>;
   onVaultContextDrop?: (path: string) => void | Promise<void>;
@@ -87,7 +88,7 @@ export type AgentWorkspaceOptions = Readonly<{
   onRename?: (title: string) => void | Promise<void>;
   /** Fills the header's More menu; the view adds the same items to its pane menu. */
   buildMoreMenu?: (menu: Menu) => void;
-  onViewPlans?: () => void | Promise<void>;
+  onViewPlans?: (error?: ManagedAgentError) => void | Promise<void>;
   showPlanOffer?: boolean;
   onCancelQueued?: (id: string) => void | Promise<void>;
   onRunQueuedNow?: (id: string) => void | Promise<void>;

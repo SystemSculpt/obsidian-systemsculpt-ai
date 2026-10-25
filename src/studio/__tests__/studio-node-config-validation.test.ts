@@ -48,38 +48,6 @@ describe("Studio node config validation", () => {
     expect(result.errors).toHaveLength(0);
   });
 
-  it("rejects invalid image-generation aspect-ratio values", () => {
-    const registry = registryWithBuiltIns();
-    const definition = registry.get("studio.image_generation", "1.0.0");
-    expect(definition).not.toBeNull();
-
-    const result = validateNodeConfig(definition!, {
-      count: 1,
-      aspectRatio: "bad-ratio",
-    });
-
-    expect(result.isValid).toBe(false);
-    expect(result.errors.some((error) => error.fieldKey === "aspectRatio")).toBe(true);
-  });
-
-  it("accepts the portrait and landscape aspect ratios used by AI image edit flows", () => {
-    const registry = registryWithBuiltIns();
-    const definition = registry.get("studio.image_generation", "1.0.0");
-    expect(definition).not.toBeNull();
-
-    const wide = validateNodeConfig(definition!, {
-      count: 1,
-      aspectRatio: "3:2",
-    });
-    const tall = validateNodeConfig(definition!, {
-      count: 1,
-      aspectRatio: "2:3",
-    });
-
-    expect(wide.isValid).toBe(true);
-    expect(tall.isValid).toBe(true);
-  });
-
   it("accepts legacy provider key as unknown config key during validation", () => {
     const registry = registryWithBuiltIns();
     const definition = registry.get("studio.image_generation", "1.0.0");

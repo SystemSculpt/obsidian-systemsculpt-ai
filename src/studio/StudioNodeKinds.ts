@@ -1,4 +1,9 @@
-const VISUAL_ONLY_NODE_KINDS = new Set<string>(["studio.terminal", "studio.run_collection", "studio.command_center", "studio.button", "studio.workflow"]);
+const RETIRED_NODE_KINDS = new Set<string>(["studio.workflow", "studio.image_generation"]);
+const VISUAL_ONLY_NODE_KINDS = new Set<string>(["studio.terminal", "studio.run_collection", "studio.command_center", "studio.button", ...RETIRED_NODE_KINDS]);
+
+export function isStudioRetiredNodeKind(kind: string): boolean {
+  return RETIRED_NODE_KINDS.has(String(kind || "").trim());
+}
 export type StudioManagedOutputKind = "image" | "video";
 const MANAGED_OUTPUT_KIND_BY_NODE_KIND: Readonly<Record<string, StudioManagedOutputKind>> = {
   "studio.image_generation": "image",

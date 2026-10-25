@@ -57,11 +57,30 @@
   border: 1px solid var(--ss-line-strong);
   border-radius: var(--ss-radius-lg);
   background: var(--ss-surface-0);
-  transition: border-color var(--ss-dur-fast) var(--ss-ease);
+  transition: var(--ss-transition-colors);
 }
 
+/* A chip or toolbar control has focus and draws its own ring; the card only
+ * warms its hairline. */
 .systemsculpt-agent-prompt:focus-within {
   border-color: var(--ss-line-accent);
+}
+
+/* The message box shows its focus once, on the card: code sets is-focused
+ * while the textarea has focus, and the chat-wide ring (index.css) skips
+ * the textarea. The border takes the focus outline's ink accent: a raw
+ * light accent (green, cyan, yellow, orange) falls under 3:1 on paper. */
+.systemsculpt-agent-prompt.is-focused {
+  border-color: var(--ss-ink-accent);
+  box-shadow: var(--ss-ring);
+}
+
+/* Forced colours drop shadows and repaint borders; an outline survives. */
+@media (forced-colors: active) {
+  .systemsculpt-agent-prompt.is-focused {
+    outline: 2px solid;
+    outline-offset: 2px;
+  }
 }
 
 .systemsculpt-agent-composer.is-dragging-files .systemsculpt-agent-prompt {

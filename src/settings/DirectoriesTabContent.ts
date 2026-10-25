@@ -1,7 +1,16 @@
-import { Notice, Setting } from "obsidian";
+import { Notice } from "obsidian";
+import { createCatalogSetting } from "./SettingsCatalog";
 import { SystemSculptSettingTab } from "./SystemSculptSettingTab";
 import { attachFolderSuggester } from "../components/FolderSuggester";
 import { beginTextSettings } from "./TextSettings";
+
+const DIRECTORY_SETTING_IDS = {
+    attachmentsDirectory: "workspace.attachments-directory",
+    recordingsDirectory: "workspace.recordings-directory",
+    chatsDirectory: "workspace.chats-directory",
+    extractionsDirectory: "workspace.extractions-directory",
+    savedChatsDirectory: "workspace.saved-chats-directory",
+} as const;
 
 function validateDirectory(path: string): boolean {
     if (!path) return true;
@@ -13,12 +22,7 @@ function validateDirectory(path: string): boolean {
 async function handleDirectoryChange(
     tabInstance: SystemSculptSettingTab,
     value: string,
-    settingKey:
-        | "attachmentsDirectory"
-        | "recordingsDirectory"
-        | "chatsDirectory"
-        | "extractionsDirectory"
-        | "savedChatsDirectory",
+    settingKey: keyof typeof DIRECTORY_SETTING_IDS,
 ) {
     const { plugin } = tabInstance;
     const saved = await plugin.getSettingsManager().updateSettings({ [settingKey]: value });
@@ -37,20 +41,11 @@ function createDirectorySetting(
     containerEl: HTMLElement,
     tabInstance: SystemSculptSettingTab,
     bindTextSetting: ReturnType<typeof beginTextSettings>,
-    name: string,
-    desc: string,
-    settingKey:
-        | "attachmentsDirectory"
-        | "recordingsDirectory"
-        | "chatsDirectory"
-        | "extractionsDirectory"
-        | "savedChatsDirectory",
+    settingKey: keyof typeof DIRECTORY_SETTING_IDS,
     placeholder: string
 ) {
     const { app, plugin } = tabInstance;
-    new Setting(containerEl)
-        .setName(name)
-        .setDesc(desc)
+    createCatalogSetting(containerEl, DIRECTORY_SETTING_IDS[settingKey])
         .addText((text) => {
             text
                 .setPlaceholder(placeholder)
@@ -90,8 +85,6 @@ export function displayDirectoriesTabContent(containerEl: HTMLElement, tabInstan
         containerEl,
         tabInstance,
         bindTextSetting,
-        "Chats directory",
-        "Where new chats are saved. Existing chats stay in the folder they were saved in.",
         "chatsDirectory",
         "Path relative to vault root (empty = SystemSculpt/Chats)"
     );
@@ -100,8 +93,6 @@ export function displayDirectoriesTabContent(containerEl: HTMLElement, tabInstan
         containerEl,
         tabInstance,
         bindTextSetting,
-        "Saved chats directory",
-        "Where chats saved as notes are stored.",
         "savedChatsDirectory",
         "Path relative to vault root (empty = SystemSculpt/Saved Chats)"
     );
@@ -110,8 +101,6 @@ export function displayDirectoriesTabContent(containerEl: HTMLElement, tabInstan
         containerEl,
         tabInstance,
         bindTextSetting,
-        "Recordings directory",
-        "Where recordings are stored.",
         "recordingsDirectory",
         "Path relative to vault root (empty = SystemSculpt/Recordings)"
     );
@@ -120,8 +109,6 @@ export function displayDirectoriesTabContent(containerEl: HTMLElement, tabInstan
         containerEl,
         tabInstance,
         bindTextSetting,
-        "Attachments directory",
-        "Where saved images and attachments are stored.",
         "attachmentsDirectory",
         "Path relative to vault root (empty = Attachments)"
     );
@@ -130,38 +117,39 @@ export function displayDirectoriesTabContent(containerEl: HTMLElement, tabInstan
         containerEl,
         tabInstance,
         bindTextSetting,
-        "Extractions directory",
-        "Where extracted documents are stored.",
         "extractionsDirectory",
         "Path relative to vault root (empty = file's parent folder)"
     );
 
     containerEl.createEl("h3", { text: "Diagnostics" });
 
-    const diagnosticsSetting = new Setting(containerEl)
-      .setName("Directory health")
-      .setDesc("Verify or repair SystemSculpt directories.");
+    const diagnosticsSetting = createCatalogSetting(containerEl, "workspace.directory-health");
 
     const statusEl = diagnosticsSetting.descEl.createDiv({
       cls: "ss-inline-note",
       attr: { role: "status", "aria-live": "polite" },
     });
 
+    const setStatus = (text: string) => {
+      statusEl.setText(text);
+      tabInstance.invalidateSearchIndex();
+    };
+
     diagnosticsSetting.addButton((button) => {
       button
         .setButtonText("Verify")
         .onClick(async () => {
-          statusEl.setText("Checking directories…");
+          setStatus("Checking directories…");
           try {
             const result = await plugin.checkDirectoryHealth();
             if (result.valid) {
-              statusEl.setText("All directories are ready.");
+              setStatus("All directories are ready.");
             } else {
               const messages = result.issues?.length ? result.issues.join("\n• ") : "Issues detected.";
-              statusEl.setText(`Issues found:\n• ${messages}`);
+              setStatus(`Issues found:\n• ${messages}`);
             }
           } catch (error: unknown) {
-            statusEl.setText(`Verification failed: ${error instanceof Error ? error.message : String(error)}`);
+            setStatus(`Verification failed: ${error instanceof Error ? error.message : String(error)}`);
           }
         });
     });
@@ -171,14 +159,14 @@ export function displayDirectoriesTabContent(containerEl: HTMLElement, tabInstan
         .setButtonText("Repair")
         .setCta()
         .onClick(async () => {
-          statusEl.setText("Repairing directories…");
+          setStatus("Repairing directories…");
           try {
             const success = await plugin.repairDirectoryStructure();
-            statusEl.setText(success
+            setStatus(success
               ? "Directories repaired. Restart Obsidian to apply the changes."
               : "Repair didn’t complete. Check the console for details.");
           } catch (error: unknown) {
-            statusEl.setText(`Repair failed: ${error instanceof Error ? error.message : String(error)}`);
+            setStatus(`Repair failed: ${error instanceof Error ? error.message : String(error)}`);
           }
         });
     });

@@ -138,6 +138,40 @@ describe("AgentComposer", () => {
     composer.unload();
   });
 
+  it("marks the card focused only while the message box has focus", () => {
+    const { composer, input, query } = mount();
+    const card = query<HTMLElement>(".systemsculpt-agent-prompt")!;
+    expect(card.classList.contains("is-focused")).toBe(false);
+
+    input.focus();
+    expect(card.classList.contains("is-focused")).toBe(true);
+
+    // A toolbar control draws its own ring; the card does not repeat it.
+    query('[data-testid="chat.composer.add"]')!.focus();
+    expect(document.activeElement?.getAttribute("data-testid")).toBe("chat.composer.add");
+    expect(card.classList.contains("is-focused")).toBe(false);
+    composer.unload();
+  });
+
+  it.each([false, true])("keeps a declined draft and can send it later (async: %s)", async (asynchronous) => {
+    const onSubmit = jest.fn<ReturnType<AgentComposerOptions["onSubmit"]>, [unknown]>()
+      .mockImplementationOnce(() => asynchronous ? Promise.resolve(false as const) : false);
+    const { composer, input, query } = mount({ onSubmit });
+    composer.setValue("  Keep my\nwhole draft  ");
+
+    key(input, { key: "Enter" });
+    await idle(composer);
+    expect(composer.getValue()).toBe("  Keep my\nwhole draft  ");
+    expect(query('[data-testid="chat.composer.send"]')!.disabled).toBe(false);
+
+    query('[data-testid="chat.composer.send"]')!.click();
+    await idle(composer);
+    expect(onSubmit).toHaveBeenCalledTimes(2);
+    expect(onSubmit).toHaveBeenLastCalledWith({ text: "Keep my\nwhole draft", mode: "send" });
+    expect(composer.getValue()).toBe("");
+    composer.unload();
+  });
+
   it("shows Stop while running, and turns Send into Queue only once there is text", () => {
     const { composer, query } = mount();
     const send = query('[data-testid="chat.composer.send"]')!;

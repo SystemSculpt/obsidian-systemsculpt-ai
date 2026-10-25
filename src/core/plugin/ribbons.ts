@@ -21,9 +21,8 @@ export class RibbonManager {
    * Initialize the ribbon manager and register all ribbon icons
    */
   initialize() {
-    // Disabled means inert (#134/#214): ribbon init is deferred (a setTimeout in
-    // ViewManager), so this can fire after onunload flips the unloading flag.
-    // Don't re-add icons to a plugin that is already tearing down.
+    // Disabled means inert (#134/#214): a late lazy caller must not re-add
+    // icons to a plugin that is already tearing down.
     if (this.isDisposed || this.isInitialized || this.plugin?.isPluginUnloading?.()) {
       return;
     }

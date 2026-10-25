@@ -112,6 +112,24 @@ it('indexes status and workflow changes once, not every activity update', async 
   expect(savedIndex().runs[run.id].status).toBe('completed');
 });
 
+it('checks the run folder once per session and recreates it after it was removed', async () => {
+  const { store, adapter, files } = fixture([]);
+  const run = record(1, { status: 'running' });
+  await store.write(run);
+  const folderChecks = () => adapter.exists.mock.calls.filter(([path]) => !String(path).endsWith('.json')).length;
+  const firstChecks = folderChecks();
+  expect(firstChecks).toBe(folder.split('/').length);
+  await store.write({ ...run, currentActivity: 'Reading' });
+  await store.write({ ...run, currentActivity: 'Writing' });
+  expect(folderChecks()).toBe(firstChecks);
+
+  // Someone deletes the run folder: the next save fails once, then recreates it.
+  adapter.write.mockImplementationOnce(async () => { throw new Error('ENOENT'); });
+  await store.write({ ...run, currentActivity: 'Testing' });
+  expect(folderChecks()).toBe(firstChecks * 2);
+  expect(JSON.parse(files.get(`${folder}/${run.id}.json`)!).currentActivity).toBe('Testing');
+});
+
 it('rebuilds a damaged index from the records it reads', async () => {
   jest.useFakeTimers();
   const { store, files, savedIndex } = fixture([record(1), record(2, { status: 'running' })]);

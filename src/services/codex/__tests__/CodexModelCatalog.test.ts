@@ -6,7 +6,7 @@ beforeEach(() => { jest.clearAllMocks(); now += 120_000; jest.spyOn(Date, 'now')
 afterEach(() => jest.restoreAllMocks());
 it('reads bounded native pages and excludes hidden safety-helper models from the user selector', async () => {
   const request = jest.fn().mockResolvedValueOnce({ config: { approval_policy: 'never', sandbox_mode: 'danger-full-access' } }).mockResolvedValueOnce({ data: [
-    { model: 'gpt-6-astra', displayName: 'Astra', supportedReasoningEfforts: [{ reasoningEffort: 'high' }], defaultReasoningEffort: 'high', serviceTiers: [{ id: 'priority', name: 'Fast' }] },
+    { model: 'gpt-6-astra', displayName: 'Astra', isDefault: true, supportedReasoningEfforts: [{ reasoningEffort: 'high' }], defaultReasoningEffort: 'high', serviceTiers: [{ id: 'priority', name: 'Fast' }] },
     { model: 'platform-reviewer', hidden: true },
   ], nextCursor: 'next' }).mockResolvedValueOnce({ data: [{ model: 'other', supportedReasoningEfforts: [], serviceTiers: [] }], nextCursor: null });
   const close = jest.fn(); (connectCodex as jest.Mock).mockResolvedValue({ request, close, closed: Promise.resolve() });
@@ -14,7 +14,8 @@ it('reads bounded native pages and excludes hidden safety-helper models from the
   expect(permissions).toBe('Never ask · Full access');
   expect(request).toHaveBeenNthCalledWith(1, 'config/read', { cwd: '/vault', includeLayers: false });
   expect(models.map(model => model.model)).toEqual(['gpt-6-astra', 'other']);
-  expect(models[0]).toMatchObject({ efforts: ['high'], fastTier: 'priority' });
+  expect(models[0]).toMatchObject({ efforts: ['high'], fastTier: 'priority', isDefault: true });
+  expect(models[1].isDefault).toBe(false);
   expect(request).toHaveBeenNthCalledWith(3, 'model/list', { limit: 100, includeHidden: false, cursor: 'next' });
   expect(close).toHaveBeenCalled();
   request.mockResolvedValueOnce({ config: { approval_policy: 'untrusted', sandbox_mode: 'read-only' } }).mockResolvedValueOnce({ data: [{ model: 'workspace-model' }] });

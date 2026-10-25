@@ -189,6 +189,20 @@ describe("AgentChatView chrome wiring", () => {
     expect(hosted.approvalMode).toBe("full-access");
   });
 
+  it("restores Codex inheritance from the model menu and can override fields independently", async () => {
+    const view = harness({ agent: "codex" });
+    Object.assign(view.plugin.settings, { codexModel: "custom", codexThinkingLevel: "low" });
+    await (view as any).changeAgentModel("model:");
+    expect(view.plugin.settings).toMatchObject({ codexModel: "", codexThinkingLevel: "" });
+    view.codexModels = [{ model: "native", name: "Native", efforts: ["high"], defaultEffort: "high", isDefault: true }];
+    await (view as any).changeAgentModel("model:native");
+    expect(view.plugin.settings).toMatchObject({ codexModel: "native", codexThinkingLevel: "" });
+    await (view as any).changeAgentModel("effort:high");
+    expect(view.plugin.settings.codexThinkingLevel).toBe("high");
+    await (view as any).changeAgentModel("effort:");
+    expect(view.plugin.settings.codexThinkingLevel).toBe("");
+  });
+
   it("keeps a thinking level the new Codex model supports", async () => {
     const view = harness({ agent: "codex" });
     Object.assign(view.plugin.settings, { codexModel: "gpt-6.1", codexThinkingLevel: "low", codexServiceTier: "default" });

@@ -22,6 +22,7 @@ import type {
   AgentConversationSnapshot,
   AgentPart,
   AgentToolPart,
+  ManagedAgentError,
 } from "../../chat/ChatConversation";
 import {
   formatAgentActivityDuration,
@@ -82,7 +83,7 @@ export type AgentConversationRendererOptions = Readonly<{
   onDetectAgain?: () => boolean | void | Promise<boolean | void>;
   onUseHosted?: () => void | Promise<void>;
   onOpenCredits?: () => void | Promise<void>;
-  onViewPlans?: () => void | Promise<void>;
+  onViewPlans?: (error?: ManagedAgentError) => void | Promise<void>;
   onRetryFailedTurn?: (messageId: string) => void | Promise<void>;
   onPrepareIncidentReport?: (reportId: string, retry?: boolean) => Promise<boolean>;
   onCopyIncidentReport?: (
@@ -178,9 +179,10 @@ type HistoricalTurnSemantics = Readonly<{
 
 type DurableFailedReceipt = Readonly<{
   messageId: string;
-  reportId: string;
+  reportId?: string;
   incidentId?: string;
   failureCode: string;
+  failureMessage?: string;
   retryable: boolean;
   serverRunId?: string;
 }>;
@@ -191,12 +193,18 @@ function durableFailedReceipt(message: ChatMessage): DurableFailedReceipt | null
   if (!receipt) return null;
   return Object.freeze({
     messageId: message.message_id,
-    reportId: receipt.terminalReportId ?? receipt.terminalIncidentId!,
+    reportId: receipt.terminalReportId ?? receipt.terminalIncidentId,
     ...(receipt.terminalIncidentId ? { incidentId: receipt.terminalIncidentId } : {}),
     failureCode: receipt.terminalFailureCode,
+    failureMessage: receipt.terminalFailureMessage,
     retryable: receipt.terminalRetryable,
     ...(receipt.terminalServerRunId ? { serverRunId: receipt.terminalServerRunId } : {}),
   });
+}
+
+/** Plugin 6.18.0 could save a native failure for a message that never reached the agent, under the previous turn. */
+function isOrphanNativeFailure(message: ChatMessage, turnId: string | null): boolean {
+  return durableFailedReceipt(message)?.failureMessage !== undefined && message.message_id !== `${turnId}_assistant`;
 }
 
 type HistoricalPartPartition = Readonly<{
@@ -811,10 +819,11 @@ export class AgentConversationRenderer extends Component {
       const message = messages[index];
       index += 1;
       if (message.role !== "user" && message.role !== "assistant") continue;
+      if (isOrphanNativeFailure(message, currentTurnId)) continue;
       const turnMessages: ChatMessage[] = [message];
       if (message.role === "assistant") {
         while (index < messages.length && messages[index].role === "assistant") {
-          turnMessages.push(messages[index]);
+          if (!isOrphanNativeFailure(messages[index], currentTurnId)) turnMessages.push(messages[index]);
           index += 1;
         }
       }
@@ -2177,11 +2186,11 @@ export class AgentConversationRenderer extends Component {
       kind: "error",
       error: {
         code: receipt.failureCode,
-        message: "SystemSculpt could not complete the response.",
+        message: receipt.failureMessage ?? "SystemSculpt could not complete the response.",
         retryable: receipt.retryable,
-        ...(isLocalReportId(receipt.reportId)
+        ...(receipt.reportId ? isLocalReportId(receipt.reportId)
           ? { reportId: receipt.reportId }
-          : { incidentId: receipt.reportId }),
+          : { incidentId: receipt.reportId } : {}),
         ...(receipt.incidentId ? { incidentId: receipt.incidentId } : {}),
       },
       retryable: receipt.retryable,
@@ -2837,7 +2846,7 @@ export class AgentConversationRenderer extends Component {
             text: "Preparing report…",
           }) : null;
         const canRetry = part.retryable && part.retryMessageId && this.options.onRetryFailedTurn
-          && !presented.action?.match(/^(see-plans|add-credits|detect)$/)
+          && !presented.action?.match(/^(see-plans|add-credits|detect|use-hosted)$/)
           && part.error.code !== "content_filter";
         const actions = canRetry || presented.action || presented.reportId && this.options.onCopyIncidentReport
           ? copy.createDiv({ cls: "systemsculpt-agent-error-actions" }) : null;
@@ -2866,7 +2875,7 @@ export class AgentConversationRenderer extends Component {
             detect.onclick = () => void this.options.onRetryFailedTurn?.(part.retryMessageId!);
           };
         }
-        if (actions && presented.action === "detect" && this.options.onUseHosted) {
+        if (actions && (presented.action === "detect" || presented.action === "use-hosted") && this.options.onUseHosted) {
           const hosted = createUiAction(actions, { label: "Use SystemSculpt instead", testId: "chat.turn.use-hosted", size: "small" });
           hosted.onclick = () => void this.options.onUseHosted?.();
         }
@@ -2882,7 +2891,7 @@ export class AgentConversationRenderer extends Component {
             tone: "primary",
             size: "small",
           });
-          plans.onclick = () => void this.options.onViewPlans?.();
+          plans.onclick = () => void this.options.onViewPlans?.(part.error);
         }
         if (reportStatus && presented.reportId) {
           void this.prepareIncidentReport(reportStatus, actions, presented.reportId);

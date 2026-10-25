@@ -158,9 +158,6 @@ export function validateNodeConfig(
           });
           break;
         }
-        if (field.optionsSource === "image_aspect_ratios" && value !== "" && !/^(auto|match_input_image|[0-9]{1,2}(?:\.[0-9]{1,2})?:[0-9]{1,2}(?:\.[0-9]{1,2})?)$/.test(value)) {
-          errors.push({ fieldKey: field.key, message: "Must be an aspect ratio or the model default." });
-        }
         if (field.type === "select" && Array.isArray(field.options) && field.options.length > 0) {
           const allowed = new Set(field.options.map((option) => option.value));
           if (!allowed.has(value)) {

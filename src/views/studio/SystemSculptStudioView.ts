@@ -2,7 +2,8 @@ import { StudioOutputContainerController } from "./StudioOutputContainerControll
 import { createSurfaceElement } from "../../core/ui/surface/SurfaceDomContext";
 import { StudioVaultNotes, isStudioMarkdownFile } from "./StudioVaultNotes";
 import { StudioTextEditSessions } from "./StudioTextEditSessions";
-import { isStudioMediaModelConfigKey, resolveStudioMediaModelOptionsForPlugin, resetStudioMediaModelOptions } from "../../studio/StudioMediaModelOptions";
+import { isStudioMediaModelConfigKey, resolveStudioMediaModelOptionsForPlugin } from "../../studio/StudioMediaModelOptions";
+import { resetStudioVideoModelOptions } from "../../studio/StudioVideoModelOptions";
 import { startStudioIndependentRun } from './StudioIndependentRun';
 import { localTextAgent } from "../../services/codex/CodexExecutionSettings";
 import { applyStudioNodeSource } from "../../studio/StudioNodeSource";
@@ -10,6 +11,7 @@ import { StudioRunObservationController } from "./StudioRunObservationController
 import {
   ItemView,
   Scope,
+  Component,
   MarkdownRenderer,
   Notice,
   normalizePath,
@@ -73,7 +75,7 @@ import {
   removeNodesFromGroups,
 } from "../../studio/StudioGraphGroupModel";
 import { computeStudioGraphGroupBounds } from "./canvas/StudioGraphGroupBounds";
-import { openStudioMediaPreviewModal, resolveStudioAssetPreviewSrc } from "./canvas/StudioGraphMediaPreviewModal";
+import { openStudioMediaPreviewModal } from "./canvas/StudioGraphMediaPreviewModal";
 import { bindStudioVaultEvents } from "./StudioVaultEventBindings";
 import { StudioAssetPreviewController } from "./StudioAssetPreviewController";
 import type { StudioEditingSnapshot } from "../../core/plugin/StudioReloadState";
@@ -160,10 +162,6 @@ import {
   type StudioCreatedNodesFinalization,
 } from "./systemsculpt-studio-view/StudioClipboardAndDropController";
 import {
-  inferAiImageEditAspectRatio,
-  insertAiImageEditNode,
-} from "./systemsculpt-studio-view/StudioAiImageEditFlow";
-import {
   isTextGenerationOutputLocked,
   resolveTextGenerationOutputSnapshot,
 } from "./systemsculpt-studio-view/StudioPromptBundleUtils";
@@ -226,6 +224,7 @@ type StudioRunGraphOptions = {
 export class SystemSculptStudioView extends ItemView {
   private busy = false;
   private retryingMigration = false;
+  private renderFrame: { ownerWindow: Window; id: number } | null = null;
   private readonly runObservation = new StudioRunObservationController({
     getProjectPath: () => this.currentProjectPath,
     beginRun: (nodeIds, fromNodeId) => this.runPresentation.beginRun(nodeIds, { fromNodeId }),
@@ -249,7 +248,7 @@ export class SystemSculptStudioView extends ItemView {
   private nodeContextMenuOverlay: StudioNodeContextMenuOverlay | null = null;
   private nodeActionContextMenuOverlay: StudioSimpleContextMenuOverlay | null = null;
   private nodeDragInProgress = false;
-  private readonly mediaModelPicker = new StudioMediaModelPickerController({ plugin: () => this.plugin, requestRender: () => this.render() });
+  private readonly mediaModelPicker = new StudioMediaModelPickerController({ plugin: () => this.plugin, requestRender: () => this.scheduleRender() });
   private readonly outputContainers = new StudioOutputContainerController({
     getProject: () => this.currentProject,
     getNodeElement: (id) => this.leafVisible ? this.graphInteraction.getNodeElement(id) : null,
@@ -326,7 +325,7 @@ export class SystemSculptStudioView extends ItemView {
   ) {
     super(leaf);
     this.vaultNotes = new StudioVaultNotes(this.app.vault, this.runPresentation);
-    this.assetPreviews = new StudioAssetPreviewController(this.app, () => this.render(), async (path) => {
+    this.assetPreviews = new StudioAssetPreviewController(this.app, () => this.scheduleRender(), async (path) => {
       const projectPath = this.currentProjectPath;
       return projectPath ? this.plugin.getStudioService().restoreAssetFile(projectPath, path) : false;
     });
@@ -468,7 +467,7 @@ export class SystemSculptStudioView extends ItemView {
   private detachLeafVisibility: (() => void) | null = null;
   private leafVisible = true;
   private readonly presentation = new StudioPresentation();
-  private readonly markdownPreviewRequests = new WeakMap<HTMLElement, object>();
+  private readonly markdownPreviewRequests = new WeakMap<HTMLElement, () => void>();
 
   private setLeafVisible(visible: boolean): void {
     if (this.closed || this.leafVisible === visible) return;
@@ -526,6 +525,7 @@ export class SystemSculptStudioView extends ItemView {
   }
   private async closeStudioView(): Promise<void> {
     this.closed = true;
+    if (this.renderFrame) this.cancelScheduledRender();
     this.detachSurfaceActivity?.();
     this.detachSurfaceActivity = null;
     this.detachLeafVisibility?.();
@@ -655,7 +655,7 @@ export class SystemSculptStudioView extends ItemView {
       async (project) => await this.vaultNotes.refresh(project),
       { captureHistory: false }
     ).then(() => {
-      this.render();
+      this.scheduleRender();
     });
     return { project: currentProject, selectedNodeIds: nextSelection };
   }
@@ -948,7 +948,7 @@ export class SystemSculptStudioView extends ItemView {
     void this.vaultNotes.refresh(project, {
       onlyNodeIds: new Set(createdNodeIds),
     }).then(() => {
-      this.render();
+      this.scheduleRender();
     });
   }
 
@@ -981,7 +981,7 @@ export class SystemSculptStudioView extends ItemView {
         onlyNodeIds: new Set(options.refreshNoteNodeIds),
       }).then(() => {
         if (this.currentProject === project) {
-          this.render();
+          this.scheduleRender();
         }
       });
     }
@@ -1122,7 +1122,8 @@ export class SystemSculptStudioView extends ItemView {
     } else if (event.type === "run.completed") {
       this.removePendingManagedOutputPlaceholders({ runId: event.runId });
     }
-    if (structural) this.render();
+    // A burst of run events (outputs for many nodes, say) renders once.
+    if (structural) this.scheduleRender();
     else this.activity.refresh();
   }
 
@@ -1353,18 +1354,30 @@ export class SystemSculptStudioView extends ItemView {
   private async renderNodeMarkdownPreview(
     node: StudioNodeInstance,
     markdown: string,
-    containerEl: HTMLElement
+    containerEl: HTMLElement,
+    lifetime: AbortSignal
   ): Promise<void> {
+    this.markdownPreviewRequests.get(containerEl)?.();
+    if (lifetime.aborted) return;
     const content = String(markdown || "");
-    const request = {};
-    this.markdownPreviewRequests.set(containerEl, request);
+    const component = new Component();
+    component.load();
+    let disposed = false;
+    const dispose = (): void => {
+      disposed = true;
+      component.unload();
+      lifetime.removeEventListener("abort", dispose);
+      if (this.markdownPreviewRequests.get(containerEl) === dispose) this.markdownPreviewRequests.delete(containerEl);
+    };
+    lifetime.addEventListener("abort", dispose, { once: true });
+    this.markdownPreviewRequests.set(containerEl, dispose);
     // The host renderer can finish asynchronously. Keep both success and fallback
     // off the mounted card until the leaf can present them.
     const staging = createSurfaceElement(containerEl.ownerDocument, "div");
     const noteSourcePath = node.kind === "studio.note" ? normalizePath(readPrimaryStudioNotePath(node.config)) : "";
     const sourcePath = noteSourcePath || this.currentProjectPath || "SystemSculpt Studio";
     try {
-      if (content.trim()) await MarkdownRenderer.render(this.app, content, staging, sourcePath, this);
+      if (content.trim()) await MarkdownRenderer.render(this.app, content, staging, sourcePath, component);
     } catch (error) {
       console.warn("[SystemSculpt Studio] Failed to render node markdown preview", {
         nodeId: node.id,
@@ -1372,11 +1385,21 @@ export class SystemSculptStudioView extends ItemView {
         sourcePath,
         error: error instanceof Error ? error.message : String(error),
       });
+      component.unload();
       staging.setText(content);
     }
+    if (disposed) {
+      // A renderer may register children after its card was removed. Reload only
+      // this detached owner so unload also drains those late registrations.
+      component.load();
+      component.unload();
+      return;
+    }
     await this.presentation.deliver(() => {
-      if (!this.closed && containerEl.isConnected && this.markdownPreviewRequests.get(containerEl) === request) {
+      if (!disposed && !this.closed && containerEl.isConnected && this.markdownPreviewRequests.get(containerEl) === dispose) {
         containerEl.replaceChildren(...Array.from(staging.childNodes));
+      } else {
+        dispose();
       }
     });
   }
@@ -1541,7 +1564,7 @@ export class SystemSculptStudioView extends ItemView {
           return false;
         }
         target.config[key] = nextValue;
-        resetStudioMediaModelOptions(target, key);
+        resetStudioVideoModelOptions(target, key);
         return true;
       },
       {
@@ -1743,123 +1766,6 @@ export class SystemSculptStudioView extends ItemView {
       },
       onClose: (nodeId) => this.endImageEdit(nodeId),
     };
-  }
-
-  private async editImageWithAiForNode(node: StudioNodeInstance): Promise<void> {
-    if (this.busy || !this.currentProject || !this.currentProjectPath) {
-      return;
-    }
-    if (node.kind !== "studio.media_ingest") {
-      return;
-    }
-
-    const imageGenerationDefinition = this.nodeDefinitions.find(
-      (definition) => definition.kind === "studio.image_generation"
-    );
-    if (!imageGenerationDefinition) {
-      this.setError("Studio image-edit dependencies are unavailable.");
-      return;
-    }
-
-    const aspectRatio = await this.resolveAiImageEditAspectRatioForNode(node);
-    let createdImageGenerationNodeId: string | null = null;
-    const changed = this.commitCurrentProjectMutation("graph.node.create", (project) => {
-      const sourceNode = this.findNode(project, node.id);
-      if (!sourceNode) {
-        return false;
-      }
-      const inserted = insertAiImageEditNode({
-        project,
-        sourceNode,
-        aspectRatio,
-        imageGenerationDefinition,
-        nextNodeId: () => randomId("node"),
-        nextEdgeId: () => randomId("edge"),
-        cloneConfigDefaults: (definition) => cloneConfigDefaults(definition),
-        normalizeNodePosition: (position) => this.normalizeNodePosition(position),
-      });
-      createdImageGenerationNodeId = inserted.imageGenerationNodeId;
-      return true;
-    });
-    if (!changed || !createdImageGenerationNodeId || !this.currentProject) {
-      return;
-    }
-
-    this.graphInteraction.selectOnlyNode(createdImageGenerationNodeId);
-    this.graphInteraction.clearPendingConnection();
-    this.render();
-    this.focusImageGenerationPrompt(createdImageGenerationNodeId);
-  }
-
-  /** After spawning an AI edit node, put the caret straight into its Prompt box. */
-  private focusImageGenerationPrompt(nodeId: string): void {
-    const nodeEl = this.graphInteraction.getNodeElement(nodeId);
-    const promptEl = nodeEl?.querySelector<HTMLTextAreaElement>(
-      ".ss-studio-node-inline-config-field--prompt textarea"
-    );
-    promptEl?.focus();
-  }
-
-  private async resolveAiImageEditAspectRatioForNode(node: StudioNodeInstance): Promise<string> {
-    const ensuredAsset = await this.ensureRenderedImageAssetForNode(node);
-    const nodeRunState = this.runPresentation.getNodeState(node.id);
-    const outputs = (nodeRunState.outputs || {}) as Record<string, unknown>;
-    const candidatePaths = [
-      ensuredAsset?.path || "",
-      typeof outputs.preview_path === "string" ? outputs.preview_path : "",
-      typeof outputs.source_preview_path === "string" ? outputs.source_preview_path : "",
-      typeof outputs.path === "string" ? outputs.path : "",
-      typeof node.config.sourcePath === "string" ? node.config.sourcePath : "",
-    ];
-
-    for (const candidatePath of candidatePaths) {
-      const previewSrc = this.resolveImagePreviewSrcFromPath(candidatePath);
-      if (!previewSrc) {
-        continue;
-      }
-      try {
-        const dimensions = await this.measureImageDimensions(previewSrc);
-        return inferAiImageEditAspectRatio(dimensions.width, dimensions.height);
-      } catch {
-        continue;
-      }
-    }
-
-    return "1:1";
-  }
-
-  private resolveImagePreviewSrcFromPath(path: string): string | null {
-    const normalizedPath = String(path || "").trim();
-    if (!normalizedPath) {
-      return null;
-    }
-    const assetSrc = resolveStudioAssetPreviewSrc(this.app, normalizedPath);
-    if (assetSrc) {
-      return assetSrc;
-    }
-    if (isAbsoluteFilesystemPath(normalizedPath)) {
-      return `file://${encodeURI(normalizedPath)}`;
-    }
-    return null;
-  }
-
-  private measureImageDimensions(src: string): Promise<{ width: number; height: number }> {
-    return new Promise((resolve, reject) => {
-      const ImageCtor = (getStudioOwnerWindow(this.contentEl) as Window & {
-        Image: new () => HTMLImageElement;
-      }).Image;
-      const imageEl = new ImageCtor();
-      imageEl.onload = () => {
-        resolve({
-          width: imageEl.naturalWidth || 1,
-          height: imageEl.naturalHeight || 1,
-        });
-      };
-      imageEl.onerror = () => {
-        reject(new Error("Preview image failed to load."));
-      };
-      imageEl.src = src;
-    });
   }
 
   /**
@@ -3231,14 +3137,11 @@ export class SystemSculptStudioView extends ItemView {
       onOpenImageEditor: (node) => this.toggleImageEditForNode(node),
       imageBoard: this.imageBoardOptions(),
       isImageNodeEditing: (nodeId) => this.imageEditNodeId === nodeId,
-      onEditImageWithAi: (node) => {
-        void this.editImageWithAiForNode(node);
-      },
       onCopyNodeImageToClipboard: (node) => {
         void this.copyImageForNodeToClipboard(node);
       },
-      renderMarkdownPreview: (node, markdown, containerEl) => {
-        return this.renderNodeMarkdownPreview(node, markdown, containerEl);
+      renderMarkdownPreview: (node, markdown, containerEl, lifetime) => {
+        return this.renderNodeMarkdownPreview(node, markdown, containerEl, lifetime);
       },
       onNodeGeometryMutated: () => {
         this.graphInteraction.notifyNodePositionsChanged();
@@ -3345,7 +3248,32 @@ export class SystemSculptStudioView extends ItemView {
     }
   }
 
+  /**
+   * Coalesces renders that background work asks for (previews resolving, run
+   * events, catalogs and notes loading) into one frame. A direct render()
+   * supersedes a pending one.
+   */
+  private scheduleRender(): void {
+    if (this.closed || this.renderFrame) return;
+    const ownerWindow = getStudioOwnerWindow(this.contentEl);
+    const frame = { ownerWindow, id: 0 };
+    this.renderFrame = frame;
+    const id = ownerWindow.requestAnimationFrame(() => {
+      if (this.renderFrame !== frame) return;
+      this.renderFrame = null;
+      this.render();
+    });
+    if (this.renderFrame === frame) frame.id = id;
+  }
+
+  private cancelScheduledRender(): void {
+    const frame = this.renderFrame;
+    this.renderFrame = null;
+    if (frame) frame.ownerWindow.cancelAnimationFrame(frame.id);
+  }
+
   private render(): void {
+    if (this.renderFrame) this.cancelScheduledRender();
     if (this.closed || this.leafVisible === false) return;
     const reason = this.currentProjectSession?.getReadOnlyReason();
     const recovery = reason ? { reason, retrying: this.retryingMigration, retry: () => { void this.retryMigration(); } } : undefined;

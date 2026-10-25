@@ -29,6 +29,7 @@ import { mountStudioGraphNodeResizeFrame } from './StudioGraphNodeResizeFrame';
 import { hasHostCapability } from '../../../platform/hostCapabilities';
 import { nodeActivityFromRunState } from '../activity/StudioActivity';
 import { applyStudioNodeActivity } from '../activity/StudioActivityDomApplier';
+import { createStudioCardLock } from './StudioCardLock';
 
 /**
  * One card per node, one primary surface per kind (see StudioNodeSurface):
@@ -40,6 +41,11 @@ export type StudioGraphNodeCardHandle = {
   updateGeometry: (node: RenderStudioGraphNodeCardOptions["node"]) => void;
   /** Present while the card hosts an editor that must follow outside changes instead of remounting. */
   syncNode?: (node: RenderStudioGraphNodeCardOptions["node"]) => void;
+  /**
+   * Applies a run starting or ending in place. Absent on cards that must
+   * remount instead: a command center shows other nodes' run status.
+   */
+  setBusy?: (busy: boolean) => void;
   dispose: () => void;
 };
 
@@ -47,9 +53,14 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
   const { node, graphInteraction, nodeRunState } = options;
   const definition = options.findNodeDefinition(node);
   const placeholder = isManagedOutputPlaceholderNode(node);
-  const locked = options.busy || placeholder;
-  const teardowns: (() => void)[] = [];
+  const previewLifetime = new AbortController();
+  const teardowns: (() => void)[] = [() => previewLifetime.abort()];
+  const renderMarkdownPreview = options.renderMarkdownPreview
+    ? (previewNode: typeof node, markdown: string, containerEl: HTMLElement): Promise<void> | void =>
+        options.renderMarkdownPreview?.(previewNode, markdown, containerEl, previewLifetime.signal)
+    : undefined;
   const nodeEl = options.layer.createDiv({ cls: 'ss-studio-node-card' });
+  const locked = createStudioCardLock(options.busy || placeholder, nodeEl);
   nodeEl.dataset.nodeId = node.id; nodeEl.dataset.nodeKind = node.kind;
   nodeEl.style.transform = `translate(${node.position.x}px, ${node.position.y}px)`;
   nodeEl.style.width = `${resolveStudioGraphNodeWidth(node)}px`;
@@ -87,6 +98,7 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
       const nextMinimum = resolveStudioGraphNodeMinHeight(nextNode);
       nodeEl.style.minHeight = nextMinimum > 0 ? `${nextMinimum}px` : "";
     },
+    ...(node.kind === 'studio.command_center' || node.kind === 'studio.button' ? {} : { setBusy: (busy: boolean) => locked.set(busy || placeholder) }),
     dispose,
   };
   const finish = (): StudioGraphNodeCardHandle => {
@@ -94,7 +106,7 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     options.registerNodeTeardown?.(node.id, dispose);
     return handle;
   };
-  const mountResizeFrame = (aspectContentEl?: HTMLElement | null): void => { mountStudioGraphNodeResizeFrame({ node, nodeEl,
+  const mountResizeFrame = (aspectContentEl?: HTMLElement | null): void => { teardowns.push(mountStudioGraphNodeResizeFrame({ node, nodeEl,
     title: node.kind === 'studio.terminal' ? 'Resize terminal node' : 'Resize node', ariaLabel: node.kind === 'studio.terminal' ? 'Resize terminal node' : 'Resize node',
     interactionLocked: locked, getGraphZoom: () => graphInteraction.getGraphZoom(),
     showResizeGuides: (moving, edges) => graphInteraction.showNodeResizeGuides(node.id, moving, edges),
@@ -103,7 +115,7 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     onNodeResize: options.onNodeResize, onNodeGeometryMutated: options.onNodeGeometryMutated,
     applySize: ({ width, height }) => { nodeEl.style.width = `${width}px`; if (height === null) return; if (node.kind === 'studio.terminal') nodeEl.style.height = `${height}px`; else nodeEl.style.minHeight = `${height}px`; },
     readInitialSize: () => { const aspect = aspectContentEl?.offsetHeight ?? 0; return { width: resolveStudioGraphNodeWidth(node), height: aspect > 0 ? aspect : nodeEl.offsetHeight > 0 ? nodeEl.offsetHeight : Math.max(minimum, 1) }; },
-  }); };
+  })); };
 
   // ── Text: chromeless Markdown that edits in place ──
   if (surface.kind === 'text') {
@@ -123,7 +135,7 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
         }
       : undefined;
     if (isStudioFillTextNode(node)) {
-      teardowns.push(renderFillTextNodeCard({ nodeEl, node, busy: options.busy, graphInteraction,
+      teardowns.push(renderFillTextNodeCard({ nodeEl, node, busy: locked, graphInteraction,
         onNodeConfigMutated: options.onNodeConfigMutated, onNodeConfigValueChange: options.onNodeConfigValueChange,
         onNodeResize: options.onNodeResize, onNodeGeometryMutated: options.onNodeGeometryMutated,
         ...options.takeTextNodeEditorMountState(node.id),
@@ -132,13 +144,13 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
       renderNodePorts({ nodeEl, node, definition, graphInteraction, interactionLocked: locked, ...portGating });
       return finish();
     }
-    renderTextNodeCard({ nodeEl, node, busy: options.busy, graphInteraction,
+    teardowns.push(renderTextNodeCard({ nodeEl, node, busy: locked, graphInteraction,
       onNodeConfigMutated: options.onNodeConfigMutated, onNodeConfigValueChange: options.onNodeConfigValueChange,
       onNodeResize: options.onNodeResize, onNodeGeometryMutated: options.onNodeGeometryMutated,
       ...options.takeTextNodeEditorMountState(node.id),
       onRequestTextNodeEdit: options.onRequestTextNodeEdit, onStopTextNodeEdit: options.onStopTextNodeEdit,
-      renderMarkdownPreview: options.renderMarkdownPreview, createMarkdownEditor: options.createTextNodeMarkdownEditor,
-      registerEditorTeardown });
+      renderMarkdownPreview, createMarkdownEditor: options.createTextNodeMarkdownEditor,
+      registerEditorTeardown }));
     renderNodePorts({ nodeEl, node, definition, graphInteraction, interactionLocked: locked, ...portGating });
     return finish();
   }
@@ -170,7 +182,7 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
       mountResizeFrame(content);
       renderStudioMediaNodeActionBar({ nodeEl: media.kind === 'video' ? content : nodeEl, node, definition, mediaKind: media.kind, interactionLocked: locked,
         onRunNode: options.onRunNode, onRemoveNode: options.onRemoveNode, onNodeConfigValueChange: options.onNodeConfigValueChange,
-        onOpenImageEditor: options.onOpenImageEditor, onEditImageWithAi: options.onEditImageWithAi, onCopyNodeImageToClipboard: options.onCopyNodeImageToClipboard, pathBrowseOptions: options.pathBrowseOptions });
+        onOpenImageEditor: options.onOpenImageEditor, onCopyNodeImageToClipboard: options.onCopyNodeImageToClipboard, pathBrowseOptions: options.pathBrowseOptions });
       if (hasHostCapability('file-manager-reveal', nodeEl)) nodeEl.addEventListener('dblclick', event => {
         if (isStudioNodeCardInteractiveTarget(event.target)) return;
         const path = resolveMediaIngestRevealPath(node, outputs, '');
@@ -218,11 +230,15 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     if (node.kind === 'studio.run_collection' && options.agentRuns && options.projectPath) return renderStudioRunCollection(root, { runs: options.agentRuns, presentation: options.presentation, projectId: options.projectId || '', projectPath: options.projectPath, sources: Array.isArray(node.config.sources) ? node.config.sources.filter((value): value is string => typeof value === 'string') : [], compact: false, groupBy: String(node.config.groupBy || 'status'), showCompleted: node.config.showCompleted !== false });
     if (node.kind === 'studio.collection') return renderStudioCollection(root, { node, outputs: nodeRunState.outputs || {}, scope: options.projectId, onChange: change, presentation: options.presentation });
     if (node.kind === 'studio.workflow') return renderStudioWorkflow(root, { node });
+    if (node.kind === 'studio.image_generation') {
+      root.createEl('p', { text: 'Image generation was retired. Saved outputs are preserved.', attr: { role: 'status' } });
+      return renderNodeMediaPreview({ nodeEl: root, node, nodeRunState, resolveAssetPreviewSrc: options.resolveAssetPreviewSrc, onRevealPathInFinder: options.onRevealPathInFinder, onOpenMediaPreview: options.onOpenMediaPreview });
+    }
     root.createDiv({ cls: 'ss-studio-source-empty', text: 'This panel is available once its project is open.' });
   };
 
   if (surface.kind === 'code' || surface.kind === 'panel') {
-    sourceBody = renderStudioNodeSourceBody(nodeEl, { node, definition, scope: options.projectId, locked, mode: surface.kind === 'panel' ? 'panel' : 'source',
+    sourceBody = renderStudioNodeSourceBody(nodeEl, { node, definition, scope: options.projectId, locked: node.kind === 'studio.image_generation' || locked, mode: surface.kind === 'panel' ? 'panel' : 'source',
       onApply: options.onNodeSourceApply, renderPanel: surface.kind === 'panel' ? renderPanel : undefined,
       onViewChange: view => { if (header.sourceToggle) updateUiAction(header.sourceToggle, { selected: view === 'source' }); } });
     teardowns.push(sourceBody.dispose);
@@ -231,7 +247,7 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     const visible = (section: 'textEditor' | 'systemPrompt' | 'outputPreview' | 'fieldHelp') => resolveStudioNodeDetailSectionVisibility({ node, mode: options.nodeDetailMode, section });
     renderStudioNodeInlineEditor({ nodeEl, node, nodeRunState, definition, inboundEdges: options.inboundEdges, interactionLocked: locked,
       onNodeConfigMutated: options.onNodeConfigMutated, onNodeConfigValueChange: options.onNodeConfigValueChange,
-      renderMarkdownPreview: options.renderMarkdownPreview, resolveDynamicSelectOptions: options.resolveDynamicSelectOptions, pathBrowseOptions: options.pathBrowseOptions,
+      renderMarkdownPreview, resolveDynamicSelectOptions: options.resolveDynamicSelectOptions, pathBrowseOptions: options.pathBrowseOptions,
       openMediaModelPicker: options.openMediaModelPicker, mediaInputPlan: mediaPlan,
       nodeDetailMode: options.nodeDetailMode, showTextEditor: visible('textEditor'), showSystemPromptField: visible('systemPrompt'), showOutputPreview: visible('outputPreview'), showFieldHelp: visible('fieldHelp') });
     if (node.kind === 'studio.codex') {

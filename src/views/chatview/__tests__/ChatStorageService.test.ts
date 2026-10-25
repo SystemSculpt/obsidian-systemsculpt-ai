@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { App, TFile } from "obsidian";
+import { App, stringifyYaml, TFile } from "obsidian";
 import {
   ChatStorageService,
   isPathInDirectory,
@@ -665,6 +665,22 @@ Hello`);
 
     it.each([
       [
+        "legacy multipart metadata nested in reasoning",
+        (serializer: typeof import("../storage/ChatMarkdownSerializer").ChatMarkdownSerializer) => [
+          serializer.serializeMessages([{ role: "user", message_id: "user-1", content: "Keep the full history" }]),
+          '<!-- SYSTEMSCULPT-MESSAGE-START role="assistant" message-id="assistant-1" -->',
+          "Original answer",
+          "<!-- REASONING",
+          "before",
+          "<!-- SYSTEMSCULPT-CONTENT-PARTS base64",
+          btoa(JSON.stringify([{ type: "text", text: "Replacement answer" }])),
+          "-->",
+          "after",
+          "-->",
+          "<!-- SYSTEMSCULPT-MESSAGE-END -->",
+        ].join("\n"),
+      ],
+      [
         "legacy stored multipart payload",
         (serializer: typeof import("../storage/ChatMarkdownSerializer").ChatMarkdownSerializer) => (
           serializer.serializeMessages([{
@@ -734,6 +750,58 @@ ${buildBody(actualSerializer)}`, newline, bom));
 
       expect(mockVault.modify).not.toHaveBeenCalled();
       expect(mockVault.create).not.toHaveBeenCalled();
+    });
+
+    it("keeps reasoning and tool calls beside legacy multipart content when the chat is saved again", async () => {
+      const mockedSerializer = jest.requireMock("../storage/ChatMarkdownSerializer").ChatMarkdownSerializer;
+      const actualSerializer = jest.requireActual("../storage/ChatMarkdownSerializer").ChatMarkdownSerializer;
+      const defaultParse = mockedSerializer.parseMarkdown.getMockImplementation();
+      const content = [
+        { type: "text", text: "Original answer" },
+        { type: "image_url", image_url: { url: "data:image/png;base64,YWJj" } },
+      ];
+      const mockFile = new TFile({ path: "SystemSculpt/Chats/legacy-multipart.md" });
+      mockVault.getAbstractFileByPath.mockReturnValue(mockFile);
+      mockVault.read.mockResolvedValue([
+        "---",
+        "id: legacy-multipart",
+        "title: Legacy multipart",
+        "---",
+        "",
+        '<!-- SYSTEMSCULPT-MESSAGE-START role="assistant" message-id="assistant-1" -->',
+        "<!-- REASONING\nOriginal reasoning\n-->",
+        '<!-- TOOL-CALLS\n[{"id":"legacy-tool"}]\n-->',
+        "Original answer",
+        `<!-- SYSTEMSCULPT-CONTENT-PARTS base64\n${btoa(JSON.stringify(content))}\n-->`,
+        "<!-- SYSTEMSCULPT-MESSAGE-END -->",
+      ].join("\n"));
+      mockedSerializer.parseMarkdown.mockImplementation((markdown: string) => actualSerializer.parseMarkdown(markdown));
+      mockedSerializer.serializeMessages.mockImplementationOnce((messages: ChatMessage[]) => (
+        actualSerializer.serializeMessages(messages)
+      ));
+      // Obsidian's YAML ends with a newline, so the saved note reads back.
+      jest.mocked(stringifyYaml).mockImplementationOnce((metadata: Record<string, unknown>) => (
+        `id: ${metadata.id}\ntitle: ${metadata.title}\n`
+      ));
+      try {
+        const loaded = await service.loadChat("legacy-multipart");
+        await service.saveChat("legacy-multipart", [
+          ...loaded!.messages,
+          { role: "user", message_id: "user-2", content: "Continue" },
+        ]);
+        mockVault.read.mockResolvedValue(mockVault.modify.mock.calls[0][1]);
+        const reloaded = await service.loadChat("legacy-multipart");
+
+        expect(reloaded?.messages).toHaveLength(2);
+        expect(reloaded?.messages[0]).toMatchObject({
+          message_id: "assistant-1",
+          content,
+          reasoning: "Original reasoning",
+          tool_calls: [{ id: "legacy-tool" }],
+        });
+      } finally {
+        mockedSerializer.parseMarkdown.mockImplementation(defaultParse);
+      }
     });
   });
 

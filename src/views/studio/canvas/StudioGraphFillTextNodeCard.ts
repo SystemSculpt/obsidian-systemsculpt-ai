@@ -20,6 +20,7 @@ import {
   readStudioTextNodeValue,
   type RenderTextNodeCardOptions,
 } from "./StudioGraphTextNodeCard";
+import { isStudioCardLocked } from "./StudioCardLock";
 
 type RenderFillTextNodeCardOptions = Pick<
   RenderTextNodeCardOptions,
@@ -88,7 +89,7 @@ export function renderFillTextNodeCard(options: RenderFillTextNodeCardOptions): 
     );
   };
 
-  if (options.isEditing && !busy) {
+  if (options.isEditing && !isStudioCardLocked(busy)) {
     const field = nodeEl.createEl("textarea", {
       cls: STUDIO_FILL_TEXT_CLASS,
       attr: {

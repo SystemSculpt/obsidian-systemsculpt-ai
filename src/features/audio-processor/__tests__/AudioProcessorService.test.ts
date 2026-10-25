@@ -291,6 +291,116 @@ describe("AudioProcessorService", () => {
     });
   });
 
+  it("delivers vault-native titles and navigation with technical source metadata only in frontmatter", async () => {
+    const { plugin, contents } = createPlugin();
+    const api = createApi();
+    const fingerprint = "a".repeat(64);
+    const processedAt = "2026-10-25T12:34:56.000Z";
+    const withSource = (markdown: string): string => markdown
+      .replace("---\n\n#", `source-object-fingerprint: "${fingerprint}"\nprocessed-at: "${processedAt}"\n---\n\n#`)
+      .replace(/(\n# [^\n]+\n)/u, `$1\n> [!info] Source\n> Uploaded media \`${fingerprint}\` · 2m 4s · en · processed ${processedAt}\n`);
+    const rawNote = withSource(fullNoteMarkdown());
+    const rawSummary = withSource(summaryMarkdown());
+    const rawTranscript = withSource(transcriptMarkdown());
+    const completedJob = {
+      ...job("succeeded", "complete", 1),
+      result: {
+        ...result,
+        artifactManifest: {
+          version: "audio_processor_artifacts.v1", outputPreset: "detailed",
+          note: { url: result.noteUrl, filename: result.filename, sha256: sha256(rawNote) },
+          summary: { url: result.summaryUrl, filename: "Product sync — Summary.md", sha256: sha256(rawSummary) },
+          transcript: { url: result.transcriptUrl, filename: "Product sync — Transcript.md", sha256: sha256(rawTranscript) },
+        },
+      },
+    };
+    api.createYouTubeJob.mockResolvedValue({ job: completedJob, upload: null });
+    api.getJob.mockReset().mockResolvedValue(completedJob);
+    api.downloadNote.mockImplementation(async (url: string) => url.includes("transcript")
+      ? rawTranscript : url.includes("summary") ? rawSummary : rawNote);
+    const service = new AudioProcessorService(plugin, { apiClient: api as unknown as AudioProcessorApiClient });
+
+    const completed = await service.process({ type: "youtube", url: "https://youtu.be/dQw4w9WgXcQ" }, {
+      signal: new AbortController().signal,
+    });
+    await completed.saveArtifact("summary");
+
+    expect(contents.size).toBe(3);
+    for (const markdown of contents.values()) {
+      const [, frontmatter, body] = markdown.split(/^---\s*$/mu);
+      expect(body).not.toMatch(/^# /mu);
+      expect(body).not.toContain("<!-- systemsculpt-audio-");
+      expect(body).not.toContain(fingerprint);
+      expect(body).not.toContain(processedAt);
+      expect(body).toContain("> Uploaded media · 2m 4s · en");
+      expect(body).toMatch(/\[\[SystemSculpt\/Audio Notes\/Product sync(?: — Transcript)?\|/u);
+      expect(frontmatter).toContain(`source-object-fingerprint: "${fingerprint}"`);
+      expect(frontmatter).toContain(`processed-at: "${processedAt}"`);
+      expect(frontmatter).toContain("systemsculpt-audio-job-id: audio_job_123");
+      expect(frontmatter).toContain("systemsculpt-audio-delivery-job-id: audio_job_123");
+    }
+  });
+
+  it("preserves source attribution, citations, timestamps, and headings within the returned content", async () => {
+    const { plugin, contents } = createPlugin();
+    const api = createApi();
+    const attribution = "> [!info] Source\n> [YouTube](https://www.youtube.com/watch?v=dQw4w9WgXcQ) · Gull Point · 2m 4s · en";
+    const content = "# Quoted slide\n\nA timestamp in the content: 2026-10-25T12:34:56.000Z. [[#seg-000001|00:00]]";
+    api.createYouTubeJob.mockResolvedValue({ job: job("succeeded", "complete", 1), upload: null });
+    api.downloadNote.mockImplementation(async (url: string) => (url.includes("transcript")
+      ? transcriptMarkdown() : fullNoteMarkdown())
+      .replace(/(\n# [^\n]+\n)/u, `$1\n${attribution} · processed 2026-10-25T12:34:56.000Z\n`)
+      + `\n\n${content}\n`);
+    const service = new AudioProcessorService(plugin, { apiClient: api as unknown as AudioProcessorApiClient });
+
+    await service.process({ type: "youtube", url: "https://youtu.be/dQw4w9WgXcQ" }, { signal: new AbortController().signal });
+
+    for (const markdown of contents.values()) {
+      expect(markdown).toContain(attribution + "\n");
+      expect(markdown).toContain(content);
+      expect(markdown).toContain("**00:00** Speaker 1: Hello.");
+      expect(markdown).not.toContain(" · processed 2026-10-25T12:34:56.000Z");
+    }
+  });
+
+  it("migrates legacy navigation markers on resume without duplicating links or changing user content", async () => {
+    const { plugin, contents, files, created, transcriptCreated, app } = createPlugin();
+    const userContent = "\n\n## My edits\nKeep this text exactly.\n";
+    files.set(created.path, created);
+    files.set(transcriptCreated.path, transcriptCreated);
+    contents.set(created.path, fullNoteMarkdown().replace("\n\n# Product sync", "\n\n<!-- systemsculpt-audio-transcript-link -->\n> [!info] Timestamped transcript\n> [[SystemSculpt/Audio Notes/Product sync — Transcript|Open the full timestamped transcript]]\n\n# Product sync") + userContent);
+    contents.set(transcriptCreated.path, transcriptMarkdown().replace("\n\n# Product sync", "\n\n<!-- systemsculpt-audio-note-link -->\n> [!info] Audio note\n> [[SystemSculpt/Audio Notes/Product sync|Back to the audio note]]\n\n# Product sync") + userContent);
+    const api = createApi();
+    const service = new AudioProcessorService(plugin, { apiClient: api as unknown as AudioProcessorApiClient });
+
+    await service.resume(job("succeeded", "complete", 1), { signal: new AbortController().signal });
+    const firstDelivery = [...contents.values()];
+    await service.resume(job("succeeded", "complete", 1), { signal: new AbortController().signal });
+
+    expect([...contents.values()]).toEqual(firstDelivery);
+    expect(app.vault.modify).toHaveBeenCalledTimes(2);
+    expect(api.downloadNote).not.toHaveBeenCalled();
+    for (const markdown of contents.values()) {
+      expect(markdown).not.toContain("<!-- systemsculpt-audio-");
+      expect(markdown.match(/> \[!info\]/gu)).toHaveLength(1);
+      expect(markdown).toContain(userContent);
+      expect(markdown).toMatch(/^systemsculpt-audio-(?:note|transcript)-link: true$/mu);
+    }
+  });
+
+  it("preserves server-generated filenames instead of replacing them with the upload name", async () => {
+    const { plugin } = createPlugin();
+    const api = createApi();
+    api.createAudioJob.mockResolvedValue({ job: job("succeeded", "complete", 1), upload: null });
+    const audio = { ...createAudioSource(new Uint8Array([1])), filename: "Gull Point timetable review.m4a" };
+    const service = new AudioProcessorService(plugin, { apiClient: api as unknown as AudioProcessorApiClient });
+
+    const completed = await service.process({ type: "audio", audio }, { signal: new AbortController().signal });
+
+    expect(api.createAudioJob).toHaveBeenCalledWith(expect.objectContaining({ filename: audio.filename }), expect.any(Object));
+    expect(completed.notePath).toBe("SystemSculpt/Audio Notes/Product sync.md");
+  });
+
   it("saves a paid transcript during summary work without acknowledging and repairs its link on completion", async () => {
     const { plugin, contents } = createPlugin();
     const api = createApi();

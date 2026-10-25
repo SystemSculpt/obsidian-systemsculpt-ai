@@ -145,7 +145,6 @@ export class SystemSculptSearchEngine {
   private readonly INDEX_BUILD_YIELD_EVERY = 128;
   private readonly RECENT_PREVIEW_CONCURRENCY = 2;
   private readonly MAX_RECENT_PREVIEW_FILE_BYTES = 1024 * 1024;
-  private readonly SEMANTIC_TIMEOUT_MS = 1500;
   /** Smart mode skips semantic search for one- and two-character prefixes. */
   private readonly MIN_SEMANTIC_QUERY_CHARS = 3;
   private embeddingsIndicatorCache: { key: string; indicator: EmbeddingsIndicator } | null = null;
@@ -159,12 +158,11 @@ export class SystemSculptSearchEngine {
   }
 
   /**
-   * Run a search across the vault
-   */
-  /**
    * Run a search across the vault. `semantic: false` keeps a smart search
    * lexical-only; the search modal uses it for fast per-keystroke results
-   * and adds semantic hits once typing pauses.
+   * and adds semantic hits once typing pauses. The semantic leg runs until it
+   * answers or `signal` aborts: the caller already has word results on
+   * screen, so a slow managed query is worth waiting for.
    */
   async search(
     query: string,
@@ -1332,13 +1330,12 @@ export class SystemSculptSearchEngine {
   private async runSemanticSearch(query: string, limit: number, signal?: AbortSignal): Promise<SearchHit[]> {
     const manager = this.getExistingEmbeddingsManager();
     if (!manager || signal?.aborted) return [];
-    // One controller for the whole semantic leg: the caller's cancellation and
-    // the timeout both abort the managed query and the vector scan behind it,
-    // instead of leaving them running after the results were dropped.
+    // One controller for the whole semantic leg: the caller's cancellation
+    // aborts the managed query and the vector scan behind it, instead of
+    // leaving them running after the results were dropped.
     const controller = new AbortController();
     const onAbort = () => controller.abort();
     signal?.addEventListener("abort", onAbort, { once: true });
-    const timer = window.setTimeout(() => controller.abort(), this.SEMANTIC_TIMEOUT_MS);
     try {
       const semantic = (async (): Promise<SearchHit[]> => {
         if (typeof manager.awaitReady === "function") {
@@ -1373,7 +1370,6 @@ export class SystemSculptSearchEngine {
     } catch {
       return [];
     } finally {
-      window.clearTimeout(timer);
       signal?.removeEventListener("abort", onAbort);
     }
   }
@@ -1402,57 +1398,36 @@ export class SystemSculptSearchEngine {
     return sort === "recency" ? recency || relevance : relevance || recency;
   }
 
+  /**
+   * Word and meaning scores are separate evidence that a note is the one being
+   * looked for, so they combine as a probabilistic OR: a note found both ways
+   * ranks above a note found either way alone with the same score, and a note
+   * found one way keeps that score. A weighted average would let a weak word
+   * match pull a good meaning match below notes found by meaning alone.
+   */
   private mergeResults(lexical: SearchHit[], semantic: SearchHit[], limit: number, sort: SortMode): SearchHit[] {
-    const K = 60;
-    const entries = new Map<string, { lex?: SearchHit; sem?: SearchHit; rrfLex: number; rrfSem: number }>();
-
-    lexical.forEach((hit, idx) => {
-      const entry = entries.get(hit.path) ?? { rrfLex: 0, rrfSem: 0 };
-      entry.lex = hit;
-      entry.rrfLex += 1 / (K + idx + 1);
-      entries.set(hit.path, entry);
-    });
-
-    semantic.forEach((hit, idx) => {
-      const entry = entries.get(hit.path) ?? { rrfLex: 0, rrfSem: 0 };
-      entry.sem = hit;
-      entry.rrfSem += 1 / (K + idx + 1);
-      entries.set(hit.path, entry);
-    });
+    const entries = new Map<string, { lex?: SearchHit; sem?: SearchHit }>();
+    for (const hit of lexical) entries.set(hit.path, { lex: hit });
+    for (const hit of semantic) {
+      const entry = entries.get(hit.path);
+      if (entry) entry.sem = hit;
+      else entries.set(hit.path, { sem: hit });
+    }
 
     const merged: SearchHit[] = [];
-
-    for (const entry of entries.values()) {
-      const lexScore = entry.lex?.lexScore ?? 0;
-      const semScore = entry.sem?.semScore ?? 0;
-      const rrfBoost = entry.rrfLex + entry.rrfSem;
-
-      let finalScore = lexScore;
-      let origin: SearchHit["origin"] = "lexical";
-
-      if (entry.lex && entry.sem) {
-        finalScore = Math.min(1, 0.55 * lexScore + 0.35 * semScore + 0.10 * rrfBoost);
-        origin = "blend";
-      } else if (entry.sem && !entry.lex) {
-        finalScore = Math.min(1, semScore + 0.25 * rrfBoost);
-        origin = "semantic";
-      }
-
-      const target = entry.lex ?? entry.sem!;
+    for (const { lex, sem } of entries.values()) {
+      const lexScore = lex?.lexScore ?? 0;
+      const semScore = sem?.semScore ?? 0;
       merged.push({
-        ...target,
-        origin,
-        score: finalScore,
-        lexScore: entry.lex?.lexScore,
-        semScore: entry.sem?.semScore,
+        ...(lex ?? sem!),
+        origin: lex && sem ? "blend" : lex ? "lexical" : "semantic",
+        score: 1 - (1 - lexScore) * (1 - semScore),
+        lexScore: lex?.lexScore,
+        semScore: sem?.semScore,
       });
     }
 
-    merged.sort((a, b) => this.compareHits(a, b, sort));
-
-    const sliced = merged.slice(0, limit);
-
-    return sliced;
+    return merged.sort((a, b) => this.compareHits(a, b, sort)).slice(0, limit);
   }
 
   /**

@@ -6,7 +6,7 @@
 /**
  * SystemSculpt AI Plugin for Obsidian
  */
-import { Plugin, Notice, FileSystemAdapter, apiVersion } from "obsidian";
+import { Plugin, Notice, FileSystemAdapter, apiVersion, requireApiVersion } from "obsidian";
 import { checkObsidianCompatibility, MINIMUM_OBSIDIAN_VERSION } from "./core/plugin/lifecycle/ObsidianCompat";
 import { SystemSculptSettings, DEFAULT_SETTINGS, LogLevel, LICENSE_URL } from "./types";
 import { SystemSculptService, type CreditsBalanceSnapshot } from "./services/SystemSculptService";
@@ -17,7 +17,7 @@ import { FileContextMenuService } from "./context-menu/FileContextMenuService";
 import { SettingsManager } from "./core/settings/SettingsManager";
 import { LicenseManager } from "./core/license/LicenseManager";
 import { AccountConnectService } from "./services/AccountConnectService";
-import { ViewManager } from "./core/plugin/views";
+import { ViewManager, waitForChatProducers } from "./core/plugin/views";
 import { CommandManager } from "./core/plugin/commands";
 import { setLogLevel } from "./utils/errorHandling";
 import { errorLogger } from "./utils/errorLogger";
@@ -26,6 +26,7 @@ import { StorageManager } from "./core/storage";
 import { showConfirm } from "./core/ui/notifications";
 import { legacyCredentialNotice, protectLegacyCredentials } from "./core/security/LegacyCredentialProtection";
 import { ResumeChatService } from "./views/chatview/ResumeChatService";
+import { nativeChatSessions } from "./views/chatview/NativeChatSessions";
 import { EmbeddingsManager } from "./services/embeddings/EmbeddingsManager";
 import { VaultFileCache } from "./utils/VaultFileCache";
 import { EmbeddingsStatusBar } from "./components/EmbeddingsStatusBar";
@@ -52,6 +53,9 @@ import {
   PhoneCaptureInbox,
   type PhoneCaptureSyncResult,
 } from "./features/phone-captures/PhoneCaptureInbox";
+import { PhoneHandoffInbox, type HandoffAgent } from "./features/phone-captures/PhoneHandoffInbox";
+import { detectLocalAgents, isLocalAgentUsable } from "./services/codex/LocalAgentDetection";
+import { localAgentDetectionDirectory } from "./services/codex/CodexExecutionSettings";
 import { SystemSculptSearchEngine } from "./services/search/SystemSculptSearchEngine";
 import { relativeLineNumbersExtension } from "./editor/relative-line-numbers";
 import { studioTextNodeEmptyLines } from "./views/studio/canvas/StudioTextNodeEmptyLines";
@@ -181,6 +185,7 @@ export default class SystemSculptPlugin extends Plugin {
   private diagnosticsSessionLifecycle: DiagnosticsSessionLifecycle | null = null;
   private inboxTranscriptionService: InboxTranscriptionService | null = null;
   private phoneCaptureInbox: PhoneCaptureInbox | null = null;
+  private phoneHandoffInbox: PhoneHandoffInbox | null = null;
   private searchEngine: SystemSculptSearchEngine | null = null;
   private studioService: StudioService | null = null;
   private managedCapabilityGraph: ManagedCapabilityGraph | null = null;
@@ -515,6 +520,17 @@ export default class SystemSculptPlugin extends Plugin {
     });
 
     coordinator.registerTask("bootstrap", {
+      id: "workspace.ribbons",
+      label: "ribbon actions",
+      run: () => {
+        // Register before onload returns, without starting chat restoration
+        // ahead of loaded settings and services in the deferred phase.
+        this.viewManager ??= new ViewManager(this, this.app);
+        this.viewManager.ribbonManager.initialize();
+      },
+    });
+
+    coordinator.registerTask("bootstrap", {
       id: "settings.tab.register",
       label: "settings tab",
       optional: true,
@@ -664,8 +680,15 @@ export default class SystemSculptPlugin extends Plugin {
       optional: true,
       run: () => {
         const sync = () => {
-          if (!this.isUnloading) void this.getPhoneCaptureInbox().maybeSync();
+          if (!this.isUnloading) {
+            // A capture confirmation can stay open; it must not hold the queue.
+            void this.getPhoneCaptureInbox().maybeSync();
+            void this.pollPhoneHandoffs();
+          }
         };
+        this.registerEvent(this.app.workspace.on("systemsculpt:settings-updated", () => {
+          if (this.phoneHandoffInbox || this.settings.phoneCapturesLinked) void this.pollPhoneHandoffs();
+        }));
         this.registerInterval(window.setInterval(sync, PHONE_CAPTURE_POLL_INTERVAL_MS));
         this.registerDomEvent(window, "focus", sync);
         this.registerDomEvent(document, "visibilitychange", () => {
@@ -1494,13 +1517,8 @@ export default class SystemSculptPlugin extends Plugin {
   }
 
   private ensureViewManager(): ViewManager {
-    if (this.viewManager) {
-      return this.viewManager;
-    }
-
-    const viewManager = new ViewManager(this, this.app);
-    viewManager.initialize();
-    this.viewManager = viewManager;
+    this.viewManager ??= new ViewManager(this, this.app);
+    this.viewManager.initialize();
     return this.viewManager;
   }
 
@@ -1638,6 +1656,7 @@ export default class SystemSculptPlugin extends Plugin {
 
   private async unloadAsync(): Promise<void> {
     this.deferredStartup.abort();
+    this.phoneHandoffInbox?.dispose();
     // Microphone privacy is the first teardown action and must never wait on
     // diagnostics disk I/O or an unrelated service cleanup.
     const recorder = this.recorderService;
@@ -1668,13 +1687,19 @@ export default class SystemSculptPlugin extends Plugin {
       // A failed producer stop must not skip the pending diagnostics drain.
     }
 
-    // Wait for each live ChatView to stop session callbacks before closing
-    // incident admission. Each view owns an idempotent close barrier, so the
-    // normal leaf detach below reuses the completed teardown.
+    // Cancel background native runs immediately, then drain them alongside
+    // views within the existing unload window. Slow vault writes can finish
+    // best-effort without preventing the remaining service teardown.
+    const nativeDisposal = nativeChatSessions(this).dispose();
+    // Each view owns an idempotent close barrier, so normal leaf detach below
+    // reuses the completed teardown.
     const viewManager = this.viewManager;
     this.viewManager = null;
     try {
-      await viewManager?.quiesceChatViewProducers();
+      await waitForChatProducers(Promise.allSettled([
+        nativeDisposal,
+        Promise.resolve().then(() => viewManager?.quiesceChatViewProducers()),
+      ]));
     } catch {
       // A stale ViewManager must not skip normal leaf detach or incident drain.
     }
@@ -2165,6 +2190,47 @@ export default class SystemSculptPlugin extends Plugin {
       }),
     });
     return this.phoneCaptureInbox;
+  }
+
+  getPhoneHandoffInbox(): PhoneHandoffInbox {
+    if (!this.phoneHandoffInbox) {
+      // Obsidian's vault-local browser storage is installation-specific, unlike
+      // synced data.json. A fresh session identity is safe if storage is blocked.
+      let instanceId = "";
+      try {
+        if (requireApiVersion("1.8.7")) instanceId = String(this.app.loadLocalStorage("systemsculpt-handoff-instance") ?? "");
+      } catch { /* Older host. */ }
+      if (!/^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(instanceId)) {
+        instanceId = crypto.randomUUID();
+        try {
+          if (requireApiVersion("1.8.7")) this.app.saveLocalStorage("systemsculpt-handoff-instance", instanceId);
+        } catch { /* Session-local identity. */ }
+      }
+      this.phoneHandoffInbox = new PhoneHandoffInbox({
+        app: this.app, pluginVersion: this.manifest.version, instanceId,
+        settings: () => ({ licenseKey: this.settings.licenseKey ?? "", linked: this.settings.phoneCapturesLinked === true,
+          autoRun: this.settings.phoneHandoffsAutoRun === true, vaultId: this.settings.vaultInstanceId ?? "" }),
+        availableAgents: async () => {
+          const agents: HandoffAgent[] = ["systemsculpt"];
+          if (hasHostCapability("local-cli")) {
+            const detection = await detectLocalAgents({ workingDirectory: localAgentDetectionDirectory(this.app) });
+            if (isLocalAgentUsable(detection.agents.claude)) agents.push("claude_code");
+            if (isLocalAgentUsable(detection.agents.codex)) agents.push("codex");
+          }
+          return agents;
+        },
+        execute: execution => this.getViewManager().runPhoneHandoff(execution),
+      });
+    }
+    return this.phoneHandoffInbox;
+  }
+
+  private async pollPhoneHandoffs(): Promise<void> {
+    if (this.isUnloading) return;
+    // An unlinked account never starts queue polling.
+    if (!this.phoneHandoffInbox && this.settings.phoneCapturesLinked !== true) return;
+    try { await this.getPhoneHandoffInbox().poll(); }
+    catch { this.getLogger().warn("Couldn't check for iPhone handoffs.", { source: "PhoneHandoffInbox" }); }
   }
 
   /** Saves waiting iPhone captures now; a manual sync asks again about declined ones. */

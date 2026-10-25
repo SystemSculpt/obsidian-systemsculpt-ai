@@ -1,4 +1,3 @@
-import { ManagedImageModelCatalog } from "../../images/ManagedImageModelCatalog";
 import { ManagedVideoModelCatalog } from "../../videos/ManagedVideoModelCatalog";
 import { getStudioMediaCatalogs } from "../../../studio/StudioMediaCatalogs";
 
@@ -9,7 +8,7 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-describe.each([ManagedImageModelCatalog, ManagedVideoModelCatalog])("%p cache ownership", Catalog => {
+describe.each([ManagedVideoModelCatalog])("%p cache ownership", Catalog => {
   it("invalidates cached prices when the license changes or is removed", async () => {
     let license = "first";
     const request = jest.fn(async () => response());
@@ -104,15 +103,14 @@ describe.each([ManagedImageModelCatalog, ManagedVideoModelCatalog])("%p cache ow
   });
 });
 
-it("keeps one shared Studio catalog owner while invalidating both catalogs on license changes", async () => {
+it("keeps one shared Studio catalog owner while invalidating the catalog on license changes", async () => {
   const request = jest.fn(async () => response());
   const plugin = { settings: { licenseKey: "first" }, getManagedCapabilityGraph: () => ({ transport: { request } }) };
   const catalogs = getStudioMediaCatalogs(plugin as never);
-  await Promise.all([catalogs.images.load(), catalogs.videos.load()]);
+  await catalogs.videos.load();
   plugin.settings.licenseKey = "second";
   expect(getStudioMediaCatalogs(plugin as never)).toBe(catalogs);
-  expect(catalogs.images.peek()).toBeNull();
   expect(catalogs.videos.peek()).toBeNull();
-  await Promise.all([catalogs.images.load(), catalogs.videos.load()]);
-  expect(request).toHaveBeenCalledTimes(4);
+  await catalogs.videos.load();
+  expect(request).toHaveBeenCalledTimes(2);
 });

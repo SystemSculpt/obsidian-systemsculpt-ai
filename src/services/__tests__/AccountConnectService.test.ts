@@ -361,7 +361,7 @@ describe("AccountConnectService browser sign-in", () => {
     const plugin = createPlugin();
     plugin.settingsTab = {
       containerEl: { isConnected: true },
-      display: jest.fn(() => {
+      refreshAccountSection: jest.fn(() => {
         if (failure === "sync") throw new Error("detached settings");
         return Promise.reject(new Error("detached settings"));
       }),
@@ -370,7 +370,7 @@ describe("AccountConnectService browser sign-in", () => {
     await expect(service.begin("sign-in")).resolves.toBe(true);
     request.mockResolvedValueOnce(jsonResponse(200, successPayload));
     await expect(service.submitManualCode("code")).resolves.toMatchObject({ kind: "signed-in" });
-    expect(plugin.settingsTab.display).toHaveBeenCalledTimes(2);
+    expect(plugin.settingsTab.refreshAccountSection).toHaveBeenCalledTimes(2);
   });
 
   it("reopens the browser with the same state and challenge for the active request", async () => {

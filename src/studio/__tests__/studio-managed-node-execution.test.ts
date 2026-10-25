@@ -1,7 +1,6 @@
 import { registerBuiltInStudioNodes } from "../StudioBuiltInNodes";
 import { migrateStudioProjectToPathOnlyPorts } from "../StudioGraphMigrations";
 import { StudioNodeRegistry } from "../StudioNodeRegistry";
-import { imageGenerationNode } from "../nodes/imageGenerationNode";
 import { textGenerationNode } from "../nodes/textGenerationNode";
 import { transcriptionNode } from "../nodes/transcriptionNode";
 import { DESKTOP_TRANSCRIPTION_MAX_FILE_SIZE } from "../../services/transcription/TranscriptionCoordinator";
@@ -64,11 +63,10 @@ function services(api: Record<string, unknown>) {
 }
 
 describe("managed-only Studio remote nodes", () => {
-  it("registers exactly four remote executors and keeps retired HTTP hidden and inert", async () => {
+  it("registers exactly three remote executors and keeps retired HTTP hidden and inert", async () => {
     const registry = new StudioNodeRegistry();
     registerBuiltInStudioNodes(registry);
     expect(registry.list().filter(definition => definition.capabilityClass === "api").map(definition => definition.kind).sort()).toEqual([
-      "studio.image_generation",
       "studio.text_generation",
       "studio.transcription",
       "studio.video_generation",
@@ -104,27 +102,6 @@ describe("managed-only Studio remote nodes", () => {
       inputs: textInputs as never, services: services({ generateText }) as never, log: jest.fn(),
     });
     expect(textReads).toBeGreaterThan(0);
-
-    let imageReads = 0;
-    const imageInputs = {} as Record<string, unknown>;
-    Object.defineProperty(imageInputs, "prompt", { get: () => { imageReads += 1; return "Draw"; } });
-    const generateImage = jest.fn(async request => {
-      expect(imageReads).toBe(0);
-      const payload = await request.buildPayload();
-      expect(payload).toEqual({
-        prompt: "Draw",
-        count: 1,
-        aspectRatio: "1:1",
-        inputImages: [],
-      });
-      return { images: [], operation: { capability: "image_generation", operationId: "image-op" }, payload };
-    });
-    await imageGenerationNode.execute({
-      runId: "run", projectPath: "Studio/Test.systemsculpt", signal: new AbortController().signal,
-      node: { id: "image", kind: imageGenerationNode.kind, version: imageGenerationNode.version, title: "Image", position: { x: 0, y: 0 }, config: { count: 1, aspectRatio: "1:1" } },
-      inputs: imageInputs as never, services: services({ generateImage }) as never, log: jest.fn(),
-    });
-    expect(imageReads).toBeGreaterThan(0);
 
     let pathReads = 0;
     const transcriptionInputs = {} as Record<string, unknown>;
@@ -347,7 +324,7 @@ describe("managed-only Studio remote nodes", () => {
   });
 
   it("never caches managed node outputs", () => {
-    for (const definition of [textGenerationNode, imageGenerationNode, transcriptionNode]) {
+    for (const definition of [textGenerationNode, transcriptionNode]) {
       expect(definition.cachePolicy).toBe("never");
     }
   });

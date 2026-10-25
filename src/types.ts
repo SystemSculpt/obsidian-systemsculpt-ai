@@ -186,6 +186,8 @@ export interface SystemSculptSettings {
   phoneCapturesAskBeforeSaving: boolean;
   /** The account has used the iPhone app; until then the inbox stays hidden and silent. */
   phoneCapturesLinked: boolean;
+  /** Skip only the handoff's Run click, never the selected agent's own approvals. */
+  phoneHandoffsAutoRun: boolean;
 
   /**
    * Skip empty note warning confirmation modal
@@ -260,7 +262,7 @@ export interface SystemSculptSettings {
 
 export const DEFAULT_SETTINGS: SystemSculptSettings = {
   textExecutionBackend: "systemsculpt", textExecutionBackendExplicit: false,
-  codexModel: "gpt-6-astra", codexThinkingLevel: "high", codexServiceTier: "default", codexApprovalMode: "auto",
+  codexModel: "", codexThinkingLevel: "", codexServiceTier: "default", codexApprovalMode: "auto",
   claudeModel: "", claudePermissionMode: "auto",
   vaultInstanceId: "",
   relativeLineNumbersEnabled: false,
@@ -302,6 +304,7 @@ Please:
   phoneCapturesMeetingsFolder: "SystemSculpt/Meetings",
   phoneCapturesAskBeforeSaving: false,
   phoneCapturesLinked: false,
+  phoneHandoffsAutoRun: false,
 
   skipEmptyNoteWarning: false,
 
@@ -460,6 +463,9 @@ export interface ChatMessage {
   terminalReportId?: string;
   terminalIncidentId?: string;
   terminalFailureCode?: string;
+  // Native error text for the same local-agent recovery presentation after reload.
+  // Managed failures retain only their content-free receipt identifiers.
+  terminalFailureMessage?: string;
   terminalRetryable?: boolean;
   terminalServerRunId?: string;
 }

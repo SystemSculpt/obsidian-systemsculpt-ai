@@ -1,14 +1,12 @@
 import { App } from "obsidian";
 import { StandardModal } from "../../../core/ui/modals/standard/StandardModal";
 import { createUiAction, updateUiAction } from "../../../core/ui/surface/SurfacePrimitives";
-import type { ManagedImageModel } from "../../../services/images/ManagedImageModelCatalog";
 import { findManagedVideoEstimate, type ManagedVideoModel } from "../../../services/videos/ManagedVideoModelCatalog";
-import { describeStudioMediaModelInputs, type StudioMediaModelKind } from "../../../studio/StudioMediaModelCapabilities";
+import { describeStudioMediaModelInputs } from "../../../studio/StudioMediaModelCapabilities";
 
-export type StudioMediaModelPickerModel = ManagedImageModel | ManagedVideoModel;
+export type StudioMediaModelPickerModel = ManagedVideoModel;
 
 export type StudioMediaModelPickerModalOptions = {
-  kind: StudioMediaModelKind;
   models: readonly StudioMediaModelPickerModel[];
   selectedId: string;
   onSelect: (model: StudioMediaModelPickerModel) => void;
@@ -31,29 +29,11 @@ const SORT_CHOICES: readonly { key: StudioMediaModelSortKey; label: string }[] =
 /** A group with no label renders as a plain run of cards under no heading. */
 export type StudioMediaModelGroup = { key: string; label: string; models: StudioMediaModelPickerModel[] };
 
-// Session-scoped: reopening the picker keeps the last sort per media kind.
-const lastSortByKind = new Map<StudioMediaModelKind, StudioMediaModelSortKey>();
+// Session-scoped: reopening the video picker keeps the last sort.
+let lastSort: StudioMediaModelSortKey = "released";
 
 function credits(value: number): string {
   return Number.isFinite(value) && value > 0 ? (Number.isInteger(value) ? String(value) : value.toFixed(1)) : "n/a";
-}
-
-export function isStudioImageModel(model: StudioMediaModelPickerModel): model is ManagedImageModel {
-  return "supportsImageInput" in model;
-}
-
-/**
- * Providers charge more for larger images, so a model with size tiers is
- * quoted as a range. One number would price every selection at the smallest
- * size the model offers.
- */
-function imagePriceLabel(model: ManagedImageModel): string {
-  const tiers = model.sizeEstimates.map(estimate => estimate.estimatedCredits).filter(value => Number.isFinite(value) && value > 0);
-  const low = Math.min(...tiers);
-  const high = Math.max(...tiers);
-  return tiers.length > 1 && high > low
-    ? `~${credits(low)}-${credits(high)} credits/image`
-    : `~${credits(model.estimatedCredits)} credits/image`;
 }
 
 function defaultVideoEstimate(model: ManagedVideoModel) {
@@ -66,22 +46,18 @@ function defaultVideoEstimate(model: ManagedVideoModel) {
 
 /** Short price for a trigger chip or card heading. */
 export function studioMediaModelPriceLabel(model: StudioMediaModelPickerModel): string {
-  if (isStudioImageModel(model)) return imagePriceLabel(model);
   const estimate = defaultVideoEstimate(model);
   if (!estimate) return "Priced per job";
   return `~${credits(estimate.estimatedCredits)} credits · ${estimate.durationSeconds}s ${estimate.resolution}`;
 }
 
 /**
- * Comparable price in credits: per image for image models, per output second
- * at the model's default selection for video models (durations differ, so a
- * per-clip number would make long-clip models look expensive). Null when the
- * server published no usable estimate; those sort last under either order.
+ * Comparable price in credits per output second at the model's default
+ * selection (durations differ, so a per-clip number would make long-clip
+ * models look expensive). Null when the server published no usable estimate;
+ * those sort last under either order.
  */
 export function studioMediaModelPriceKey(model: StudioMediaModelPickerModel): number | null {
-  if (isStudioImageModel(model)) {
-    return Number.isFinite(model.estimatedCredits) && model.estimatedCredits > 0 ? model.estimatedCredits : null;
-  }
   const estimate = defaultVideoEstimate(model);
   if (!estimate || !Number.isFinite(estimate.estimatedCredits) || estimate.estimatedCredits <= 0) return null;
   return estimate.estimatedCredits / Math.max(1, estimate.durationSeconds);
@@ -118,9 +94,7 @@ export function filterStudioMediaModels(models: readonly StudioMediaModelPickerM
   const normalized = query.trim().toLowerCase();
   if (!normalized) return [...models];
   return models.filter(model => {
-    const details = [model.name, model.provider, model.id, model.description, ...model.inputModalities, ...describeStudioMediaModelInputs(model)];
-    if (!isStudioImageModel(model)) details.push(...model.resolutions, ...model.aspectRatios);
-    else details.push(...model.imageSizes, ...model.aspectRatios, ...model.qualities);
+    const details = [model.name, model.provider, model.id, model.description, ...model.inputModalities, ...describeStudioMediaModelInputs(model), ...model.resolutions, ...model.aspectRatios];
     return details.join(" ").toLowerCase().includes(normalized);
   });
 }
@@ -192,12 +166,6 @@ function formatTypicalDuration(ms: number | null): string | null {
   return `~${Math.round(seconds / 60)} min to generate`;
 }
 
-function formatRange(values: readonly string[]): string {
-  if (values.length === 0) return "";
-  if (values.length === 1) return values[0];
-  return `${values[0]}–${values[values.length - 1]}`;
-}
-
 function formatDurationRange(values: readonly number[]): string {
   if (values.length === 0) return "";
   const sorted = [...values].sort((a, b) => a - b);
@@ -208,12 +176,6 @@ function formatDurationRange(values: readonly number[]): string {
 /** Capability tags: what the model takes first, then what it can produce. */
 export function studioMediaModelTags(model: StudioMediaModelPickerModel): string[] {
   const tags = describeStudioMediaModelInputs(model);
-  if (isStudioImageModel(model)) {
-    if (model.imageSizes.length > 0) tags.push(formatRange(model.imageSizes));
-    if (model.qualities.length > 0) tags.push(`${model.qualities.length} quality levels`);
-    tags.push(`${model.aspectRatios.length} aspect ratios`);
-    return tags;
-  }
   if (model.resolutions.length > 0) tags.push(model.resolutions.join(" · "));
   if (model.durationsSeconds.length > 0) tags.push(formatDurationRange(model.durationsSeconds));
   if (model.aspectRatios.length > 0) tags.push(`${model.aspectRatios.length} aspect ratios`);
@@ -241,14 +203,13 @@ export class StudioMediaModelPickerModal extends StandardModal {
     this.favorites = new Set(options.favoriteIds ?? []);
     this.setSize("large");
     this.modalEl.addClass("ss-studio-media-model-picker-modal-shell");
-    this.sort = lastSortByKind.get(options.kind) ?? "released";
+    this.sort = lastSort;
     if (!this.availableSortKeys().includes(this.sort)) this.sort = "recommended";
   }
 
   onOpen(): void {
     super.onOpen();
-    const kindLabel = this.options.kind === "image" ? "Image" : "Video";
-    this.addTitle(`${kindLabel} generation models`, "Every currently available model with what it accepts and its server-computed price. Select one to use it in this node.");
+    this.addTitle("Video generation models", "Every currently available model with what it accepts and its server-computed price. Select one to use it in this node.");
     this.contentEl.addClass("ss-studio-media-model-picker-modal");
     const searchInput = this.addSearchBar("studio.media-model-picker.search", "Search models, providers, or capabilities", (query) => {
       this.query = query;
@@ -292,7 +253,7 @@ export class StudioMediaModelPickerModal extends StandardModal {
       chip.addEventListener("click", () => {
         if (this.sort === choice.key) return;
         this.sort = choice.key;
-        lastSortByKind.set(this.options.kind, choice.key);
+        lastSort = choice.key;
         this.renderSortBar();
         this.renderModels();
       });
@@ -347,9 +308,6 @@ export class StudioMediaModelPickerModal extends StandardModal {
     const heading = button.createDiv({ cls: "ss-studio-media-model-picker-card-heading" });
     const nameWrap = heading.createDiv({ cls: "ss-studio-media-model-picker-card-name-wrap" });
     nameWrap.createSpan({ cls: "ss-studio-media-model-picker-card-name", text: model.name });
-    if (isStudioImageModel(model) && model.isDefault) {
-      nameWrap.createSpan({ cls: "ss-studio-media-model-picker-card-default", text: "Default" });
-    }
     heading.createSpan({ cls: "ss-studio-media-model-picker-card-price", text: studioMediaModelPriceLabel(model) });
 
     const provider = button.createDiv({ cls: "ss-studio-media-model-picker-card-provider" });
@@ -365,7 +323,6 @@ export class StudioMediaModelPickerModal extends StandardModal {
     const foot: string[] = [];
     const typical = formatTypicalDuration(model.typicalDurationMs);
     if (typical) foot.push(typical);
-    if (isStudioImageModel(model) && model.reservationCredits) foot.push(`Hold from ${credits(model.reservationCredits)} credits`);
     if (foot.length > 0) {
       const footEl = button.createDiv({ cls: "ss-studio-media-model-picker-card-foot" });
       for (const text of foot) footEl.createSpan({ text });

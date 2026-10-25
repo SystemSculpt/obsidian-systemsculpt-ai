@@ -18,7 +18,9 @@ import { pulseStudioActivityElement } from "../activity/StudioActivityDomApplier
  *     contract local to the connection implementation.
  *  3. Geometry comes from the caller's data-driven anchor resolver, so a line
  *     is drawn whenever both endpoint nodes exist — independent of DOM
- *     measurement, paint timing, or visibility.
+ *     measurement, paint timing, or visibility. A render resolves every
+ *     anchor before it writes any path, so measuring forces one layout at
+ *     most, and it leaves a path whose geometry didn't change untouched.
  *  4. Run activity is not stored here. Each group carries `data-activity`
  *     from the activity snapshot; groups persist across geometry renders,
  *     and a freshly created group asks `resolveEdgeActivity` so a lazily
@@ -42,7 +44,8 @@ export type EdgePortAnchorResolver = (
 export type StudioEdgeRendererOptions = {
   store: StudioLinkStore;
   layer: SVGSVGElement;
-  resolvePortAnchorPoint: EdgePortAnchorResolver;
+  /** Called once per render; the resolver it returns serves that render's anchors. */
+  createPortAnchorResolver: () => EdgePortAnchorResolver;
   getCursorAnchorPoint: () => { x: number; y: number } | null;
   resolveEdgeActivity?: (edgeId: string) => StudioEdgeActivityPhase;
 };
@@ -65,6 +68,8 @@ function previewStroke(validity: string): string {
 
 export class StudioEdgeRenderer {
   private readonly groupsByEdgeId = new Map<string, EdgeGroupElements>();
+  /** The geometry each group last drew. */
+  private readonly drawnByEdgeId = new Map<string, { path: string; arrow: string }>();
   private previewPath: SVGPathElement | null = null;
 
   constructor(private readonly options: StudioEdgeRendererOptions) {}
@@ -74,9 +79,9 @@ export class StudioEdgeRenderer {
   }
 
   render(): void {
-    const { layer, store, resolvePortAnchorPoint, getCursorAnchorPoint } = this.options;
-    const seen = new Set<string>();
-
+    const { layer, store, getCursorAnchorPoint } = this.options;
+    const resolvePortAnchorPoint = this.options.createPortAnchorResolver();
+    const next: Array<{ edgeId: string; path: string; arrow: string }> = [];
     for (const edge of store.listEdges()) {
       const source = resolvePortAnchorPoint(edge.source, "out");
       const target = resolvePortAnchorPoint(edge.target, "in");
@@ -84,31 +89,39 @@ export class StudioEdgeRenderer {
         continue;
       }
       const curve = buildCubicLinkCurve(source, target);
-      const arrow = buildChevronPath(target, curveTangentAtEnd(curve), 6.5);
+      next.push({ edgeId: edge.id, path: curve.path, arrow: buildChevronPath(target, curveTangentAtEnd(curve), 6.5) });
+    }
+    const preview = this.resolvePreview(resolvePortAnchorPoint, getCursorAnchorPoint);
 
-      let group = this.groupsByEdgeId.get(edge.id);
+    const seen = new Set<string>();
+    for (const { edgeId, path, arrow } of next) {
+      let group = this.groupsByEdgeId.get(edgeId);
       if (!group) {
-        group = this.createEdgeGroup(edge.id);
-        this.groupsByEdgeId.set(edge.id, group);
+        group = this.createEdgeGroup(edgeId);
+        this.groupsByEdgeId.set(edgeId, group);
         layer.appendChild(group.group);
-        this.applyEdgeActivity(edge.id, this.options.resolveEdgeActivity?.(edge.id) ?? "idle");
+        this.applyEdgeActivity(edgeId, this.options.resolveEdgeActivity?.(edgeId) ?? "idle");
       }
-
-      group.visiblePath.setAttribute("d", curve.path);
-      group.hitPath.setAttribute("d", curve.path);
-      group.glowPath.setAttribute("d", curve.path);
-      group.energyPath.setAttribute("d", curve.path);
-      group.arrowPath.setAttribute("d", arrow);
-      seen.add(edge.id);
+      const drawn = this.drawnByEdgeId.get(edgeId);
+      if (drawn?.path !== path) {
+        group.visiblePath.setAttribute("d", path);
+        group.hitPath.setAttribute("d", path);
+        group.glowPath.setAttribute("d", path);
+        group.energyPath.setAttribute("d", path);
+      }
+      if (drawn?.arrow !== arrow) group.arrowPath.setAttribute("d", arrow);
+      this.drawnByEdgeId.set(edgeId, { path, arrow });
+      seen.add(edgeId);
     }
 
     for (const [edgeId, group] of this.groupsByEdgeId) {
       if (seen.has(edgeId)) continue;
       group.group.remove();
       this.groupsByEdgeId.delete(edgeId);
+      this.drawnByEdgeId.delete(edgeId);
     }
 
-    this.renderPreview(getCursorAnchorPoint);
+    this.renderPreview(preview);
   }
 
   /** Stamp a cable's phase; `pulse` marks a real transition for one-shot emphasis. */
@@ -124,6 +137,7 @@ export class StudioEdgeRenderer {
       group.group.remove();
     }
     this.groupsByEdgeId.clear();
+    this.drawnByEdgeId.clear();
     if (this.previewPath?.parentNode) {
       this.previewPath.parentNode.removeChild(this.previewPath);
     }
@@ -167,20 +181,17 @@ export class StudioEdgeRenderer {
     return { group, hitPath, glowPath, visiblePath, energyPath, arrowPath };
   }
 
-  private renderPreview(getCursorAnchorPoint: () => { x: number; y: number } | null): void {
-    const { layer, store, resolvePortAnchorPoint } = this.options;
-    const drag = store.getDragState();
+  private resolvePreview(
+    resolvePortAnchorPoint: EdgePortAnchorResolver,
+    getCursorAnchorPoint: () => { x: number; y: number } | null
+  ): { path: string; validity: string } | null {
+    const drag = this.options.store.getDragState();
     if (!drag) {
-      if (this.previewPath?.parentNode) {
-        this.previewPath.parentNode.removeChild(this.previewPath);
-      }
-      this.previewPath = null;
-      return;
+      return null;
     }
-
     const source = resolvePortAnchorPoint(drag.source, "out");
     if (!source) {
-      return;
+      return null;
     }
     let end = drag.snapTarget
       ? resolvePortAnchorPoint(drag.snapTarget, "in")
@@ -188,18 +199,31 @@ export class StudioEdgeRenderer {
     if (!end) {
       end = { x: drag.cursorWorld.x, y: drag.cursorWorld.y };
     }
+    return { path: buildCubicLinkCurve(source, end).path, validity: drag.validity };
+  }
 
-    const curve = buildCubicLinkCurve(source, end);
+  private renderPreview(preview: { path: string; validity: string } | null): void {
+    const { layer, store } = this.options;
+    if (!preview) {
+      // A drag whose source can't be resolved keeps its last preview, as before.
+      if (store.getDragState()) return;
+      if (this.previewPath?.parentNode) {
+        this.previewPath.parentNode.removeChild(this.previewPath);
+      }
+      this.previewPath = null;
+      return;
+    }
+
     if (!this.previewPath) {
       // Static presentation lives on .ss-studio-edge-preview in
       // views/studio/connections.css.
       this.previewPath = createStudioSvgElement(layer, "path");
       this.previewPath.setAttribute("class", "ss-studio-edge-preview");
     }
-    this.previewPath.style.stroke = previewStroke(drag.validity);
-    this.previewPath.style.strokeDasharray = drag.validity === "valid" ? "none" : "6 6";
-    this.previewPath.setAttribute("d", curve.path);
-    this.previewPath.dataset.validity = drag.validity;
+    this.previewPath.style.stroke = previewStroke(preview.validity);
+    this.previewPath.style.strokeDasharray = preview.validity === "valid" ? "none" : "6 6";
+    this.previewPath.setAttribute("d", preview.path);
+    this.previewPath.dataset.validity = preview.validity;
     if (this.previewPath.parentNode !== layer) {
       layer.appendChild(this.previewPath);
     }

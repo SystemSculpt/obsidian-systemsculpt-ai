@@ -5,7 +5,7 @@ import { mountCodexExecutionControls } from '../CodexExecutionControls';
 import { renderStudioCommandExecution } from '../../../views/studio/canvas/StudioCommandExecutionControls';
 import { readCodexCatalog } from '../CodexModelCatalog';
 
-jest.mock('../../../platform/desktopOnly', () => ({ desktopHost: { childProcess: jest.fn(), fs: jest.fn(), path: jest.fn() } }));
+jest.mock('../../../platform/desktopOnly', () => ({ desktopHost: { childProcess: jest.fn(), fs: jest.fn(), path: jest.fn(), os: async () => ({ platform: () => 'darwin' }) } }));
 jest.mock('../../../platform/hostCapabilities', () => ({ hasHostCapability: () => true }));
 jest.mock('../CodexLaunch', () => ({ resolveCodexLaunchOptions: async () => ({ binary: 'codex', home: '/home/test', environment: {} }) }));
 jest.mock('../CodexExecutionSettings', () => ({ ...jest.requireActual('../CodexExecutionSettings'), codexVaultDirectory: () => '/vault' }));

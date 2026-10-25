@@ -1,6 +1,8 @@
 import { EventEmitter } from 'node:events';
+import { posix } from 'node:path';
 import { CLAUDE_SIGN_IN_MESSAGE, ClaudeChatTransport, claudeLaunchArgs, claudePermissionResponse, runLocalClaude } from '../LocalClaudeClient';
 import { desktopHost } from '../../../platform/desktopOnly';
+import { windowsNpmHost } from '../../codex/__tests__/fixtures/npmNodeShim';
 jest.mock('../../../platform/desktopOnly', () => ({ desktopHost: { childProcess: jest.fn(), fs: jest.fn(), os: jest.fn(), path: jest.fn(), environment: jest.fn() } }));
 
 const SESSION = 'b33728f4-ea7d-4fec-bcd0-bf79649b7d28';
@@ -31,10 +33,10 @@ function host(options: { config?: unknown; spawnError?: string; script?: Script 
     return child;
   });
   (desktopHost.childProcess as jest.Mock).mockResolvedValue({ spawn });
-  (desktopHost.fs as jest.Mock).mockResolvedValue({ stat: jest.fn(async () => ({ isDirectory: () => true })),
+  (desktopHost.fs as jest.Mock).mockResolvedValue({ readdir: jest.fn(async () => []), stat: jest.fn(async () => ({ isDirectory: () => true, isFile: () => false })),
     readFile: options.config === undefined ? jest.fn().mockRejectedValue(Object.assign(new Error('missing'), { code: 'ENOENT' })) : jest.fn(async () => JSON.stringify(options.config)) });
-  (desktopHost.path as jest.Mock).mockResolvedValue({ isAbsolute: (path: string) => path.startsWith('/'), delimiter: ':', join: (...parts: string[]) => parts.join('/') });
-  (desktopHost.os as jest.Mock).mockResolvedValue({ homedir: () => '/home/test' });
+  (desktopHost.path as jest.Mock).mockResolvedValue(posix);
+  (desktopHost.os as jest.Mock).mockResolvedValue({ homedir: () => '/home/test', platform: () => 'darwin' });
   (desktopHost.environment as jest.Mock).mockReturnValue({ PATH: '/bin', HOME: '/home/test', CLAUDECODE: '1' });
   return { child, messages, send, reply, spawn };
 }
@@ -154,6 +156,32 @@ describe('discovery', () => {
     expect(env.CLAUDECODE).toBeUndefined(); expect(env.PATH.split(':')).toEqual(expect.arrayContaining(['/bin', '/opt/homebrew/bin', '/home/test/.local/bin']));
     expect(messages[0]).toEqual({ type: 'user', message: { role: 'user', content: 'Read note.md' } });
     expect(child.stdin.end).toHaveBeenCalled();
+  });
+  it.each(['/home/test/.nvm/versions/node/v22.18.0/bin', '/home/test/.volta/bin', '/home/test/.claude/local'])('launches a CLI and its node interpreter from %s with a bare GUI PATH', async folder => {
+    const { spawn, child } = host();
+    const fs = await desktopHost.fs();
+    const files = new Set([`${folder}/claude`, `${folder}/node`]);
+    (fs.stat as jest.Mock).mockImplementation(async path => ({ isDirectory: () => path === '/vault', isFile: () => files.has(path), mode: 0o100755 }));
+    (fs.readdir as jest.Mock).mockImplementation(async path => path === '/home/test/.nvm/versions/node' && folder.includes('/.nvm/')
+      ? [{ name: 'v22.18.0', isDirectory: () => true }] : []);
+    spawn.mockImplementationOnce((...args: unknown[]) => {
+      const [binary, , options] = args as [string, string[], { env: { PATH: string } }];
+      const resolve = (name: string) => options.env.PATH.split(':').map(path => `${path}/${name}`).find(path => files.has(path));
+      expect(resolve(binary)).toBe(`${folder}/claude`);
+      expect(resolve('node')).toBe(`${folder}/node`);
+      return child;
+    });
+    await expect(runLocalClaude(input, new AbortController().signal, callbacks())).resolves.toMatchObject({ text: 'hello there' });
+    expect(spawn).toHaveBeenCalledTimes(1);
+  });
+  it('launches a Windows npm CLI with native permissions and literal prompt data over stdio', async () => {
+    const { spawn, messages } = host(), windows = windowsNpmHost();
+    const prompt = 'Read "notes" & echo injected > marker %PATH% !name!\nnext line';
+    await expect(runLocalClaude({ ...input, prompt, workingDirectory: windows.cwd }, new AbortController().signal, callbacks())).resolves.toMatchObject({ sessionId: SESSION });
+    expect(spawn).toHaveBeenCalledWith(windows.node, [windows.scripts.claude, ...claudeLaunchArgs({}), '--session-id', SESSION],
+      expect.objectContaining({ shell: false, cwd: windows.cwd, env: expect.objectContaining({ CLAUDE_CONFIG_DIR: windows.environment.CLAUDE_CONFIG_DIR }) }));
+    expect((spawn.mock.calls[0] as any[])[2].env.CLAUDECODE).toBeUndefined();
+    expect(messages[0]).toEqual({ type: 'user', message: { role: 'user', content: prompt } });
   });
   it('uses the binary from ~/.config/systemsculpt/claude.json', async () => {
     const { spawn } = host({ config: { binary: '~/tools/claude' } });
@@ -437,12 +465,13 @@ describe('permissions', () => {
     expect(messages.find(m => m.response?.request_id === 'hook').response.subtype).toBe('error');
   });
   it('closes the prompt when Claude Code withdraws it, and interrupts on cancel', async () => {
-    let promptSignal: AbortSignal | undefined;
+    let promptSignal: AbortSignal | undefined, withdrew!: () => void;
+    const withdrawn = new Promise<void>(resolve => { withdrew = resolve; });
     const controller = new AbortController();
-    const { messages } = host({ script: (send, msg) => { if (msg.type === 'user') { send(edit); send({ type: 'control_cancel_request', request_id: 'req-1' }); } } });
+    const { messages } = host({ script: (send, msg) => { if (msg.type === 'user') { send(edit); send({ type: 'control_cancel_request', request_id: 'req-1' }); withdrew(); } } });
     const cb = { ...callbacks(), permission: jest.fn((_request, signal: AbortSignal) => { promptSignal = signal; return new Promise<boolean>(() => {}); }) };
     const running = runLocalClaude(input, controller.signal, cb);
-    for (let i = 0; i < 20; i++) await Promise.resolve();
+    await withdrawn;
     expect(promptSignal?.aborted).toBe(true);
     controller.abort();
     await expect(running).rejects.toThrow('Claude Code run canceled.');

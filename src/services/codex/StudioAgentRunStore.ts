@@ -94,6 +94,8 @@ export class StudioAgentRunStore {
   private readonly writes = new Map<string, Promise<void>>();
   private readonly indexes = new Map<string, Promise<RunIndex>>();
   private readonly retention = new Map<string, Promise<number>>();
+  /** Run folders this session created or found, so each save doesn't re-check every folder level. */
+  private readonly folders = new Set<string>();
   private closed = false;
   constructor(private readonly app: App) {}
 
@@ -131,14 +133,16 @@ export class StudioAgentRunStore {
     const path = `${agentRunFolder(record.projectPath)}/${record.id}.json`;
     const previous = this.writes.get(path) || Promise.resolve();
     const pending = previous.catch(() => {}).then(async () => {
-      const adapter = this.app.vault.adapter, parts = agentRunFolder(record.projectPath).split('/');
-      for (let index = 1; index <= parts.length; index++) {
-        const folder = parts.slice(0, index).join('/');
-        if (!await adapter.exists(folder)) {
-          try { await adapter.mkdir(folder); } catch (error) { if (!await adapter.exists(folder)) throw error; }
-        }
+      const adapter = this.app.vault.adapter, folder = agentRunFolder(record.projectPath);
+      if (this.folders.has(folder)) {
+        // The folder may have been removed since; recreate it once.
+        try { await adapter.write(path, snapshot); } catch { this.folders.delete(folder); }
       }
-      await adapter.write(path, snapshot);
+      if (!this.folders.has(folder)) {
+        await this.ensureFolder(folder);
+        await adapter.write(path, snapshot);
+        this.folders.add(folder);
+      }
       this.noteRecord(record.projectPath, await this.index(record.projectPath), record);
     });
     this.track(path, pending);
@@ -168,6 +172,15 @@ export class StudioAgentRunStore {
   /** Stop retention early and save everything pending. */
   async close(): Promise<void> { this.closed = true; await this.flush(); }
 
+  private async ensureFolder(folder: string): Promise<void> {
+    const adapter = this.app.vault.adapter, parts = folder.split('/');
+    for (let index = 1; index <= parts.length; index++) {
+      const level = parts.slice(0, index).join('/');
+      if (!await adapter.exists(level)) {
+        try { await adapter.mkdir(level); } catch (error) { if (!await adapter.exists(level)) throw error; }
+      }
+    }
+  }
   private track(path: string, pending: Promise<void>): void {
     this.writes.set(path, pending);
     void pending.finally(() => { if (this.writes.get(path) === pending) this.writes.delete(path); }).catch(() => {});
