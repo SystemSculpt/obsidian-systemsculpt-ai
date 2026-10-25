@@ -60,6 +60,10 @@ export class EmbeddingsPendingFilesModal extends StandardModal {
     this.searchInput.disabled = true;
 
     this.listEl = this.contentEl.createDiv({ cls: "ss-modal__list" });
+    this.registerDomEvent(this.listEl, "click", (event) => {
+      const button = (event.target as HTMLElement | null)?.closest<HTMLButtonElement>("button[data-file-path]");
+      if (button && !button.disabled && button.dataset.filePath) void this.openFile(button.dataset.filePath);
+    });
     createUiState(this.listEl, {
       kind: "loading",
       title: "Collecting pending files",
@@ -139,9 +143,7 @@ export class EmbeddingsPendingFilesModal extends StandardModal {
       const detailEl = itemEl.createDiv({ cls: "ss-modal__item-description" });
       detailEl.setText(this.buildDescription(entry));
 
-      this.registerDomEvent(itemEl, "click", () => {
-        void this.openFile(entry.path);
-      });
+      itemEl.dataset.filePath = entry.path;
     }
   }
 

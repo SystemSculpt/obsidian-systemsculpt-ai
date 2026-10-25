@@ -305,6 +305,51 @@ describe("ContextSelectionModal", () => {
     expect(modal.modalEl.querySelector(".ss-context-load-more")).toBeNull();
   });
 
+  it("keeps one list listener through 30 filters and load-more renders", () => {
+    const addListener = jest.spyOn(EventTarget.prototype, "addEventListener");
+    const app = new App();
+    (app.vault.getFiles as jest.Mock).mockReturnValue(
+      Array.from({ length: 150 }, (_, index) => new TFile({ path: `notes/file-${index}.md` })),
+    );
+    const modal = new ContextSelectionModal(app, jest.fn(), {}, { autoFocusSearch: false });
+    modal.open();
+    const list = modal.modalEl.querySelector<HTMLUListElement>(".ss-context-file-list")!;
+    const search = modal.modalEl.querySelector<HTMLInputElement>('input[type="search"]')!;
+    const detachedCheckbox = list.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+
+    for (let pass = 0; pass < 30; pass++) {
+      search.value = pass % 2 === 0 ? "file" : "notes";
+      search.dispatchEvent(new Event("input", { bubbles: true }));
+      list.querySelector<HTMLButtonElement>(".ss-context-load-more")!.click();
+      expect(list.querySelectorAll(".ss-context-file-item")).toHaveLength(150);
+    }
+
+    const registrations = addListener.mock.calls.filter((_, index) => {
+      const target = addListener.mock.contexts[index] as HTMLElement;
+      return target === list || target.matches?.(".ss-context-file-label input, .ss-context-load-more");
+    });
+    addListener.mockRestore();
+    expect(registrations.map(([type]) => type)).toEqual(["click"]);
+
+    detachedCheckbox.click();
+    expect(modal.modalEl.textContent).not.toContain("Pin 1 file");
+    const checkbox = list.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')[149]!;
+    checkbox.click();
+    expect(modal.modalEl.textContent).toContain("Pin 1 file");
+    expect(checkbox.closest("li")?.classList.contains("is-selected")).toBe(true);
+    checkbox.click();
+    expect(modal.modalEl.textContent).not.toContain("Pin 1 file");
+
+    const removeListener = jest.spyOn(list, "removeEventListener");
+    modal.close();
+    expect(removeListener).toHaveBeenCalledWith("click", expect.any(Function));
+    modal.open();
+    const reopenedCheckbox = modal.modalEl.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+    reopenedCheckbox.click();
+    expect(modal.modalEl.textContent).toContain("Pin 1 file");
+    modal.close();
+  });
+
   it("only resolves thumbnails for each rendered image batch", () => {
     const app = new App();
     (app.vault.getFiles as jest.Mock).mockReturnValue(
