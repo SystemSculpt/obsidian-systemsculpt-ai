@@ -72,8 +72,8 @@ export class ViewManager {
     }
     this.registerView();
 
-    // Initialize ribbon manager in the background
-    window.setTimeout(() => this.ribbonManager.initialize(), 0);
+    // Obsidian restores ribbon visibility and order after plugin onload.
+    this.ribbonManager.initialize();
 
     // Wait for layout to be ready before minimal initialization
     this.app.workspace.onLayoutReady(() => {

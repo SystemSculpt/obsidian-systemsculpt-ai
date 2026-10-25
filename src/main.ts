@@ -520,6 +520,17 @@ export default class SystemSculptPlugin extends Plugin {
     });
 
     coordinator.registerTask("bootstrap", {
+      id: "workspace.ribbons",
+      label: "ribbon actions",
+      run: () => {
+        // Register before onload returns, without starting chat restoration
+        // ahead of loaded settings and services in the deferred phase.
+        this.viewManager ??= new ViewManager(this, this.app);
+        this.viewManager.ribbonManager.initialize();
+      },
+    });
+
+    coordinator.registerTask("bootstrap", {
       id: "settings.tab.register",
       label: "settings tab",
       optional: true,
@@ -1506,13 +1517,8 @@ export default class SystemSculptPlugin extends Plugin {
   }
 
   private ensureViewManager(): ViewManager {
-    if (this.viewManager) {
-      return this.viewManager;
-    }
-
-    const viewManager = new ViewManager(this, this.app);
-    viewManager.initialize();
-    this.viewManager = viewManager;
+    this.viewManager ??= new ViewManager(this, this.app);
+    this.viewManager.initialize();
     return this.viewManager;
   }
 
