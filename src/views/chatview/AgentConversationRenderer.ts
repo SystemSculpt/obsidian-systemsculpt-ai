@@ -202,6 +202,11 @@ function durableFailedReceipt(message: ChatMessage): DurableFailedReceipt | null
   });
 }
 
+/** Plugin 6.18.0 could save a native failure for a message that never reached the agent, under the previous turn. */
+function isOrphanNativeFailure(message: ChatMessage, turnId: string | null): boolean {
+  return durableFailedReceipt(message)?.failureMessage !== undefined && message.message_id !== `${turnId}_assistant`;
+}
+
 type HistoricalPartPartition = Readonly<{
   workParts: readonly MessagePart[];
   finalAnswers: readonly MessagePart[];
@@ -814,10 +819,11 @@ export class AgentConversationRenderer extends Component {
       const message = messages[index];
       index += 1;
       if (message.role !== "user" && message.role !== "assistant") continue;
+      if (isOrphanNativeFailure(message, currentTurnId)) continue;
       const turnMessages: ChatMessage[] = [message];
       if (message.role === "assistant") {
         while (index < messages.length && messages[index].role === "assistant") {
-          turnMessages.push(messages[index]);
+          if (!isOrphanNativeFailure(messages[index], currentTurnId)) turnMessages.push(messages[index]);
           index += 1;
         }
       }
