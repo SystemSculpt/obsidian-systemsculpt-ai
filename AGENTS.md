@@ -265,6 +265,11 @@ manual mobile exploration is performed.
   never read file contents or credentials. Chat states what runs where in one run
   line under the composer (backend, mode, model or hosted credits), each part a
   one-click menu; **Detect again** lives in its backend menu on desktop.
+- Native chat turns belong to the plugin, not a view. Switching history, starting
+  New chat, or closing a view leaves an admitted Claude Code or Codex turn running
+  and saves its answer to the original Markdown transcript. Reopening attaches to
+  the live session, including pending approvals. Stop, deleting the chat, and
+  unloading the plugin cancel the turn; navigation never implies approval.
 - New Claude Code chats default to **Auto** (`auto`), using Claude Code's native
   safety checks, not permission bypass. Manual choices are **Ask before edits**
   (`manual`), **Accept edits** (`acceptEdits`), **Plan only** (`plan`), and **Claude

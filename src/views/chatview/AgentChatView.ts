@@ -85,6 +85,7 @@ import {
   isChatAttachmentContentRef,
 } from "./attachments/ChatAttachmentVaultStore";
 import { emitChatTranscriptCommitted } from "./ChatTranscriptEvents";
+import { nativeChatSessions } from "./NativeChatSessions";
 import {
   AgentTranscriptRepository,
   type AgentTranscriptSnapshot,
@@ -473,7 +474,7 @@ export class AgentChatView extends ItemView {
   public approvalMode: ChatApprovalMode;
   public isFullyLoaded = false;
   public creditsBalance: CreditsBalanceSnapshot | null = null;
-  private readonly transcript: AgentTranscriptRepository;
+  private transcript: AgentTranscriptRepository;
   private agent: ChatSession;
   private readonly agentBaseUrl: string;
   // Journal instances share one adapter-and-path state. Concurrent views
@@ -562,28 +563,13 @@ export class AgentChatView extends ItemView {
       onContextChange: async () => {
         this.syncAttachments();
         if (!this.contextLoading && this.chatId && !this.legacyHistoryViewOnly) {
-          const snapshot = await this.transcript.saveMetadata();
+          const snapshot = await this.transcript.saveMetadata(this);
           this.applyTranscriptIdentity(snapshot);
         }
       },
     });
-    this.transcript = new AgentTranscriptRepository(this.chatStorage, () => ({
-      // `context_files` is the persisted compatibility key. Its values are
-      // precisely the files the user pinned for rereading on every message.
-      contextFiles: new Set(this.contextManager.getPinnedFiles()),
-      title: this.chatTitle,
-      chatFontSize: this.chatFontSize,
-      approvalMode: this.approvalMode,
-    }));
-    this.transcriptCommitUnsubscribe = this.transcript.subscribeToCommits(({ snapshot, role, messageId }) => {
-      this.applyTranscriptIdentity(snapshot);
-      emitChatTranscriptCommitted(this.app.workspace, {
-        chatId: snapshot.chatId,
-        version: snapshot.version,
-        role,
-        messageId,
-      });
-    });
+    this.transcript = this.createTranscript();
+    this.bindTranscript(this.transcript);
     this.documentAttachmentProcessor = new ManagedChatDocumentAttachmentProcessor(plugin.app, plugin);
 
     this.agentBaseUrl = new URL(this.aiService.baseUrl).origin;
@@ -628,24 +614,62 @@ export class AgentChatView extends ItemView {
   private titleExplicit = false;
   /** The bubble of a message sent before first-open detection finished. */
   private detectionPendingBubble: ChatMessage | null = null;
-  private createAgentSession(): ChatSession {
-    const persistAssistant = async (message: ChatMessage): Promise<void> => {
-      const snapshot = await this.transcript.persistAssistant(message);
-      this.applyTranscriptIdentity(snapshot);
+  private transcriptSaveOptions() {
+    return {
+      contextFiles: new Set(this.contextManager.getPinnedFiles()),
+      title: this.chatTitle,
+      chatFontSize: this.chatFontSize,
+      approvalMode: this.approvalMode,
     };
-    const backend = this.chatExecutionBackend ?? defaultTextBackend(this.plugin.settings);
-    const forkHistory = () => this.pendingForkHistory?.prefix ?? [];
+  }
+
+  private createTranscript(): AgentTranscriptRepository {
+    const transcript = new AgentTranscriptRepository(this.chatStorage, () => this.transcriptSaveOptions());
+    const workspace = this.app.workspace;
+    // This signal belongs to the transcript, including when no view displays it.
+    transcript.subscribeToCommits(({ snapshot, role, messageId }) => {
+      emitChatTranscriptCommitted(workspace, { chatId: snapshot.chatId, version: snapshot.version, role, messageId });
+    });
+    return transcript;
+  }
+
+  private bindTranscript(transcript: AgentTranscriptRepository): void {
+    this.transcriptCommitUnsubscribe?.();
+    this.transcript = transcript;
+    const unbindOptions = transcript.bindSaveOptions(this, () => this.transcriptSaveOptions());
+    const unsubscribe = transcript.subscribeToCommits(({ snapshot, role }) => {
+      this.applyTranscriptIdentity(snapshot);
+      if (role === "user" && this.agent instanceof LocalAgentChatSession) {
+        void this.workspace?.setHistory(snapshot.messages).catch(() => {});
+      }
+    });
+    this.transcriptCommitUnsubscribe = () => { unsubscribe(); unbindOptions(); };
+  }
+
+  private createAgentSession(): ChatSession {
+    const transcript = this.transcript;
+    const persistAssistant = async (message: ChatMessage): Promise<void> => {
+      await transcript.persistAssistant(message);
+    };
+    const { app, plugin } = this;
+    const backend = this.chatExecutionBackend ?? defaultTextBackend(plugin.settings);
+    const notice = (text: string, reason?: string): void => {
+      for (const leaf of app.workspace.getLeavesOfType(CHAT_VIEW_TYPE)) {
+        const view = leaf.view;
+        if (!(view instanceof AgentChatView) || view.transcript !== transcript || view.closing) continue;
+        if (reason !== "auto-unavailable" || !view.claudeAutoUnavailable) view.workspace?.showNotice(text);
+        if (reason === "auto-unavailable") {
+          view.claudeAutoUnavailable = true;
+          view.syncChrome();
+        }
+      }
+    };
+    // Retry context belongs to the submitting turn, never the creating pane.
     if (backend === "codex") {
-      return new CodexChatSession(this.app, { persistAssistant, notice: text => this.workspace?.showNotice(text) }, forkHistory, () => codexOptionsFromSettings(this.plugin.settings));
+      return new CodexChatSession(app, { persistAssistant, notice }, () => [], () => codexOptionsFromSettings(plugin.settings));
     }
     if (backend === "claude") {
-      return new ClaudeChatSession(this.app, { persistAssistant, notice: (text, reason) => {
-        if (reason !== "auto-unavailable" || !this.claudeAutoUnavailable) this.workspace?.showNotice(text);
-        if (reason === "auto-unavailable") {
-          this.claudeAutoUnavailable = true;
-          this.syncChrome();
-        }
-      } }, forkHistory, () => claudeOptionsFromSettings(this.plugin.settings));
+      return new ClaudeChatSession(app, { persistAssistant, notice }, () => [], () => claudeOptionsFromSettings(plugin.settings));
     }
     return new AgentChatSession({
       recoveryEnvironment: {
@@ -755,22 +779,45 @@ export class AgentChatView extends ItemView {
           }
         }
       },
+      (session) => session instanceof LocalAgentChatSession
+        ? nativeChatSessions(this.plugin).release(session, this)
+        : session.detach(),
     );
     this.agentSessionBinding = binding;
     this.agentUnsubscribe = () => binding.unsubscribe();
   }
 
-  /**
-   * Hands the next conversation its own session instead of recycling this
-   * one. The exact outgoing binding must finish detaching before the next
-   * session can subscribe or connect. Rapid switches serialize through the
-   * same barrier, and a failed detach leaves the replacement unattached.
-   */
-  private async replaceAgentSession(): Promise<void> {
+  /** Releases this pane before acquiring a live chat or a fresh session. */
+  private async replaceAgentSession(chatId?: string): Promise<void> {
     this.bindAgentSession();
     const binding = this.agentSessionBinding;
     if (!binding) throw new Error("The chat session binding is unavailable.");
-    const replacement = await binding.replace(() => this.createAgentSession());
+    const sessions = nativeChatSessions(this.plugin);
+    const origin = this.conversationOriginToken;
+    // Acquire before awaiting the outgoing connection: completion during that
+    // await must not retire the selected session and leave us with stale disk data.
+    const retained = chatId ? sessions.attach(chatId, this) : undefined;
+    let replacement: ChatSession | null;
+    try {
+      replacement = await binding.replace(() => {
+        if (this.closing || this.conversationOriginToken !== origin) return null;
+        if (retained) {
+          this.bindTranscript(retained.transcript);
+          return retained.session;
+        }
+        // Navigation gets its own repository even if deletion already removed
+        // the old registry entry. A second, target-backend replacement keeps it.
+        if (!chatId) this.bindTranscript(this.createTranscript());
+        return this.createAgentSession();
+      });
+    } catch (error) {
+      if (retained) await sessions.release(retained.session, this);
+      throw error;
+    }
+    if (!replacement) {
+      if (retained) await sessions.release(retained.session, this);
+      return;
+    }
     const wasNative = this.agent instanceof LocalAgentChatSession;
     this.agent = replacement;
     if (this.agent instanceof LocalAgentChatSession) {
@@ -1067,23 +1114,31 @@ export class AgentChatView extends ItemView {
         if (this.conversationOriginToken === loadOriginToken) this.contextLoading = false;
       }
       if (this.conversationOriginToken !== loadOriginToken) return;
-      this.chatExecutionBackend = executionBackend;
-      if (backendOf(this.agent) !== this.chatExecutionBackend) await this.replaceAgentSession();
+      // Restore metadata before binding a live transcript: its turn may finish
+      // during any of the asynchronous queue/render work below.
+      if (loaded.chatFontSize) this.chatFontSize = loaded.chatFontSize;
+      this.approvalMode = parseChatApprovalMode(loaded.approvalMode);
+      const retained = nativeChatSessions(this.plugin).get(chatId);
+      this.chatExecutionBackend = retained?.session.agent ?? executionBackend;
+      if (retained || backendOf(this.agent) !== this.chatExecutionBackend) await this.replaceAgentSession(chatId);
       if (this.conversationOriginToken !== loadOriginToken) return;
+      if (retained) {
+        loaded = { ...loaded, ...this.transcript.snapshot() };
+        const turnId = this.agent.getSnapshot().turnId;
+        if (turnId) this.runConversationOrigins.set(turnId, loadOriginToken);
+      }
       this.applyTranscriptIdentity(loaded);
       this.draftKey = loaded.chatId;
       await this.hydrateQueue(this.draftKey);
       if (this.conversationOriginToken !== loadOriginToken) return;
-      if (loaded.chatFontSize) this.chatFontSize = loaded.chatFontSize;
-      this.approvalMode = parseChatApprovalMode(loaded.approvalMode);
       this.applyFontSize();
       this.workspace?.setTitle(this.displayTitle());
-      await this.workspace?.setHistory(loaded.messages);
+      await this.workspace?.setHistory(retained ? this.transcript.snapshot().messages : loaded.messages);
       if (this.conversationOriginToken !== loadOriginToken) return;
       const recoverySnapshot = loaded.agentConversationId
         ? cachedTranscriptRecoverySnapshot(loaded.messages)
         : null;
-      await this.workspace?.setAgentSnapshot(recoverySnapshot);
+      await this.workspace?.setAgentSnapshot(retained ? this.agent.getSnapshot() : recoverySnapshot);
       if (this.conversationOriginToken !== loadOriginToken) return;
       const legacyHistoryViewOnly = loaded.messages.length > 0 && !loaded.agentConversationId;
       this.setLegacyHistoryViewOnly(legacyHistoryViewOnly);
@@ -1165,7 +1220,7 @@ export class AgentChatView extends ItemView {
 
   public async saveChat(): Promise<void> {
     if (!this.chatId || this.legacyHistoryViewOnly) return;
-    const snapshot = await this.transcript.saveMetadata();
+    const snapshot = await this.transcript.saveMetadata(this);
     this.applyTranscriptIdentity(snapshot);
   }
 
@@ -1627,6 +1682,8 @@ export class AgentChatView extends ItemView {
 
   private async performClose(): Promise<void> {
     this.closing = true;
+    this.transcriptCommitUnsubscribe?.();
+    this.transcriptCommitUnsubscribe = null;
     this.approvalNotice?.hide();
     this.approvalNotice = null;
     this.approvalNoticeSurface = null;
@@ -1654,7 +1711,6 @@ export class AgentChatView extends ItemView {
       this.finishSubmissionOperation(transition);
       this.closed = true;
       this.agentUnsubscribe?.();
-      this.transcriptCommitUnsubscribe?.();
       this.recorderToggleUnsubscribe?.();
       this.recorderTranscriptUnsubscribe?.();
       this.workspace = null;
@@ -1666,6 +1722,8 @@ export class AgentChatView extends ItemView {
   ): Promise<void> {
     if (this.agentSessionBinding) {
       await this.agentSessionBinding.detach();
+    } else if (this.agent instanceof LocalAgentChatSession) {
+      await nativeChatSessions(this.plugin).release(this.agent, this);
     } else {
       await this.agent.detach();
     }
@@ -2415,7 +2473,10 @@ export class AgentChatView extends ItemView {
             }
           : {}),
       };
-      run = this.agent.start({
+      const session = this.agent;
+      const transcript = this.transcript;
+      run = session.start({
+        ...(session instanceof LocalAgentChatSession ? { forkHistory: this.pendingForkHistory?.prefix ?? [] } : {}),
         conversationId,
         turnId: admittedUserMessage.message_id,
         message: toThinAgentUserMessage(hydratedUserMessage),
@@ -2427,7 +2488,7 @@ export class AgentChatView extends ItemView {
           // No sources means there is nothing to stage; context_ref is
           // optional on the wire, so skip the staging round trip entirely.
           if (context.sources.length === 0) return undefined;
-          const staged = await this.agent.stageContext(
+          const staged = await session.stageContext(
             admittedUserMessage.message_id,
             context,
             signal,
@@ -2451,6 +2512,9 @@ export class AgentChatView extends ItemView {
             expectedConversationOriginToken,
             operation,
           );
+          if (session instanceof LocalAgentChatSession) {
+            nativeChatSessions(this.plugin).retain(transcript.snapshot().chatId, session, transcript, this);
+          }
         },
       });
       operation.runPromise = run;
@@ -3826,7 +3890,8 @@ export class AgentChatView extends ItemView {
   }
 
   private isChatWorkingAnywhere(chatId: string): boolean {
-    return this.chatViews(chatId).some((view) => view.isWorking());
+    return nativeChatSessions(this.plugin).isWorking(chatId)
+      || this.chatViews(chatId).some((view) => view.isWorking());
   }
 
   private async openHistoryRow(row: ChatHistoryRow, inNewTab: boolean): Promise<void> {
@@ -3858,12 +3923,17 @@ export class AgentChatView extends ItemView {
   private async renameSavedChat(row: Pick<ChatHistoryRow, "chatId" | "chatPath" | "title">, title: string): Promise<void> {
     const normalized = normalizeChatTitle(title) || row.title;
     const open = this.chatViews(row.chatId).map((view) => ({ view, transcript: view.transcript, title: view.chatTitle }));
+    const retained = nativeChatSessions(this.plugin).get(row.chatId)?.transcript;
+    const retainedTitle = retained?.snapshot().title;
     try {
+      retained?.setTitle(normalized);
       for (const { view } of open) await view.setTitle(normalized, false);
+      await retained?.idle();
       // A write already in flight may still carry the previous title.
       await Promise.all(open.map(({ transcript }) => transcript.idle()));
       await this.chatStorage.renameChat(row.chatPath, row.chatId, normalized);
     } catch {
+      if (retainedTitle && retained?.snapshot().title === normalized) retained.setTitle(retainedTitle);
       for (const { view, title: previousTitle } of open) {
         if (view.chatId === row.chatId && view.chatTitle === normalized) await view.setTitle(previousTitle, false);
       }
@@ -3880,8 +3950,9 @@ export class AgentChatView extends ItemView {
     if (!confirmed) return false;
     try {
       const open = this.chatViews(row.chatId).map((view) => ({ view, transcript: view.transcript }));
-      // Detaching a native run saves its partial output; reset fences queued
-      // writes, and idle waits for physical writes already in progress.
+      // Explicit deletion cancels even a native run with no view attached and
+      // drains its final write before the note is moved to trash.
+      await nativeChatSessions(this.plugin).delete(row.chatId);
       await Promise.all(open.map(({ view }) => view.startNewChat(false)));
       await Promise.all(open.map(({ transcript }) => transcript.idle()));
       const file = this.app.vault.getAbstractFileByPath(row.chatPath);
@@ -4273,6 +4344,18 @@ export class AgentChatView extends ItemView {
     // Running state feeds the mode menu's "Applies from your next message."
     this.syncChrome();
     const rendering = workspace?.setAgentSnapshot(snapshot);
+    if (agent instanceof LocalAgentChatSession && snapshot.turnId
+      && this.activeSubmissionOperation?.turnId !== snapshot.turnId
+      && ["completed", "failed", "cancelled"].includes(snapshot.status)) {
+      const messages = this.transcript.snapshot().messages;
+      if (messages.some(message => message.message_id === `${snapshot.turnId}_assistant`)) {
+        // Reattached panes have no executeSubmission continuation to settle them.
+        const settlement = snapshot.status === "completed"
+          ? workspace?.settleCompletedRun(messages)
+          : workspace?.settleUnfinishedRun(messages);
+        void settlement?.catch(() => {});
+      }
+    }
     if (rendering && workspace) {
       void rendering.then(() => {
         if (workspace.isRenderingVisible?.() === false) return;

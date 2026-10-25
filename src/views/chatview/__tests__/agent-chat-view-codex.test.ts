@@ -8,6 +8,8 @@ function view(backend: 'codex' | 'claude' | 'systemsculpt' = 'codex') {
   return { app: { vault: { adapter: {} } }, plugin: { settings: { textExecutionBackend: backend, licenseKey: '' }, manifest: { version: 'test' } },
     agentBaseUrl: 'https://systemsculpt.com', agentMutationJournal: {}, pendingForkHistory: null,
     transcript: { snapshot: () => ({ messages: [] }) },
+    contextManager: { getPinnedFiles: () => [] },
+    createTranscript: prototype.createTranscript, bindTranscript: prototype.bindTranscript,
     shouldOfferPlan: prototype.shouldOfferPlan,
     creditsBalance: { totalRemaining: 0, availableUnreserved: 0 }, workspace: { setPlanOfferVisible: jest.fn(), setChrome: jest.fn() } } as any;
 }
@@ -16,7 +18,9 @@ it('creates native sessions for the selected backend and retains saved-chat rout
   expect(native.agent).toBeInstanceOf(CodexChatSession);
   expect(native.agent.forkHistory()).toEqual([]);
   native.pendingForkHistory = { prefix: [{ role: 'user', content: 'Earlier context', message_id: 'earlier' }] };
-  expect(native.agent.forkHistory()).toEqual(native.pendingForkHistory.prefix);
+  // A shared session must not read the creating pane's pending retry. The
+  // submitting turn supplies that prefix (covered by native-chat-lifetime).
+  expect(native.agent.forkHistory()).toEqual([]);
   native.chatExecutionBackend = 'systemsculpt';
   expect(prototype.createAgentSession.call(native)).toBeInstanceOf(AgentChatSession);
   expect(prototype.createAgentSession.call(native)).not.toBeInstanceOf(CodexChatSession);
