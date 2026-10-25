@@ -15,3 +15,14 @@
 .systemsculpt-notice-action {
   margin-top: var(--ss-space-2);
 }
+
+.systemsculpt-notice-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ss-space-2);
+  margin-top: var(--ss-space-2);
+}
+
+.systemsculpt-notice-actions > .systemsculpt-notice-action {
+  margin-top: 0;
+}

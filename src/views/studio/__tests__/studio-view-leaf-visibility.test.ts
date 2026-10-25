@@ -30,7 +30,9 @@ async function fixture(initiallyHidden = false, pendingLoad?: Promise<void>) {
     },
     offref: ({ name, callback }: { name: string; callback: () => void }) => events.get(name)?.delete(callback),
   });
-  const emit = (name: string) => { for (const callback of events.get(name) ?? []) callback(); };
+  const emit = (name: string, ...args: unknown[]) => {
+    for (const callback of events.get(name) ?? []) (callback as (...values: unknown[]) => void)(...args);
+  };
   let disk = createEmptyStudioProject({ name: "Visibility", policyPath: "p", minPluginVersion: "6", maxRuns: 10, maxArtifactsMb: 10 });
   disk.graph.layout = { mode: "manual" };
   disk.graph.nodes = definitions.map((definition, index) => ({
@@ -280,6 +282,27 @@ describe("Studio leaf visibility", () => {
       f.nativeChange();
       expect(f.view.contentEl.textContent).toContain("Other split is still live");
       expect(split.contentEl.innerHTML).toBe(before);
+    } finally { await f.close(); }
+  });
+
+  it("ends a click-armed connection once another leaf becomes active", async () => {
+    const f = await fixture();
+    try {
+      const root = f.view.contentEl;
+      const output = root.querySelector<HTMLElement>('.ss-studio-port-pin[data-port-direction="out"]:not(:disabled)')!;
+      const armed = () => output.getAttribute("aria-pressed") === "true";
+      output.click();
+      expect(armed()).toBe(true);
+      expect(root.querySelector(".ss-studio-port-pin.is-drop-target")).not.toBeNull();
+
+      // Its own leaf becoming active (the press that armed it) keeps it.
+      f.emit("active-leaf-change", f.view.leaf);
+      expect(armed()).toBe(true);
+
+      f.emit("active-leaf-change", new WorkspaceLeaf(f.view.app));
+      expect(armed()).toBe(false);
+      expect(root.querySelector(".ss-studio-port-pin.is-drop-target")).toBeNull();
+      expect(root.querySelector(".ss-studio-edge-preview")).toBeNull();
     } finally { await f.close(); }
   });
 });

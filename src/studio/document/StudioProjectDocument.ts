@@ -58,6 +58,21 @@ class StudioWriteRace extends Error {}
 class StudioOriginalCopyError extends Error {}
 
 /**
+ * The project a file's text opens as, older dialects migrated: the gate every import passes.
+ * Throws when Studio can't open it. It reads and writes nothing.
+ */
+export function readStudioProjectFile(raw: string, projectPath: string): {record: Record<string, unknown>; project: StudioProjectV1} {
+  const parsed: unknown = JSON.parse(raw);
+  assertValidStudioProjectAgentDocumentStructure(parsed);
+  // Older dialects migrate before validation: retired v1 node kinds only compile once rewritten.
+  const project = parseAndMigrateStudioProject(raw, {projectPath});
+  // Grants belong to the file's own location; an authored reference cannot select another project's policy.
+  project.permissionsRef = {...project.permissionsRef, policyPath: deriveStudioPolicyPath(projectPath)};
+  validateStudioProjectForAgentEdit(project);
+  return {record: parsed as Record<string, unknown>, project};
+}
+
+/**
  * An agent revision: the SHA-256 of the canonical document text.
  * @internal Unit-tested directly.
  */
@@ -232,15 +247,8 @@ export class StudioProjectDocument {
   private async import(raw: string): Promise<Accepted> {
     const previous = this.cache.get(this.path);
     if (previous && previous.source === raw) return previous;
-    const parsed: unknown = JSON.parse(raw);
-    assertValidStudioProjectAgentDocumentStructure(parsed);
-    // Older dialects migrate before validation: retired v1 node kinds only compile once rewritten.
-    const candidate = parseAndMigrateStudioProject(raw, {projectPath: this.path});
-    // Grants belong to the file's own location; an authored reference cannot select another project's policy.
-    candidate.permissionsRef = {...candidate.permissionsRef, policyPath: deriveStudioPolicyPath(this.path)};
-    validateStudioProjectForAgentEdit(candidate);
+    const {record, project: candidate} = readStudioProjectFile(raw, this.path);
     if (previous && previous.project.projectId !== candidate.projectId) throw new Error("The edited file belongs to another Studio project.");
-    const record = parsed as Record<string, unknown>;
     const legacy = String(record.schema ?? "").trim() !== "studio.project.v2";
     const documentState = !legacy && Object.prototype.hasOwnProperty.call(record, "document");
     const block = legacy ? null : readStudioMergeBlock(record.merge);

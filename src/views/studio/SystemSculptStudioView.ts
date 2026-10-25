@@ -465,7 +465,7 @@ export class SystemSculptStudioView extends ItemView {
 
   private detachSurfaceActivity: (() => void) | null = null;
   private detachLeafVisibility: (() => void) | null = null;
-  private detachSaveOnLeave: (() => void) | null = null;
+  private detachLeaveHandlers: (() => void) | null = null;
   /** Typing saves once it pauses; leaving Studio's focus, window or leaf saves it at once. */
   private readonly saveOnLeave = (): void => { void this.flushPendingProjectSaveWork(); };
   private leafVisible = true;
@@ -494,10 +494,15 @@ export class SystemSculptStudioView extends ItemView {
     this.detachSurfaceActivity = bindSurfaceActivity(this.contentEl);
     this.detachLeafVisibility?.();
     this.detachLeafVisibility = observeLeafVisibility(this.containerEl, this.app.workspace, visible => this.setLeafVisible(visible));
-    this.detachSaveOnLeave?.();
+    this.detachLeaveHandlers?.();
     this.contentEl.addEventListener("focusout", this.saveOnLeave);
-    const leafChange = this.app.workspace.on("active-leaf-change", leaf => { if (leaf !== this.leaf) this.saveOnLeave(); });
-    this.detachSaveOnLeave = () => {
+    const leafChange = this.app.workspace.on("active-leaf-change", leaf => {
+      if (leaf === this.leaf) return;
+      this.saveOnLeave();
+      // A connection started here ends once another leaf takes over.
+      if (this.graphInteraction.getPendingConnection()) this.graphInteraction.clearPendingConnection();
+    });
+    this.detachLeaveHandlers = () => {
       this.contentEl.removeEventListener("focusout", this.saveOnLeave);
       this.app.workspace.offref(leafChange);
     };
@@ -541,8 +546,8 @@ export class SystemSculptStudioView extends ItemView {
     this.detachSurfaceActivity = null;
     this.detachLeafVisibility?.();
     this.detachLeafVisibility = null;
-    this.detachSaveOnLeave?.();
-    this.detachSaveOnLeave = null;
+    this.detachLeaveHandlers?.();
+    this.detachLeaveHandlers = null;
     this.presentation.dispose();
     this.mediaModelPicker.dispose();
     this.shapeController.cancelDrawGesture();
