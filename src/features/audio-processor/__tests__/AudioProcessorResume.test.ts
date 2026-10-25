@@ -1,5 +1,6 @@
 /** @jest-environment jsdom */
 
+import { Component } from "obsidian";
 import type SystemSculptPlugin from "../../../main";
 import { AudioProcessorApiError } from "../AudioProcessorApiClient";
 import { getAudioProcessorAvailability } from "../AudioProcessorAvailability";
@@ -44,6 +45,17 @@ jest.mock("../AudioProcessorPanel", () => ({
 }));
 
 const mockGetAudioProcessorAvailability = getAudioProcessorAvailability as jest.Mock;
+
+/** A loaded plugin component: unloading it runs what live runs registered. */
+const loadedPlugin = (extra: Record<string, unknown>): SystemSculptPlugin => {
+  const plugin = Object.assign(new Component(), extra);
+  plugin.load();
+  return plugin as unknown as SystemSculptPlugin;
+};
+
+/** Runs still registered for unload (the Obsidian mock keeps children in `children`). */
+const registeredRuns = (plugin: SystemSculptPlugin): number =>
+  (plugin as unknown as { children: unknown[] }).children.length;
 
 const activeJob = (
   id: string,
@@ -98,17 +110,16 @@ describe("resumeAudioProcessorJobs", () => {
   });
 
   it("does nothing when startup settings do not yet contain a license key", async () => {
-    const plugin = {
-      register: jest.fn(),
+    const plugin = loadedPlugin({
       settings: {},
       getLogger: () => ({ warn: jest.fn() }),
-    } as unknown as SystemSculptPlugin;
+    });
 
     await expect(resumeAudioProcessorJobs(plugin)).resolves.toBeUndefined();
 
     expect(mockListActiveJobs).not.toHaveBeenCalled();
     expect(mockGetAudioProcessorAvailability).not.toHaveBeenCalled();
-    expect(plugin.register).not.toHaveBeenCalled();
+    expect(registeredRuns(plugin)).toBe(0);
   });
 
   it("quietly skips discovery when the server does not advertise Audio Processor", async () => {
@@ -117,11 +128,10 @@ describe("resumeAudioProcessorJobs", () => {
       canOpen: false,
       authoritative: true,
     });
-    const plugin = {
-      register: jest.fn(),
+    const plugin = loadedPlugin({
       settings: { licenseKey: "license" },
       getLogger: () => ({ warn }),
-    } as unknown as SystemSculptPlugin;
+    });
 
     await expect(resumeAudioProcessorJobs(plugin, {
       notifyOnDiscoveryFailure: true,
@@ -143,11 +153,10 @@ describe("resumeAudioProcessorJobs", () => {
       404,
       "route_not_found",
     ));
-    const plugin = {
-      register: jest.fn(),
+    const plugin = loadedPlugin({
       settings: { licenseKey: "license" },
       getLogger: () => ({ warn }),
-    } as unknown as SystemSculptPlugin;
+    });
 
     await expect(resumeAudioProcessorJobs(plugin)).resolves.toBeUndefined();
 
@@ -162,11 +171,10 @@ describe("resumeAudioProcessorJobs", () => {
       503,
       "temporarily_unavailable",
     ));
-    const plugin = {
-      register: jest.fn(),
+    const plugin = loadedPlugin({
       settings: { licenseKey: "license" },
       getLogger: () => ({ warn }),
-    } as unknown as SystemSculptPlugin;
+    });
 
     await expect(resumeAudioProcessorJobs(plugin)).resolves.toBeUndefined();
 
@@ -209,11 +217,10 @@ describe("resumeAudioProcessorJobs", () => {
         open: jest.fn(),
       };
     });
-    const plugin = {
-      register: jest.fn(),
+    const plugin = loadedPlugin({
       settings: { licenseKey: "license" },
       getLogger: () => ({ warn: jest.fn() }),
-    } as unknown as SystemSculptPlugin;
+    });
 
     const startup = resumeAudioProcessorJobs(plugin);
     const command = resumeAudioProcessorJobs(plugin, { notifyOnDiscoveryFailure: true });
@@ -240,6 +247,8 @@ describe("resumeAudioProcessorJobs", () => {
     expect(mockPanelInstances).toHaveLength(4);
     expect(mockPanelInstances.every((panel) => panel.succeed.mock.calls.length === 1)).toBe(true);
     expect(mockPanelInstances.every((panel) => panel.fail.mock.calls.length === 0)).toBe(true);
+    // Discovery and all four jobs settled, so nothing waits for unload.
+    expect(registeredRuns(plugin)).toBe(0);
   });
 
   it("limits resumable audio jobs to two concurrent recoveries", async () => {
@@ -273,11 +282,10 @@ describe("resumeAudioProcessorJobs", () => {
         };
       });
     });
-    const plugin = {
-      register: jest.fn(),
+    const plugin = loadedPlugin({
       settings: { licenseKey: "license" },
       getLogger: () => ({ warn: jest.fn() }),
-    } as unknown as SystemSculptPlugin;
+    });
 
     await resumeAudioProcessorJobs(plugin);
     await Promise.resolve();
@@ -319,11 +327,10 @@ describe("resumeAudioProcessorJobs", () => {
         options.onProgress?.({ stage: "transcribing", progress: 0.5, message: "Working" });
         return await watcher.promise;
       });
-    const plugin = {
-      register: jest.fn(),
+    const plugin = loadedPlugin({
       settings: { licenseKey: "license" },
       getLogger: () => ({ warn: jest.fn() }),
-    } as unknown as SystemSculptPlugin;
+    });
 
     await resumeAudioProcessorJobs(plugin);
 
@@ -339,6 +346,62 @@ describe("resumeAudioProcessorJobs", () => {
       notePath: "SystemSculpt/Audio Notes/audio_watcher.md",
       open: jest.fn(),
     });
+  });
+
+  it("keeps only a still-running job registered and aborts it at unload", async () => {
+    mockListActiveJobs.mockResolvedValue([
+      activeJob("audio_terminal", "succeeded", "complete", "2026-07-18T11:59:00.000Z"),
+      activeJob("audio_watcher", "processing", "transcribing", "2026-07-18T11:58:00.000Z"),
+    ]);
+    let watcherSignal: AbortSignal | undefined;
+    mockResume
+      .mockResolvedValueOnce({ jobId: "audio_terminal", notePath: "SystemSculpt/Audio Notes/audio_terminal.md", open: jest.fn() })
+      .mockImplementationOnce((_job: AudioProcessorJob, options: { signal: AbortSignal }) => {
+        watcherSignal = options.signal;
+        return new Promise((_resolve, reject) => {
+          options.signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")));
+        });
+      });
+    const plugin = loadedPlugin({
+      settings: { licenseKey: "license" },
+      getLogger: () => ({ warn: jest.fn() }),
+    });
+
+    await resumeAudioProcessorJobs(plugin);
+
+    // Discovery and the terminal job are done; the watcher is the one live run.
+    expect(registeredRuns(plugin)).toBe(1);
+    expect(watcherSignal?.aborted).toBe(false);
+
+    plugin.unload();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(watcherSignal?.aborted).toBe(true);
+    expect(mockPanelInstances[1].fail).not.toHaveBeenCalled();
+  });
+
+  it("aborts discovery when the plugin unloads first", async () => {
+    let discoverySignal: AbortSignal | undefined;
+    mockGetAudioProcessorAvailability.mockImplementationOnce((_plugin: unknown, _options: unknown, signal: AbortSignal) => {
+      discoverySignal = signal;
+      return new Promise((resolve) => {
+        signal.addEventListener("abort", () => resolve({ canOpen: true, authoritative: true }));
+      });
+    });
+    const plugin = loadedPlugin({
+      settings: { licenseKey: "license" },
+      getLogger: () => ({ warn: jest.fn() }),
+    });
+
+    const resume = resumeAudioProcessorJobs(plugin);
+    await Promise.resolve();
+    expect(registeredRuns(plugin)).toBe(1);
+    plugin.unload();
+    await resume;
+
+    expect(discoverySignal?.aborted).toBe(true);
+    expect(mockListActiveJobs).not.toHaveBeenCalled();
   });
 });
 

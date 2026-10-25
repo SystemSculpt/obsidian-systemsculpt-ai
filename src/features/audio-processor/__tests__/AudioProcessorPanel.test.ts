@@ -1,8 +1,20 @@
 /** @jest-environment jsdom */
 
+import { Component } from "obsidian";
 import type SystemSculptPlugin from "../../../main";
 import { AudioProcessorPanel } from "../AudioProcessorPanel";
 import type { AudioProcessorCompletedNote } from "../types";
+
+/** A loaded plugin component: unloading it runs what live runs registered. */
+const loadedPlugin = (extra: Record<string, unknown> = {}): SystemSculptPlugin => {
+  const plugin = Object.assign(new Component(), extra);
+  plugin.load();
+  return plugin as unknown as SystemSculptPlugin;
+};
+
+/** Runs still registered for unload (the Obsidian mock keeps children in `children`). */
+const registeredRuns = (plugin: SystemSculptPlugin): number =>
+  (plugin as unknown as { children: unknown[] }).children.length;
 
 const actionButton = (label: string): HTMLButtonElement => {
   const button = Array.from(document.querySelectorAll<HTMLButtonElement>(
@@ -19,7 +31,7 @@ describe("AudioProcessorPanel", () => {
   });
 
   it("uses a preset-neutral note step in the shared progress timeline", () => {
-    const plugin = { register: jest.fn() } as unknown as SystemSculptPlugin;
+    const plugin = loadedPlugin();
 
     new AudioProcessorPanel(plugin, "audio.m4a", jest.fn());
 
@@ -29,7 +41,7 @@ describe("AudioProcessorPanel", () => {
 
   it("distinguishes cancelling an upload from stopping local observation of server work", () => {
     const onCancel = jest.fn();
-    const plugin = { register: jest.fn() } as unknown as SystemSculptPlugin;
+    const plugin = loadedPlugin();
     const panel = new AudioProcessorPanel(plugin, "audio.m4a", onCancel);
 
     panel.update({ stage: "uploading", progress: 0.2, message: "Uploading audio…" });
@@ -54,7 +66,7 @@ describe("AudioProcessorPanel", () => {
   });
 
   it("offers direct access to the note and automatically persisted transcript", async () => {
-    const plugin = { register: jest.fn() } as unknown as SystemSculptPlugin;
+    const plugin = loadedPlugin();
     const artifactOpen = jest.fn().mockResolvedValue(undefined);
     const saveArtifact = jest.fn().mockImplementation(async (kind: string) => ({
       notePath: `SystemSculpt/Audio Notes/Product sync ${kind}.md`,
@@ -84,10 +96,7 @@ describe("AudioProcessorPanel", () => {
   it("opens Credits & usage while an awaiting-funds job remains resumable", () => {
     const openCreditsBalanceModal = jest.fn().mockResolvedValue(undefined);
     const onCancel = jest.fn();
-    const plugin = {
-      register: jest.fn(),
-      openCreditsBalanceModal,
-    } as unknown as SystemSculptPlugin;
+    const plugin = loadedPlugin({ openCreditsBalanceModal });
     const panel = new AudioProcessorPanel(plugin, "Product sync", onCancel);
 
     panel.update({
@@ -114,10 +123,7 @@ describe("AudioProcessorPanel", () => {
 
   it("routes a rejected 402 to Add credits instead of a raw failure (#300)", () => {
     const openCreditsBalanceModal = jest.fn().mockResolvedValue(undefined);
-    const plugin = {
-      register: jest.fn(),
-      openCreditsBalanceModal,
-    } as unknown as SystemSculptPlugin;
+    const plugin = loadedPlugin({ openCreditsBalanceModal });
     const panel = new AudioProcessorPanel(plugin, "Product sync", jest.fn());
     const error = Object.assign(new Error("Insufficient available credits to run this request."), {
       status: 402,
@@ -135,10 +141,7 @@ describe("AudioProcessorPanel", () => {
 
   it("brings a hidden job back with Add credits when it later returns 402", () => {
     const openCreditsBalanceModal = jest.fn().mockResolvedValue(undefined);
-    const plugin = {
-      register: jest.fn(),
-      openCreditsBalanceModal,
-    } as unknown as SystemSculptPlugin;
+    const plugin = loadedPlugin({ openCreditsBalanceModal });
     const notices = jest.spyOn(console, "log").mockImplementation(() => undefined);
     const panel = new AudioProcessorPanel(plugin, "Product sync", jest.fn());
     panel.update({ stage: "transcribing", progress: 0.5, message: "Transcribing…", serverOwned: true });
@@ -163,7 +166,7 @@ describe("AudioProcessorPanel", () => {
     [true, "Audio processing is continuing on the server. You can close Obsidian and resume later."],
     [false, "This audio is still being prepared. Keep Obsidian open until server processing begins."],
   ])("says once, on Hide, whether Obsidian may close (server-owned %s)", (serverOwned, expected) => {
-    const plugin = { register: jest.fn() } as unknown as SystemSculptPlugin;
+    const plugin = loadedPlugin();
     const notices = jest.spyOn(console, "log").mockImplementation(() => undefined);
     const panel = new AudioProcessorPanel(plugin, "Product sync", jest.fn());
     panel.update({ stage: serverOwned ? "transcribing" : "uploading", progress: 0.5, message: "Working…", serverOwned });
@@ -177,7 +180,7 @@ describe("AudioProcessorPanel", () => {
     [true, "Audio note and transcript saved to SystemSculpt/Audio Notes/Product sync.md."],
     [false, "Transcript recovered to SystemSculpt/Audio Notes/Product sync — Transcript.md; primary note unavailable."],
   ])("says once where a hidden job's result went (primary note %s)", (primaryNoteAvailable, expected) => {
-    const plugin = { register: jest.fn() } as unknown as SystemSculptPlugin;
+    const plugin = loadedPlugin();
     const notices = jest.spyOn(console, "log").mockImplementation(() => undefined);
     const panel = new AudioProcessorPanel(plugin, "Product sync", jest.fn());
     panel.update({ stage: "transcribing", progress: 0.5, message: "Transcribing…", serverOwned: true });
@@ -198,20 +201,98 @@ describe("AudioProcessorPanel", () => {
   });
 
   it("does not bring a panel back after it was closed by unload", () => {
-    const register = jest.fn();
-    const plugin = { register, openCreditsBalanceModal: jest.fn() } as unknown as SystemSculptPlugin;
+    const plugin = loadedPlugin({ openCreditsBalanceModal: jest.fn() });
     const panel = new AudioProcessorPanel(plugin, "Product sync", jest.fn());
-    const unload = register.mock.calls[0][0] as () => void;
 
-    unload();
+    plugin.unload();
+    expect(document.querySelector(".systemsculpt-progress-panel")).toBeNull();
     panel.fail(Object.assign(new Error("Insufficient credits"), { status: 402, code: "insufficient_credits" }));
 
     expect(document.querySelector(".systemsculpt-progress-panel")).toBeNull();
     expect(plugin.openCreditsBalanceModal).not.toHaveBeenCalled();
   });
 
+  describe("unload registration", () => {
+    const completedNote = (): AudioProcessorCompletedNote => ({
+      jobId: "audio_job_123",
+      notePath: "SystemSculpt/Audio Notes/Product sync.md",
+      transcriptPath: "SystemSculpt/Audio Notes/Product sync — Transcript.md",
+      primaryNoteAvailable: true,
+      open: jest.fn().mockResolvedValue(undefined),
+      saveArtifact: jest.fn(),
+    });
+    const dismiss = (): void => {
+      document.querySelector<HTMLButtonElement>(".systemsculpt-progress-dismiss")!.click();
+    };
+
+    beforeEach(() => {
+      jest.spyOn(console, "log").mockImplementation(() => undefined);
+    });
+
+    it("keeps a running or still-visible result registered and releases it once dismissed", () => {
+      const plugin = loadedPlugin();
+      const panel = new AudioProcessorPanel(plugin, "Product sync", jest.fn());
+      expect(registeredRuns(plugin)).toBe(1);
+
+      panel.succeed(completedNote());
+      expect(registeredRuns(plugin)).toBe(1);
+
+      dismiss();
+      expect(registeredRuns(plugin)).toBe(0);
+    });
+
+    it("releases a hidden run as soon as it succeeds", () => {
+      const plugin = loadedPlugin();
+      const panel = new AudioProcessorPanel(plugin, "Product sync", jest.fn());
+      panel.update({ stage: "transcribing", progress: 0.5, message: "Transcribing…", serverOwned: true });
+      actionButton("Hide").click();
+      expect(registeredRuns(plugin)).toBe(1);
+
+      panel.succeed(completedNote());
+
+      expect(registeredRuns(plugin)).toBe(0);
+    });
+
+    it.each([
+      ["a plain failure", new Error("Network down")],
+      ["a cancellation", new DOMException("Stopped", "AbortError")],
+    ])("releases a hidden run after %s", (_label, error) => {
+      const plugin = loadedPlugin();
+      const panel = new AudioProcessorPanel(plugin, "Product sync", jest.fn());
+      actionButton("Hide").click();
+
+      panel.fail(error);
+
+      expect(registeredRuns(plugin)).toBe(0);
+    });
+
+    it("releases a shown failure when the user closes it", () => {
+      const plugin = loadedPlugin();
+      const panel = new AudioProcessorPanel(plugin, "Product sync", jest.fn());
+
+      panel.fail(new Error("Network down"));
+      expect(registeredRuns(plugin)).toBe(1);
+      actionButton("Close").click();
+
+      expect(registeredRuns(plugin)).toBe(0);
+    });
+
+    it("leaves nothing to run at unload after a finished run", () => {
+      const plugin = loadedPlugin();
+      const panel = new AudioProcessorPanel(plugin, "Product sync", jest.fn());
+      const close = jest.spyOn(panel, "close");
+      panel.fail(new Error("Network down"));
+      actionButton("Close").click();
+      close.mockClear();
+
+      plugin.unload();
+
+      expect(close).not.toHaveBeenCalled();
+    });
+  });
+
   it("opens an independently paid transcript without stopping active processing", async () => {
-    const plugin = { register: jest.fn() } as unknown as SystemSculptPlugin;
+    const plugin = loadedPlugin();
     const onCancel = jest.fn();
     const transcriptOpen = jest.fn().mockResolvedValue(undefined);
     let finishSave: ((value: { notePath: string; open(): Promise<void> }) => void) | undefined;
@@ -252,10 +333,7 @@ describe("AudioProcessorPanel", () => {
 
   it("keeps transcript and funding actions usable after an early-download error", async () => {
     const openCreditsBalanceModal = jest.fn().mockResolvedValue(undefined);
-    const plugin = {
-      register: jest.fn(),
-      openCreditsBalanceModal,
-    } as unknown as SystemSculptPlugin;
+    const plugin = loadedPlugin({ openCreditsBalanceModal });
     const notice = jest.spyOn(console, "log").mockImplementation(() => undefined);
     const panel = new AudioProcessorPanel(plugin, "Product sync", jest.fn());
 
@@ -283,7 +361,7 @@ describe("AudioProcessorPanel", () => {
   });
 
   it("presents a clean transcript as a completed primary note without implying a summary exists", () => {
-    const plugin = { register: jest.fn() } as unknown as SystemSculptPlugin;
+    const plugin = loadedPlugin();
     const note: AudioProcessorCompletedNote = {
       jobId: "audio_job_123",
       notePath: "SystemSculpt/Audio Notes/Product sync.md",
@@ -303,7 +381,7 @@ describe("AudioProcessorPanel", () => {
   });
 
   it("presents a transcript-only recovery without offering a missing summary note", () => {
-    const plugin = { register: jest.fn() } as unknown as SystemSculptPlugin;
+    const plugin = loadedPlugin();
     const note: AudioProcessorCompletedNote = {
       jobId: "audio_job_123",
       notePath: "SystemSculpt/Audio Notes/Product sync — Transcript.md",

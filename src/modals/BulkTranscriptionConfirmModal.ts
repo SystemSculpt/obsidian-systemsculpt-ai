@@ -5,6 +5,7 @@ import {
   OperationProgressPanel,
   type OperationProgressButton,
 } from "../core/ui/progress/OperationProgressPanel";
+import { registerRunTeardown } from "../core/plugin/lifecycle/RunTeardown";
 import { tryCopyToClipboard } from "../utils/clipboard";
 import { flashButtonResult } from "../core/ui/notifications";
 
@@ -85,6 +86,7 @@ export class BulkTranscriptionProgressWidget {
   private readonly totalFiles: number;
   private readonly onStop?: () => void;
   private readonly panel: OperationProgressPanel;
+  private readonly releaseUnload: () => void;
   private destroyed = false;
   private completedCount = 0;
   private failedCount = 0;
@@ -102,10 +104,15 @@ export class BulkTranscriptionProgressWidget {
       className: "systemsculpt-bulk-progress-widget",
       collapsible: true,
       host: options.host,
+      // Close and the auto-close after completion both end here.
+      onClose: () => {
+        this.destroyed = true;
+        this.releaseUnload();
+      },
     });
+    this.releaseUnload = registerRunTeardown(this.plugin, () => this.close());
     this.syncStatus();
     this.panel.setActions(this.buildRunningActions());
-    this.plugin.register(() => this.close());
   }
 
   updateStatus(status: string): void {
@@ -167,7 +174,6 @@ export class BulkTranscriptionProgressWidget {
 
   close(): void {
     if (this.destroyed) return;
-    this.destroyed = true;
     this.panel.close();
   }
 

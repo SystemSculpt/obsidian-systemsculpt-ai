@@ -46,6 +46,8 @@ export interface OperationProgressPanelOptions {
   metaIcon?: string;
   dismissLabel?: string;
   onDismiss?: () => void;
+  /** Called once when the panel closes, however it closes. */
+  onClose?: () => void;
   className?: string;
   steps?: OperationProgressStepDefinition[];
   host?: HTMLElement;
@@ -100,10 +102,12 @@ export class OperationProgressPanel {
   private readonly hostWindow: Window;
   private readonly stackHost: HTMLElement;
   private readonly stack: OperationProgressStack;
+  private readonly onClose?: () => void;
   private autoCloseTimer: number | null = null;
   private closed = false;
 
   constructor(options: OperationProgressPanelOptions) {
+    this.onClose = options.onClose;
     const context = resolveSurfaceDomContext(options.host);
     const { host } = context;
     this.hostWindow = context.window;
@@ -400,6 +404,7 @@ export class OperationProgressPanel {
         progressStacks.delete(this.stackHost);
       }
     }
+    this.onClose?.();
   }
 
   private applyState(state: OperationProgressState): void {

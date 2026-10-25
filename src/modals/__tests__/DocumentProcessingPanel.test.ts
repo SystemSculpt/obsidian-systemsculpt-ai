@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 
-import { Notice, TFile } from "obsidian";
+import { Component, Notice, TFile } from "obsidian";
 import { ManagedJobError } from "../../services/managed/ManagedJobClient";
 import { describeDocumentProcessingFailure, launchDocumentProcessingPanel } from "../DocumentProcessingPanel";
 import { tryCopyToClipboard } from "../../utils/clipboard";
@@ -52,7 +52,8 @@ describe("document processing panel failure actions", () => {
   });
 
   function launch() {
-    const plugin = { register: jest.fn(), openCreditsBalanceModal: jest.fn(async () => undefined) };
+    const plugin = Object.assign(new Component(), { openCreditsBalanceModal: jest.fn(async () => undefined) });
+    plugin.load();
     const file = new TFile({ path: "Docs/report.pdf", name: "report.pdf", stat: { size: 2048 } });
     const panel = launchDocumentProcessingPanel({ plugin: plugin as never, file });
     return { panel, plugin, file };
@@ -87,6 +88,62 @@ describe("document processing panel failure actions", () => {
     const hidden = launch();
     document.querySelector<HTMLButtonElement>('[data-testid="document.progress.hide"]')!.click();
     expect(hidden.panel.markFailure({ error: { code: "document_processing_failed" }, file: hidden.file })).toBe(false);
+    document.body.empty();
+
+    // The header's own dismiss hides the panel the same way.
+    const dismissed = launch();
+    document.querySelector<HTMLButtonElement>(".systemsculpt-progress-dismiss")!.click();
+    expect(dismissed.panel.markFailure({ error: { code: "document_processing_failed" }, file: dismissed.file })).toBe(false);
+  });
+
+  describe("unload registration", () => {
+    const registeredRuns = (plugin: Component): number =>
+      (plugin as unknown as { children: unknown[] }).children.length;
+
+    it("closes a running conversion's panel when the plugin unloads", () => {
+      const { plugin } = launch();
+      expect(registeredRuns(plugin)).toBe(1);
+
+      plugin.unload();
+
+      expect(document.querySelector(".systemsculpt-progress-panel")).toBeNull();
+    });
+
+    it.each([
+      ["Hide", () => document.querySelector<HTMLButtonElement>('[data-testid="document.progress.hide"]')!.click()],
+      ["the header dismiss", () => document.querySelector<HTMLButtonElement>(".systemsculpt-progress-dismiss")!.click()],
+    ])("releases a conversion hidden with %s", (_label, hide) => {
+      const { plugin } = launch();
+
+      hide();
+
+      expect(registeredRuns(plugin)).toBe(0);
+    });
+
+    it("releases a finished conversion when its success panel closes itself", () => {
+      jest.useFakeTimers();
+      try {
+        const { panel, plugin, file } = launch();
+        panel.markSuccess({ extractionPath: "Docs/report.md", durationMs: 1200, file, openOutput: jest.fn() });
+        expect(registeredRuns(plugin)).toBe(1);
+
+        jest.advanceTimersByTime(6000);
+
+        expect(document.querySelector(".systemsculpt-progress-panel")).toBeNull();
+        expect(registeredRuns(plugin)).toBe(0);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it("releases a failed conversion when the user closes it", () => {
+      const { panel, plugin, file } = launch();
+      panel.markFailure({ error: { code: "document_processing_failed" }, file });
+
+      document.querySelector<HTMLButtonElement>('[data-testid="document.progress.close"]')!.click();
+
+      expect(registeredRuns(plugin)).toBe(0);
+    });
   });
 
   it.each([

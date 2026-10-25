@@ -1,5 +1,6 @@
 import { Notice } from "obsidian";
 import type SystemSculptPlugin from "../../main";
+import { registerRunTeardown } from "../../core/plugin/lifecycle/RunTeardown";
 import { AudioProcessorApiError } from "./AudioProcessorApiClient";
 import { getAudioProcessorAvailability } from "./AudioProcessorAvailability";
 import { AudioProcessorPanel } from "./AudioProcessorPanel";
@@ -40,17 +41,30 @@ async function runResume(
   const licenseKey = plugin.settings?.licenseKey;
   if (typeof licenseKey !== "string" || !licenseKey.trim()) return;
   const controller = new AbortController();
-  plugin.register(() => controller.abort());
-  const availability = await getAudioProcessorAvailability(plugin, {}, controller.signal);
-  if (controller.signal.aborted) return;
+  const releaseUnload = registerRunTeardown(plugin, () => controller.abort());
+  try {
+    await discoverAndResume(plugin, options, controller.signal);
+  } finally {
+    releaseUnload();
+  }
+}
+
+/** Lists the server's active jobs and resumes each under its own controller; `signal` covers discovery only. */
+async function discoverAndResume(
+  plugin: SystemSculptPlugin,
+  options: ResumeAudioProcessorOptions,
+  signal: AbortSignal,
+): Promise<void> {
+  const availability = await getAudioProcessorAvailability(plugin, {}, signal);
+  if (signal.aborted) return;
   if (availability.authoritative && !availability.canOpen) return;
 
   const service = new AudioProcessorService(plugin);
   let jobs: AudioProcessorJob[];
   try {
-    jobs = await service.listActiveJobs(controller.signal);
+    jobs = await service.listActiveJobs(signal);
   } catch (error) {
-    if (controller.signal.aborted) return;
+    if (signal.aborted) return;
     if (isExpectedAudioProcessorUnavailability(error)) return;
     plugin.getLogger().warn("Active Audio Processor job discovery failed", {
       source: "AudioProcessorResume",
@@ -69,9 +83,9 @@ async function runResume(
 
   await service.cleanupStaleStaging(
     jobs.filter((job) => job.status === "uploading").map((job) => job.id),
-    controller.signal,
+    signal,
   ).catch((error) => {
-    if (controller.signal.aborted) return;
+    if (signal.aborted) return;
     plugin.getLogger().warn("Audio Processor staging cleanup deferred", {
       source: "AudioProcessorResume",
       metadata: { error: error instanceof Error ? error.message : String(error) },
@@ -91,7 +105,7 @@ async function runResume(
     await service.clearUploadRecovery(job.id).catch(() => undefined);
   }
 
-  if (controller.signal.aborted || (watcherJobs.length === 0 && uploadJobs.length === 0)) return;
+  if (signal.aborted || (watcherJobs.length === 0 && uploadJobs.length === 0)) return;
   const background = runWithConcurrencyLimit(
     [...uploadJobs.map((job) => ({ kind: "upload" as const, job })), ...watcherJobs.map((job) => ({ kind: "watch" as const, job }))],
     RESUME_CONCURRENCY,
@@ -137,7 +151,7 @@ async function resumeJob(
   kind: "upload" | "watch",
 ): Promise<void> {
   const jobController = new AbortController();
-  plugin.register(() => jobController.abort());
+  const releaseUnload = registerRunTeardown(plugin, () => jobController.abort());
   let userCancelled = false;
   const panel = new AudioProcessorPanel(
     plugin,
@@ -158,6 +172,8 @@ async function resumeJob(
     panel.succeed(note);
   } catch (error) {
     if (userCancelled || !jobController.signal.aborted) panel.fail(error);
+  } finally {
+    releaseUnload();
   }
 }
 

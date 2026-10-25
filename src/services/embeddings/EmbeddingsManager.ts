@@ -433,15 +433,6 @@ export class EmbeddingsManager {
     });
   }
 
-  async retryFailedFiles(): Promise<EmbeddingsRunResult> {
-    await this.workQueue.retryFailures();
-    this.failedFiles.clear();
-    await this.clearFatalSuspension();
-    this.fatalSuspensionCode = null;
-    this.processingSuspended = false;
-    return this.processVault();
-  }
-
   async searchSimilar(query: string, limit = 20, signal?: AbortSignal): Promise<SearchResult[]> {
     await this.awaitReady();
     const prepared = String(query || "").trim();
@@ -757,10 +748,6 @@ export class EmbeddingsManager {
     }
   }
 
-  public hasAnyStoredVectors(): boolean {
-    return this.storage.size() > 0;
-  }
-
   public hasAnyEmbeddings(): boolean {
     return this.storage.getDistinctPaths().some((path) => this.getFileIndexSnapshot(path).ready);
   }
@@ -793,26 +780,6 @@ export class EmbeddingsManager {
         lastError: null,
       });
     });
-  }
-
-  async resetDatabase(): Promise<void> {
-    this.processor.cancel();
-    await this.processingMutex.runExclusive(async () => {
-      await this.storage.reset();
-      this.processingSuspended = false;
-      this.fatalSuspensionCode = null;
-      this.initialized = false;
-      this.initializationPromise = null;
-      this.failedFiles.clear();
-      this.queryCache.clear();
-      this.similarCache.clear();
-      this.gateway.activeGeneration = undefined;
-      this.gateway.metadata = undefined;
-      this.searchNamespace = null;
-      this.portableCheckpoint?.cancel();
-      this.portableCheckpoint = null;
-    });
-    await this.initialize();
   }
 
   async forceRefreshCurrentNamespace(): Promise<void> {

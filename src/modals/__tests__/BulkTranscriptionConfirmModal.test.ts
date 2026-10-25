@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { App, Notice, TFile } from "obsidian";
+import { App, Component, Notice, TFile } from "obsidian";
 import {
   BulkTranscriptionConfirmModal,
   BulkTranscriptionProgressWidget,
@@ -10,6 +10,15 @@ import { tryCopyToClipboard } from "../../utils/clipboard";
 
 jest.mock("obsidian", () => ({ ...jest.requireActual("obsidian"), Notice: jest.fn() }));
 jest.mock("../../utils/clipboard", () => ({ tryCopyToClipboard: jest.fn(async () => true) }));
+
+function loadedPlugin(): any {
+  const plugin = new Component();
+  plugin.load();
+  return plugin;
+}
+
+const registeredRuns = (plugin: Component): number =>
+  (plugin as unknown as { children: unknown[] }).children.length;
 
 function createPendingFiles() {
   return [
@@ -83,7 +92,7 @@ describe("BulkTranscriptionConfirmModal", () => {
   });
 
   it("uses a semantic minimize button and live progress status", () => {
-    const plugin = { register: jest.fn() } as any;
+    const plugin = loadedPlugin();
     const widget = new BulkTranscriptionProgressWidget({
       plugin,
       totalFiles: 4,
@@ -111,7 +120,7 @@ describe("BulkTranscriptionConfirmModal", () => {
   });
 
   it("shows a copied error on its button and keeps the failed batch visible", async () => {
-    const widget = new BulkTranscriptionProgressWidget({ plugin: { register: jest.fn() } as any, totalFiles: 2 });
+    const widget = new BulkTranscriptionProgressWidget({ plugin: loadedPlugin(), totalFiles: 2 });
     widget.markFailed({ status: "Transcription stopped", detailLines: ["second.mp3: Upload failed"], copyText: "second.mp3: Upload failed" });
     const copy = document.querySelector<HTMLButtonElement>('[data-testid="bulk-transcribe.progress.copy-error"]')!;
 
@@ -124,5 +133,33 @@ describe("BulkTranscriptionConfirmModal", () => {
     expect(document.body.textContent).toContain("second.mp3: Upload failed");
     expect(Notice).not.toHaveBeenCalled();
     widget.close();
+  });
+
+  it("closes a running batch's widget when the plugin unloads", () => {
+    const plugin = loadedPlugin();
+    new BulkTranscriptionProgressWidget({ plugin, totalFiles: 2 });
+    expect(registeredRuns(plugin)).toBe(1);
+
+    plugin.unload();
+
+    expect(document.querySelector(".systemsculpt-bulk-progress-widget")).toBeNull();
+  });
+
+  it("releases a finished batch once its widget closes itself or is closed", () => {
+    jest.useFakeTimers();
+    try {
+      const completed = loadedPlugin();
+      new BulkTranscriptionProgressWidget({ plugin: completed, totalFiles: 1 }).markComplete();
+      expect(registeredRuns(completed)).toBe(1);
+      jest.advanceTimersByTime(5000);
+      expect(registeredRuns(completed)).toBe(0);
+
+      const failed = loadedPlugin();
+      new BulkTranscriptionProgressWidget({ plugin: failed, totalFiles: 1 }).markFailed({ status: "Transcription stopped" });
+      document.querySelector<HTMLButtonElement>('[data-testid="bulk-transcribe.progress.close"]')!.click();
+      expect(registeredRuns(failed)).toBe(0);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });
