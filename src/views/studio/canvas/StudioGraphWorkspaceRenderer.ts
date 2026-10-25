@@ -135,6 +135,8 @@ function studioNodeContentSignature(
     inboundEdges,
     outputs,
     mediaSrc: media ? options.resolveAssetPreviewSrc?.(media.path) ?? null : null,
+    // The selected model decides which inputs a media card offers; its catalog can load later.
+    mediaInputPlan: options.resolveMediaNodeInputPlan?.(node) ?? null,
     nodeDetailMode: options.nodeDetailMode,
     editing: studioNodeIsEditing(node.id, options),
   });

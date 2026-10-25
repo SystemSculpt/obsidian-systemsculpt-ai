@@ -199,7 +199,7 @@ describe("persistent Studio graph workspace", () => {
     initial.root.remove();
   });
 
-  it("locks a focused card only once focus leaves it", () => {
+  it("locks a focused card only once focus leaves it", async () => {
     const initial = options(project([node("typing")]));
     document.body.appendChild(initial.root);
     const handle = renderStudioGraphWorkspace(initial);
@@ -212,10 +212,31 @@ describe("persistent Studio graph workspace", () => {
     expect(title.disabled).toBe(false);
     expect(document.activeElement).toBe(title);
 
+    // Focus leaving the card refreshes it on its own.
     title.blur();
-    expect(handle.refresh(running)).toBe(true);
+    await Promise.resolve();
     expect(initial.root.querySelector('[data-node-id="typing"]')).toBe(typing);
     expect(title.disabled).toBe(true);
+    initial.root.remove();
+  });
+
+  it("remounts a media card when its model catalog arrives and changes the inputs it offers", () => {
+    let hidden: string[] = [];
+    const video = { ...node("video"), kind: "studio.video_generation" };
+    const withPlan = (base: StudioGraphWorkspaceRendererOptions): StudioGraphWorkspaceRendererOptions => ({
+      ...base,
+      resolveMediaNodeInputPlan: () => ({ kind: "video", modelId: "m", model: null, hiddenInputPortIds: [...hidden], inputPortNotes: {}, hiddenFieldKeys: [] }),
+    });
+    const initial = withPlan(options(project([video])));
+    document.body.appendChild(initial.root);
+    const handle = renderStudioGraphWorkspace(initial);
+    const first = initial.root.querySelector('[data-node-id="video"]');
+    expect(handle.refresh({ ...withPlan(options(initial.currentProject!)), root: initial.root })).toBe(true);
+    expect(initial.root.querySelector('[data-node-id="video"]')).toBe(first);
+
+    hidden = ["image"];
+    expect(handle.refresh({ ...withPlan(options(initial.currentProject!)), root: initial.root })).toBe(true);
+    expect(initial.root.querySelector('[data-node-id="video"]')).not.toBe(first);
     initial.root.remove();
   });
 });

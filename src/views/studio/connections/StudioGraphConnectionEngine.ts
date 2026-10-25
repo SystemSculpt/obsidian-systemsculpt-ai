@@ -46,6 +46,7 @@ export class StudioGraphConnectionEngine {
   // measurement instead of dropping the edge.
   private readonly portOffsetCache = new Map<string, StudioPortLocalOffset>();
   private reuseMeasuredPortOffsets = false;
+  private portOffsetsMeasuredForDrag = false;
   private settingEdges = false;
 
   constructor(private readonly host: Host) {
@@ -213,8 +214,10 @@ export class StudioGraphConnectionEngine {
 
   /**
    * `translating` marks a drag frame: cards only moved, so the edges, the pin
-   * states and each pin's offset inside its card are unchanged, and the frame
-   * reuses the measured offsets instead of reading layout.
+   * states and each pin's offset inside its card are unchanged. The first such
+   * frame after a full render measures (a card may have grown since, say an
+   * image loaded); the rest of the drag reuses those offsets instead of
+   * reading layout.
    */
   renderEdgeLayer(options?: { translating?: boolean }): void {
     const project = this.host.getCurrentProject();
@@ -224,14 +227,16 @@ export class StudioGraphConnectionEngine {
       return;
     }
     if (options?.translating) {
-      this.reuseMeasuredPortOffsets = true;
+      this.reuseMeasuredPortOffsets = this.portOffsetsMeasuredForDrag;
       try {
         this.renderer?.render();
       } finally {
         this.reuseMeasuredPortOffsets = false;
       }
+      this.portOffsetsMeasuredForDrag = true;
       return;
     }
+    this.portOffsetsMeasuredForDrag = false;
     // The render below draws the new edges; the store's listener needn't draw them first.
     this.settingEdges = true;
     try {

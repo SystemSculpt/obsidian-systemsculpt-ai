@@ -7,7 +7,7 @@ function rect(left: number, top: number, width: number, height: number): DOMRect
   return { left, top, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON: () => ({}) } as DOMRect;
 }
 
-it("measures pins on a full edge render and reuses those offsets on drag frames", () => {
+it("measures pins on a full render and on a drag's first frame, then reuses those offsets for the drag", () => {
   const project = {
     graph: {
       nodes: [
@@ -53,12 +53,22 @@ it("measures pins on a full edge render and reuses those offsets on drag frames"
   expect(line().startsWith("M 280 100")).toBe(true);
   expect(source.classList.contains("is-linked")).toBe(true);
 
-  // A drag frame: node A moved; nothing is measured and the cable follows.
+  // The card grew after that render (an image loaded): its pin moved down 20 px.
+  source.getBoundingClientRect = () => { reads += 1; return rect(275, 115, 10, 10); };
+  // The first drag frame measures once, so the cable lands on the moved pin.
+  reads = 0;
+  project.graph.nodes[0].position = { x: 20, y: 10 };
+  engine.renderEdgeLayer({ translating: true });
+  expect(reads).toBe(4);
+  expect(line().startsWith("M 300 130")).toBe(true);
+
+  // Later drag frames: node A moved again; nothing is measured and the cable follows.
   reads = 0;
   project.graph.nodes[0].position = { x: 40, y: 30 };
   engine.renderEdgeLayer({ translating: true });
+  engine.renderEdgeLayer({ translating: true });
   expect(reads).toBe(0);
-  expect(line().startsWith("M 320 130")).toBe(true);
+  expect(line().startsWith("M 320 150")).toBe(true);
 
   // The next full render measures again.
   engine.renderEdgeLayer();
