@@ -60,7 +60,10 @@ npm run check:compat
 - test:integration imports the production artifact in the Obsidian host mock.
   It also drives the credential-free thin-agent endurance fixture through the
   real headless Chat, native transport, approval, mutation-journal, reconnect,
-  and terminal seams.
+  and terminal seams, and unloads and reloads the artifact in place as an
+  update does: every window and document listener, timer, observer and
+  workspace, vault and metadataCache event ref returns to its count before
+  load, and the first instance must be collected.
 - check:plugin adds source and test types, mobile, sync, artifact, and release
   guards.
 - test:chatview:critical uses strict console, randomized test order with a
