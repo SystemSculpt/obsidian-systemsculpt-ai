@@ -49,3 +49,34 @@ export function nativeToolPath(path: string, workingDirectory: string, vaultRoot
   const fromHome = home && comparableNativePath(target).startsWith(comparableNativePath(`${home}/`)) ? `~/${target.slice(home.length + 1)}` : target;
   return { displayPath: `${fromHome} (outside vault)`, vaultPath: null };
 }
+
+const NATIVE_ROOT_ONLY = /^(?:[A-Za-z]:\/|\/\/?)$/u;
+
+/**
+ * Rewrite absolute directory prefixes in free text (native tool output,
+ * commands, messages) to portable spellings, longest directory first. A prefix
+ * matches only as a whole path: where a path can start, and followed by a
+ * separator, a line break, a quote or the end of the text. A sibling such as
+ * "Vault 2" never reads as "Vault", and a prefix inside another path stays.
+ */
+export function nativePathPrefixRewriter(prefixes: Iterable<readonly [directory: string, replacement: string]>): (text: string) => string {
+  const replacements = new Map<string, { directory: string; replacement: string }>();
+  for (const [value, replacement] of prefixes) {
+    if (!isAbsoluteNativePath(value) || value.includes("\0")) continue;
+    const directory = normalizedNativePath(value);
+    const key = comparableNativePath(directory);
+    if (!NATIVE_ROOT_ONLY.test(directory) && !replacements.has(key)) replacements.set(key, { directory, replacement });
+  }
+  if (!replacements.size) return (text) => text;
+  const patterns = [...replacements.values()].sort((a, b) => b.directory.length - a.directory.length)
+    .map(({ directory }) => /^[A-Za-z]:|^\/\//u.test(directory)
+      ? [...directory].map((character, index) => character === "/" ? "[\\\\/]"
+        : index === 0 && /[A-Za-z]/u.test(character) ? `[${character.toLowerCase()}${character.toUpperCase()}]`
+          : character.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")).join("")
+      : directory.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"));
+  const pattern = new RegExp(`(^|[\\s"'\`=:(\\[{<>,;|&])(${patterns.join("|")})(?=[\\\\/\\r\\n\\t"'\`]|$)`, "gu");
+  return (text) => text.replace(pattern, (match: string, before: string, directory: string) => {
+    const replacement = replacements.get(comparableNativePath(normalizedNativePath(directory)))?.replacement;
+    return replacement === undefined ? match : before + replacement;
+  });
+}

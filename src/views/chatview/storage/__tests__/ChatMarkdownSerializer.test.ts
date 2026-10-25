@@ -161,6 +161,68 @@ describe("ChatMarkdownSerializer", () => {
       expect(ChatMarkdownSerializer.serializeMessages(reloaded?.messages ?? [])).toBe(serialized);
     });
 
+    it("stores native tool text without the vault's absolute path or the home folder", () => {
+      const root = "/Users/alex/Demo Vaults/Vale Studio";
+      const created = `${root}/Reviews/2026-10-24 Weekly review.md`;
+      const write: any = {
+        id: "native-write", messageId: "native-message", timestamp: 1, state: "completed", executedOn: "server",
+        native: { agent: "claude", workingDirectory: root, vaultRoot: root, vaultRootAlias: "/Volumes/Data/Vale Studio", homeDirectory: "/Users/alex",
+          description: `Claude wants to create ${created}` },
+        request: { id: "native-write", type: "function", function: { name: "Write", arguments: JSON.stringify({ file_path: created, content: "# Weekly review" }) } },
+        result: { success: true, data: { data: `File created successfully at: ${created} (file state is current in your context)`,
+          summary: `File created successfully at: ${created} (file state is current in your context)` } },
+      };
+      const bash: any = {
+        ...write, id: "native-bash",
+        request: { id: "native-bash", type: "function", function: { name: "Bash", arguments: JSON.stringify({
+          command: `ls "${root}/Daily" && cat /Volumes/Data/Vale Studio/Daily/2026-10-24.md`, description: "List daily notes" }) } },
+        result: { success: false, data: { data: [{ type: "text", text: `${root}/Daily/2026-10-24.md\n/Users/alex/.claude/settings.json` }] },
+          error: { code: "NATIVE_TOOL_FAILED", message: `cat: ${root}/Daily/missing.md: No such file` } },
+      };
+      const live = JSON.stringify([write, bash]);
+      const message: ChatMessage = { role: "assistant", message_id: "native-message", content: "",
+        messageParts: [write, bash].map((data, index) => ({ id: data.id, type: "tool_call" as const, data, timestamp: index + 1 })) };
+      const serialized = ChatMarkdownSerializer.serializeMessages([message]);
+      expect(serialized).not.toContain("alex");
+      expect(serialized).not.toContain("/Volumes");
+      expect(JSON.stringify([write, bash])).toBe(live);
+
+      const [savedWrite, savedBash] = ChatMarkdownSerializer.readBack([message])![0].tool_calls!;
+      expect(savedWrite.native).toEqual({ agent: "claude", workingDirectory: ".", vaultRoot: ".",
+        description: "Claude wants to create ./Reviews/2026-10-24 Weekly review.md" });
+      expect(JSON.parse(savedWrite.request.function.arguments).file_path).toBe("Reviews/2026-10-24 Weekly review.md");
+      expect(savedWrite.result?.data).toEqual({
+        data: "File created successfully at: ./Reviews/2026-10-24 Weekly review.md (file state is current in your context)",
+        summary: "File created successfully at: ./Reviews/2026-10-24 Weekly review.md (file state is current in your context)",
+      });
+      expect(JSON.parse(savedBash.request.function.arguments)).toEqual({ command: 'ls "./Daily" && cat ./Daily/2026-10-24.md', description: "List daily notes" });
+      expect(savedBash.result).toEqual({ success: false,
+        data: { data: [{ type: "text", text: "./Daily/2026-10-24.md\n~/.claude/settings.json" }] },
+        error: { code: "NATIVE_TOOL_FAILED", message: "cat: ./Daily/missing.md: No such file" } });
+
+      const reloaded = ChatMarkdownSerializer.parseMarkdown(`---\nid: portable-text\n---\n\n${serialized}`);
+      expect(ChatMarkdownSerializer.serializeMessages(reloaded?.messages ?? [])).toBe(serialized);
+    });
+
+    it.each([
+      ["C:\\Users\\alex\\Vault\\Notes", "C:\\Users\\alex\\Vault", "C:\\Users\\alex",
+        "C:\\Users\\alex\\Vault\\Notes\\Plan.md C:\\Users\\alex\\Vault\\Other.md C:\\Users\\alex\\Vault", ".\\Plan.md ..\\Other.md .."],
+      ["/vault/Notes", "/vault", undefined, "/vault/Notes/Plan.md /vault/Other.md /vault-copy/Plan.md /vault", "./Plan.md ../Other.md /vault-copy/Plan.md .."],
+      ["/elsewhere", "/vault", "/home/alex", "/vault/Plan.md /elsewhere/Plan.md /home/alex/Plan.md", "/vault/Plan.md /elsewhere/Plan.md ~/Plan.md"],
+    ])("spells Codex output paths from the saved working directory %s", (cwd, root, home, output, saved) => {
+      const tool: any = {
+        id: "codex-command", state: "completed",
+        native: { agent: "codex", workingDirectory: cwd, vaultRoot: root, ...(home ? { homeDirectory: home } : {}) },
+        request: { id: "codex-command", type: "function", function: { name: "commandExecution", arguments: JSON.stringify({ command: "ls" }) } },
+        result: { success: true, data: { data: output, summary: output } },
+      };
+      const restored = ChatMarkdownSerializer.readBack([{
+        role: "assistant", message_id: "codex", content: "",
+        messageParts: [{ id: "codex", type: "tool_call", data: tool, timestamp: 1 }],
+      }])?.[0].tool_calls?.[0];
+      expect(restored?.result?.data).toEqual({ data: saved, summary: saved });
+    });
+
     it("keeps Codex rename destinations portable with their source paths", () => {
       const tool: any = {
         id: "rename", state: "completed",
