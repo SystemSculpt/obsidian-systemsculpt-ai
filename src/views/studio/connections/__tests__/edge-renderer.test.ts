@@ -17,7 +17,7 @@ describe("StudioEdgeRenderer", () => {
     const renderer = new StudioEdgeRenderer({
       store,
       layer,
-      resolvePortAnchorPoint: (_anchor, direction) =>
+      createPortAnchorResolver: () => (_anchor, direction) =>
         direction === "out" ? { x: 100, y: 100 } : { x: 400, y: 260 },
       getCursorAnchorPoint: () => null,
     });
@@ -52,7 +52,7 @@ describe("StudioEdgeRenderer", () => {
     const renderer = new StudioEdgeRenderer({
       store,
       layer,
-      resolvePortAnchorPoint: (_anchor, direction) =>
+      createPortAnchorResolver: () => (_anchor, direction) =>
         direction === "out" ? { x: 0, y: 0 } : { x: 100, y: 100 },
       getCursorAnchorPoint: () => null,
       resolveEdgeActivity: () => phase,
@@ -80,7 +80,7 @@ describe("StudioEdgeRenderer", () => {
     const renderer = new StudioEdgeRenderer({
       store,
       layer,
-      resolvePortAnchorPoint: (_anchor, direction) =>
+      createPortAnchorResolver: () => (_anchor, direction) =>
         direction === "out" ? { x: 40, y: 50 } : { x: 200, y: 160 },
       getCursorAnchorPoint: () => null,
     });
@@ -99,7 +99,7 @@ describe("StudioEdgeRenderer", () => {
     const renderer = new StudioEdgeRenderer({
       store,
       layer,
-      resolvePortAnchorPoint: () => ({ x: 0, y: 0 }),
+      createPortAnchorResolver: () => () => ({ x: 0, y: 0 }),
       getCursorAnchorPoint: () => null,
     });
 
@@ -118,7 +118,7 @@ describe("StudioEdgeRenderer", () => {
     const renderer = new StudioEdgeRenderer({
       store,
       layer,
-      resolvePortAnchorPoint: (_anchor, direction) => (direction === "in" ? null : { x: 1, y: 1 }),
+      createPortAnchorResolver: () => (_anchor, direction) => (direction === "in" ? null : { x: 1, y: 1 }),
       getCursorAnchorPoint: () => null,
     });
 
@@ -133,7 +133,7 @@ describe("StudioEdgeRenderer", () => {
     const renderer = new StudioEdgeRenderer({
       store,
       layer,
-      resolvePortAnchorPoint: () => ({ x: 10, y: 10 }),
+      createPortAnchorResolver: () => () => ({ x: 10, y: 10 }),
       getCursorAnchorPoint: () => ({ x: 200, y: 200 }),
     });
 
@@ -155,5 +155,47 @@ describe("StudioEdgeRenderer", () => {
     store.setDragState(null);
     renderer.render();
     expect(layer.querySelector(".ss-studio-edge-preview")).toBeNull();
+  });
+
+  it("resolves every anchor before writing any path and leaves unchanged paths untouched", () => {
+    const store = new StudioLinkStore();
+    const layer = makeLayer();
+    const log: string[] = [];
+    const targets: Record<string, { x: number; y: number }> = { b: { x: 300, y: 200 }, c: { x: 300, y: 400 } };
+    const renderer = new StudioEdgeRenderer({
+      store,
+      layer,
+      createPortAnchorResolver: () => (anchor, direction) => {
+        log.push(`read:${anchor.nodeId}`);
+        return direction === "out" ? { x: 0, y: 0 } : targets[anchor.nodeId];
+      },
+      getCursorAnchorPoint: () => null,
+    });
+    store.setEdges([edge("e1"), { id: "e2", source: { nodeId: "a", portId: "out" }, target: { nodeId: "c", portId: "in" } }]);
+    const original = Element.prototype.setAttribute;
+    const setAttribute = jest.spyOn(Element.prototype, "setAttribute").mockImplementation(function (this: Element, name: string, value: string) {
+      if (name === "d") log.push(`write:${(this.parentNode as SVGGElement | null)?.dataset?.edgeId ?? "new"}`);
+      original.call(this, name, value);
+    });
+    try {
+      renderer.render();
+      const firstWrite = log.findIndex(entry => entry.startsWith("write:"));
+      expect(firstWrite).toBeGreaterThan(0);
+      expect(log.slice(firstWrite).some(entry => entry.startsWith("read:"))).toBe(false);
+
+      log.length = 0;
+      renderer.render();
+      expect(log.filter(entry => entry.startsWith("write:"))).toEqual([]);
+
+      log.length = 0;
+      targets.c = { x: 320, y: 420 };
+      renderer.render();
+      // Only the edge whose geometry moved is rewritten: four lines and its arrow.
+      expect(log.filter(entry => entry.startsWith("write:"))).toEqual(Array(5).fill("write:e2"));
+    } finally {
+      setAttribute.mockRestore();
+    }
+    const line = layer.querySelector('.ss-studio-edge-line[data-edge-id="e2"]');
+    expect(line?.getAttribute("d")?.startsWith("M 0 0")).toBe(true);
   });
 });

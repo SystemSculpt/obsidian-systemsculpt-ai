@@ -102,6 +102,12 @@ export class StudioPortInteraction {
     return this.ports.get(portKey(nodeId, direction, portId))?.element ?? null;
   }
 
+  forEachPortElement(
+    visit: (nodeId: string, direction: PortDirection, portId: string, element: HTMLElement) => void
+  ): void {
+    for (const { nodeId, direction, portId, element } of this.ports.values()) visit(nodeId, direction, portId, element);
+  }
+
   clearPortElements(): void {
     this.resetPortVisualState();
     this.ports.clear();

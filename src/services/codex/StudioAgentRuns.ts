@@ -29,6 +29,8 @@ const MAX_ACTIVE = 8, MAX_PENDING = 100;
  * board then says it shows only the newest runs.
  */
 export const MAX_LOADED_AGENT_RUNS = 1000;
+/** Saves after a state change; streamed text and activity wait longer, so a long turn isn't rewritten per delta. */
+const STATE_SAVE_DELAY_MS = 400, STREAM_SAVE_DELAY_MS = 5000;
 const tools: CodexJson[] = [
   {type: 'function', name: 'studio_read_document', description: 'Read this canvas and its revision for scoped concurrent edits. Use this and studio_edit_document instead of replacing the file.', inputSchema: {type: 'object', properties: {}, additionalProperties: false}},
   {type: 'function', name: 'studio_edit_document', description: 'Apply a batch to this canvas using heads from studio_read_document. Edits use kind set/create/delete/restore, entityId, optional path string array, value, remove. Changes since that read merge by field; a batch that conflicts with a later change to the same field is rejected, so read again. Deletion prevents stale resurrection.', inputSchema: {type: 'object', properties: {heads: {type: 'array', items: {type: 'string'}}, edits: {type: 'array', items: {type: 'object', properties: {kind: {type: 'string', enum: ['set','create','delete','restore']}, entityId: {type: 'string'}, path: {type: 'array', items: {type: 'string'}}, value: {}, remove: {type: 'boolean'}}, required: ['kind','entityId'], additionalProperties: false}}}, required: ['heads','edits'], additionalProperties: false}},
@@ -52,7 +54,7 @@ export class StudioAgentRuns {
   private readonly older = new Map<string, { before: string; remaining: number }>();
   /** Projects whose older loaded runs were evicted to keep the cache bounded. */
   private readonly capped = new Set<string>();
-  private readonly timers = new Map<string, number>();
+  private readonly timers = new Map<string, { timer: number; due: number }>();
   private readonly delivering = new Set<string>();
   private readonly notificationTimers = new Map<string, number>();
   private readonly tasks = new Set<Promise<void>>();
@@ -221,14 +223,14 @@ export class StudioAgentRuns {
             for (const pending of record.messages.filter(item => item.to === record.id && item.status === 'pending')) void this.deliver(record, pending).catch(() => {});
           },
           log: text => { if (text.startsWith('Connected to')) { record.currentActivity = 'Starting native turn'; this.changed(record); } },
-          text: text => { record.result = text.slice(-64_000); this.changed(record); },
+          text: text => { record.result = text.slice(-64_000); this.changed(record, 'stream'); },
           activity: activity => {
             const existing = record.activity.findIndex(item => item.id === activity.id);
             const projected = { ...activity, detail: activity.detail.slice(-2000) };
             if (existing >= 0) record.activity[existing] = projected; else record.activity.push(projected);
             record.activity = record.activity.slice(-40);
             if (activity.kind !== 'message' || activity.detail) record.currentActivity = activity.kind === 'message' ? activity.detail.replace(/\s+/g, ' ').slice(0, 180) : activity.title;
-            this.changed(record);
+            this.changed(record, 'stream');
           },
           request: (method, params, signal) => method === 'item/tool/call' ? this.tool(record, params, control.controller.signal) : this.waitForReview(record, control, method, params, signal),
         });
@@ -511,22 +513,28 @@ export class StudioAgentRuns {
     }
   }
   private emit(projectId: string): void { for (const listener of this.listeners) { try { listener(projectId); } catch (error) { this.plugin.getLogger().error('Run presentation failed', error); } } }
-  private changed(record: StudioAgentRun): void {
+  private changed(record: StudioAgentRun, kind: 'state' | 'stream' = 'state'): void {
     record.updatedAt = new Date().toISOString();
     while (record.messages.length > 100 || record.messages.reduce((total, item) => total + item.text.length, 0) > 48_000) {
       const removable = record.messages.findIndex(item => item.status !== 'pending'); if (removable < 0) break; record.messages.splice(removable, 1);
     }
     if (this.disposed) return;
     if (!this.notificationTimers.has(record.projectId)) this.notificationTimers.set(record.projectId, window.setTimeout(() => { this.notificationTimers.delete(record.projectId); this.emit(record.projectId); }, 80));
-    if (!this.timers.has(record.id)) this.timers.set(record.id, window.setTimeout(() => { this.timers.delete(record.id); void this.persist(record).catch(() => {}); }, 400));
+    const due = Date.now() + (kind === 'stream' ? STREAM_SAVE_DELAY_MS : STATE_SAVE_DELAY_MS), pending = this.timers.get(record.id);
+    if (pending && pending.due <= due) return;
+    if (pending) window.clearTimeout(pending.timer);
+    this.timers.set(record.id, { due, timer: window.setTimeout(() => { this.timers.delete(record.id); void this.persist(record).catch(() => {}); }, due - Date.now()) });
   }
   private async persist(record: StudioAgentRun): Promise<void> {
+    // The write serializes the record now, so it covers any save still scheduled.
+    const pending = this.timers.get(record.id);
+    if (pending) { window.clearTimeout(pending.timer); this.timers.delete(record.id); }
     try { await this.store.write(record); delete record.persistenceError; }
     catch (error) { record.persistenceError = error instanceof Error ? error.message : 'Could not save this run.'; this.emit(record.projectId); throw error; }
   }
   async dispose(): Promise<void> {
     this.disposed = true;
-    for (const timer of this.timers.values()) window.clearTimeout(timer); this.timers.clear();
+    for (const { timer } of this.timers.values()) window.clearTimeout(timer); this.timers.clear();
     for (const [id, control] of this.controls) {
       control.controller.abort(); const record = this.records.get(id)!; record.status = 'interrupted'; record.currentActivity = 'Obsidian session ended';
       control.reject(new Error('Obsidian session ended.')); await this.persist(record).catch(() => {});

@@ -5,13 +5,14 @@ import type { StudioGraphInteractionEngine } from "../StudioGraphInteractionEngi
 import { createStudioAction } from "../StudioAction";
 import type { StudioNodeActivity } from "../activity/StudioActivity";
 import { renderStudioActivityBadge } from "../activity/StudioActivityBadge";
+import { lockStudioControl, type StudioCardLockState } from "./StudioCardLock";
 
 export function renderNodeHeader(options: {
   nodeEl: HTMLElement;
   node: StudioNodeInstance;
-  interactionLocked: boolean;
+  interactionLocked: StudioCardLockState;
   runUnavailableReason?: string;
-  runLocked?: boolean;
+  runLocked?: StudioCardLockState;
   /** Panel surfaces expose their definition through one header toggle. */
   sourceToggle?: { isActive: () => boolean; onToggle: () => void };
   onNodeTitleInput: (node: StudioNodeInstance, title: string) => void;
@@ -38,13 +39,13 @@ export function renderNodeHeader(options: {
     cls: "ss-studio-node-title-input",
   });
   titleInput.value = node.title;
-  titleInput.disabled = interactionLocked || node.kind === "studio.image_generation";
+  lockStudioControl(interactionLocked, titleInput, node.kind === "studio.image_generation");
   titleInput.addEventListener("input", (event) => {
     onNodeTitleInput(node, (event.target as HTMLInputElement).value);
   });
 
   const isVisualOnlyNode = isStudioVisualOnlyNodeKind(node.kind);
-  if (!["studio.button", "studio.command_center"].includes(node.kind) && !isStudioRetiredNodeKind(node.kind)) createStudioAction(header, {
+  if (!["studio.button", "studio.command_center"].includes(node.kind) && !isStudioRetiredNodeKind(node.kind)) lockStudioControl(options.runLocked ?? interactionLocked, createStudioAction(header, {
     className: "ss-studio-node-run",
     label: "Run",
     testId: "studio.node.run",
@@ -55,28 +56,26 @@ export function renderNodeHeader(options: {
       ? "Interactive node (not part of graph execution)"
       : "Run node"),
     size: "small",
-    disabled: (options.runLocked ?? interactionLocked) || isVisualOnlyNode || Boolean(options.runUnavailableReason),
     onSelect: () => {
       if (!isVisualOnlyNode && !options.runUnavailableReason) {
         onRunNode(node.id);
       }
     },
-  });
+  }), isVisualOnlyNode || Boolean(options.runUnavailableReason));
 
   if (node.kind === "studio.text_generation") {
     const outputLocked = node.config.lockOutput === true;
-    createStudioAction(header, {
+    lockStudioControl(interactionLocked, createStudioAction(header, {
       className: "ss-studio-node-copy-prompt",
       label: "Copy",
       testId: "studio.node.copy-prompt",
       ariaLabel: "Copy prompt bundle for handoff",
       title: "Copy prompt bundle for handoff",
       size: "small",
-      disabled: interactionLocked,
       onSelect: (event) => onCopyTextGenerationPromptBundle(node.id, event.currentTarget as HTMLButtonElement),
-    });
+    }));
 
-    createStudioAction(header, {
+    lockStudioControl(interactionLocked, createStudioAction(header, {
       className: "ss-studio-node-lock-output",
       label: outputLocked ? "Unlock" : "Lock",
       testId: "studio.node.lock-output",
@@ -84,9 +83,8 @@ export function renderNodeHeader(options: {
       title: outputLocked ? "Unlock text output" : "Lock text output",
       size: "small",
       selected: outputLocked,
-      disabled: interactionLocked,
       onSelect: () => onToggleTextGenerationOutputLock(node.id),
-    });
+    }));
   }
 
   let sourceToggle: HTMLButtonElement | null = null;
@@ -104,16 +102,15 @@ export function renderNodeHeader(options: {
     });
   }
 
-  createStudioAction(header, {
+  lockStudioControl(interactionLocked, createStudioAction(header, {
     className: "ss-studio-node-remove",
     label: "×",
     testId: "studio.node.remove",
     ariaLabel: "Remove node",
     title: "Remove node",
     size: "small",
-    disabled: interactionLocked,
     onSelect: () => onRemoveNode(node.id),
-  });
+  }));
   return { sourceToggle };
 }
 
@@ -141,7 +138,7 @@ export function renderNodePorts(options: {
   node: StudioNodeInstance;
   definition: StudioNodeDefinition | null;
   graphInteraction: StudioGraphInteractionEngine;
-  interactionLocked: boolean;
+  interactionLocked: StudioCardLockState;
   /** Inputs the selected model does not accept; hidden unless something is wired to them. */
   hiddenInputPortIds?: ReadonlySet<string>;
   inputPortNotes?: Readonly<Record<string, string>>;
@@ -180,13 +177,13 @@ export function renderNodePorts(options: {
       pin.dataset.nodeId = node.id;
       pin.dataset.portId = port.id;
       pin.dataset.portDirection = "in";
-      pin.disabled = interactionLocked;
+      lockStudioControl(interactionLocked, pin, savedConnectionsOnly);
       row.createSpan({
         cls: "ss-studio-port-label",
         text: `${port.id}${port.required ? "*" : ""}`,
       });
       graphInteraction.registerPortElement(node.id, "in", port.id, pin);
-      if (savedConnectionsOnly) { pin.disabled = true; continue; }
+      if (savedConnectionsOnly) continue;
       pin.addEventListener("click", (event) => {
         event.stopPropagation();
         if (!graphInteraction.getPendingConnection()) {
@@ -216,9 +213,9 @@ export function renderNodePorts(options: {
       pin.dataset.nodeId = node.id;
       pin.dataset.portId = port.id;
       pin.dataset.portDirection = "out";
-      pin.disabled = interactionLocked;
+      lockStudioControl(interactionLocked, pin, savedConnectionsOnly);
       graphInteraction.registerPortElement(node.id, "out", port.id, pin);
-      if (savedConnectionsOnly) { pin.disabled = true; continue; }
+      if (savedConnectionsOnly) continue;
       pin.addEventListener("pointerdown", (event) => {
         event.stopPropagation();
         graphInteraction.startConnectionDrag(node.id, port.id, event, pin);

@@ -14,6 +14,7 @@ function context(overrides?: Record<string, unknown>) {
     logStudioConsoleError: jest.fn(),
     activity: { refresh: jest.fn() },
     render: jest.fn(),
+    scheduleRender: jest.fn(),
     currentProjectPath: "A.systemsculpt",
     ...overrides,
   };
@@ -31,21 +32,23 @@ describe("SystemSculptStudioView run events and activity", () => {
     expect(ctx.runPresentation.applyEvent).toHaveBeenCalledTimes(4);
     expect(ctx.activity.refresh).toHaveBeenCalledTimes(4);
     expect(ctx.render).not.toHaveBeenCalled();
+    expect(ctx.scheduleRender).not.toHaveBeenCalled();
   });
 
-  it("rebuilds the canvas when the graph itself changes", () => {
+  it("rebuilds the canvas, once per frame, when the graph itself changes", () => {
     const ctx = context();
     handleRunEvent.call(ctx, { type: "run.started", runId: "r", at: AT });
     handleRunEvent.call(ctx, { type: "node.output", runId: "r", nodeId: "n1", outputRef: "ref", outputs: {}, at: AT } as StudioRunEvent);
     handleRunEvent.call(ctx, { type: "run.completed", runId: "r", status: "success", at: AT });
-    expect(ctx.render).toHaveBeenCalledTimes(3);
+    expect(ctx.scheduleRender).toHaveBeenCalledTimes(3);
+    expect(ctx.render).not.toHaveBeenCalled();
     expect(ctx.activity.refresh).not.toHaveBeenCalled();
   });
 
   it("rebuilds when a start event materializes managed placeholders", () => {
     const ctx = context({ materializeManagedOutputPlaceholders: jest.fn(() => true) });
     handleRunEvent.call(ctx, { type: "node.started", runId: "r", nodeId: "n1", at: AT });
-    expect(ctx.render).toHaveBeenCalledTimes(1);
+    expect(ctx.scheduleRender).toHaveBeenCalledTimes(1);
     expect(ctx.activity.refresh).not.toHaveBeenCalled();
   });
 });

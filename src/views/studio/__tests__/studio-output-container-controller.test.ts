@@ -3,7 +3,7 @@ import { StudioOutputContainerController } from "../StudioOutputContainerControl
 import { createEmptyStudioProject } from "../../../studio/schema";
 import { materializeImageOutputsAsMediaNodes } from "../../../studio/StudioManagedOutputNodes";
 
-it("measures only output cards, reflows growing rows, waits for drags, and cancels on disposal", () => {
+it("measures only output cards, reflows growing rows, waits for the end of a drag without polling, and cancels on disposal", () => {
   jest.useFakeTimers();
   const original = window.ResizeObserver;
   let resized = () => {};
@@ -39,7 +39,9 @@ it("measures only output cards, reflows growing rows, waits for drags, and cance
     Object.defineProperty(elements.get("n2"), "offsetHeight", { value: 500 });
     resized(); jest.advanceTimersByTime(40);
     expect(project.graph.nodes[4].position.y).toBe(268);
-    dragging = false; jest.advanceTimersByTime(40);
+    expect(jest.getTimerCount()).toBe(0);
+    // The view schedules again when the drag ends.
+    dragging = false; controller.schedule(); jest.advanceTimersByTime(40);
     expect(project.graph.nodes[4].position.y).toBe(568);
     expect(source.position).toEqual({ x: 10, y: 20 });
     const calls = positionsChanged.mock.calls.length;

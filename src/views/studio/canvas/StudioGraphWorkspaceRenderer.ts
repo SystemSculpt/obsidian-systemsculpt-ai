@@ -104,12 +104,29 @@ export type StudioGraphWorkspaceRenderResult = {
   dispose: () => void;
 };
 
+type StudioInboundEdge = { fromNodeId: string; fromPortId: string; toPortId: string };
+
+/** Every node's inbound connections, in edge order, from one pass over the edges. */
+function studioInboundEdgesByNode(project: StudioProjectV1): Map<string, StudioInboundEdge[]> {
+  const byNode = new Map<string, StudioInboundEdge[]>();
+  for (const edge of project.graph.edges) {
+    let inbound = byNode.get(edge.toNodeId);
+    if (!inbound) byNode.set(edge.toNodeId, inbound = []);
+    inbound.push({ fromNodeId: edge.fromNodeId, fromPortId: edge.fromPortId, toPortId: edge.toPortId });
+  }
+  return byNode;
+}
+
+/**
+ * What a card shows, except its geometry and the run lock: a run starting or
+ * ending patches the lock in place (see StudioCardLock).
+ */
 function studioNodeContentSignature(
   node: StudioProjectV1["graph"]["nodes"][number],
   options: StudioGraphWorkspaceRendererOptions,
+  inboundEdges: readonly StudioInboundEdge[],
 ): string {
   const { position: _position, size: _size, ...content } = node;
-  const inboundEdges = options.currentProject?.graph.edges.filter(edge => edge.toNodeId === node.id) ?? [];
   const outputs = options.getNodeRunState(node.id).outputs;
   // A preview resolves after its bytes are confirmed; the card it turns into is different content.
   const media = resolveNodeMediaPreview(node, outputs);
@@ -118,7 +135,8 @@ function studioNodeContentSignature(
     inboundEdges,
     outputs,
     mediaSrc: media ? options.resolveAssetPreviewSrc?.(media.path) ?? null : null,
-    busy: options.busy,
+    // The selected model decides which inputs a media card offers; its catalog can load later.
+    mediaInputPlan: options.resolveMediaNodeInputPlan?.(node) ?? null,
     nodeDetailMode: options.nodeDetailMode,
     editing: studioNodeIsEditing(node.id, options),
   });
@@ -131,8 +149,9 @@ function studioNodeIsEditing(nodeId: string, options: StudioGraphWorkspaceRender
 function studioNodeStructureSignature(
   node: StudioProjectV1["graph"]["nodes"][number],
   options: StudioGraphWorkspaceRendererOptions,
+  inboundEdges: readonly StudioInboundEdge[],
 ): string {
-  return studioNodeContentSignature({ ...node, title: "" }, options);
+  return studioNodeContentSignature({ ...node, title: "" }, options, inboundEdges);
 }
 
 function studioCollectionSignature(value: unknown): string {
@@ -504,28 +523,18 @@ export function renderStudioGraphWorkspace(
 
   const nodeLayer = world.createDiv({ cls: "ss-studio-nodes-layer" });
   graphInteraction.clearGraphElementMaps();
-  const inboundEdgesByNode = new Map<
-    string,
-    Array<{ fromNodeId: string; fromPortId: string; toPortId: string }>
-  >();
-  for (const edge of currentProject.graph.edges) {
-    const bucket = inboundEdgesByNode.get(edge.toNodeId) || [];
-    bucket.push({
-      fromNodeId: edge.fromNodeId,
-      fromPortId: edge.fromPortId,
-      toPortId: edge.toPortId,
-    });
-    inboundEdgesByNode.set(edge.toNodeId, bucket);
-  }
   const cardHandles = new Map<string, StudioGraphNodeCardHandle>();
   const nodeSignatures = new Map<string, string>();
   const nodeStructureSignatures = new Map<string, string>();
   const nodeEditing = new Map<string, boolean>();
+  /** The run lock each card shows. */
+  const cardBusy = new Map<string, boolean>();
   const cardEditors = new Map<string, StudioEditorRevision>();
-  const mountCard = (node: StudioProjectV1["graph"]["nodes"][number], renderOptions: StudioGraphWorkspaceRendererOptions): StudioGraphNodeCardHandle => {
-    const inboundEdges = renderOptions.currentProject!.graph.edges
-      .filter(edge => edge.toNodeId === node.id)
-      .map(edge => ({ fromNodeId: edge.fromNodeId, fromPortId: edge.fromPortId, toPortId: edge.toPortId }));
+  const mountCard = (
+    node: StudioProjectV1["graph"]["nodes"][number],
+    renderOptions: StudioGraphWorkspaceRendererOptions,
+    inboundEdges: readonly StudioInboundEdge[],
+  ): StudioGraphNodeCardHandle => {
     // The card's controls show these values; later keystrokes are relative to them.
     const editor = new StudioEditorRevision();
     editor.display("title", node.title);
@@ -548,18 +557,20 @@ export function renderStudioGraphWorkspace(
       getRelatedNodeRunState: renderOptions.getNodeRunState,
       layer: nodeLayer,
       node,
-      inboundEdges,
+      inboundEdges: [...inboundEdges],
       nodeRunState: renderOptions.getNodeRunState(node.id),
       nodeActivity: renderOptions.getNodeActivity?.(node.id),
     });
     cardHandles.set(node.id, handle);
     nodeEditing.set(node.id, studioNodeIsEditing(node.id, renderOptions));
-    nodeSignatures.set(node.id, studioNodeContentSignature(node, renderOptions));
-    nodeStructureSignatures.set(node.id, studioNodeStructureSignature(node, renderOptions));
+    cardBusy.set(node.id, renderOptions.busy);
+    nodeSignatures.set(node.id, studioNodeContentSignature(node, renderOptions, inboundEdges));
+    nodeStructureSignatures.set(node.id, studioNodeStructureSignature(node, renderOptions, inboundEdges));
     return handle;
   };
+  const initialInbound = studioInboundEdgesByNode(currentProject);
   for (const node of currentProject.graph.nodes) {
-    mountCard(node, options);
+    mountCard(node, options, initialInbound.get(node.id) ?? []);
   }
 
   graphInteraction.renderGroupLayer();
@@ -604,13 +615,16 @@ export function renderStudioGraphWorkspace(
       nodeSignatures.delete(nodeId);
       nodeStructureSignatures.delete(nodeId);
       nodeEditing.delete(nodeId);
+      cardBusy.delete(nodeId);
       graphInteraction.onNodeRemoved(nodeId);
       registrationsChanged = true;
     }
+    const inboundByNode = studioInboundEdgesByNode(project);
     for (const node of project.graph.nodes) {
+      const inboundEdges = inboundByNode.get(node.id) ?? [];
       const existing = cardHandles.get(node.id);
       if (!existing) {
-        mountCard(node, next);
+        mountCard(node, next, inboundEdges);
         registrationsChanged = true;
         continue;
       }
@@ -621,28 +635,39 @@ export function renderStudioGraphWorkspace(
         geometryChanged = geometryChanged || existing.element.style.transform !== nextTransform || existing.element.style.width !== nextWidth;
         existing.updateGeometry(node);
       }
-      const signature = studioNodeContentSignature(node, next);
-      if (nodeSignatures.get(node.id) === signature) continue;
+      const signature = studioNodeContentSignature(node, next, inboundEdges);
       // Entering or leaving an edit swaps preview for editor: remount even while focused or dragging.
       const editing = studioNodeIsEditing(node.id, next);
       const editingChanged = nodeEditing.get(node.id) !== editing;
+      const active = existing.element.ownerDocument.activeElement;
+      const focused = Boolean(active && existing.element.contains(active));
+      // A run started or ended: lock the card in place. A focused card waits
+      // until focus leaves, so typing isn't cut off. An open text editor picks
+      // its kind by the lock as it mounts, and a card without setBusy shows
+      // other nodes' run status, so those remount as before.
+      let busyPending = cardBusy.get(node.id) !== next.busy;
+      if (busyPending && existing.setBusy && !focused && (!editing || existing.syncNode)) {
+        existing.setBusy(next.busy);
+        cardBusy.set(node.id, next.busy);
+        busyPending = false;
+      }
+      if (!busyPending && nodeSignatures.get(node.id) === signature) continue;
       if (!editingChanged && existing.syncNode) {
         // An in-place editor owns its card: hand it the change (e.g. an undo) instead of remounting.
         existing.syncNode(node);
         nodeSignatures.set(node.id, signature);
-        nodeStructureSignatures.set(node.id, studioNodeStructureSignature(node, next));
+        nodeStructureSignatures.set(node.id, studioNodeStructureSignature(node, next, inboundEdges));
         continue;
       }
-      const active = existing.element.ownerDocument.activeElement;
       const titleInput = existing.element.querySelector<HTMLInputElement>(".ss-studio-node-title-input");
       if (titleInput && active !== titleInput) { titleInput.value = node.title; cardEditors.get(node.id)?.display("title", node.title); }
-      const structureSignature = studioNodeStructureSignature(node, next);
-      if (!editingChanged && nodeStructureSignatures.get(node.id) === structureSignature) {
+      const structureSignature = studioNodeStructureSignature(node, next, inboundEdges);
+      if (!editingChanged && !busyPending && nodeStructureSignatures.get(node.id) === structureSignature) {
         nodeSignatures.set(node.id, signature);
         continue;
       }
-      if (!editingChanged && ((active && existing.element.contains(active)) || preserveForGesture)) continue;
-      const replacement = mountCard(node, next);
+      if (!editingChanged && (focused || preserveForGesture)) continue;
+      const replacement = mountCard(node, next, inboundEdges);
       existing.element.replaceWith(replacement.element);
       existing.dispose();
       registrationsChanged = true;
@@ -704,6 +729,7 @@ export function renderStudioGraphWorkspace(
       nodeSignatures.clear();
       nodeStructureSignatures.clear();
       nodeEditing.clear();
+      cardBusy.clear();
     },
   };
 }

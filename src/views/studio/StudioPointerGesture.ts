@@ -10,6 +10,8 @@ export function latestStudioPointerEvent(event: PointerEvent): PointerEvent {
 /**
  * One captured pointer and one pending frame. Finishing flushes the last move;
  * disposal drops it. Both release every listener before notifying the owner.
+ * The window losing focus finishes the gesture, since its pointerup may never
+ * arrive.
  */
 export function startStudioPointerGesture(options: {
   element: HTMLElement;
@@ -49,12 +51,16 @@ export function startStudioPointerGesture(options: {
     ownerWindow.removeEventListener("pointermove", move);
     ownerWindow.removeEventListener("pointerup", finish);
     ownerWindow.removeEventListener("pointercancel", finish);
+    ownerWindow.removeEventListener("blur", end);
     ownerWindow.removeEventListener("keydown", key);
     ownerWindow.removeEventListener("keyup", key);
     try { element.releasePointerCapture?.(pointerId); } catch { /* Detached pointer. */ }
   };
   const finish = (next: PointerEvent): void => {
-    if (!active || next.pointerId !== pointerId) return;
+    if (next.pointerId === pointerId) end();
+  };
+  const end = (): void => {
+    if (!active) return;
     try {
       if (frame !== null) {
         ownerWindow.cancelAnimationFrame(frame);
@@ -67,6 +73,7 @@ export function startStudioPointerGesture(options: {
   ownerWindow.addEventListener("pointermove", move);
   ownerWindow.addEventListener("pointerup", finish);
   ownerWindow.addEventListener("pointercancel", finish);
+  ownerWindow.addEventListener("blur", end);
   if (onKeyChange) {
     ownerWindow.addEventListener("keydown", key);
     ownerWindow.addEventListener("keyup", key);
