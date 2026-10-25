@@ -29,6 +29,7 @@ import { mountStudioGraphNodeResizeFrame } from './StudioGraphNodeResizeFrame';
 import { hasHostCapability } from '../../../platform/hostCapabilities';
 import { nodeActivityFromRunState } from '../activity/StudioActivity';
 import { applyStudioNodeActivity } from '../activity/StudioActivityDomApplier';
+import { createStudioCardLock } from './StudioCardLock';
 
 /**
  * One card per node, one primary surface per kind (see StudioNodeSurface):
@@ -40,6 +41,11 @@ export type StudioGraphNodeCardHandle = {
   updateGeometry: (node: RenderStudioGraphNodeCardOptions["node"]) => void;
   /** Present while the card hosts an editor that must follow outside changes instead of remounting. */
   syncNode?: (node: RenderStudioGraphNodeCardOptions["node"]) => void;
+  /**
+   * Applies a run starting or ending in place. Absent on cards that must
+   * remount instead: a command center shows other nodes' run status.
+   */
+  setBusy?: (busy: boolean) => void;
   dispose: () => void;
 };
 
@@ -47,9 +53,9 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
   const { node, graphInteraction, nodeRunState } = options;
   const definition = options.findNodeDefinition(node);
   const placeholder = isManagedOutputPlaceholderNode(node);
-  const locked = options.busy || placeholder;
   const teardowns: (() => void)[] = [];
   const nodeEl = options.layer.createDiv({ cls: 'ss-studio-node-card' });
+  const locked = createStudioCardLock(options.busy || placeholder, nodeEl);
   nodeEl.dataset.nodeId = node.id; nodeEl.dataset.nodeKind = node.kind;
   nodeEl.style.transform = `translate(${node.position.x}px, ${node.position.y}px)`;
   nodeEl.style.width = `${resolveStudioGraphNodeWidth(node)}px`;
@@ -87,6 +93,7 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
       const nextMinimum = resolveStudioGraphNodeMinHeight(nextNode);
       nodeEl.style.minHeight = nextMinimum > 0 ? `${nextMinimum}px` : "";
     },
+    ...(node.kind === 'studio.command_center' || node.kind === 'studio.button' ? {} : { setBusy: (busy: boolean) => locked.set(busy || placeholder) }),
     dispose,
   };
   const finish = (): StudioGraphNodeCardHandle => {
@@ -123,7 +130,7 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
         }
       : undefined;
     if (isStudioFillTextNode(node)) {
-      teardowns.push(renderFillTextNodeCard({ nodeEl, node, busy: options.busy, graphInteraction,
+      teardowns.push(renderFillTextNodeCard({ nodeEl, node, busy: locked, graphInteraction,
         onNodeConfigMutated: options.onNodeConfigMutated, onNodeConfigValueChange: options.onNodeConfigValueChange,
         onNodeResize: options.onNodeResize, onNodeGeometryMutated: options.onNodeGeometryMutated,
         ...options.takeTextNodeEditorMountState(node.id),
@@ -132,7 +139,7 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
       renderNodePorts({ nodeEl, node, definition, graphInteraction, interactionLocked: locked, ...portGating });
       return finish();
     }
-    renderTextNodeCard({ nodeEl, node, busy: options.busy, graphInteraction,
+    renderTextNodeCard({ nodeEl, node, busy: locked, graphInteraction,
       onNodeConfigMutated: options.onNodeConfigMutated, onNodeConfigValueChange: options.onNodeConfigValueChange,
       onNodeResize: options.onNodeResize, onNodeGeometryMutated: options.onNodeGeometryMutated,
       ...options.takeTextNodeEditorMountState(node.id),
@@ -226,7 +233,7 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
   };
 
   if (surface.kind === 'code' || surface.kind === 'panel') {
-    sourceBody = renderStudioNodeSourceBody(nodeEl, { node, definition, scope: options.projectId, locked: locked || node.kind === 'studio.image_generation', mode: surface.kind === 'panel' ? 'panel' : 'source',
+    sourceBody = renderStudioNodeSourceBody(nodeEl, { node, definition, scope: options.projectId, locked: node.kind === 'studio.image_generation' || locked, mode: surface.kind === 'panel' ? 'panel' : 'source',
       onApply: options.onNodeSourceApply, renderPanel: surface.kind === 'panel' ? renderPanel : undefined,
       onViewChange: view => { if (header.sourceToggle) updateUiAction(header.sourceToggle, { selected: view === 'source' }); } });
     teardowns.push(sourceBody.dispose);

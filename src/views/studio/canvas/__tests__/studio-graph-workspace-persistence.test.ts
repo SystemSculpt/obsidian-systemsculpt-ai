@@ -172,4 +172,50 @@ describe("persistent Studio graph workspace", () => {
     expect(initial.root.querySelector('[data-node-id="dragging"]')).toBe(dragging);
     expect(dragging.style.transform).toBe("translate(80px, 0px)");
   });
+
+  it("locks and unlocks cards in place when a run starts and ends, remounting only a command center", () => {
+    const center = { ...node("center"), kind: "studio.command_center" };
+    const initial = options(project([node("worker"), center]));
+    document.body.appendChild(initial.root);
+    const handle = renderStudioGraphWorkspace(initial);
+    const card = (id: string) => initial.root.querySelector<HTMLElement>(`[data-node-id="${id}"]`)!;
+    const worker = card("worker"), firstCenter = card("center");
+    const title = worker.querySelector<HTMLInputElement>(".ss-studio-node-title-input")!;
+    const controls = () => [title, ...worker.querySelectorAll<HTMLButtonElement>('[data-testid="studio.node.run"], [data-testid="studio.node.remove"]')];
+    expect(controls()).toHaveLength(3);
+    expect(controls().map(control => control.disabled)).toEqual([false, false, false]);
+
+    const running = { ...options(initial.currentProject!), root: initial.root, busy: true };
+    expect(handle.refresh(running)).toBe(true);
+    expect(card("worker")).toBe(worker);
+    expect(controls().map(control => control.disabled)).toEqual([true, true, true]);
+    // A command center shows its targets' run status, so it remounts.
+    expect(card("center")).not.toBe(firstCenter);
+
+    const finished = { ...options(initial.currentProject!), root: initial.root, busy: false };
+    expect(handle.refresh(finished)).toBe(true);
+    expect(card("worker")).toBe(worker);
+    expect(controls().map(control => control.disabled)).toEqual([false, false, false]);
+    initial.root.remove();
+  });
+
+  it("locks a focused card only once focus leaves it", () => {
+    const initial = options(project([node("typing")]));
+    document.body.appendChild(initial.root);
+    const handle = renderStudioGraphWorkspace(initial);
+    const typing = initial.root.querySelector<HTMLElement>('[data-node-id="typing"]')!;
+    const title = typing.querySelector<HTMLInputElement>(".ss-studio-node-title-input")!;
+    title.focus();
+
+    const running = { ...options(initial.currentProject!), root: initial.root, busy: true };
+    expect(handle.refresh(running)).toBe(true);
+    expect(title.disabled).toBe(false);
+    expect(document.activeElement).toBe(title);
+
+    title.blur();
+    expect(handle.refresh(running)).toBe(true);
+    expect(initial.root.querySelector('[data-node-id="typing"]')).toBe(typing);
+    expect(title.disabled).toBe(true);
+    initial.root.remove();
+  });
 });

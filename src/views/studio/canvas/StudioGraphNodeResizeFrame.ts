@@ -17,6 +17,7 @@ import {
   type StudioNodeResizeMode,
 } from "../../../studio/StudioNodeGeometry";
 import { getStudioOwnerWindow } from "../StudioDomContext";
+import { isStudioCardLocked, watchStudioCardLock, type StudioCardLockState } from "./StudioCardLock";
 
 /**
  * tldraw-style 8-zone resize frame: four edge strips plus four corner zones
@@ -132,7 +133,7 @@ type MountStudioGraphNodeResizeFrameOptions = {
   nodeEl: HTMLElement;
   title: string;
   ariaLabel: string;
-  interactionLocked: boolean;
+  interactionLocked: StudioCardLockState;
   getGraphZoom: () => number;
   /**
    * True when the card body is an image/video media preview whose rendered
@@ -218,7 +219,9 @@ export function mountStudioGraphNodeResizeFrame(
     for (const [property, value] of Object.entries(resolveStudioGraphResizeZoneLayout(zone))) {
       zoneEl.style.setProperty(property, value);
     }
-    zoneEl.classList.toggle("is-disabled", options.interactionLocked);
+    watchStudioCardLock(options.interactionLocked, (locked) => {
+      zoneEl.classList.toggle("is-disabled", locked);
+    }, zoneEl);
     zoneEls.set(zone, zoneEl);
   }
 
@@ -228,10 +231,6 @@ export function mountStudioGraphNodeResizeFrame(
       zoneEl.remove();
     }
   };
-
-  if (options.interactionLocked) {
-    return removeFrame;
-  }
 
   const semanticsMode: StudioNodeResizeMode = resolveStudioNodeResizeSemantics(node.kind, {
     hasAspectMediaContent: options.hasAspectMediaContent,
@@ -570,7 +569,8 @@ export function mountStudioGraphNodeResizeFrame(
   };
 
   const startDrag = (zone: StudioGraphResizeZone, zoneEl: HTMLElement, event: PointerEvent): void => {
-    if (event.button !== 0 || activePointerId !== null) {
+    // A locked card's zones stay inert: the press goes on to the card as if they weren't there.
+    if (isStudioCardLocked(options.interactionLocked) || event.button !== 0 || activePointerId !== null) {
       return;
     }
     event.preventDefault();

@@ -16,6 +16,8 @@ type StudioSearchableDropdownOptions = {
 
 export type StudioSearchableDropdownHandle = Readonly<{
   rootEl: HTMLElement;
+  /** Disabling closes an open list. */
+  setDisabled: (disabled: boolean) => void;
   destroy: () => void;
 }>;
 
@@ -58,7 +60,6 @@ export function renderStudioSearchableDropdown(
   const {
     containerEl,
     ariaLabel,
-    disabled,
     placeholder,
     noResultsText,
     loadOptions,
@@ -67,6 +68,7 @@ export function renderStudioSearchableDropdown(
   const ownerDocument = getStudioOwnerDocument(containerEl);
   const ownerWindow = getStudioOwnerWindow(containerEl);
 
+  let disabled = options.disabled;
   let currentValue = String(options.value || "").trim();
   let loadedOptions: StudioNodeConfigSelectOption[] | null = null;
   let loadErrorMessage: string | null = null;
@@ -464,7 +466,13 @@ export function renderStudioSearchableDropdown(
     }, 0);
   });
 
+  const setDisabled = (next: boolean): void => {
+    disabled = next;
+    triggerEl.disabled = next;
+    if (next) closePanel();
+  };
+
   updateTriggerLabel();
   void ensureOptionsLoaded();
-  return { rootEl, destroy };
+  return { rootEl, setDisabled, destroy };
 }

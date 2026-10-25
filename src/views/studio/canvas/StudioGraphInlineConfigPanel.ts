@@ -26,6 +26,7 @@ import {
 } from "../StudioPathFieldPicker";
 import { renderStudioSearchableDropdown } from "../StudioSearchableDropdown";
 import { createStudioAction } from "../StudioAction";
+import { isStudioCardLocked, lockStudioControl, watchStudioCardLock, type StudioCardLockState } from "./StudioCardLock";
 import type { StudioGraphNodeMutationOptions } from "./StudioGraphNodeCardTypes";
 
 function readConfigString(value: unknown): string {
@@ -179,12 +180,12 @@ function renderInlineConfigSelectField(options: InlineConfigFieldOptions): void 
         testId: `studio.config.option.${option.value}`,
         size: "small",
         selected: false,
-        disabled: interactionLocked,
         onSelect: () => {
           setValue(option.value, { mode: "discrete" });
           refreshActiveState(option.value);
         },
       });
+      lockStudioControl(interactionLocked, buttonEl);
       buttonEl.dataset.optionValue = option.value;
     }
     refreshActiveState(currentValue);
@@ -198,7 +199,7 @@ function renderInlineConfigSelectField(options: InlineConfigFieldOptions): void 
       cls: "ss-studio-media-model-picker-trigger",
       attr: { type: "button", "aria-label": `${node.title || node.kind} ${field.label || field.key}`, "aria-haspopup": "dialog", "data-testid": "studio.media-model-picker.trigger" },
     });
-    triggerEl.disabled = interactionLocked;
+    lockStudioControl(interactionLocked, triggerEl);
     const labelEl = triggerEl.createSpan({ cls: "ss-studio-media-model-picker-trigger-label", text: currentValue || resolveSearchableSelectPlaceholder(field) });
     const badgeEl = triggerEl.createSpan({ cls: "ss-studio-media-model-picker-trigger-badge" });
     badgeEl.hidden = true;
@@ -236,11 +237,11 @@ function renderInlineConfigSelectField(options: InlineConfigFieldOptions): void 
       }
       return Array.isArray(field.options) ? field.options : [];
     };
-    renderStudioSearchableDropdown({
+    const dropdown = renderStudioSearchableDropdown({
       containerEl: fieldEl,
       ariaLabel: `${node.title || node.kind} ${field.label || field.key}`,
       value: readConfigString(node.config[field.key]),
-      disabled: interactionLocked,
+      disabled: isStudioCardLocked(interactionLocked),
       placeholder: resolveSearchableSelectPlaceholder(field),
       noResultsText: "No matching options.",
       loadOptions,
@@ -248,6 +249,7 @@ function renderInlineConfigSelectField(options: InlineConfigFieldOptions): void 
         setValue(value, { mode: "discrete" });
       },
     });
+    watchStudioCardLock(interactionLocked, dropdown.setDisabled, dropdown.rootEl);
     return;
   }
 
@@ -257,7 +259,7 @@ function renderInlineConfigSelectField(options: InlineConfigFieldOptions): void 
       "aria-label": `${node.title || node.kind} ${field.label || field.key}`,
     },
   });
-  selectEl.disabled = interactionLocked;
+  lockStudioControl(interactionLocked, selectEl);
 
   if (field.required !== true) {
     selectEl.createEl("option", {
@@ -297,7 +299,7 @@ function renderInlineConfigNumberField(options: InlineConfigFieldOptions): void 
       "aria-label": `${node.title || node.kind} ${field.label || field.key}`,
     },
   });
-  inputEl.disabled = interactionLocked;
+  lockStudioControl(interactionLocked, inputEl);
 
   if (Number.isFinite(field.min)) {
     inputEl.min = String(field.min);
@@ -354,7 +356,7 @@ function renderInlineConfigTextField(options: InlineConfigFieldOptions): void {
       "aria-label": `${node.title || node.kind} ${field.label || field.key}`,
     },
   });
-  inputEl.disabled = interactionLocked;
+  lockStudioControl(interactionLocked, inputEl);
   inputEl.value = readConfigString(node.config[field.key]);
   inputEl.addEventListener("input", () => {
     setValue(inputEl.value, { mode: "continuous" });
@@ -381,7 +383,7 @@ function renderInlineConfigTextareaField(options: InlineConfigFieldOptions): voi
       ...(compactSingleRow ? { rows: "1" } : {}),
     },
   });
-  textAreaEl.disabled = interactionLocked;
+  lockStudioControl(interactionLocked, textAreaEl);
   textAreaEl.value = readConfigString(node.config[field.key]);
   textAreaEl.addEventListener("input", () => {
     setValue(textAreaEl.value, { mode: "continuous" });
@@ -399,7 +401,7 @@ function renderInlineConfigBooleanField(options: InlineConfigFieldOptions): void
     },
   });
   checkboxEl.checked = node.config[field.key] === true;
-  checkboxEl.disabled = interactionLocked;
+  lockStudioControl(interactionLocked, checkboxEl);
   checkboxEl.addEventListener("change", () => {
     setValue(checkboxEl.checked, { mode: "discrete" });
   });
@@ -414,7 +416,7 @@ function renderInlineConfigJsonObjectField(options: InlineConfigFieldOptions): v
       "aria-label": `${node.title || node.kind} ${field.label || field.key}`,
     },
   });
-  textAreaEl.disabled = interactionLocked;
+  lockStudioControl(interactionLocked, textAreaEl);
   const initial = node.config[field.key];
   const isPortList = field.type === "port_list";
   if (isPortList) textAreaEl.placeholder = '[{"id":"value","type":"json","required":true}]';
@@ -452,7 +454,7 @@ function renderInlineConfigStringListField(options: InlineConfigFieldOptions): v
       "aria-label": `${node.title || node.kind} ${field.label || field.key}`,
     },
   });
-  textAreaEl.disabled = interactionLocked;
+  lockStudioControl(interactionLocked, textAreaEl);
   const current = Array.isArray(node.config[field.key]) ? (node.config[field.key] as unknown[]) : [];
   textAreaEl.value = current.map((entry) => String(entry ?? "")).join("\n");
   textAreaEl.addEventListener("input", () => {
@@ -486,8 +488,8 @@ function renderInlineConfigNoteSelectorField(options: InlineConfigFieldOptions):
     testId: "studio.notes.add",
     ariaLabel: "Add note entry",
     size: "small",
-    disabled: interactionLocked,
   });
+  lockStudioControl(interactionLocked, addButton);
   const itemsContainer = container.createDiv({ cls: "ss-studio-note-selector-items" });
 
   const updateSummary = (): void => {
@@ -523,7 +525,7 @@ function renderInlineConfigNoteSelectorField(options: InlineConfigFieldOptions):
     buttonEl.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      if (interactionLocked) {
+      if (isStudioCardLocked(interactionLocked)) {
         return;
       }
       void handler();
@@ -567,7 +569,7 @@ function renderInlineConfigNoteSelectorField(options: InlineConfigFieldOptions):
         },
       });
       checkbox.checked = item.enabled;
-      checkbox.disabled = interactionLocked;
+      lockStudioControl(interactionLocked, checkbox);
       const cardIndexEl = toggleLabel.createSpan({
         cls: "ss-studio-note-selector-card-index",
         text: "",
@@ -585,8 +587,8 @@ function renderInlineConfigNoteSelectorField(options: InlineConfigFieldOptions):
         ariaLabel: `Move note ${i + 1} up`,
         title: "Move note up",
         size: "small",
-        disabled: interactionLocked || i === 0,
       });
+      lockStudioControl(interactionLocked, moveUpButton, i === 0);
       bindActionButton(moveUpButton, () => {
         if (i === 0) {
           return;
@@ -605,8 +607,8 @@ function renderInlineConfigNoteSelectorField(options: InlineConfigFieldOptions):
         ariaLabel: `Move note ${i + 1} down`,
         title: "Move note down",
         size: "small",
-        disabled: interactionLocked || i === items.length - 1,
       });
+      lockStudioControl(interactionLocked, moveDownButton, i === items.length - 1);
       bindActionButton(moveDownButton, () => {
         if (i >= items.length - 1) {
           return;
@@ -626,8 +628,8 @@ function renderInlineConfigNoteSelectorField(options: InlineConfigFieldOptions):
         title: "Remove note",
         size: "small",
         tone: "danger",
-        disabled: interactionLocked,
       });
+      lockStudioControl(interactionLocked, removeButton);
       bindActionButton(removeButton, () => {
         items.splice(i, 1);
         renderItems();
@@ -659,7 +661,7 @@ function renderInlineConfigNoteSelectorField(options: InlineConfigFieldOptions):
         },
       });
       pathInput.value = item.path;
-      pathInput.disabled = interactionLocked;
+      lockStudioControl(interactionLocked, pathInput);
       const pathStateEl = pathField.createDiv({
         cls: "ss-studio-note-selector-path-state",
       });
@@ -685,8 +687,8 @@ function renderInlineConfigNoteSelectorField(options: InlineConfigFieldOptions):
         ariaLabel: "Browse files",
         title: "Browse files",
         size: "small",
-        disabled: interactionLocked,
       });
+      lockStudioControl(interactionLocked, browseButtonEl);
       appendStudioPathBrowseButtonIcon(
         browseButtonEl,
         "ss-studio-node-inline-config-path-button-icon ss-studio-path-browse-button-icon"
@@ -750,7 +752,7 @@ function renderInlineConfigPathField(options: InlineConfigFieldOptions): void {
       "aria-label": `${node.title || node.kind} ${field.label || field.key}`,
     },
   });
-  inputEl.disabled = interactionLocked;
+  lockStudioControl(interactionLocked, inputEl);
   inputEl.value = readConfigString(node.config[field.key]);
   inputEl.addEventListener("input", () => {
     setValue(inputEl.value, { mode: "continuous" });
@@ -765,8 +767,8 @@ function renderInlineConfigPathField(options: InlineConfigFieldOptions): void {
     ariaLabel: browseAriaLabel,
     title: browseAriaLabel,
     size: "small",
-    disabled: interactionLocked,
   });
+  lockStudioControl(interactionLocked, browseButtonEl);
   appendStudioPathBrowseButtonIcon(
     browseButtonEl,
     "ss-studio-node-inline-config-path-button-icon ss-studio-path-browse-button-icon"
@@ -780,7 +782,7 @@ function renderInlineConfigPathField(options: InlineConfigFieldOptions): void {
   browseButtonEl.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
-    if (interactionLocked) {
+    if (isStudioCardLocked(interactionLocked)) {
       return;
     }
     void browseForNodeConfigPath(field, browseButtonEl, pathBrowseOptions).then((selected) => {
@@ -798,7 +800,7 @@ type InlineConfigPanelOptions = {
   node: StudioNodeInstance;
   definition: StudioNodeDefinition;
   orderedFieldKeys: string[];
-  interactionLocked: boolean;
+  interactionLocked: StudioCardLockState;
   onNodeConfigMutated: (node: StudioNodeInstance) => void;
   onNodeConfigValueChange?: (
     nodeId: string,

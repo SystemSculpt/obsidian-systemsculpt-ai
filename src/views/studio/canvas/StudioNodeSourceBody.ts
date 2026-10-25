@@ -3,6 +3,7 @@ import { parseStudioNodeSource, readStudioNodeSource, STUDIO_NODE_SOURCE_MAX_BYT
 import { createStudioAction } from '../StudioAction';
 import { markStudioNodeCardInteractive } from './StudioGraphNodeCardPointer';
 import { mountStudioSourceEditor, renderStudioHighlightedSource, type StudioSourceEditorSnapshot } from './StudioSourceEditor';
+import { isStudioCardLocked, lockStudioControl, type StudioCardLockState } from './StudioCardLock';
 
 export type StudioSourceBodyView = 'source' | 'panel';
 type State = { view: StudioSourceBodyView; editing: boolean; draft: string; base: string; snapshot?: StudioSourceEditorSnapshot };
@@ -34,7 +35,7 @@ export type StudioSourceBodyHandle = {
  * applied.
  */
 export function renderStudioNodeSourceBody(root: HTMLElement, options: {
-  node: StudioNodeInstance; definition: StudioNodeDefinition | null; scope?: string; locked: boolean;
+  node: StudioNodeInstance; definition: StudioNodeDefinition | null; scope?: string; locked: StudioCardLockState;
   mode: StudioSourceBodyView;
   onApply?: (nodeId: string, source: string, expectedSource: string) => void;
   renderPanel?: (root: HTMLElement) => (() => void) | void;
@@ -68,9 +69,9 @@ export function renderStudioNodeSourceBody(root: HTMLElement, options: {
     toolbar.hidden = state.view !== 'source';
     if (state.view === 'panel') { teardown = options.renderPanel?.(body) || undefined; return; }
     if (!state.editing) {
-      createStudioAction(tools, { label: 'Edit source', testId: `studio.source.edit.${node.id}`,
-        disabled: options.locked || !options.onApply || new TextEncoder().encode(source.text).byteLength > STUDIO_NODE_SOURCE_MAX_BYTES,
-        onSelect: () => { state.editing = true; state.draft = source.text; state.base = source.text; state.snapshot = undefined; render(); } });
+      lockStudioControl(options.locked, createStudioAction(tools, { label: 'Edit source', testId: `studio.source.edit.${node.id}`,
+        onSelect: () => { state.editing = true; state.draft = source.text; state.base = source.text; state.snapshot = undefined; render(); } }),
+      !options.onApply || new TextEncoder().encode(source.text).byteLength > STUDIO_NODE_SOURCE_MAX_BYTES);
       renderStudioHighlightedSource(body, source.text, source.language); return;
     }
     const conflict = state.base !== source.text;
@@ -80,7 +81,7 @@ export function renderStudioNodeSourceBody(root: HTMLElement, options: {
     const editorRoot = body.createDiv({ cls: 'ss-studio-source-editor' });
     let editor: ReturnType<typeof mountStudioSourceEditor> | undefined;
     const apply = () => {
-      if (options.locked || conflict || !options.onApply) return;
+      if (isStudioCardLocked(options.locked) || conflict || !options.onApply) return;
       const text = editor?.read() ?? state.draft;
       try {
         parseStudioNodeSource(node, text, options.definition);
@@ -95,7 +96,7 @@ export function renderStudioNodeSourceBody(root: HTMLElement, options: {
         if (!teardown) { render(); const restored = body.querySelector<HTMLElement>('.ss-studio-source-message'); if (restored) { restored.hidden = false; restored.setText(error instanceof Error ? error.message : 'Source could not be saved.'); restored.classList.add('is-error'); } }
       }
     };
-    createStudioAction(tools, { label: 'Apply', testId: `studio.source.apply.${node.id}`, disabled: options.locked || conflict, onSelect: apply });
+    lockStudioControl(options.locked, createStudioAction(tools, { label: 'Apply', testId: `studio.source.apply.${node.id}`, onSelect: apply }), conflict);
     createStudioAction(tools, { label: conflict ? 'Reload source' : 'Cancel', testId: `studio.source.cancel.${node.id}`, onSelect: () => { state.editing = false; dispose(); state.draft = ''; state.base = source.text; render(); } });
     editor = mountStudioSourceEditor(editorRoot, { source: state.draft, language: source.language, label: `${node.title} source`,
       onChange: text => { state.draft = text; }, onApply: apply, snapshot: state.snapshot });

@@ -11,6 +11,7 @@ import {
 import { createStudioAction } from "../StudioAction";
 import { markStudioNodeCardInteractive } from "./StudioGraphNodeCardPointer";
 import type { StudioGraphNodeMutationOptions } from "./StudioGraphNodeCardTypes";
+import { isStudioCardLocked, watchStudioCardLock, type StudioCardLockState } from "./StudioCardLock";
 
 const MEDIA_SOURCE_CONFIG_KEY = "sourcePath";
 
@@ -19,7 +20,7 @@ export interface RenderStudioMediaNodeActionBarOptions {
   node: StudioNodeInstance;
   definition: StudioNodeDefinition;
   mediaKind: "image" | "video";
-  interactionLocked: boolean;
+  interactionLocked: StudioCardLockState;
   onRunNode: (nodeId: string) => void;
   onRemoveNode: (nodeId: string) => void;
   onNodeConfigValueChange?: (
@@ -152,7 +153,6 @@ export function renderStudioMediaNodeActionBar(
     },
   });
   markStudioNodeCardInteractive(barEl);
-  barEl.classList.toggle("is-locked", interactionLocked);
 
   const actionsById = new Map<string, MediaBarAction>();
   for (const action of resolveActions(options, barEl)) {
@@ -165,10 +165,14 @@ export function renderStudioMediaNodeActionBar(
       size: "icon",
     });
     buttonEl.dataset.mediaAction = action.id;
-    if (interactionLocked) {
-      buttonEl.setAttribute("aria-disabled", "true");
-    }
   }
+  watchStudioCardLock(interactionLocked, (locked) => {
+    barEl.classList.toggle("is-locked", locked);
+    for (const buttonEl of barEl.querySelectorAll<HTMLButtonElement>("button[data-media-action]")) {
+      if (locked) buttonEl.setAttribute("aria-disabled", "true");
+      else buttonEl.removeAttribute("aria-disabled");
+    }
+  }, barEl);
 
   barEl.addEventListener("pointerdown", (event) => {
     event.stopPropagation();
@@ -179,7 +183,7 @@ export function renderStudioMediaNodeActionBar(
   });
   barEl.addEventListener("click", (event) => {
     event.stopPropagation();
-    if (interactionLocked) {
+    if (isStudioCardLocked(interactionLocked)) {
       return;
     }
     const buttonEl =
