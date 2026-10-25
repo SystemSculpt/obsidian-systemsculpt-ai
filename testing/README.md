@@ -13,6 +13,13 @@ The plugin has four local test layers:
    belongs to the website API; the plugin does not replay it through a second
    client-owned projector.
 
+Tests are type-checked too. tsconfig.test.json checks src and testing in one
+program in which obsidian resolves to src/tests/mocks/obsidian.d.ts: the real
+obsidian.d.ts types plus the constructors the Jest mock accepts (for example
+`new TFile({ path })`). Give fakes the real shape instead of casting them;
+reach a private member with `view["member"]`, which keeps its declared type.
+`npm run check:types:tests` runs that program alone.
+
 Managed fixtures live in testing/fixtures/managed; versioned settings inputs
 live in testing/fixtures/settings. Default tests need no provider key, hosted
 service, installed app, physical device, or remote host.
@@ -54,7 +61,8 @@ npm run check:compat
   It also drives the credential-free thin-agent endurance fixture through the
   real headless Chat, native transport, approval, mutation-journal, reconnect,
   and terminal seams.
-- check:plugin adds types, mobile, sync, artifact, and release guards.
+- check:plugin adds source and test types, mobile, sync, artifact, and release
+  guards.
 - test:chatview:critical uses strict console, randomized test order with a
   printed replay seed, open-handle detection, adversarial thin-session and
   local-persistence cases, and a global coverage floor on the high-risk
