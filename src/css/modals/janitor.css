@@ -60,11 +60,6 @@
   min-width: 0;
 }
 
-.ss-janitor-preview-count {
-  font-variant-numeric: tabular-nums;
-  font-weight: var(--ss-weight-medium);
-}
-
 .ss-janitor-main {
   display: flex;
   flex-direction: column;
@@ -125,11 +120,12 @@
   min-width: 140px;
 }
 
-/* Confirmation preview */
+/* Confirmation preview: the modal's scrollable content keeps the header's
+ * inset, so rows align with the title; hairlines between rows, no box. */
 .ss-janitor-preview {
   display: flex;
   flex-direction: column;
-  gap: var(--ss-space-3);
+  gap: var(--ss-space-5);
 }
 
 .ss-janitor-preview-section {
@@ -138,38 +134,27 @@
   gap: var(--ss-space-2);
 }
 
-.ss-janitor-preview-header {
-  margin-bottom: var(--ss-space-2);
+.ss-janitor-preview-section-title {
   font-size: var(--ss-text-sm);
+  font-weight: var(--ss-weight-medium);
   color: var(--ss-ink-muted);
-}
-
-.ss-janitor-preview-list {
-  max-height: 300px;
-  overflow-y: auto;
-  border: 1px solid var(--ss-line);
-  border-radius: var(--ss-radius-sm);
 }
 
 .ss-janitor-preview-item {
   display: flex;
   align-items: center;
-  gap: var(--ss-space-2);
-  padding: var(--ss-space-2) var(--ss-space-3);
-  border-bottom: 1px solid var(--ss-line);
-  transition: var(--ss-transition-colors);
+  gap: var(--ss-space-3);
+  padding: var(--ss-space-2) 0;
 }
 
-.ss-janitor-preview-item:last-child {
-  border-bottom: none;
-}
-
-.ss-janitor-preview-item:hover,
-.ss-janitor-preview-item:focus-within {
-  background-color: var(--ss-state-hover);
+.ss-janitor-preview-item + .ss-janitor-preview-item,
+.ss-janitor-preview-item + .ss-janitor-preview-more {
+  border-top: 1px solid var(--ss-line);
 }
 
 .ss-janitor-preview-icon {
+  --icon-size: var(--ss-icon-size);
+  display: flex;
   flex-shrink: 0;
   color: var(--ss-ink-muted);
 }
@@ -185,35 +170,16 @@
 
 .ss-janitor-preview-size {
   flex-shrink: 0;
-  padding: 0 var(--ss-space-2);
-  border-radius: var(--ss-radius-full);
-  background-color: var(--ss-surface-2);
-  font-size: var(--ss-text-xs);
+  font-size: var(--ss-text-sm);
   color: var(--ss-ink-muted);
   font-variant-numeric: tabular-nums;
 }
 
+/* Starts under the paths, past the row icon and its gap. */
 .ss-janitor-preview-more {
-  padding: var(--ss-space-2) var(--ss-space-3);
+  padding: var(--ss-space-2) 0 var(--ss-space-2) calc(var(--ss-icon-size) + var(--ss-space-3));
   font-size: var(--ss-text-sm);
-  color: var(--ss-ink-faint);
-  text-align: center;
-}
-
-.ss-janitor-preview-section-header {
-  display: flex;
-  align-items: center;
-  gap: var(--ss-space-2);
-  margin: var(--ss-space-3) 0 var(--ss-space-2);
-}
-
-.ss-janitor-preview-section-icon {
   color: var(--ss-ink-muted);
-}
-
-.ss-janitor-preview-section-title {
-  font-weight: var(--ss-weight-semibold);
-  font-size: var(--ss-text-sm);
 }
 
 /* Respond to the modal, not the app window. */
@@ -270,8 +236,12 @@
 
 @media (prefers-contrast: more) {
   .ss-janitor-section,
-  .ss-janitor-stat-card,
-  .ss-janitor-preview-list {
+  .ss-janitor-stat-card {
     border-width: 2px;
+  }
+
+  .ss-janitor-preview-item + .ss-janitor-preview-item,
+  .ss-janitor-preview-item + .ss-janitor-preview-more {
+    border-top-width: 2px;
   }
 }
