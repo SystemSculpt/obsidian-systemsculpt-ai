@@ -33,31 +33,26 @@ describe("JanitorConfirmationListModal", () => {
 
   it("renders one typed preview for flat and grouped cleanup confirmations", async () => {
     const modal = new JanitorConfirmationListModal(new App(), {
-      title: "Move Empty Content to Trash",
-      description: "8 empty items will move to Obsidian Trash. You can restore them later.",
-      summary: "8 items",
+      title: "Move empty content to Trash",
+      description: "8 empty items will move to Trash, following Obsidian’s trash setting.",
       groups: [
         {
-          title: "Empty Files",
-          icon: "file-text",
+          title: "Empty files (6)",
           items: Array.from({ length: 6 }, (_, index) => ({
             path: `Empty/file-${index}.md`,
             icon: "file-text",
-            detail: "empty",
           })),
           previewLimit: 5,
-          moreLabel: "files",
         },
         {
-          title: "Empty Folders",
-          icon: "folder",
+          title: "Empty folders (2)",
           items: [
             { path: "Empty/folder-one", icon: "folder" },
             { path: "Empty/folder-two", icon: "folder" },
           ],
           previewLimit: 5,
-          moreLabel: "folders",
         },
+        { title: "Nothing here (0)", items: [] },
       ],
     });
 
@@ -66,13 +61,14 @@ describe("JanitorConfirmationListModal", () => {
     expect(modal.modalEl.getAttribute("role")).toBe("dialog");
     expect(modal.modalEl.getAttribute("aria-labelledby")).toBeTruthy();
     expect(modal.modalEl.classList.contains("ss-modal--medium")).toBe(true);
-    expect(modal.modalEl.querySelector(".ss-janitor-preview-count")?.textContent)
-      .toBe("8 items");
-    expect(modal.modalEl.querySelectorAll(".ss-janitor-preview-section")).toHaveLength(2);
+    // Scrollable content carries the header's inset, so the rows align with the title.
+    expect(modal.modalEl.classList.contains("ss-modal--scrollable")).toBe(true);
+    const sections = [...modal.modalEl.querySelectorAll(".ss-janitor-preview-section")];
+    expect(sections.map((section) => section.querySelector(".ss-janitor-preview-section-title")?.textContent))
+      .toEqual(["Empty files (6)", "Empty folders (2)"]);
     expect(modal.modalEl.querySelectorAll(".ss-janitor-preview-item")).toHaveLength(7);
-    expect(modal.modalEl.textContent).toContain("Empty Files (6)");
-    expect(modal.modalEl.textContent).toContain("... and 1 more files");
-    expect(modal.modalEl.textContent).toContain("Empty Folders (2)");
+    expect(sections[0].querySelector(".ss-janitor-preview-more")?.textContent).toBe("and 1 more");
+    expect(sections[1].querySelector(".ss-janitor-preview-more")).toBeNull();
 
     const confirm = findButton("Move to Trash");
     expect(confirm.classList.contains("ss-button--danger")).toBe(true);
@@ -87,13 +83,15 @@ describe("JanitorConfirmationListModal", () => {
       title: "Move chats to Trash",
       description: "One file will move to Obsidian Trash.",
       groups: [{
-        items: [{ path: "SystemSculpt/Chats/chat.md", icon: "file-text" }],
-        moreLabel: "files",
+        items: [{ path: "SystemSculpt/Chats/chat.md", icon: "file-text", detail: "2.0 KB" }],
       }],
     });
 
     const dismissed = createModal();
     const dismissedResult = dismissed.openAndWait();
+    const flat = dismissed.modalEl.querySelector(".ss-janitor-preview-section")!;
+    expect(flat.querySelector(".ss-janitor-preview-section-title")).toBeNull();
+    expect(flat.querySelector(".ss-janitor-preview-size")?.textContent).toBe("2.0 KB");
     dismissed.close();
     await expect(dismissedResult).resolves.toBe(false);
 
