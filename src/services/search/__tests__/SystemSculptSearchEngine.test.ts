@@ -72,9 +72,80 @@ describe("SystemSculptSearchEngine lexical mode", () => {
     engine.destroy();
     releaseRead("late orange content");
     await indexing;
-    expect((engine as any).index.size).toBe(0);
-    expect((engine as any).tokenIndex.size).toBe(0);
+    expect((engine as any).textIndex.size).toBe(0);
+    expect((engine as any).textIndex.hasToken("orange")).toBe(false);
     expect((engine as any).contentIndexReady).toBe(false);
+  });
+
+  describe("idle release", () => {
+    const IDLE_MS = 5 * 60_000;
+
+    beforeEach(() => jest.useFakeTimers());
+    afterEach(() => jest.useRealTimers());
+
+    it("frees the index once the last search closes and sits unused, then rebuilds on the next search", async () => {
+      const { app } = buildFixture();
+      const engine = new SystemSculptSearchEngine(app as any, makePlugin(app));
+      const release = engine.hold();
+      await engine.search("orange", { mode: "lexical", limit: 10 });
+      expect((engine as any).textIndex.size).toBe(7);
+
+      release();
+      jest.advanceTimersByTime(IDLE_MS - 1);
+      expect((engine as any).textIndex.size).toBe(7);
+      jest.advanceTimersByTime(1);
+      expect((engine as any).textIndex.size).toBe(0);
+      expect((engine as any).contentIndexReady).toBe(false);
+
+      (app.vault.cachedRead as jest.Mock).mockClear();
+      const cold = await engine.search("orange", { mode: "smart", limit: 10 });
+      expect(cold.stats.metadataOnly).toBe(true);
+      const warm = await engine.search("orange juice", { mode: "lexical", limit: 10 });
+      expect(warm.results[0]?.path).toBe("notes/orange-juice.md");
+      expect(app.vault.cachedRead).toHaveBeenCalledTimes(7 + warm.results.length);
+      engine.destroy();
+    });
+
+    it("keeps the index while any search is open or reopens within the idle window", async () => {
+      const { app } = buildFixture();
+      const engine = new SystemSculptSearchEngine(app as any, makePlugin(app));
+      const first = engine.hold();
+      const second = engine.hold();
+      await engine.search("orange", { mode: "lexical", limit: 10 });
+
+      first();
+      first();
+      jest.advanceTimersByTime(IDLE_MS * 2);
+      expect((engine as any).textIndex.size).toBe(7);
+
+      second();
+      jest.advanceTimersByTime(IDLE_MS - 1_000);
+      const reopened = engine.hold();
+      jest.advanceTimersByTime(IDLE_MS * 2);
+      expect((engine as any).textIndex.size).toBe(7);
+
+      reopened();
+      engine.destroy();
+      expect(jest.getTimerCount()).toBe(0);
+    });
+  });
+
+  it("keeps no note text in the index: excerpts come from reading the results shown", async () => {
+    const { app } = buildFixture();
+    const engine = new SystemSculptSearchEngine(app as any, makePlugin(app));
+    await engine.startIndexing();
+    const notes = Array.from((engine as any).textIndex.docIds(), (docId: number) => (engine as any).textIndex.note(docId));
+    for (const note of notes) {
+      expect(Object.keys(note).sort()).toEqual(["file", "lowerPath", "lowerTitle", "mtime", "path", "preview", "size", "title"]);
+      expect(note.preview.length).toBeLessThanOrEqual(243);
+    }
+
+    (app.vault.cachedRead as jest.Mock).mockClear();
+    const res = await engine.search("bright", { mode: "lexical", limit: 10 });
+    expect(res.results.map((r) => r.path)).toEqual(["notes/orange-juice.md"]);
+    expect(res.results[0].excerpt).toBe("Orange juice is delicious and bright. Fresh squeezed orange juice every day.");
+    expect((app.vault.cachedRead as jest.Mock).mock.calls.map(([file]) => file.path)).toEqual(["notes/orange-juice.md"]);
+    engine.destroy();
   });
 
   it("returns matches in Fast (lexical) mode for body content", async () => {
@@ -169,8 +240,12 @@ describe("SystemSculptSearchEngine lexical mode", () => {
     const listener = (app.workspace.on as jest.Mock).mock.calls.find(([event]) => event === "systemsculpt:settings-updated")![1];
     listener(plugin.settings, plugin.settings, [key]);
     const result = await engine.search("orange juice", { mode: "lexical", limit: 10 });
-    expect(result.results.map(hit => hit.path)).toContain("notes/orange-juice.md");
-    expect(app.vault.cachedRead).not.toHaveBeenCalled();
+    const resultPaths = result.results.map(hit => hit.path);
+    expect(resultPaths).toContain("notes/orange-juice.md");
+    // Only the results shown are read again, for their excerpts; a rebuild would read every note.
+    const readPaths = (app.vault.cachedRead as jest.Mock).mock.calls.map(([file]) => file.path);
+    expect(readPaths.length).toBeLessThanOrEqual(resultPaths.length);
+    expect(resultPaths).toEqual(expect.arrayContaining(readPaths));
     engine.destroy();
   });
 

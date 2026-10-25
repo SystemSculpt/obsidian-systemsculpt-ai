@@ -44,6 +44,7 @@ const createMockSearchResponse = (overrides: Partial<SearchResponse> = {}): Sear
 });
 
 const createMockEngine = (overrides: Record<string, any> = {}) => ({
+  hold: jest.fn(() => jest.fn()),
   search: jest.fn().mockResolvedValue(createMockSearchResponse()),
   whenIndexReady: jest.fn().mockResolvedValue(undefined),
   getRecentPreviews: jest.fn().mockResolvedValue(new Map()),
@@ -122,6 +123,17 @@ describe("SystemSculptSearchModal", () => {
       expect(input.getAttribute("aria-autocomplete")).toBe("list");
       expect(listEl.getAttribute("role")).toBe("listbox");
       expect(listEl.getAttribute("aria-label")).toBe("Search results");
+    });
+
+    it("holds the search index while open and lets it go once on close", () => {
+      modal.onOpen();
+      const release = plugin._testEngine.hold.mock.results[0].value as jest.Mock;
+      expect(plugin._testEngine.hold).toHaveBeenCalledTimes(1);
+      expect(release).not.toHaveBeenCalled();
+
+      modal.onClose();
+      modal.onClose();
+      expect(release).toHaveBeenCalledTimes(1);
     });
 
     it("renders recent files on open without warming or checking backends", async () => {
