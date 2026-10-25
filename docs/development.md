@@ -77,8 +77,10 @@ that tree run as ordinary unit tests. Standalone mobile checks retain all their
 scenarios. Every Jest config shares the same transform and setup base.
 check:compat is the smaller Node and operating-system compatibility contract.
 It runs the same critical ChatView suites without repeating coverage collection
-or OS-independent ESLint already enforced by check:ci. Fast ESLint passes use
-separate local cache files, including lint:community. Full check:plugin/check:ci
+or OS-independent ESLint already enforced by check:ci. lint:obsidian runs the
+repository's source rules and the community-directory scan in one type-aware
+pass over one TypeScript program; lint:community still runs the directory scan
+alone. Fast ESLint passes use separate local cache files. Full check:plugin/check:ci
 (and therefore pre-push and release) disable ESLint caches: a changed import's
 types can introduce lint errors in an otherwise unchanged caller.
 
