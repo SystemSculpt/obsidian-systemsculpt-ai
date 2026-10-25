@@ -47,7 +47,6 @@ const createLogger = () => ({
   info: jest.fn(),
   error: jest.fn(),
   debug: jest.fn(),
-  setLogFileName: jest.fn(),
 });
 
 const createTracer = () => ({

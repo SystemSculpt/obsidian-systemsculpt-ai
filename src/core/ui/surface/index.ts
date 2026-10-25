@@ -1,7 +1,4 @@
-export {
-  applyPluginSurface,
-  isPluginSurface,
-} from "./PluginSurface";
+export { applyPluginSurface } from "./PluginSurface";
 export {
   createUiAction,
   createUiSearch,

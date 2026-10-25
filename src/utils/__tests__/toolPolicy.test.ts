@@ -1,9 +1,7 @@
 /** @jest-environment node */
 import {
   extractPrimaryPathArg,
-  getToolApprovalDecision,
   isMutatingTool,
-  isToolAllowlisted,
   requiresUserApproval,
   splitToolName,
 } from "../toolPolicy";
@@ -48,15 +46,14 @@ describe("first-party tool policy", () => {
   });
 
   it("auto-approves canonical read-only tools and rejects unknown names", () => {
-    expect(getToolApprovalDecision("read")).toEqual({ autoApprove: true, reason: "non-mutating" });
-    expect(getToolApprovalDecision("unknown")).toEqual({ autoApprove: false, reason: "invalid" });
+    expect(requiresUserApproval("read")).toBe(false);
     expect(requiresUserApproval("unknown")).toBe(true);
   });
 
   it("supports canonical allowlist entries", () => {
-    expect(isToolAllowlisted("write", ["write"])).toBe(true);
-    expect(isToolAllowlisted("write", ["unrelated"])).toBe(false);
-    expect(isToolAllowlisted("multi_edit", ["*"])).toBe(true);
+    expect(requiresUserApproval("write", { autoApproveAllowlist: ["write"] })).toBe(false);
+    expect(requiresUserApproval("write", { autoApproveAllowlist: ["unrelated"] })).toBe(true);
+    expect(requiresUserApproval("multi_edit", { autoApproveAllowlist: ["*"] })).toBe(false);
   });
 
   it("keeps remembered Ask Approval choices narrower than Full Access", () => {

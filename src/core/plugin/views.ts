@@ -9,6 +9,7 @@ import { AgentChatView } from "../../views/chatview/AgentChatView";
 import { yieldToEventLoop } from "../../utils/yieldToEventLoop";
 import { isMobileLayout } from "../../platform/mobileLayout";
 import { restoreStudioReloadState } from "./StudioReloadState";
+import type { HandoffExecution } from "../../features/phone-captures/PhoneHandoffInbox";
 import {
   CHAT_VIEW_TYPE,
   EMBEDDINGS_VIEW_TYPE,
@@ -343,7 +344,7 @@ export class ViewManager {
   }
 
   /** Own a fresh leaf so phone work never replaces a person's current draft. */
-  async runPhoneHandoff(execution: import("../../features/phone-captures/PhoneHandoffInbox").HandoffExecution): Promise<string> {
+  async runPhoneHandoff(execution: HandoffExecution): Promise<string> {
     if (execution.signal.aborted) throw new Error("The handoff was cancelled.");
     const leaf = this.app.workspace.getLeaf("tab");
     await leaf.setViewState({ type: CHAT_VIEW_TYPE, active: execution.reveal, state: { chatId: "", chatTitle: "From your iPhone" } });

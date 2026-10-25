@@ -122,48 +122,6 @@ describe("LifecycleCoordinator", () => {
       await expect(coordinator.runPhase("bootstrap")).resolves.not.toThrow();
     });
 
-    it("tracks task results on success", async () => {
-      coordinator.registerTask("bootstrap", {
-        id: "test-task",
-        label: "Test Task",
-        run: jest.fn(),
-      });
-
-      await coordinator.runPhase("bootstrap");
-
-      const results = coordinator.getResults();
-      expect(results).toHaveLength(1);
-      expect(results[0]).toEqual(expect.objectContaining({
-        phase: "bootstrap",
-        taskId: "test-task",
-        label: "Test Task",
-        status: "success",
-        optional: false,
-      }));
-      expect(results[0].durationMs).toBeGreaterThanOrEqual(0);
-    });
-
-    it("tracks task results on failure", async () => {
-      const error = new Error("Task failed");
-      coordinator.registerTask("bootstrap", {
-        id: "failing-task",
-        optional: true,
-        run: () => { throw error; },
-      });
-
-      await coordinator.runPhase("bootstrap");
-
-      const results = coordinator.getResults();
-      expect(results).toHaveLength(1);
-      expect(results[0]).toEqual(expect.objectContaining({
-        phase: "bootstrap",
-        taskId: "failing-task",
-        status: "failed",
-        error,
-        optional: true,
-      }));
-    });
-
     it("throws error for non-optional task failure", async () => {
       coordinator.registerTask("bootstrap", {
         id: "required-task",
@@ -240,7 +198,7 @@ describe("LifecycleCoordinator", () => {
         "lifecycle.deferred.traced-task",
         expect.any(Object)
       );
-      expect(mockPhaseTracker.complete).toHaveBeenCalled();
+      expect(mockPhaseTracker.complete).toHaveBeenCalledWith({ durationMs: expect.any(Number) });
     });
 
     it("uses custom diagnostic thresholds when provided", async () => {
@@ -295,38 +253,6 @@ describe("LifecycleCoordinator", () => {
         error,
         expect.objectContaining({ durationMs: expect.any(Number) })
       );
-    });
-  });
-
-  describe("getResults", () => {
-    it("returns empty array when no tasks run", () => {
-      const results = coordinator.getResults();
-
-      expect(results).toEqual([]);
-    });
-
-    it("returns copy of results array", async () => {
-      coordinator.registerTask("bootstrap", { id: "task", run: jest.fn() });
-      await coordinator.runPhase("bootstrap");
-
-      const results1 = coordinator.getResults();
-      const results2 = coordinator.getResults();
-
-      expect(results1).not.toBe(results2);
-      expect(results1).toEqual(results2);
-    });
-
-    it("accumulates results across multiple phases", async () => {
-      coordinator.registerTask("bootstrap", { id: "bootstrap-task", run: jest.fn() });
-      coordinator.registerTask("critical", { id: "critical-task", run: jest.fn() });
-
-      await coordinator.runPhase("bootstrap");
-      await coordinator.runPhase("critical");
-
-      const results = coordinator.getResults();
-      expect(results).toHaveLength(2);
-      expect(results[0].phase).toBe("bootstrap");
-      expect(results[1].phase).toBe("critical");
     });
   });
 });

@@ -1,7 +1,6 @@
 import { Notice } from 'obsidian';
 import { StudioPresentation } from '../StudioPresentation';
 import { StudioRunDetailModal } from './StudioRunDetailModal';
-export { StudioRunDetailModal } from './StudioRunDetailModal';
 import type { StudioAgentRuns } from '../../../services/codex/StudioAgentRuns';
 import { isActiveAgentRun, type StudioAgentRun } from '../../../services/codex/StudioAgentRunStore';
 import { createStudioAction } from '../StudioAction';

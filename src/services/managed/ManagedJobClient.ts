@@ -4,10 +4,12 @@ import { MANAGED_CAPABILITY_CONTRACT, MANAGED_IMAGE_OUTPUT_MAX_BYTES, ManagedIma
 import { parseRetryAfterMs } from "../../utils/retryAfter";
 import { CREDITS_REQUIRED_MESSAGE } from "../../utils/errors";
 
+/** @internal Tests assert against this value. */
 export const MANAGED_JOB_PROTOCOL = "managed-job-protocol-v1" as const;
 // Bounds only the transfer of a completed document, never server processing.
 const DOCUMENT_DOWNLOAD_TIMEOUT_MS = 10 * 60_000;
 const MANAGED_IMAGE_OUTPUT_PROTOCOL = "managed-image-output-v1" as const;
+/** @internal Tests assert against this value. */
 export const MANAGED_IMAGE_OUTPUT_DESCRIPTOR = Object.freeze({
   contract_version: MANAGED_IMAGE_OUTPUT_PROTOCOL,
   negotiation: { header: "x-systemsculpt-image-output-contract", required_value: MANAGED_IMAGE_OUTPUT_PROTOCOL, required_headers: { "x-systemsculpt-contract": MANAGED_CAPABILITY_CONTRACT, "x-systemsculpt-job-contract": MANAGED_JOB_PROTOCOL, "x-systemsculpt-capability": "image_generation", "x-license-key": "<license-key>", "x-request-id": "<1-128 characters matching [A-Za-z0-9._:-]+>" } },
@@ -43,19 +45,20 @@ function jobFailureDetail(holder: unknown): { jobId: string | null; code: string
   return { jobId, code, message };
 }
 
+/** @internal Tests assert against this value. */
 export const MANAGED_JOB_OPERATION_STATUSES = {
   transcription: { create: ["uploading"], upload_complete: ["queued"], upload_abort: ["failed"], start: ["queued", "processing", "succeeded", "failed"], status: ["uploading", "queued", "processing", "succeeded", "failed", "expired"] },
   document_processing: { create: ["uploading"], upload_complete: ["queued"], upload_abort: ["failed"], start: ["queued", "processing", "completed", "failed"], status: ["uploading", "queued", "processing", "completed", "failed"] },
   image_generation: { generation_create: ["queued", "processing", "succeeded", "failed", "expired"], generation_list: ["queued", "processing", "succeeded", "failed", "expired"], generation_status: ["queued", "processing", "succeeded", "failed", "expired"] },
 } as const;
 
+/** @internal Tests assert against this value. */
 export const MANAGED_JOB_DESCRIPTORS: Record<ManagedJobCapability, { paths: Partial<Record<Operation, [string, string]>>; statuses: ManagedJobStatus[]; version: Operation[]; idempotent: Operation[] }> = {
   transcription: { paths: { create: ["POST", "/api/plugin/audio/transcriptions/jobs"], part_url: ["GET", "/api/plugin/audio/transcriptions/jobs/{jobId}/upload/part-url"], upload_complete: ["POST", "/api/plugin/audio/transcriptions/jobs/{jobId}/upload/complete"], upload_abort: ["POST", "/api/plugin/audio/transcriptions/jobs/{jobId}/upload/abort"], start: ["POST", "/api/plugin/audio/transcriptions/jobs/{jobId}/start"], status: ["GET", "/api/plugin/audio/transcriptions/jobs/{jobId}"] }, statuses: ["uploading", "queued", "processing", "succeeded", "failed", "expired"], version: ["create", "upload_complete", "start"], idempotent: ["create", "upload_complete", "start"] },
   document_processing: { paths: { create: ["POST", "/api/plugin/documents/jobs"], part_url: ["GET", "/api/plugin/documents/jobs/{documentId}/upload/part-url"], upload_complete: ["POST", "/api/plugin/documents/jobs/{documentId}/upload/complete"], upload_abort: ["POST", "/api/plugin/documents/jobs/{documentId}/upload/abort"], start: ["POST", "/api/plugin/documents/jobs/{documentId}/start"], status: ["GET", "/api/plugin/documents/{documentId}"], download: ["GET", "/api/plugin/documents/{documentId}/download"] }, statuses: ["uploading", "queued", "processing", "completed", "failed"], version: ["create", "upload_complete", "start"], idempotent: ["create", "upload_complete", "start"] },
   image_generation: { paths: { input_prepare: ["POST", "/api/plugin/images/inputs/prepare"], generation_create: ["POST", "/api/plugin/images/generations/jobs"], generation_list: ["GET", "/api/plugin/images/generations/jobs"], generation_status: ["GET", "/api/plugin/images/generations/jobs/{jobId}"] }, statuses: ["queued", "processing", "succeeded", "failed", "expired"], version: [], idempotent: ["generation_create"] },
 };
 
-export interface ManagedMultipartPart { part_number: number; expected_content_length_bytes: number }
 export interface ManagedUploadedImageInput {
   type: "uploaded";
   key: string;
@@ -63,7 +66,7 @@ export interface ManagedUploadedImageInput {
   size_bytes: number;
   sha256: string;
 }
-export interface ManagedImageUsage { raw_usd: number; cost_source: string; estimated: boolean }
+interface ManagedImageUsage { raw_usd: number; cost_source: string; estimated: boolean }
 type JsonObject = Record<string, unknown>;
 type PreparedImageInputsResponse = {
   uploadId: string;

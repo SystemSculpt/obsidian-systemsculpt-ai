@@ -13,7 +13,7 @@ import type { StudioNodeInstance } from "../../../studio/types";
  * - panel: a renderer-owned surface (boards, buttons, workflows) whose
  *   definition is reachable through one Source toggle in the header.
  */
-export type StudioNodeSurfaceKind = "media" | "text" | "code" | "form" | "panel";
+type StudioNodeSurfaceKind = "media" | "text" | "code" | "form" | "panel";
 
 export type StudioNodeSurface = Readonly<{
   kind: StudioNodeSurfaceKind;
@@ -52,12 +52,4 @@ export function resolveStudioNodeSurface(
   if (CODE_KINDS.has(kind)) return surface("code");
   if (PANEL_KINDS.has(kind)) return surface("panel", true);
   return surface("form");
-}
-
-export function isStudioCodeSurfaceKind(kind: string): boolean {
-  return CODE_KINDS.has(String(kind || "").trim());
-}
-
-export function isStudioPanelSurfaceKind(kind: string): boolean {
-  return PANEL_KINDS.has(String(kind || "").trim());
 }

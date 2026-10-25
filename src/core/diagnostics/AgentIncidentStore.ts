@@ -44,18 +44,17 @@ import {
   type AgentIncidentTerminalValidation,
 } from "./AgentIncidentSchema";
 
+/** @internal Tests assert against this value. */
 export const AGENT_INCIDENT_STORE_PATH = ".systemsculpt/diagnostics/incidents";
-export const AGENT_INCIDENT_MAX_REPORTS = 20;
-export const AGENT_INCIDENT_MAX_TOTAL_BYTES = 10 * 1024 * 1024;
-export const AGENT_INCIDENT_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
+const AGENT_INCIDENT_MAX_REPORTS = 20;
+const AGENT_INCIDENT_MAX_TOTAL_BYTES = 10 * 1024 * 1024;
+const AGENT_INCIDENT_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000;
+/** @internal Tests assert against this value. */
 export const AGENT_INCIDENT_MAX_DIRECTORY_ENTRIES = 1_024;
+/** @internal Tests assert against this value. */
 export const AGENT_INCIDENT_MAX_SCAN_CANDIDATES = 128;
+/** @internal Tests assert against this value. */
 export const AGENT_INCIDENT_MAX_SCAN_BYTES = 4 * 1024 * 1024;
-
-export {
-  AGENT_INCIDENT_MAX_REPORT_BYTES,
-  AGENT_INCIDENT_SCHEMA_VERSION,
-} from "./AgentIncidentSchema";
 
 const AGENT_INCIDENT_SCAN_BATCH_SIZE = 16;
 
@@ -93,7 +92,7 @@ export interface AgentIncidentStoreAdapter {
   rename?: (path: string, newPath: string) => Promise<void>;
 }
 
-export interface AgentIncidentStoreIncident {
+interface AgentIncidentStoreIncident {
   readonly classification: "operation_failure";
   readonly impact: "run_failed";
   readonly outcome: "failed";
@@ -154,13 +153,14 @@ export interface AgentIncidentRetentionResult {
   readonly limitsSatisfied: boolean;
 }
 
-export type AgentIncidentStoreErrorCode =
+type AgentIncidentStoreErrorCode =
   | "invalid_identifier"
   | "invalid_report"
   | "report_too_large"
   | "duplicate_report_id"
   | "persistence_unavailable";
 
+/** @internal Tests match this error class. */
 export class AgentIncidentStoreError extends Error {
   constructor(public readonly code: AgentIncidentStoreErrorCode, message: string) {
     super(message);

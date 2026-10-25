@@ -29,23 +29,19 @@ describe("ManagedAdmission", () => {
   );
 
   it.each([null, "disclosure-compatibility-metadata"]) (
-    "treats disclosure metadata %p as non-authoritative and keeps payload creation lazy",
+    "treats disclosure metadata %p as non-authoritative",
     async (disclosureVersion) => {
-    const payload = jest.fn();
     const compatible = structuredClone(fixture) as any;
     compatible.disclosure_version = disclosureVersion;
     getCatalog.mockResolvedValue(ManagedCapabilityCatalog.parse(compatible));
-    const admission = create();
-    const first = await admission.withLease({ alias: "systemsculpt/chat", requestContract: "chat_turn" }, payload);
-    expect(first).toBeUndefined();
-    expect(payload).toHaveBeenCalledTimes(1);
+    const first = await create().acquireLease({ alias: "systemsculpt/chat", requestContract: "chat_turn" });
+    expect(first.outcome).toBe("allowed");
 
     const unavailable = structuredClone(fixture) as any;
     unavailable.capabilities[0].availability = "unavailable";
     getCatalog.mockResolvedValue(ManagedCapabilityCatalog.parse(unavailable));
-    const second = await create().withLease({ alias: "systemsculpt/chat" }, payload);
+    const second = await create().acquireLease({ alias: "systemsculpt/chat" });
     expect(second.outcome).toBe("capability_unavailable");
-    expect(payload).toHaveBeenCalledTimes(1);
   });
 
   it("uses one deterministic cache entry, expiring at the exact boundary", async () => {

@@ -1,15 +1,8 @@
 /**
  * @jest-environment jsdom
  */
-import { checkPremiumUserStatus, verifyPremiumAccess, PremiumUserStatus } from "../licenseUtils";
+import { checkPremiumUserStatus, PremiumUserStatus } from "../licenseUtils";
 import { SystemSculptSettings } from "../../types";
-
-// Mock obsidian Notice
-jest.mock("obsidian", () => ({
-  Notice: jest.fn(),
-}));
-
-import { Notice } from "obsidian";
 
 // Create a minimal settings object for testing
 const createMockSettings = (overrides: Partial<SystemSculptSettings> = {}): SystemSculptSettings => ({
@@ -114,46 +107,6 @@ describe("licenseUtils", () => {
       const status = checkPremiumUserStatus(settings);
 
       expect(status.greeting).toBeUndefined();
-    });
-  });
-
-  describe("verifyPremiumAccess", () => {
-    it("returns true for premium users", () => {
-      const settings = createMockSettings({ licenseValid: true });
-      const result = verifyPremiumAccess(settings);
-
-      expect(result).toBe(true);
-      expect(Notice).not.toHaveBeenCalled();
-    });
-
-    it("returns false for non-premium users", () => {
-      const settings = createMockSettings({ licenseValid: false });
-      const result = verifyPremiumAccess(settings);
-
-      expect(result).toBe(false);
-    });
-
-    it("shows notice for non-premium users by default", () => {
-      const settings = createMockSettings({ licenseValid: false });
-      verifyPremiumAccess(settings);
-
-      expect(Notice).toHaveBeenCalledWith(
-        expect.stringContaining("Premium pro license required")
-      );
-    });
-
-    it("does not show notice when showNotice is false", () => {
-      const settings = createMockSettings({ licenseValid: false });
-      verifyPremiumAccess(settings, false);
-
-      expect(Notice).not.toHaveBeenCalled();
-    });
-
-    it("does not show notice for premium users regardless of showNotice", () => {
-      const settings = createMockSettings({ licenseValid: true });
-      verifyPremiumAccess(settings, true);
-
-      expect(Notice).not.toHaveBeenCalled();
     });
   });
 });

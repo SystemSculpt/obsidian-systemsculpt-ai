@@ -1,5 +1,4 @@
 import { SystemSculptSettings } from "../types";
-import { Notice } from "obsidian";
 
 export interface PremiumUserStatus {
   isPremium: boolean;
@@ -24,20 +23,4 @@ export function checkPremiumUserStatus(settings: SystemSculptSettings): PremiumU
   }
 
   return status;
-}
-
-export function verifyPremiumAccess(
-  settings: SystemSculptSettings, 
-  showNotice: boolean = true
-): boolean {
-  const status = checkPremiumUserStatus(settings);
-
-  if (!status.isPremium) {
-    if (showNotice) {
-      new Notice("Premium pro license required for this feature");
-    }
-    return false;
-  }
-
-  return true;
 }

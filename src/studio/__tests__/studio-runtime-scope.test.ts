@@ -1,5 +1,9 @@
 import type { StudioProjectV1 } from "../types";
-import { planStudioRun, scopeProjectForRun } from "../StudioRunScope";
+import { planStudioRun } from "../StudioRunScope";
+
+/** The entry nodes plus every upstream ancestor, all executable. */
+const scopeProjectForRun = (project: Parameters<typeof planStudioRun>[0], entryNodeIds?: string[]) =>
+  planStudioRun(project, entryNodeIds, () => "by_inputs").project;
 
 function baseProject(): StudioProjectV1 {
   return {

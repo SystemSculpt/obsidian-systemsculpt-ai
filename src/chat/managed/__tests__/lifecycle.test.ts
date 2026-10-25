@@ -1,26 +1,17 @@
 import {
   AgentLifecycle,
+  type AgentLifecycleInput,
+} from "../Lifecycle";
+import {
   CREDITS_REFRESH_REASONS,
   HISTORY_SYNC_KINDS,
   THIN_AGENT_LIFECYCLE_CODES,
   THIN_AGENT_LIFECYCLE_PHASES,
-  type AgentLifecycleInput,
-} from "../Lifecycle";
-import {
-  CREDITS_REFRESH_REASONS as SHARED_CREDITS_REFRESH_REASONS,
-  HISTORY_SYNC_KINDS as SHARED_HISTORY_SYNC_KINDS,
-  THIN_AGENT_LIFECYCLE_CODES as SHARED_THIN_AGENT_LIFECYCLE_CODES,
-  THIN_AGENT_LIFECYCLE_PHASES as SHARED_THIN_AGENT_LIFECYCLE_PHASES,
   isThinAgentRequestId,
 } from "../../../utils/ThinAgentLifecycleSchema";
 
 describe("AgentLifecycle privacy-safe chronology", () => {
-  it("keeps the Lifecycle compatibility exports bound to the shared schema", () => {
-    expect(THIN_AGENT_LIFECYCLE_CODES).toBe(SHARED_THIN_AGENT_LIFECYCLE_CODES);
-    expect(THIN_AGENT_LIFECYCLE_PHASES).toBe(SHARED_THIN_AGENT_LIFECYCLE_PHASES);
-    expect(CREDITS_REFRESH_REASONS).toBe(SHARED_CREDITS_REFRESH_REASONS);
-    expect(HISTORY_SYNC_KINDS).toBe(SHARED_HISTORY_SYNC_KINDS);
-
+  it("defines the shared lifecycle vocabulary", () => {
     expect(THIN_AGENT_LIFECYCLE_CODES).toEqual(expect.arrayContaining([
       "session_opened",
       "response_stream_ended_incomplete",

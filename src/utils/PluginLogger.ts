@@ -125,7 +125,7 @@ export class PluginLogger {
   private flushTimer: number | null = null;
   private readonly maxEntries = 600;
   private readonly flushIntervalMs = 1500;
-  private logFileName = "systemsculpt.log";
+  private readonly logFileName: string = "systemsculpt.log";
   private readonly maxLogFileBytes = 1_000_000; // 1 MB cap per log file
   private activeFlush: Promise<void> | null = null;
   private preUnloadFlush: Promise<void> | null = null;
@@ -188,12 +188,6 @@ export class PluginLogger {
       .map(projectSupportDiagnosticEvent)
       .filter((entry): entry is SupportDiagnosticEvent => entry !== null)
       .slice(-boundedLimit);
-  }
-
-  setLogFileName(fileName: string): void {
-    if (fileName && fileName !== this.logFileName) {
-      this.logFileName = fileName;
-    }
   }
 
   private write(

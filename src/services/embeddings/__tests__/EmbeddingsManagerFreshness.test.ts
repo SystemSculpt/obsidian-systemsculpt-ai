@@ -1,11 +1,11 @@
 import { TFile } from "obsidian";
 import { EmbeddingsManager } from "../EmbeddingsManager";
 import type { EmbeddingVector } from "../types";
-import { buildManagedNamespace } from "../utils/namespace";
+import { managedNamespace } from "./support/managedNamespace";
 import { buildVectorId } from "../utils/vectorId";
 
 function harness() {
-  const namespace = buildManagedNamespace(2);
+  const namespace = managedNamespace(2);
   const file = new TFile({
     path: "Note.md",
     name: "Note.md",
@@ -75,8 +75,8 @@ describe("EmbeddingsManager file freshness", () => {
 
   it("keeps search on the committed namespace while a replacement schema is incomplete", async () => {
     const { file, manager } = harness();
-    const committedNamespace = buildManagedNamespace(2, "semantic-v1", 3);
-    const replacementNamespace = buildManagedNamespace(2, "semantic-v1", 4);
+    const committedNamespace = managedNamespace(2, "semantic-v1", 3);
+    const replacementNamespace = managedNamespace(2, "semantic-v1", 4);
     manager.searchNamespace = committedNamespace;
     manager.gateway.activeGeneration = {
       ...manager.gateway.activeGeneration,

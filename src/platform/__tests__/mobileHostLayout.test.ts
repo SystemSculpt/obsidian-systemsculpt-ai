@@ -4,9 +4,16 @@ import { Platform } from "obsidian";
 import {
   disposeMobileHostLayoutStates,
   ensureMobileHostLayoutState,
-  MOBILE_HOST_LAYOUT_CLASSES,
   readMobileHostLayout,
 } from "../mobileHostLayout";
+
+/** The body classes mobileHostLayout publishes for feature CSS. */
+const MOBILE_HOST_LAYOUT_CLASSES = {
+  layout: "ss-mobile-layout",
+  navbarVisible: "ss-mobile-navbar-visible",
+  navbarHidden: "ss-mobile-navbar-hidden",
+  navbarSuppressed: "ss-mobile-navbar-suppressed",
+} as const;
 
 type MutablePlatform = typeof Platform & {
   isDesktopApp?: boolean;

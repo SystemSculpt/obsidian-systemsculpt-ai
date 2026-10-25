@@ -245,7 +245,7 @@ describe("built bundle (main.js)", () => {
     visit(source);
 
     // Electron's renderer treats native import() as a URL fetch. Desktop code
-    // must use the plugin's lazy loadDesktopOnly(() => require(...)) seam.
+    // must load Node modules through the plugin's lazy desktopHost seam.
     expect(dynamicNodeImports).toEqual([]);
   });
 

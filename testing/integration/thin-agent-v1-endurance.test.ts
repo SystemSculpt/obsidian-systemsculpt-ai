@@ -15,9 +15,9 @@ import {
 } from "../../src/chat/managed/Protocol";
 import {
   AgentChatSession,
-  type AgentLifecycleRecord,
   type AgentRunResult,
 } from "../../src/chat/managed/ChatSession";
+import type { AgentLifecycleRecord } from "../../src/chat/managed/Lifecycle";
 import { AgentMutationJournal } from "../../src/chat/managed/MutationJournal";
 
 type ToolCall = Readonly<{

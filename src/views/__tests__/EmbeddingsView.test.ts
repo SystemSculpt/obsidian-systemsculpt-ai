@@ -2,7 +2,8 @@
  * @jest-environment jsdom
  */
 
-import { EmbeddingsView, EMBEDDINGS_VIEW_TYPE } from "../EmbeddingsView";
+import { EmbeddingsView } from "../EmbeddingsView";
+import { EMBEDDINGS_VIEW_TYPE } from "../../core/plugin/viewTypes";
 import { WorkspaceLeaf, TFile } from "obsidian";
 import { MANAGED_EMBEDDINGS_INDEX_MAX_QUERY_CHARS } from "../../services/embeddings/gateway/ManagedEmbeddingsIndexAdapter";
 import { emitChatTranscriptCommitted } from "../chatview/ChatTranscriptEvents";

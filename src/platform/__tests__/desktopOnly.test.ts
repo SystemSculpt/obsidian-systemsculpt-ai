@@ -4,8 +4,8 @@
 import { Platform } from "obsidian";
 import {
   DesktopHostUnavailableError,
+  desktopHost,
   hasNodeRuntime,
-  loadDesktopOnly,
 } from "../desktopOnly";
 
 describe("desktop host seam (#207)", () => {
@@ -27,25 +27,29 @@ describe("desktop host seam (#207)", () => {
     });
   });
 
-  describe("loadDesktopOnly", () => {
-    it("invokes the loader and returns its value", () => {
-      const loaded = { ok: true };
-      const loader = jest.fn().mockReturnValue(loaded);
+  describe("desktopHost", () => {
+    const host = globalThis as typeof globalThis & { window?: { require?: jest.Mock } };
 
-      const result = loadDesktopOnly(loader);
-
-      expect(loader).toHaveBeenCalledTimes(1);
-      expect(result).toBe(loaded);
+    afterEach(() => {
+      delete host.window;
     });
 
-    it("rejects desktop adapters without evaluating their loader on mobile", () => {
-      platform.isDesktopApp = false;
-      const loader = jest.fn();
+    it("loads Node modules through the desktop window's require on demand", async () => {
+      const childProcess = { spawn: jest.fn() };
+      host.window = { require: jest.fn().mockReturnValue(childProcess) };
 
-      expect(() => loadDesktopOnly(loader, "CLI execution")).toThrow(
+      await expect(desktopHost.childProcess()).resolves.toBe(childProcess);
+      expect(host.window.require).toHaveBeenCalledWith("node:child_process");
+    });
+
+    it("rejects desktop adapters without requiring their module on mobile", async () => {
+      platform.isDesktopApp = false;
+      host.window = { require: jest.fn() };
+
+      await expect(desktopHost.childProcess()).rejects.toThrow(
         new DesktopHostUnavailableError("CLI execution"),
       );
-      expect(loader).not.toHaveBeenCalled();
+      expect(host.window.require).not.toHaveBeenCalled();
     });
   });
 });

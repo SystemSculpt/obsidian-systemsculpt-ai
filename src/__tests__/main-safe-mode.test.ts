@@ -16,7 +16,6 @@ const createLogger = () => ({
   warn: jest.fn(),
   error: jest.fn(),
   debug: jest.fn(),
-  setLogFileName: jest.fn(),
   flushBeforeUnload: jest.fn(async () => undefined),
   dispose: jest.fn(),
 });

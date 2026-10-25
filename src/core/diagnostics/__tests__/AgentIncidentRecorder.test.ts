@@ -1,9 +1,6 @@
 import {
-  AGENT_INCIDENT_MAX_EVENTS,
   AGENT_INCIDENT_MAX_ACTIVE_RUNS,
-  AGENT_INCIDENT_MAX_REPORT_BYTES,
   AGENT_INCIDENT_MAX_RESOURCE_SAMPLES,
-  AGENT_INCIDENT_MAX_TOOLS,
   AGENT_INCIDENT_MAX_TRANSPORT_SEGMENTS,
   AgentIncidentRecorder,
   type AgentIncidentCaptureContext,
@@ -15,6 +12,9 @@ import {
 } from "../AgentIncidentRecorder";
 import {
   AGENT_INCIDENT_EXPORTED_FAILURE_CODES,
+  AGENT_INCIDENT_MAX_EVENTS,
+  AGENT_INCIDENT_MAX_REPORT_BYTES,
+  AGENT_INCIDENT_MAX_TOOLS,
   normalizeAgentIncidentFailureCode,
 } from "../AgentIncidentSchema";
 

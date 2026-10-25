@@ -150,8 +150,3 @@ export async function resolveLocalAgentCommand(binary: string, args: string[], e
   // Absolute script path prevents Node option injection. No quoting, interpolation, or cmd.exe.
   return { binary: node, args: [script, ...args] };
 }
-
-export async function isLocalAgentInstalled(agent: LocalAgentId): Promise<boolean> {
-  try { return await resolveLocalAgentBinary(agent) !== null; }
-  catch { return false; } // Launch failures show their own guidance when the agent runs.
-}

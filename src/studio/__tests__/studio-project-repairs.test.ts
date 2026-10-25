@@ -7,7 +7,6 @@ import {
   MANAGED_OUTPUT_PENDING_RUN_ID_KEY,
   MANAGED_TEXT_OWNER,
   MANAGED_TEXT_OWNER_KEY,
-  MANAGED_TEXT_SLOT_INDEX_KEY,
   MANAGED_TEXT_SOURCE_NODE_ID_KEY,
 } from "../StudioManagedOutputNodes";
 import {
@@ -130,7 +129,7 @@ describe("StudioProjectRepairs", () => {
         value: "Generated output",
         [MANAGED_TEXT_OWNER_KEY]: MANAGED_TEXT_OWNER,
         [MANAGED_TEXT_SOURCE_NODE_ID_KEY]: textSource.id,
-        [MANAGED_TEXT_SLOT_INDEX_KEY]: 0,
+        __studio_source_output_index: 0,
       },
       continueOnError: false,
       disabled: false,
