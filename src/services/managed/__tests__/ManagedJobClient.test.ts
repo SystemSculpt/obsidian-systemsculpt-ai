@@ -108,16 +108,16 @@ describe("ManagedJobClient exact wire contract", () => {
 
   it("parses document, multipart part, result and image list discriminants", async () => {
     request.mockResolvedValueOnce(json({ document: { id: "doc-1", status: "uploading" }, upload: { part_size_bytes: 10, total_parts: 1, part_url_expires_in_seconds: 900, expires_at: "2099-01-01T00:00:00Z" } }));
-    expect((await client.documents.create({ filename: "a.pdf", contentType: "application/pdf", contentLengthBytes: 10 }, "op")).document.id).toBe("doc-1");
+    await expect(client.documents.create({ filename: "a.pdf", contentType: "application/pdf", contentLengthBytes: 10 }, "op")).resolves.toMatchObject({ document: { id: "doc-1" } });
     request.mockResolvedValueOnce(json({ part: { part_number: 1, method: "PUT", url: "https://signed/x", url_expires_in_seconds: 900, expected_content_length_bytes: 10 } })).mockResolvedValueOnce(new Response("", { status: 200, headers: { etag: `"${"a".repeat(32)}"` } }));
     const part = await client.documents.uploadPart("doc-1", 1, new Uint8Array(10).buffer); expect(part).toEqual({ partNumber: 1, etag: `"${"a".repeat(32)}"` }); expect(JSON.stringify(part)).not.toContain("signed");
     request.mockResolvedValueOnce(json({ result: { content: [], text: "x", markdown: "x", images: [], metadata: {} } }));
-    expect((await client.documents.download("doc-1")).result.text).toBe("x");
+    await expect(client.documents.download("doc-1")).resolves.toMatchObject({ result: { text: "x" } });
     // Only the completed-result transfer has the shared generous deadline.
     expect(request.mock.calls.at(-1)?.[0].timeoutMs).toBe(10 * 60_000);
     expect(request.mock.calls.slice(0, -1).every(([input]) => input.timeoutMs === undefined)).toBe(true);
     request.mockResolvedValueOnce(json({ items: [{ job: imageJob(), outputs: [], usage: { raw_usd: 0.1, cost_source: "provider", estimated: false } }], next_before: null }));
-    expect((await client.images.list()).items).toHaveLength(1);
+    await expect(client.images.list()).resolves.toMatchObject({ items: [expect.anything()] });
   });
 
   it("accepts canonical document progress and array downloads while rejecting legacy wire shapes", async () => {
@@ -133,7 +133,7 @@ describe("ManagedJobClient exact wire contract", () => {
 
   it.each(retryFixture.cases)("carries $name through signed uploads, HTTP errors, image-output errors and status hints", async ({ header, milliseconds }) => {
     const now = jest.spyOn(Date, "now").mockReturnValue(retryFixture.now);
-    const headers = header === null ? {} : { "Retry-After": header };
+    const headers: Record<string, string> = header === null ? {} : { "Retry-After": header };
     const retryAfterMs = milliseconds ?? undefined;
     try {
       for (const capability of ["transcription", "documents"] as const) {
@@ -151,7 +151,7 @@ describe("ManagedJobClient exact wire contract", () => {
       await expect(client.images.status("img-1")).rejects.toMatchObject({ status: 503, retryAfterMs });
       request.mockResolvedValueOnce(json({ document: { id: "doc-1", status: "processing", error: null, progress: 0.5 } }, 200, headers));
       const status = await client.documents.status("doc-1");
-      expect(status.poll_after_ms).toBe(retryAfterMs);
+      expect(typeof status === "object" && status !== null && "poll_after_ms" in status ? status.poll_after_ms : undefined).toBe(retryAfterMs);
     } finally {
       now.mockRestore();
     }
@@ -171,7 +171,7 @@ describe("ManagedJobClient exact wire contract", () => {
   });
 
   it("keeps signed upload material internal and returns uploaded keys in declared index order", async () => {
-    const signed = jest.spyOn(transport as any, "uploadSignedInput").mockResolvedValue(undefined);
+    const signed = jest.spyOn(transport, "uploadSignedInput").mockResolvedValue(undefined);
     request.mockResolvedValue(json({ contract: MANAGED_JOB_PROTOCOL, upload_id: "up-1", expires_at: futureUploadExpiry(), input_uploads: [
       { index: 1, upload: { method: "PUT", url: "https://signed/b", headers: { authorization: "secret-b" }, expires_in_seconds: 900, expires_at: futureUploadExpiry() }, input_image: { type: "uploaded", key: "key-b", mime_type: "image/webp", size_bytes: 2, sha256: "b".repeat(64) } },
       { index: 0, upload: { method: "PUT", url: "https://signed/a", headers: { authorization: "secret-a" }, expires_in_seconds: 900, expires_at: futureUploadExpiry() }, input_image: { type: "uploaded", key: "key-a", mime_type: "image/png", size_bytes: 1, sha256: "a".repeat(64) } },

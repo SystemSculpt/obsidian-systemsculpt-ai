@@ -85,7 +85,7 @@ const storage = {
     legacyVector,
     localEmptyVector,
   ]),
-  removeIds: jest.fn(async () => undefined),
+  removeIds: jest.fn(async (_ids: Iterable<string>) => undefined),
   peekCurrentManagedNamespace: jest.fn(() => "systemsculpt:managed:semantic-v1:v3:2"),
   listManagedRootNamespaces: jest.fn(() => [
     "systemsculpt:managed:semantic-v1:v3:2",
@@ -187,7 +187,7 @@ describe("EmbeddingsManager managed namespace migration", () => {
       "invalid-dimension",
       "legacy",
     ]);
-    const removed = new Set(storage.removeIds.mock.calls[0]?.[0] as string[]);
+    const removed = new Set(storage.removeIds.mock.calls[0]?.[0]);
     expect(removed).not.toContain("current-v3");
     expect(removed).not.toContain("future-dynamic");
     expect(removed).not.toContain("local-empty");

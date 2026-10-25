@@ -5,6 +5,7 @@ import { detectLocalAgents, invalidateLocalAgentDetection, subscribeLocalAgentDe
 import { resolveDefaultChatBackend } from '../DefaultChatBackend';
 import { DEFAULT_SETTINGS } from '../../../types';
 import { migrateSettingsToCurrentSchema } from '../../../core/settings/migrations/SettingsMigrator';
+import { isLocalAgentId } from '../LocalAgents';
 import { windowsNpmHost } from './fixtures/npmNodeShim';
 
 jest.mock('../../../platform/desktopOnly', () => ({ desktopHost: { fs: jest.fn(), os: jest.fn(), path: jest.fn(), environment: jest.fn(), childProcess: jest.fn() } }));
@@ -332,7 +333,17 @@ it('does not let an invalidated background retry overwrite Detect again', async 
   expect(jest.getTimerCount()).toBe(0);
 });
 
-it.each([DEFAULT_SETTINGS, migrateSettingsToCurrentSchema({ schemaVersion: 14, textExecutionBackend: 'systemsculpt' }, DEFAULT_SETTINGS).settings])('defaults a fresh or migrated desktop chat to an installed recently used agent despite slow auth', async settings => {
+/** Narrows migrated persisted settings to the backend fields production validates before use. */
+function migratedBackendSettings(raw: Record<string, unknown>): Parameters<typeof resolveDefaultChatBackend>[0] {
+  const { textExecutionBackend, textExecutionBackendExplicit, licenseKey } = raw;
+  if (!(isLocalAgentId(textExecutionBackend) || textExecutionBackend === 'systemsculpt')
+    || typeof textExecutionBackendExplicit !== 'boolean' || typeof licenseKey !== 'string') {
+    throw new Error('Expected migrated backend settings.');
+  }
+  return { textExecutionBackend, textExecutionBackendExplicit, licenseKey };
+}
+
+it.each([DEFAULT_SETTINGS, migratedBackendSettings(migrateSettingsToCurrentSchema({ schemaVersion: 14, textExecutionBackend: 'systemsculpt' }, DEFAULT_SETTINGS).settings)])('defaults a fresh or migrated desktop chat to an installed recently used agent despite slow auth', async settings => {
   jest.useFakeTimers();
   const host = machine({ installed: ['claude'], hang: 'claude' });
   host.file('/home/test/.claude/projects/vault/main.jsonl');

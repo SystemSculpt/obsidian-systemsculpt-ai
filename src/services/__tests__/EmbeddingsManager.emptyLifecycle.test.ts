@@ -1,6 +1,5 @@
 import type { EmbeddingVector } from "../embeddings/types";
 import {
-  ManagedEmbeddingsError,
   type ManagedEmbeddingsIndexAdapter,
   type ManagedEmbeddingsIndexGeneration,
   type ManagedEmbeddingsIndexMetadata,
@@ -358,10 +357,10 @@ describe("EmbeddingsManager local empty-note lifecycle", () => {
     const state = harness("Queued work must honor a suspension raised during preparation. ".repeat(4));
     await state.manager.initialize();
     state.plugin.settings.embeddingsEnabled = true;
-    const queue = (state.manager as any).workQueue;
+    const queue = state.manager["workQueue"];
     await queue.enqueueImmediate(state.file.path, "modify", state.file.stat.mtime);
     const complete = queue.complete.bind(queue);
-    jest.spyOn(queue, "complete").mockImplementation(async (items: unknown[]) => {
+    jest.spyOn(queue, "complete").mockImplementation(async (items) => {
       await complete(items);
       (state.manager as any).processingSuspended = true;
       (state.manager as any).fatalSuspensionCode = "capability_unavailable";

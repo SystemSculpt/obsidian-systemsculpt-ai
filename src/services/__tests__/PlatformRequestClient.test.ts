@@ -488,6 +488,13 @@ describe("PlatformRequestClient", () => {
       await jest.advanceTimersByTimeAsync(0);
       return state;
     };
+    const timedOut = (request: Promise<Response>) => request.then(
+      (): never => { throw new Error("Expected the request to time out."); },
+      (error: unknown) => {
+        if (error instanceof PlatformRequestTimeoutError) return error;
+        throw error;
+      },
+    );
 
     beforeEach(() => {
       jest.useFakeTimers({ doNotFake: ["nextTick", "queueMicrotask"] });
@@ -525,13 +532,13 @@ describe("PlatformRequestClient", () => {
     it("scales an upload deadline by its body size and keeps a generous floor", async () => {
       const client = new PlatformRequestClient();
       (requestUrl as jest.Mock).mockImplementation(hang);
-      const upload = (bytes: number) => client.request({
+      const upload = (bytes: number) => timedOut(client.request({
         url: "https://signed.example.com/upload",
         method: "PUT",
         body: new ArrayBuffer(bytes),
         bodyEncoding: "raw",
         transport: "requestUrl",
-      }).catch((error: unknown) => error as PlatformRequestTimeoutError);
+      }));
 
       const small = upload(16);
       const large = upload(8 * 1024 * 1024);
@@ -551,13 +558,13 @@ describe("PlatformRequestClient", () => {
       (requestUrl as jest.Mock).mockImplementation(hang);
       const maxResponseBytes = 30 * 1024 * 1024;
 
-      const download = client.request({
+      const download = timedOut(client.request({
         url: "https://systemsculpt.com/api/plugin/images/generations/jobs/job/outputs/0",
         method: "GET",
         transport: "requestUrl",
         responseEncoding: "arrayBuffer",
         maxResponseBytes,
-      }).catch((error: unknown) => error as PlatformRequestTimeoutError);
+      }));
 
       await jest.advanceTimersByTimeAsync(platformTransferTimeoutMs(maxResponseBytes));
       expect((await download).timeoutMs).toBe(platformTransferTimeoutMs(maxResponseBytes));
@@ -570,12 +577,12 @@ describe("PlatformRequestClient", () => {
         .mockImplementationOnce(hang)
         .mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
 
-      const short = client.request({
+      const short = timedOut(client.request({
         url: "https://systemsculpt.com/api/plugin/auth/poll",
         method: "POST",
         body: {},
         timeoutMs: 5_000,
-      }).catch((error: unknown) => error as PlatformRequestTimeoutError);
+      }));
       const unbounded = client.request({
         url: "https://systemsculpt.com/api/plugin/license/validate",
         method: "GET",
