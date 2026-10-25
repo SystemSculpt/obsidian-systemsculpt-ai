@@ -413,8 +413,15 @@ export class ChatMarkdownSerializer {
         attributes,
         "terminal-retryable",
       );
+      const encodedFailureMessage = this.uniqueAdditiveAttribute(attributes, "terminal-failure-message");
+      let terminalFailureMessage: unknown;
+      if (encodedFailureMessage !== undefined) {
+        try { terminalFailureMessage = this.decodeBase64Json(encodedFailureMessage); }
+        catch { /* Invalid additive metadata does not invalidate the transcript. */ }
+      }
       const failedReceipt = normalizeFailedTerminalReceipt({
         terminalOutcome,
+        terminalFailureMessage,
         terminalReportId: this.uniqueAdditiveAttribute(
           attributes,
           "terminal-report-id",
@@ -752,6 +759,9 @@ export class ChatMarkdownSerializer {
           attributes += ` terminal-incident-id="${failedReceipt.terminalIncidentId}"`;
         }
         attributes += ` terminal-failure-code="${failedReceipt.terminalFailureCode}"`;
+        if (failedReceipt.terminalFailureMessage !== undefined) {
+          attributes += ` terminal-failure-message="${this.encodeBase64Json(failedReceipt.terminalFailureMessage)}"`;
+        }
         attributes += ` terminal-retryable="${String(failedReceipt.terminalRetryable)}"`;
         if (failedReceipt.terminalServerRunId) {
           attributes += ` terminal-server-run-id="${failedReceipt.terminalServerRunId}"`;

@@ -179,9 +179,10 @@ type HistoricalTurnSemantics = Readonly<{
 
 type DurableFailedReceipt = Readonly<{
   messageId: string;
-  reportId: string;
+  reportId?: string;
   incidentId?: string;
   failureCode: string;
+  failureMessage?: string;
   retryable: boolean;
   serverRunId?: string;
 }>;
@@ -192,9 +193,10 @@ function durableFailedReceipt(message: ChatMessage): DurableFailedReceipt | null
   if (!receipt) return null;
   return Object.freeze({
     messageId: message.message_id,
-    reportId: receipt.terminalReportId ?? receipt.terminalIncidentId!,
+    reportId: receipt.terminalReportId ?? receipt.terminalIncidentId,
     ...(receipt.terminalIncidentId ? { incidentId: receipt.terminalIncidentId } : {}),
     failureCode: receipt.terminalFailureCode,
+    failureMessage: receipt.terminalFailureMessage,
     retryable: receipt.terminalRetryable,
     ...(receipt.terminalServerRunId ? { serverRunId: receipt.terminalServerRunId } : {}),
   });
@@ -2178,11 +2180,11 @@ export class AgentConversationRenderer extends Component {
       kind: "error",
       error: {
         code: receipt.failureCode,
-        message: "SystemSculpt could not complete the response.",
+        message: receipt.failureMessage ?? "SystemSculpt could not complete the response.",
         retryable: receipt.retryable,
-        ...(isLocalReportId(receipt.reportId)
+        ...(receipt.reportId ? isLocalReportId(receipt.reportId)
           ? { reportId: receipt.reportId }
-          : { incidentId: receipt.reportId }),
+          : { incidentId: receipt.reportId } : {}),
         ...(receipt.incidentId ? { incidentId: receipt.incidentId } : {}),
       },
       retryable: receipt.retryable,

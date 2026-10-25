@@ -313,6 +313,39 @@ describe("ChatMarkdownSerializer", () => {
       expect(String(parsed?.messages[1]?.content)).toContain("PARTIAL-STREAM-START");
     });
 
+    it.each(['local_claude_failed', 'local_codex_failed', 'local_claude_usage_limit', 'local_codex_usage_limit'])(
+      'round-trips %s with native error text outside the answer', terminalFailureCode => {
+        for (const content of ['', 'Partial answer', '<!-- SYSTEMSCULPT-MESSAGE-END -->']) {
+          const receipt = { terminalOutcome: 'failed' as const, terminalFailureCode,
+            terminalFailureMessage: 'Not signed in: "résumé"\n<!-- SYSTEMSCULPT-MESSAGE-END -->', terminalRetryable: !terminalFailureCode.endsWith('usage_limit') };
+          const messages: ChatMessage[] = [{ role: 'assistant', message_id: 'native-failed', content, ...receipt }];
+          const markdown = ChatMarkdownSerializer.serializeMessages(messages);
+          expect(markdown).toContain('terminal-failure-message="');
+          expect(markdown).not.toContain(receipt.terminalFailureMessage);
+          expect(markdown).not.toMatch(/terminal-(?:report|incident|server-run)-id/);
+          expect(ChatMarkdownSerializer.parseMarkdown(`---\nid: native-failure\n---\n\n${markdown}`)?.messages[0])
+            .toMatchObject({ content, ...receipt });
+        }
+      },
+    );
+
+    it.each(['missing', 'invalid base64', 'invalid JSON', 'non-string', 'duplicate'])(
+      'ignores %s native error metadata without losing transcript content', corruption => {
+        const markdown = ChatMarkdownSerializer.serializeMessages([{ role: 'assistant', message_id: 'native-failed', content: 'Partial answer',
+          terminalOutcome: 'failed', terminalFailureCode: 'local_claude_failed', terminalFailureMessage: 'Native error', terminalRetryable: true }]);
+        const changed = markdown.replace(/terminal-failure-message="[^"]*"/, attribute => {
+          if (corruption === 'missing') return '';
+          if (corruption === 'duplicate') return `${attribute} ${attribute}`;
+          const payload = corruption === 'invalid base64' ? '!' : corruption === 'invalid JSON' ? btoa('bad json') : btoa('{}');
+          return `terminal-failure-message="${payload}"`;
+        });
+        const restored = ChatMarkdownSerializer.parseMarkdown(`---\nid: native-failure\n---\n\n${changed}`)?.messages[0];
+        expect(restored?.content).toBe('Partial answer');
+        expect(restored).not.toHaveProperty('terminalOutcome');
+        expect(restored).not.toHaveProperty('terminalFailureMessage');
+      },
+    );
+
     it.each([true, false])(
       "round-trips a complete failed terminal receipt when retryable is %s",
       (terminalRetryable) => {

@@ -93,9 +93,9 @@ it.each(cases.flatMap(native => [false, true].map(partial => ({ ...native, parti
       hosted!.click();
       expect(onUseHosted).toHaveBeenCalledTimes(1); expect(onRetryFailedTurn).not.toHaveBeenCalled();
       expect(snapshot.parts.filter(part => part.kind === 'text').map(part => part.markdown).join('')).toBe(partial ? PARTIAL : '');
-      expect(JSON.stringify(persistAssistant.mock.calls)).not.toContain(NOTICE);
-      if (partial) expect(persistAssistant).toHaveBeenCalledWith(expect.objectContaining({ content: PARTIAL, terminalOutcome: 'failed' }));
-      else expect(persistAssistant).not.toHaveBeenCalled();
+      expect(persistAssistant).toHaveBeenCalledWith(expect.objectContaining({
+        content: partial ? PARTIAL : '', terminalOutcome: 'failed', terminalFailureCode: `local_${agent}_usage_limit`, terminalFailureMessage: NOTICE, terminalRetryable: false,
+      }));
     } finally { renderer.unload(); await session.detach(); }
   },
 );
@@ -106,9 +106,7 @@ it.each(['rate_limit', 'billing_error'].flatMap(code => [false, true].map(partia
     const persistAssistant = jest.fn(async () => {}), session = new ClaudeChatSession(new App(), { persistAssistant });
     try {
       await expect(session.start(input)).resolves.toMatchObject({ kind: 'failed', error: { code: 'local_claude_usage_limit', message: NOTICE, retryable: false } });
-      if (partial) expect(persistAssistant).toHaveBeenCalledWith(expect.objectContaining({ content: PARTIAL }));
-      else expect(persistAssistant).not.toHaveBeenCalled();
-      expect(JSON.stringify(persistAssistant.mock.calls)).not.toContain(NOTICE);
+      expect(persistAssistant).toHaveBeenCalledWith(expect.objectContaining({ content: partial ? PARTIAL : '', terminalFailureMessage: NOTICE }));
     } finally { await session.detach(); }
   },
 );
@@ -120,7 +118,7 @@ it.each([false, true])('preserves genuine unfinished text before a limit (stream
   try {
     await expect(session.start(input)).resolves.toMatchObject({ kind: 'failed', error: { code: 'local_claude_usage_limit' } });
     expect(persistAssistant).toHaveBeenCalledWith(expect.objectContaining({ content: `${PARTIAL}\n\n${pendingText}`, terminalOutcome: 'failed' }));
-    expect(JSON.stringify(persistAssistant.mock.calls)).not.toContain(NOTICE);
+    expect(persistAssistant).toHaveBeenCalledWith(expect.objectContaining({ terminalFailureMessage: NOTICE, terminalRetryable: false }));
   } finally { await session.detach(); }
 });
 

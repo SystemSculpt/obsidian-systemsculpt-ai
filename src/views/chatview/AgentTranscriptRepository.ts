@@ -209,6 +209,7 @@ function omitsTerminalMetadata(message: ChatMessage): boolean {
     && message.terminalReportId === undefined
     && message.terminalIncidentId === undefined
     && message.terminalFailureCode === undefined
+    && message.terminalFailureMessage === undefined
     && message.terminalRetryable === undefined
     && message.terminalServerRunId === undefined;
 }

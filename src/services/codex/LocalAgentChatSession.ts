@@ -223,12 +223,14 @@ export class LocalAgentChatSession implements ChatSession {
       const cancelled = controller.signal.aborted;
       finishParts(cancelled ? 'cancelled' : 'failed');
       try { await this.closeTransport(); } catch { /* Preserve the original turn failure. */ }
-      if (!persisted && this.localSnapshot.parts.length) {
-        try { await this.localOptions.persistAssistant(message(receivedText, cancelled ? 'cancelled' : 'failed')); } catch { /* Preserve the original native failure. */ }
-      }
-      if (cancelled) { this.publish({ status: 'cancelled', phase: 'complete', waitingReason: undefined, statusLabel: `${name} stopped` }); return { kind: 'cancelled', snapshot: this.localSnapshot }; }
       const usageLimit = cause instanceof LocalAgentUsageLimitError;
       const error = { code: `local_${this.agent}_${usageLimit ? 'usage_limit' : 'failed'}`, message: cause instanceof Error ? cause.message : `${name} could not complete this response.`, retryable: !usageLimit };
+      if (!persisted && (!cancelled || this.localSnapshot.parts.length)) {
+        const assistant = message(receivedText, cancelled ? 'cancelled' : 'failed');
+        if (!cancelled) Object.assign(assistant, { terminalFailureCode: error.code, terminalFailureMessage: error.message, terminalRetryable: error.retryable });
+        try { await this.localOptions.persistAssistant(assistant); } catch { /* Preserve the original native failure. */ }
+      }
+      if (cancelled) { this.publish({ status: 'cancelled', phase: 'complete', waitingReason: undefined, statusLabel: `${name} stopped` }); return { kind: 'cancelled', snapshot: this.localSnapshot }; }
       this.publish({ status: 'failed', phase: 'complete', waitingReason: undefined, terminalError: error, parts: [...this.localSnapshot.parts, { id: `${messageId}_error`, order: this.localSnapshot.parts.length, kind: 'error', error, retryable: error.retryable }] });
       return { kind: 'failed', snapshot: this.localSnapshot, error };
     } finally { accepting = false; this.withdrawApprovals(); controller.signal.removeEventListener('abort', stopApprovals); this.sources = []; }
