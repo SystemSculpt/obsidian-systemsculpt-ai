@@ -2,7 +2,7 @@
 import { TFile, type App } from "obsidian";
 import type { AgentToolPart } from "../../../chat/ChatConversation";
 import { nativeToolPresentation, renderNativeToolPreview } from "../NativeToolPresentation";
-import { nativeToolPath } from "../../../utils/nativeToolPath";
+import { nativePathPrefixRewriter, nativeToolPath } from "../../../utils/nativeToolPath";
 import { prepareNativeWriteEditPreview } from "../ToolCallPreview";
 import { presentAgentTool, presentAgentToolDetails, presentAgentToolFailure } from "../AgentToolPresentation";
 import { desktopHost } from "../../../platform/desktopOnly";
@@ -80,6 +80,37 @@ describe("native tool paths", () => {
     ["/Users/me/Vault/Plan.md", "Plan.md"],
   ])("shows %s relative to home only when it is outside the vault", (path, displayPath) => {
     expect(nativeToolPath(path, "/Users/me/Vault", "/Users/me/Vault", undefined, "/Users/me/").displayPath).toBe(displayPath);
+  });
+
+  it.each([
+    ["File created successfully at: /Users/me/Vale Studio/Reviews/Weekly review.md", "File created successfully at: ./Reviews/Weekly review.md"],
+    ["/Users/me/Vale Studio\n", ".\n"],
+    ['ls "/Users/me/Vale Studio" /Users/me/Vale Studio/Daily', 'ls "." ./Daily'],
+    ["/Users/me/Vale Studio/a.md:3:todo\n/Users/me/Vale Studio/b.md:9:todo", "./a.md:3:todo\n./b.md:9:todo"],
+    ["/Users/me/Vale Studio 2/Plan.md and /Users/me/Vale Studio.bak", "~/Vale Studio 2/Plan.md and ~/Vale Studio.bak"],
+    ["/Users/meow/Plan.md /backup/Users/me/Vale Studio/a.md file:///Users/me/x", "/Users/meow/Plan.md /backup/Users/me/Vale Studio/a.md file:///Users/me/x"],
+    ['cd "/Users/me" && cat ~/.zshrc', 'cd "~" && cat ~/.zshrc'],
+    // A bare directory followed by a space may begin a sibling's name ("Vale Studio 2").
+    ["cd /Users/me/Vale Studio && ls", "cd ~/Vale Studio && ls"],
+  ])("rewrites whole directory prefixes in %j", (text, expected) => {
+    const rewrite = nativePathPrefixRewriter([["/Users/me/Vale Studio/", "."], ["/Users/me", "~"]]);
+    expect(rewrite(text)).toBe(expected);
+  });
+
+  it("rewrites Windows prefixes with either separator and drive letter case", () => {
+    const rewrite = nativePathPrefixRewriter([["C:\\Users\\me\\Vault\\Notes", "."], ["C:\\Users\\me\\Vault", ".."], ["C:\\Users\\me", "~"]]);
+    expect(rewrite("c:\\Users\\me\\Vault\\Notes\\Plan.md, C:/Users/me/Vault/Other.md, C:\\Users\\me\\AppData"))
+      .toBe(".\\Plan.md, ../Other.md, ~\\AppData");
+  });
+
+  it("matches directory names literally", () => {
+    const rewrite = nativePathPrefixRewriter([["/Users/me/Notes (2026)+[a].*", "."]]);
+    expect(rewrite("/Users/me/Notes (2026)+[a].*/Plan.md /Users/me/Notes (2026)++[a].*/Plan.md")).toBe("./Plan.md /Users/me/Notes (2026)++[a].*/Plan.md");
+  });
+
+  it("never rewrites a filesystem root or a relative directory", () => {
+    const rewrite = nativePathPrefixRewriter([["/", "."], ["C:\\", "."], ["//", "."], ["Vault", "."], ["", "."]]);
+    expect(rewrite("/Users/me/Vault/Plan.md C:\\Plan.md Vault/Plan.md")).toBe("/Users/me/Vault/Plan.md C:\\Plan.md Vault/Plan.md");
   });
 });
 
