@@ -13,7 +13,7 @@ import type {
 } from "../StudioGraphInteractionTypes";
 import { StudioSimpleContextMenuOverlay } from "../StudioSimpleContextMenuOverlay";
 import { StudioLinkStore, type PortAnchor } from "./StudioLinkStore";
-import { StudioEdgeRenderer } from "./StudioEdgeRenderer";
+import { StudioEdgeRenderer, type EdgePortAnchorResolver } from "./StudioEdgeRenderer";
 import { StudioPortInteraction } from "./StudioPortInteraction";
 import { getStudioOwnerWindow } from "../StudioDomContext";
 import type { StudioEdgeActivityPhase } from "../activity/StudioActivity";
@@ -45,6 +45,8 @@ export class StudioGraphConnectionEngine {
   // leaf is hidden/unlaid-out still resolves precise anchors from the last
   // measurement instead of dropping the edge.
   private readonly portOffsetCache = new Map<string, StudioPortLocalOffset>();
+  private reuseMeasuredPortOffsets = false;
+  private settingEdges = false;
 
   constructor(private readonly host: Host) {
     this.portInteraction = new StudioPortInteraction(host, this.store, {
@@ -123,11 +125,13 @@ export class StudioGraphConnectionEngine {
     this.renderer = new StudioEdgeRenderer({
       store: this.store,
       layer,
-      resolvePortAnchorPoint: (anchor, direction) => this.resolvePortAnchorPoint(anchor, direction),
+      createPortAnchorResolver: () => this.createPortAnchorResolver(),
       getCursorAnchorPoint: () => this.cursorAnchorPoint(),
       resolveEdgeActivity: (edgeId) => this.edgeActivity.get(edgeId) ?? "idle",
     });
-    this.storeUnsub = this.store.subscribe(() => this.renderer?.render());
+    this.storeUnsub = this.store.subscribe(() => {
+      if (!this.settingEdges) this.renderer?.render();
+    });
     this.bindEdgeLayerListeners(layer);
     this.observeCanvasForEdgeReresolve();
   }
@@ -207,20 +211,40 @@ export class StudioGraphConnectionEngine {
     return this.portInteraction.consumeSuppressedOutputClick(nodeId, portId);
   }
 
-  renderEdgeLayer(): void {
+  /**
+   * `translating` marks a drag frame: cards only moved, so the edges, the pin
+   * states and each pin's offset inside its card are unchanged, and the frame
+   * reuses the measured offsets instead of reading layout.
+   */
+  renderEdgeLayer(options?: { translating?: boolean }): void {
     const project = this.host.getCurrentProject();
     if (!project || !this.graphEdgesLayerEl || !this.graphCanvasEl) {
       this.store.clear();
       this.renderer?.render();
       return;
     }
-    this.store.setEdges(
-      project.graph.edges.map((edge) => ({
-        id: edge.id,
-        source: { nodeId: edge.fromNodeId, portId: edge.fromPortId },
-        target: { nodeId: edge.toNodeId, portId: edge.toPortId },
-      }))
-    );
+    if (options?.translating) {
+      this.reuseMeasuredPortOffsets = true;
+      try {
+        this.renderer?.render();
+      } finally {
+        this.reuseMeasuredPortOffsets = false;
+      }
+      return;
+    }
+    // The render below draws the new edges; the store's listener needn't draw them first.
+    this.settingEdges = true;
+    try {
+      this.store.setEdges(
+        project.graph.edges.map((edge) => ({
+          id: edge.id,
+          source: { nodeId: edge.fromNodeId, portId: edge.fromPortId },
+          target: { nodeId: edge.toNodeId, portId: edge.toPortId },
+        }))
+      );
+    } finally {
+      this.settingEdges = false;
+    }
     this.applyConnectedPortVisuals(project);
     this.portInteraction.applyActiveOutputClass();
     this.portInteraction.reapplyPendingHighlights();
@@ -400,25 +424,21 @@ export class StudioGraphConnectionEngine {
     this.autoCreateHintEl.style.top = `${Math.round(anchorY)}px`;
   }
 
-  // Resolve a port anchor in canvas WORLD coordinates, primarily from the data
+  // Resolve port anchors in canvas WORLD coordinates, primarily from the data
   // model (node.position + width) — the same coordinates the visible cards are
   // positioned with — so edges never depend on whether a pin can be measured at
   // render time. DOM measurement only refines the per-port vertical offset and
   // is cached, so a render while hidden/unlaid-out still draws precise edges.
-  private resolvePortAnchorPoint(
-    anchor: PortAnchor,
-    direction: PortDirection
-  ): { x: number; y: number } | null {
-    const node = this.findNodeById(anchor.nodeId);
-    if (!node) return null;
-    const measuredOffset = this.resolvePortLocalOffset(anchor.nodeId, direction, anchor.portId);
-    return resolveStudioPortAnchorWorldPoint({ node, direction, measuredOffset });
-  }
-
-  private findNodeById(nodeId: string): StudioNodeInstance | null {
-    const project = this.host.getCurrentProject();
-    if (!project) return null;
-    return project.graph.nodes.find((node) => node.id === nodeId) ?? null;
+  // One resolver serves one render, over one index of the current nodes.
+  private createPortAnchorResolver(): EdgePortAnchorResolver {
+    const nodes = new Map<string, StudioNodeInstance>();
+    for (const node of this.host.getCurrentProject()?.graph.nodes ?? []) nodes.set(node.id, node);
+    return (anchor, direction) => {
+      const node = nodes.get(anchor.nodeId);
+      if (!node) return null;
+      const measuredOffset = this.resolvePortLocalOffset(anchor.nodeId, direction, anchor.portId);
+      return resolveStudioPortAnchorWorldPoint({ node, direction, measuredOffset });
+    };
   }
 
   private resolvePortLocalOffset(
@@ -427,6 +447,10 @@ export class StudioGraphConnectionEngine {
     portId: string
   ): StudioPortLocalOffset | null {
     const key = `${nodeId}:${direction}:${portId}`;
+    if (this.reuseMeasuredPortOffsets) {
+      const cached = this.portOffsetCache.get(key);
+      if (cached) return cached;
+    }
     const measured = this.measurePortLocalOffset(nodeId, direction, portId);
     if (measured) {
       this.portOffsetCache.set(key, measured);
@@ -483,11 +507,7 @@ export class StudioGraphConnectionEngine {
       linked.add(`${edge.fromNodeId}:out:${edge.fromPortId}`);
       linked.add(`${edge.toNodeId}:in:${edge.toPortId}`);
     }
-    const pins = this.graphCanvasEl.querySelectorAll<HTMLElement>(".ss-studio-port-pin");
-    pins.forEach((pin) => {
-      const nodeId = pin.dataset.nodeId || "";
-      const portId = pin.dataset.portId || "";
-      const direction = pin.classList.contains("is-output") ? "out" : "in";
+    this.portInteraction.forEachPortElement((nodeId, direction, portId, pin) => {
       pin.classList.toggle("is-linked", linked.has(`${nodeId}:${direction}:${portId}`));
     });
   }
