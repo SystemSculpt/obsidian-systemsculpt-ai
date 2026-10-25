@@ -651,6 +651,14 @@ export class AgentChatView extends ItemView {
     const persistAssistant = async (message: ChatMessage): Promise<void> => {
       await transcript.persistAssistant(message);
     };
+    // A native reply belongs under its committed user turn. A turn that failed
+    // before that commit never reached the agent: the composer gets the draft
+    // back, and saving its failure would leave an orphan under the previous turn.
+    const persistNativeAssistant = async (message: ChatMessage): Promise<void> => {
+      if (!transcript.snapshot().messages.some((user) =>
+        user.role === "user" && `${user.message_id}_assistant` === message.message_id)) return;
+      await transcript.persistAssistant(message);
+    };
     const { app, plugin } = this;
     const backend = this.chatExecutionBackend ?? defaultTextBackend(plugin.settings);
     const notice = (text: string, reason?: string): void => {
@@ -666,10 +674,10 @@ export class AgentChatView extends ItemView {
     };
     // Retry context belongs to the submitting turn, never the creating pane.
     if (backend === "codex") {
-      return new CodexChatSession(app, { persistAssistant, notice }, () => [], () => codexOptionsFromSettings(plugin.settings));
+      return new CodexChatSession(app, { persistAssistant: persistNativeAssistant, notice }, () => [], () => codexOptionsFromSettings(plugin.settings));
     }
     if (backend === "claude") {
-      return new ClaudeChatSession(app, { persistAssistant, notice }, () => [], () => claudeOptionsFromSettings(plugin.settings));
+      return new ClaudeChatSession(app, { persistAssistant: persistNativeAssistant, notice }, () => [], () => claudeOptionsFromSettings(plugin.settings));
     }
     return new AgentChatSession({
       recoveryEnvironment: {
