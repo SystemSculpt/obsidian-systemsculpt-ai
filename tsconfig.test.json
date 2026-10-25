@@ -1,11 +1,11 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "lib": ["DOM", "ES2022"],
+    "lib": ["DOM", "DOM.Iterable", "ES2022"],
     "types": ["jest", "node"],
     "paths": {
-      "@/*": ["src/*"],
-      "obsidian": ["src/tests/mocks/obsidian"]
+      "@/*": ["./src/*"],
+      "obsidian": ["./src/tests/mocks/obsidian"]
     }
   },
   "include": ["src/**/*.ts", "testing/**/*.ts"],
