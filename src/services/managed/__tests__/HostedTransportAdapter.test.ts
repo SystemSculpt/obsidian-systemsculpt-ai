@@ -1,5 +1,6 @@
 import { requestUrl } from "obsidian";
 import fixture from "../../../../testing/fixtures/managed/managed-capabilities-v2.json";
+import retryFixture from "../../../../testing/fixtures/retry-after.json";
 import { PlatformRequestClient } from "../../PlatformRequestClient";
 import { HostedTransportAdapter } from "../adapters/HostedTransportAdapter";
 
@@ -273,7 +274,7 @@ describe("HostedTransportAdapter", () => {
     await adapter.managedImageOutput("/api/plugin/images/generations/jobs/123e4567-e89b-42d3-a456-426614174000/outputs/0", headers);
     expect(request).toHaveBeenCalledWith(expect.objectContaining({
       url: "https://api.test/api/plugin/images/generations/jobs/123e4567-e89b-42d3-a456-426614174000/outputs/0",
-      method: "GET", headers: expect.objectContaining(headers), preserveResponseHeaders: true, licenseKey: "secret",
+      method: "GET", headers: expect.objectContaining(headers), licenseKey: "secret",
       transport: "requestUrl", responseEncoding: "arrayBuffer", maxResponseBytes: 30 * 1024 * 1024,
     }));
     await expect(adapter.managedImageOutput("https://signed.test/output", headers)).rejects.toThrow("Invalid managed image output path");
@@ -308,7 +309,6 @@ describe("HostedTransportAdapter", () => {
       },
       body,
       stream: false,
-      preserveResponseHeaders: true,
       allowTransportFallback: false,
       transport: "requestUrl",
       bodyEncoding: "raw",
@@ -361,7 +361,6 @@ describe("HostedTransportAdapter", () => {
       headers: commonHeaders,
       body: undefined,
       stream: false,
-      preserveResponseHeaders: true,
       allowTransportFallback: false,
       transport: "requestUrl",
       responseEncoding: "arrayBuffer",
@@ -377,7 +376,6 @@ describe("HostedTransportAdapter", () => {
       },
       body: { query: "semantic query" },
       stream: false,
-      preserveResponseHeaders: true,
       allowTransportFallback: false,
       transport: "requestUrl",
       responseEncoding: "arrayBuffer",
@@ -407,7 +405,7 @@ describe("HostedTransportAdapter", () => {
     await adapter.uploadSignedInput("https://signed.test/input", "PUT", { "content-type": "image/png" }, body);
     expect(request).toHaveBeenCalledWith({
       url: "https://signed.test/input", method: "PUT", headers: { "content-type": "image/png" }, body,
-      signal: undefined, stream: false, preserveResponseHeaders: false,
+      signal: undefined, stream: false,
       transport: "requestUrl", bodyEncoding: "raw",
     });
     expect(request.mock.calls[0][0]).not.toHaveProperty("licenseKey");
@@ -423,18 +421,36 @@ describe("HostedTransportAdapter", () => {
 
     expect(request).toHaveBeenCalledWith({
       url: "https://signed.test/part", method: "PUT", headers: {}, body,
-      signal: undefined, stream: false, preserveResponseHeaders: true,
+      signal: undefined, stream: false,
       transport: "requestUrl", bodyEncoding: "raw",
     });
     expect(result).toBe(signedResponse);
     expect(result.headers.get("etag")).toBe('"0123456789abcdef"');
   });
 
+  it.each(retryFixture.cases)("decodes $name in ordinary and embeddings diagnostics without consuming the body", async ({ header, milliseconds }) => {
+    const now = jest.spyOn(Date, "now").mockReturnValue(retryFixture.now);
+    try {
+      const adapter = new HostedTransportAdapter({ baseUrl: "https://api.test", pluginVersion: "6", licenseKey: () => "key" });
+      for (const send of [
+        () => adapter.request({ path: "/op", method: "GET" }),
+        () => adapter.getManagedEmbeddingsIndexMetadata(),
+      ]) {
+        request.mockResolvedValueOnce(new Response("busy", { status: 503, headers: header === null ? {} : { "Retry-After": header } }));
+        const result = await send();
+        expect(result.diagnostics.retryAfterMs).toBe(milliseconds ?? undefined);
+        expect(await result.response.text()).toBe("busy");
+      }
+    } finally {
+      now.mockRestore();
+    }
+  });
+
   it("returns bounded diagnostics with preserved response metadata", async () => {
     request.mockResolvedValue(response(503, { error: "x".repeat(5000) }));
     const adapter = new HostedTransportAdapter({ baseUrl: "https://api.test", pluginVersion: "6", licenseKey: () => "secret" });
     const result = await adapter.request({ path: "/op", method: "POST" });
-    expect(result.diagnostics).toMatchObject({ status: 503, requestId: "request-1", contentType: "application/json", retryAfter: "5" });
+    expect(result.diagnostics).toMatchObject({ status: 503, requestId: "request-1", contentType: "application/json", retryAfterMs: 5_000 });
     expect(result.diagnostics.errorText.length).toBeLessThanOrEqual(2048);
     expect(result.diagnostics.errorText).not.toContain("secret");
   });

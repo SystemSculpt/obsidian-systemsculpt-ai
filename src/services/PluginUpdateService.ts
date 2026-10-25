@@ -5,6 +5,7 @@ import { API_BASE_URL } from "../constants/api";
 import { showActionNotice } from "../core/ui/notifications";
 import { hasHostCapability } from "../platform/hostCapabilities";
 import { compareNumericVersions, parseNumericVersion } from "../utils/semver";
+import { parseRetryAfterMs } from "../utils/retryAfter";
 import { PlatformRequestClient } from "./PlatformRequestClient";
 
 const RELEASE_CONTRACT = "plugin-release-v1" as const;
@@ -71,15 +72,6 @@ export function cacheControlMaxAgeMs(value: string | null): number | undefined {
     if (match) return Number(match[1]) * 1_000;
   }
   return undefined;
-}
-
-/** Reads Retry-After as delta-seconds or an HTTP date. */
-export function retryAfterMs(value: string | null, now: number): number | undefined {
-  if (!value) return undefined;
-  const trimmed = value.trim();
-  if (/^\d{1,10}$/.test(trimmed)) return Number(trimmed) * 1_000;
-  const at = Date.parse(trimmed);
-  return Number.isFinite(at) ? Math.max(0, at - now) : undefined;
 }
 
 function hasExactKeys(record: Record<string, unknown>, expected: readonly string[]): boolean {
@@ -306,7 +298,7 @@ export class PluginUpdateService {
     if (!response.ok) {
       throw new PluginReleaseRequestError(
         `Plugin release request failed (${response.status})`,
-        retryAfterMs(response.headers.get("retry-after"), this.now()),
+        parseRetryAfterMs(response.headers.get("retry-after"), { now: this.now() }),
       );
     }
     const text = await response.text();

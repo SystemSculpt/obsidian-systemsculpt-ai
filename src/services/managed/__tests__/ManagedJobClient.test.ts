@@ -2,6 +2,7 @@ import fixture from "../../../../testing/fixtures/managed/managed-job-protocol-v
 import imageOutputFixture from "../../../../testing/fixtures/managed/managed-image-output-v1.json";
 import { ManagedJobClient, MANAGED_IMAGE_OUTPUT_DESCRIPTOR, MANAGED_JOB_DESCRIPTORS, MANAGED_JOB_OPERATION_STATUSES, MANAGED_JOB_PROTOCOL } from "../ManagedJobClient";
 import { HostedTransportAdapter } from "../adapters/HostedTransportAdapter";
+import retryFixture from "../../../../testing/fixtures/retry-after.json";
 
 const json = (value: unknown, status = 200, headers: Record<string, string> = {}) => new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json", "x-request-id": "req-1", ...headers } });
 const txJob = (status = "uploading") => ({ id: "job-1", status, filename: "a.wav", content_type: "audio/wav", content_length_bytes: 5, expires_at: "2099-01-01T00:00:00Z" });
@@ -130,12 +131,30 @@ describe("ManagedJobClient exact wire contract", () => {
     await expect(client.documents.download("doc-1")).rejects.toMatchObject({ code: "malformed_response" });
   });
 
-  it.each(["transcription", "documents"] as const)("preserves signed %s upload Retry-After", async (capability) => {
-    request.mockResolvedValueOnce(json({ part: {
-      part_number: 1, method: "PUT", url: "https://signed/part", url_expires_in_seconds: 900, expected_content_length_bytes: 1,
-    } })).mockResolvedValueOnce(new Response("Unavailable", { status: 503, headers: { "retry-after": "5" } }));
-    await expect(client[capability].uploadPart("job-1", 1, new Uint8Array([1]).buffer))
-      .rejects.toMatchObject({ status: 503, retryable: true, retryAfterMs: 5_000 });
+  it.each(retryFixture.cases)("carries $name through signed uploads, HTTP errors, image-output errors and status hints", async ({ header, milliseconds }) => {
+    const now = jest.spyOn(Date, "now").mockReturnValue(retryFixture.now);
+    const headers = header === null ? {} : { "Retry-After": header };
+    const retryAfterMs = milliseconds ?? undefined;
+    try {
+      for (const capability of ["transcription", "documents"] as const) {
+        request.mockResolvedValueOnce(json({ part: {
+          part_number: 1, method: "PUT", url: "https://signed/part", url_expires_in_seconds: 900, expected_content_length_bytes: 1,
+        } })).mockResolvedValueOnce(new Response("Unavailable", { status: 503, headers }));
+        await expect(client[capability].uploadPart("job-1", 1, new Uint8Array([1]).buffer))
+          .rejects.toMatchObject({ status: 503, retryable: true, retryAfterMs });
+        request.mockResolvedValueOnce(new Response("Unavailable", { status: 503, headers }));
+        await expect(client[capability].status("job-1")).rejects.toMatchObject({ retryAfterMs });
+      }
+      const imageErrorResponse = imageError(503, "temporarily_unavailable", "The managed image output is temporarily unavailable.");
+      if (header !== null) imageErrorResponse.headers.set("Retry-After", header);
+      request.mockResolvedValueOnce(imageErrorResponse);
+      await expect(client.images.status("img-1")).rejects.toMatchObject({ status: 503, retryAfterMs });
+      request.mockResolvedValueOnce(json({ document: { id: "doc-1", status: "processing", error: null, progress: 0.5 } }, 200, headers));
+      const status = await client.documents.status("doc-1");
+      expect(status.poll_after_ms).toBe(retryAfterMs);
+    } finally {
+      now.mockRestore();
+    }
   });
 
   it("keeps Retry-After outside strict response bodies while exposing the server poll hint", async () => {
@@ -306,7 +325,7 @@ describe("ManagedJobClient exact wire contract", () => {
     const result = await client.images.downloadOutput("123e4567-e89b-42d3-a456-426614174000", 0, metadata);
     expect([...new Uint8Array(result.bytes)]).toEqual([1, 2]);
     expect(result.metadata).toEqual(metadata);
-    expect(request.mock.calls[0][0]).toEqual(expect.objectContaining({ url: "https://api.test/api/plugin/images/generations/jobs/123e4567-e89b-42d3-a456-426614174000/outputs/0", method: "GET", preserveResponseHeaders: true }));
+    expect(request.mock.calls[0][0]).toEqual(expect.objectContaining({ url: "https://api.test/api/plugin/images/generations/jobs/123e4567-e89b-42d3-a456-426614174000/outputs/0", method: "GET" }));
     expect(request.mock.calls[0][0].headers["x-systemsculpt-image-output-contract"]).toBe("managed-image-output-v1");
     expect(JSON.stringify(request.mock.calls[0][0])).not.toContain("signed");
   });

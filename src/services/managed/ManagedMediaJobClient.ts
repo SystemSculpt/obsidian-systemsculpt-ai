@@ -12,7 +12,6 @@ import {
   ManagedVideoOutputMetadata,
 } from "./ManagedTypes";
 import type { ManagedUploadedImageInput } from "./ManagedJobClient";
-import { retryAfterHeaderMs } from "./ManagedJobObservation";
 
 /**
  * managed-job-protocol-v2 — the negotiated media contract that adds model
@@ -218,7 +217,7 @@ export class ManagedMediaJobClient {
 
   private async protocolError(result: ManagedTransportResult, requestId: string): Promise<never> {
     const status = result.response.status;
-    const retryAfterMs = retryAfterHeaderMs(result.response.headers.get("retry-after"));
+    const retryAfterMs = result.diagnostics.retryAfterMs;
     const retryable = status === 429 || status === 502 || status === 503;
     let envelope: { code: string; message: string } | null = null;
     try {
@@ -336,7 +335,7 @@ export class ManagedMediaJobClient {
     if (item.job.id !== jobId) malformed("Managed media status identity changed.");
     this.throwTerminal(kind, item.job, result.response.status, requestId);
     const pollAfterMs = root.poll_after_ms === undefined
-      ? retryAfterHeaderMs(result.response.headers.get("retry-after"))
+      ? result.diagnostics.retryAfterMs
       : root.poll_after_ms as number;
     return {
       ...item,

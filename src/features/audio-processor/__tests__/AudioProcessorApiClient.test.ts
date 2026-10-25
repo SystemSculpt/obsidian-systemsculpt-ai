@@ -1,3 +1,4 @@
+import retryFixture from "../../../../testing/fixtures/retry-after.json";
 import {
   PlatformRequestClient,
   platformTransferTimeoutMs,
@@ -88,6 +89,23 @@ describe("AudioProcessorApiClient", () => {
     });
     return { client, requestClient };
   };
+
+  it.each(retryFixture.cases)("carries $name through signed uploads, API failures and audio poll hints", async ({ header, milliseconds }) => {
+    const now = jest.spyOn(Date, "now").mockReturnValue(retryFixture.now);
+    const headers = header === null ? {} : { "Retry-After": header };
+    const { client, requestClient } = setup();
+    try {
+      requestClient.responses.push(new Response("busy", { status: 503, headers }));
+      await expect(client.uploadPart({ partNumber: 1, url: "https://signed.test/part", headers: {}, expiresInSeconds: 900 }, new ArrayBuffer(1)))
+        .rejects.toMatchObject({ status: 503, retryAfterMs: milliseconds ?? undefined });
+      requestClient.responses.push(new Response("busy", { status: 503, headers }));
+      await expect(client.getPartUrl("audio_job_123", 1)).rejects.toMatchObject({ status: 503, retryAfterMs: milliseconds ?? undefined });
+      requestClient.responses.push(json({ job: pendingJob }, 200, headers));
+      expect((await client.getJob("audio_job_123")).pollAfterMs).toBe(milliseconds ?? undefined);
+    } finally {
+      now.mockRestore();
+    }
+  });
 
   it("creates an audio job with the exact source contract and upload plan", async () => {
     const { client, requestClient } = setup();
@@ -238,7 +256,6 @@ describe("AudioProcessorApiClient", () => {
       body: bytes,
       bodyEncoding: "raw",
       transport: "requestUrl",
-      preserveResponseHeaders: true,
       allowTransportFallback: false,
       headers: { "x-amz-checksum-sha256": "checksum" },
     }));

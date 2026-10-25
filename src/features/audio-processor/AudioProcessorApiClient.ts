@@ -20,7 +20,7 @@ import {
   AUDIO_PROCESSOR_OUTPUT_PRESETS,
   AUDIO_PROCESSOR_PRESET_ARTIFACT_MANIFEST_VERSION,
 } from "./types";
-import { retryAfterHeaderMs } from "../../services/managed/ManagedJobObservation";
+import { parseRetryAfterMs } from "../../utils/retryAfter";
 import { CREDITS_REQUIRED_MESSAGE } from "../../utils/errors";
 
 type JsonRecord = Record<string, unknown>;
@@ -169,7 +169,6 @@ export class AudioProcessorApiClient {
       bodyEncoding: "raw",
       responseEncoding: "text",
       transport: "requestUrl",
-      preserveResponseHeaders: true,
       allowTransportFallback: false,
       signal,
     });
@@ -178,7 +177,7 @@ export class AudioProcessorApiClient {
         `Audio upload failed (${response.status}).`,
         response.status,
         "upload_failed",
-        retryAfterHeaderMs(response.headers.get("retry-after")),
+        parseRetryAfterMs(response.headers.get("retry-after")),
       );
     }
     const etag = response.headers.get("etag")?.trim();
@@ -244,7 +243,7 @@ export class AudioProcessorApiClient {
       signal,
     );
     const job = parseJobEnvelope(payload, "Audio job response");
-    const pollAfterMs = retryAfterHeaderMs(response.headers.get("retry-after"));
+    const pollAfterMs = parseRetryAfterMs(response.headers.get("retry-after"));
     return pollAfterMs === undefined ? job : { ...job, pollAfterMs };
   }
 
@@ -299,7 +298,6 @@ export class AudioProcessorApiClient {
       bodyEncoding: "raw",
       responseEncoding: "text",
       transport: "requestUrl",
-      preserveResponseHeaders: true,
       allowTransportFallback: false,
       signal,
       timeoutMs: NOTE_DOWNLOAD_TIMEOUT_MS,
@@ -367,7 +365,6 @@ export class AudioProcessorApiClient {
       body,
       signal,
       licenseKey: licenseKey || undefined,
-      preserveResponseHeaders: true,
       allowTransportFallback: method === "GET",
     });
     const text = await response.text();
@@ -399,7 +396,7 @@ export class AudioProcessorApiClient {
         message,
         response.status,
         code,
-        retryAfterHeaderMs(response.headers.get("retry-after")),
+        parseRetryAfterMs(response.headers.get("retry-after")),
       );
     }
     return { payload, response };

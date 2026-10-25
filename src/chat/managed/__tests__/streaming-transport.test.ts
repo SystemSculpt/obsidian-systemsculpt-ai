@@ -217,7 +217,6 @@ describe("AgentStreamingTransport", () => {
       method: "POST",
       url: "https://systemsculpt.test/api/plugin/agent/turn",
       headers: { Authorization: "Bearer access_token_streaming_transport" },
-      preserveResponseHeaders: true,
       streamingProbeUrl: "https://systemsculpt.test/api/plugin/connectivity",
       allowTransportFallback: false,
     });

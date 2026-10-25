@@ -594,7 +594,6 @@ implements AgentConnectionPort {
       headers: { "x-plugin-version": this.options.pluginVersion },
       licenseKey: this.options.licenseKey(),
       body: request,
-      preserveResponseHeaders: true,
       allowTransportFallback: true,
       responseEncoding: "arrayBuffer",
       maxResponseBytes: MAX_BOOTSTRAP_RESPONSE_BYTES,
@@ -680,7 +679,6 @@ implements AgentConnectionPort {
         // whole turn. The request client serializes the body itself; handing
         // it an already-encoded string would send a JSON string literal.
         stream: true,
-        preserveResponseHeaders: true,
         // Prove direct CORS readability with a replay-safe GET before choosing
         // the transport for this state-changing command. A failed probe may
         // select requestUrl once up front; a failed POST must never be replayed.

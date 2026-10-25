@@ -845,7 +845,6 @@ describe("AgentChatSession", () => {
       url: "https://systemsculpt.test/api/plugin/agent/bootstrap",
       method: "POST",
       licenseKey: "license_test",
-      preserveResponseHeaders: true,
       allowTransportFallback: true,
       responseEncoding: "arrayBuffer",
     });
@@ -861,7 +860,6 @@ describe("AgentChatSession", () => {
         root_message_id: rootMessageId,
         context_sources: [],
       },
-      preserveResponseHeaders: true,
       allowTransportFallback: true,
       responseEncoding: "arrayBuffer",
     });
@@ -2843,7 +2841,6 @@ describe("AgentChatSession", () => {
           method: "POST",
           body: {},
           stream: true,
-          preserveResponseHeaders: true,
           allowTransportFallback: false,
           transport: "fetch",
         });

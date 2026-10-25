@@ -83,7 +83,7 @@ export interface ManagedLease { outcome: ManagedAdmissionOutcome; descriptor?: M
 export interface ManagedResponseDiagnostics {
   status: number; requestId: string | null; contentType: string | null;
   rateLimitLimit: string | null; rateLimitRemaining: string | null; rateLimitReset: string | null;
-  retryAfter: string | null; errorText: string;
+  retryAfterMs: number | undefined; errorText: string;
 }
 export interface ManagedTransportResult { response: Response; diagnostics: ManagedResponseDiagnostics; }
 export interface ManagedTransportOperation {

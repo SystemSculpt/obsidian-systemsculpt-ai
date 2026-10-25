@@ -1,5 +1,6 @@
 import { ManagedMediaJobClient, ManagedMediaJobError, MANAGED_MEDIA_JOB_PROTOCOL } from "../ManagedMediaJobClient";
 import { HostedTransportAdapter } from "../adapters/HostedTransportAdapter";
+import retryFixture from "../../../../testing/fixtures/retry-after.json";
 
 const JOB_ID = "123e4567-e89b-42d3-a456-426614174000";
 const SHA_1_2 = "a12871fee210fb8619291eaea194581cbd2531e4b23759d225f6806923f63222";
@@ -23,6 +24,21 @@ describe("ManagedMediaJobClient managed-job-protocol-v2 wire contract", () => {
   const transport = new HostedTransportAdapter({ baseUrl: "https://api.test", pluginVersion: "6.0.0", licenseKey: () => "license", requestClient: { request } as any });
   const client = new ManagedMediaJobClient(transport, undefined, () => "req-1");
   beforeEach(() => { request.mockReset(); });
+
+  it.each(retryFixture.cases)("carries $name through media HTTP errors and status hints", async ({ header, milliseconds }) => {
+    const now = jest.spyOn(Date, "now").mockReturnValue(retryFixture.now);
+    const headers = header === null ? {} : { "Retry-After": header };
+    try {
+      for (const kind of ["images", "videos"] as const) {
+        request.mockResolvedValueOnce(json({}, 503, headers));
+        await expect(client[kind].status(JOB_ID)).rejects.toMatchObject({ status: 503, retryAfterMs: milliseconds ?? undefined });
+        request.mockResolvedValueOnce(json({ job: mediaJob(), outputs: [], usage: usage(0) }, 200, headers));
+        expect((await client[kind].status(JOB_ID)).poll_after_ms).toBe(milliseconds ?? undefined);
+      }
+    } finally {
+      now.mockRestore();
+    }
+  });
 
   it.each([
     ["images.create", () => client.images.create({ prompt: "x", model: "test/model-1" }, "op"), "image_generation", true],
@@ -231,7 +247,7 @@ describe("ManagedMediaJobClient managed-job-protocol-v2 wire contract", () => {
     expect(result.metadata).toEqual(metadata);
     expect(result.delivery.download_started_at).toBe(headers["x-systemsculpt-download-started-at"]);
     expect(result.delivery.download_completed_offset_ms).toBeGreaterThanOrEqual(0);
-    expect(request.mock.calls[0][0]).toEqual(expect.objectContaining({ url: `https://api.test/api/plugin/${segment}/generations/jobs/${JOB_ID}/outputs/0`, method: "GET", preserveResponseHeaders: true }));
+    expect(request.mock.calls[0][0]).toEqual(expect.objectContaining({ url: `https://api.test/api/plugin/${segment}/generations/jobs/${JOB_ID}/outputs/0`, method: "GET" }));
     expect(request.mock.calls[0][0].headers["x-systemsculpt-job-contract"]).toBe(MANAGED_MEDIA_JOB_PROTOCOL);
     expect(JSON.stringify(request.mock.calls[0][0])).not.toContain("signed");
   });

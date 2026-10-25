@@ -11,6 +11,7 @@ import {
   type ManagedLicenseRejectReason,
 } from "../ManagedAdmissionResponse";
 import { SharedFlight } from "../SharedFlight";
+import { parseRetryAfterMs } from "../../../utils/retryAfter";
 import { SystemSculptEnvironment } from "../../api/SystemSculptEnvironment";
 import {
   MANAGED_EMBEDDINGS_INDEX_CONTRACT,
@@ -91,7 +92,6 @@ export class HostedTransportAdapter {
             "x-plugin-version": this.options.pluginVersion.trim(),
           },
           licenseKey,
-          preserveResponseHeaders: true,
           signal: shared,
         });
         if (!response.ok) return null;
@@ -136,7 +136,7 @@ export class HostedTransportAdapter {
   async uploadSignedInput(url: string, method: string, headers: Record<string, string>, body: ArrayBuffer, signal?: AbortSignal): Promise<void> {
     const response = await this.client.request({
       url, method, headers, body, signal,
-      stream: false, preserveResponseHeaders: false,
+      stream: false,
       transport: "requestUrl", bodyEncoding: "raw",
     });
     if (!response.ok) throw new Error(`Signed upload failed (${response.status})`);
@@ -145,7 +145,7 @@ export class HostedTransportAdapter {
   async uploadSignedJobPart(url: string, method: string, headers: Record<string, string>, body: ArrayBuffer, signal?: AbortSignal): Promise<Response> {
     return this.client.request({
       url, method, headers, body, signal,
-      stream: false, preserveResponseHeaders: true,
+      stream: false,
       transport: "requestUrl", bodyEncoding: "raw",
     });
   }
@@ -263,7 +263,6 @@ export class HostedTransportAdapter {
       headers: input.headers,
       body: input.body,
       stream: false,
-      preserveResponseHeaders: true,
       allowTransportFallback: false,
       transport: "requestUrl",
       ...(input.bodyEncoding ? { bodyEncoding: input.bodyEncoding } : {}),
@@ -280,7 +279,7 @@ export class HostedTransportAdapter {
         rateLimitLimit: response.headers.get("x-ratelimit-limit"),
         rateLimitRemaining: response.headers.get("x-ratelimit-remaining"),
         rateLimitReset: response.headers.get("x-ratelimit-reset"),
-        retryAfter: response.headers.get("retry-after"),
+        retryAfterMs: parseRetryAfterMs(response.headers.get("retry-after")),
         errorText: "",
       },
     };
@@ -294,7 +293,7 @@ export class HostedTransportAdapter {
     const licenseKey = this.key();
     const response = await this.client.request({
       url: this.url(operation.path), method: operation.method ?? "POST", headers,
-      body: operation.body, stream: false, preserveResponseHeaders: true,
+      body: operation.body, stream: false,
       allowTransportFallback: isReplaySafeManagedRead(operation),
       signal: operation.signal, licenseKey,
       ...(operation.timeoutMs !== undefined ? { timeoutMs: operation.timeoutMs } : {}),
@@ -309,7 +308,7 @@ export class HostedTransportAdapter {
     return { response, diagnostics: {
       status: response.status, requestId: response.headers.get("x-request-id"), contentType: response.headers.get("content-type"),
       rateLimitLimit: response.headers.get("x-ratelimit-limit"), rateLimitRemaining: response.headers.get("x-ratelimit-remaining"), rateLimitReset: response.headers.get("x-ratelimit-reset"),
-      retryAfter: response.headers.get("retry-after"), errorText,
+      retryAfterMs: parseRetryAfterMs(response.headers.get("retry-after")), errorText,
     } };
   }
 }

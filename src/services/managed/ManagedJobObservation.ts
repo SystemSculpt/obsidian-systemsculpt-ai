@@ -70,10 +70,10 @@ export function normalizedPollAfterMs(
   value: unknown,
   fallback = DEFAULT_POLL_AFTER_MS,
 ): number {
-  const milliseconds = Number.isInteger(value) && (value as number) >= 0 && (value as number) <= MAX_POLL_AFTER_MS
+  const milliseconds = Number.isInteger(value) && (value as number) >= 0
     ? value as number
     : fallback;
-  return Math.max(MIN_POLL_AFTER_MS, milliseconds);
+  return Math.max(MIN_POLL_AFTER_MS, Math.min(MAX_POLL_AFTER_MS, milliseconds));
 }
 
 function isHostOffline(): boolean {
@@ -101,22 +101,6 @@ export async function waitForManagedJobHostOnline(signal: AbortSignal): Promise<
     signal.addEventListener("abort", onAbort, { once: true });
   });
   throwIfAborted(signal);
-}
-
-export function retryAfterHeaderMs(
-  value: string | null,
-  now = Date.now(),
-): number | undefined {
-  if (value === null) return undefined;
-  const trimmed = value.trim();
-  if (/^(0|[1-9]\d*)$/.test(trimmed)) {
-    const milliseconds = Number(trimmed) * 1_000;
-    return milliseconds <= MAX_POLL_AFTER_MS ? milliseconds : undefined;
-  }
-  const timestamp = Date.parse(trimmed);
-  if (!Number.isFinite(timestamp)) return undefined;
-  const milliseconds = Math.max(0, timestamp - now);
-  return milliseconds <= MAX_POLL_AFTER_MS ? milliseconds : undefined;
 }
 
 export function isRetryableManagedJobObservationError(error: unknown): boolean {
