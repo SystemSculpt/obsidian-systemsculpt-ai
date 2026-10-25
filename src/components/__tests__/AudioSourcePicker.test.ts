@@ -90,7 +90,7 @@ describe("AudioSourcePicker", () => {
 
     press(rows()[1], "End");
     expect(document.activeElement).toBe(rows()[3]);
-    expect(picker.selection?.file.path).toBe("Meetings/oldest.m4a");
+    expect(picker.selection).toEqual({ kind: "vault", file: files[0] });
 
     press(rows()[3], "ArrowDown");
     expect(document.activeElement).toBe(rows()[3]);
