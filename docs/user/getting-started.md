@@ -5,7 +5,7 @@ your installed, signed-in Claude Code or Codex; you need no SystemSculpt account
 license to use your own agents. Hosted chat uses your SystemSculpt account and is
 also the chat backend on mobile.
 
-Free to install. Paid Monthly and Lifetime plans are available for hosted
+Free to install. Paid Monthly and Yearly plans are available for hosted
 SystemSculpt features in Obsidian, not required for your own desktop agents.
 [Compare plans and current usage terms](https://systemsculpt.com/pricing?utm_source=obsidian&utm_medium=plugin_readme&utm_campaign=pricing_discovery_oct2026)
 if you want hosted features.
@@ -52,7 +52,7 @@ For hosted chat, mobile chat, or other hosted features:
 
 1. Open `Settings -> SystemSculpt AI -> Account`.
 2. Use `Sign in` (or `Sign up`) to connect your SystemSculpt account in the browser, or enter and activate a license key manually.
-3. Choose **View plans** to compare monthly, lifetime, and credit packs. If you already purchased, sign in with the same email or activate the key from your receipt.
+3. Choose **View plans** to compare monthly, yearly, and credit packs. If you already purchased, sign in with the same email or activate the key from your receipt.
 4. Review credits and account status. **Manage account** opens billing controls. You can also find **Sign in** and **View plans / buy credits** in the command palette.
 5. Open docs or support links if you need help. If the browser does not return automatically, use **Open the sign-in page again** and paste the connection code. On Obsidian 1.8.7 or newer, a pending sign-in survives an app restart for up to ten minutes on the same device.
 

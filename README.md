@@ -2,7 +2,7 @@
 
 SystemSculpt brings an agent workspace, semantic vault search, transcription, and visual workflows into Obsidian. Hosted features use your SystemSculpt account. Desktop chat and Studio text generation can also use your installed, signed-in Codex or Claude Code.
 
-Free to install. Paid Monthly and Lifetime plans are available for SystemSculpt in Obsidian. [Compare plans and current usage terms](https://systemsculpt.com/pricing?utm_source=obsidian&utm_medium=plugin_readme&utm_campaign=pricing_discovery_oct2026) before you start. Your own on-machine Codex and Claude Code remain available without a SystemSculpt plan.
+Free to install. Paid Monthly and Yearly plans are available for SystemSculpt in Obsidian. [Compare plans and current usage terms](https://systemsculpt.com/pricing?utm_source=obsidian&utm_medium=plugin_readme&utm_campaign=pricing_discovery_oct2026) before you start. Your own on-machine Codex and Claude Code remain available without a SystemSculpt plan.
 
 ## What it does
 

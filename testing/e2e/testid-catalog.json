@@ -275,12 +275,12 @@
     "upgrade-plan.done",
     "upgrade-plan.enter-code",
     "upgrade-plan.license-key",
-    "upgrade-plan.lifetime",
     "upgrade-plan.pricing",
     "upgrade-plan.reopen",
     "upgrade-plan.retry",
     "upgrade-plan.sign-in",
     "upgrade-plan.subscribe",
-    "upgrade-plan.sync"
+    "upgrade-plan.sync",
+    "upgrade-plan.yearly"
   ]
 }
