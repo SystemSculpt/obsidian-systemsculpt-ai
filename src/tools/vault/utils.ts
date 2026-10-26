@@ -1,9 +1,8 @@
 import { App, TFile, TFolder, normalizePath, type DataAdapter } from "obsidian";
 import { desktopHost, hasNodeRuntime } from "../../platform/desktopOnly";
-import { joinFilesystemPath } from "../../utils/vaultPathUtils";
+import { joinFilesystemPath, normalizeVaultRelativePath } from "../../utils/vaultPathUtils";
 import { toSafeVaultFileName } from "../../utils/vaultFileName";
 import { FILESYSTEM_LIMITS } from "./constants";
-export { fuzzyMatchScore } from "./searchUtils";
 
 type VaultDataAdapter = DataAdapter & {
   getBasePath?: () => string;
@@ -41,29 +40,7 @@ export function formatBytes(bytes: number): string {
 }
 
 export function normalizeVaultPath(value: string): string {
-  const raw = String(value ?? "").trim();
-  if (!raw) return "";
-
-  // People (and models) sometimes copy paths from Obsidian URIs (or other URL-encoded sources),
-  // which turns spaces into `%20` and slashes into `%2F`. Decode those so tool calls work with
-  // vault paths like `My Folder/My Note.md` even if the input was encoded.
-  let decoded = raw;
-  for (let i = 0; i < 2; i++) {
-    if (!/%[0-9A-Fa-f]{2}/.test(decoded)) break;
-    try {
-      const next = decodeURIComponent(decoded);
-      if (next === decoded) break;
-      decoded = next;
-    } catch {
-      break;
-    }
-  }
-
-  return decoded
-    .replace(/\\/g, "/")
-    .replace(/\/{2,}/g, "/")
-    .replace(/^\/+/, "")
-    .replace(/\/+$/, "");
+  return normalizeVaultRelativePath(value, { decodeUri: true, preserveCharacters: true });
 }
 
 export function isHiddenSystemPath(path: string): boolean {
@@ -77,6 +54,7 @@ export function isHiddenSystemPath(path: string): boolean {
  * Resolve a vault path to an absolute filesystem path for the Node fast-path
  * (desktop only). Returns null when there is no Node runtime or the adapter
  * exposes no base path — callers then fall back to the adapter API.
+ * @internal Unit-tested directly.
  */
 export function resolveAdapterPath(adapter: VaultDataAdapter, vaultPath: string): string | null {
   if (!hasNodeRuntime() || !adapter || typeof adapter.getBasePath !== "function") return null;

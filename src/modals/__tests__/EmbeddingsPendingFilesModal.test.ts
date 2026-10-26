@@ -19,24 +19,31 @@ const createMockPendingFiles = (): PendingEmbeddingFile[] => [
     path: "notes/machine-learning.md",
     reason: "missing",
     lastModified: NOW - 1000 * 60 * 30,
+    lastEmbedded: null,
+    size: 1024,
   },
   {
     path: "notes/deep-learning.md",
     reason: "modified",
     lastModified: NOW - 1000 * 60 * 60 * 2,
     lastEmbedded: NOW - 1000 * 60 * 60 * 24,
+    size: 1024,
   },
   {
     path: "folder/nested/file.md",
     reason: "schema-mismatch",
     lastModified: NOW - 1000 * 60 * 60 * 48,
     lastEmbedded: NOW - 1000 * 60 * 60 * 72,
+    size: 1024,
   },
   {
     path: "failed-file.md",
     reason: "failed",
     lastModified: NOW - 1000 * 60 * 10,
+    lastEmbedded: null,
+    size: 1024,
     failureInfo: {
+      code: "rate_limited",
       message: "API rate limit exceeded",
       failedAt: NOW - 1000 * 60 * 5,
     },
@@ -162,6 +169,8 @@ describe("EmbeddingsPendingFilesModal", () => {
           path: "notes/stale.md",
           reason: "missing",
           lastModified: NOW,
+          lastEmbedded: null,
+          size: 1024,
         },
       ]);
       await firstOpen;
@@ -206,6 +215,39 @@ describe("EmbeddingsPendingFilesModal", () => {
       expect(desc?.textContent).toContain("notes");
       expect(desc?.textContent).toContain("Never embedded");
     });
+  });
+
+  it("keeps one list listener through 30 whole-list filter passes", async () => {
+    const pending = Array.from({ length: 250 }, (_, index) => ({
+      path: `notes/file-${index}.md`, reason: "missing" as const, lastModified: NOW,
+    }));
+    mockManager.listPendingFiles.mockResolvedValue(pending);
+    const addListener = jest.spyOn(EventTarget.prototype, "addEventListener");
+    await modal.onOpen();
+    const list = modal.modalEl.querySelector<HTMLElement>(".ss-modal__list")!;
+    const search = modal.modalEl.querySelector<HTMLInputElement>('input[type="search"]')!;
+    const detachedButton = list.querySelector<HTMLButtonElement>(".ss-modal__item")!;
+
+    for (let pass = 0; pass < 30; pass++) {
+      search.value = pass % 2 === 0 ? "notes" : "file";
+      search.dispatchEvent(new Event("input", { bubbles: true }));
+      expect(list.querySelectorAll(".ss-modal__item")).toHaveLength(250);
+    }
+    const registrations = addListener.mock.calls.filter((_, index) => {
+      const target = addListener.mock.contexts[index] as HTMLElement;
+      return target === list || target.matches?.(".ss-modal__item");
+    });
+    addListener.mockRestore();
+    expect(registrations.map(([type]) => type)).toEqual(["click"]);
+
+    detachedButton.click();
+    expect(plugin.app.workspace.getLeaf().openFile).not.toHaveBeenCalled();
+    list.querySelectorAll<HTMLElement>(".ss-modal__item-description")[249]!.click();
+    expect(plugin.app.workspace.getLeaf().openFile).toHaveBeenCalledWith(
+      expect.objectContaining({ path: "notes/file-249.md" }),
+    );
+    await Promise.resolve();
+    modal.onClose();
   });
 
   describe("empty states", () => {
@@ -313,26 +355,28 @@ describe("EmbeddingsPendingFilesModal", () => {
       });
     });
 
-    it("copies all paths when no filter active", async () => {
+    it("copies all paths when no filter active and says so on the button", async () => {
       await modal.onOpen();
-      await (modal as any).copyPaths();
+      const button = (modal as any).copyButtons[0] as HTMLButtonElement;
+      await (modal as any).copyPaths(button);
 
       const written = (navigator.clipboard.writeText as jest.Mock).mock.calls[0][0];
       expect(written).toContain("notes/machine-learning.md");
       expect(written).toContain("notes/deep-learning.md");
       expect(written).toContain("folder/nested/file.md");
       expect(written).toContain("failed-file.md");
-      expect(mockedNotice).toHaveBeenCalledWith("Copied 4 file paths to the clipboard.");
+      expect(button.textContent).toContain("Copied");
+      expect(mockedNotice).not.toHaveBeenCalled();
     });
 
     it("copies filtered paths when filter active", async () => {
       await modal.onOpen();
       (modal as any).applyFilter("machine");
-      await (modal as any).copyPaths();
+      await (modal as any).copyPaths((modal as any).copyButtons[1]);
 
       const written = (navigator.clipboard.writeText as jest.Mock).mock.calls[0][0];
       expect(written).toBe("notes/machine-learning.md");
-      expect(mockedNotice).toHaveBeenCalledWith("Copied 1 file path to the clipboard.");
+      expect(mockedNotice).not.toHaveBeenCalled();
     });
 
     it("disables Copy and never copies hidden paths when a filter has no matches", async () => {
@@ -340,7 +384,7 @@ describe("EmbeddingsPendingFilesModal", () => {
       (modal as any).applyFilter("nonexistent-xyz");
 
       expect((modal as any).copyButtons.every((button: HTMLButtonElement) => button.disabled)).toBe(true);
-      await (modal as any).copyPaths();
+      await (modal as any).copyPaths((modal as any).copyButtons[0]);
       expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
       expect(mockedNotice).toHaveBeenCalledWith("No pending files to copy.");
     });
@@ -477,6 +521,8 @@ describe("EmbeddingsPendingFilesModal", () => {
         path: "folder/test.md",
         reason: "missing",
         lastModified: NOW - 1000,
+        lastEmbedded: null,
+        size: 1024,
       };
       const desc = (modal as any).buildDescription(entry);
       expect(desc).toContain("folder");
@@ -487,6 +533,8 @@ describe("EmbeddingsPendingFilesModal", () => {
         path: "test.md",
         reason: "missing",
         lastModified: NOW - 1000,
+        lastEmbedded: null,
+        size: 1024,
       };
       const desc = (modal as any).buildDescription(entry);
       expect(desc).toContain("Modified");
@@ -497,6 +545,8 @@ describe("EmbeddingsPendingFilesModal", () => {
         path: "test.md",
         reason: "modified",
         lastModified: NOW - 1000,
+        lastEmbedded: null,
+        size: 1024,
       };
       const desc = (modal as any).buildDescription(entry);
       expect(desc).toContain("Needs refresh after edits");
@@ -507,7 +557,10 @@ describe("EmbeddingsPendingFilesModal", () => {
         path: "test.md",
         reason: "failed",
         lastModified: NOW - 1000,
+        lastEmbedded: null,
+        size: 1024,
         failureInfo: {
+          code: "rate_limited",
           message: "Rate limit",
           failedAt: NOW - 5000,
         },
@@ -523,6 +576,7 @@ describe("EmbeddingsPendingFilesModal", () => {
         reason: "modified",
         lastModified: NOW - 1000,
         lastEmbedded: NOW - 60000,
+        size: 1024,
       };
       const desc = (modal as any).buildDescription(entry);
       expect(desc).toContain("Last embedded");

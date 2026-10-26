@@ -7,6 +7,7 @@
  * minimal and explicit — a missing export failing loudly here is the signal
  * this suite exists to produce.
  */
+const YAML = require("yaml");
 const base = require("../../../src/tests/mocks/obsidian.js");
 
 class IntegrationApp extends base.App {
@@ -16,6 +17,15 @@ class IntegrationApp extends base.App {
     this.workspace.iterateAllLeaves = jest.fn();
     this.workspace.requestSaveLayout = jest.fn();
   }
+}
+
+// Obsidian's View supplies these defaults, and the bundle's views call super.setState.
+class IntegrationItemView extends base.ItemView {
+  getState() {
+    return {};
+  }
+
+  async setState() {}
 }
 
 class IntegrationPlugin extends base.Plugin {
@@ -41,5 +51,9 @@ module.exports = {
   // installed-plugin lifecycle instead of the old-host recovery path.
   apiVersion: "1.7.2",
   App: IntegrationApp,
+  ItemView: IntegrationItemView,
   Plugin: IntegrationPlugin,
+  // Saved chats keep their identity in YAML frontmatter.
+  parseYaml: (text) => YAML.parse(text),
+  stringifyYaml: (value) => YAML.stringify(value),
 };

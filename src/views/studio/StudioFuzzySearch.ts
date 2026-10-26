@@ -1,3 +1,4 @@
+/** @internal Unit-tested directly. */
 export function normalizeStudioSearchText(value: string): string {
   return String(value || "")
     .toLowerCase()
@@ -9,6 +10,7 @@ function isBoundaryChar(char: string): boolean {
   return char === " " || char === "." || char === "_" || char === "-" || char === "/" || char === ":";
 }
 
+/** @internal Unit-tested directly. */
 export function scoreStudioFuzzyMatch(haystackRaw: string, queryRaw: string): number | null {
   const haystack = normalizeStudioSearchText(haystackRaw);
   const query = normalizeStudioSearchText(queryRaw);

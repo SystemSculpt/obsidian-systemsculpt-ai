@@ -10,15 +10,16 @@ const VAULT_IMAGE_CONTEXT_FILE_EXTENSIONS = ["jpg", "jpeg", "png", "webp"] as co
 
 const toReadonlySet = (values: readonly string[]): ReadonlySet<string> => new Set(values);
 
+/** @internal Tests assert against this value. */
 export const MANAGED_DOCUMENT_CONVERSION_EXTENSIONS = toReadonlySet(MANAGED_DOCUMENT_EXTENSIONS);
 export const AUDIO_FILE_EXTENSIONS = toReadonlySet(AUDIO_EXTENSIONS);
 export const VAULT_IMAGE_CONTEXT_EXTENSIONS = toReadonlySet(
   VAULT_IMAGE_CONTEXT_FILE_EXTENSIONS,
 );
 
-export type ManagedDocumentFileExtension = (typeof MANAGED_DOCUMENT_EXTENSIONS)[number];
-export type AudioFileExtension = (typeof AUDIO_EXTENSIONS)[number];
+type ManagedDocumentFileExtension = (typeof MANAGED_DOCUMENT_EXTENSIONS)[number];
 
+/** @internal Tests assert against this value. */
 export const MANAGED_DOCUMENT_MIME_TYPE_MAP: Readonly<Record<ManagedDocumentFileExtension, string>> = Object.freeze({
   pdf: "application/pdf",
   png: "image/png",

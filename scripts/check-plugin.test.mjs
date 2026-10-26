@@ -16,23 +16,23 @@ const packageJson = JSON.parse(
 test("package scripts preserve fast edit and exhaustive verification tiers", () => {
   assert.equal(
     packageJson.scripts.check,
-    "npm run check:plugin:fast && npm run test:mobile:interactions "
+    "npm run check:plugin:fast && npm run test:mobile:ci "
       + "&& npm run test:chatview:critical && npm run test:mobile:bundle",
   );
   assert.equal(
     packageJson.scripts["check:plugin:obsidian"],
-    "npm run lint:obsidian && npm run lint:obsidian:meta && npm run lint:community",
+    "npm run lint:obsidian && npm run lint:obsidian:meta",
   );
   assert.equal(
     packageJson.scripts["check:ci"],
-    "npm run check:plugin && npm run test:mobile:interactions && npm run test:chatview:critical "
+    "npm run check:plugin && npm run check:knip && npm run test:mobile:ci && npm run test:chatview:critical "
       + "&& npm run test:unit:ci && npm run test:embeddings:ci "
       + "&& npm run test:integration:ci",
   );
   assert.equal(
     packageJson.scripts["check:compat"],
-    "npm run check:plugin:fast && npm run test:chatview:compat "
-      + "&& npm run test:integration:ci",
+    "npm run check:plugin:fast -- --skip-lint && npm run test:chatview:compat "
+      + "&& npm run test:local-agent:compat && npm run test:integration:ci",
   );
   assert.equal(
     packageJson.scripts["release:plugin"],
@@ -76,7 +76,8 @@ test("fast plugin checks stay on the measured Obsidian-native tier", () => {
   assert.match(source, /scripts\/git-hooks\.test\.mjs/);
   assert.match(source, /scripts\/lint-css\.test\.mjs/);
   assert.match(source, /scripts\/module-ownership\.test\.mjs/);
-  assert.match(source, /npm run check:plugin:obsidian/);
+  assert.match(source, /scripts\/eslint-config\.test\.mjs/);
+  assert.match(source, /fast \? "check:plugin:obsidian" : "check:plugin:obsidian:ci"/);
   assert.match(source, /buildProductionPlugin/);
   assert.match(source, /if \(!fast\) \{/);
 
@@ -177,7 +178,7 @@ test("focused Jest gates point at test files that exist", () => {
   }
 });
 
-test("source CI partitions cover every suite without repeating embeddings", () => {
+test("source CI partitions cover every suite exactly once", () => {
   const normalizedRoot = root.replace(/\\/g, "/").replace(/\/$/, "");
   const escapedRoot = normalizedRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const selected = (file) => {
@@ -191,18 +192,50 @@ test("source CI partitions cover every suite without repeating embeddings", () =
     return new Set(paths.map((filePath) => filePath.replace(/\\/g, "/"))
       .filter((filePath) => !ignored.some((pattern) => pattern.test(`${normalizedRoot}/${filePath}`))));
   };
-  const unit = selected("jest.unit-ci.config.cjs");
+  const configs = [
+    "jest.unit-ci.config.cjs",
+    "jest.embeddings.config.cjs",
+    "jest.mobile-ci.config.cjs",
+    "jest.chatview-critical-risk.config.cjs",
+  ];
+  const covered = new Set();
+  for (const config of configs) {
+    const suites = selected(config);
+    assert.ok(suites.size > 0, `${config} must select tests`);
+    for (const suite of suites) {
+      assert.ok(!covered.has(suite), `${suite} is repeated by ${config}`);
+      covered.add(suite);
+    }
+  }
+  const ordinary = selected("jest.config.cjs");
   const embeddings = selected("jest.embeddings.config.cjs");
-  assert.ok(unit.size > 0 && embeddings.size > 0);
-  assert.deepEqual([...unit].filter((file) => embeddings.has(file)), []);
-  const covered = new Set([
-    ...unit, ...embeddings,
-    ...selected("jest.mobile-interactions.config.cjs"),
-    ...selected("jest.chatview-critical-risk.config.cjs"),
-  ]);
+  assert.deepEqual([...ordinary].filter((file) => embeddings.has(file)), []);
+  assert.deepEqual([...new Set([...ordinary, ...embeddings])].sort(), [...covered].sort());
   const expected = new Set([...fs.globSync("src/**/__tests__/**/*.test.ts", { cwd: root })]
     .map((filePath) => filePath.replace(/\\/g, "/")));
   assert.deepEqual([...covered].sort(), [...expected].sort());
+});
+
+test("Jest configs share transforms and setup without changing the bundle host", () => {
+  const base = require(path.join(root, "jest.base.config.cjs"));
+  for (const file of ["jest.config.cjs", "jest.embeddings.config.cjs"]) {
+    const config = require(path.join(root, file));
+    assert.equal(config.transform, base.transform);
+    assert.equal(config.setupFilesAfterEnv, base.setupFilesAfterEnv);
+    assert.equal(config.moduleNameMapper["^@/(.*)$"], base.moduleNameMapper["^@/(.*)$"]);
+  }
+  const integration = require(path.join(root, "jest.integration.config.cjs"));
+  assert.equal(integration.transform, base.transform);
+  assert.equal(integration.moduleNameMapper["^@/(.*)$"], base.moduleNameMapper["^@/(.*)$"]);
+  // The built bundle's host takes the shared setup minus its Node module loader.
+  assert.deepEqual(integration.setupFilesAfterEnv, [...base.setupFilesAfterEnv, "<rootDir>/testing/integration/host-setup.ts"]);
+  assert.equal(integration.moduleNameMapper["^obsidian$"], "<rootDir>/testing/integration/mocks/obsidian-host.js");
+  assert.ok(integration.transformIgnorePatterns.includes("<rootDir>/main\\.js$"));
+  assert.match(packageJson.scripts["lint:community"], /--cache --cache-location \.cache\/eslint\/community\.cache/);
+  assert.match(source, /if \(!skipLint\) \{/);
+  // lint:obsidian runs the community scan in the same type-aware pass.
+  assert.equal(packageJson.scripts["check:plugin:obsidian:ci"],
+    "npm run lint:obsidian -- --no-cache && npm run lint:obsidian:meta -- --no-cache");
 });
 
 test("TypeScript and Jest resolve the source alias to the same tree", () => {
@@ -213,4 +246,19 @@ test("TypeScript and Jest resolve the source alias to the same tree", () => {
   const result = ts.resolveModuleName("@/constants/api", path.join(root, "src/main.ts"), parsed.options, ts.sys);
   assert.equal(path.normalize(result.resolvedModule.resolvedFileName), path.join(root, "src/constants/api.ts"));
   assert.equal(require(path.join(root, "jest.config.cjs")).moduleNameMapper["^@/(.*)$"], "<rootDir>/src/$1");
+});
+
+test("tests type-check against the declaration of the Obsidian mock Jest loads", () => {
+  assert.match(packageJson.scripts["check:types"], /&& npm run check:types:tests$/);
+  assert.match(packageJson.scripts["check:types:tests"], /^tsc -p tsconfig\.test\.json --noEmit /);
+  const ts = require("typescript");
+  const config = ts.readConfigFile(path.join(root, "tsconfig.test.json"), ts.sys.readFile);
+  assert.equal(config.error, undefined);
+  const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, root);
+  assert.ok(parsed.fileNames.some((file) => file.endsWith("/src/views/chatview/__tests__/agent-composer.test.ts")));
+  assert.ok(parsed.fileNames.some((file) => file.endsWith("/testing/integration/bundle-load.test.ts")));
+  const testFile = path.join(root, "src/__tests__/main-startup-phases.test.ts");
+  const result = ts.resolveModuleName("obsidian", testFile, parsed.options, ts.sys);
+  assert.equal(path.normalize(result.resolvedModule.resolvedFileName), path.join(root, "src/tests/mocks/obsidian.d.ts"));
+  assert.equal(require(path.join(root, "jest.config.cjs")).moduleNameMapper["^obsidian$"], "<rootDir>/src/tests/mocks/obsidian.js");
 });

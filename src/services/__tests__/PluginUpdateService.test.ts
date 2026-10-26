@@ -7,8 +7,9 @@ import {
   PluginUpdateService,
   cacheControlMaxAgeMs,
   parsePluginReleaseInfo,
-  retryAfterMs,
+  type PluginReleaseFetch,
 } from "../PluginUpdateService";
+import fixture from "../../../testing/fixtures/retry-after.json";
 
 const HOUR_MS = 60 * 60_000;
 
@@ -37,12 +38,10 @@ async function settle(): Promise<void> {
 
 function createPlugin(overrides: Record<string, unknown> = {}) {
   const settings = {
-    lastAnnouncedPluginRelease: "",
-    lastLoadedPluginVersion: "6.6.1",
     ...overrides,
   };
-  const statusBarEl = document.createElement("div") as HTMLElement & { setText?: (text: string) => void };
-  statusBarEl.setText = (text) => { statusBarEl.textContent = text; };
+  const statusBarEl = document.createElement("div");
+  statusBarEl.setText = (text) => { statusBarEl.textContent = typeof text === "string" ? text : text.textContent; };
   const updateSettings = jest.fn(async (patch: Record<string, unknown>) => Object.assign(settings, patch));
   return {
     manifest: { id: "systemsculpt-ai", version: "6.6.1" },
@@ -80,65 +79,67 @@ describe("PluginUpdateService", () => {
     expect(parsePluginReleaseInfo("<html>gateway error</html>")).toBeNull();
   });
 
-  it("shows one prompt per release and keeps an update action", async () => {
+  it("keeps background release discovery passive: a status-bar action and nothing else", async () => {
     const plugin = createPlugin();
     const request = jest.fn().mockResolvedValue(release());
     const notify = jest.fn();
     const openUpdatePage = jest.fn();
-    const showUpdatePrompt = jest.fn().mockResolvedValue(false);
-    const service = new PluginUpdateService(plugin, {
-      request,
-      notify,
-      openUpdatePage,
-      showUpdatePrompt,
-    });
+    const service = new PluginUpdateService(plugin, { request, notify, openUpdatePage });
 
     service.start();
+    await settle();
     await service.checkForUpdates();
 
-    expect(showUpdatePrompt).toHaveBeenCalledWith("6.6.2");
-    expect(plugin.updateSettings).toHaveBeenCalledWith({ lastAnnouncedPluginRelease: "6.6.2" });
+    expect(request).toHaveBeenCalledTimes(2);
     expect(notify).not.toHaveBeenCalled();
+    expect(plugin.updateSettings).not.toHaveBeenCalled();
+    expect(document.querySelector(".modal")).toBeNull();
     expect(plugin.statusBarEl.hidden).toBe(false);
     expect(plugin.statusBarEl.textContent).toBe("Update SystemSculpt to 6.6.2");
+    expect(openUpdatePage).not.toHaveBeenCalled();
     plugin.statusBarEl.click();
     expect(openUpdatePage).toHaveBeenCalledTimes(1);
-
-    showUpdatePrompt.mockClear();
-    await service.checkForUpdates();
-    expect(showUpdatePrompt).not.toHaveBeenCalled();
     service.stop();
   });
 
-  it("opens the Obsidian update page from the prompt", async () => {
+  it("shows no toast or prompt after the plugin itself was updated", async () => {
     const plugin = createPlugin();
+    plugin.manifest.version = "6.6.2";
+    const notify = jest.fn();
+    const service = new PluginUpdateService(plugin, {
+      request: jest.fn().mockResolvedValue(release("6.6.2")),
+      notify,
+    });
+
+    service.start();
+    await settle();
+
+    expect(notify).not.toHaveBeenCalled();
+    expect(plugin.updateSettings).not.toHaveBeenCalled();
+    service.stop();
+  });
+
+  it("answers a manual check with one available result that opens Obsidian's plugin updates", async () => {
+    const plugin = createPlugin();
+    const notify = jest.fn();
     const openUpdatePage = jest.fn();
     const service = new PluginUpdateService(plugin, {
       request: jest.fn().mockResolvedValue(release()),
-      notify: jest.fn(),
+      notify,
       openUpdatePage,
-      showUpdatePrompt: jest.fn().mockResolvedValue(true),
     });
 
-    await service.checkForUpdates();
+    await expect(service.checkForUpdates({ manual: true })).resolves.toMatchObject({ outcome: "update_available" });
 
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(notify).toHaveBeenCalledWith("SystemSculpt 6.6.2 is available.", 10_000, {
+      label: "Open plugin updates",
+      onSelect: expect.any(Function),
+    });
+    expect(openUpdatePage).not.toHaveBeenCalled();
+    notify.mock.calls[0][2].onSelect();
     expect(openUpdatePage).toHaveBeenCalledTimes(1);
-  });
-
-  it("does not repeat a dismissed release unless the user checks manually", async () => {
-    const plugin = createPlugin({ lastAnnouncedPluginRelease: "6.6.2" });
-    const showUpdatePrompt = jest.fn().mockResolvedValue(false);
-    const service = new PluginUpdateService(plugin, {
-      request: jest.fn().mockResolvedValue(release()),
-      notify: jest.fn(),
-      showUpdatePrompt,
-    });
-
-    await service.checkForUpdates();
-    expect(showUpdatePrompt).not.toHaveBeenCalled();
-
-    await service.checkForUpdates({ manual: true });
-    expect(showUpdatePrompt).toHaveBeenCalledWith("6.6.2");
+    expect(plugin.updateSettings).not.toHaveBeenCalled();
   });
 
   it("checks at launch, then at most once per six hours with a single timeout", async () => {
@@ -277,14 +278,33 @@ describe("PluginUpdateService", () => {
     request.mockRestore();
   });
 
-  it("parses only bounded cache and retry hints", () => {
+  it.each(fixture.cases)("schedules $name from the real release transport at the existing 24-hour ceiling", async ({ header, milliseconds }) => {
+    jest.setSystemTime(fixture.now);
+    setHidden(false);
+    setOnline(true);
+    const request = jest.spyOn(PlatformRequestClient.prototype, "request").mockImplementation(async () =>
+      new Response("busy", { status: 503, headers: header === null ? {} : { "Retry-After": header } }),
+    );
+    const service = new PluginUpdateService(createPlugin(), { notify: jest.fn() });
+    try {
+      service.start();
+      await settle();
+      const wait = Math.max(15 * 60_000, Math.min(24 * HOUR_MS, milliseconds ?? 0));
+      await jest.advanceTimersByTimeAsync(wait - 1);
+      expect(request).toHaveBeenCalledTimes(1);
+      await jest.advanceTimersByTimeAsync(1);
+      expect(request).toHaveBeenCalledTimes(2);
+    } finally {
+      service.stop();
+      request.mockRestore();
+    }
+  });
+
+  it("parses cache hints", () => {
     expect(cacheControlMaxAgeMs("public, max-age=60")).toBe(60_000);
     expect(cacheControlMaxAgeMs("no-store, max-age=600")).toBeUndefined();
     expect(cacheControlMaxAgeMs("private")).toBeUndefined();
     expect(cacheControlMaxAgeMs(null)).toBeUndefined();
-    expect(retryAfterMs("120", 0)).toBe(120_000);
-    expect(retryAfterMs(new Date(90_000).toUTCString(), 30_000)).toBe(60_000);
-    expect(retryAfterMs("soon", 0)).toBeUndefined();
   });
 
   it("keeps failures quiet in the background and gives manual feedback", async () => {
@@ -304,8 +324,8 @@ describe("PluginUpdateService", () => {
   it("adds manual feedback to an in-flight background check", async () => {
     const plugin = createPlugin();
     const notify = jest.fn();
-    let resolveRequest!: (value: unknown) => void;
-    const request = jest.fn(() => new Promise<unknown>((resolve) => {
+    let resolveRequest!: (value: PluginReleaseFetch) => void;
+    const request = jest.fn(() => new Promise<PluginReleaseFetch>((resolve) => {
       resolveRequest = resolve;
     }));
     const service = new PluginUpdateService(plugin, { request, notify });
@@ -332,12 +352,16 @@ describe("PluginUpdateService", () => {
     const service = new PluginUpdateService(plugin, {
       request: jest.fn().mockResolvedValue(release()),
       notify,
-      showUpdatePrompt: jest.fn().mockResolvedValue(false),
     });
 
     await service.checkForUpdates();
-
     expect(notify).not.toHaveBeenCalled();
     expect(plugin.addStatusBarItem).not.toHaveBeenCalled();
+
+    // Mobile has no status bar, so the manual check is its update entry point.
+    await service.checkForUpdates({ manual: true });
+    expect(notify).toHaveBeenCalledWith("SystemSculpt 6.6.2 is available.", 10_000, expect.objectContaining({
+      label: "Open plugin updates",
+    }));
   });
 });

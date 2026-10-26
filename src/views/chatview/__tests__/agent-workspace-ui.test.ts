@@ -2,8 +2,7 @@
  * @jest-environment jsdom
  */
 
-import { App, Component, MarkdownRenderer, setIcon } from "obsidian";
-import { AgentComposer } from "../AgentComposer";
+import { App, Component, MarkdownRenderer, setIcon, TFile } from "obsidian";
 import {
   type AgentArtifact,
   type AgentConversationSnapshot,
@@ -62,496 +61,26 @@ async function expandHistoricalOverflow(
   await state?.hydration;
 }
 
+/**
+ * Waits until every requested live-Markdown revision has committed through
+ * the renderer's own stream throttle. That interval stretches to the previous
+ * parse's wall-clock duration, so a fixed sleep loses the race whenever a
+ * loaded machine stalls a parse.
+ */
+async function settleLiveMarkdown(renderer: AgentConversationRenderer): Promise<void> {
+  const liveMarkdown = (renderer as unknown as {
+    liveMarkdown: {
+      states: Map<HTMLElement, { revision: number }>;
+      waitForRevision(state: { revision: number }, revision: number): Promise<void>;
+    };
+  }).liveMarkdown;
+  await Promise.all(Array.from(
+    liveMarkdown.states.values(),
+    (state) => liveMarkdown.waitForRevision(state, state.revision),
+  ));
+}
+
 const GENERIC_AGENT_FAILURE = "SystemSculpt could not complete the response.";
-
-describe("AgentComposer", () => {
-  it("sends while idle, queues while running, and preserves line breaks", async () => {
-    const parent = document.body.createDiv();
-    const submissions: Array<{ text: string; mode: "send" | "queue" }> = [];
-    const onStop = jest.fn();
-    const composer = new AgentComposer(parent, {
-      onSubmit: async (submission) => { submissions.push(submission); },
-      onStop,
-      onAttach: jest.fn(),
-      onRemoveAttachment: jest.fn(),
-    });
-    composer.load();
-    const input = parent.querySelector("textarea")!;
-
-    const pinFiles = parent.querySelector<HTMLButtonElement>(
-      '[aria-label="Pin files for every message"]',
-    );
-    expect(pinFiles).not.toBeNull();
-    expect(pinFiles?.getAttribute("aria-description")).toContain(
-      "Files SystemSculpt reads while working remain part of this chat",
-    );
-
-    composer.setValue("First request");
-    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(submissions).toEqual([{ text: "First request", mode: "send" }]);
-
-    composer.setRunning(true);
-    expect(parent.querySelector('[aria-label="Search the web"]')).toBeNull();
-    parent.querySelector<HTMLButtonElement>('[aria-label="Stop response"]')!.click();
-    expect(onStop).toHaveBeenCalledTimes(1);
-    composer.setValue("Follow up");
-    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(submissions.at(-1)).toEqual({ text: "Follow up", mode: "queue" });
-
-    composer.setValue("Keep me");
-    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", shiftKey: true, bubbles: true }));
-    expect(composer.getValue()).toBe("Keep me");
-    composer.unload();
-  });
-
-  it("makes a saved-history composer visibly read-only until a new chat enables it", async () => {
-    const parent = document.body.createDiv();
-    const onSubmit = jest.fn(async () => undefined);
-    const onAttach = jest.fn();
-    const onRemoveAttachment = jest.fn();
-    const composer = new AgentComposer(parent, {
-      onSubmit,
-      onStop: jest.fn(),
-      onAttach,
-      onRemoveAttachment,
-    });
-    composer.load();
-    composer.setValue("Draft that must not be sent");
-    composer.setAttachments([{
-      id: "legacy-context",
-      label: "Legacy.md",
-      path: "Legacy.md",
-      kind: "vault",
-    }]);
-
-    composer.setReadOnly("View-only saved chat. Start a new chat to continue.");
-
-    const input = parent.querySelector<HTMLTextAreaElement>("textarea")!;
-    expect(input.disabled).toBe(true);
-    expect(input.placeholder).toBe("Start a new chat to continue.");
-    expect(parent.querySelector(".systemsculpt-agent-prompt-hint")?.textContent)
-      .toBe("View-only saved chat. Start a new chat to continue.");
-    expect(parent.querySelector<HTMLButtonElement>('[aria-label="Send message"]')!.disabled).toBe(true);
-    expect(parent.querySelector<HTMLButtonElement>('[aria-label="Attach files"]')!.disabled).toBe(true);
-    expect(parent.querySelector<HTMLButtonElement>(
-      '[aria-label="Pin files for every message"]',
-    )!.disabled).toBe(true);
-    expect(parent.querySelector<HTMLSelectElement>('[aria-label="Vault changes"]')!.disabled).toBe(true);
-    expect(parent.querySelector<HTMLButtonElement>('[aria-label="Unpin Legacy.md"]')!.disabled).toBe(true);
-
-    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-    parent.querySelector<HTMLButtonElement>('[aria-label="Unpin Legacy.md"]')!.click();
-    await Promise.resolve();
-    expect(onSubmit).not.toHaveBeenCalled();
-    expect(onAttach).not.toHaveBeenCalled();
-    expect(onRemoveAttachment).not.toHaveBeenCalled();
-    expect(composer.getValue()).toBe("Draft that must not be sent");
-
-    composer.setReadOnly(null);
-
-    expect(input.disabled).toBe(false);
-    expect(input.placeholder).toBe("Ask SystemSculpt to work in your vault…");
-    expect(parent.querySelector<HTMLButtonElement>('[aria-label="Send message"]')!.disabled).toBe(false);
-    parent.querySelector<HTMLButtonElement>('[aria-label="Send message"]')!.click();
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(onSubmit).toHaveBeenCalledWith({
-      text: "Draft that must not be sent",
-      mode: "send",
-    });
-    composer.unload();
-  });
-
-  it("distinguishes pinned files from one-message attachments and exposes an unpin action", () => {
-    const parent = document.body.createDiv();
-    const onRemoveAttachment = jest.fn();
-    const composer = new AgentComposer(parent, {
-      onSubmit: jest.fn(),
-      onStop: jest.fn(),
-      onAttach: jest.fn(),
-      onRemoveAttachment,
-    });
-    composer.load();
-    composer.setAttachments([{ id: "a", label: "Project.md", path: "Project.md", kind: "vault" }]);
-    expect(parent.querySelector(".systemsculpt-agent-composer-attachments")?.getAttribute("role"))
-      .toBe("list");
-    expect(parent.querySelector(".systemsculpt-agent-composer-attachments")?.getAttribute("aria-label"))
-      .toBe("Message attachments and pinned files");
-    expect(parent.querySelector(".systemsculpt-agent-composer-attachments")?.getAttribute("aria-description"))
-      .toContain("Pinned files are reread for every message");
-    expect(parent.querySelector(".systemsculpt-agent-attachment")?.getAttribute("role"))
-      .toBe("listitem");
-    const pinned = parent.querySelector<HTMLElement>(".systemsculpt-agent-attachment.is-pinned")!;
-    expect(pinned.title).toBe("Project.md. Pinned and reread for every message.");
-    expect(pinned.querySelector(".systemsculpt-agent-attachment-badge")?.textContent).toBe("Pinned");
-    const unpin = parent.querySelector<HTMLButtonElement>('[aria-label="Unpin Project.md"]')!;
-    unpin.click();
-    expect(onRemoveAttachment).toHaveBeenCalledWith(expect.objectContaining({ id: "a" }));
-
-    expect(parent.textContent).toContain("Project.md");
-    composer.unload();
-  });
-
-  it("keeps a vault image thumbnail visible after selection", () => {
-    const parent = document.body.createDiv();
-    const composer = new AgentComposer(parent, {
-      onSubmit: jest.fn(),
-      onStop: jest.fn(),
-      onAttach: jest.fn(),
-      onRemoveAttachment: jest.fn(),
-    });
-    composer.load();
-    composer.setAttachments([{
-      id: "image",
-      label: "Diagram.png",
-      path: "[[Images/Diagram.png]]",
-      kind: "image",
-      previewUrl: "app://local/Images/Diagram.png",
-    }]);
-
-    const preview = parent.querySelector<HTMLImageElement>(
-      ".systemsculpt-agent-attachment.is-pinned .systemsculpt-agent-attachment-preview",
-    )!;
-    expect(preview.src).toContain("Images/Diagram.png");
-    expect(preview.alt).toBe("");
-    expect(preview.loading).toBe("lazy");
-    expect(preview.decoding).toBe("async");
-    expect(preview.draggable).toBe(false);
-
-    preview.dispatchEvent(new Event("error"));
-    expect(parent.querySelector(".systemsculpt-agent-attachment.is-pinned img")).toBeNull();
-    const fallback = parent.querySelector(
-      ".systemsculpt-agent-attachment.is-pinned .systemsculpt-agent-attachment-icon",
-    );
-    expect(fallback).not.toBeNull();
-    expect(fallback?.nextElementSibling?.classList.contains("systemsculpt-agent-attachment-label"))
-      .toBe(true);
-    composer.unload();
-  });
-
-  it("preserves pasted text while ingesting multiple mixed clipboard files", async () => {
-    const parent = document.body.createDiv();
-    const submissions: any[] = [];
-    const composer = new AgentComposer(parent, {
-      onSubmit: async (submission) => { submissions.push(submission); },
-      onStop: jest.fn(),
-      onAttach: jest.fn(),
-      onRemoveAttachment: jest.fn(),
-    });
-    composer.load();
-    const text = new File(["# Plan"], "plan.md", { type: "text/markdown" });
-    const image = new File([new Uint8Array([1, 2, 3])], "diagram.png", { type: "image/png" });
-    Object.defineProperty(text, "arrayBuffer", { value: async () => new TextEncoder().encode("# Plan").buffer });
-    Object.defineProperty(image, "arrayBuffer", { value: async () => new Uint8Array([1, 2, 3]).buffer });
-
-    composer.setValue("Pasted instructions");
-    const paste = new Event("paste", { bubbles: true, cancelable: true });
-    Object.defineProperty(paste, "clipboardData", {
-      value: { types: ["Files", "text/plain"], files: [text, image], items: [] },
-    });
-    parent.querySelector("textarea")!.dispatchEvent(paste);
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
-
-    expect(paste.defaultPrevented).toBe(false);
-    expect(parent.querySelectorAll(".systemsculpt-agent-attachment.is-message")).toHaveLength(2);
-    expect(parent.querySelector<HTMLImageElement>(".systemsculpt-agent-attachment-preview")?.src).toMatch(/^data:image\/png;base64,/);
-    const send = parent.querySelector<HTMLButtonElement>('[aria-label="Send message"]')!;
-    expect(send.disabled).toBe(false);
-    send.click();
-    await Promise.resolve();
-    await Promise.resolve();
-
-    expect(submissions).toHaveLength(1);
-    expect(submissions[0].text).toBe("Pasted instructions");
-    expect(submissions[0].attachments.map((item: any) => item.kind)).toEqual(["text", "image"]);
-    expect(parent.querySelectorAll(".systemsculpt-agent-attachment.is-message")).toHaveLength(0);
-    composer.unload();
-  });
-
-  it("ingests multiple mixed files through the native picker and sends attachment-only", async () => {
-    const parent = document.body.createDiv();
-    const submissions: any[] = [];
-    const composer = new AgentComposer(parent, {
-      onSubmit: async (submission) => { submissions.push(submission); },
-      onStop: jest.fn(),
-      onAttach: jest.fn(),
-      onRemoveAttachment: jest.fn(),
-    });
-    composer.load();
-    const text = new File(["notes"], "notes.txt", { type: "text/plain" });
-    const image = new File([new Uint8Array([7, 8])], "photo.webp", { type: "image/webp" });
-    Object.defineProperty(text, "arrayBuffer", { value: async () => new TextEncoder().encode("notes").buffer });
-    Object.defineProperty(image, "arrayBuffer", { value: async () => new Uint8Array([7, 8]).buffer });
-    const picker = parent.querySelector<HTMLInputElement>('input[type="file"]')!;
-    Object.defineProperty(picker, "files", { configurable: true, value: [text, image] });
-    picker.dispatchEvent(new Event("change", { bubbles: true }));
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
-
-    expect(parent.querySelectorAll(".systemsculpt-agent-attachment.is-message")).toHaveLength(2);
-    parent.querySelector<HTMLButtonElement>('[aria-label="Send message"]')!.click();
-    await Promise.resolve();
-    await Promise.resolve();
-
-    expect(submissions).toHaveLength(1);
-    expect(submissions[0].text).toBe("");
-    expect(submissions[0].attachments.map((item: any) => item.kind)).toEqual(["text", "image"]);
-    composer.unload();
-  });
-
-  it("restores a rejected submission without overwriting the newer draft", () => {
-    const parent = document.body.createDiv();
-    const composer = new AgentComposer(parent, {
-      onSubmit: jest.fn(),
-      onStop: jest.fn(),
-      onAttach: jest.fn(),
-      onRemoveAttachment: jest.fn(),
-    });
-    composer.load();
-    composer.setValue("New draft typed while waiting");
-    const rejectedAttachment = {
-      status: "ready" as const,
-      id: "text-hash",
-      name: "brief.md",
-      mimeType: "text/markdown",
-      byteLength: 7,
-      kind: "text" as const,
-      contentPart: {
-        type: "text" as const,
-        text: "--- BEGIN ATTACHED FILE: brief.md (text/markdown) ---\n# Brief\n--- END ATTACHED FILE: brief.md ---",
-      },
-    };
-
-    composer.restoreRejectedSubmission({
-      text: "Rejected request",
-      attachments: [rejectedAttachment],
-    });
-
-    expect(composer.getValue()).toBe("Rejected request\n\nNew draft typed while waiting");
-    expect(composer.getMessageAttachments()).toEqual([rejectedAttachment]);
-    expect(composer.hasDraft()).toBe(true);
-    composer.unload();
-  });
-
-  it("blocks a mixed batch when PDF processing fails, then submits the whole batch after retry", async () => {
-    const parent = document.body.createDiv();
-    const submissions: any[] = [];
-    const noticeLog = jest.spyOn(console, "log").mockImplementation(() => undefined);
-    let attempt = 0;
-    const composer = new AgentComposer(parent, {
-      onSubmit: async (submission) => { submissions.push(submission); },
-      onStop: jest.fn(),
-      onAttach: jest.fn(),
-      onRemoveAttachment: jest.fn(),
-      documentAttachmentProcessor: {
-        prepare: jest.fn(async () => {
-          attempt += 1;
-          if (attempt === 1) throw new Error("conversion failed");
-          return { operationId: "pdf-retry", markdown: "Recovered document" };
-        }),
-        complete: jest.fn(async () => undefined),
-        discard: jest.fn(async () => undefined),
-      },
-    });
-    composer.load();
-    const text = new File(["notes"], "notes.md", { type: "text/markdown" });
-    const pdf = new File(["%PDF"], "broken.pdf", { type: "application/pdf" });
-    const image = new File(["image"], "diagram.png", { type: "image/png" });
-    Object.defineProperty(text, "arrayBuffer", { value: async () => new TextEncoder().encode("notes").buffer });
-    Object.defineProperty(pdf, "arrayBuffer", { value: async () => new TextEncoder().encode("%PDF").buffer });
-    Object.defineProperty(image, "arrayBuffer", { value: async () => new TextEncoder().encode("image").buffer });
-
-    const picker = parent.querySelector<HTMLInputElement>('input[type="file"]')!;
-    Object.defineProperty(picker, "files", { configurable: true, value: [text, pdf, image] });
-    picker.dispatchEvent(new Event("change", { bubbles: true }));
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
-
-    expect(noticeLog).toHaveBeenCalledWith(
-      "Notice: broken.pdf could not be processed: conversion failed",
-    );
-    const send = parent.querySelector<HTMLButtonElement>('[aria-label="Send message"]')!;
-    expect(parent.querySelectorAll(".systemsculpt-agent-attachment.is-message")).toHaveLength(3);
-    expect(parent.querySelector(".systemsculpt-agent-attachment.is-failed")?.textContent).toContain("broken.pdf");
-    expect(send.disabled).toBe(true);
-    send.click();
-    expect(submissions).toEqual([]);
-
-    parent.querySelector<HTMLButtonElement>('[data-testid="chat.composer.attachment.retry"]')!.click();
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
-
-    expect(send.disabled).toBe(false);
-    send.click();
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(submissions).toHaveLength(1);
-    expect(submissions[0].attachments.map((attachment: any) => attachment.name)).toEqual([
-      "notes.md", "broken.pdf", "diagram.png",
-    ]);
-    composer.unload();
-  });
-
-  it("offers a stop control while documents process, and stops them when clicked or when the chat closes (#420)", async () => {
-    const parent = document.body.createDiv();
-    const noticeLog = jest.spyOn(console, "log").mockImplementation(() => undefined);
-    const signals: AbortSignal[] = [];
-    const composer = new AgentComposer(parent, {
-      onSubmit: jest.fn(),
-      onStop: jest.fn(),
-      onAttach: jest.fn(),
-      onRemoveAttachment: jest.fn(),
-      documentAttachmentProcessor: {
-        prepare: jest.fn((_input, { signal }) => new Promise<never>((_resolve, reject) => {
-          signals.push(signal);
-          signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
-        })),
-        complete: jest.fn(async () => undefined),
-        discard: jest.fn(async () => undefined),
-      },
-    });
-    composer.load();
-    const pdf = new File(["%PDF"], "slow.pdf", { type: "application/pdf" });
-    Object.defineProperty(pdf, "arrayBuffer", { value: async () => new TextEncoder().encode("%PDF").buffer });
-    const stop = parent.querySelector<HTMLButtonElement>('[data-testid="chat.composer.attachment.cancel"]')!;
-    expect(stop.hidden).toBe(true);
-
-    const picker = parent.querySelector<HTMLInputElement>('input[type="file"]')!;
-    Object.defineProperty(picker, "files", { configurable: true, value: [pdf] });
-    picker.dispatchEvent(new Event("change", { bubbles: true }));
-    for (let turn = 0; signals.length === 0 && turn < 100; turn++) await Promise.resolve();
-    expect(stop.hidden).toBe(false);
-    stop.click();
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
-
-    expect(signals[0].aborted).toBe(true);
-    expect(stop.hidden).toBe(true);
-    expect(noticeLog).toHaveBeenCalledWith("Notice: slow.pdf could not be processed: processing was stopped. Retry to process it.");
-    expect(parent.querySelector(".systemsculpt-agent-attachment.is-failed")?.textContent).toContain("slow.pdf");
-
-    // Closing the chat stops a retry that is still processing.
-    noticeLog.mockClear();
-    parent.querySelector<HTMLButtonElement>('[data-testid="chat.composer.attachment.retry"]')!.click();
-    for (let turn = 0; signals.length === 1 && turn < 100; turn++) await Promise.resolve();
-    composer.unload();
-    expect(signals[1].aborted).toBe(true);
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
-    expect(noticeLog).not.toHaveBeenCalled();
-    noticeLog.mockRestore();
-  });
-
-  it.each(["resolve", "reject"] as const)("Remove during Retry keeps the PDF removed after a late %s", async (outcome) => {
-    const parent = document.body.createDiv();
-    const notices = jest.spyOn(console, "log").mockImplementation(() => undefined);
-    let finish!: () => void;
-    let signal!: AbortSignal;
-    const composer = new AgentComposer(parent, {
-      onSubmit: jest.fn(), onStop: jest.fn(), onAttach: jest.fn(), onRemoveAttachment: jest.fn(),
-      documentAttachmentProcessor: {
-        prepare: jest.fn().mockRejectedValueOnce(new Error("First failure"))
-          .mockImplementationOnce((_input, options) => {
-            signal = options.signal;
-            return new Promise((resolve, reject) => { finish = () => outcome === "resolve"
-              ? resolve({ operationId: "late", markdown: "Late result" }) : reject(new Error("Late failure")); });
-          }),
-        complete: jest.fn(async () => undefined), discard: jest.fn(async () => undefined),
-      },
-    });
-    composer.load();
-    const pdf = new File(["%PDF"], "remove.pdf", { type: "application/pdf" });
-    Object.defineProperty(pdf, "arrayBuffer", { value: async () => new TextEncoder().encode("%PDF").buffer });
-    const picker = parent.querySelector<HTMLInputElement>('input[type="file"]')!;
-    Object.defineProperty(picker, "files", { configurable: true, value: [pdf] });
-    picker.dispatchEvent(new Event("change", { bubbles: true }));
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
-    notices.mockClear();
-    parent.querySelector<HTMLButtonElement>('[data-testid="chat.composer.attachment.retry"]')!.click();
-    parent.querySelector<HTMLButtonElement>('[data-testid="chat.composer.attachment.remove"]')!.click();
-    const abortedOnRemove = signal.aborted;
-    finish();
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
-    expect(abortedOnRemove).toBe(true);
-    expect(parent.querySelectorAll(".systemsculpt-agent-attachment.is-message")).toHaveLength(0);
-    expect(parent.querySelector<HTMLButtonElement>('[data-testid="chat.composer.attachment.cancel"]')!.hidden).toBe(true);
-    expect(notices).not.toHaveBeenCalled();
-    composer.setValue("Send without the removed PDF");
-    expect(parent.querySelector<HTMLButtonElement>('[aria-label="Send message"]')!.disabled).toBe(false);
-    composer.unload();
-    notices.mockRestore();
-  });
-
-  it("turns a Similar Notes drag payload into a pinned file instead of a message attachment", () => {
-    const parent = document.body.createDiv();
-    const onVaultContextDrop = jest.fn();
-    const composer = new AgentComposer(parent, {
-      onSubmit: jest.fn(),
-      onStop: jest.fn(),
-      onAttach: jest.fn(),
-      onRemoveAttachment: jest.fn(),
-      onVaultContextDrop,
-    });
-    composer.load();
-    const transfer = {
-      types: ["application/x-systemsculpt-similar-note"],
-      files: [],
-      items: [],
-      getData: jest.fn(() => JSON.stringify({
-        path: "Research/Project.md",
-        title: "Project",
-        source: "similar-notes",
-      })),
-    };
-    const drop = new Event("drop", { bubbles: true, cancelable: true });
-    Object.defineProperty(drop, "dataTransfer", { value: transfer });
-
-    composer.element.dispatchEvent(drop);
-
-    expect(drop.defaultPrevented).toBe(true);
-    expect(onVaultContextDrop).toHaveBeenCalledWith("Research/Project.md");
-    expect((composer as any).messageAttachments.displaySnapshot()).toEqual([]);
-    composer.unload();
-  });
-
-  it("does not enable send for pinned files without prompt text or message attachments", () => {
-    const parent = document.body.createDiv();
-    const composer = new AgentComposer(parent, {
-      onSubmit: jest.fn(),
-      onStop: jest.fn(),
-      onAttach: jest.fn(),
-      onRemoveAttachment: jest.fn(),
-    });
-    composer.load();
-
-    composer.setAttachments([{ id: "context", label: "Project.md", path: "Project.md", kind: "vault" }]);
-
-    expect(parent.querySelector<HTMLButtonElement>('[aria-label="Send message"]')?.disabled).toBe(true);
-    composer.unload();
-  });
-
-  it("offers familiar Ask Approval and Full Access modes in the composer", () => {
-    const parent = document.body.createDiv();
-    const onApprovalModeChange = jest.fn();
-    const composer = new AgentComposer(parent, {
-      onSubmit: jest.fn(),
-      onStop: jest.fn(),
-      onAttach: jest.fn(),
-      onRemoveAttachment: jest.fn(),
-      onApprovalModeChange,
-    });
-    composer.load();
-    const select = parent.querySelector<HTMLSelectElement>('[aria-label="Vault changes"]')!;
-    expect(Array.from(select.options).map((option) => option.text)).toEqual(["Ask Approval", "Full Access"]);
-    expect(select.hasAttribute("title")).toBe(false);
-    composer.setApprovalMode("full-access");
-    expect(select.value).toBe("full-access");
-    expect(select.hasAttribute("title")).toBe(false);
-    select.value = "ask";
-    select.dispatchEvent(new Event("change"));
-    expect(onApprovalModeChange).toHaveBeenCalledWith("ask");
-    composer.unload();
-  });
-});
 
 describe("AgentWorkspace", () => {
   const originalClipboardDescriptor = Object.getOwnPropertyDescriptor(window.navigator, "clipboard");
@@ -563,7 +92,7 @@ describe("AgentWorkspace", () => {
       Object.defineProperty(window.navigator, "clipboard", originalClipboardDescriptor);
       return;
     }
-    delete (window.navigator as Navigator & { clipboard?: Clipboard }).clipboard;
+    Reflect.deleteProperty(window.navigator, "clipboard");
   });
 
   it("renders tool status as static non-focusable content without raw payload disclosure", async () => {
@@ -695,7 +224,7 @@ describe("AgentWorkspace", () => {
       input: { query: "Obsidian agents" },
       state: "running",
     });
-    expect(node.textContent).toContain("Searching the web...");
+    expect(node.textContent).toContain("Searching the web…");
     expect(node.textContent).not.toContain("Obsidian agents");
     expect(node.textContent).not.toContain("web_search");
     expect(node.querySelector(":scope > .systemsculpt-agent-tool")?.tagName)
@@ -736,7 +265,7 @@ describe("AgentWorkspace", () => {
     });
     expect(node.textContent).toContain("SystemSculpt action");
     expect(node.querySelector<HTMLElement>(".systemsculpt-agent-tool-state-icon")?.dataset.iconState)
-      .toBe("minus");
+      .toBe("loader-circle");
     expect(node.textContent).not.toMatch(/needs approval|allow once|allow for chat/i);
     expect(node.querySelector(".systemsculpt-agent-approval")).toBeNull();
     expect(onApprove).not.toHaveBeenCalled();
@@ -952,8 +481,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
-      onOpenCredits: jest.fn(),
       onViewPlans,
       showPlanOffer: true,
       onCancelQueued: jest.fn(),
@@ -961,32 +488,40 @@ describe("AgentWorkspace", () => {
     });
     workspace.load();
 
-    const plans = parent.querySelector<HTMLButtonElement>('[data-testid="chat.empty.view-plans"]')!;
-    expect(plans.closest("[hidden]")).toBeNull();
-    plans.click();
-    expect(onViewPlans).toHaveBeenCalledTimes(1);
-    workspace.setPlanOfferVisible(false);
-    expect(plans.closest("[hidden]")).not.toBeNull();
-
     expect(workspace.element.matches('.ss-surface[data-ss-surface="view"]')).toBe(true);
     expect(parent.querySelector('[aria-label="Chat history"]')?.classList.contains("ss-button--icon")).toBe(true);
-    expect(parent.querySelector('[aria-label="Attach files"]')?.classList.contains("ss-button--icon")).toBe(true);
+    expect(parent.querySelector('[aria-label="Add files and notes"]')?.classList.contains("ss-button--icon")).toBe(true);
     expect(parent.querySelector('[aria-label="Jump to latest"]')?.classList.contains("ss-button")).toBe(true);
-    expect(parent.querySelector(".systemsculpt-agent-credits")?.textContent).toBe("Credits");
-    for (const label of ["Chat history", "New chat", "Chat settings", "Attach files", "Jump to latest"]) {
+    const transcript = workspace.viewport.parentElement!;
+    expect(transcript.classList.contains("systemsculpt-agent-transcript")).toBe(true);
+    expect(parent.querySelector('[aria-label="Jump to latest"]')?.parentElement).toBe(transcript);
+    expect(transcript.contains(parent.querySelector(".systemsculpt-agent-composer"))).toBe(false);
+    // Credits live in the run line now, and only for hosted chat (spec 4.2).
+    expect(parent.querySelector(".systemsculpt-agent-credits")).toBeNull();
+    for (const label of ["Chat history", "New chat", "More", "Add files and notes", "Jump to latest"]) {
       expect(parent.querySelector(`[aria-label="${label}"]`)?.hasAttribute("title")).toBe(false);
     }
     expect(parent.querySelector(".systemsculpt-agent-header-title")?.getAttribute("role"))
       .toBe("heading");
     const title = parent.querySelector<HTMLElement>(".systemsculpt-agent-header-title")!;
     const conversation = parent.querySelector<HTMLElement>(".systemsculpt-agent-conversation")!;
-    expect(conversation.hasAttribute("aria-label")).toBe(false);
-    expect(conversation.getAttribute("aria-labelledby")).toBe(title.id);
+    // Spec 6.3: the log is "Conversation"; the scroll region carries the chat title.
+    expect(conversation.getAttribute("role")).toBe("log");
+    expect(conversation.getAttribute("aria-label")).toBe("Conversation");
+    expect(conversation.getAttribute("aria-live")).toBe("off");
+    expect(conversation.hasAttribute("aria-labelledby")).toBe(false);
+    expect(parent.querySelector(".systemsculpt-agent-viewport")?.getAttribute("aria-labelledby")).toBe(title.id);
     expect(parent.querySelector(".systemsculpt-agent-viewport")?.hasAttribute("aria-label")).toBe(false);
     workspace.setTitle("Conversation");
     expect(title.hasAttribute("title")).toBe(false);
 
+    workspace.setBanner("Monthly is $9", "error", true);
+    const bannerPlans = parent.querySelector<HTMLButtonElement>('[data-testid="chat.banner.see-plans"]')!;
+    expect(bannerPlans.textContent).toBe("See plans");
+    bannerPlans.click();
+    expect(onViewPlans).toHaveBeenCalledTimes(1);
     workspace.setBanner("Connection failed", "error");
+    expect(parent.querySelector('[data-testid="chat.banner.see-plans"]')).toBeNull();
     expect(parent.querySelector(".systemsculpt-agent-banner")?.getAttribute("role"))
       .toBe("alert");
     workspace.setQueue([
@@ -1016,117 +551,10 @@ describe("AgentWorkspace", () => {
       "Remove queued follow-up 2 of 2",
     ]);
     expect(actionLabels.join(" ")).not.toContain("private");
+    const firstQueued = parent.querySelector<HTMLElement>(".systemsculpt-agent-queue-item")!;
+    expect(firstQueued.querySelector(".systemsculpt-agent-queue-label")?.textContent).toBe("Queued");
+    expect(firstQueued.querySelector('[data-queue-action="run-now"]')?.textContent).toBe("Send now");
 
-    workspace.unload();
-  });
-
-  it("presents master auth as Internal QA without implying exhausted credits", () => {
-    const parent = document.body.createDiv();
-    const workspace = new AgentWorkspace(parent, {
-      app: new App(),
-      sourcePath: () => "",
-      onSubmit: jest.fn(),
-      onStop: jest.fn(),
-      onAttach: jest.fn(),
-      onRemoveAttachment: jest.fn(),
-      onApprove: jest.fn(),
-      onOpenArtifact: jest.fn(),
-      onCopyArtifactPath: jest.fn(),
-      onNewChat: jest.fn(),
-      onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
-      onOpenCredits: jest.fn(),
-    });
-    workspace.load();
-    const credits = parent.querySelector<HTMLButtonElement>(
-      ".systemsculpt-agent-credits",
-    )!;
-
-    workspace.setCreditsBalance({
-      includedRemaining: 0,
-      addOnRemaining: 0,
-      totalRemaining: 0,
-      includedPerMonth: 0,
-      usageClass: "master_auth",
-      cycleEndsAt: "2026-08-01T00:00:00.000Z",
-      cycleStartedAt: "2026-07-01T00:00:00.000Z",
-      cycleAnchorAt: "2026-07-01T00:00:00.000Z",
-      turnInFlightUntil: null,
-      purchaseUrl: null,
-    });
-
-    expect(credits.hidden).toBe(false);
-    expect(credits.textContent).toBe("Internal QA");
-    expect(credits.title).toBe("Internal testing mode");
-    expect(credits.getAttribute("aria-label")).toBe("Internal testing mode");
-    expect(credits.classList.contains("is-internal-qa")).toBe(true);
-    expect(credits.classList.contains("is-low")).toBe(false);
-    expect(parent.textContent).not.toContain("Credits: 0");
-
-    workspace.setCreditsBalance({
-      includedRemaining: 500,
-      addOnRemaining: 0,
-      totalRemaining: 500,
-      includedPerMonth: 2000,
-      usageClass: "customer",
-      cycleEndsAt: "2026-08-01T00:00:00.000Z",
-      cycleStartedAt: "2026-07-01T00:00:00.000Z",
-      cycleAnchorAt: "2026-07-01T00:00:00.000Z",
-      turnInFlightUntil: null,
-      purchaseUrl: null,
-    });
-
-    expect(credits.textContent).toBe("500");
-    expect(credits.title).toBe("Credits available: 500");
-    expect(credits.getAttribute("aria-label")).toBe("Credits available: 500");
-    expect(credits.classList.contains("is-internal-qa")).toBe(false);
-    expect(credits.classList.contains("is-low")).toBe(true);
-
-    workspace.setCreditsBalance({
-      includedRemaining: 500,
-      addOnRemaining: 0,
-      totalRemaining: 500,
-      heldInFlight: 500,
-      availableUnreserved: 0,
-      includedPerMonth: 2000,
-      usageClass: "customer",
-      cycleEndsAt: "2026-08-01T00:00:00.000Z",
-      cycleStartedAt: "2026-07-01T00:00:00.000Z",
-      cycleAnchorAt: "2026-07-01T00:00:00.000Z",
-      turnInFlightUntil: null,
-      purchaseUrl: null,
-    });
-
-    expect(credits.textContent).toBe("0 available");
-    expect(credits.title).toContain("500 held in flight");
-    expect(credits.getAttribute("aria-label")).toContain("No credits are available");
-    expect(credits.classList.contains("is-empty")).toBe(false);
-
-    workspace.setCreditsBalance({
-      includedRemaining: 0,
-      addOnRemaining: 0,
-      totalRemaining: 0,
-      includedPerMonth: 2000,
-      usageClass: "customer",
-      cycleEndsAt: "2026-08-01T00:00:00.000Z",
-      cycleStartedAt: "2026-07-01T00:00:00.000Z",
-      cycleAnchorAt: "2026-07-01T00:00:00.000Z",
-      turnInFlightUntil: null,
-      purchaseUrl: null,
-    });
-
-    expect(credits.textContent).toBe("Out of credits");
-    expect(credits.title).toBe("You are out of credits. Add credits to continue.");
-    expect(credits.getAttribute("aria-label")).toBe("Out of credits. Add credits to continue.");
-    expect(credits.classList.contains("is-empty")).toBe(true);
-
-    workspace.setCreditsBalance(null);
-
-    expect(credits.hidden).toBe(true);
-    expect(credits.textContent).toBe("Credits");
-    expect(credits.title).toBe("Credits");
-    expect(credits.getAttribute("aria-label")).toBe("Credits");
-    expect(credits.classList.contains("is-empty")).toBe(false);
     workspace.unload();
   });
 
@@ -1179,7 +607,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const history = deepFreeze<ChatMessage[]>([
@@ -1324,7 +751,7 @@ describe("AgentWorkspace", () => {
       phase: "completed",
       busy: false,
       composerRunning: false,
-      tailStatus: null,
+      progressActive: false,
       visibleParts: [{
         id: "text-adopted-lease",
         kind: "text",
@@ -1333,6 +760,7 @@ describe("AgentWorkspace", () => {
         markdown: "Open adopted action",
         order: 0,
       }],
+      activityStatus: "Done",
     });
     const liveAction = host.querySelector<HTMLButtonElement>(
       ".systemsculpt-agent-active-run button",
@@ -1453,7 +881,9 @@ describe("AgentWorkspace", () => {
     const pre = host.querySelector("pre")!;
     const copy = host.querySelector<HTMLButtonElement>(".systemsculpt-agent-code-copy")!;
     expect(pre.classList.contains("systemsculpt-agent-code-block")).toBe(true);
-    expect(host.querySelector(".copy-code-button")).toBeNull();
+    // R3 keeps Obsidian's own copy button and restyles it, so there is exactly one.
+    expect(host.querySelectorAll(".copy-code-button")).toHaveLength(1);
+    expect(host.querySelector(".copy-code-button")).toBe(copy);
     expect(copy.textContent).toContain("Copy");
     expect(copy.hasAttribute("title")).toBe(false);
 
@@ -1589,7 +1019,6 @@ describe("AgentWorkspace", () => {
       onCopyText: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const tool = (id: string, messageId: string, timestamp: number) => ({
@@ -1663,7 +1092,6 @@ describe("AgentWorkspace", () => {
       onCancelMessageEdit,
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     await workspace.setHistory([
@@ -1746,7 +1174,6 @@ describe("AgentWorkspace", () => {
       onCancelMessageEdit: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     await workspace.setHistory([
@@ -1813,7 +1240,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const firstTool = {
@@ -1852,14 +1278,14 @@ describe("AgentWorkspace", () => {
       return "other";
     })).toEqual(["activity", "text"]);
     expect(Array.from(body.children).map((node) => node.textContent)).toEqual([
-      "Worked",
+      "Read 2 notes",
       "After",
     ]);
     const activity = body.querySelector<HTMLDetailsElement>(
       ":scope > .systemsculpt-agent-activity",
     )!;
     expect(activity.querySelector(".systemsculpt-agent-activity-label")?.textContent)
-      .toBe("Worked");
+      .toBe("Read 2 notes");
     expect(activity.dataset.activityState).toBe("settled");
     expect(activity.open).toBe(false);
     const activityBody = activity.querySelector<HTMLElement>(
@@ -1868,7 +1294,7 @@ describe("AgentWorkspace", () => {
     expect(activityBody.childElementCount).toBe(0);
     await hydrateRestoredWorked(workspace.renderer, activity);
     expect(Array.from(body.children).map((node) => node.textContent)).toEqual([
-      expect.stringMatching(/Before[\s\S]*Read 1 file \+ 1 other tool call[\s\S]*Two\.md/),
+      expect.stringMatching(/Before[\s\S]*Read 2 notes[\s\S]*Two\.md/),
       "After",
     ]);
     expect(Array.from(activityBody.querySelectorAll<HTMLElement>(
@@ -1879,7 +1305,7 @@ describe("AgentWorkspace", () => {
     )!;
     expect(overflow.getAttribute("aria-expanded")).toBe("false");
     expect(overflow.querySelector(".systemsculpt-agent-activity-overflow-label")?.textContent)
-      .toBe("Read 1 file + 1 other tool call");
+      .toBe("Read 2 notes");
     const overflowBody = overflow.nextElementSibling as HTMLElement;
     expect(overflowBody.hasAttribute("hidden")).toBe(true);
     expect(overflowBody.querySelector(".is-tool")?.textContent)
@@ -1910,7 +1336,6 @@ describe("AgentWorkspace", () => {
       onCopyText: jest.fn(async () => true),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const tool = (id: string, timestamp: number) => ({
@@ -1980,7 +1405,7 @@ describe("AgentWorkspace", () => {
         ":scope > .systemsculpt-agent-activity",
       )!;
       expect(activity.querySelector(".systemsculpt-agent-activity-label")?.textContent)
-        .toBe("Worked");
+        .toBe("Thought, read 3 notes");
       expect(activity.dataset.activityState).toBe("settled");
       expect(activity.open).toBe(false);
       const activityBody = activity.querySelector<HTMLElement>(
@@ -1992,7 +1417,7 @@ describe("AgentWorkspace", () => {
       )!;
       expect(overflow.getAttribute("aria-expanded")).toBe(String(expectedInitiallyExpanded));
       expect(overflow.querySelector(".systemsculpt-agent-activity-overflow-label")?.textContent)
-        .toBe("Read 1 file + 4 other tool calls");
+        .toBe("Thought, read 3 notes");
       const overflowBody = overflow.nextElementSibling as HTMLElement;
       expect(overflowBody.hasAttribute("hidden")).toBe(!expectedInitiallyExpanded);
       expect(activityBody.lastElementChild).toBe(overflowBody);
@@ -2060,7 +1485,6 @@ describe("AgentWorkspace", () => {
       onCopyText: jest.fn(async () => true),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const tool = (id: string, messageId: string, timestamp: number, path: string) => ({
@@ -2114,7 +1538,7 @@ describe("AgentWorkspace", () => {
         ":scope > .systemsculpt-agent-activity",
       )!;
       expect(activity.querySelector(".systemsculpt-agent-activity-label")?.textContent)
-        .toBe("Worked");
+        .toBe("Read 3 notes");
       expect(activity.dataset.activityState).toBe("settled");
       expect(activity.open).toBe(false);
       const activityBody = activity.querySelector<HTMLElement>(
@@ -2126,7 +1550,7 @@ describe("AgentWorkspace", () => {
       )!;
       expect(overflow.getAttribute("aria-expanded")).toBe(String(expectedInitiallyExpanded));
       expect(overflow.querySelector(".systemsculpt-agent-activity-overflow-label")?.textContent)
-        .toBe("Read 1 file + 2 other tool calls");
+        .toBe("Read 3 notes");
       const overflowBody = overflow.nextElementSibling as HTMLElement;
       if (!expectedInitiallyExpanded) {
         const collapsedTool = overflowBody.querySelector<HTMLElement>(
@@ -2182,7 +1606,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const turnId = "user-live-history";
@@ -2222,7 +1645,7 @@ describe("AgentWorkspace", () => {
     expect(liveActivity.hasAttribute("data-agent-turn-fold")).toBe(true);
     expect(liveActivity.dataset.activityState).toBe("settled");
     expect(liveActivity.querySelector(".systemsculpt-agent-activity-label")?.textContent)
-      .toBe("Worked");
+      .toBe("Searched the web for “stable identity”");
     expect(liveActivity.open).toBe(false);
     liveActivity.open = true;
     const liveDetails = liveTool.querySelector<HTMLDetailsElement>("details")!;
@@ -2293,7 +1716,7 @@ describe("AgentWorkspace", () => {
     expect(historicalActivity.hasAttribute("data-agent-turn-fold")).toBe(true);
     expect(historicalActivity.dataset.activityState).toBe("settled");
     expect(historicalActivity.querySelector(".systemsculpt-agent-activity-label")?.textContent)
-      .toBe("Worked");
+      .toBe("Searched the web for “stable identity”");
     expect(historicalActivity.open).toBe(true);
     const historicalDetails = historicalTools[0].querySelector<HTMLDetailsElement>("details")!;
     expect(historicalDetails).toBe(liveDetails);
@@ -2320,7 +1743,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const turnId = "user-atomic-boundary";
@@ -2475,7 +1897,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     await workspace.setHistory([
@@ -2503,6 +1924,82 @@ describe("AgentWorkspace", () => {
     workspace.unload();
   });
 
+  it("keeps denial steering until the next queued turn starts, without needing an idle gap", async () => {
+    const parent = document.body.createDiv();
+    const onApprove = jest.fn(async () => true);
+    const workspace = new AgentWorkspace(parent, {
+      app: new App(),
+      sourcePath: () => "SystemSculpt/Chats/chat.md",
+      reducedMotion: () => true,
+      onSubmit: jest.fn(),
+      onStop: jest.fn(),
+      onAttach: jest.fn(),
+      onRemoveAttachment: jest.fn(),
+      onApprove,
+      onOpenArtifact: jest.fn(),
+      onCopyArtifactPath: jest.fn(),
+      onNewChat: jest.fn(),
+      onOpenHistory: jest.fn(),
+    });
+    workspace.load();
+    workspace.composer.setAgentName("Claude Code");
+    await workspace.setHistory([{ role: "user", content: "Tidy the plan", message_id: "user-1" }]);
+    const pending = (id: string, order: number): Extract<AgentPart, { kind: "tool" }> => ({
+      id: `tool-${id}`, kind: "tool", messageId: "assistant-1", callId: `call-${id}`, name: "edit",
+      location: "vault", input: { path: `${id}.md` }, state: "approval-required", approvalId: id, order,
+    });
+    await workspace.setAgentSnapshot({
+      runId: "run-1", turnId: "user-1", status: "waiting", phase: "waiting", waitingReason: "approval",
+      messages: [{ id: "assistant-1", role: "assistant", partIds: ["tool-a", "tool-b"] }],
+      parts: [pending("a", 0), pending("b", 1)],
+    });
+    const input = parent.querySelector<HTMLTextAreaElement>('[data-testid="chat.composer.input"]')!;
+    const deny = (id: string) => parent.querySelector<HTMLButtonElement>(
+      `.systemsculpt-agent-approval[data-approval-id="${id}"] [data-focus-key="tool-deny"]`,
+    )!.click();
+
+    deny("a");
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    expect(onApprove).toHaveBeenCalledWith("a", false);
+    // Another card still waits: no steering yet.
+    expect(input.placeholder).not.toContain("what to do instead");
+
+    await workspace.setAgentSnapshot({
+      runId: "run-1", turnId: "user-1", status: "waiting", phase: "waiting", waitingReason: "approval",
+      messages: [{ id: "assistant-1", role: "assistant", partIds: ["tool-b"] }],
+      parts: [pending("b", 1)],
+    });
+    deny("b");
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    expect(input.placeholder).toBe("Tell Claude Code what to do instead…");
+    workspace.setRunPending(true, "user-1");
+    const settled = {
+      runId: "run-1", turnId: "user-1", status: "completed" as const, phase: "complete" as const,
+      messages: [], parts: [],
+    };
+    // Same-turn updates and history settlement must not clear the invitation.
+    await workspace.setAgentSnapshot({ ...settled, status: "running", phase: "working" });
+    expect(input.placeholder).toBe("Tell Claude Code what to do instead…");
+    await workspace.setAgentSnapshot(settled);
+    await workspace.settleCompletedRun([]);
+    expect(input.placeholder).toBe("Tell Claude Code what to do instead…");
+
+    workspace.setInputText("Keep my unsent draft");
+    // Queue promotion claims the next turn before finishing the previous one.
+    // Only successful admission clears the old projection; a failed queue save
+    // never reaches this boundary and must leave steering/draft state alone.
+    workspace.setRunPending(true, "user-queued");
+    expect(input.placeholder).toBe("Tell Claude Code what to do instead…");
+    await workspace.setAgentSnapshot(null);
+    expect(input.placeholder).toBe("Queue a follow-up…");
+    expect(workspace.getInputText()).toBe("Keep my unsent draft");
+    await workspace.setAgentSnapshot({ ...settled, runId: "run-queued", turnId: "user-queued" });
+    await workspace.settleCompletedRun([]);
+    workspace.setRunPending(false);
+    expect(input.placeholder).toBe("Ask Claude Code to work in your vault…");
+    workspace.unload();
+  });
+
   it("keeps a pending approval visible when the tool drawer is collapsed", async () => {
     const parent = document.body.createDiv();
     const workspace = new AgentWorkspace(parent, {
@@ -2518,7 +2015,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
       onCancelQueued: jest.fn(),
       onRunQueuedNow: jest.fn(),
     });
@@ -2587,7 +2083,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
       onCancelQueued: jest.fn(),
       onRunQueuedNow: jest.fn(),
     });
@@ -2628,14 +2123,14 @@ describe("AgentWorkspace", () => {
     expect(parent.textContent).not.toContain("Needs approval");
     parent.querySelector<HTMLButtonElement>('[data-focus-key="tool-deny"]')!.click();
     expect(onApprove).toHaveBeenCalledWith("approval-1", false);
+    await workspace.setAgentSnapshot({ ...snapshot, parts: [{ ...approvalTool, approvalId: "approval-2" }] });
     const allowOnce = parent.querySelector<HTMLButtonElement>('[data-focus-key="tool-allow-once"]')!;
     expect(allowOnce.classList.contains("ss-button--primary")).toBe(true);
     allowOnce.click();
-    expect(onApprove).toHaveBeenCalledWith("approval-1", true);
-    Array.from(parent.querySelectorAll<HTMLButtonElement>(".systemsculpt-agent-approval-actions button"))
-      .find((entry) => entry.textContent === "Allow for chat")!
-      .click();
-    expect(onApprove).toHaveBeenCalledWith("approval-1", true, true);
+    expect(onApprove).toHaveBeenCalledWith("approval-2", true);
+    await workspace.setAgentSnapshot({ ...snapshot, parts: [{ ...approvalTool, approvalId: "approval-3" }] });
+    parent.querySelector<HTMLButtonElement>('[data-focus-key="tool-allow-chat"]')!.click();
+    expect(onApprove).toHaveBeenCalledWith("approval-3", true, true);
 
     const pendingPart = parent.querySelector<HTMLElement>(".systemsculpt-agent-part.is-tool")!;
     const pendingHeader = pendingPart.querySelector<HTMLElement>(".systemsculpt-agent-tool-header")!;
@@ -2700,7 +2195,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
       onCancelQueued,
       onRunQueuedNow,
     });
@@ -2793,7 +2287,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
 
@@ -2826,7 +2319,7 @@ describe("AgentWorkspace", () => {
     expect(turn?.querySelector(".systemsculpt-agent-part.is-status")).toBeNull();
     expect(turn?.querySelectorAll(".systemsculpt-agent-tail-status")).toHaveLength(1);
     expect(turn?.querySelector(".systemsculpt-agent-tail-status-label")?.textContent)
-      .toBe("Working");
+      .toBe("Writing");
     expect(turn?.querySelector(".systemsculpt-agent-turn-body")?.lastElementChild)
       .toBe(turn?.querySelector(".systemsculpt-agent-tail-status"));
     workspace.unload();
@@ -2846,7 +2339,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
 
@@ -3079,7 +2571,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const activity: readonly AgentPart[] = [{
@@ -3131,7 +2622,7 @@ describe("AgentWorkspace", () => {
         expect(current.querySelector(
           ":scope > .systemsculpt-agent-activity-overflow-label",
         )?.textContent).toBe(
-          `Read 1 file + ${String(partCount - 1)} other tool call${partCount === 2 ? "" : "s"}`,
+          partCount === 2 ? "Thought, read Note-1.md" : `Thought, read ${String(partCount - 1)} notes`,
         );
         const directRows = Array.from(body.children).filter((node) =>
           node instanceof HTMLElement && node.hasAttribute("data-agent-activity-row"));
@@ -3141,7 +2632,9 @@ describe("AgentWorkspace", () => {
         expect(drawer.querySelector<HTMLElement>("[data-agent-activity-row]")?.dataset.partKey).toBe(
           latestPart.kind === "tool" ? `tool:${latestPart.callId}` : latestPart.id,
         );
-        expect(drawer.hasAttribute("hidden")).toBe(true);
+        // Spec 3.4: while the turn runs, the newest line stays visible under the group line.
+        expect(drawer.hasAttribute("hidden")).toBe(false);
+        expect(drawer.querySelectorAll("[data-agent-activity-row]")).toHaveLength(1);
         expect(current.querySelectorAll("[data-agent-activity-row]")).toHaveLength(0);
       }
       const body = parent.querySelector<HTMLElement>(
@@ -3154,7 +2647,7 @@ describe("AgentWorkspace", () => {
       overflow!.click();
       expect(overflow!.getAttribute("aria-expanded")).toBe("true");
       expect(overflow!.querySelector(".systemsculpt-agent-activity-overflow-label")?.textContent)
-        .toBe("Read 1 file + 3 other tool calls");
+        .toBe("Thought, read 3 notes");
       const expandedRows = Array.from(drawer.querySelectorAll<HTMLElement>(
         ":scope > [data-agent-activity-row]",
       ));
@@ -3198,7 +2691,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const reasoning: Extract<AgentPart, { kind: "reasoning" }> = {
@@ -3336,7 +2828,7 @@ describe("AgentWorkspace", () => {
     }
   });
 
-  it("keeps one stable Working status while distinguishing approval by its icon", async () => {
+  it("keeps one stable status row while distinguishing pending approval by text and icon", async () => {
     const parent = document.body.createDiv();
     const workspace = new AgentWorkspace(parent, {
       app: new App(),
@@ -3350,7 +2842,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const textPart = {
@@ -3386,6 +2877,7 @@ describe("AgentWorkspace", () => {
       label: string,
       expectedActivity?: HTMLElement,
       animated = true,
+      expectedIcon = "loader-circle",
     ): Promise<HTMLElement> => {
       await workspace.setAgentSnapshot(value);
       const activity = parent.querySelector<HTMLElement>(".systemsculpt-agent-tail-status")!;
@@ -3397,8 +2889,7 @@ describe("AgentWorkspace", () => {
         .toBe(label);
       expect(statusIcon.classList.contains("is-animated"))
         .toBe(animated);
-      expect(statusIcon.dataset.iconState)
-        .toBe(animated ? "loader-circle" : "shield-question");
+      expect(statusIcon.dataset.iconState).toBe(expectedIcon);
       expect(parent.querySelectorAll(".systemsculpt-agent-tail-status")).toHaveLength(1);
       expect(parent.querySelector(".systemsculpt-agent-part.is-status")).toBeNull();
       expect(parent.querySelector(".systemsculpt-agent-part.is-text")?.textContent)
@@ -3407,7 +2898,8 @@ describe("AgentWorkspace", () => {
       return activity;
     };
 
-    const activity = await assertPhase(snapshot("thinking", "Working"), "Working");
+    // Spec 3.3: the row names the newest activity; here the answer text is streaming.
+    const activity = await assertPhase(snapshot("thinking", "Working"), "Writing");
     await assertPhase(snapshot("working", "Working", {
       id: "tool-search",
       kind: "tool",
@@ -3418,7 +2910,7 @@ describe("AgentWorkspace", () => {
       input: { query: "Obsidian" },
       state: "running",
       order: 0,
-    }), "Working", activity);
+    }), "Writing", activity);
     await assertPhase(snapshot("waiting", "Working", {
       id: "tool-write",
       kind: "tool",
@@ -3429,7 +2921,7 @@ describe("AgentWorkspace", () => {
       input: { path: "Plan.md" },
       state: "running",
       order: 0,
-    }), "Working", activity);
+    }), "Writing", activity);
     await assertPhase(snapshot("waiting", "Working", {
       id: "tool-approval",
       kind: "tool",
@@ -3441,10 +2933,10 @@ describe("AgentWorkspace", () => {
       state: "approval-required",
       approvalId: "approval-write",
       order: 0,
-    }), "Working", activity, false);
-    await assertPhase(snapshot("retrying", "Continuing"), "Working", activity);
-    await assertPhase(snapshot("retrying", "Reconnecting"), "Working", activity);
-    await assertPhase(snapshot("settling", "Finishing"), "Working", activity);
+    }), "Waiting for your approval", activity, false, "shield-question");
+    await assertPhase(snapshot("retrying", "Continuing"), "Continuing", activity, false);
+    await assertPhase(snapshot("retrying", "Reconnecting"), "Continuing", activity, false);
+    await assertPhase(snapshot("settling", "Finishing"), "Finishing", activity);
     workspace.unload();
   });
 
@@ -3468,7 +2960,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
 
@@ -3492,14 +2983,14 @@ describe("AgentWorkspace", () => {
       )!;
       const durationText = label.firstChild as Text;
       expect(durationText.nodeType).toBe(Node.TEXT_NODE);
-      expect(durationText.nodeValue).toBe("Working for 1s");
+      expect(durationText.nodeValue).toBe("Thinking · 1s");
       expect(renderActive).toHaveBeenCalledTimes(1);
       renderActive.mockClear();
 
       jest.advanceTimersByTime(1_000);
 
       expect(label.firstChild).toBe(durationText);
-      expect(durationText.nodeValue).toBe("Working for 2s");
+      expect(durationText.nodeValue).toBe("Thinking · 2s");
       expect(renderActive).not.toHaveBeenCalled();
     } finally {
       workspace.unload();
@@ -3527,7 +3018,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
 
@@ -3602,7 +3092,7 @@ describe("AgentWorkspace", () => {
         expect(toolNode.querySelector(".systemsculpt-agent-tool-summary")).toBe(summary);
         expect(toolNode.querySelector(".systemsculpt-agent-tool-state")).toBeNull();
         expect(toolNode.querySelector(".systemsculpt-agent-tool-support")).toBe(support);
-        expect(stateIcon.dataset.iconState).toBe("minus");
+        expect(stateIcon.dataset.iconState).toBe("loader-circle");
         expect(toolIconCalls()).toBe(initialToolIconCalls);
         expect(document.activeElement).toBe(header);
       }
@@ -3652,7 +3142,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
 
@@ -3732,7 +3221,7 @@ describe("AgentWorkspace", () => {
       expect(overflowDrawer.getAttribute("aria-expanded")).toBe("false");
       expect(overflowDrawer.querySelector(
         ".systemsculpt-agent-activity-overflow-label",
-      )?.textContent).toBe("Write file + 1 other tool call");
+      )?.textContent).toBe("Thought, create file");
       const reasoningNode = (workspace.renderer as any).activeNodes.get(
         "reasoning-token-stream",
       ) as HTMLElement;
@@ -3769,14 +3258,11 @@ describe("AgentWorkspace", () => {
       expect(streamedTextNode?.nodeType).toBe(Node.TEXT_NODE);
       const markdownCallsBeforeSuffix = markdownRender.mock.calls.length;
       let expectedMarkdownCalls = markdownCallsBeforeSuffix;
-      const settleLiveMarkdown = async (): Promise<void> => {
-        await new Promise((resolve) => setTimeout(resolve, 60));
-      };
       approvalButton.focus();
 
       currentSnapshot = snapshot("First token and second token");
       await workspace.setAgentSnapshot(currentSnapshot);
-      await settleLiveMarkdown();
+      await settleLiveMarkdown(workspace.renderer);
       expectedMarkdownCalls += 1;
 
       expect(parent.querySelector(".systemsculpt-agent-tail-status")).toBe(tailStatus);
@@ -3810,7 +3296,7 @@ describe("AgentWorkspace", () => {
       selection.addRange(selectedToken);
       reasoningDetails.open = true;
       reasoningDetails.dispatchEvent(new Event("toggle"));
-      await settleLiveMarkdown();
+      await settleLiveMarkdown(workspace.renderer);
       expectedMarkdownCalls += 1;
       approvalButton.focus();
       const burstRender = jest.spyOn(workspace.renderer, "renderActive");
@@ -3826,7 +3312,7 @@ describe("AgentWorkspace", () => {
           workspace.setAgentSnapshot(burstSnapshot)),
       );
       currentSnapshot = burstSnapshots[burstSnapshots.length - 1]!;
-      await settleLiveMarkdown();
+      await settleLiveMarkdown(workspace.renderer);
       expectedMarkdownCalls += 1;
 
       expect(burstRender).toHaveBeenCalledTimes(1);
@@ -3873,7 +3359,7 @@ describe("AgentWorkspace", () => {
       ].join("\n");
       currentSnapshot = snapshot(formattedStream);
       await workspace.setAgentSnapshot(currentSnapshot);
-      await settleLiveMarkdown();
+      await settleLiveMarkdown(workspace.renderer);
       // The completed leading blocks are parsed once on their own; the open
       // code fence is the only part later frames parse again.
       expectedMarkdownCalls += 2;
@@ -3897,7 +3383,7 @@ describe("AgentWorkspace", () => {
       );
       currentSnapshot = snapshot(correctedFormattedStream);
       await workspace.setAgentSnapshot(currentSnapshot);
-      await settleLiveMarkdown();
+      await settleLiveMarkdown(workspace.renderer);
       expectedMarkdownCalls += 1;
       const correctedTextNode = textPart.firstChild;
       expect(correctedTextNode).toBe(streamedTextNode);
@@ -3921,7 +3407,9 @@ describe("AgentWorkspace", () => {
       expect(parent.querySelector('[data-part-key="text-token-stream"]')).toBe(textPart);
       expect(textPart.firstChild).not.toBeNull();
       expect(textPart.textContent).toBe(correctedFormattedStream);
-      expect(selection.toString()).toBe("First");
+      // Resolving the focused approval returns to the composer, whose native
+      // textarea focus replaces the document selection.
+      expect(document.activeElement).toBe(workspace.composer.element.querySelector("textarea"));
       expect(markdownRender).toHaveBeenCalledTimes(expectedMarkdownCalls);
       expect(parent.querySelector(".systemsculpt-agent-tail-status")).toBeNull();
       expect(tailStatus.isConnected).toBe(false);
@@ -3933,7 +3421,7 @@ describe("AgentWorkspace", () => {
       )!;
       expect(workedDrawer.dataset.activityState).toBe("settled");
       expect(workedDrawer.querySelector(".systemsculpt-agent-activity-label")?.textContent)
-        .toBe("Worked");
+        .toBe("Thought, created file");
       expect(workedDrawer.open).toBe(false);
       expect(workedDrawer.querySelector("button[data-agent-activity-overflow]"))
         .toBe(overflowDrawer);
@@ -3963,7 +3451,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const snapshot = (markdown: string): AgentConversationSnapshot => ({
@@ -4034,7 +3521,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const snapshot = (input: unknown, output?: unknown): AgentConversationSnapshot => ({
@@ -4076,7 +3562,7 @@ describe("AgentWorkspace", () => {
     expect(toolNode.firstElementChild).toBe(shell);
     expect(toolNode.querySelector(".systemsculpt-agent-tool-icon")).toBe(icon);
     expect(icon.firstElementChild).toBe(svg);
-    expect(toolNode.textContent).toContain("Searching the web...");
+    expect(toolNode.textContent).toContain("Searching the web…");
     expect(toolNode.textContent).not.toContain("cloudflare official documentation");
     workspace.unload();
   });
@@ -4095,7 +3581,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const running: AgentConversationSnapshot = {
@@ -4170,7 +3655,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const running: AgentConversationSnapshot = {
@@ -4218,7 +3702,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const tools: readonly AgentPart[] = [{
@@ -4285,7 +3768,7 @@ describe("AgentWorkspace", () => {
     await workspace.setAgentSnapshot(snapshot("cancelled"));
     expect(Array.from(parent.querySelectorAll<HTMLElement>(
       ".systemsculpt-agent-tool-state-icon",
-    )).map((node) => node.dataset.iconState)).toEqual(["x", "x", "x"]);
+    )).map((node) => node.dataset.iconState)).toEqual(["minus", "minus", "minus"]);
     expect(parent.querySelectorAll(
       ".systemsculpt-agent-tool-state-icon.is-animated",
     )).toHaveLength(0);
@@ -4351,7 +3834,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const snapshot = (complete: boolean): AgentConversationSnapshot => ({
@@ -4419,7 +3901,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const running: AgentConversationSnapshot = {
@@ -4484,7 +3965,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
 
@@ -4539,7 +4019,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const runningTool: Extract<AgentPart, { kind: "tool" }> = {
@@ -4579,9 +4058,10 @@ describe("AgentWorkspace", () => {
       const tailStatus = parent.querySelector<HTMLElement>(".systemsculpt-agent-tail-status")!;
       expect(toolNode.querySelector<HTMLElement>(
         ".systemsculpt-agent-tool-state-icon",
-      )?.dataset.iconState).toBe("minus");
-      expect(toolNode.querySelector(".systemsculpt-agent-tool-state-icon")?.classList)
-        .not.toContain("is-animated");
+      )?.dataset.iconState).toBe("loader-circle");
+      // The visible action icon spins (static under reduced motion via CSS).
+      expect(toolNode.querySelector(".systemsculpt-agent-tool-icon")?.classList)
+        .toContain("is-animated");
 
       markdownRender.mockRejectedValueOnce(new Error("postprocessor failed"));
       const terminalError = {
@@ -4640,7 +4120,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
 
@@ -4684,7 +4163,7 @@ describe("AgentWorkspace", () => {
     )!;
     details.open = true;
     details.dispatchEvent(new Event("toggle"));
-    await new Promise((resolve) => setTimeout(resolve, 60));
+    await settleLiveMarkdown(workspace.renderer);
     expect(markdownRender).toHaveBeenCalledTimes(1);
     let bodyText = body.firstChild!;
     expect(bodyText.nodeType).toBe(Node.TEXT_NODE);
@@ -4710,7 +4189,7 @@ describe("AgentWorkspace", () => {
       "```",
     ].join("\n");
     await workspace.setAgentSnapshot(snapshot(formattedSummary));
-    await new Promise((resolve) => setTimeout(resolve, 60));
+    await settleLiveMarkdown(workspace.renderer);
 
     expect(parent.querySelector(".systemsculpt-agent-reasoning-details")).toBe(details);
     expect(parent.querySelector(".systemsculpt-agent-reasoning-header")).toBe(header);
@@ -4742,7 +4221,7 @@ describe("AgentWorkspace", () => {
 
     details.open = true;
     details.dispatchEvent(new Event("toggle"));
-    await new Promise((resolve) => setTimeout(resolve, 60));
+    await settleLiveMarkdown(workspace.renderer);
     expect(markdownRender).toHaveBeenCalledTimes(5);
 
     await workspace.setAgentSnapshot(
@@ -4782,7 +4261,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
 
@@ -4800,10 +4278,10 @@ describe("AgentWorkspace", () => {
 
     expect(parent.querySelectorAll(".systemsculpt-agent-tail-status")).toHaveLength(1);
     expect(parent.querySelector(".systemsculpt-agent-tail-status-label")?.textContent)
-      .toBe("Working for 0s");
+      .toBe("Connecting… · 0s");
     jest.advanceTimersByTime(1_000);
     expect(parent.querySelector(".systemsculpt-agent-tail-status-label")?.textContent)
-      .toBe("Working for 1s");
+      .toBe("Connecting… · 1s");
     expect(parent.querySelector(".systemsculpt-agent-empty")?.hasAttribute("hidden")).toBe(true);
     expect(parent.querySelector(".systemsculpt-agent-composer")?.classList.contains("is-running"))
       .toBe(true);
@@ -4821,7 +4299,7 @@ describe("AgentWorkspace", () => {
     await flushSnapshot(active);
     expect(parent.querySelectorAll(".systemsculpt-agent-tail-status")).toHaveLength(1);
     expect(parent.querySelector(".systemsculpt-agent-tail-status-label")?.textContent)
-      .toBe("Working");
+      .toBe("Connecting…");
     expect(parent.querySelector(".systemsculpt-agent-turn.is-active")).toBe(pendingTurn);
     expect(parent.querySelector(".systemsculpt-agent-turn")?.getAttribute("data-turn-id"))
       .toBe("user-1");
@@ -4835,13 +4313,14 @@ describe("AgentWorkspace", () => {
     workspace.unload();
   });
 
-  it("keeps recovered zero-part lifecycle status above the empty state", async () => {
+  it("keeps recovered zero-part status static and stoppable until an idle snapshot releases the composer", async () => {
     const parent = document.body.createDiv();
+    const onStop = jest.fn();
     const workspace = new AgentWorkspace(parent, {
       app: new App(),
       sourcePath: () => "SystemSculpt/Chats/chat.md",
       onSubmit: jest.fn(),
-      onStop: jest.fn(),
+      onStop,
       onAttach: jest.fn(),
       onRemoveAttachment: jest.fn(),
       onApprove: jest.fn(),
@@ -4849,7 +4328,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
 
@@ -4859,6 +4337,7 @@ describe("AgentWorkspace", () => {
       status: "running",
       phase: "retrying",
       statusLabel: "Recovering",
+      elapsedMs: 5_000,
       messages: [],
       parts: [],
     });
@@ -4866,9 +4345,25 @@ describe("AgentWorkspace", () => {
     expect(parent.querySelector(".systemsculpt-agent-empty")?.hasAttribute("hidden"))
       .toBe(true);
     expect(parent.querySelector(".systemsculpt-agent-tail-status-label")?.textContent)
-      .toBe("Working");
+      .toBe("Continuing");
     expect(parent.querySelector(".systemsculpt-agent-tail-status-icon")?.classList)
-      .toContain("is-animated");
+      .not.toContain("is-animated");
+    expect(parent.querySelector("[data-agent-working-timer]")).toBeNull();
+    const stop = parent.querySelector<HTMLButtonElement>('[data-testid="chat.composer.stop"]')!;
+    expect(stop.hidden).toBe(false);
+    expect(stop.disabled).toBe(false);
+    stop.click();
+    expect(onStop).toHaveBeenCalledTimes(1);
+
+    // The snapshot, not an outer submission/stop promise, owns composer state.
+    workspace.setRunPending(true, "user-recovered");
+    await workspace.setAgentSnapshot({
+      runId: null, turnId: null, status: "idle", elapsedMs: 5_000, messages: [], parts: [],
+    });
+    expect(stop.hidden).toBe(true);
+    expect(parent.querySelector(".systemsculpt-agent-composer")?.classList)
+      .not.toContain("is-running");
+    expect(parent.querySelector(".systemsculpt-agent-tail-status")).toBeNull();
     workspace.unload();
   });
 
@@ -4886,7 +4381,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
 
@@ -4959,7 +4453,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
 
@@ -5023,13 +4516,13 @@ describe("AgentWorkspace", () => {
       ".systemsculpt-agent-active-run details[data-agent-turn-fold]",
     )!;
     expect(worked.open).toBe(false);
-    expect(worked.querySelector(".systemsculpt-agent-activity-label")?.textContent).toBe("Worked");
+    expect(worked.querySelector(".systemsculpt-agent-activity-label")?.textContent).toBe("Read 2 notes");
     const overflow = worked.querySelector<HTMLButtonElement>(
       "button[data-agent-activity-overflow]",
     )!;
     expect(overflow.getAttribute("aria-expanded")).toBe("false");
     expect(overflow.querySelector(".systemsculpt-agent-activity-overflow-label")?.textContent)
-      .toBe("Read 1 file + 1 other tool call");
+      .toBe("Read 2 notes");
     expect(worked.querySelector(
       ":scope > .systemsculpt-agent-activity-body > .systemsculpt-agent-activity-overflow-body > .systemsculpt-agent-part.is-tool",
     )).toBe(secondToolNode);
@@ -5063,7 +4556,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const user = { role: "user" as const, message_id: "user-settle", content: "Finish this" };
@@ -5118,7 +4610,6 @@ describe("AgentWorkspace", () => {
       onRetryFailedTurn,
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const user = {
@@ -5221,7 +4712,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const user = {
@@ -5303,7 +4793,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const user = { role: "user" as const, message_id: "user-stale", content: "Finish this" };
@@ -5375,7 +4864,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     workspace.setRunPending(true);
@@ -5392,7 +4880,8 @@ describe("AgentWorkspace", () => {
 
     expect(parent.querySelector(".systemsculpt-agent-composer")?.classList.contains("is-running"))
       .toBe(false);
-    expect(parent.querySelector(".systemsculpt-agent-prompt-hint")?.textContent).toBe("Enter to send");
+    expect(parent.querySelector<HTMLElement>(".systemsculpt-agent-prompt-hint")?.hidden).toBe(true);
+    expect(parent.querySelector<HTMLElement>('[aria-label="Stop response"]')?.hidden).toBe(true);
     expect(parent.querySelector('[aria-label="Send message"]')).not.toBeNull();
     workspace.unload();
   });
@@ -5411,7 +4900,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
 
@@ -5480,6 +4968,106 @@ describe("AgentWorkspace", () => {
     workspace.unload();
   });
 
+  it.each(["approved", "denied", "withdrawn"] as const)(
+    "retains the captured native preview and raw Details after %s, including in-flight hydration",
+    async (decision) => {
+      for (const hydrateBeforeDecision of [true, false]) {
+        const parent = document.body.createDiv();
+        const app = new App();
+        Object.assign(app.vault.adapter, { getBasePath: () => "/vault" });
+        const file = Object.assign(new TFile(), { path: "Plan.md" });
+        jest.spyOn(app.vault, "getAbstractFileByPath").mockReturnValue(file);
+        let finishRead!: (content: string) => void;
+        const read = jest.spyOn(app.vault, "read")
+          .mockResolvedValue("Already changed on disk")
+          .mockImplementationOnce(() => new Promise<string>((resolve) => { finishRead = resolve; }));
+        const workspace = new AgentWorkspace(parent, {
+          app,
+          sourcePath: () => "",
+          onSubmit: jest.fn(),
+          onStop: jest.fn(),
+          onAttach: jest.fn(),
+          onRemoveAttachment: jest.fn(),
+          onApprove: jest.fn(),
+          onOpenArtifact: jest.fn(),
+          onCopyArtifactPath: jest.fn(),
+          onNewChat: jest.fn(),
+          onOpenHistory: jest.fn(),
+        });
+        workspace.load();
+        try {
+          const pending: Extract<AgentPart, { kind: "tool" }> = {
+            id: "native-edit", kind: "tool", messageId: "assistant-1", callId: "native-edit",
+            order: 0, name: "Edit", location: "server", state: "approval-required",
+            approvalId: "native-approval",
+            input: { file_path: "/vault/Plan.md", old_string: "Before", new_string: "After" },
+            native: { agent: "claude", workingDirectory: "/vault" },
+          };
+          const snapshot: AgentConversationSnapshot = {
+            runId: "run-1", turnId: "user-1", status: "waiting", phase: "waiting",
+            waitingReason: "approval",
+            messages: [{ id: "assistant-1", role: "assistant", partIds: [pending.id] }],
+            parts: [pending],
+          };
+          await workspace.setAgentSnapshot(snapshot);
+          const node = parent.querySelector<HTMLElement>(".systemsculpt-agent-part.is-tool")!;
+          const preview = node.querySelector<HTMLElement>(".systemsculpt-agent-approval-preview")!;
+          const rawDetails = node.querySelector<HTMLDetailsElement>(".systemsculpt-agent-approval-details")!;
+          const hydration = (workspace.renderer as unknown as {
+            toolApprovalPreviewHydrationStates: WeakMap<HTMLElement, { hydration: Promise<void> | null }>;
+          }).toolApprovalPreviewHydrationStates.get(node)!.hydration!;
+          expect(read).toHaveBeenCalledTimes(1);
+          if (hydrateBeforeDecision) {
+            finishRead("Before\n");
+            await hydration;
+          }
+          const capturedDiff = preview.querySelector(".systemsculpt-diff-viewer");
+          const resolved: typeof pending = {
+            ...pending,
+            state: decision === "approved" ? "approved" : decision === "denied" ? "denied" : "cancelled",
+            approvalDecision: decision,
+          };
+          const resolvedSnapshot: AgentConversationSnapshot = {
+            ...snapshot, status: "running", phase: "working", waitingReason: undefined, parts: [resolved],
+          };
+          await workspace.setAgentSnapshot(resolvedSnapshot);
+          const shell = node.querySelector<HTMLDetailsElement>(".systemsculpt-agent-tool")!;
+          expect(shell.open).toBe(false);
+          expect(shell.classList.contains("is-disclosure")).toBe(true);
+          expect(node.querySelector(".systemsculpt-agent-approval")).toBeNull();
+          expect(shell.querySelector(".systemsculpt-agent-approval-actions")).toBeNull();
+          expect(shell.querySelector(".systemsculpt-agent-approval-preview")).toBe(preview);
+          expect(shell.querySelector(".systemsculpt-agent-approval-details")).toBe(rawDetails);
+          if (!hydrateBeforeDecision) {
+            finishRead("Before\n");
+            await hydration;
+          } else {
+            expect(preview.querySelector(".systemsculpt-diff-viewer")).toBe(capturedDiff);
+          }
+          expect(preview.hasAttribute("hidden")).toBe(false);
+          expect(preview.querySelector(".systemsculpt-diff-line-removed .systemsculpt-diff-line-content")?.textContent).toBe("Before");
+          expect(preview.querySelector(".systemsculpt-diff-line-added .systemsculpt-diff-line-content")?.textContent).toBe("After");
+          expect(rawDetails.querySelector("pre")?.textContent).toBe(JSON.stringify(pending.input, null, 2));
+          shell.querySelector<HTMLElement>(":scope > summary")!.click();
+          expect(shell.open).toBe(true);
+          // A subsequent native update may rebuild support rows. The reviewed
+          // content remains the same nodes, and is never read from disk again.
+          await workspace.setAgentSnapshot({
+            ...resolvedSnapshot,
+            parts: [{ ...resolved, error: { code: "native-action-error", message: "Action ended", retryable: false } }],
+          });
+          expect(shell.open).toBe(true);
+          expect(shell.querySelector(".systemsculpt-agent-approval-preview")).toBe(preview);
+          expect(shell.querySelector(".systemsculpt-agent-approval-details")).toBe(rawDetails);
+          expect(read).toHaveBeenCalledTimes(1);
+        } finally {
+          workspace.unload();
+          parent.remove();
+        }
+      }
+    },
+  );
+
   it("coalesces bursty stream snapshots and renders only the newest frame", async () => {
     const parent = document.body.createDiv();
     const workspace = new AgentWorkspace(parent, {
@@ -5494,7 +5082,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const render = jest.spyOn(workspace.renderer, "renderActive");
@@ -5529,7 +5116,7 @@ describe("AgentWorkspace", () => {
       working,
       expect.objectContaining({ busy: true, composerRunning: true }),
     );
-    expect(parent.textContent).toContain("Working");
+    expect(parent.textContent).toContain("Thinking");
     workspace.unload();
   });
 
@@ -5569,7 +5156,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const terminalError = {
@@ -5646,7 +5232,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const notifyTurnStarted = jest.spyOn((workspace as any).scroller, "notifyTurnStarted");
@@ -5693,7 +5278,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const viewportState = {
@@ -5738,7 +5322,7 @@ describe("AgentWorkspace", () => {
       runId: "run-pending",
       turnId: "user-pending",
       status: "running",
-      phase: "responding",
+      phase: "working",
       messages: [{
         id: "assistant-pending",
         role: "assistant",
@@ -5778,7 +5362,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const input = parent.querySelector<HTMLTextAreaElement>(
@@ -5866,7 +5449,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const viewportState = {
@@ -5941,7 +5523,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
 
@@ -6068,7 +5649,6 @@ describe("AgentWorkspace", () => {
       onRetryMessage,
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const continuing: AgentConversationSnapshot = {
@@ -6082,7 +5662,7 @@ describe("AgentWorkspace", () => {
     };
     await workspace.setAgentSnapshot(continuing);
     expect(parent.querySelector(".systemsculpt-agent-tail-status-label")?.textContent)
-      .toContain("Working");
+      .toContain("Continuing");
 
     const interruptedError = {
       code: "transport",
@@ -6135,7 +5715,6 @@ describe("AgentWorkspace", () => {
       onRetryMessage,
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const turnId = "user-reloaded-capacity";
@@ -6205,7 +5784,6 @@ describe("AgentWorkspace", () => {
       onRetryMessage: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
 
@@ -6302,7 +5880,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const writeCall = {
@@ -6337,7 +5914,7 @@ describe("AgentWorkspace", () => {
     );
 
     expect(parent.textContent).toContain("Project.md");
-    expect(parent.textContent).toContain("Wrote file");
+    expect(parent.textContent).toContain("Created Project.md");
     expect(parent.textContent).not.toContain("Mcp Filesystem");
     expect(parent.querySelector(".systemsculpt-agent-tool")?.textContent).not.toContain("Result");
     expect(parent.querySelector(".systemsculpt-agent-tool")?.querySelector("pre")).not.toBeNull();
@@ -6361,7 +5938,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
     const input = { files: [{ path: "Changed.md" }, { path: "Failed.md" }] };
@@ -6491,7 +6067,7 @@ describe("AgentWorkspace", () => {
     workspace.unload();
   });
 
-  it("restores denied, stopped, and uncertain tool outcomes without flattening them to failed", async () => {
+  it.each(["hosted", "native"] as const)("round-trips %s denied, stopped, and uncertain tool outcomes without flattening them to failed", async (backend) => {
     const parent = document.body.createDiv();
     const workspace = new AgentWorkspace(parent, {
       app: new App(),
@@ -6505,7 +6081,6 @@ describe("AgentWorkspace", () => {
       onCopyArtifactPath: jest.fn(),
       onNewChat: jest.fn(),
       onOpenHistory: jest.fn(),
-      onOpenSettings: jest.fn(),
     });
     workspace.load();
 
@@ -6520,14 +6095,19 @@ describe("AgentWorkspace", () => {
       state: "failed" as const,
       timestamp: 1,
       result: { success: false, error: { code, message } },
+      ...(backend === "native" ? {
+        native: { agent: "claude" as const, workingDirectory: "/vault" },
+        approvalDecision: id === "denied" ? "denied" as const : id === "stopped" ? "withdrawn" as const : "approved" as const,
+        ...(id === "uncertain" ? { approvalScope: "session" as const } : {}),
+      } : {}),
     });
 
     const outcomeCalls = [
-      tool("denied", "USER_DENIED", "The user denied this tool execution."),
-      tool("stopped", "TOOL_CANCELLED_BEFORE_START", "Cancelled before execution."),
-      tool("uncertain", "TOOL_OUTCOME_UNKNOWN_AFTER_RESTART", "Outcome unknown after restart."),
+      tool("denied", backend === "native" ? "NATIVE_TOOL_DENIED" : "USER_DENIED", "The user denied this tool execution."),
+      tool("stopped", backend === "native" ? "NATIVE_TOOL_CANCELLED" : "TOOL_CANCELLED_BEFORE_START", "Cancelled before execution."),
+      tool("uncertain", backend === "native" ? "NATIVE_TOOL_OUTCOME_UNKNOWN" : "TOOL_OUTCOME_UNKNOWN_AFTER_RESTART", "Outcome unknown after restart."),
     ];
-    await workspace.setHistory([{
+    await workspace.setHistory(reloadSavedMessages([{
       role: "assistant",
       content: "Tool outcomes",
       message_id: "assistant-outcomes",
@@ -6541,7 +6121,7 @@ describe("AgentWorkspace", () => {
         })),
         { id: "content-part", type: "content", timestamp: 4, data: "Tool outcomes" },
       ],
-    }]);
+    }]));
     await hydrateRestoredWorked(
       workspace.renderer,
       parent.querySelector<HTMLDetailsElement>("details[data-agent-turn-fold]")!,
@@ -6556,7 +6136,21 @@ describe("AgentWorkspace", () => {
     const stateIcons = [
       ...parent.querySelectorAll<HTMLElement>(".systemsculpt-agent-tool-state-icon"),
     ].map((element) => element.dataset.iconState);
-    expect(stateIcons).toEqual(["x", "x", "x"]);
+    // Spec 3.4: denied `ban`, withdrawn/stopped `minus`, uncertain stays `x`.
+    expect(stateIcons).toEqual(["ban", "minus", "x"]);
+    const groupLabel = parent.querySelector("details[data-agent-turn-fold] > summary")!.textContent!;
+    expect(groupLabel).toContain("Denied");
+    expect(groupLabel).toContain("1 failed"); // Only the uncertain outcome, not the denial.
+    expect(groupLabel).not.toContain("2 failed");
+    const tools = [...parent.querySelectorAll<HTMLElement>(".systemsculpt-agent-part.is-tool")];
+    expect(tools[0].querySelector(".systemsculpt-agent-tool-label")?.textContent).not.toContain("Couldn't");
+    expect(tools.map(tool => ["denied", "cancelled", "outcome-unknown"].find(state => tool.classList.contains(`is-${state}`))))
+      .toEqual(["denied", "cancelled", "outcome-unknown"]);
+    if (backend === "native") {
+      expect(tools[0].textContent).toContain("· Denied");
+      expect(tools[1].textContent).toContain("· Withdrawn");
+      expect(tools[2].textContent).toContain("· Approved for this chat");
+    }
     workspace.unload();
   });
 });

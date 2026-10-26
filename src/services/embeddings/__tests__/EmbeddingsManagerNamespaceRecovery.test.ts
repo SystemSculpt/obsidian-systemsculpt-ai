@@ -1,7 +1,8 @@
 import { TFile } from "obsidian";
 import { EmbeddingsManager } from "../EmbeddingsManager";
 import type { EmbeddingVector } from "../types";
-import { buildManagedNamespace, parseNamespaceDimension } from "../utils/namespace";
+import { parseNamespaceDimension } from "../utils/namespace";
+import { managedNamespace } from "./support/managedNamespace";
 import { buildVectorId } from "../utils/vectorId";
 
 function root(namespace: string, file: TFile, options: { complete?: boolean } = {}): EmbeddingVector {
@@ -64,8 +65,8 @@ function restartHarness(options: {
 
 describe("EmbeddingsManager namespace recovery", () => {
   it("revalidates corpus coverage after restart and keeps a partial replacement inactive", async () => {
-    const oldNamespace = buildManagedNamespace(2);
-    const newNamespace = buildManagedNamespace(3);
+    const oldNamespace = managedNamespace(2);
+    const newNamespace = managedNamespace(3);
     const files = ["A.md", "B.md"].map((path) => new TFile({
       path,
       name: path,
@@ -93,7 +94,7 @@ describe("EmbeddingsManager namespace recovery", () => {
   });
 
   it("does not promote a partially rebuilt namespace when no committed namespace exists", async () => {
-    const namespace = buildManagedNamespace(3);
+    const namespace = managedNamespace(3);
     const files = ["A.md", "B.md"].map((path) => new TFile({
       path,
       name: path,
@@ -113,8 +114,8 @@ describe("EmbeddingsManager namespace recovery", () => {
   });
 
   it("restores the explicit committed namespace instead of a newer partial indexing namespace", async () => {
-    const committedNamespace = buildManagedNamespace(2);
-    const partialNamespace = buildManagedNamespace(3);
+    const committedNamespace = managedNamespace(2);
+    const partialNamespace = managedNamespace(3);
     const files = ["A.md", "B.md"].map((path) => new TFile({
       path,
       name: path,

@@ -2,79 +2,50 @@
 
 Canonical repository guidance for every coding agent working on the SystemSculpt Obsidian client. Edit `AGENTS.md` directly.
 
-## Repository boundary
+## Product boundary
 
-The SystemSculpt workspace has three sibling repositories:
+The vault is the home: capture and AI output belong there as plain Markdown.
+The plugin is a thin Obsidian client, not an agent runtime. Hosted execution
+stays behind the first-party API; native agents own their login and execution.
+Keep notes usable after uninstall or cancellation. Make no unsupported privacy
+or open-source claims; the full product and architecture rules are linked below.
 
-- ~/gits/systemsculpt/plugin — this Obsidian client.
-- ~/gits/systemsculpt/systemsculpt-website — the customer website and first-party API.
-- ~/gits/systemsculpt/systemsculpt-os — growth and operator automation.
+## Safe checkout and live-vault watcher
 
-The plugin is a thin, vault-native client. It owns Obsidian integration,
-presentation, local vault tool implementations, approval UX and enforcement,
-a reconnecting server-protocol client, user-visible local cache/export state,
-and portable Studio behavior. It does not own an agent loop, continuation
-policy, provider retry, compaction, prompt caching, authoritative chat
-sessions, provider SDKs, provider credentials, model catalogs, marketing
-operations, or a local AI runtime.
+Do plugin work in a task-private ordinary clone, on a branch from current
+`origin/main`. The canonical checkout at `~/gits/systemsculpt/plugin` has a
+persistent watcher that deploys into a live vault; leave that checkout and its
+watcher alone. Never install or run the watcher from a task clone. Never switch
+branches, stash or reset another worker's checkout. Never force-push.
 
-Managed AI traffic uses the first-party SystemSculpt API at
-https://systemsculpt.com/api/plugin. OpenRouter and server agent
-implementation details stay behind that interface.
+## Read the topic before changing it
 
-Michael's 2026-09-05 direction revives this plugin as the SystemSculpt product surface and retires development of the standalone desktop app. Personal agent execution uses Codex and T3 Code directly. Preserve saved projects, drafts, and history. Michael’s 2026-09-08 direction authorizes selectable on-machine Codex for ChatView, Studio text generation and desktop Studio Codex task cards through the installed Codex app-server and the machine’s existing Codex login, as in T3 Code. This is a thin local protocol client exception: Codex owns its agent loop, credentials, approval review, tools and authoritative thread history; never copy tokens or introduce a separate agent runtime. Michael’s 2026-10-14 direction adds on-machine Claude Code to ChatView and Studio text generation under the same exception: the installed `claude` CLI owns its login, settings, permissions, tools and session history; the plugin never reads `~/.claude` and never enables permission bypass. Michael’s 2026-09-08 run-board direction also authorizes independent explicit native Codex run instances and project-scoped message/handoff tools. The plugin projects public native activity, stores a bounded presentation cache, and forwards explicit messages as native turns; ordinary independent runs must not infer completion or schedule autonomous continuation. Michael’s 2026-09-08 Command Center direction authorizes owner-started native Codex orchestrators: persist the model-authored plan, dispatch bounded assignments, deliver child results and resume interrupted workflow threads. Codex chooses every next step and explicitly declares the objective outcome; Studio handles event delivery and recovery only. Managed SystemSculpt AI keeps the API boundary above. Preserve existing standalone work while reusing applicable portable Studio behavior here.
+These topic files are repository instructions, not optional background. Read
+all topics that apply before changing an area; commands run from the repo root.
+Keep shared rules here and area-specific detail in its topic, with this index
+kept current.
 
-## Server-upgrade independence
-
-This is a release requirement, not an implementation preference:
-
-- The boundary applies to ChatView, Audio Processor, transcription, document
-  processing, images, embeddings, Studio AI, and future managed AI features.
-  The client may capture or select local input bytes, upload them, render
-  progress, obtain local approval, and save or apply a returned result.
-  Provider calls, models, prompts, chunking, polling, retry, transforms, job
-  orchestration, caching, billing, and durable execution state stay
-  server-side.
-- Harness, model, provider, retry, caching, compaction, memory, session, and
-  orchestration changes must be deployable server-side without a plugin
-  release.
-- The plugin wire contract is harness-agnostic. Production client code,
-  headers, persisted data, UI labels, and tool results must not contain Pi,
-  Think, OpenRouter, AI SDK, or another harness/provider identity.
-- The plugin never decides whether the agent should continue. It receives a
-  typed client-tool request, applies local approval policy, executes the
-  Obsidian operation, and returns one typed result. The server decides every
-  subsequent model step.
-- The server owns the authoritative conversation session and ordered event
-  history. Local chat persistence is a cache or user export and must never
-  become execution authority after reconnect.
-- Client capability negotiation is additive. The plugin advertises supported
-  local tool names and contract versions; the server adapts its tool catalog
-  to that manifest. Unknown additive event fields and unknown server-only
-  tools must not crash or stop the client.
-- One migration release may replace the legacy client continuation loop with
-  this thin protocol bridge. The first released thin-client artifact then
-  becomes a permanent compatibility fixture. Every later server agent change
-  must connect, render, execute its supported local tools, reconnect, and
-  finish a long turn against that unchanged artifact.
-- A plugin update is justified only by a new or changed local Obsidian
-  capability, a client security correction, or an intentionally new UI
-  feature. A server harness replacement is never sufficient justification.
-
-Do not add a harness package, model SDK, agent state machine, continuation
-counter, context compactor, or provider retry loop to the production plugin
-bundle. A client protocol SDK is acceptable only when it remains a transport
-and event/tool bridge and does not take ownership of the agent loop.
-
-The pre-migration released plugin may use a legacy compatibility endpoint
-during a bounded support window. It cannot define the new architecture
-because its compiled code still owns continuation. Do not copy that behavior
-into the new protocol.
-
-Freeze `managed-capabilities-v2` and its existing strict client behavior for
-that legacy path. The migration release negotiates a new additive thin-client
-contract. Do not mutate v2 and mistake a breaking parser change for additive
-protocol evolution.
+- [Product and architecture](docs/dev/product-and-architecture.md) — Read before
+  changing product behavior/copy, module design or refactoring, ownership
+  boundaries, vault paths or releases.
+- [Managed execution](docs/dev/managed-execution.md) — Read before changing any
+  hosted AI feature (Chat, audio/transcription, documents, images, embeddings or
+  Studio AI), API/protocol negotiation, local vault tools/approvals, reconnect,
+  saved-chat parsing or managed compatibility/release behavior.
+- [Native agents](docs/dev/native-agents.md) — Read before changing Chat backend
+  choice or detection, native Claude Code/Codex execution, models or approval
+  modes, native chat lifetime/history, Studio native tasks, run boards,
+  Command Center orchestration, Studio persistence/migrations or reuse of
+  existing standalone projects, drafts and history.
+- [Adaptive UI](docs/dev/adaptive-ui.md) — Read before changing any view, modal,
+  transient, command, setting, card action, CSS, platform/desktop adapter,
+  pop-out behavior, mobile layout or Studio node/capability declaration.
+- [Tests and CI](docs/dev/tests.md) — Read before selecting broader gates or
+  changing tests, coverage, CI partitioning, replay records or failure evidence.
+  The everyday commands, required pre-push gate and release rules stay below.
+  Detailed release validation lives in this topic; the artifact rule stays here.
+- [Local development](docs/dev/local-development.md) — Read before local Obsidian
+  QA, canonical-checkout sync or watcher setup; this is not a task-clone step.
 
 ## Architecture
 
@@ -84,57 +55,6 @@ Use [CONTRIBUTING.md](CONTRIBUTING.md) for change and review standards. Durable
 decisions live in [docs/adr](docs/adr); audit reports and temporary plans stay
 outside this repository.
 
-- Prefer one deep module with a narrow interface over adapters that simply
-  rename or forward calls.
-- Keep ownership local to the capability. Views render and coordinate; domain
-  modules own state transitions, persistence, policy, and transport.
-- The compiled plugin is the integration seam. Tests under
-  testing/integration import the production bundle in an Obsidian host mock.
-- Managed-service contracts and fixtures live under
-  testing/fixtures/managed. Tests and CI remain credential-free.
-- Built-in tool names describe user actions, not transport history. Do not add
-  MCP or provider terminology to product code.
-- SystemSculpt may detect and announce published releases. Obsidian Community
-  Plugins exclusively owns download, installation, activation, and rollback.
-- Studio is portable. Every built-in node declares
-  requiredHostCapabilities, including an explicit empty list for portable
-  nodes. Registry presentation, run preflight, and runtime enforcement all use
-  the same declaration.
-
-## Desktop and mobile product contract
-
-Desktop and mobile are one adaptive product, not separate feature trees. Keep
-shared state, services, views, and components together. Adapt through these
-three independent seams:
-
-1. Host capability: src/platform/hostCapabilities.ts owns device capability
-   checks and Electron resolution. Feature code uses hasHostCapability and
-   never reads Platform to decide behavior or loads Electron directly.
-   src/platform/desktopOnly.ts remains the only Node built-in loader.
-2. Surface geometry: every plugin-owned view, modal, or transient mounts
-   PluginSurface. Use container queries for available width and pointer:
-   coarse for touch ergonomics. Do not infer host capability from viewport
-   width.
-3. Mobile host chrome: src/platform/mobileLayout.ts owns the mobile-host
-   predicate. src/platform/mobileHostLayout.ts is the only code allowed to
-   know Obsidian's private mobile navbar DOM; it publishes the owned
-   ss-mobile-layout, ss-mobile-navbar-visible, and ss-mobile-navbar-hidden
-   body classes. Feature CSS must not target .is-mobile or
-   .mobile-navbar-action.
-
-Commands, settings, and card actions must either work on both hosts, provide a
-useful portable fallback, or disappear when their required capability is
-absent. Never leave a control that only produces a desktop-only error on
-mobile. Fixed and bottom-aligned surfaces consume the shared safe-area and
-mobile-bottom-clearance tokens. Resolve layout, clipboard, focus, timers, and
-Electron from the initiating element's owner window so pop-out windows remain
-correct.
-
-Obsidian 1.13 treats getSettingDefinitions as the complete settings renderer
-and skips display() when it exists. SystemSculpt remains on its full imperative
-renderer until every dynamic control has declarative parity. Never add partial
-definitions: that turns mobile settings into heading-only rows.
-
 ## Working loop
 
 ~~~bash
@@ -142,103 +62,18 @@ npm run check
 npm run test:related -- <changed source files>
 ~~~
 
-check is the canonical fast gate: Obsidian lint, community-directory lint, metadata lint, production
-bundle, CSS contracts, cheap architecture policy tests, focused mobile
-interactions, the ChatView critical-risk coverage gate, and an exact built
-bundle smoke in a mobile Obsidian host.
-
-Use broader gates only when the affected seam requires them:
-
-~~~bash
-npm run check:ui
-npm run check:mobile
-npm run test:integration
-npm run test:chatview:critical
-npm run check:plugin
-npm run check:ci
-npm run check:compat
-~~~
-
-- check:ui runs the CSS and UI architecture policy tests, then test:ui:focused:
-  one Jest path pattern over the UI-owned suites (surface, modals, progress,
-  audio processor, recorder, history, editor, and Studio directories plus the
-  named settings, context-menu, main-initialize, and chat-workspace tests).
-- check:mobile runs the static mobile-safety policy, rebuilds the artifact, and
-  runs focused narrow-pane, touch, accessibility, and Studio capability tests
-  before opening settings, Chat, Similar Notes, and Studio from that artifact
-  with desktop adapters unavailable.
-- check:plugin adds TypeScript, mobile compatibility, sync, artifact, and
-  release guards.
-- test:chatview:critical runs the persistence, managed-request projection,
-  controller/runtime/transport, storage, and restored-history UI suites with
-  strict console, randomized order, open-handle detection, seeded generative
-  histories, and a global coverage floor over the critical ChatView modules
-  (the small identity and tool-execution modules stay at 100%).
-- check:ci is the exact exhaustive PR gate. It adds strict-console randomized
-  mobile interactions, critical ChatView coverage, the partitioned unit
-  remainder, embeddings, already-built integration, and open-handle detection.
-  Focused mobile and ChatView paths are excluded from the unit remainder so
-  they are not run a third time. The release-script contracts (build
-  provenance, build options, artifacts, release-plugin) run inside check:plugin
-  and remain available standalone as test:release-script.
-- check:compat is the smaller compatibility contract used on Node 22.18,
-  Node 24, macOS, and Windows after the exhaustive Ubuntu/Node 22 job. It runs
-  the same critical ChatView suites without repeating coverage instrumentation.
-- CI is credential-free. It runs check:ci on Ubuntu/Node 22 and check:compat
-  across the compatibility matrix. It has no provider or native-device lane.
 - The installed pre-push hook runs check:ci before a push. Hosted CI remains
   authoritative and branch protection must require the stable `required` job,
-  which fails unless every exhaustive and compatibility lane succeeds.
-- Top-level hosted Jest gates record replay-oriented child argv and seed.
-  Failed jobs retain those records, ChatView coverage, artifact inspection,
-  build provenance, and exact plugin artifact bytes for 14 days.
-- Release validation records the SHA-256 and size of manifest.json, main.js, and styles.css plus the source revision and build environment identity. The published-release workflow rebuilds the tag, requires exact asset bytes, and attests those published bytes before announcing the release through first-party metadata.
-- Saved chat parsing fails closed. A malformed or truncated history must never
-  become a shortened request. Leave the source note unchanged, open a fresh
-  unsaved chat, and keep a visible corruption banner.
+  which requires every exhaustive and compatibility lane to succeed. A main
+  push may reuse a successful PR/merge-group run only when GitHub job records
+  prove all lanes tested the identical Git tree. Missing proof or API errors
+  run full CI; manual dispatch always runs it. Release publication remains
+  independently triggered by a published release and validates exact tag bytes.
 
-## Local Obsidian loop
+Gate contents, compatibility and release validation live in
+[Tests and CI](docs/dev/tests.md). Obsidian Community Plugins owns installation
+and rollback; the plugin only detects and announces published releases.
 
-systemsculpt-sync.config.json is an ignored machine-local file. List Obsidian
-plugin folders under pluginTargets, then use:
-
-~~~bash
-./run.sh --headless
-npm run sync:local
-npm run dev:watch:install
-~~~
-
-On the normal macOS development machine, install the persistent watcher once.
-It stays running across logins, rebuilds on source changes, atomically replaces
-each artifact before reload, and hot reloads configured vaults.
-Re-running the install from the canonical checkout transfers watcher ownership
-back to that checkout. Never install or run the watcher from a git worktree. Synced
-development manifests include a visible local-only build identity without
-changing the release version used by server contracts. Use the official
-Obsidian CLI or Computer Use for live reload, errors, DOM inspection, and
-visual verification.
-
-For mobile-sensitive changes, npm run check:mobile and npm run check:ci are
-the release gates. They validate the exact built main.js, manifest.json, and
-styles.css across narrow-pane, touch, keyboard, accessibility, and Studio
-capability scenarios with desktop adapters unavailable. Simulator, emulator,
-browser-emulation, or physical-device runs may provide supplemental evidence
-when explicitly requested, but they are not release gates and must not replace
-or weaken the deterministic checks. Record the host and artifact hashes when
-manual mobile exploration is performed.
-
-## Product contracts
-
-- Managed API approval modes are Ask Approval and Full Access. On-machine Codex inherits native configuration, including approval policy, sandbox, permission profiles and reviewer; never override these with plugin settings. On-machine Claude Code runs with one of its own permission modes (Ask before edits by default, Accept edits, Plan only, or its own settings) and answers its permission prompts in a plugin dialog.
-- Read-only vault tools may run immediately; mutating tools follow the selected
-  approval policy.
-- The client executes local vault tools but never orchestrates the agent that
-  requested them.
-- The server conversation session and event journal are authoritative. Local
-  transcript data is a cache/export surface only.
-- File and folder paths are vault-relative unless a desktop-only Studio node
-  explicitly accepts an external path.
-- The managed API base is a build-time value. The text execution selector may choose SystemSculpt API or the installed on-machine Codex; it never exposes managed API routing or credentials.
 - Release artifacts are exactly manifest.json, main.js, and styles.css.
 
 ## Repository hygiene
@@ -252,5 +87,3 @@ manual mobile exploration is performed.
   provider experiments in this repository.
 - Keep user docs aligned with current commands and settings whenever those
   surfaces change.
-
-See docs/development.md for detailed checks and local QA.

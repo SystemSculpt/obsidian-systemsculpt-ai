@@ -7,6 +7,7 @@ import { createDefaultWorkflowEngineSettings } from "./types/workflows";
 import { CURRENT_SCHEMA_VERSION } from "./core/settings/migrations/schemaVersion";
 
 export { LogLevel };
+/** @internal Tests import ToolCall beside the other chat message types. */
 export type { ToolCall };
 
 export type {
@@ -44,7 +45,7 @@ export interface PendingRecorderCapture {
   discarded?: true;
 }
 
-export interface PendingAudioProcessorUploadPart {
+interface PendingAudioProcessorUploadPart {
   partNumber: number;
   etag: string;
 }
@@ -85,10 +86,13 @@ export interface SystemSculptSettings {
   codexThinkingLevel?: string;
   codexServiceTier?: string;
   textExecutionBackend?: "systemsculpt" | "codex" | "claude";
+  /** False until a person chooses; new desktop chats use session-local detection. */
+  textExecutionBackendExplicit?: boolean;
+  codexApprovalMode?: "auto" | "ask" | "read-only" | "settings";
   /** Claude Code model alias; empty uses Claude Code's own default. */
   claudeModel?: string;
   /** Claude Code permission mode for plugin turns; "settings" inherits Claude Code's configuration. */
-  claudePermissionMode?: "default" | "acceptEdits" | "plan" | "settings";
+  claudePermissionMode?: "auto" | "manual" | "acceptEdits" | "plan" | "settings";
   /**
    * Stable identifier unique to this vault installation.
    * Used to scope local IndexedDB storage per vault (prevents cross-vault collisions).
@@ -122,8 +126,6 @@ export interface SystemSculptSettings {
   licenseKey: string;
   licenseValid: boolean;
   suppressLicenseUpgradePrompt: boolean;
-  /** One-time first-run welcome/sign-in modal was shown (never repeats). */
-  accountOnboardingShown?: boolean;
   userName?: string;
   displayName?: string;
   userEmail?: string;
@@ -138,14 +140,12 @@ export interface SystemSculptSettings {
    */
   knownChatsDirectories?: string[];
   /**
-   * Directory where notes created via the "Save chat as note" feature are stored
+   * Retired: nothing writes here and the plugin no longer creates the folder.
+   * A value saved by an older version keeps that folder out of search.
    */
-  savedChatsDirectory: string;
+  savedChatsDirectory?: string;
+  /** Session-local validation freshness; omitted from saved settings and backups. */
   lastValidated: number;
-  /** Last release for which the plugin showed the update prompt. */
-  lastAnnouncedPluginRelease: string;
-  /** Last plugin version observed after a successful load. */
-  lastLoadedPluginVersion: string;
   recordingsDirectory: string;
   /** Recorder audio saved before recorder-owned transcription fully committed. */
   pendingRecorderCaptures: PendingRecorderCapture[];
@@ -175,17 +175,25 @@ export interface SystemSculptSettings {
    * - "srt": Save as an SRT subtitle file
    */
   transcriptionOutputFormat?: "markdown" | "srt";
-  attachmentsDirectory: string;
+  /**
+   * Retired: nothing writes here and the plugin no longer creates the folder.
+   * A value saved by an older version keeps that folder out of search.
+   */
+  attachmentsDirectory?: string;
   extractionsDirectory: string;
   workflowEngine: WorkflowEngineSettings;
   /** Save captures from the SystemSculpt iPhone app into the vault. */
   phoneCapturesEnabled: boolean;
   /** Vault folder for iPhone captures. Empty means SystemSculpt/Inbox. */
   phoneCapturesFolder: string;
+  /** Vault folder for iPhone meetings. Empty means SystemSculpt/Meetings. */
+  phoneCapturesMeetingsFolder: string;
   /** Ask before saving new iPhone captures. */
   phoneCapturesAskBeforeSaving: boolean;
   /** The account has used the iPhone app; until then the inbox stays hidden and silent. */
   phoneCapturesLinked: boolean;
+  /** Skip only the handoff's Run click, never the selected agent's own approvals. */
+  phoneHandoffsAutoRun: boolean;
 
   /**
    * Skip empty note warning confirmation modal
@@ -217,10 +225,10 @@ export interface SystemSculptSettings {
   chatFontSize: "small" | "medium" | "large";
 
   /**
-   * When enabled, SystemSculpt UI will honor the OS "reduced motion" preference
-   * by minimizing animations/transitions inside SystemSculpt views only.
+   * Minimize chat animations even when the OS does not request reduced motion.
+   * The OS preference is always honored independently through CSS.
    */
-  respectReducedMotion: boolean;
+  reduceChatMotion: boolean;
 
   /**
    * Studio project defaults.
@@ -259,9 +267,9 @@ export interface SystemSculptSettings {
 }
 
 export const DEFAULT_SETTINGS: SystemSculptSettings = {
-  textExecutionBackend: "systemsculpt",
-  codexModel: "gpt-6-astra", codexThinkingLevel: "high", codexServiceTier: "default",
-  claudeModel: "", claudePermissionMode: "default",
+  textExecutionBackend: "systemsculpt", textExecutionBackendExplicit: false,
+  codexModel: "", codexThinkingLevel: "", codexServiceTier: "default", codexApprovalMode: "auto",
+  claudeModel: "", claudePermissionMode: "auto",
   vaultInstanceId: "",
   relativeLineNumbersEnabled: false,
   schemaVersion: CURRENT_SCHEMA_VERSION,
@@ -269,12 +277,8 @@ export const DEFAULT_SETTINGS: SystemSculptSettings = {
   licenseKey: "",
   licenseValid: false,
   suppressLicenseUpgradePrompt: false,
-  accountOnboardingShown: false,
   chatsDirectory: "SystemSculpt/Chats",
-  savedChatsDirectory: "SystemSculpt/Saved Chats",
   lastValidated: 0,
-  lastAnnouncedPluginRelease: "",
-  lastLoadedPluginVersion: "",
   recordingsDirectory: "SystemSculpt/Recordings",
   pendingRecorderCaptures: [],
   pendingAudioProcessorUploads: [],
@@ -297,13 +301,14 @@ Please:
   audioProcessorOutputPreset: "detailed",
   autoSubmitAfterTranscription: false,
   transcriptionOutputFormat: "markdown",
-  attachmentsDirectory: "SystemSculpt/Attachments",
   extractionsDirectory: "SystemSculpt/Extractions",
   workflowEngine: createDefaultWorkflowEngineSettings(),
   phoneCapturesEnabled: true,
   phoneCapturesFolder: "SystemSculpt/Inbox",
+  phoneCapturesMeetingsFolder: "SystemSculpt/Meetings",
   phoneCapturesAskBeforeSaving: false,
   phoneCapturesLinked: false,
+  phoneHandoffsAutoRun: false,
 
   skipEmptyNoteWarning: false,
 
@@ -325,7 +330,7 @@ Please:
   debugMode: false,
   defaultChatTag: "",
   chatFontSize: "medium",
-  respectReducedMotion: true,
+  reduceChatMotion: false,
 
   studioDefaultProjectsFolder: "SystemSculpt/Studio",
   studioRunRetentionMaxRuns: 100,
@@ -356,14 +361,14 @@ Please:
 
 export type ChatRole = "user" | "assistant" | "system" | "tool";
 
-export interface ImageContent {
+interface ImageContent {
   type: "image_url";
   image_url: {
     url: string;
   };
 }
 
-export interface TextContent {
+interface TextContent {
   type: "text";
   text: string;
 }
@@ -388,7 +393,7 @@ export interface ChatAttachmentMetadata {
   contentRef?: ChatAttachmentContentRef;
 }
 
-export interface UrlCitation {
+interface UrlCitation {
   url: string;
   title: string;
   content?: string;
@@ -396,7 +401,7 @@ export interface UrlCitation {
   end_index?: number;
 }
 
-export interface Annotation {
+interface Annotation {
   type: string;
   url_citation?: UrlCitation;
 }
@@ -462,6 +467,9 @@ export interface ChatMessage {
   terminalReportId?: string;
   terminalIncidentId?: string;
   terminalFailureCode?: string;
+  // Native error text for the same local-agent recovery presentation after reload.
+  // Managed failures retain only their content-free receipt identifiers.
+  terminalFailureMessage?: string;
   terminalRetryable?: boolean;
   terminalServerRunId?: string;
 }

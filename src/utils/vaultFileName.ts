@@ -31,7 +31,7 @@ const TRAILING_EXTENSION = /^(.*[^.\s])(\.[A-Za-z0-9]{1,16})$/s;
  * Filesystems cap one name at 255 bytes. Leave room for the collision and
  * conflict suffixes Obsidian and Obsidian Sync append to a name.
  */
-export const MAX_VAULT_FILE_NAME_BYTES = 200;
+const MAX_VAULT_FILE_NAME_BYTES = 200;
 
 export type SafeVaultFileNameOptions = {
   /**
@@ -118,9 +118,4 @@ export function toSafeVaultFileName(
     safe = avoidReservedStem(`${shortened || fallback || "Untitled"}${extension}`);
   }
   return safe;
-}
-
-/** True when {@link toSafeVaultFileName} would keep this name unchanged. */
-export function isSafeVaultFileName(name: string): boolean {
-  return name.length > 0 && toSafeVaultFileName(name, { fallback: "" }) === name;
 }

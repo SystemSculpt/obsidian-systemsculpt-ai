@@ -4,6 +4,7 @@ import type SystemSculptPlugin from '../../main';
 import { desktopHost } from '../../platform/desktopOnly';
 import { hasHostCapability } from '../../platform/hostCapabilities';
 import { isRecord, randomId } from '../../studio/utils';
+import { studioDevice } from '../../studio/StudioDevice';
 import { codexWorkingDirectory } from './CodexExecutionSettings';
 import { runLocalCodex, type CodexRequest, type CodexResult } from './LocalCodexClient';
 import { answerCodexRequest } from './CodexRequestModal';
@@ -27,13 +28,23 @@ const MAX_ACTIVE = 8, MAX_PENDING = 100;
  * The presentation cache holds at most this many runs across projects. Paging
  * past it evicts the least recently changed runs that are not live, and the
  * board then says it shows only the newest runs.
+ * @internal Tests assert against this value.
  */
 export const MAX_LOADED_AGENT_RUNS = 1000;
+/** Saves after a state change; streamed text and activity wait longer, so a long turn isn't rewritten per delta. */
+const STATE_SAVE_DELAY_MS = 400, STREAM_SAVE_DELAY_MS = 5000;
+/**
+ * An active run this machine isn't executing is shown as stale once its saved
+ * record has gone this long without a change. Presentation only: runs this
+ * machine executes have no time limit.
+ * @internal Tests assert against this value.
+ */
+export const STALE_AGENT_RUN_MS = 10 * 60_000;
 const tools: CodexJson[] = [
   {type: 'function', name: 'studio_read_document', description: 'Read this canvas and its revision for scoped concurrent edits. Use this and studio_edit_document instead of replacing the file.', inputSchema: {type: 'object', properties: {}, additionalProperties: false}},
   {type: 'function', name: 'studio_edit_document', description: 'Apply a batch to this canvas using heads from studio_read_document. Edits use kind set/create/delete/restore, entityId, optional path string array, value, remove. Changes since that read merge by field; a batch that conflicts with a later change to the same field is rejected, so read again. Deletion prevents stale resurrection.', inputSchema: {type: 'object', properties: {heads: {type: 'array', items: {type: 'string'}}, edits: {type: 'array', items: {type: 'object', properties: {kind: {type: 'string', enum: ['set','create','delete','restore']}, entityId: {type: 'string'}, path: {type: 'array', items: {type: 'string'}}, value: {}, remove: {type: 'boolean'}}, required: ['kind','entityId'], additionalProperties: false}}}, required: ['heads','edits'], additionalProperties: false}},
   { type: 'function', name: 'studio_stop_run', description: 'Stop one of your own child assignments when it is no longer needed. This preserves its history.', inputSchema: { type: 'object', properties: { runId: { type: 'string' } }, required: ['runId'], additionalProperties: false } },
-  { type: 'function', name: 'studio_runs', description: 'List the available role definitions and recent run instances in this Studio project, including IDs, status and latest public activity. Use before choosing a peer.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
+  { type: 'function', name: 'studio_runs', description: 'List the available role definitions and recent run instances in this Studio project, including IDs, status and latest public activity. stale marks another machine\'s active run that has not changed for 10 minutes. Use before choosing a peer.', inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
   { type: 'function', name: 'studio_send_message', description: 'Send a concrete handoff or finding to a run in this Studio project. An active run receives it through native turn steering; an idle run resumes its native thread. A delivery receipt means accepted by Codex, not completed work.', inputSchema: { type: 'object', properties: { runId: { type: 'string' }, message: { type: 'string' } }, required: ['runId','message'], additionalProperties: false } },
   { type: 'function', name: 'studio_start_run', description: 'Start an independent instance of an existing role in this Studio project with a concrete objective. Use only within the owner-authorized task. Return and retain the new run ID; use messages for follow-up.', inputSchema: { type: 'object', properties: { nodeId: { type: 'string' }, objective: { type: 'string' }, assignmentId: { type: 'string', description: 'Required in orchestrated workflows: stable plan step ID; repeated dispatch returns the original child.' } }, required: ['nodeId','objective'], additionalProperties: false } },
 ];
@@ -52,7 +63,12 @@ export class StudioAgentRuns {
   private readonly older = new Map<string, { before: string; remaining: number }>();
   /** Projects whose older loaded runs were evicted to keep the cache bounded. */
   private readonly capped = new Set<string>();
-  private readonly timers = new Map<string, number>();
+  private readonly timers = new Map<string, { timer: number; due: number }>();
+  /** When to read each run executing elsewhere again: as it would turn stale, then every STALE_AGENT_RUN_MS. */
+  private readonly staleChecks = new Map<string, number>();
+  /** Runs this device marked stopped; they stay watched, so a later save from their machine shows them again. */
+  private readonly markedStopped = new Set<string>();
+  private staleTimer: { timer: number; due: number } | null = null;
   private readonly delivering = new Set<string>();
   private readonly notificationTimers = new Map<string, number>();
   private readonly tasks = new Set<Promise<void>>();
@@ -63,7 +79,9 @@ export class StudioAgentRuns {
   private active = 0;
   private admissions = 0;
   private disposed = false;
-  private machine = '';
+  /** This machine's stable ID ('' when the host keeps none across sessions) and its current hostname. */
+  private machineId = '';
+  private hostname = '';
 
   constructor(private readonly plugin: Pick<SystemSculptPlugin, 'app' | 'getLogger'>, private readonly callbacks: Callbacks) { this.store = new StudioAgentRunStore(plugin.app); }
   get app() { return this.plugin.app; }
@@ -74,10 +92,54 @@ export class StudioAgentRuns {
     return [...this.records.values()].filter(run => run.projectId === projectId && (!allowed || allowed.has(run.nodeId))).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
   get(id: string): StudioAgentRunView | undefined { return this.records.get(id); }
-  canControl(id: string): boolean { const run = this.records.get(id); return !!run && hasHostCapability('local-cli') && run.machine === this.machine; }
+  canControl(id: string): boolean { const run = this.records.get(id); return !!run && hasHostCapability('local-cli') && this.isOwn(run); }
   hasRequest(id: string): boolean { return !!this.controls.get(id)?.reviews.length; }
+  /**
+   * An active run this machine isn't executing whose saved record hasn't
+   * changed for STALE_AGENT_RUN_MS, or an open workflow between turns whose
+   * active assignments are all stale.
+   */
+  isStale(id: string, now = Date.now()): boolean {
+    const run = this.records.get(id);
+    if (!run || this.controls.has(id)) return false;
+    if (isActiveAgentRun(run.status)) return now - Date.parse(run.updatedAt) >= STALE_AGENT_RUN_MS;
+    const active = workflowOpen(run.workflow) ? this.children(run).filter(child => isActiveAgentRun(child.status)) : [];
+    return active.length > 0 && active.every(child => this.isStale(child.id, now));
+  }
+  /** Runs, or open workflows, that stay active on record although this machine can't stop them. */
+  canMarkStopped(id: string): boolean {
+    const run = this.records.get(id);
+    return !!run && !this.controls.has(id) && !this.canControl(id) && (isActiveAgentRun(run.status) || workflowOpen(run.workflow));
+  }
+  /**
+   * Settle a run this machine can't stop, such as one another machine left
+   * active when it closed or crashed. It settles the latest saved copy, so
+   * anything that machine saved since is kept, and reaches no other machine:
+   * if that machine is still working, its next save shows the run again.
+   */
+  async markStopped(id: string): Promise<void> {
+    const loaded = this.records.get(id);
+    if (!loaded || !this.canMarkStopped(id)) return;
+    const saved = await this.store.read(loaded.projectPath, loaded.projectId, id);
+    if (this.disposed) return;
+    if (saved && saved.updatedAt > loaded.updatedAt && this.records.get(id) === loaded) this.adopt({ records: [saved], before: null, olderRemaining: 0 });
+    const record = this.records.get(id);
+    if (!record || !this.canMarkStopped(id)) { if (record) this.emit(record.projectId); return; }
+    if (record.workflow && workflowOpen(record.workflow)) { record.workflow.status = 'stopped'; await Promise.all(this.children(record).map(child => this.markStopped(child.id))); }
+    if (isActiveAgentRun(record.status)) { record.status = 'stopped'; record.finishedAt = new Date().toISOString(); }
+    record.currentActivity = 'Marked stopped'; this.markedStopped.add(id);
+    this.changed(record); this.watchElsewhere(record, Date.now()); this.scheduleStaleCheck();
+    await this.persist(record);
+  }
+  /** Whether this machine executes a run: its stable ID matches, or, on records saved before machines had one, its current hostname does. */
+  private isOwn(run: StudioAgentRun): boolean {
+    return !!this.hostname && (run.machineId ? run.machineId === this.machineId : run.machine === this.hostname);
+  }
   private async identifyMachine(): Promise<void> {
-    if (!this.machine && hasHostCapability('local-cli')) this.machine = (await desktopHost.os()).hostname();
+    if (this.hostname || !hasHostCapability('local-cli')) return;
+    const device = studioDevice(this.plugin.app), hostname = (await desktopHost.os()).hostname();
+    // A per-session ID would disown this machine's runs at the next launch; the hostname alone is steadier.
+    this.machineId = device.persistent ? device.id : ''; this.hostname = hostname;
   }
   async refresh(projectPath: string, projectId: string): Promise<void> {
     await this.loaded.get(projectPath);
@@ -142,12 +204,48 @@ export class StudioAgentRuns {
   }
   private adopt(page: AgentRunPage): void {
     for (const run of page.records) {
-      if (this.controls.has(run.id) || (this.records.has(run.id) && run.machine === this.machine)) continue;
-      if (run.machine === this.machine && isActiveAgentRun(run.status)) {
+      const own = this.isOwn(run);
+      if (this.controls.has(run.id) || (this.records.has(run.id) && own)) continue;
+      if (own && isActiveAgentRun(run.status)) {
         run.status = 'interrupted'; run.currentActivity = 'Previous Obsidian session ended';
       }
-      this.records.set(run.id, run);
+      this.records.set(run.id, run); this.watchElsewhere(run);
     }
+    this.scheduleStaleCheck();
+  }
+  /**
+   * Read a run executing elsewhere again when it would turn stale, then every
+   * STALE_AGENT_RUN_MS while it stays active, so a run its machine saves again
+   * comes back live. `changedAt` defaults to its last save; a save dated in
+   * the future (a fast clock) counts as now.
+   */
+  private watchElsewhere(run: StudioAgentRun, changedAt = Date.parse(run.updatedAt)): void {
+    if (this.controls.has(run.id) || (!isActiveAgentRun(run.status) && !this.markedStopped.has(run.id))) { this.staleChecks.delete(run.id); return; }
+    const now = Date.now(), from = Number.isFinite(changedAt) ? Math.min(changedAt, now) : now;
+    this.staleChecks.set(run.id, from + STALE_AGENT_RUN_MS > now ? from + STALE_AGENT_RUN_MS : now + STALE_AGENT_RUN_MS);
+  }
+  private scheduleStaleCheck(): void {
+    if (this.disposed || !this.staleChecks.size) return;
+    const due = Math.min(...this.staleChecks.values());
+    if (this.staleTimer && this.staleTimer.due <= due) return;
+    if (this.staleTimer) window.clearTimeout(this.staleTimer.timer);
+    this.staleTimer = { due, timer: window.setTimeout(() => { this.staleTimer = null; void this.checkStale(); }, Math.max(0, due - Date.now())) };
+  }
+  /** Read each due run again: a newer save from its machine shows it live; otherwise it is checked again later. */
+  private async checkStale(): Promise<void> {
+    const now = Date.now(), due = [...this.staleChecks].filter(([, at]) => at <= now).map(([id]) => id), projects = new Set<string>();
+    for (const id of due) this.staleChecks.delete(id);
+    await Promise.all(due.map(async id => {
+      const run = this.records.get(id); if (!run) return;
+      projects.add(run.projectId);
+      const saved = await this.store.read(run.projectPath, run.projectId, id);
+      if (this.disposed || this.records.get(id) !== run) return;
+      if (saved && saved.updatedAt > run.updatedAt) { this.markedStopped.delete(id); this.adopt({ records: [saved], before: null, olderRemaining: 0 }); }
+      else this.watchElsewhere(run, now);
+    }));
+    if (this.disposed) return;
+    for (const projectId of projects) this.emit(projectId);
+    this.scheduleStaleCheck();
   }
   /** Bound the on-disk records once per project per session, without delaying the board. */
   private retainOnDisk(projectPath: string, projectId: string): void {
@@ -178,7 +276,7 @@ export class StudioAgentRuns {
     }
     const now = new Date().toISOString();
     const record: StudioAgentRun = { schema: 'studio.agent-run.v1', id: randomId(`agent_${Date.now()}`), projectId: specification.projectId, projectPath: specification.projectPath, nodeId: specification.nodeId,
-      title: specification.title, workflow: specification.workflow, assignmentId: specification.assignmentId, preparationPending: !!specification.prepare, workflowId: specification.parentRunId ? (this.records.get(specification.parentRunId)?.workflow ? specification.parentRunId : this.records.get(specification.parentRunId)?.workflowId) : undefined, parentRunId: specification.parentRunId, owner: this.owner, machine: this.machine, status: 'queued', createdAt: now, updatedAt: now,
+      title: specification.title, workflow: specification.workflow, assignmentId: specification.assignmentId, preparationPending: !!specification.prepare, workflowId: specification.parentRunId ? (this.records.get(specification.parentRunId)?.workflow ? specification.parentRunId : this.records.get(specification.parentRunId)?.workflowId) : undefined, parentRunId: specification.parentRunId, owner: this.owner, machine: this.hostname, ...(this.machineId ? { machineId: this.machineId } : {}), status: 'queued', createdAt: now, updatedAt: now,
       threadId: specification.request.threadId || '', turnId: '', request: { ...specification.request }, result: '', error: '', currentActivity: 'Queued', activity: [], messages: [] };
     this.records.set(record.id, record);
     try { await this.store.write(record); }
@@ -201,6 +299,8 @@ export class StudioAgentRuns {
     const completion = new Promise<CodexResult>((yes, no) => { resolve = yes; reject = no; }); void completion.catch(() => {});
     const control: Control = { controller: new AbortController(), reviews: [], completion, resolve, reject };
     this.controls.set(record.id, control); record.owner = this.owner; record.status = 'queued'; record.error = ''; record.result = ''; record.currentActivity = 'Queued'; delete record.finishedAt;
+    // A record saved before machines had a stable ID takes this machine's now.
+    record.machine = this.hostname; if (this.machineId) record.machineId = this.machineId; this.staleChecks.delete(record.id);
     this.changed(record);
     const task = async () => {
       try {
@@ -221,14 +321,14 @@ export class StudioAgentRuns {
             for (const pending of record.messages.filter(item => item.to === record.id && item.status === 'pending')) void this.deliver(record, pending).catch(() => {});
           },
           log: text => { if (text.startsWith('Connected to')) { record.currentActivity = 'Starting native turn'; this.changed(record); } },
-          text: text => { record.result = text.slice(-64_000); this.changed(record); },
+          text: text => { record.result = text.slice(-64_000); this.changed(record, 'stream'); },
           activity: activity => {
             const existing = record.activity.findIndex(item => item.id === activity.id);
             const projected = { ...activity, detail: activity.detail.slice(-2000) };
             if (existing >= 0) record.activity[existing] = projected; else record.activity.push(projected);
             record.activity = record.activity.slice(-40);
             if (activity.kind !== 'message' || activity.detail) record.currentActivity = activity.kind === 'message' ? activity.detail.replace(/\s+/g, ' ').slice(0, 180) : activity.title;
-            this.changed(record);
+            this.changed(record, 'stream');
           },
           request: (method, params, signal) => method === 'item/tool/call' ? this.tool(record, params, control.controller.signal) : this.waitForReview(record, control, method, params, signal),
         });
@@ -368,7 +468,7 @@ export class StudioAgentRuns {
       if (params.tool === 'studio_read_document' && this.callbacks.readDocument) result = await this.callbacks.readDocument(record.projectPath);
       else if (params.tool === 'studio_edit_document' && this.callbacks.editDocument) result = await this.callbacks.editDocument(record.projectPath, args.heads as string[], args.edits as StudioDocumentEdit[]);
       else if (String(params.tool).startsWith('studio_workflow_') || params.tool === 'studio_context') result = await this.workflowTool(record, String(params.tool), args, signal);
-      else if (params.tool === 'studio_runs') result = { self: record.id, roles: await this.callbacks.templates(record.projectPath), runs: this.list(record.projectId).slice(0, 50).map(run => ({ id: run.id, role: run.title, nodeId: run.nodeId, status: run.status, activity: run.currentActivity, parentRunId: run.parentRunId, controllable: this.canControl(run.id) })) };
+      else if (params.tool === 'studio_runs') result = { self: record.id, roles: await this.callbacks.templates(record.projectPath), runs: this.list(record.projectId).slice(0, 50).map(run => ({ id: run.id, role: run.title, nodeId: run.nodeId, status: run.status, activity: run.currentActivity, parentRunId: run.parentRunId, controllable: this.canControl(run.id), ...(this.isStale(run.id) ? { stale: true } : {}) })) };
       else if (params.tool === 'studio_send_message') result = await this.send(String(args.runId || ''), String(args.message || ''), record.id, String(params.callId || randomId('call')));
       else if (params.tool === 'studio_stop_run') { const child = this.get(String(args.runId || '')); if (!child || child.parentRunId !== record.id) throw new Error('Only your own child can be stopped.'); this.stop(child.id); result = { id: child.id, status: 'stop requested' }; }
       else if (params.tool === 'studio_start_run') {
@@ -482,7 +582,7 @@ export class StudioAgentRuns {
     const changed = new Set<StudioAgentRun>();
     const deliveryError = 'Message delivery could not be verified after Obsidian reloaded. Codex may already have accepted it. Review native thread history before sending a new follow-up; this message will not be replayed.';
     for (const run of this.records.values()) {
-      if (run.projectId !== projectId || run.machine !== this.machine || !run.threadId || this.controls.has(run.id)) continue;
+      if (run.projectId !== projectId || !this.isOwn(run) || !run.threadId || this.controls.has(run.id)) continue;
       for (const message of run.messages.filter(message => message.to === run.id && message.status === 'pending')) {
         // A pending local receipt cannot prove that native turn/start or turn/steer failed.
         message.status = 'failed'; message.error = deliveryError; this.messageChanged(message);
@@ -491,7 +591,7 @@ export class StudioAgentRuns {
       }
       if (uncertain.has(run.id)) { run.currentActivity = deliveryError; this.changed(run); }
     }
-    const roots = [...this.records.values()].filter(run => run.projectId === projectId && run.machine === this.machine && workflowOpen(run.workflow));
+    const roots = [...this.records.values()].filter(run => run.projectId === projectId && this.isOwn(run) && workflowOpen(run.workflow));
     for (const root of roots) {
       if (![root, ...this.children(root)].some(run => uncertain.has(run.id))) continue;
       root.workflow!.status = 'needs_input'; root.workflow!.outcome = deliveryError;
@@ -502,7 +602,7 @@ export class StudioAgentRuns {
     if (this.disposed) return;
     for (const root of roots.filter(root => workflowOpen(root.workflow))) {
       for (const run of [...this.children(root), root]) {
-        if (run.machine !== this.machine || this.controls.has(run.id) || run.status !== 'interrupted') continue;
+        if (!this.isOwn(run) || this.controls.has(run.id) || run.status !== 'interrupted') continue;
         if (run.workflow) run.workflow.received = {}; // Replaying evidence is safe; assignment IDs prevent repeated dispatch.
         this.admit(run, run.threadId ? `Obsidian reloaded during this owner-authorized workflow. Resume the existing assignment from native thread history. Inspect existing work before taking further action; do not repeat completed operations or create duplicate assignments.\n${run.workflow ? 'Use studio_workflow_wait for outstanding child results.' : run.request.prompt}` : run.request.prompt,
           run.preparationPending && this.callbacks.prepare ? () => this.callbacks.prepare!(run) : undefined, undefined, !!run.threadId);
@@ -511,22 +611,29 @@ export class StudioAgentRuns {
     }
   }
   private emit(projectId: string): void { for (const listener of this.listeners) { try { listener(projectId); } catch (error) { this.plugin.getLogger().error('Run presentation failed', error); } } }
-  private changed(record: StudioAgentRun): void {
+  private changed(record: StudioAgentRun, kind: 'state' | 'stream' = 'state'): void {
     record.updatedAt = new Date().toISOString();
     while (record.messages.length > 100 || record.messages.reduce((total, item) => total + item.text.length, 0) > 48_000) {
       const removable = record.messages.findIndex(item => item.status !== 'pending'); if (removable < 0) break; record.messages.splice(removable, 1);
     }
     if (this.disposed) return;
     if (!this.notificationTimers.has(record.projectId)) this.notificationTimers.set(record.projectId, window.setTimeout(() => { this.notificationTimers.delete(record.projectId); this.emit(record.projectId); }, 80));
-    if (!this.timers.has(record.id)) this.timers.set(record.id, window.setTimeout(() => { this.timers.delete(record.id); void this.persist(record).catch(() => {}); }, 400));
+    const due = Date.now() + (kind === 'stream' ? STREAM_SAVE_DELAY_MS : STATE_SAVE_DELAY_MS), pending = this.timers.get(record.id);
+    if (pending && pending.due <= due) return;
+    if (pending) window.clearTimeout(pending.timer);
+    this.timers.set(record.id, { due, timer: window.setTimeout(() => { this.timers.delete(record.id); void this.persist(record).catch(() => {}); }, due - Date.now()) });
   }
   private async persist(record: StudioAgentRun): Promise<void> {
+    // The write serializes the record now, so it covers any save still scheduled.
+    const pending = this.timers.get(record.id);
+    if (pending) { window.clearTimeout(pending.timer); this.timers.delete(record.id); }
     try { await this.store.write(record); delete record.persistenceError; }
     catch (error) { record.persistenceError = error instanceof Error ? error.message : 'Could not save this run.'; this.emit(record.projectId); throw error; }
   }
   async dispose(): Promise<void> {
     this.disposed = true;
-    for (const timer of this.timers.values()) window.clearTimeout(timer); this.timers.clear();
+    for (const { timer } of this.timers.values()) window.clearTimeout(timer); this.timers.clear();
+    if (this.staleTimer) window.clearTimeout(this.staleTimer.timer); this.staleTimer = null; this.staleChecks.clear(); this.markedStopped.clear();
     for (const [id, control] of this.controls) {
       control.controller.abort(); const record = this.records.get(id)!; record.status = 'interrupted'; record.currentActivity = 'Obsidian session ended';
       control.reject(new Error('Obsidian session ended.')); await this.persist(record).catch(() => {});

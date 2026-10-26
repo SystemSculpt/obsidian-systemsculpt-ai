@@ -16,6 +16,7 @@ function definitionFixture(): StudioNodeDefinition {
   return {
     kind: "studio.note",
     version: "1.0.0",
+    requiredHostCapabilities: [],
     capabilityClass: "local_io",
     cachePolicy: "never",
     inputPorts: [],

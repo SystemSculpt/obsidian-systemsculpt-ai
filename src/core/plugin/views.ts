@@ -1,13 +1,15 @@
-import { App, WorkspaceLeaf, Notice, ItemView } from "obsidian";
+import { App, WorkspaceLeaf, Notice, ItemView, TFile } from "obsidian";
+import { generateDefaultChatTitle } from "../../utils/titleUtils";
 import type SystemSculptPlugin from "../../main";
 import { RibbonManager } from "./ribbons";
 import { ChatState } from "../../types/index";
 import { EmbeddingsView } from "../../views/EmbeddingsView";
-import { SystemSculptStudioView } from "../../views/studio/SystemSculptStudioView";
+import { PendingStudioView, type StudioViewCreator } from "../../views/studio/PendingStudioView";
 import { AgentChatView } from "../../views/chatview/AgentChatView";
 import { yieldToEventLoop } from "../../utils/yieldToEventLoop";
 import { isMobileLayout } from "../../platform/mobileLayout";
 import { restoreStudioReloadState } from "./StudioReloadState";
+import type { HandoffExecution } from "../../features/phone-captures/PhoneHandoffInbox";
 import {
   CHAT_VIEW_TYPE,
   EMBEDDINGS_VIEW_TYPE,
@@ -15,6 +17,20 @@ import {
 } from "./viewTypes";
 
 const CHAT_VIEW_PRODUCER_QUIESCE_DEADLINE_MS = 1_000;
+
+/** The existing unload window also covers native runs with no remaining pane. */
+export async function waitForChatProducers(barriers: Promise<unknown>): Promise<void> {
+  let deadlineTimer: number | null = null;
+  const deadline = new Promise<void>((resolve) => {
+    deadlineTimer = window.setTimeout(resolve, CHAT_VIEW_PRODUCER_QUIESCE_DEADLINE_MS);
+  });
+  try {
+    await Promise.race([barriers, deadline]);
+  } finally {
+    if (deadlineTimer !== null) window.clearTimeout(deadlineTimer);
+  }
+}
+
 type AppWithViewRegistry = App & {
   viewRegistry?: {
     viewByType?: Record<string, unknown>;
@@ -35,7 +51,7 @@ interface ChatViewState {
 export class ViewManager {
   private plugin: SystemSculptPlugin;
   private app: App;
-  private ribbonManager: RibbonManager;
+  readonly ribbonManager: RibbonManager;
   private hasStarted: boolean = false;
   private isInitialized: boolean = false;
   private isInitializing: boolean = false;
@@ -44,6 +60,8 @@ export class ViewManager {
   private restoreQueuedLeaves: Set<WorkspaceLeaf> = new Set();
   private restorePromise: Promise<void> | null = null;
   private registeredViewTypes: Set<string> = new Set();
+  private studioViewCreator: StudioViewCreator | null = null;
+  private studioViewLoad: Promise<StudioViewCreator> | null = null;
 
   constructor(plugin: SystemSculptPlugin, app: App) {
     this.plugin = plugin;
@@ -57,8 +75,8 @@ export class ViewManager {
     }
     this.registerView();
 
-    // Initialize ribbon manager in the background
-    window.setTimeout(() => this.ribbonManager.initialize(), 0);
+    // Obsidian restores ribbon visibility and order after plugin onload.
+    this.ribbonManager.initialize();
 
     // Wait for layout to be ready before minimal initialization
     this.app.workspace.onLayoutReady(() => {
@@ -300,12 +318,62 @@ export class ViewManager {
     this.registerViewType(
       SYSTEMSCULPT_STUDIO_VIEW_TYPE,
       (leaf: WorkspaceLeaf) => {
-        return new SystemSculptStudioView(leaf, this.plugin);
+        return this.studioViewCreator?.(leaf) ?? new PendingStudioView(leaf, () => this.loadStudioView());
       }
     );
   }
 
+  /**
+   * Evaluates Studio's view code the first time anything opens Studio, so
+   * people who never use it don't pay for it at startup.
+   */
+  loadStudioView(): Promise<StudioViewCreator> {
+    this.studioViewLoad ??= import("../../views/studio/SystemSculptStudioView").then(
+      ({ SystemSculptStudioView }) => {
+        const create = (leaf: WorkspaceLeaf) => new SystemSculptStudioView(leaf, this.plugin);
+        this.studioViewCreator = create;
+        return create;
+      },
+      (error: unknown) => {
+        this.studioViewLoad = null;
+        throw error;
+      }
+    );
+    return this.studioViewLoad;
+  }
 
+
+
+  /** Open one fresh chat through Obsidian's registered view factory. */
+  async openChat({ file }: { file?: TFile } = {}): Promise<void> {
+    const { workspace } = this.app;
+    const leaf = workspace.getLeaf("tab");
+    await leaf.setViewState({
+      type: CHAT_VIEW_TYPE,
+      active: true,
+      state: {
+        chatId: "",
+        chatTitle: generateDefaultChatTitle(),
+      },
+    });
+    workspace.setActiveLeaf(leaf, { focus: true });
+    if (file) {
+      const view = leaf.view as AgentChatView;
+      await view.addFileToContext(file);
+      view.focusInput();
+    }
+  }
+
+  /** Own a fresh leaf so phone work never replaces a person's current draft. */
+  async runPhoneHandoff(execution: HandoffExecution): Promise<string> {
+    if (execution.signal.aborted) throw new Error("The handoff was cancelled.");
+    const leaf = this.app.workspace.getLeaf("tab");
+    await leaf.setViewState({ type: CHAT_VIEW_TYPE, active: execution.reveal, state: { chatId: "", chatTitle: "From your iPhone" } });
+    await leaf.loadIfDeferred();
+    if (execution.reveal) await this.app.workspace.revealLeaf(leaf);
+    if (!(leaf.view instanceof AgentChatView)) throw new Error("The agent workspace could not open.");
+    return leaf.view.executePhoneHandoff(execution);
+  }
 
   async activateEmbeddingsView(): Promise<EmbeddingsView> {
     // Check if we already have an embeddings view open
@@ -335,7 +403,8 @@ export class ViewManager {
     return targetLeaf.view as EmbeddingsView;
   }
 
-  async activateSystemSculptStudioView(projectPath?: string): Promise<SystemSculptStudioView> {
+  async activateSystemSculptStudioView(projectPath?: string): Promise<void> {
+    await this.loadStudioView();
     const normalizedTarget = String(projectPath || "").trim();
     if (normalizedTarget) {
       const existingLeaves = this.app.workspace.getLeavesOfType(SYSTEMSCULPT_STUDIO_VIEW_TYPE);
@@ -346,7 +415,7 @@ export class ViewManager {
           : "";
         if (file === normalizedTarget) {
           await this.app.workspace.revealLeaf(leaf);
-          return leaf.view as SystemSculptStudioView;
+          return;
         }
       }
     }
@@ -363,7 +432,6 @@ export class ViewManager {
     });
 
     await this.app.workspace.revealLeaf(leaf);
-    return leaf.view as SystemSculptStudioView;
   }
 
   /** Waits until live ChatViews can no longer add incident evidence. */
@@ -374,18 +442,7 @@ export class ViewManager {
       if (typeof view.quiesceIncidentProducers !== "function") return;
       await view.quiesceIncidentProducers();
     })).then(() => undefined);
-    let deadlineTimer: number | null = null;
-    const deadline = new Promise<void>((resolve) => {
-      deadlineTimer = window.setTimeout(
-        resolve,
-        CHAT_VIEW_PRODUCER_QUIESCE_DEADLINE_MS,
-      );
-    });
-    try {
-      await Promise.race([barriers, deadline]);
-    } finally {
-      if (deadlineTimer !== null) window.clearTimeout(deadlineTimer);
-    }
+    await waitForChatProducers(barriers);
   }
 
   unloadViews() {

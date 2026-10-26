@@ -47,10 +47,10 @@ describe("yieldToEventLoop", () => {
 });
 
 describe("waitForIdle", () => {
-  const idleWindow = window as Window & {
+  const idleWindow: Omit<Window, "requestIdleCallback" | "cancelIdleCallback"> & {
     requestIdleCallback?: unknown;
     cancelIdleCallback?: unknown;
-  };
+  } = window;
 
   beforeEach(() => {
     jest.useFakeTimers();

@@ -3,7 +3,7 @@ import { updateStudioActivityBadge } from "./StudioActivityBadge";
 import type { StudioActivitySnapshot } from "./StudioActivityProjector";
 
 /** Runtime CSS contract written here and read by views/studio/activity.css. */
-export const STUDIO_ACTIVITY_PROGRESS_PROPERTY = "--ss-activity-progress";
+const STUDIO_ACTIVITY_PROGRESS_PROPERTY = "--ss-activity-progress";
 
 export type StudioEdgeActivityUpdate = Readonly<{ phase: StudioEdgeActivityPhase; pulse: boolean }>;
 
@@ -15,24 +15,29 @@ export type StudioActivityDomTargets = Readonly<{
   setEdgeActivity: (edges: ReadonlyMap<string, StudioEdgeActivityUpdate>) => void;
 }>;
 
-/** One-shot transition emphasis; cleared when its animation ends. */
+const pulseCleanups = new WeakMap<Element, () => void>();
+
+/** One-shot transition emphasis; cleared when its own decoration ends. */
 export function pulseStudioActivityElement(el: HTMLElement | SVGElement, kind: string): void {
+  pulseCleanups.get(el)?.();
   if (el.dataset.activityPulse) {
     delete el.dataset.activityPulse;
     // Restart the animation when the same pulse fires twice in a row.
     void (el as HTMLElement).offsetWidth;
   }
   el.dataset.activityPulse = kind;
-  el.addEventListener(
-    "animationend",
-    (event) => {
-      const name = String((event as AnimationEvent).animationName || "");
-      if (event.target === el && name.startsWith("ss-studio-activity-pulse")) {
-        delete el.dataset.activityPulse;
-      }
-    },
-    { once: true }
-  );
+  const finish = (event: Event) => {
+    const name = String((event as AnimationEvent).animationName || "");
+    if (event.target !== el || !name.startsWith("ss-studio-activity-pulse")) return;
+    delete el.dataset.activityPulse;
+    cleanup();
+  };
+  const cleanup = () => {
+    el.removeEventListener("animationend", finish);
+    pulseCleanups.delete(el);
+  };
+  pulseCleanups.set(el, cleanup);
+  el.addEventListener("animationend", finish);
 }
 
 /**

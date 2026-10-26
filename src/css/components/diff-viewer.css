@@ -51,7 +51,7 @@
 }
 
 .systemsculpt-diff-stats.systemsculpt-diff-no-changes {
-  color: var(--ss-ink-faint);
+  color: var(--ss-ink-muted);
 }
 
 .systemsculpt-diff-additions {
@@ -68,21 +68,42 @@
 
 .systemsculpt-diff-content {
   max-height: clamp(120px, 30vh, 200px);
-  overflow-y: auto;
+  overflow: auto;
+}
+
+.systemsculpt-diff-content.is-disclosed {
+  max-height: none;
+}
+
+.systemsculpt-diff-show-all {
+  display: flex;
+  width: 100%;
+  justify-content: center;
+  border: 0;
+  border-top: 1px solid var(--ss-line);
+  border-radius: 0;
+  background: var(--ss-surface-1);
+  color: var(--ss-ink-muted);
+}
+
+.systemsculpt-diff-content:focus-visible,
+.systemsculpt-diff-show-all:focus-visible {
+  outline: none;
+  box-shadow: var(--ss-ring);
 }
 
 .systemsculpt-diff-hunk-separated::before {
   content: "⋯";
   display: block;
   padding: var(--ss-space-0) var(--ss-space-2);
-  color: var(--ss-ink-faint);
+  color: var(--ss-ink-muted);
   text-align: center;
 }
 
 .systemsculpt-diff-hunk-header {
   padding: var(--ss-space-0) var(--ss-space-2);
   background-color: var(--ss-surface-1);
-  color: var(--ss-ink-faint);
+  color: var(--ss-ink-muted);
   font-family: var(--ss-font-mono);
 }
 
@@ -94,7 +115,8 @@
 .systemsculpt-diff-line {
   display: flex;
   align-items: baseline;
-  border-left: 2px solid transparent;
+  min-width: max-content;
+  color: var(--ss-ink);
   font-family: var(--ss-font-mono);
   line-height: var(--ss-leading-base);
   transition: background-color var(--ss-dur-fast) var(--ss-ease);
@@ -102,12 +124,10 @@
 
 .systemsculpt-diff-line-added {
   background-color: var(--ss-success-tint);
-  border-left-color: var(--ss-success);
 }
 
 .systemsculpt-diff-line-removed {
   background-color: var(--ss-danger-tint);
-  border-left-color: var(--ss-danger);
 }
 
 .systemsculpt-diff-line-unchanged {
@@ -123,7 +143,7 @@
   flex-shrink: 0;
   min-width: 3.5ch;
   padding: 0 var(--ss-space-1);
-  color: var(--ss-ink-faint);
+  color: var(--ss-ink-muted);
   text-align: right;
   user-select: none;
   font-variant-numeric: tabular-nums;
@@ -132,21 +152,21 @@
 .systemsculpt-diff-prefix {
   flex-shrink: 0;
   width: 1.5ch;
-  color: var(--ss-ink-faint);
+  color: var(--ss-ink-muted);
   user-select: none;
 }
 
 .systemsculpt-diff-line-content {
   flex: 1 1 auto;
   min-width: 0;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
+  white-space: pre;
+  overflow-wrap: normal;
   padding-right: var(--ss-space-2);
 }
 
 .systemsculpt-diff-no-changes-notice {
   padding: var(--ss-space-2);
-  color: var(--ss-ink-faint);
+  color: var(--ss-ink-muted);
   font-style: italic;
   text-align: center;
 }
@@ -164,8 +184,24 @@
 
 .systemsculpt-diff-truncated {
   padding: var(--ss-space-1) var(--ss-space-2);
-  color: var(--ss-ink-faint);
+  color: var(--ss-ink-muted);
   font-style: italic;
+}
+
+.is-reduced-motion .systemsculpt-diff-line {
+  transition: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .systemsculpt-diff-line {
+    transition: none;
+  }
+}
+
+@media (pointer: coarse) {
+  .systemsculpt-diff-show-all {
+    min-height: var(--ss-touch-target);
+  }
 }
 
 @container ss-surface (max-width: 600px) {

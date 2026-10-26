@@ -17,11 +17,11 @@ describe("resolveStudioNodeSurface", () => {
     expect(resolve(kind)).toEqual({ kind: "code", sourceToggle: false });
   });
 
-  it.each(["studio.collection", "studio.run_collection", "studio.command_center", "studio.button", "studio.workflow"])("gives %s a panel with one Source toggle", kind => {
+  it.each(["studio.collection", "studio.run_collection", "studio.command_center", "studio.button", "studio.workflow", "studio.image_generation"])("gives %s a panel with one Source toggle", kind => {
     expect(resolve(kind)).toEqual({ kind: "panel", sourceToggle: true });
   });
 
-  it.each(["studio.image_generation", "studio.text_generation", "studio.codex", "studio.transcription", "studio.input", "studio.note", "studio.dataset", "studio.unknown"])("shows %s as a form without any source view", kind => {
+  it.each(["studio.text_generation", "studio.codex", "studio.transcription", "studio.input", "studio.note", "studio.dataset", "studio.unknown"])("shows %s as a form without any source view", kind => {
     expect(resolve(kind)).toEqual({ kind: "form", sourceToggle: false });
   });
 

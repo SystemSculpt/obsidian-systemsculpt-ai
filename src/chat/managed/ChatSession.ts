@@ -94,7 +94,6 @@ export type {
   AgentLifecycleCode,
   AgentLifecycleInput,
   AgentLifecyclePhase,
-  AgentLifecycleRecord,
 } from "./Lifecycle";
 
 function toolRequestedItemCount(call: LocalToolCall): number | undefined {
@@ -160,6 +159,11 @@ export type AgentChatSessionOptions = Readonly<{
   requestClient?: RequestClient;
   runStallGraceMs?: number;
   resynchronizationDelayMs?: (attempt: number) => number;
+  recoveryEnvironment?: Readonly<{
+    ownerWindow: () => Window;
+    isVisible: () => boolean;
+    subscribe: (refresh: () => void) => () => void;
+  }>;
   now?: () => number;
   monotonicNow?: () => number;
 }>;
@@ -175,7 +179,8 @@ export type AgentChatSessionOptions = Readonly<{
  * an honest one and never terminates the run, which the server still owns.
  */
 const RUN_STALL_GRACE_MS = 240_000;
-const MAX_RESYNCHRONIZATION_DELAY_MS = 5_000;
+const MAX_RESYNCHRONIZATION_DELAY_MS = 120_000;
+const HIDDEN_RESYNCHRONIZATION_DELAY_MS = 60_000;
 const MAX_RETAINED_LATENCY_RUNS = 8;
 const MAX_RETAINED_LATENCY_SEGMENTS_PER_RUN = 512;
 const MAX_TOOL_EXECUTIONS_PER_RUN = 512;
@@ -604,6 +609,9 @@ export class AgentChatSession implements ChatSession {
   private resynchronizationTimer: number | null = null;
   private resynchronizationInFlight = false;
   private resynchronizationAttempt = 0;
+  private resynchronizationPending = false;
+  private recoveryWindow: Window = window;
+  private detachRecoveryEnvironment: (() => void) | null = null;
   private stallRecovery: StallRecovery | null = null;
   private readonly clientLatency = new Map<string, ClientLatencyContext>();
 
@@ -806,6 +814,7 @@ export class AgentChatSession implements ChatSession {
     this.transport = transport;
     this.session = session;
     this.conversationId = conversationId;
+    this.bindRecoveryEnvironment();
     this.connectionState = transport.state;
     this.detachSession = session.subscribe((snapshot) => {
       if (this.generation !== generation || this.session !== session) return;
@@ -1077,7 +1086,6 @@ export class AgentChatSession implements ChatSession {
         },
         body: request,
         signal,
-        preserveResponseHeaders: true,
         allowTransportFallback: true,
         responseEncoding: "arrayBuffer",
         maxResponseBytes: MAX_CONTEXT_RESPONSE_BYTES,
@@ -1291,6 +1299,9 @@ export class AgentChatSession implements ChatSession {
     this.generation += 1;
     this.clearRunStallTimer();
     this.clearResynchronization();
+    this.detachRecoveryEnvironment?.();
+    this.detachRecoveryEnvironment = null;
+    this.resynchronizationInFlight = false;
     this.runStalled = false;
     this.stallRecovery = null;
     this.detachSession?.();
@@ -2110,7 +2121,60 @@ export class AgentChatSession implements ChatSession {
     if (active && !active.terminal) this.publishActive(active, true);
   }
 
-  private scheduleResynchronization(active: ActiveRun): void {
+  private recoveryIsOnline(): boolean {
+    return this.recoveryWindow.navigator?.onLine !== false;
+  }
+
+  private recoveryIsVisible(): boolean {
+    return this.recoveryWindow.document?.visibilityState !== "hidden"
+      && (this.options.recoveryEnvironment?.isVisible() ?? true);
+  }
+
+  private bindRecoveryEnvironment(): void {
+    this.recoveryWindow = this.options.recoveryEnvironment?.ownerWindow() ?? window;
+    let detachOwner = () => {};
+    let online = this.recoveryIsOnline();
+    let visible = this.recoveryIsVisible();
+    const refresh = () => {
+      const owner = this.options.recoveryEnvironment?.ownerWindow() ?? window;
+      const migrated = this.recoveryWindow !== owner;
+      if (migrated) {
+        this.clearResynchronizationTimer();
+        this.recoveryWindow = owner;
+        bindOwner();
+      }
+      const nextOnline = this.recoveryIsOnline();
+      const nextVisible = this.recoveryIsVisible();
+      const changed = migrated || nextOnline !== online || nextVisible !== visible;
+      const resume = nextOnline && nextVisible && (!online || !visible || migrated);
+      online = nextOnline;
+      visible = nextVisible;
+      if (!changed || !this.resynchronizationPending) return;
+      this.clearResynchronizationTimer();
+      if (this.active) this.scheduleResynchronization(this.active, resume);
+    };
+    const bindOwner = () => {
+      detachOwner();
+      const owner = this.recoveryWindow;
+      owner.addEventListener?.("online", refresh);
+      owner.addEventListener?.("offline", refresh);
+      owner.document?.addEventListener("visibilitychange", refresh);
+      detachOwner = () => {
+        owner.removeEventListener?.("online", refresh);
+        owner.removeEventListener?.("offline", refresh);
+        owner.document?.removeEventListener("visibilitychange", refresh);
+      };
+    };
+    bindOwner();
+    const detachSurface = this.options.recoveryEnvironment?.subscribe(refresh);
+    refresh();
+    this.detachRecoveryEnvironment = () => {
+      detachSurface?.();
+      detachOwner();
+    };
+  }
+
+  private scheduleResynchronization(active: ActiveRun, immediate = false): void {
     const transport = this.transport;
     if (
       !transport
@@ -2118,23 +2182,30 @@ export class AgentChatSession implements ChatSession {
       || active.terminal
       || (active.cancelRequested
         && this.pendingCancelRequestId !== active.requestId)
+    ) return;
+    this.resynchronizationPending = true;
+    if (
+      !this.recoveryIsOnline()
       || this.resynchronizationTimer !== null
       || this.resynchronizationInFlight
     ) return;
 
-    const attempt = this.resynchronizationAttempt++;
+    // Only actual attempts advance backoff. Hiding a view or going offline must
+    // not count as a failed request, and snapshot-only success must not reset it.
+    const attempt = this.resynchronizationAttempt;
     const exponentialDelay = Math.min(
-      250 * (2 ** attempt),
+      2_000 * (2 ** attempt),
       MAX_RESYNCHRONIZATION_DELAY_MS,
     );
     const configuredDelay = this.options.resynchronizationDelayMs
       ? this.options.resynchronizationDelayMs(attempt)
       : exponentialDelay * (0.5 + Math.random() * 0.5);
-    const delay = Number.isFinite(configuredDelay)
+    let delay = immediate ? 0 : Number.isFinite(configuredDelay)
       ? Math.max(0, Math.min(configuredDelay, MAX_RESYNCHRONIZATION_DELAY_MS))
       : MAX_RESYNCHRONIZATION_DELAY_MS;
+    if (!this.recoveryIsVisible()) delay = Math.max(delay, HIDDEN_RESYNCHRONIZATION_DELAY_MS);
     const generation = this.generation;
-    this.resynchronizationTimer = window.setTimeout(() => {
+    this.resynchronizationTimer = this.recoveryWindow.setTimeout(() => {
       this.resynchronizationTimer = null;
       if (
         this.generation !== generation
@@ -2144,8 +2215,14 @@ export class AgentChatSession implements ChatSession {
         || (active.cancelRequested
           && this.pendingCancelRequestId !== active.requestId)
       ) return;
+      if (!this.recoveryIsOnline()) return;
+      if (!this.recoveryIsVisible() && delay < HIDDEN_RESYNCHRONIZATION_DELAY_MS) {
+        this.scheduleResynchronization(active);
+        return;
+      }
       const stallRecovery = this.currentStallRecovery(active);
       if (stallRecovery) active.streamSupersededByRecovery = true;
+      this.resynchronizationAttempt += 1;
       this.resynchronizationInFlight = true;
       void (stallRecovery ? transport.forceReconnect() : transport.connect())
         .catch((error) => this.reportLocalIssue(error))
@@ -2172,12 +2249,15 @@ export class AgentChatSession implements ChatSession {
       : null;
   }
 
+  private clearResynchronizationTimer(): void {
+    if (this.resynchronizationTimer === null) return;
+    this.recoveryWindow.clearTimeout(this.resynchronizationTimer);
+    this.resynchronizationTimer = null;
+  }
+
   private clearResynchronization(resetAttempt = true): void {
-    if (this.resynchronizationTimer !== null) {
-      window.clearTimeout(this.resynchronizationTimer);
-      this.resynchronizationTimer = null;
-    }
-    this.resynchronizationInFlight = false;
+    this.clearResynchronizationTimer();
+    this.resynchronizationPending = false;
     if (resetAttempt) this.resynchronizationAttempt = 0;
   }
 
@@ -3800,7 +3880,6 @@ export class AgentChatSession implements ChatSession {
       headers: { "x-plugin-version": this.options.pluginVersion },
       licenseKey,
       body: request,
-      preserveResponseHeaders: true,
       allowTransportFallback: true,
       responseEncoding: "arrayBuffer",
       maxResponseBytes: 64 * 1024,

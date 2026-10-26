@@ -65,42 +65,6 @@ export function mergeNodeConfigWithDefaults(
   };
 }
 
-export function getUnknownNodeConfigKeys(
-  definition: StudioNodeDefinition,
-  config: Record<string, StudioJsonValue> | undefined | null
-): Record<string, StudioJsonValue> {
-  const normalized = normalizeConfigObject(config);
-  const known = new Set(definition.configSchema.fields.map((field) => field.key));
-  const unknown: Record<string, StudioJsonValue> = {};
-  for (const [key, value] of Object.entries(normalized)) {
-    if (!known.has(key)) {
-      unknown[key] = value;
-    }
-  }
-  return unknown;
-}
-
-export function rebuildConfigWithUnknownKeys(
-  definition: StudioNodeDefinition,
-  config: Record<string, StudioJsonValue> | undefined | null,
-  unknownOverrides: Record<string, StudioJsonValue>
-): Record<string, StudioJsonValue> {
-  const normalized = normalizeConfigObject(config);
-  const known = new Set(definition.configSchema.fields.map((field) => field.key));
-  const next: Record<string, StudioJsonValue> = {};
-  for (const [key, value] of Object.entries(normalized)) {
-    if (known.has(key)) {
-      next[key] = value;
-    }
-  }
-  for (const [key, value] of Object.entries(unknownOverrides || {})) {
-    if (key.trim().length > 0 && !known.has(key)) {
-      next[key] = value;
-    }
-  }
-  return next;
-}
-
 export function validateNodeConfig(
   definition: StudioNodeDefinition,
   config: Record<string, StudioJsonValue> | undefined | null
@@ -157,9 +121,6 @@ export function validateNodeConfig(
             message: "Must be a string value.",
           });
           break;
-        }
-        if (field.optionsSource === "image_aspect_ratios" && value !== "" && !/^(auto|match_input_image|[0-9]{1,2}(?:\.[0-9]{1,2})?:[0-9]{1,2}(?:\.[0-9]{1,2})?)$/.test(value)) {
-          errors.push({ fieldKey: field.key, message: "Must be an aspect ratio or the model default." });
         }
         if (field.type === "select" && Array.isArray(field.options) && field.options.length > 0) {
           const allowed = new Set(field.options.map((option) => option.value));

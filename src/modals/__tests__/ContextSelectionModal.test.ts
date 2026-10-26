@@ -204,6 +204,31 @@ describe("ContextSelectionModal", () => {
     expect(document.body.contains(modal.modalEl)).toBe(false);
   });
 
+  it("adds files to one message without offering audio or pinning copy", async () => {
+    const { modal, onSelect } = harness({
+      autoFocusSearch: false,
+      purpose: "message",
+      isFileAlreadyPinned: (file) => file.path === "notes/project.md",
+    });
+
+    expect(modal.modalEl.textContent).toContain("Add notes to this message");
+    expect(modal.modalEl.textContent).toContain("These files are sent with this message only.");
+    expect(modal.modalEl.textContent).not.toContain("Pin files");
+    expect(modal.modalEl.textContent).not.toContain("recording");
+    expect(modal.modalEl.querySelector('[data-testid="modal.context.filter.audio"]')).toBeNull();
+    expect(modal.modalEl.querySelectorAll(".ss-context-file-item")).toHaveLength(7);
+    const taken = modal.modalEl.querySelector<HTMLInputElement>('input[aria-label="notes/project.md, already added"]')!;
+    expect(taken.disabled).toBe(true);
+    expect(taken.closest("li")?.textContent).toContain("Added");
+
+    modal.modalEl.querySelector<HTMLInputElement>('input[aria-label="Add notes/meeting.md"]')!.click();
+    const add = modal.modalEl.querySelector<HTMLButtonElement>('[data-testid="modal.context.add"]')!;
+    expect(add.textContent).toBe("Add 1 file");
+    add.click();
+    await Promise.resolve();
+    expect(onSelect).toHaveBeenCalledWith([expect.objectContaining({ path: "notes/meeting.md" })], expect.any(AbortSignal));
+  });
+
   it("keeps the dialog open and restores controls when adding fails", async () => {
     const { modal, onSelect } = harness({ autoFocusSearch: false });
     onSelect.mockRejectedValueOnce(new Error("Processing failed"));
@@ -255,7 +280,7 @@ describe("ContextSelectionModal", () => {
     onSelect.mockImplementationOnce(() => new Promise<void>(() => undefined));
     modal.modalEl.querySelector<HTMLButtonElement>('[data-testid="modal.context.pin"]')!.click();
     const signal = onSelect.mock.calls[0][1] as AbortSignal;
-    expect(signal).toBeInstanceOf(frame.contentWindow!.AbortSignal);
+    expect(signal).toBeInstanceOf(frame.contentWindow!.window.AbortSignal);
     modal.modalEl.querySelector<HTMLButtonElement>('[data-testid="modal.context.cancel"]')!.click();
     expect(signal.aborted).toBe(true);
     frame.remove();
@@ -278,6 +303,51 @@ describe("ContextSelectionModal", () => {
     modal.modalEl.querySelector<HTMLButtonElement>(".ss-context-load-more")!.click();
     expect(modal.modalEl.querySelectorAll(".ss-context-file-item")).toHaveLength(150);
     expect(modal.modalEl.querySelector(".ss-context-load-more")).toBeNull();
+  });
+
+  it("keeps one list listener through 30 filters and load-more renders", () => {
+    const addListener = jest.spyOn(EventTarget.prototype, "addEventListener");
+    const app = new App();
+    (app.vault.getFiles as jest.Mock).mockReturnValue(
+      Array.from({ length: 150 }, (_, index) => new TFile({ path: `notes/file-${index}.md` })),
+    );
+    const modal = new ContextSelectionModal(app, jest.fn(), {}, { autoFocusSearch: false });
+    modal.open();
+    const list = modal.modalEl.querySelector<HTMLUListElement>(".ss-context-file-list")!;
+    const search = modal.modalEl.querySelector<HTMLInputElement>('input[type="search"]')!;
+    const detachedCheckbox = list.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+
+    for (let pass = 0; pass < 30; pass++) {
+      search.value = pass % 2 === 0 ? "file" : "notes";
+      search.dispatchEvent(new Event("input", { bubbles: true }));
+      list.querySelector<HTMLButtonElement>(".ss-context-load-more")!.click();
+      expect(list.querySelectorAll(".ss-context-file-item")).toHaveLength(150);
+    }
+
+    const registrations = addListener.mock.calls.filter((_, index) => {
+      const target = addListener.mock.contexts[index] as HTMLElement;
+      return target === list || target.matches?.(".ss-context-file-label input, .ss-context-load-more");
+    });
+    addListener.mockRestore();
+    expect(registrations.map(([type]) => type)).toEqual(["click"]);
+
+    detachedCheckbox.click();
+    expect(modal.modalEl.textContent).not.toContain("Pin 1 file");
+    const checkbox = list.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')[149]!;
+    checkbox.click();
+    expect(modal.modalEl.textContent).toContain("Pin 1 file");
+    expect(checkbox.closest("li")?.classList.contains("is-selected")).toBe(true);
+    checkbox.click();
+    expect(modal.modalEl.textContent).not.toContain("Pin 1 file");
+
+    const removeListener = jest.spyOn(list, "removeEventListener");
+    modal.close();
+    expect(removeListener).toHaveBeenCalledWith("click", expect.any(Function));
+    modal.open();
+    const reopenedCheckbox = modal.modalEl.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+    reopenedCheckbox.click();
+    expect(modal.modalEl.textContent).toContain("Pin 1 file");
+    modal.close();
   });
 
   it("only resolves thumbnails for each rendered image batch", () => {

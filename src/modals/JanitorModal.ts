@@ -118,14 +118,17 @@ export class JanitorModal extends StandardModal {
       icon: item.file instanceof TFile ? janitorFileIcon(item.file.extension) : "folder",
       ...(group.kind !== "empty" ? { detail: formatJanitorFileSize([{ stat: { size: item.size } }]) } : {}),
     }));
+    const count = group.items.length;
+    const subject = group.kind === "empty"
+      ? `${count} empty ${count === 1 ? "item" : "items"}`
+      : `${count} ${count === 1 ? "file" : "files"} (${formatJanitorFileSize(group.items.map((item) => ({ stat: { size: item.size } })))})`;
     const confirmation = new JanitorConfirmationListModal(this.app, {
-      title: `Move ${definition.title} to Trash`,
-      description: `${group.items.length} ${group.kind === "empty" ? "empty items" : `files from ${group.directory}`} will move to Obsidian Trash. You can restore them later.`,
-      ...(group.kind !== "empty" ? { summary: `${group.items.length} files (${formatJanitorFileSize(group.items.map((item) => ({ stat: { size: item.size } })))})` } : {}),
+      title: `Move ${definition.title.toLowerCase()} to Trash`,
+      description: `${subject} will move to Trash, following Obsidian’s trash setting.`,
       groups: group.kind === "empty" ? [
-        { title: "Empty Files", icon: "file-text", items: previewItems(fileItems), previewLimit: 5, moreLabel: "files" },
-        { title: "Empty Folders", icon: "folder", items: previewItems(folderItems), previewLimit: 5, moreLabel: "folders" },
-      ] : [{ items: previewItems(group.items), previewLimit: 10, moreLabel: "files" }],
+        { title: `Empty files (${fileItems.length})`, items: previewItems(fileItems), previewLimit: 5 },
+        { title: `Empty folders (${folderItems.length})`, items: previewItems(folderItems), previewLimit: 5 },
+      ] : [{ items: previewItems(group.items), previewLimit: 10 }],
     });
     const task = this.beginAsyncTask("janitor-confirmation");
     if (!await confirmation.openAndWait() || !task.isCurrent()) return;

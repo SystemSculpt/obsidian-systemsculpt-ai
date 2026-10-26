@@ -1,4 +1,5 @@
-import { App, Component, setIcon } from "obsidian";
+import { App, Component, Menu, setIcon } from "obsidian";
+import { getHostOperatingSystem } from "../../platform/hostCapabilities";
 import {
   applyPluginSurface,
   createUiAction,
@@ -6,8 +7,11 @@ import {
 } from "../../core/ui/surface";
 import {
   cancelSurfaceAnimationFrame,
+  getSurfaceOwnerWindow,
   requestSurfaceAnimationFrame,
 } from "../../core/ui/surface/SurfaceDomContext";
+import { bindSurfaceActivity } from "../../core/ui/surface/SurfaceActivity";
+import { observeLeafVisibility } from "../../core/ui/surface/LeafVisibility";
 import type { ChatMessage } from "../../types";
 import { contentKeys, sameContentKeys } from "../../utils/immutableJson";
 import {
@@ -17,14 +21,20 @@ import {
 import {
   AgentComposer,
   type AgentComposerAttachment,
+  type AgentComposerOptions,
   type AgentComposerSubmit,
 } from "./AgentComposer";
 import type { ChatMessageAttachment } from "./attachments/ChatMessageAttachments";
 import type { ChatDocumentAttachmentProcessor } from "./attachments/ChatMessageAttachments";
 import type { ThinAgentInputLimits } from "../../services/managed/ThinAgentInputLimits";
-import type { CreditsBalanceSnapshot } from "../../services/SystemSculptService";
-import type { AgentArtifact, AgentConversationSnapshot } from "../../chat/ChatConversation";
+import type { AgentArtifact, AgentConversationSnapshot, ManagedAgentError } from "../../chat/ChatConversation";
 import { presentAgentConversation } from "./AgentConversationPresentation";
+import type { ApprovalAnswer } from "./AgentApprovalCards";
+import type { AgentToolPart } from "../../chat/ChatConversation";
+import { presentEmptyState, type AgentChromeState } from "./AgentChatChrome";
+import { AgentEmptyState, type AgentEmptyStateOptions } from "./AgentEmptyState";
+import { AgentRunLine, containMenuEscape, returnFocusAfterMenu, type AgentRunLineOptions } from "./AgentRunLine";
+import { ChatHistoryPanel, type ChatHistoryPanelOptions } from "../history/ChatHistoryPanel";
 import {
   AgentConversationRenderer,
   type AgentConversationRendererIncidentSnapshot,
@@ -40,9 +50,10 @@ export type AgentQueuedFollowUp = Readonly<{
 
 export type AgentWorkspaceOptions = Readonly<{
   app: App;
+  visibilityRoot?: HTMLElement;
   sourcePath: () => string;
   reducedMotion?: () => boolean;
-  onSubmit: (submission: AgentComposerSubmit) => void | Promise<void>;
+  onSubmit: AgentComposerOptions["onSubmit"];
   onStop: () => void | Promise<void>;
   onAttach: () => void | Promise<void>;
   onVaultContextDrop?: (path: string) => void | Promise<void>;
@@ -50,10 +61,13 @@ export type AgentWorkspaceOptions = Readonly<{
   attachmentLimits?: ThinAgentInputLimits;
   onMic?: () => void | Promise<void>;
   onRemoveAttachment: (attachment: AgentComposerAttachment) => void | Promise<void>;
-  onApprove: (approvalId: string, approved: boolean, rememberForChat?: boolean) => void | Promise<void>;
+  onApprove: ApprovalAnswer;
+  isApprovalVisible?: () => boolean;
+  onHiddenApproval?: (part: AgentToolPart) => void;
   onOpenArtifact: (artifact: AgentArtifact) => void | Promise<void>;
   onCopyArtifactPath: (artifact: AgentArtifact) => boolean | Promise<boolean>;
   onRetryFailedTurn?: (messageId: string) => void | Promise<void>;
+  onPrepareIncidentReport?: (reportId: string, retry?: boolean) => Promise<boolean>;
   onCopyIncidentReport?: (
     reportId: string,
   ) => boolean | Promise<boolean>;
@@ -63,14 +77,52 @@ export type AgentWorkspaceOptions = Readonly<{
   onCopyText?: (text: string) => boolean | Promise<boolean>;
   onNewChat: () => void | Promise<void>;
   onOpenHistory: () => void | Promise<void>;
-  onOpenSettings: () => void | Promise<void>;
+  /** Detect again resolves true when this chat's agent is ready, enabling Retry. */
+  onDetectAgain?: () => boolean | void | Promise<boolean | void>;
+  onUseHosted?: () => void | Promise<void>;
+  /** "Add credits" in an out-of-credits error: the credits modal. */
   onOpenCredits?: () => void | Promise<void>;
-  onViewPlans?: () => void | Promise<void>;
+  /** Who answers in this chat ("Claude Code", "Codex", "SystemSculpt"). */
+  backendName?: () => string;
+  /** Saves a title typed into the header. */
+  onRename?: (title: string) => void | Promise<void>;
+  /** Fills the header's More menu; the view adds the same items to its pane menu. */
+  buildMoreMenu?: (menu: Menu) => void;
+  onViewPlans?: (error?: ManagedAgentError) => void | Promise<void>;
   showPlanOffer?: boolean;
   onCancelQueued?: (id: string) => void | Promise<void>;
   onRunQueuedNow?: (id: string) => void | Promise<void>;
-  onApprovalModeChange?: (mode: "ask" | "full-access") => void;
+  runLine?: AgentRunLineOptions;
+  emptyState?: AgentEmptyStateOptions;
+  history?: ChatHistoryPanelOptions;
 }>;
+
+const NO_RUN_LINE: AgentRunLineOptions = {
+  onSelectBackend: () => undefined,
+  onSelectMode: () => undefined,
+  onModelChange: () => undefined,
+  onDetectAgain: () => undefined,
+  onOpenSettings: () => undefined,
+  onAction: () => undefined,
+};
+
+const NO_EMPTY_STATE: AgentEmptyStateOptions = {
+  onStarter: () => undefined,
+  onAction: () => undefined,
+};
+
+const NO_HISTORY: ChatHistoryPanelOptions = {
+  loadRows: async () => [],
+  loadSearchText: async () => "",
+  isCurrent: () => false,
+  isRunning: () => false,
+  onOpen: () => undefined,
+  onNewChat: () => undefined,
+  onClose: () => undefined,
+  onToggleFavorite: async () => undefined,
+  onRename: async () => undefined,
+  onDelete: async () => false,
+};
 
 function iconButton(parent: HTMLElement, testId: string, label: string, icon: string): HTMLButtonElement {
   const element = createUiAction(parent, {
@@ -85,14 +137,6 @@ function iconButton(parent: HTMLElement, testId: string, label: string, icon: st
 }
 
 let workspaceLabelSequence = 0;
-
-function formatCredits(value: number): string {
-  try {
-    return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(value);
-  } catch {
-    return String(Math.round(value));
-  }
-}
 
 const PENDING_AGENT_SNAPSHOT: AgentConversationSnapshot = Object.freeze({
   runId: null,
@@ -150,10 +194,22 @@ export class AgentWorkspace extends Component {
   public readonly viewport: HTMLElement;
   public readonly renderer: AgentConversationRenderer;
   public readonly composer: AgentComposer;
+  public readonly runLine: AgentRunLine;
+  public readonly historyPanel: ChatHistoryPanel;
+  private readonly header: HTMLElement;
   private readonly titleElement: HTMLElement;
-  private readonly creditsButton: HTMLButtonElement | null;
-  private readonly emptyState: HTMLElement;
-  private readonly planOffer: HTMLElement;
+  private readonly titleButton: HTMLButtonElement;
+  private titleText = "New chat";
+  private readonly emptyState: AgentEmptyState;
+  private readonly liveRegion: HTMLElement;
+  private announceTimer: number | null = null;
+  private announceTimerWindow: Window | null = null;
+  private loading = false;
+  private pendingAnnouncements: string[] = [];
+  private chromeKey = "";
+  private historyReturnFocus: HTMLElement | null = null;
+  private moreMenu: Menu | null = null;
+  private showPlanOffer = false;
   private readonly banner: HTMLElement;
   private readonly queueElement: HTMLElement;
   private readonly jumpButton: HTMLButtonElement;
@@ -163,6 +219,7 @@ export class AgentWorkspace extends Component {
   private history: readonly ChatMessage[] = [];
   /** Frozen transcript messages compare by identity instead of by JSON. */
   private historyKeys: readonly unknown[] = [];
+  private historyNeedsRender = false;
   private snapshot: AgentConversationSnapshot | null = null;
   private runPending = false;
   private pendingTurnId: string | null = null;
@@ -182,6 +239,10 @@ export class AgentWorkspace extends Component {
     cancel: () => void;
   }> | null = null;
   private unloaded = false;
+  private visible = true;
+  private deferredChrome: AgentChromeState | null = null;
+  private deferredQueue: readonly AgentQueuedFollowUp[] | null = null;
+  private snapshotRenderWindow: Window | null = null;
   private lifecycleGeneration = 0;
   private incidentMetricsGeneration = 0;
   private incidentRenderPassCount = 0;
@@ -201,80 +262,90 @@ export class AgentWorkspace extends Component {
     applyPluginSurface(this.element, "view");
     this.element.classList.toggle("is-reduced-motion", options.reducedMotion?.() === true);
 
-    const header = this.element.createDiv({ cls: "systemsculpt-agent-header" });
+    this.header = this.element.createDiv({ cls: "systemsculpt-agent-header" });
     const titleId = `systemsculpt-agent-title-${++workspaceLabelSequence}`;
-    this.titleElement = header.createDiv({
+    this.titleElement = this.header.createDiv({
       cls: "systemsculpt-agent-header-title",
-      text: "New chat",
       attr: { id: titleId, role: "heading", "aria-level": "2" },
     });
-    const headerActions = header.createDiv({ cls: "systemsculpt-agent-header-actions" });
-    this.creditsButton = options.onOpenCredits
-      ? createUiAction(headerActions, {
-          label: "Credits",
-          testId: "chat.header.credits",
-          size: "small",
-        })
-      : null;
-    if (this.creditsButton) {
-      this.creditsButton.addClass("systemsculpt-agent-credits");
-      this.creditsButton.setAttribute("aria-label", "Credits");
-      this.registerDomEvent(this.creditsButton, "click", () => void this.options.onOpenCredits?.());
-    }
+    this.titleButton = this.titleElement.createEl("button", {
+      cls: "systemsculpt-agent-title-button",
+      text: this.titleText,
+      attr: { type: "button", "data-testid": "chat.header.title", "aria-description": "Rename chat" },
+    });
+    this.titleButton.addEventListener("click", () => this.beginRename());
+    const headerActions = this.header.createDiv({ cls: "systemsculpt-agent-header-actions" });
     const history = iconButton(headerActions, "chat.header.history", "Chat history", "history");
     const create = iconButton(headerActions, "chat.header.new", "New chat", "square-pen");
-    const settings = iconButton(headerActions, "chat.header.settings", "Chat settings", "settings-2");
+    const more = iconButton(headerActions, "chat.header.more", "More", "more-horizontal");
+    const modifier = getHostOperatingSystem() === "macOS" ? "Meta" : "Control";
+    history.setAttribute("aria-keyshortcuts", `${modifier}+K`);
+    create.setAttribute("aria-keyshortcuts", `${modifier}+Shift+O`);
+    more.setAttribute("aria-haspopup", "menu");
+    for (const button of [history, create, more]) button.addClass("systemsculpt-agent-header-button");
     this.registerDomEvent(history, "click", () => void this.options.onOpenHistory());
     this.registerDomEvent(create, "click", () => void this.options.onNewChat());
-    this.registerDomEvent(settings, "click", () => void this.options.onOpenSettings());
+    this.registerDomEvent(more, "click", () => this.showMoreMenu(more));
 
     this.banner = this.element.createDiv({
       cls: "systemsculpt-agent-banner",
-      attr: { role: "status", "aria-live": "polite", "aria-atomic": "true" },
+      attr: { "aria-atomic": "true" },
     });
     this.banner.toggleAttribute("hidden", true);
 
-    this.viewport = this.element.createDiv({
+    const transcript = this.element.createDiv({ cls: "systemsculpt-agent-transcript" });
+    this.viewport = transcript.createDiv({
       cls: "systemsculpt-agent-viewport",
       attr: { tabindex: "0" },
     });
-    this.emptyState = this.viewport.createDiv({ cls: "systemsculpt-agent-empty" });
-    this.emptyState.createEl("strong", { text: "What should we work on?" });
-    this.emptyState.createDiv({ text: "Ask about your notes or give SystemSculpt a task." });
-    this.planOffer = this.emptyState.createDiv({ cls: "systemsculpt-agent-plan-offer" });
-    this.planOffer.toggleAttribute("hidden", !options.showPlanOffer || !options.onViewPlans);
-    if (options.onViewPlans) {
-      this.planOffer.createDiv({ text: "Explore hosted AI chat, semantic search, and transcription." });
-      const plans = createUiAction(this.planOffer, {
-        label: "View plans",
-        testId: "chat.empty.view-plans",
-        size: "small",
-      });
-      this.registerDomEvent(plans, "click", () => void this.options.onViewPlans?.());
-    }
+    this.emptyState = new AgentEmptyState(this.viewport, options.emptyState ?? NO_EMPTY_STATE);
 
     this.renderer = new AgentConversationRenderer(this.viewport, {
       app: options.app,
       sourcePath: options.sourcePath,
-      labelledBy: titleId,
       beginLayoutMutation: (disclosureControl, mutationTarget) => this.unloaded
         ? undefined
         : disclosureControl
           ? this.scroller.beginDisclosureLayoutMutation(disclosureControl)
           : this.scroller.beginLayoutMutation(mutationTarget),
-      onApprove: options.onApprove,
+      onApprove: (approvalId, approved, rememberForSession, answers) => {
+        const answered = answers
+          ? options.onApprove(approvalId, approved, rememberForSession, answers)
+          : rememberForSession
+            ? options.onApprove(approvalId, approved, rememberForSession)
+            : options.onApprove(approvalId, approved);
+        return Promise.resolve(answered).then((result) => {
+          // After a denial with nothing else waiting, invite the person to steer.
+          if (!approved && !answers && result !== false && !this.hasPendingApprovalOtherThan(approvalId)) {
+            this.composer.showSteeringPlaceholder();
+          }
+          return result;
+        });
+      },
+      onReviewApproval: () => this.hideHistory(false),
+      approvalComposer: () => this.composer?.element,
+      isApprovalVisible: options.isApprovalVisible,
+      onHiddenApproval: options.onHiddenApproval,
       onOpenArtifact: options.onOpenArtifact,
       onCopyArtifactPath: options.onCopyArtifactPath,
+      showPlanOffer: () => this.showPlanOffer,
+      onViewPlans: options.onViewPlans,
       onRetryFailedTurn: options.onRetryFailedTurn,
+      onPrepareIncidentReport: options.onPrepareIncidentReport,
       onCopyIncidentReport: options.onCopyIncidentReport,
       onRetryMessage: options.onRetryMessage,
       onResubmitMessage: options.onResubmitMessage,
       onCancelMessageEdit: options.onCancelMessageEdit,
       onCopyText: options.onCopyText,
+      backendName: options.backendName,
+      onAnnounce: (text) => this.announce(text),
+      onDetectAgain: options.onDetectAgain,
+      onUseHosted: options.onUseHosted,
+      onOpenCredits: options.onOpenCredits,
     });
     this.addChild(this.renderer);
 
-    this.jumpButton = createUiAction(this.element, {
+    this.jumpButton = createUiAction(transcript, {
       label: "Latest",
       testId: "chat.jump-to-latest",
       icon: "arrow-down",
@@ -300,12 +371,13 @@ export class AgentWorkspace extends Component {
       attr: {
         role: "list",
         "aria-label": "Queued follow-ups",
-        "aria-live": "polite",
       },
     });
     this.queueElement.toggleAttribute("hidden", true);
 
     this.composer = new AgentComposer(this.element, {
+      app: options.app,
+      sourcePath: options.sourcePath,
       onSubmit: options.onSubmit,
       onStop: options.onStop,
       onAttach: options.onAttach,
@@ -314,12 +386,167 @@ export class AgentWorkspace extends Component {
       attachmentLimits: options.attachmentLimits,
       onMic: options.onMic,
       onRemoveAttachment: options.onRemoveAttachment,
-      onApprovalModeChange: options.onApprovalModeChange,
+      announce: (message) => this.announce(message),
       onHeightChange: () => {
         if (!this.unloaded) this.scroller.notifyViewportGeometryChanged();
       },
     });
     this.addChild(this.composer);
+
+    this.runLine = new AgentRunLine(this.composer.footerSlot, options.runLine ?? NO_RUN_LINE);
+    this.addChild(this.runLine);
+
+    this.historyPanel = new ChatHistoryPanel(this.element, {
+      ...(options.history ?? NO_HISTORY),
+      announce: (message) => this.announce(message),
+    });
+    this.addChild(this.historyPanel);
+
+    // One polite live region per view (spec 6.3); streaming text is never announced.
+    this.liveRegion = this.element.createDiv({
+      cls: "systemsculpt-agent-sr-only",
+      attr: { role: "status", "aria-live": "polite", "aria-atomic": "true", "data-testid": "chat.announcer" },
+    });
+    this.register(() => {
+      if (this.announceTimer !== null) this.announceTimerWindow?.clearTimeout(this.announceTimer);
+      this.announceTimer = null;
+      this.announceTimerWindow = null;
+      this.pendingAnnouncements = [];
+    });
+  }
+
+  /** A one-time info line from the agent, shown in the conversation. */
+  public showNotice(text: string): void {
+    this.renderer.showNotice(text);
+  }
+
+  /** A saved chat is loading; the conversation shows its skeleton after 300 ms. */
+  public setLoading(loading: boolean): void {
+    this.loading = loading;
+    if (!this.visible) return;
+    this.element.classList.toggle("is-loading-chat", loading);
+    this.renderer.setLoading(loading);
+    this.syncEmpty();
+  }
+
+  /** Polite announcement for screen readers. */
+  public announce(text: string): void {
+    if (!this.isRenderingVisible()) return;
+    this.pendingAnnouncements.push(text);
+    if (this.announceTimer !== null) return;
+    // Clearing first makes a repeated message announce again. Preserve a burst
+    // in order rather than letting a fast reply overwrite its start or approval.
+    this.liveRegion.setText("");
+    const ownerWindow = getSurfaceOwnerWindow(this.liveRegion);
+    this.announceTimerWindow = ownerWindow;
+    this.announceTimer = ownerWindow.setTimeout(() => {
+      this.announceTimer = null;
+      this.announceTimerWindow = null;
+      this.liveRegion.setText(this.pendingAnnouncements.join(" "));
+      this.pendingAnnouncements = [];
+    }, 50);
+  }
+
+  /** Renders the run line and the empty state for the current chat. */
+  public setChrome(state: AgentChromeState): void {
+    if (!this.visible) { this.deferredChrome = state; return; }
+    // Snapshots arrive many times a second while a turn streams.
+    const key = JSON.stringify(state, (_key, value: unknown) => value instanceof Set ? [...value] : value);
+    if (key === this.chromeKey) return;
+    this.chromeKey = key;
+    this.runLine.render(state);
+    this.emptyState.render(presentEmptyState(state));
+  }
+
+  /** The header hides its title on mobile, where Obsidian's own header shows it. */
+  public isTitleVisible(): boolean {
+    return this.titleElement.getClientRects().length > 0;
+  }
+
+  public get isHistoryOpen(): boolean {
+    return this.historyPanel.isOpen;
+  }
+
+  /** History replaces the conversation and composer until it closes. */
+  public showHistory(): void {
+    if (this.historyPanel.isOpen) {
+      this.historyPanel.focusSearch();
+      return;
+    }
+    const active = this.element.ownerDocument.activeElement;
+    this.historyReturnFocus = active instanceof HTMLElement && this.element.contains(active) ? active : null;
+    this.element.classList.add("is-history-open");
+    this.historyPanel.open();
+  }
+
+  public hideHistory(restoreFocus = true): void {
+    if (!this.historyPanel.isOpen) return;
+    this.historyPanel.close();
+    this.element.classList.remove("is-history-open");
+    this.scroller.notifyViewportGeometryChanged();
+    const target = this.historyReturnFocus;
+    this.historyReturnFocus = null;
+    if (!restoreFocus) return;
+    if (target?.isConnected && !target.hasAttribute("disabled")) target.focus();
+    else this.composer.focus();
+  }
+
+  private showMoreMenu(anchor: HTMLElement): void {
+    // The same in-view menu style as the run line, whatever the native-menu setting.
+    this.moreMenu?.hide();
+    const menu = new Menu().setUseNativeMenu(false);
+    this.moreMenu = menu;
+    const releaseEscape = containMenuEscape(menu, anchor.ownerDocument);
+    this.options.buildMoreMenu?.(menu);
+    anchor.setAttribute("aria-expanded", "true");
+    menu.onHide(() => {
+      releaseEscape();
+      if (this.moreMenu !== menu) return;
+      this.moreMenu = null;
+      anchor.setAttribute("aria-expanded", "false");
+      returnFocusAfterMenu(this.element, () => this.titleElement.querySelector("input") ? null : anchor);
+    });
+    const rect = anchor.getBoundingClientRect();
+    menu.showAtPosition({ x: rect.right, y: rect.bottom, left: true }, anchor.ownerDocument);
+  }
+
+  /** Edits the title in place: Enter or blur saves, Escape cancels. */
+  public beginRename(): void {
+    if (this.titleElement.querySelector("input")) return;
+    const input = this.titleElement.createEl("input", {
+      cls: "systemsculpt-agent-title-input",
+      attr: {
+        type: "text",
+        value: this.titleText,
+        "aria-label": "Chat title",
+        "data-testid": "chat.header.title-input",
+      },
+    });
+    this.titleButton.toggleAttribute("hidden", true);
+    let settled = false;
+    const finish = (save: boolean): void => {
+      if (settled) return;
+      settled = true;
+      const next = input.value.trim();
+      const focusTitle = this.titleElement.contains(input.ownerDocument.activeElement);
+      input.remove();
+      this.titleButton.toggleAttribute("hidden", false);
+      if (focusTitle) this.titleButton.focus();
+      if (save && next && next !== this.titleText) void this.options.onRename?.(next);
+    };
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && !event.isComposing) {
+        event.preventDefault();
+        finish(true);
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        finish(false);
+      }
+    });
+    input.addEventListener("blur", () => finish(true));
+    input.focus();
+    input.select();
   }
 
   /** Returns a deeply frozen, content-free projection for a local incident report. */
@@ -389,74 +616,56 @@ export class AgentWorkspace extends Component {
     return true;
   }
 
+  private hasPendingApprovalOtherThan(approvalId: string): boolean {
+    return (this.snapshot?.parts ?? []).some((part) =>
+      part.kind === "tool" && part.state === "approval-required" && part.approvalId !== approvalId);
+  }
+
   public setTitle(title: string): void {
-    const normalized = title.trim() || "New chat";
-    this.titleElement.setText(normalized);
+    this.titleText = title.trim() || "New chat";
+    this.titleButton.setText(this.titleText);
+    // The tooltip shows a title the header had to truncate.
+    this.titleButton.setAttribute("aria-label", this.titleText);
   }
 
-  public setCreditsBalance(balance: CreditsBalanceSnapshot | null): void {
-    if (!this.creditsButton) return;
-    this.creditsButton.toggleAttribute("hidden", balance === null);
-    this.creditsButton.classList.toggle(
-      "is-internal-qa",
-      balance?.usageClass === "master_auth",
-    );
-    if (balance === null) {
-      this.creditsButton.classList.remove("is-low", "is-empty");
-      updateUiAction(this.creditsButton, {
-        label: "Credits",
-        title: "Credits",
-      });
-      this.creditsButton.setAttribute("aria-label", "Credits");
-      return;
-    }
-    if (balance.usageClass === "master_auth") {
-      this.creditsButton.classList.remove("is-low", "is-empty");
-      updateUiAction(this.creditsButton, {
-        label: "Internal QA",
-        title: "Internal testing mode",
-      });
-      this.creditsButton.setAttribute("aria-label", "Internal testing mode");
-      return;
-    }
-    const available = balance.availableUnreserved ?? balance.totalRemaining;
-    const held = balance.heldInFlight ?? 0;
-    const label = formatCredits(available);
-    const outOfCredits = balance.totalRemaining <= 0;
-    const unavailable = !outOfCredits && available <= 0;
-    this.creditsButton.classList.toggle("is-low", available <= 1000);
-    this.creditsButton.classList.toggle("is-empty", outOfCredits);
-    const availableTitle = held > 0
-      ? `${label} credits available; ${formatCredits(held)} held in flight; ${formatCredits(balance.totalRemaining)} total.`
-      : `Credits available: ${label}`;
-    updateUiAction(this.creditsButton, {
-      label: outOfCredits ? "Out of credits" : unavailable ? "0 available" : label,
-      title: outOfCredits
-        ? "You are out of credits. Add credits to continue."
-        : unavailable
-          ? `${availableTitle} Add credits or wait for in-flight work to settle.`
-          : availableTitle,
-    });
-    this.creditsButton.setAttribute(
-      "aria-label",
-      outOfCredits
-        ? "Out of credits. Add credits to continue."
-        : unavailable
-          ? "No credits are available. Add credits or wait for in-flight work to settle."
-          : availableTitle,
-    );
-  }
-
-  public setBanner(message: string | null, kind: "info" | "error" = "info"): void {
+  /**
+   * View-level state only: a read-only or corrupted saved chat, or a session
+   * that could not be restored. `action` true offers plans (T-36).
+   */
+  public setBanner(
+    message: string | null,
+    kind: "info" | "error" = "info",
+    action: boolean | Readonly<{ label: string; testId: string; onSelect: () => void }> = false,
+  ): void {
+    const previousMessage = this.banner.dataset.message;
+    this.banner.dataset.message = message ?? "";
     this.banner.toggleAttribute("hidden", !message);
     this.banner.classList.toggle("is-error", kind === "error");
-    this.banner.setAttribute("role", kind === "error" ? "alert" : "status");
-    this.banner.setAttribute("aria-live", kind === "error" ? "assertive" : "polite");
+    if (kind === "error") this.banner.setAttribute("role", "alert");
+    else this.banner.removeAttribute("role");
     this.banner.setText(message ?? "");
+    if (message && message !== previousMessage && kind !== "error") this.announce(message);
+    if (!message) return;
+    if (action === true && this.options.onViewPlans) {
+      const plans = createUiAction(this.banner, {
+        label: "See plans",
+        testId: "chat.banner.see-plans",
+        size: "small",
+      });
+      plans.onclick = () => void this.options.onViewPlans?.();
+    } else if (action && action !== true) {
+      const button = createUiAction(this.banner, {
+        label: action.label,
+        testId: action.testId,
+        size: "small",
+      });
+      button.onclick = () => action.onSelect();
+    }
   }
 
+  /** Whether out-of-credits turns offer plans (T-36); the empty state reads the account itself. */
   public setPlanOfferVisible(visible: boolean): void {
-    this.planOffer.toggleAttribute("hidden", !visible || !this.options.onViewPlans);
+    this.showPlanOffer = visible;
   }
 
   public setAttachments(attachments: readonly AgentComposerAttachment[]): void {
@@ -500,6 +709,7 @@ export class AgentWorkspace extends Component {
   }
 
   public setQueue(queue: readonly AgentQueuedFollowUp[]): void {
+    if (!this.visible) { this.deferredQueue = queue; return; }
     const focusedElement = this.queueElement.contains(
       this.queueElement.ownerDocument.activeElement,
     )
@@ -525,11 +735,19 @@ export class AgentWorkspace extends Component {
         });
         const icon = row.createSpan({
           cls: "systemsculpt-agent-queue-icon",
+          attr: { "aria-hidden": "true" },
         });
         setIcon(icon, "list-end");
+        row.createSpan({ cls: "systemsculpt-agent-queue-label", text: "Queued" });
         row.createSpan({ cls: "systemsculpt-agent-queue-copy" });
         if (this.options.onRunQueuedNow) {
-          const runNow = iconButton(row, "chat.queue.run-now", "Stop and send queued follow-up now", "arrow-up");
+          const runNow = createUiAction(row, {
+            label: "Send now",
+            testId: "chat.queue.run-now",
+            size: "small",
+            tooltip: false,
+          });
+          runNow.addClass("systemsculpt-agent-queue-send-now");
           runNow.dataset.queueAction = "run-now";
           runNow.onclick = () => {
             const currentId = row?.dataset.queueItemId;
@@ -556,7 +774,7 @@ export class AgentWorkspace extends Component {
         ':scope > [data-queue-action="run-now"]',
       );
       if (runNow) {
-        updateUiAction(runNow, { label: `Stop and send ${target} now` });
+        runNow.setAttribute("aria-label", `Stop and send ${target} now`);
       }
       const remove = row.querySelector<HTMLButtonElement>(
         ':scope > [data-queue-action="remove"]',
@@ -595,6 +813,8 @@ export class AgentWorkspace extends Component {
   }
 
   public setHistory(messages: readonly ChatMessage[]): Promise<void> {
+    this.history = messages;
+    if (!this.visible) return Promise.resolve();
     if (
       this.submittedPromptTurnId
       && !messages.some((message) =>
@@ -604,7 +824,7 @@ export class AgentWorkspace extends Component {
       this.scroller.clearSubmittedPromptAnchor();
     }
     const keys = contentKeys(messages);
-    this.history = messages;
+    this.composer.setPromptHistory(messages);
     if (sameContentKeys(keys, this.historyKeys)) return Promise.resolve();
     return this.renderHistoryPreservingAnchor().then(() => {
       this.historyKeys = keys;
@@ -685,8 +905,9 @@ export class AgentWorkspace extends Component {
     retainedSnapshot: AgentConversationSnapshot | null,
     completedTurnId: string | null = null,
   ): Promise<void> {
-    this.flushPendingSnapshotRender();
     this.history = messages;
+    if (!this.visible) return Promise.resolve();
+    this.flushPendingSnapshotRender();
     const generation = this.lifecycleGeneration;
     return this.scheduleRender(async () => {
       if (!this.isLifecycleCurrent(generation)) return;
@@ -742,6 +963,9 @@ export class AgentWorkspace extends Component {
   }
 
   public setAgentSnapshot(snapshot: AgentConversationSnapshot | null): Promise<void> {
+    // Explicit projection resets begin a new chat or admitted turn (including
+    // automatic queue promotion). Ordinary settlement keeps denial steering.
+    if (!snapshot) this.composer.clearSteeringPlaceholder();
     const currentTurnId = this.runPending
       ? this.pendingTurnId ?? this.snapshot?.turnId ?? null
       : this.snapshot?.turnId ?? null;
@@ -750,6 +974,10 @@ export class AgentWorkspace extends Component {
     }
     this.snapshot = snapshot;
     if (this.unloaded) return Promise.resolve();
+    if (!this.visible) {
+      this.notifyHiddenApproval();
+      return Promise.resolve();
+    }
     if (!snapshot && !this.runPending) {
       // Clearing to "no run" is authoritative and idempotent, so retire the
       // active turn immediately. The scheduled render can coalesce, delay, or
@@ -794,6 +1022,7 @@ export class AgentWorkspace extends Component {
     }
     this.runPending = pending;
     this.pendingTurnId = pending ? turnId ?? this.pendingTurnId : null;
+    if (!this.visible) return;
     this.composer.setRunning(presentAgentConversation(this.snapshot, pending).composerRunning);
     this.syncEmpty();
     if (!this.snapshot) {
@@ -812,10 +1041,6 @@ export class AgentWorkspace extends Component {
 
   public setInputText(value: string, options?: Readonly<{ focus?: boolean }>): void {
     this.composer.setValue(value, options);
-  }
-
-  public setApprovalMode(mode: "ask" | "full-access"): void {
-    this.composer.setApprovalMode(mode);
   }
 
   private syncRows(): void {
@@ -847,23 +1072,23 @@ export class AgentWorkspace extends Component {
         discovered.set(id, { priority, row });
       }
     }
-    for (const [id, { row }] of discovered) {
-      const registered = this.registeredRows.get(id);
-      if (registered !== row) {
-        if (registered) this.scroller.unregisterRow(id);
-        this.scroller.registerRow(id, row);
-        this.registeredRows.set(id, row);
+    this.scroller.batchRowChanges(() => {
+      for (const [id, { row }] of discovered) {
+        const registered = this.registeredRows.get(id);
+        if (registered !== row) {
+          if (registered) this.scroller.unregisterRow(id);
+          this.scroller.registerRow(id, row);
+          this.registeredRows.set(id, row);
+        }
       }
-    }
-    for (const id of this.registeredRows.keys()) {
-      if (!discovered.has(id)) {
-        this.scroller.unregisterRow(id);
-        this.registeredRows.delete(id);
+      for (const id of this.registeredRows.keys()) {
+        if (!discovered.has(id)) {
+          this.scroller.unregisterRow(id);
+          this.registeredRows.delete(id);
+        }
       }
-    }
-    const activeResponse = this.renderer.element.querySelector<HTMLElement>(
-      ".systemsculpt-agent-active-run .systemsculpt-agent-turn.is-assistant[data-turn-id]",
-    );
+    });
+    const activeResponse = this.renderer.activeResponseElement;
     const activeTurnId = activeResponse?.dataset.turnId?.trim();
     this.registeredActiveResponse = activeResponse && activeTurnId
       ? { turnId: activeTurnId, row: activeResponse }
@@ -871,9 +1096,7 @@ export class AgentWorkspace extends Component {
   }
 
   private syncActiveResponseRow(): void {
-    const activeResponse = this.renderer.element.querySelector<HTMLElement>(
-      ".systemsculpt-agent-active-run .systemsculpt-agent-turn.is-assistant[data-turn-id]",
-    );
+    const activeResponse = this.renderer.activeResponseElement;
     const turnId = activeResponse?.dataset.turnId?.trim();
     if (!activeResponse || !turnId) {
       if (this.registeredActiveResponse) this.syncRows();
@@ -943,9 +1166,9 @@ export class AgentWorkspace extends Component {
   private syncEmpty(): void {
     const presentation = presentAgentConversation(this.snapshot, this.runPending);
     const hasActivePresentation = presentation.phase !== "idle";
-    this.emptyState.toggleAttribute(
+    this.emptyState.element.toggleAttribute(
       "hidden",
-      this.history.length > 0 || hasActivePresentation,
+      this.element.classList.contains("is-loading-chat") || this.history.length > 0 || hasActivePresentation,
     );
   }
 
@@ -1025,6 +1248,7 @@ export class AgentWorkspace extends Component {
   private ensureSnapshotRender(): void {
     if (
       this.unloaded
+      || !this.visible
       || this.snapshotRenderFrame !== null
       || this.snapshotRenderTaskCount > 0
       || typeof this.pendingSnapshotRender === "undefined"
@@ -1032,8 +1256,10 @@ export class AgentWorkspace extends Component {
       return;
     }
     const generation = this.lifecycleGeneration;
+    this.snapshotRenderWindow = getSurfaceOwnerWindow(this.element);
     this.snapshotRenderFrame = requestSurfaceAnimationFrame(this.element, () => {
       this.snapshotRenderFrame = null;
+      this.snapshotRenderWindow = null;
       if (!this.isLifecycleCurrent(generation)) return;
       this.queuePendingSnapshotRender(generation);
     });
@@ -1052,11 +1278,20 @@ export class AgentWorkspace extends Component {
       const presentation = presentAgentConversation(snapshot, this.runPending);
       this.composer.setRunning(presentation.composerRunning);
       this.syncEmpty();
-      const activeRun = this.renderer.element.querySelector<HTMLElement>(
-        ":scope > .systemsculpt-agent-active-run",
-      );
-      const finishLayoutMutation = this.scroller.beginLayoutMutation(activeRun ?? undefined);
+      const finishLayoutMutation = this.scroller.beginLayoutMutation(this.renderer.activeRoot);
       try {
+        if (this.historyNeedsRender) {
+          try {
+            await this.renderer.renderHistory(this.history);
+          } catch (error) {
+            if (this.isLifecycleCurrent(generation)) this.renderer.showCompletedRenderFallback();
+            throw error;
+          }
+          if (!this.isLifecycleCurrent(generation)) return;
+          this.historyNeedsRender = false;
+          this.historyKeys = contentKeys(this.history);
+          this.syncRows();
+        }
         if (snapshot) {
           await this.renderer.renderActive(snapshot, presentation);
           if (
@@ -1103,11 +1338,15 @@ export class AgentWorkspace extends Component {
     });
   }
 
+  private cancelSnapshotRenderFrame(): void {
+    if (this.snapshotRenderFrame === null) return;
+    cancelSurfaceAnimationFrame(this.snapshotRenderWindow?.document ?? this.element, this.snapshotRenderFrame);
+    this.snapshotRenderFrame = null;
+    this.snapshotRenderWindow = null;
+  }
+
   private flushPendingSnapshotRender(): void {
-    if (this.snapshotRenderFrame !== null) {
-      cancelSurfaceAnimationFrame(this.element, this.snapshotRenderFrame);
-      this.snapshotRenderFrame = null;
-    }
+    this.cancelSnapshotRenderFrame();
     if (typeof this.pendingSnapshotRender !== "undefined") {
       this.queuePendingSnapshotRender(this.lifecycleGeneration);
     }
@@ -1120,12 +1359,8 @@ export class AgentWorkspace extends Component {
       return;
     }
     if (this.followedTurnId === turnId) return;
-    const durableUserRow = Array.from(
-      this.renderer.element.querySelectorAll<HTMLElement>(
-        ".systemsculpt-agent-history .systemsculpt-agent-turn.is-user[data-message-id]",
-      ),
-    ).find((row) => row.dataset.messageId === turnId);
-    if (!durableUserRow) return;
+    const durableUserRow = this.registeredRows.get(`message:${turnId}`);
+    if (!durableUserRow?.classList.contains("is-user")) return;
     const rowId = `response:${turnId}`;
     if (!this.registeredRows.has(rowId)) return;
     if (this.submittedPromptTurnId === turnId) {
@@ -1139,19 +1374,74 @@ export class AgentWorkspace extends Component {
     this.followedTurnId = turnId;
   }
 
+  public isRenderingVisible(): boolean {
+    return this.visible && !this.unloaded;
+  }
+
+  private notifyHiddenApproval(): void {
+    const approval = this.snapshot?.parts.find((part): part is AgentToolPart =>
+      part.kind === "tool" && part.state === "approval-required" && Boolean(part.approvalId)
+      && (part.location === "vault" || Boolean(part.native)));
+    if (approval) this.options.onHiddenApproval?.(approval);
+  }
+
+  private setVisible(visible: boolean): void {
+    if (this.visible === visible || this.unloaded) return;
+    this.visible = visible;
+    this.lifecycleGeneration += 1;
+    this.renderer.setVisible(visible);
+    if (!visible) {
+      if (this.announceTimer !== null) this.announceTimerWindow?.clearTimeout(this.announceTimer);
+      this.announceTimer = null;
+      this.announceTimerWindow = null;
+      this.pendingAnnouncements = [];
+      this.scroller.setStreaming(false);
+      this.cancelSnapshotRenderFrame();
+      this.pendingSnapshotRender = undefined;
+      // Rendering must never hold up transcript commits or queued turns.
+      for (const waiter of this.snapshotRenderWaiters.splice(0)) waiter.resolve();
+      for (const waiter of this.activeSnapshotRenderWaiters) waiter.resolve();
+      this.notifyHiddenApproval();
+      return;
+    }
+    this.setLoading(this.loading);
+    if (this.deferredChrome) this.setChrome(this.deferredChrome);
+    if (this.deferredQueue) this.setQueue(this.deferredQueue);
+    this.deferredChrome = null;
+    this.deferredQueue = null;
+    this.composer.setPromptHistory(this.history);
+    // Reconcile history and the latest snapshot together; a failed history
+    // render must keep the completion fallback instead of clearing the live row.
+    this.historyNeedsRender = true;
+    this.pendingSnapshotRender = this.snapshot;
+    this.ensureSnapshotRender();
+  }
+
   public override onload(): void {
+    this.register(bindSurfaceActivity(this.element));
     this.unloaded = false;
     this.lifecycleGeneration += 1;
+    const detachMigration = this.element.onWindowMigrated?.(() => {
+      if (this.snapshotRenderFrame !== null) {
+        this.cancelSnapshotRenderFrame();
+        this.ensureSnapshotRender();
+      }
+    });
+    if (detachMigration) this.register(detachMigration);
+    this.register(observeLeafVisibility(
+      this.options.visibilityRoot ?? this.element.parentElement!,
+      this.options.app.workspace,
+      visible => this.setVisible(visible),
+    ));
   }
 
   public override onunload(): void {
+    this.moreMenu?.hide();
+    this.moreMenu = null;
     this.pendingDisclosureLayoutMutation?.cancel();
     this.unloaded = true;
     this.lifecycleGeneration += 1;
-    if (this.snapshotRenderFrame !== null) {
-      cancelSurfaceAnimationFrame(this.element, this.snapshotRenderFrame);
-      this.snapshotRenderFrame = null;
-    }
+    this.cancelSnapshotRenderFrame();
     this.pendingSnapshotRender = undefined;
     for (const waiter of this.snapshotRenderWaiters.splice(0)) waiter.resolve();
     for (const waiter of this.activeSnapshotRenderWaiters) waiter.resolve();
@@ -1159,6 +1449,6 @@ export class AgentWorkspace extends Component {
   }
 
   private isLifecycleCurrent(generation: number): boolean {
-    return !this.unloaded && generation === this.lifecycleGeneration;
+    return this.isRenderingVisible() && generation === this.lifecycleGeneration;
   }
 }

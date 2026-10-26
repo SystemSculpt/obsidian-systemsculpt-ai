@@ -123,5 +123,34 @@ describe("StudioActivityDomApplier", () => {
     Object.defineProperty(spin, "animationName", { value: "ss-spin" });
     child.dispatchEvent(spin);
     expect(nodeEl.dataset.activityPulse).toBe("done");
+    const ended = new Event("animationend", { bubbles: true });
+    Object.defineProperty(ended, "animationName", { value: "ss-studio-activity-pulse-card" });
+    Object.defineProperty(ended, "pseudoElement", { value: "::after" });
+    nodeEl.dispatchEvent(ended);
+    expect(nodeEl.dataset.activityPulse).toBeUndefined();
+  });
+
+  it("ignores another pseudo-element's animation before the pulse ends", () => {
+    const nodeEl = card();
+    applyStudioNodeActivity(nodeEl, createNodeActivity("done"), { pulse: true });
+    const shimmer = new Event("animationend", { bubbles: true });
+    Object.defineProperty(shimmer, "animationName", { value: "ss-shimmer" });
+    nodeEl.dispatchEvent(shimmer);
+    expect(nodeEl.dataset.activityPulse).toBe("done");
+    const ended = new Event("animationend", { bubbles: true });
+    Object.defineProperty(ended, "animationName", { value: "ss-studio-activity-pulse-card" });
+    nodeEl.dispatchEvent(ended);
+    expect(nodeEl.dataset.activityPulse).toBeUndefined();
+  });
+
+  it("replaces the previous pulse listener when a paused pulse is restarted", () => {
+    const nodeEl = card();
+    const added = jest.spyOn(nodeEl, "addEventListener");
+    const removed = jest.spyOn(nodeEl, "removeEventListener");
+    applyStudioNodeActivity(nodeEl, createNodeActivity("done"), { pulse: true });
+    applyStudioNodeActivity(nodeEl, createNodeActivity("failed"), { pulse: true });
+    const previous = added.mock.calls.find(([name]) => name === "animationend")![1];
+    expect(removed).toHaveBeenCalledWith("animationend", previous);
+    expect(nodeEl.dataset.activityPulse).toBe("failed");
   });
 });

@@ -60,23 +60,6 @@ export class InitializationTracer {
     return handle;
   }
 
-  async trackPromise<T>(
-    name: string,
-    task: () => Promise<T>,
-    options?: InitializationPhaseOptions
-  ): Promise<T> {
-    const phase = this.startPhase(name, options);
-
-    try {
-      const result = await task();
-      phase.complete();
-      return result;
-    } catch (error) {
-      phase.fail(error);
-      throw error;
-    }
-  }
-
   markMilestone(name: string, metadata?: Record<string, unknown>): void {
     const logger = this.getLogger();
     const context: PluginLogContext = {

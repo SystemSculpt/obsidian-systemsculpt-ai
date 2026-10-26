@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { App, TFile, TFolder, Notice } from "obsidian";
+import { App, TFile, TFolder } from "obsidian";
 import { ManagementOperations } from "../ManagementOperations";
 import { normalizeLocalToolOutcome } from "../../../../services/SystemSculptService";
 import { safeOutboundVaultToolResult } from "../../../../chat/managed/WireConversation";
@@ -175,6 +175,31 @@ describe("ManagementOperations", () => {
   });
 
   describe("manageContext", () => {
+    describe.each(["add", "remove"] as const)("%s failure reporting", (action) => {
+      it.each([
+        [null, "Unknown error occurred"],
+        [undefined, "Unknown error occurred"],
+        ["Storage unavailable", "Storage unavailable"],
+        [new Error("Disk full"), "Disk full"],
+      ])("reports %p per path and continues the batch", async (error, reason) => {
+        (app.vault.getAbstractFileByPath as jest.Mock).mockImplementation((path: string) => new TFile({ path }));
+        mockContextManager.hasPinnedFile.mockReturnValue(true);
+        const operation = action === "add"
+          ? mockDocumentContextManager.pinVaultFile
+          : mockContextManager.unpinFile;
+        operation.mockReset().mockRejectedValueOnce(error).mockResolvedValue(true);
+
+        const result = await mgmtOps.manageContext({ action, paths: ["failed.md", "ok.md"] });
+
+        expect(result.results).toEqual([
+          { path: "failed.md", success: false, reason },
+          { path: "ok.md", success: true },
+        ]);
+        expect(result.processed).toBe(1);
+        if (action === "add") expect(mockContextManager.triggerContextChange).toHaveBeenCalledTimes(1);
+      });
+    });
+
     describe("add action", () => {
       it("throws error when paths is not an array", async () => {
         await expect(

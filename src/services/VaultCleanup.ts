@@ -1,4 +1,5 @@
-import { App, TFile, TFolder, normalizePath } from "obsidian";
+import { App, TFile, TFolder } from "obsidian";
+import { normalizeVaultRelativePath } from "../utils/vaultPathUtils";
 import { isAudioFileExtension } from "../constants/fileTypes";
 import type { SystemSculptSettings } from "../types";
 
@@ -21,9 +22,13 @@ export interface VaultCleanupGroup {
 export type VaultCleanupPlan = Record<VaultCleanupKind, VaultCleanupGroup>;
 
 function cleanupDirectory(value: string): string | null {
-  const raw = value.trim().replace(/\\/g, "/");
-  if (!raw || raw.startsWith("/") || raw.split("/").some((part) => part === "." || part === "..")) return null;
-  return normalizePath(raw).replace(/\/+$/, "") || null;
+  try {
+    return normalizeVaultRelativePath(value, {
+      validateRelative: { allowRepeatedSeparators: true },
+    });
+  } catch {
+    return null;
+  }
 }
 
 function withinDirectory(path: string, directory: string | null): boolean {
@@ -34,12 +39,13 @@ function snapshot(file: TFile | TFolder): CleanupItem {
   return { file, path: file.path, size: file instanceof TFile ? file.stat.size : 0, mtime: file instanceof TFile ? file.stat.mtime : 0 };
 }
 
-async function isEmptyFile(app: App, file: TFile): Promise<boolean> {
+async function isEmptyFile(app: App, file: TFile, useCache = false): Promise<boolean> {
   if (file.stat.size === 0) return true;
   if (file.stat.size >= 1024 || !["md", "txt", "markdown"].includes(file.extension.toLowerCase())) return false;
   try {
     // Frontmatter is authored content too; only whitespace is empty.
-    return !(await app.vault.read(file)).trim();
+    const content = await (useCache ? app.vault.cachedRead(file) : app.vault.read(file));
+    return !content.trim();
   } catch {
     return false;
   }
@@ -57,11 +63,14 @@ export async function scanVaultCleanup(
     recording: { kind: "recording", directory: cleanupDirectory(settings.recordingsDirectory), items: [], folders: [] },
   };
   const directories = [plan.chat, plan.extraction, plan.recording];
-  for (const file of app.vault.getFiles()) {
+  const emptyFiles = await Promise.all(app.vault.getFiles().map(async (file) => {
     const entry = snapshot(file);
     const group = directories.find((candidate) => withinDirectory(file.path, candidate.directory));
     if (group && (group.kind !== "recording" || isAudioFileExtension(file.extension))) group.items.push(entry);
-    if (await isEmptyFile(app, file)) plan.empty.items.push(entry);
+    return await isEmptyFile(app, file, true) ? entry : null;
+  }));
+  for (const entry of emptyFiles) {
+    if (entry) plan.empty.items.push(entry);
   }
   for (const folder of app.vault.getAllLoadedFiles()) {
     if (!(folder instanceof TFolder) || !cleanupDirectory(folder.path)) continue;
@@ -88,6 +97,7 @@ export async function applyVaultCleanup(
     if (entry.file instanceof TFolder) {
       if (entry.file.children.length > 0) continue;
     } else if (group.kind === "empty") {
+      // Revalidate against disk, not the review scan's potentially stale read cache.
       if (!await isEmptyFile(app, entry.file) || !unchanged(entry)) continue;
     } else if (!withinDirectory(entry.path, group.directory)) {
       continue;

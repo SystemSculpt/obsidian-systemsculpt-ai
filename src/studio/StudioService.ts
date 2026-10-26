@@ -150,6 +150,7 @@ export class StudioService {
       startPeer: (path, nodeId, objective, parentRunId, assignmentId) => this.startAgentRun(path, nodeId, { objective, parentRunId, assignmentId }),
       workflowSpecification: async (projectPath, centerId, objective) => {
         const path = this.requireProjectPath(projectPath), project = await this.agentProjectSnapshot(path);
+        this.assertProjectWritable(path);
         const center = project.graph.nodes.find(node => node.id === centerId && node.kind === 'studio.command_center');
         if (!center) throw new Error('Choose a Command Center in this Studio.');
         return { projectId: project.projectId, projectPath: path, nodeId: centerId, title: 'Orchestrator', request: {
@@ -222,11 +223,12 @@ export class StudioService {
   private async buildProjectSession(
     projectPath: string,
     project: StudioProjectV1,
-    options?: { acceptedRawText?: string | null }
+    options?: { acceptedRawText?: string | null; readOnlyReason?: string }
   ): Promise<StudioProjectSession> {
     const session = new StudioProjectSession({
       projectPath,
       project,
+      readOnlyReason: options?.readOnlyReason,
       saveProject: async (nextProjectPath, nextProject, onBeforeProjectWrite, baseProject) => {
         return this.projectStore.saveProject(nextProjectPath, nextProject, { onBeforeProjectWrite, baseProject });
       },
@@ -248,11 +250,16 @@ export class StudioService {
   private async loadProjectForSession(projectPath: string, options?: { forceReload?: boolean }): Promise<{
     project: StudioProjectV1;
     rawText: string | null;
+    readOnlyReason?: string;
   }> {
     void this.agentReferenceFile.ensureCurrent();
     let project = options
       ? await this.projectStore.loadProject(projectPath, options)
       : await this.projectStore.loadProject(projectPath);
+    const readOnlyReason = this.projectStore.getReadOnlyReason(projectPath);
+    if (readOnlyReason) {
+      return { project, rawText: await this.projectStore.readVisibleProjectRawText(projectPath), readOnlyReason };
+    }
     const migration = migrateStudioProjectToPathOnlyPorts(project);
     if (migration.changed) {
       project = migration.project;
@@ -279,9 +286,10 @@ export class StudioService {
       // New sessions always reconcile the visible file, including changes made
       // while no view was watching the project.
       const loaded = await this.loadProjectForSession(sessionPath, { forceReload: true });
-      return this.buildProjectSession(sessionPath, loaded.project, { acceptedRawText: loaded.rawText });
+      return this.buildProjectSession(sessionPath, loaded.project, { acceptedRawText: loaded.rawText, readOnlyReason: loaded.readOnlyReason });
     }, options?.forceReload ? async (session, sessionPath) => {
       const loaded = await this.loadProjectForSession(sessionPath, { forceReload: true });
+      session.setReadOnlyReason(loaded.readOnlyReason);
       await session.reconcileExternalProject(loaded.project, loaded.rawText);
     } : undefined);
   }
@@ -293,6 +301,7 @@ export class StudioService {
     // A watcher's bytes only announce a change: the current file is what gets imported.
     const result = await this.projectStore.refreshDocument(path);
     if (session && !session.isDisposed()) {
+      session.setReadOnlyReason(result.readOnlyReason);
       await session.reconcileExternalProject(result.project, result.source);
     }
     return {conflicts: result.conflicts};
@@ -318,6 +327,11 @@ export class StudioService {
 
   async releaseProjectSession(path: string): Promise<void> {
     await this.projectSessionManager.releaseSession(path);
+  }
+
+  /** Save every open project's pending edits now, as the app quits or the plugin unloads. */
+  async flushProjectSessions(): Promise<void> {
+    await this.projectSessionManager.flushAll();
   }
 
   private getProjectsFolder(): string {
@@ -577,6 +591,12 @@ export class StudioService {
     return normalizeStudioProjectPath(rawPath);
   }
 
+  private assertProjectWritable(path: string): void {
+    const reason = this.getProjectSession(path)?.getReadOnlyReason();
+    if (reason) throw new Error(reason);
+    this.projectStore.assertWritable(path);
+  }
+
   subscribeRunEvents(listener: (update: StudioRunUpdate) => void): () => void {
     return this.runtime.runs.subscribe(listener);
   }
@@ -592,10 +612,13 @@ export class StudioService {
     const normalized = this.requireProjectPath(projectPath);
     const session = this.projectSessionManager.getSession(normalized);
     if (!session) {
-      return this.runtime.runProject(normalized, {
+      const project = await this.projectStore.loadProject(normalized);
+      this.assertProjectWritable(normalized);
+      return this.runtime.runProjectSnapshot(normalized, project, {
         onEvent: options?.onEvent,
       });
     }
+    this.assertProjectWritable(normalized);
     await session.flushPendingSaveWork({ force: true });
     const projectSnapshot = session.getProjectSnapshot();
     return this.runtime.runProjectSnapshot(normalized, projectSnapshot, {
@@ -621,6 +644,7 @@ export class StudioService {
     }
     const projectSnapshot =
       session?.getProjectSnapshot() || (await this.projectStore.loadProject(normalized));
+    this.assertProjectWritable(normalized);
     const exists = projectSnapshot.graph.nodes.some((node) => node.id === normalizedNodeId);
     if (!exists) {
       throw new Error(`Cannot run from node "${normalizedNodeId}" because it is not part of this project.`);
@@ -641,6 +665,7 @@ export class StudioService {
 
   async startAgentRun(projectPath: string, nodeId: string, options?: { objective?: string; parentRunId?: string; assignmentId?: string }): Promise<StudioAgentRunView> {
     const path = this.requireProjectPath(projectPath), project = await this.agentProjectSnapshot(path);
+    this.assertProjectWritable(path);
     const node = project.graph.nodes.find(node => node.id === nodeId && node.kind === 'studio.codex');
     if (!node) throw new Error('Choose a Codex role in this project.');
     const config = node.config;
@@ -679,7 +704,9 @@ export class StudioService {
       return null;
     }
     const targetPath = normalizeStudioProjectPath(rawPath);
-    return this.runtime.getNodeCacheSnapshot(targetPath);
+    // Presentation reads must not retry migration or mutate a retained read-only project.
+    const projectId = this.getProjectSession(targetPath)?.getProject().projectId;
+    return this.runtime.getNodeCacheSnapshot(targetPath, projectId);
   }
 
   async storeAsset(projectPath: string, bytes: ArrayBuffer, mimeType: string): Promise<StudioAssetRef> {

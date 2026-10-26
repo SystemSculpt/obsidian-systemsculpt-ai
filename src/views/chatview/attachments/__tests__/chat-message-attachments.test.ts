@@ -1,5 +1,7 @@
 import {
   ChatMessageAttachmentCollection,
+  chatMessageDraftText,
+  isSupportedChatAttachmentName,
   composeAttachmentMetadata,
   composeUserMessageContent,
   restoreChatMessageDraft,
@@ -14,7 +16,7 @@ import * as hashing from "../../../../utils/sha256";
 
 jest.mock("../../../../utils/sha256", () => {
   const actual = jest.requireActual("../../../../utils/sha256");
-  return { ...actual, sha256HexFromBytesPortable: jest.fn(actual.sha256HexFromBytesPortable) };
+  return { ...actual, sha256HexFromBytes: jest.fn(async (bytes: Uint8Array) => actual.sha256HexFromBytesPortable(bytes)) };
 });
 
 function limits(overrides: Partial<ThinAgentInputLimits>): ThinAgentInputLimits {
@@ -33,6 +35,47 @@ function reader(contents: Readonly<Record<string, string>>) {
 }
 
 describe("ChatMessageAttachmentCollection", () => {
+  it.each(["clear", "dispose", "cancelProcessing"] as const)("%s during hashing does not restore the old draft", async (action) => {
+    let finish!: (hash: string) => void;
+    const hash = jest.mocked(hashing.sha256HexFromBytes);
+    hash.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    const collection = new ChatMessageAttachmentCollection(reader({ "image.png": "image" }));
+    const pending = collection.addFiles([file("image.png", "image/png", "image")]);
+    await Promise.resolve();
+    collection[action]();
+    finish("a".repeat(64));
+    expect((await pending).accepted).toEqual([]);
+    expect(collection.hasEntries()).toBe(false);
+  });
+
+  it("reports a native digest failure without losing the rest of the batch", async () => {
+    jest.mocked(hashing.sha256HexFromBytes).mockRejectedValueOnce(new Error("digest failed"));
+    const collection = new ChatMessageAttachmentCollection(reader({ "bad.png": "bad", "good.txt": "good" }));
+    const result = await collection.addFiles([
+      file("bad.png", "image/png", "bad"), file("good.txt", "text/plain", "good"),
+    ]);
+    expect(result.issues).toEqual([expect.objectContaining({ code: "read_failed", fileName: "bad.png" })]);
+    expect(result.accepted.map((entry) => entry.name)).toEqual(["good.txt"]);
+  });
+
+  it("recalls legacy prompt text without hashing and asynchronously restores legacy images", async () => {
+    const hash = jest.mocked(hashing.sha256HexFromBytes);
+    hash.mockClear();
+    const message = {
+      role: "user" as const,
+      message_id: "legacy",
+      content: [
+        { type: "text" as const, text: "Describe this" },
+        { type: "image_url" as const, image_url: { url: "data:image/png;base64,AQID" } },
+      ],
+    };
+    expect(chatMessageDraftText(message)).toBe("Describe this");
+    expect(hash).not.toHaveBeenCalled();
+    const restored = await restoreChatMessageDraft(message);
+    expect(restored.text).toBe("Describe this");
+    expect(restored.attachments[0].id).toBe(`image-${hashing.sha256HexFromBytesPortable(new Uint8Array([1, 2, 3]))}`);
+    expect(hash).toHaveBeenCalledTimes(1);
+  });
   it("ingests multiple mixed text and image files into provider-neutral message parts", async () => {
     const collection = new ChatMessageAttachmentCollection(reader({
       "brief.md": "# Brief\n\nShip it.",
@@ -204,6 +247,50 @@ describe("ChatMessageAttachmentCollection", () => {
     expect(signals).toHaveLength(count);
   }
 
+  it("names vault attachments by their vault path so the agent can find the note", async () => {
+    const collection = new ChatMessageAttachmentCollection(reader({ "Plan.md": "# Plan", "song.mp3": "id3" }));
+    const result = await collection.addVaultFiles([
+      { path: "Projects/Q4/Plan.md", file: file("Plan.md", "", "# Plan") },
+      { path: "Audio/song.mp3", file: file("song.mp3", "", "id3") },
+    ]);
+    expect(result.accepted.map((attachment) => attachment.name)).toEqual(["Projects/Q4/Plan.md"]);
+    const part = result.accepted[0].contentPart;
+    expect(part.type === "text" ? parseAttachedTextContent(part.text)?.name : null).toBe("Projects/Q4/Plan.md");
+    expect(result.issues).toEqual([expect.objectContaining({ code: "unsupported", fileName: "Audio/song.mp3" })]);
+    expect(isSupportedChatAttachmentName("Plan.md")).toBe(true);
+    expect(isSupportedChatAttachmentName("diagram.webp")).toBe(true);
+    expect(isSupportedChatAttachmentName("report.pdf")).toBe(true);
+    expect(isSupportedChatAttachmentName("song.mp3")).toBe(false);
+  });
+
+  it("lists a document as processing while it converts, including during a retry", async () => {
+    const { processor, signals } = stalledProcessor();
+    const onChange = jest.fn();
+    const collection = new ChatMessageAttachmentCollection(
+      reader({ "slow.pdf": "%PDF" }),
+      processor,
+      DEFAULT_THIN_AGENT_INPUT_LIMITS,
+      onChange,
+    );
+    const pending = collection.addFiles([file("slow.pdf", "application/pdf", "%PDF")]);
+    await started(signals);
+    expect(onChange).toHaveBeenCalled();
+    expect(collection.displaySnapshot()).toEqual([expect.objectContaining({ status: "processing", name: "slow.pdf" })]);
+    expect(collection.snapshot()).toEqual([]);
+    expect(collection.hasEntries()).toBe(true);
+    collection.cancelProcessing();
+    await pending;
+    const failed = collection.displaySnapshot()[0];
+    expect(failed.status).toBe("failed");
+
+    const retry = collection.retry(failed.id);
+    await started(signals, 2);
+    expect(collection.displaySnapshot()).toEqual([expect.objectContaining({ status: "processing", id: failed.id })]);
+    expect(collection.remove(failed.id)).toBe(true);
+    expect(await retry).toEqual({ accepted: [], issues: [] });
+    expect(collection.displaySnapshot()).toEqual([]);
+  });
+
   it("stops a document still processing when the user cancels, and keeps it for a retry (#420)", async () => {
     const { processor, signals } = stalledProcessor();
     const collection = new ChatMessageAttachmentCollection(reader({ "stalled.pdf": "%PDF" }), processor);
@@ -305,7 +392,7 @@ describe("ChatMessageAttachmentCollection", () => {
   it("does not read or hash later files after cancelling a PDF batch", async () => {
     const { processor, signals } = stalledProcessor();
     const read = jest.fn(reader({ "stalled.pdf": "%PDF", "later.md": "Later" }));
-    const hash = jest.mocked(hashing.sha256HexFromBytesPortable);
+    const hash = jest.mocked(hashing.sha256HexFromBytes);
     hash.mockClear();
     try {
       const collection = new ChatMessageAttachmentCollection(read, processor);
@@ -325,7 +412,7 @@ describe("ChatMessageAttachmentCollection", () => {
   it.each(["clear", "dispose"] as const)("%s invalidates an in-flight read before hashing or restoring the old draft", async (action) => {
     let finishRead!: (bytes: ArrayBuffer) => void;
     const read = jest.fn(() => new Promise<ArrayBuffer>((resolve) => { finishRead = resolve; }));
-    const hash = jest.mocked(hashing.sha256HexFromBytesPortable);
+    const hash = jest.mocked(hashing.sha256HexFromBytes);
     hash.mockClear();
     try {
       const collection = new ChatMessageAttachmentCollection(read);
@@ -397,7 +484,7 @@ describe("ChatMessageAttachmentCollection", () => {
     const content = composeUserMessageContent("Compare all three", attachments);
     const attachmentMetadata = composeAttachmentMetadata("Compare all three", attachments);
 
-    const restored = restoreChatMessageDraft({
+    const restored = await restoreChatMessageDraft({
       role: "user",
       message_id: "user-1",
       content,

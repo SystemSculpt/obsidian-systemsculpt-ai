@@ -1,6 +1,7 @@
 import type { StudioNodeInstance } from "../../../studio/types";
 import type { StudioGraphInteractionEngine } from "../StudioGraphInteractionEngine";
 import type {
+  RenderStudioGraphNodeCardOptions,
   StudioGraphNodeMutationOptions,
   StudioGraphNodeResizePatch,
 } from "./StudioGraphNodeCardTypes";
@@ -22,6 +23,7 @@ import {
   resolveStudioTextNodeFocusTarget,
   type StudioTextNodeFocusTarget,
 } from "./StudioGraphTextNodeFocus";
+import { isStudioCardLocked, lockStudioControl, type StudioCardLockState } from "./StudioCardLock";
 
 const STUDIO_TEXT_NODE_DOUBLE_TAP_DELAY_MS = 450;
 const STUDIO_TEXT_NODE_DOUBLE_TAP_SLOP_PX = 8;
@@ -46,6 +48,7 @@ export type StudioTextNodeMarkdownEditorSnapshot = {
   focused: boolean;
 };
 
+/** @internal Tests type their fixtures with this. */
 export type StudioTextNodeMarkdownEditorHandle = {
   readonly value: string;
   set(value: string): void;
@@ -82,15 +85,11 @@ export type StudioTextNodeMarkdownEditorFactory = (
 export type RenderTextNodeCardOptions = {
   nodeEl: HTMLElement;
   node: StudioNodeInstance;
-  busy: boolean;
+  /** Locks the card while a graph run is in progress. */
+  busy: StudioCardLockState;
   graphInteraction: StudioGraphInteractionEngine;
   onNodeConfigMutated: (node: StudioNodeInstance) => void;
-  onNodeConfigValueChange?: (
-    nodeId: string,
-    key: string,
-    value: string | number,
-    options?: { mode?: "discrete" | "continuous"; captureHistory?: boolean }
-  ) => void;
+  onNodeConfigValueChange?: RenderStudioGraphNodeCardOptions["onNodeConfigValueChange"];
   onNodeResize?: (
     nodeId: string,
     patch: StudioGraphNodeResizePatch,
@@ -462,7 +461,7 @@ function mountLiveMarkdownEditor(options: MountLiveMarkdownEditorOptions): boole
   return true;
 }
 
-export function renderTextNodeCard(options: RenderTextNodeCardOptions): void {
+export function renderTextNodeCard(options: RenderTextNodeCardOptions): () => void {
   const {
     nodeEl,
     node,
@@ -548,7 +547,7 @@ export function renderTextNodeCard(options: RenderTextNodeCardOptions): void {
     // internal Obsidian API, so a null factory result (unsupported internals,
     // busy view, headless tests) falls through to the plain textarea.
     const liveEditorMounted =
-      !busy && createMarkdownEditor
+      !isStudioCardLocked(busy) && createMarkdownEditor
         ? mountLiveMarkdownEditor({
             contentEl,
             node,
@@ -587,7 +586,7 @@ export function renderTextNodeCard(options: RenderTextNodeCardOptions): void {
     // fresh one-line text node at double height. One row is the true floor.
     textAreaEl.rows = 1;
     textAreaEl.value = textValue;
-    textAreaEl.disabled = busy;
+    lockStudioControl(busy, textAreaEl);
     textSurfaceEl = textAreaEl;
     applyFontSize(fontSize);
     // The card's height is intrinsic, so the editor must auto-grow with its
@@ -628,7 +627,7 @@ export function renderTextNodeCard(options: RenderTextNodeCardOptions): void {
     textAreaEl.addEventListener("blur", () => {
       onStopTextNodeEdit(node.id);
     });
-    if (shouldAutoFocus && !busy) {
+    if (shouldAutoFocus && !isStudioCardLocked(busy)) {
       requestStudioAnimationFrame(textAreaEl, () => {
         textAreaEl.focus();
         textAreaEl.select();
@@ -688,7 +687,7 @@ export function renderTextNodeCard(options: RenderTextNodeCardOptions): void {
     }
   }
 
-  mountStudioGraphNodeResizeFrame({
+  return mountStudioGraphNodeResizeFrame({
     node,
     nodeEl,
     title: "Resize text",

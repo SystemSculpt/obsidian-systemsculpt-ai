@@ -173,6 +173,10 @@
   color: var(--ss-ink-muted);
 }
 
+.ss-credits-balance__hint:empty {
+  display: none;
+}
+
 .ss-credits-balance__hint.is-warning {
   color: var(--ss-warning);
 }

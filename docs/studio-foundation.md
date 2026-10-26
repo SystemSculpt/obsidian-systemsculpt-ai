@@ -77,14 +77,19 @@ directly from the file:
   {"from": "a", "to": "b", "label": "text"} instead of the string.
 - docs points at the generated agent reference (node kinds, ports, config
   fields, editing rules) that Studio keeps current in the vault.
-- Studio still reads v1 and legacy documents and rewrites them as v2 on the
-  next save. The schema never moves backward, and agent file tools validate
+- Studio still reads v1 and legacy documents and rewrites them as v2 on
+  opening, once their original copy is safe. The schema never moves backward, and agent file tools validate
   every proposed edit before bytes reach the vault.
 - Migration converts retired node kinds (Label, HTTP Request, Prompt Template,
   Resend Audience Sync); retired request nodes lose their configuration.
   Before the first v2 rewrite, Studio copies the original file byte for byte
   to legacy/<timestamp>-v1-original.json in the assets directory, once per
-  distinct original, and names that copy in a notice.
+  distinct original, and names that copy in a notice. If the copy cannot be
+  saved, the migrated project opens in memory, read-only: its original file
+  remains unchanged, and edits and runs are disabled. The persistent notice
+  names the backup folder. Move any file blocking that folder or restore write
+  access, then select **Try again**. Editing resumes only after the original
+  copy and migrated project have both been saved.
 - Files written by 6.10 also embed merge state in a document field. Studio
   reads their readable canvas and drops that state on the next edit, after
   copying the first such original once to
@@ -121,6 +126,12 @@ this device's own edit. Removing generated outputs also removes their pins and p
 references; concurrent deletion removes references added by another writer.
 Every publication validates the project before atomically replacing its single
 visible file. Invalid documents remain untouched until corrected.
+
+Typing and drags save once they pause for 1.5 s; other edits save within 40 ms.
+Leaving a Studio field, its window or its tab, closing the view, quitting and
+unloading the plugin save at once. On desktop, a save whose file still has the
+modification time and size of this device's last write publishes without
+reading it again; any other writer changes them, so its file is read and merged.
 
 Assets and run files arrive independently of the canvas. A canvas save never
 requires the support tree to match an older snapshot and never prunes files
@@ -222,9 +233,11 @@ execution disabled and a Desktop explanation; portable nodes still work.
   Codex run cards, and workflow steps all carry `data-activity`, derived by
   src/views/studio/activity from run events, native Codex runs, and workflow
   plans. A working node shows a spinner, progress bar, and breathing halo;
-  its outgoing cables surge with travelling energy until the result lands;
-  settled phases keep their color. Activity-only events patch the canvas in
-  place; only outputs and placeholders rebuild it.
+  its outgoing cables show static energy dashes until the result lands;
+  settled phases keep their color. Activity decorations animate only opacity
+  and transforms, and pause while the view is hidden or its window is unfocused.
+  Activity-only events patch the canvas in place; only outputs and placeholders
+  rebuild it.
 
 See src/views/studio/DESIGN.md for presentation principles and the README files
 beside canvas, systemsculpt-studio-view, and activity for current module maps.
@@ -259,44 +272,38 @@ canvas. Organizational parents and execution connections do not control placemen
 Text execution can instead use the installed Codex app-server or Claude Code CLI on desktop (`services/claude/` holds the Claude Code transport). `services/codex/` contains the thin transport, native approval UI, local thread locator and ChatView presentation adapter. `studio.codex` runs explicit task prompts; the text-generation adapter honors the selected backend without creating managed operation receipts for local runs. Codex owns native sessions and all agent continuation.
 
 
-### Media model catalog, favorites, and per-model inputs
+### Retired image generation
 
-Image Generation and Video Generation cards open a **model catalog** from their
-model field instead of a dropdown. The catalog lists every currently available
-model with its service price, provider, release month, typical generation time,
-and what it accepts as input: reference-image capacity or text-only for image
-models; first-frame and last-frame support, resolutions, clip lengths, and audio
-for video models. Search matches names, providers, ids, and capabilities; sort
-chips order by release date, recommendation, price, or speed. A star pins a
-model to the top of its picker. Favorites persist per media kind in plugin
-settings as opaque service model ids.
+Image generation and **Edit with AI** are retired. Existing image-generation
+cards open read-only with a retirement notice and Source inspection. Their
+configuration, connections, generated output cards, vault assets and run history
+are preserved. They are hidden from Insert and never execute. Existing connected
+consumers reuse their recorded outputs; if no saved output exists, the run stops
+rather than silently dropping the image input. Historical count, size and seed
+settings are retained; existing removal of obsolete provider routing and
+credentials still applies. Local image editing, copying and viewing remain available.
 
-The selected model shapes the card. Input ports the model cannot take are
-removed (the reference `images` port for a text-only image model, a frame port
-the video model does not support), and fields with no choice for that model
-(sizes, quality, audio, single-value durations) are hidden. A port that is still
-wired when the model changes stays visible, dimmed, with the reason in its
-tooltip, so the edge is never silently orphaned. Reference image limits reflect
-both the selected model and the plugin's maximum of four images per job. Runs
-validate these limits before any credits are held: too many reference images,
-references for a text-only model, or a frame role the model rejects stop the run
-with an explanation. Blank model means the service default, whose limits apply.
+### Video model catalog, favorites, and per-model inputs
 
-The service supplies models, credit estimates, batch limits, sizes, ratios, and
-quality levels. Picking a different model resets output options to defaults.
-Model availability and pricing can change without a plugin release; the plugin
-caches a catalog for five minutes so cards render synchronously.
+Video Generation cards open a **model catalog** from their model field. The
+catalog lists available models with service prices, provider, release month,
+typical generation time, first-frame and last-frame support, resolutions, clip
+lengths and audio. Search matches names, providers, ids and capabilities; sort
+chips order by release date, recommendation, price or speed. A star pins a model
+to the top. Video favorites persist as opaque service model ids; saved image
+favorites are retained but no longer used.
 
-Estimates include the SystemSculpt service fee. Actual usage determines the final
-charge under the billing terms accepted at submission. Reference images and
-prompt processing can add cost, and the temporary credit hold can exceed the
-estimate. A result with unverifiable billing remains withheld for reconciliation.
-Reconnect to the existing job after a connection failure; starting a new node run
-creates a separate billable operation.
+The selected model shapes the card. Unsupported frame ports and fields with no
+choice are hidden. Already-wired ports remain visible with an explanation, so
+existing edges are not silently orphaned. Runs reject frame roles the selected
+model does not support. Picking a different model resets output options to its
+defaults. Catalogs remain server-owned and cached for five minutes.
 
-Model choices use the negotiated image job v2 contract. Input uploads, durable
-operation identity, and verified output downloads stay on the existing first-party
-transport. Model IDs, output size, and quality participate in local replay identity.
+Estimates include the SystemSculpt service fee; actual usage determines the final
+charge. Input uploads, durable operation identity and verified output downloads
+stay on the first-party transport. Video frames still use the shared
+`/images/inputs/prepare` endpoint. Retiring image generation does not remove this
+upload path or historical media records.
 
 ### Video generation
 
@@ -311,7 +318,7 @@ the node starts, Studio adds a connected placeholder card that shows
 **Generating video…** and becomes the video card once the clip is saved.
 
 Video jobs run on the negotiated media job v2 contract with the same durable
-operation identity, recovery records, and verified downloads as images. The
+operation identity, recovery records, and verified downloads as other managed media. The
 plugin reads `hosted_videos` from the service configuration before starting a
 job and reports delivery timing back to the service after the clip is written
 to the vault. Deployments that do not advertise video generation reject the node

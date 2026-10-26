@@ -22,6 +22,7 @@ import {
   PluginLogger,
   type SupportDiagnosticEvent,
 } from "../../../utils/PluginLogger";
+import { LogLevel } from "../../../utils/errorHandling";
 import { ChatMarkdownSerializer } from "../storage/ChatMarkdownSerializer";
 import { AgentTranscriptRepository } from "../AgentTranscriptRepository";
 import { AgentChatSession } from "../../../chat/managed/ChatSession";
@@ -298,7 +299,7 @@ function installNoEgressProbe(): Readonly<{
   };
 }
 
-function createAgentChatViewCopyBridge(): Readonly<{
+function createAgentChatViewCopyBridge(store: AgentIncidentStore): Readonly<{
   copy: (reportId: string) => Promise<boolean>;
   writeText: jest.Mock;
 }> {
@@ -313,6 +314,9 @@ function createAgentChatViewCopyBridge(): Readonly<{
   const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, unknown>;
   Object.assign(view, {
     workspace: { element: host },
+    plugin: {
+      getAgentIncidentCoordinator: () => ({ isReportPersisted: (id: string) => store.hasReport(id) }),
+    },
   });
   return {
     copy: (reportId) => (view as unknown as {
@@ -330,8 +334,8 @@ function createPluginLogger(): Readonly<{
 }> {
   const localLogWrites: string[] = [];
   const plugin = {
-    // Recording on, so the privacy assertions cover lifecycle bytes on disk too.
-    settings: { debugMode: false, logLevel: 0, showDiagnostics: true },
+    // Opt into info logs so privacy assertions cover lifecycle bytes on disk too.
+    settings: { debugMode: false, logLevel: LogLevel.INFO, showDiagnostics: true },
     isPluginUnloading: () => false,
     storage: {
       appendToFile: async (_directory: string, _file: string, data: string) => {
@@ -674,7 +678,7 @@ class IncidentPipelineHarness {
   public async copyReport(): Promise<boolean> {
     const reportId = this.receipt?.reportId;
     if (!reportId) return false;
-    const bridge = createAgentChatViewCopyBridge();
+    const bridge = createAgentChatViewCopyBridge(this.store);
     if (this.mode === "clipboard") {
       bridge.writeText.mockRejectedValueOnce(new Error("CANARY_clipboard_error_a0e2d22f"));
     }
@@ -1057,11 +1061,10 @@ describe("ChatView incident report regression integration", () => {
       expect(captures[0]).not.toHaveProperty("incidentId");
       expect(callbackOrder).toEqual(["capture", "lifecycle"]);
 
-      const beforeSaveBridge = createAgentChatViewCopyBridge();
+      const beforeSaveBridge = createAgentChatViewCopyBridge(store);
       await expect(beforeSaveBridge.copy(localReportId))
-        .resolves.toBe(true);
-      expect(beforeSaveBridge.writeText).toHaveBeenCalledTimes(1);
-      expect(beforeSaveBridge.writeText).toHaveBeenCalledWith(localReportId);
+        .resolves.toBe(false);
+      expect(beforeSaveBridge.writeText).not.toHaveBeenCalled();
       const finalPath = `${AGENT_INCIDENT_STORE_PATH}/${localReportId}.json`;
       expect(adapter.files.has(finalPath)).toBe(false);
 
@@ -1240,13 +1243,13 @@ describe("ChatView incident report regression integration", () => {
         .resolves.toMatchObject({ retainedReports: 1, corruptReports: 0 });
       expect(persistedIncidentBytes(adapter, restoredReportId!)).toBe(persisted);
       expect(persistedIncidentBytes(adapter, `report_${"e".repeat(32)}`)).toBeUndefined();
-      const restartedBridge = createAgentChatViewCopyBridge();
+      const restartedBridge = createAgentChatViewCopyBridge(new AgentIncidentStore(adapter));
       await expect(restartedBridge.copy(restoredReportId!)).resolves.toBe(true);
       expect(restartedBridge.writeText).toHaveBeenCalledTimes(1);
       expect(restartedBridge.writeText).toHaveBeenCalledWith(restoredReportId);
       await expect(restartedBridge.copy(`report_${"e".repeat(32)}`))
-        .resolves.toBe(true);
-      expect(restartedBridge.writeText).toHaveBeenCalledTimes(2);
+        .resolves.toBe(false);
+      expect(restartedBridge.writeText).toHaveBeenCalledTimes(1);
       const reportText = JSON.stringify(report);
       expect(reportText).not.toContain(CONVERSATION_ID);
       expect(reportText).not.toContain(REQUEST_ID);
@@ -1449,7 +1452,7 @@ describe("ChatView incident report regression integration", () => {
         },
       });
       expect(storedBytes).toBe(store.serialize(report));
-      const bridge = createAgentChatViewCopyBridge();
+      const bridge = createAgentChatViewCopyBridge(store);
       await expect(bridge.copy(receiptId!)).resolves.toBe(true);
       expect(bridge.writeText).toHaveBeenCalledWith(receiptId);
       expect(request).toHaveBeenCalledTimes(1);
@@ -1826,7 +1829,7 @@ describe("ChatView incident report regression integration", () => {
       expect(report.tools.reduce((sum, tool) => sum + (tool.requested_item_count ?? 0), 0)).toBe(12);
       expect(report.tools.reduce((sum, tool) => sum + (tool.completed_item_count ?? 0), 0)).toBe(9);
       expect(report.tools.reduce((sum, tool) => sum + (tool.failed_item_count ?? 0), 0)).toBe(3);
-      expect(report.tools).toEqual(report.tools.map((tool) => expect.objectContaining({
+      expect(report.tools).toEqual(report.tools.map(() => expect.objectContaining({
         tool_name: "read",
         outcome: "failed",
         failure_class: "partial_failure",
@@ -1867,10 +1870,10 @@ describe("ChatView incident report regression integration", () => {
   });
 
   it.each([
-    ["lifecycle projection", "lifecycle_projection", true, false],
+    ["lifecycle projection", "lifecycle_projection", false, false],
     ["resource capture", "resource_capture", true, true],
-    ["recorder finalization", "recorder_finalization", true, false],
-    ["store rejection", "store_rejection", true, false],
+    ["recorder finalization", "recorder_finalization", false, false],
+    ["store rejection", "store_rejection", false, false],
     ["clipboard", "clipboard", false, true],
   ] as const)("keeps the failed ChatView usable after %s failure", async (
     _label,

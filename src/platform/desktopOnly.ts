@@ -31,6 +31,7 @@ declare const process: DesktopProcess | undefined;
  * Obsidian Mobile while preserving the desktop implementation on demand.
  */
 
+/** @internal Tests match this error class. */
 export class DesktopHostUnavailableError extends Error {
   constructor(capability: string) {
     super(`${capability} is available in Obsidian Desktop only.`);
@@ -47,20 +48,6 @@ export function hasNodeRuntime(): boolean {
 
 export function getDesktopProcess(): DesktopProcess | null {
   return typeof process === "undefined" ? null : process;
-}
-
-/**
- * Lazily load a desktop-only module. The loader performs the `require` so
- * startup-sensitive Node modules remain demand-loaded.
- */
-export function loadDesktopOnly<T>(
-  loader: () => T,
-  capability = "This feature",
-): T {
-  if (!hasNodeRuntime()) {
-    throw new DesktopHostUnavailableError(capability);
-  }
-  return loader();
 }
 
 type DesktopFs = typeof import("node:fs/promises");

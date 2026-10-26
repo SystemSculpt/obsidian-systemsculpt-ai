@@ -4,12 +4,12 @@ import { join } from "path";
 import { StudioEditorRevision } from "../document/StudioEditorRevision";
 import type { StudioLegacyOriginalCopy } from "../document/StudioProjectDocument";
 import { StudioProjectSession } from "../StudioProjectSession";
-import { serializeStudioProject } from "../schema";
+import { createEmptyStudioProject, serializeStudioProject } from "../schema";
 import { cloneStudioProjectSnapshot } from "../StudioProjectSnapshots";
 import { StudioProjectStore } from "../StudioProjectStore";
 import { StudioService } from "../StudioService";
 import { createManagedCapabilityGraphStub, getManagedStudioTestVaultName } from "./managed-capability-graph.stub";
-import { deriveStudioAssetsDir, deriveStudioPolicyPath, sanitizeStudioProjectName } from "../paths";
+import { deriveStudioAssetsDir, deriveStudioNodeCachePath, deriveStudioPolicyPath, deriveStudioRunsDir, sanitizeStudioProjectName } from "../paths";
 
 // Spy on the CJS module object so `new Notice(...)` in the service is intercepted.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -64,6 +64,9 @@ function createStore(options?: { existingFiles?: string[]; existingDirs?: string
   const adapter = {
     exists: jest.fn(async (path: string) => files.has(path) || dirs.has(path)),
     mkdir: jest.fn(async (path: string) => {
+      if ([...files.keys()].some(file => path === file || path.startsWith(`${file}/`))) {
+        throw new Error(`A file blocks folder ${path}`);
+      }
       dirs.add(path);
     }),
     write: jest.fn(async (path: string, data: string) => {
@@ -276,7 +279,7 @@ describe("StudioProjectStore", () => {
   });
 
   it("publishes a renamed projection and retires the old visible paths safely", async () => {
-    const { store, files, dirs } = createStore();
+    const { store, files } = createStore();
 
     const created = await store.createProject({
       name: "Original",
@@ -367,7 +370,7 @@ describe("Studio concurrent workspace writers", () => {
     external.name = "External title";
     files.set(path, serializeStudioProject(external));
     project.name = "Local title";
-    project.graph.nodes.push({ id: "local", kind: "studio.text", version: "1.0.0", position: { x: 0, y: 0 }, config: { value: "keep me" } });
+    project.graph.nodes.push({ id: "local", kind: "studio.text", version: "1.0.0", title: "Text", position: { x: 0, y: 0 }, config: { value: "keep me" } });
     const saved = await store.saveProject(path, project, { baseProject: base });
     // The session preserves its own version of a reported field as an Undo step.
     expect(saved.conflicts).toEqual(["name"]);
@@ -554,7 +557,7 @@ describe("single authored file", () => {
       return update(files.get(file)!);
     });
     const draft = cloneStudioProjectSnapshot(project);
-    draft.graph.nodes.push({id: "n", kind: "studio.text", version: "1.0.0", position: {x: 0, y: 0}, config: {value: "persist"}});
+    draft.graph.nodes.push({id: "n", kind: "studio.text", version: "1.0.0", title: "Text", position: {x: 0, y: 0}, config: {value: "persist"}});
     await store.saveProject(path, draft, {baseProject: project});
     adapter.process.mockImplementation(original);
     const saved = await store.loadProject(path);
@@ -647,6 +650,108 @@ describe("single authored file", () => {
 
 });
 
+describe("saved image generation cards", () => {
+  it.each(["v1", "v2"])("opens, saves and reopens %s images with outputs and history intact", async dialect => {
+    const { store, files, reopen } = createStore();
+    const path = "SystemSculpt/Studio/Saved images.systemsculpt";
+    const project = createEmptyStudioProject({
+      name: "Saved images", policyPath: deriveStudioPolicyPath(path),
+      minPluginVersion: "6.14.0", maxRuns: 100, maxArtifactsMb: 1024,
+    });
+    const assetPath = `${deriveStudioAssetsDir(path)}/images/saved.png`;
+    const image = {
+      id: "image", kind: "studio.image_generation", version: "1.0.0", title: "Saved illustration", continueOnError: false, disabled: false,
+      position: { x: 320, y: 140 }, size: { width: 440, height: 360 },
+      config: { prompt: "A lighthouse", model: "saved-model", count: 8, aspectRatio: "16:9", imageSize: "2K", seed: 42, futureField: { retained: true } },
+    };
+    const output = {
+      id: "output", kind: "studio.media_ingest", version: "1.0.0", title: "Saved output", parentId: "image", continueOnError: false, disabled: false,
+      position: { x: 850, y: 140 }, config: {
+        sourcePath: assetPath, __studio_managed_by: "studio.image_generation_output.v1",
+        __studio_source_node_id: "image", __studio_output_slot: 0,
+      },
+    };
+    project.graph.nodes = [image, output];
+    project.graph.edges = [{ id: "image.images->output.media", fromNodeId: "image", fromPortId: "images", toNodeId: "output", toPortId: "media" }];
+    project.graph.entryNodeIds = ["image"];
+    project.graph.groups = [{ id: "saved", name: "Illustrations", nodeIds: ["image", "output"] }];
+    const outputs = { images: [{ path: assetPath, hash: "a".repeat(64), mimeType: "image/png", sizeBytes: 11 }] };
+    const supportFiles = new Map([
+      [assetPath, "saved bytes"],
+      [deriveStudioNodeCachePath(path), JSON.stringify({ schema: "studio.node-cache.v1", projectId: project.projectId, entries: { image: { outputs } } })],
+      [`${deriveStudioRunsDir(path)}/saved/events.ndjson`, JSON.stringify({ type: "node.output", nodeId: "image", runId: "saved", outputs })],
+    ]);
+    for (const [key, value] of supportFiles) files.set(key, value);
+    files.set(path, dialect === "v1" ? JSON.stringify(project) : serializeStudioProject(project));
+
+    const opened = await store.loadProject(path);
+    expect(opened.graph.nodes).toEqual([image, output]);
+    expect(opened.graph.edges).toEqual(project.graph.edges);
+    await store.saveProject(path, { ...opened, name: "Renamed images" });
+    await store.dispose();
+    const next = reopen();
+    const reopened = await next.loadProject(path);
+    expect(reopened.graph).toEqual(opened.graph);
+    for (const [key, value] of supportFiles) expect(files.get(key)).toBe(value);
+    await next.dispose();
+  });
+});
+
+describe("saved workflow notes", () => {
+  it.each(["v1", "v2"])("opens and saves %s workflows without losing their definition or relationships", async dialect => {
+    const { store, files, reopen } = createStore();
+    const path = "SystemSculpt/Studio/Saved workflow.systemsculpt";
+    const project = createEmptyStudioProject({
+      name: "Saved workflow", policyPath: deriveStudioPolicyPath(path),
+      minPluginVersion: "6.14.0", maxRuns: 100, maxArtifactsMb: 1024,
+    });
+    project.migrations.applied = [];
+    const workflow = {
+      id: "saved-workflow", kind: "studio.workflow", version: "1.0.0", title: "My saved objective",
+      parentId: "context", position: { x: 320, y: 140 }, size: { width: 440, height: 360 },
+      continueOnError: true, disabled: false,
+      config: {
+        workspaceId: "workspace", workflowId: "workflow", roleId: "reviewer", revision: "revision-1",
+        description: "Original objective\nWith a second line", input: { files: ["Notes/Research.md"] },
+        steps: { first: { title: "Inspect evidence", status: "waiting" } },
+        availability: { status: "unavailable" }, lastRunId: "saved-run", selectedTaskId: "saved-task",
+        pendingRequest: { requestId: "old-request", payload: { text: "Keep for reference" } },
+        futureField: { nested: [null, false, 42, "<script>saved text</script>"] },
+      },
+    };
+    project.graph.nodes = [
+      { id: "context", kind: "studio.json", version: "1.0.0", title: "Context", position: { x: 0, y: 0 }, config: { value: {} } },
+      workflow,
+      { id: "result", kind: "studio.json", version: "1.0.0", title: "Result", position: { x: 800, y: 0 }, config: { value: { evidence: "saved" } } },
+    ];
+    project.graph.edges = [
+      { id: "context.json->saved-workflow.context", fromNodeId: "context", fromPortId: "json", toNodeId: workflow.id, toPortId: "context" },
+      { id: "saved-workflow.json->result.json", fromNodeId: workflow.id, fromPortId: "json", toNodeId: "result", toPortId: "json" },
+    ];
+    project.graph.entryNodeIds = [workflow.id];
+    project.graph.groups = [{ id: "saved-group", name: "Saved work", nodeIds: [workflow.id, "result"] }];
+    files.set(path, dialect === "v1" ? JSON.stringify(project) : serializeStudioProject(project));
+
+    const opened = await store.loadProject(path);
+    expect(opened.projectId).toBe(project.projectId);
+    expect(opened.graph.nodes.find(node => node.id === workflow.id)).toEqual(workflow);
+    expect(opened.graph.edges).toEqual(project.graph.edges);
+    expect(opened.graph.groups).toEqual(project.graph.groups);
+    await store.saveProject(path, { ...opened, name: "Renamed project" });
+    await store.dispose();
+
+    const nextStore = reopen();
+    const reopened = await nextStore.loadProject(path);
+    expect(reopened.name).toBe("Renamed project");
+    expect(reopened.projectId).toBe(project.projectId);
+    expect(reopened.graph.nodes).toEqual(opened.graph.nodes);
+    expect(reopened.graph.edges).toEqual(project.graph.edges);
+    expect(reopened.graph.groups).toEqual(project.graph.groups);
+    expect(JSON.parse(files.get(path)!).schema).toBe("studio.project.v2");
+    await nextStore.dispose();
+  });
+});
+
 describe("v1 projects with retired node kinds", () => {
   const v1Text = readFileSync(join(__dirname, "fixtures/v1-retired-node-kinds.systemsculpt"), "utf8");
   const path = "SystemSculpt/Studio/Legacy API digest.systemsculpt";
@@ -716,6 +821,134 @@ describe("v1 projects with retired node kinds", () => {
         { title: "Fetch items", kind: "studio.http_request" },
       ],
     });
+  });
+
+  it("opens a migrated v1 project read-only when a file occupies its assets folder, then retries safely", async () => {
+    const { store, files, adapter } = createStore();
+    const assets = deriveStudioAssetsDir(path);
+    files.set(path, v1Text);
+    files.set(assets, "Keep this unrelated file");
+
+    const opened = await store.refreshDocument(path);
+    expect(opened.project.graph.nodes.find(node => node.id === "caption")?.kind).toBe("studio.text");
+    expect(opened.readOnlyReason).toMatch(/original.*copy/i);
+    expect(opened.readOnlyReason).toContain(`${assets}/legacy`);
+    expect(files.get(path)).toBe(v1Text);
+    expect(files.get(assets)).toBe("Keep this unrelated file");
+    expect(legacyCopies(files)).toEqual([]);
+    expect(adapter.process).not.toHaveBeenCalled();
+
+    const { revision } = await store.readDocument(path);
+    await expect(store.saveProject(path, { ...opened.project, name: "Not saved" })).rejects.toThrow(/read-only/i);
+    await expect(store.editDocument(path, revision, [{ entityId: "project", path: ["name"], value: "Not saved" }])).rejects.toThrow(/read-only/i);
+    expect(files.get(path)).toBe(v1Text);
+
+    // The user moves the blocking file; retry still preserves the exact original before rewriting.
+    files.delete(assets);
+    const retried = await store.refreshDocument(path);
+    expect(retried.readOnlyReason).toBeUndefined();
+    expect(legacyCopies(files).map(copy => files.get(copy))).toEqual([v1Text]);
+    expect(JSON.parse(files.get(path)!).schema).toBe("studio.project.v2");
+    await store.saveProject(path, { ...retried.project, name: "Editable again" });
+    expect(JSON.parse(files.get(path)!).name).toBe("Editable again");
+  });
+
+  it("keeps a blocked migration readable across shared sessions without edits, runs or policy writes", async () => {
+    const notice = jest.spyOn(obsidian, "Notice").mockImplementation(() => ({}));
+    const { app, files, adapter } = createStore();
+    const assets = deriveStudioAssetsDir(path);
+    files.set(path, v1Text);
+    files.set(assets, "Keep this unrelated file");
+    const service = createService(app);
+    await expect(service.runProject(path)).rejects.toThrow(/read-only/i);
+    const session = await service.retainProjectSession(path);
+    expect(session.getReadOnlyReason()).toMatch(/read-only.*original copy/i);
+    expect(await service.retainProjectSession(path)).toBe(session);
+    const snapshot = session.getProjectSnapshot();
+    const mutate = jest.fn();
+    expect(session.mutate("node.title", mutate)).toBe(false);
+    expect(await session.mutateAsync("node.config", mutate)).toBe(false);
+    expect(mutate).not.toHaveBeenCalled();
+    expect(session.applyHistorySnapshot({ ...snapshot, name: "Not applied" })).toBe(false);
+    await session.restoreEditingSnapshot({ base: snapshot, project: { ...snapshot, name: "Not restored" } });
+    session.schedulePersist();
+    await session.flushPendingSaveWork({ force: true });
+    expect(session.getProject()).toEqual(snapshot);
+    expect(session.hasPendingLocalSaveWork()).toBe(false);
+    await expect(service.runProject(path)).rejects.toThrow(/read-only/i);
+    await expect(service.runProjectFromNode(path, "caption")).rejects.toThrow(/read-only/i);
+    await expect(service.startAgentRun(path, "caption")).rejects.toThrow(/read-only/i);
+    await expect(service.importFileToProject(path, { bytes: new ArrayBuffer(1), name: "test.txt" })).rejects.toThrow(/read-only/i);
+    expect(files.has(deriveStudioPolicyPath(path))).toBe(false);
+    expect(adapter.process).not.toHaveBeenCalled();
+    expect(files.get(path)).toBe(v1Text);
+
+    // A failed explicit retry retains the same readable session and restriction.
+    expect(await service.retainProjectSession(path, { forceReload: true })).toBe(session);
+    await service.releaseProjectSession(path);
+    expect(session.getReadOnlyReason()).toBeDefined();
+    expect(files.get(path)).toBe(v1Text);
+    files.delete(assets);
+    expect(await service.retainProjectSession(path, { forceReload: true })).toBe(session);
+    await service.releaseProjectSession(path);
+    expect(session.getReadOnlyReason()).toBeUndefined();
+    expect(legacyCopies(files).map(copy => files.get(copy))).toEqual([v1Text]);
+    expect(notice).toHaveBeenCalledTimes(1);
+    expect(files.has(deriveStudioPolicyPath(path))).toBe(true);
+    await session.mutateAndFlush("node.title", project => { project.name = "Recovered"; });
+    expect(JSON.parse(files.get(path)!).name).toBe("Recovered");
+    await service.releaseProjectSession(path);
+    await service.releaseProjectSession(path);
+  });
+
+  it("reads saved outputs and history without retrying or rewriting a read-only migration", async () => {
+    const { app, files, adapter } = createStore();
+    files.set(path, v1Text);
+    const writeBinary = adapter.writeBinary.getMockImplementation()!;
+    adapter.writeBinary.mockImplementation(async (target, bytes) => {
+      if (target.startsWith(legacyFolder)) throw new Error("Permission denied");
+      await writeBinary(target, bytes);
+    });
+    const service = createService(app);
+    const session = await service.retainProjectSession(path);
+    const at = "2026-03-22T00:00:00.000Z";
+    const entry = { nodeId: "caption", nodeKind: "studio.text", nodeVersion: "1.0.0", inputFingerprint: "saved", updatedAt: at, runId: "saved_run", outputs: { text: "Saved output" } };
+    files.set(deriveStudioNodeCachePath(path), JSON.stringify({ schema: "studio.node-cache.v1", projectId: session.getProject().projectId, updatedAt: at, entries: { caption: entry } }));
+    files.set(`${deriveStudioRunsDir(path)}/index.json`, JSON.stringify([{ runId: "saved_run", startedAt: at, status: "success" }]));
+    const event = { type: "node.output", runId: "saved_run", nodeId: "caption", outputs: entry.outputs, at };
+    files.set(`${deriveStudioRunsDir(path)}/saved_run/events.ndjson`, JSON.stringify(event));
+    const unchangedFiles = new Map(files);
+    adapter.read.mockClear();
+    adapter.writeBinary.mockClear();
+
+    expect((await service.getProjectNodeCache(path))?.entries.caption).toEqual(entry);
+    expect(await service.getLatestRunEvents(path)).toEqual([event]);
+    expect(adapter.read).not.toHaveBeenCalled();
+    expect(adapter.writeBinary).not.toHaveBeenCalled();
+    expect(adapter.process).not.toHaveBeenCalled();
+    expect(files).toEqual(unchangedFiles);
+    expect(session.getReadOnlyReason()).toBeDefined();
+    await service.releaseProjectSession(path);
+  });
+
+  it("can close and reopen the read-only project when writing the backup itself fails", async () => {
+    const { app, files, adapter } = createStore();
+    files.set(path, v1Text);
+    const writeBinary = adapter.writeBinary.getMockImplementation()!;
+    adapter.writeBinary.mockImplementation(async (target, bytes) => {
+      if (target.startsWith(legacyFolder)) throw new Error("Permission denied");
+      await writeBinary(target, bytes);
+    });
+    const service = createService(app);
+    for (let open = 0; open < 2; open++) {
+      const session = await service.retainProjectSession(path);
+      expect(session.getReadOnlyReason()).toBeDefined();
+      expect(session.getProject().graph.nodes.find(node => node.id === "caption")?.kind).toBe("studio.text");
+      await service.releaseProjectSession(path);
+      expect(session.isDisposed()).toBe(true);
+    }
+    expect(files.get(path)).toBe(v1Text);
+    expect(legacyCopies(files)).toEqual([]);
   });
 
   it("keeps the copy before a save that is the first writer", async () => {

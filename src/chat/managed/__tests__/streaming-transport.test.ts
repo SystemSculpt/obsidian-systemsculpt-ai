@@ -217,7 +217,6 @@ describe("AgentStreamingTransport", () => {
       method: "POST",
       url: "https://systemsculpt.test/api/plugin/agent/turn",
       headers: { Authorization: "Bearer access_token_streaming_transport" },
-      preserveResponseHeaders: true,
       streamingProbeUrl: "https://systemsculpt.test/api/plugin/connectivity",
       allowTransportFallback: false,
     });
@@ -1346,6 +1345,7 @@ describe("AgentStreamingTransport", () => {
 
     const error = await transport.sendSubmit(submit("user_payment"))
       .catch((caught) => caught as Error & Record<string, unknown>);
+    if (!(error instanceof Error)) throw new Error("Expected the submit to reject.");
 
     expect(error).toMatchObject({
       code: "insufficient_credits",
@@ -1530,12 +1530,12 @@ describe("AgentStreamingTransport", () => {
     seen.length = 0;
 
     let staleController: ReadableStreamDefaultController<Uint8Array> | null = null;
-    let releaseSnapshot: ((response: Response) => void) | null = null;
+    const snapshotGate: { release: ((response: Response) => void) | null } = { release: null };
     const streamCancelled = jest.fn();
     request.mockImplementation(async (input: Record<string, unknown>) => {
       const url = String(input.url);
       if (url.includes("/get-messages")) {
-        return await new Promise<Response>((resolve) => { releaseSnapshot = resolve; });
+        return await new Promise<Response>((resolve) => { snapshotGate.release = resolve; });
       }
       return new Response(new ReadableStream<Uint8Array>({
         start(controller) { staleController = controller; },
@@ -1549,7 +1549,7 @@ describe("AgentStreamingTransport", () => {
     const staleTurn = transport.sendToolResult(toolResult(requestId, toolCallId));
     while (!staleController) await Promise.resolve();
     const recovery = transport.forceReconnect();
-    while (!releaseSnapshot) await Promise.resolve();
+    while (!snapshotGate.release) await Promise.resolve();
 
     // The replacement generation is already active while its snapshot is
     // gated, so the orphaned command's late ACK cannot settle a replay even
@@ -1567,7 +1567,7 @@ describe("AgentStreamingTransport", () => {
         status: "accepted",
       })}\n\n`,
     ));
-    releaseSnapshot(snapshotResponse());
+    snapshotGate.release(snapshotResponse());
 
     await recovery;
     await staleTurn;
@@ -1587,12 +1587,12 @@ describe("AgentStreamingTransport", () => {
 
     let staleController: ReadableStreamDefaultController<Uint8Array> | null = null;
     let staleSignal: AbortSignal | null = null;
-    let releaseSnapshot: ((response: Response) => void) | null = null;
+    const snapshotGate: { release: ((response: Response) => void) | null } = { release: null };
     const streamCancelled = jest.fn();
     request.mockImplementation(async (input: Record<string, unknown>) => {
       const url = String(input.url);
       if (url.includes("/get-messages")) {
-        return await new Promise<Response>((resolve) => { releaseSnapshot = resolve; });
+        return await new Promise<Response>((resolve) => { snapshotGate.release = resolve; });
       }
       staleSignal = input.signal as AbortSignal;
       return new Response(new ReadableStream<Uint8Array>({
@@ -1607,12 +1607,12 @@ describe("AgentStreamingTransport", () => {
     const staleTurn = transport.sendSubmit(submit("user_silent_dead_open_reconnect"));
     while (!staleController || !staleSignal) await Promise.resolve();
     const recovery = transport.forceReconnect();
-    while (!releaseSnapshot) await Promise.resolve();
+    while (!snapshotGate.release) await Promise.resolve();
 
     expect((staleSignal as AbortSignal).aborted).toBe(false);
     expect(streamCancelled).not.toHaveBeenCalled();
 
-    releaseSnapshot(snapshotResponse());
+    snapshotGate.release(snapshotResponse());
     await recovery;
     await staleTurn;
 
@@ -1629,11 +1629,11 @@ describe("AgentStreamingTransport", () => {
     await transport.connect();
 
     let staleController: ReadableStreamDefaultController<Uint8Array> | null = null;
-    let releaseSnapshot: ((response: Response) => void) | null = null;
+    const snapshotGate: { release: ((response: Response) => void) | null } = { release: null };
     request.mockImplementation(async (input: Record<string, unknown>) => {
       const url = String(input.url);
       if (url.includes("/get-messages")) {
-        return await new Promise<Response>((resolve) => { releaseSnapshot = resolve; });
+        return await new Promise<Response>((resolve) => { snapshotGate.release = resolve; });
       }
       return new Response(new ReadableStream<Uint8Array>({
         start(controller) { staleController = controller; },
@@ -1646,14 +1646,14 @@ describe("AgentStreamingTransport", () => {
     const staleTurn = transport.sendSubmit(submit("user_stale_error_during_reconnect"));
     while (!staleController) await Promise.resolve();
     const recovery = transport.forceReconnect();
-    while (!releaseSnapshot) await Promise.resolve();
+    while (!snapshotGate.release) await Promise.resolve();
 
     (staleController as ReadableStreamDefaultController<Uint8Array>)
       .error(new Error("orphaned Worker stream failed"));
     await expect(staleTurn).resolves.toBeUndefined();
     expect(transport.state).toBe("connecting");
 
-    releaseSnapshot(snapshotResponse());
+    snapshotGate.release(snapshotResponse());
     await recovery;
     expect(transport.state).toBe("open");
   });

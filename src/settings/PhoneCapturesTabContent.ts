@@ -1,7 +1,8 @@
-import { Notice, Setting } from "obsidian";
+import { Notice } from "obsidian";
+import { createCatalogSetting } from "./SettingsCatalog";
 import { SystemSculptSettingTab } from "./SystemSculptSettingTab";
 import { attachFolderSuggester } from "../components/FolderSuggester";
-import { DEFAULT_PHONE_CAPTURE_FOLDER } from "../features/phone-captures/PhoneCaptureInbox";
+import { DEFAULT_PHONE_CAPTURE_FOLDER, DEFAULT_PHONE_MEETING_FOLDER } from "../features/phone-captures/PhoneCaptureInbox";
 
 function validFolder(path: string): boolean {
   return !path.includes("..") && !path.startsWith("/") && !path.startsWith("\\");
@@ -14,14 +15,10 @@ export function displayPhoneCapturesTabContent(containerEl: HTMLElement, tabInst
   if (plugin.settings.phoneCapturesLinked !== true) return;
   const settingsManager = plugin.getSettingsManager();
 
-  new Setting(containerEl)
-    .setName("iOS captures")
-    .setDesc("Notes and voice memos from the SystemSculpt iOS app arrive in this vault while you are signed in.")
+  createCatalogSetting(containerEl, "workspace.phone-captures")
     .setHeading();
 
-  new Setting(containerEl)
-    .setName("Save iOS captures")
-    .setDesc("Check for new captures when Obsidian opens, when it regains focus and every few minutes.")
+  createCatalogSetting(containerEl, "workspace.save-phone-captures")
     .addToggle((toggle) => toggle
       .setValue(plugin.settings.phoneCapturesEnabled)
       .onChange(async (value) => {
@@ -29,41 +26,55 @@ export function displayPhoneCapturesTabContent(containerEl: HTMLElement, tabInst
         if (value) void plugin.syncPhoneCaptures();
       }));
 
-  new Setting(containerEl)
-    .setName("Ask before saving iOS captures")
-    .setDesc("Show the waiting captures and save them only when you confirm.")
+  createCatalogSetting(containerEl, "workspace.confirm-phone-captures")
     .addToggle((toggle) => toggle
       .setValue(plugin.settings.phoneCapturesAskBeforeSaving)
       .onChange(async (value) => {
         await settingsManager.updateSettings({ phoneCapturesAskBeforeSaving: value });
       }));
 
-  const saveFolder = async (value: string) => {
-    if (!validFolder(value)) {
-      new Notice("Use a vault-relative path without '..' or a leading slash.");
-      return;
-    }
-    await settingsManager.updateSettings({ phoneCapturesFolder: value.trim() });
-  };
+  createCatalogSetting(containerEl, "workspace.run-phone-handoffs")
+    .addToggle((toggle) => toggle
+      .setValue(plugin.settings.phoneHandoffsAutoRun === true)
+      .onChange(async (value) => {
+        await settingsManager.updateSettings({ phoneHandoffsAutoRun: value });
+      }));
 
-  new Setting(containerEl)
-    .setName("iOS captures folder")
-    .setDesc("Each capture becomes a new note here. Existing notes are never overwritten.")
-    .addText((text) => {
-      text
-        .setPlaceholder(DEFAULT_PHONE_CAPTURE_FOLDER)
-        .setValue(plugin.settings.phoneCapturesFolder)
-        .onChange(async (value) => {
-          await saveFolder(value);
-        });
-      attachFolderSuggester(
-        text.inputEl,
-        (selectedPath: string) => {
-          text.setValue(selectedPath);
-          void saveFolder(selectedPath);
-        },
-        app,
-      );
-      return text;
-    });
+  const folders = [
+    {
+      key: "phoneCapturesFolder" as const,
+      id: "workspace.phone-captures-folder" as const,
+      placeholder: DEFAULT_PHONE_CAPTURE_FOLDER,
+    },
+    {
+      key: "phoneCapturesMeetingsFolder" as const,
+      id: "workspace.phone-meetings-folder" as const,
+      placeholder: DEFAULT_PHONE_MEETING_FOLDER,
+    },
+  ];
+  for (const folder of folders) {
+    const saveFolder = async (value: string) => {
+      if (!validFolder(value)) {
+        new Notice("Use a vault-relative path without '..' or a leading slash.");
+        return;
+      }
+      await settingsManager.updateSettings({ [folder.key]: value.trim() });
+    };
+    createCatalogSetting(containerEl, folder.id)
+      .addText((text) => {
+        text
+          .setPlaceholder(folder.placeholder)
+          .setValue(plugin.settings[folder.key])
+          .onChange(saveFolder);
+        attachFolderSuggester(
+          text.inputEl,
+          (selectedPath: string) => {
+            text.setValue(selectedPath);
+            void saveFolder(selectedPath);
+          },
+          app,
+        );
+        return text;
+      });
+  }
 }

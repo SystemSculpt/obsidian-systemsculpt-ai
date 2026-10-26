@@ -1,7 +1,7 @@
 /**
  * @jest-environment node
  */
-import { App, TFile } from "obsidian";
+import { App } from "obsidian";
 
 // Mock obsidian
 jest.mock("obsidian", () => ({
@@ -17,7 +17,6 @@ jest.mock("../../core/ui/modals/PromptModal", () => ({
 
 import {
   MAX_FILE_SIZE,
-  validateFileSize,
   validateBrowserFileSize,
   formatFileSize,
 } from "../FileValidator";
@@ -59,87 +58,6 @@ describe("FileValidator", () => {
     it("handles edge cases", () => {
       expect(formatFileSize(0)).toBe("0 bytes");
       expect(formatFileSize(1)).toBe("1 bytes");
-    });
-  });
-
-  describe("validateFileSize", () => {
-    it("returns true for small files", async () => {
-      const mockFile = {
-        name: "small.txt",
-        stat: { size: 1000 },
-      } as unknown as TFile;
-
-      const result = await validateFileSize(mockFile, mockApp);
-
-      expect(result).toBe(true);
-      expect(showPrompt).not.toHaveBeenCalled();
-    });
-
-    it("returns true for files at exactly max size", async () => {
-      const mockFile = {
-        name: "exact.txt",
-        stat: { size: MAX_FILE_SIZE },
-      } as unknown as TFile;
-
-      const result = await validateFileSize(mockFile, mockApp);
-
-      expect(result).toBe(true);
-    });
-
-    it("returns false for files exceeding max size", async () => {
-      const mockFile = {
-        name: "large.txt",
-        stat: { size: MAX_FILE_SIZE + 1 },
-      } as unknown as TFile;
-
-      const result = await validateFileSize(mockFile, mockApp);
-
-      expect(result).toBe(false);
-      expect(showPrompt).toHaveBeenCalledWith(
-        mockApp,
-        expect.stringContaining("large.txt"),
-        expect.objectContaining({
-          title: "File Size Limit Exceeded",
-        })
-      );
-    });
-
-    it("shows popup with file size info when too large", async () => {
-      const mockFile = {
-        name: "huge.txt",
-        stat: { size: 600 * 1024 * 1024 },
-      } as unknown as TFile;
-
-      await validateFileSize(mockFile, mockApp);
-
-      expect(showPrompt).toHaveBeenCalledWith(
-        mockApp,
-        expect.stringContaining("600.0 MiB"),
-        expect.any(Object)
-      );
-    });
-
-    it("supports custom max size and labels", async () => {
-      const mockFile = {
-        name: "custom.txt",
-        stat: { size: 2048 },
-      } as unknown as TFile;
-
-      await validateFileSize(mockFile, mockApp, {
-        maxBytes: 1024,
-        maxLabel: "1 KB",
-        title: "Custom Limit",
-        description: "Custom description",
-      });
-
-      expect(showPrompt).toHaveBeenCalledWith(
-        mockApp,
-        expect.stringContaining("maximum allowed size is 1 KB"),
-        expect.objectContaining({
-          title: "Custom Limit",
-          description: "Custom description",
-        })
-      );
     });
   });
 
@@ -195,7 +113,7 @@ describe("FileValidator", () => {
 
       expect(showPrompt).toHaveBeenCalledWith(
         mockApp,
-        expect.any(String),
+        expect.stringContaining("600.0 MiB"),
         expect.objectContaining({
           description: "Please reduce the file size or choose a smaller file.",
           primaryButton: "OK",
@@ -212,12 +130,17 @@ describe("FileValidator", () => {
       await validateBrowserFileSize(mockFile, mockApp, {
         maxBytes: 1024,
         maxLabel: "1 KB",
+        title: "Custom Limit",
+        description: "Custom description",
       });
 
       expect(showPrompt).toHaveBeenCalledWith(
         mockApp,
         expect.stringContaining("maximum allowed size is 1 KB"),
-        expect.any(Object)
+        expect.objectContaining({
+          title: "Custom Limit",
+          description: "Custom description",
+        })
       );
     });
   });

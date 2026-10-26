@@ -18,17 +18,61 @@ Source of truth:
 | Open Credits & Usage |  | `open-credits-balance` | Opens the credits/usage modal |
 | Sign in |  | `sign-in` | Opens browser sign-in and Account settings |
 | View plans / buy credits |  | `view-plans` | Opens the plan comparison page |
+| Check for updates |  | `check-for-updates` | Reports whether a newer SystemSculpt release is available; **Open plugin updates** opens Obsidian's plugin page |
 | Reload Obsidian |  | `reload-obsidian` | Reloads app window |
-| Copy Vault-Relative File Path |  | `copy-current-file-path` | Copies the focused note or Studio file's path relative to the vault, with a success notice; assign a shortcut in Obsidian Hotkeys |
+| Copy Vault-Relative File Path |  | `copy-current-file-path` | Copies the focused note or Studio file's path relative to the vault (a notice appears only if copying fails); assign a shortcut in Obsidian Hotkeys |
 
 ## Chat and writing
 
-Chat uses the selected SystemSculpt API, on-machine Codex or on-machine Claude Code backend. Choose the execution backend and model in the chat controls.
+Chat uses hosted SystemSculpt, on-machine Codex or on-machine Claude Code. Choose
+the backend, mode and model in the run line under the composer.
+
+If Claude Code or Codex reaches its plan's usage limit, Chat shows **Claude Code
+usage limit reached** or **Codex usage limit reached**, with the agent's own
+notice and reset time when provided. **Use SystemSculpt instead** offers hosted
+chat without retrying the exhausted plan. The notice is not saved as an answer;
+any real work already received stays in the transcript.
 
 | Command | Default hotkey | Command ID | Notes |
 | --- | --- | --- | --- |
 | Create Title from Content | `Mod+Shift+T` | `change-chat-title` | Works in chat and markdown notes |
 | Chat with File |  | `chat-with-file` | Opens chat with current file preloaded |
+| Chat: New chat |  | `chat-new-chat` | In the active or most recent chat; opens one if none |
+| Chat: Open chat history |  | `chat-open-history` | History inside the chat view |
+| Chat: Focus message box |  | `chat-focus-message-box` | |
+| Chat: Stop response |  | `chat-stop-response` | Only while a chat is working |
+| Chat: Change mode |  | `chat-change-mode` | Opens the run line's mode menu |
+| Chat: Change backend |  | `chat-change-backend` | Opens the run line's backend menu |
+| Chat: Review pending approval |  | `chat-review-pending-approval` | Focuses the oldest waiting approval card |
+
+### Keys inside the chat view
+
+These work only while focus is in a chat view, so they claim no global hotkey.
+
+| Key | Action |
+| --- | --- |
+| `Mod+K` | Open chat history (or focus its search) |
+| `Mod+Shift+O` | New chat |
+| `Mod+.` | Change mode |
+| `Mod+Shift+.` | Change backend |
+| `Enter` / `Shift+Enter` | In the desktop message box: send / add a newline. While working, Enter queues a follow-up. On touch screens, Enter adds a newline; use Send to submit |
+| `Esc` | In the message box while working: stop the response, keeping partial output. An open menu or mention list closes first |
+| `↑` / `↓` | In an empty message box at its start/end: recall previous/next prompts |
+| `@` or `[[`, then `↑` / `↓` and `Enter` or `Tab` | Find and attach a vault note; Escape closes the suggestions |
+| `Enter` or `Mod+Enter` | Approve a focused inline request; Mod+Enter also works with Deny or Details focused |
+| `Esc` | Deny a focused inline request, or skip a focused question |
+| `Mod+Shift+Enter` | Use **Approve all in this chat** when the request offers a session-scoped grant |
+| `↑` / `↓` | Move between pending approval cards |
+| `Alt+↑` (also `Alt+↓`) | Focus the first pending approval card without discarding a draft |
+| `1`–`9`, or type and `Enter` | Answer a focused question with an option or your own text |
+| `Enter` or `Space` | Expand/collapse a focused tool line or activity group |
+| A printable character or `Esc` | From the conversation: return to the message box; typing keeps the character |
+| `↑` / `↓`, `Enter`, `Mod+Enter`, `Esc` or `←` | In history: move, open, open in a new tab, return to the chat |
+
+Use **Tab / Shift+Tab** to move through the controls. The run line is one Tab
+stop: **Left / Right** moves between its backend, mode and model/credits buttons.
+Menus use arrow keys, Enter and Escape. Closing a menu returns focus to its opener;
+closing history restores your draft.
 
 ## Search and embeddings
 
@@ -37,8 +81,7 @@ Chat uses the selected SystemSculpt API, on-machine Codex or on-machine Claude C
 | Open SystemSculpt Search | `Mod+K` | `open-systemsculpt-search` | Searches notes, canvases, and Studio projects; an empty query shows recently modified files |
 | Open Similar Notes Panel |  | `open-embeddings-view` | Opens embeddings/similar-notes view |
 | Find Similar Notes (Current Note) |  | `find-similar-current-note` | Added in `src/main.ts`; requires active note |
-| Rebuild Embeddings |  | `rebuild-embeddings` | Clears all embeddings data |
-| Rebuild SystemSculpt Embeddings |  | `rebuild-embeddings-current-model` | Rebuilds the current SystemSculpt embeddings index |
+| Rebuild SystemSculpt embeddings |  | `rebuild-embeddings-current-model` | Replaces the Similar notes index and processes eligible notes again, after one confirmation |
 | Show Embeddings Database Statistics (Debug) |  | `embeddings-database-stats` | Visible only when embeddings are enabled |
 
 ## Audio and media
@@ -47,6 +90,7 @@ Chat uses the selected SystemSculpt API, on-machine Codex or on-machine Claude C
 | --- | --- | --- | --- |
 | Toggle Audio Recorder |  | `toggle-audio-recorder` | Starts/stops recording |
 | Transcribe an audio file |  | `transcribe-audio-file` | Transcribes a vault audio file through SystemSculpt |
+| Resume inbox transcription |  | `resume-inbox-transcription` | Only after **Not now** on a bulk inbox transcription; sends the audio files left waiting |
 | Open audio processor |  | `open-audio-processor` | Processes audio or YouTube into a detailed note, meeting brief, or clean transcript |
 | Process YouTube video |  | `process-youtube-video` | Opens Audio Processor on the YouTube input |
 | Save audio summary |  | `save-audio-summary` | Creates or opens a summary-only note for detailed and meeting brief outputs |

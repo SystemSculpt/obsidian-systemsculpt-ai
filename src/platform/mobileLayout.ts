@@ -3,6 +3,7 @@ import { Platform } from "obsidian";
 type MobilePlatform = typeof Platform & {
   isMobile?: boolean;
   isMobileApp?: boolean;
+  isTablet?: boolean;
 };
 
 export type MobileLayoutOwner = Document | Element | Window | null | undefined;
@@ -37,4 +38,17 @@ export function isMobileLayout(owner?: MobileLayoutOwner): boolean {
   }
 
   return resolveMobileLayoutDocument(owner)?.body.classList.contains("is-mobile") ?? false;
+}
+
+/**
+ * True for Obsidian's tablet layout, real or emulated. Tablets keep the tab
+ * header and never show the phone's floating navbar.
+ */
+export function isTabletLayout(owner?: MobileLayoutOwner): boolean {
+  const platform = Platform as MobilePlatform;
+  if (platform.isTablet) {
+    return true;
+  }
+
+  return resolveMobileLayoutDocument(owner)?.body.classList.contains("is-tablet") ?? false;
 }

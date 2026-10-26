@@ -1,0 +1,24 @@
+{
+  "now": 1792864800000,
+  "cases": [
+    { "name": "delta seconds", "header": "5", "milliseconds": 5000 },
+    { "name": "padded delta with leading zeroes", "header": " 005 ", "milliseconds": 5000 },
+    { "name": "fractional seconds", "header": "1.25", "milliseconds": 1250 },
+    { "name": "sub-millisecond rounded up", "header": "0.0001", "milliseconds": 1 },
+    { "name": "zero", "header": "0", "milliseconds": 0 },
+    { "name": "HTTP date", "header": "Sat, 24 Oct 2026 18:00:05 GMT", "milliseconds": 5000 },
+    { "name": "obsolete RFC 850 date", "header": "Saturday, 24-Oct-26 18:00:05 GMT", "milliseconds": 5000 },
+    { "name": "obsolete asctime date", "header": "Sat Oct 24 18:00:05 2026", "milliseconds": 5000 },
+    { "name": "past HTTP date", "header": "Sat, 24 Oct 2026 17:59:00 GMT", "milliseconds": 0 },
+    { "name": "long delta", "header": "7200", "milliseconds": 7200000 },
+    { "name": "long HTTP date", "header": "Mon, 26 Oct 2026 18:00:00 GMT", "milliseconds": 172800000 },
+    { "name": "more than ten digits", "header": "99999999999", "milliseconds": 99999999999000 },
+    { "name": "missing", "header": null, "milliseconds": null },
+    { "name": "empty", "header": "", "milliseconds": null },
+    { "name": "whitespace", "header": "  ", "milliseconds": null },
+    { "name": "invalid", "header": "soon", "milliseconds": null },
+    { "name": "negative", "header": "-1", "milliseconds": null },
+    { "name": "exponent", "header": "1e3", "milliseconds": null },
+    { "name": "non-finite", "header": "Infinity", "milliseconds": null }
+  ]
+}

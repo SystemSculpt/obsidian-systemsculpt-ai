@@ -76,6 +76,7 @@ export type StudioProjectSessionDebugState = {
 type StudioProjectSessionOptions = {
   projectPath: string;
   project: StudioProjectV1;
+  readOnlyReason?: string;
   saveProject: (
     projectPath: string,
     project: StudioProjectV1,
@@ -92,7 +93,9 @@ type StudioProjectSessionOptions = {
 };
 
 const DEFAULT_DISCRETE_DELAY_MS = 40;
-const DEFAULT_CONTINUOUS_DELAY_MS = 120;
+/** Typing saves once it pauses: every save is a disk write and a sync upload.
+ * The view saves at once when focus, the window or the leaf is left. */
+const DEFAULT_CONTINUOUS_DELAY_MS = 1500;
 
 type StudioProjectSessionMutator = (project: StudioProjectV1) => boolean | void;
 type StudioProjectSessionAsyncMutator = (project: StudioProjectV1) => Promise<boolean | void>;
@@ -112,6 +115,7 @@ export class StudioProjectSession {
   private dirtyRevision = 0;
   private persistedRevision = 0;
   private projectFileWriteBlocked = false;
+  private readOnlyReason?: string;
   private disposed = false;
   private lastAcceptedSignature: string | null = null;
   private lastRejectedSignature: string | null = null;
@@ -124,6 +128,7 @@ export class StudioProjectSession {
     this.projectPath = String(options.projectPath || "").trim();
     this.project = cloneStudioProjectSnapshot(options.project);
     this.baseProject = cloneStudioProjectSnapshot(options.project);
+    this.readOnlyReason = options.readOnlyReason;
     this.discreteDelayMs = Math.max(0, Math.floor(options.discreteDelayMs ?? DEFAULT_DISCRETE_DELAY_MS));
     this.continuousDelayMs = Math.max(
       this.discreteDelayMs,
@@ -137,6 +142,19 @@ export class StudioProjectSession {
 
   isDisposed(): boolean {
     return this.disposed;
+  }
+
+  getReadOnlyReason(): string | undefined { return this.readOnlyReason; }
+
+  setReadOnlyReason(reason: string | undefined): void {
+    if (this.readOnlyReason === reason) return;
+    this.readOnlyReason = reason;
+    if (reason) {
+      this.clearSaveTimer();
+      this.saveQueued = false;
+      this.saveQueuedMode = null;
+    }
+    this.notifyListeners();
   }
 
   private warnDisposedWrite(operation: string): void {
@@ -163,7 +181,7 @@ export class StudioProjectSession {
   }
 
   async restoreEditingSnapshot(snapshot: { base: StudioProjectV1; project: StudioProjectV1 }): Promise<void> {
-    if (this.disposed) return;
+    if (this.disposed || this.readOnlyReason) return;
     let reconciled = reconcileStudioProject(snapshot.base, snapshot.project, this.project);
     if (reconciled.conflicts.length > 0) {
       if (!await this.preserveConflict(snapshot.project, reconciled.conflicts)) return;
@@ -208,6 +226,7 @@ export class StudioProjectSession {
       this.warnDisposedWrite(`mutate:${reason}`);
       return false;
     }
+    if (this.readOnlyReason) return false;
     const draft = this.getProjectSnapshot();
     const changed = mutator(draft) !== false;
     if (!changed) {
@@ -230,10 +249,11 @@ export class StudioProjectSession {
       this.warnDisposedWrite(`mutateAsync:${reason}`);
       return false;
     }
+    if (this.readOnlyReason) return false;
     const before = this.getProjectSnapshot();
     const draft = cloneStudioProjectSnapshot(before);
     const changed = (await mutator(draft)) !== false;
-    if (this.disposed) return false;
+    if (this.disposed || this.readOnlyReason) return false;
     if (!changed || serializeStudioProject(before) === serializeStudioProject(draft)) {
       return false;
     }
@@ -296,7 +316,7 @@ export class StudioProjectSession {
   /** History is a new local edit against the accepted disk version, not a reload.
    * Restoring a deleted entity this way is an explicit Undo, which clears its tombstone. */
   applyHistorySnapshot(project: StudioProjectV1): boolean {
-    if (this.disposed) return false;
+    if (this.disposed || this.readOnlyReason) return false;
     updateStudioProjectIdentity(this.project, project);
     this.schedulePersist({ mode: "discrete", reason: "history.apply" });
     this.notifyListeners();
@@ -442,13 +462,14 @@ export class StudioProjectSession {
       this.warnDisposedWrite(`schedulePersist:${options?.reason || "unknown"}`);
       return;
     }
+    if (this.readOnlyReason) return;
     const mode = options?.mode || "discrete";
     // A new edit is an explicit retry signal. A failed save pauses automatic
     // retry churn, but it must never make later user work permanently inert.
     this.saveFailurePaused = false;
     this.dirtyRevision += 1;
 
-    if (this.projectFileWriteBlocked) {
+    if (this.projectFileWriteBlocked || this.readOnlyReason) {
       return;
     }
 
@@ -475,7 +496,7 @@ export class StudioProjectSession {
     if (this.disposed) {
       return;
     }
-    if (this.projectFileWriteBlocked) {
+    if (this.projectFileWriteBlocked || this.readOnlyReason) {
       return;
     }
     if (this.saveFailurePaused && options?.force !== true) {
@@ -572,7 +593,7 @@ export class StudioProjectSession {
   }
 
   private async flushSave(): Promise<void> {
-    if (this.disposed || this.projectFileWriteBlocked || !this.projectPath) {
+    if (this.disposed || this.projectFileWriteBlocked || this.readOnlyReason || !this.projectPath) {
       return;
     }
 

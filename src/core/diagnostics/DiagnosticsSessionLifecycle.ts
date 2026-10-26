@@ -1,31 +1,19 @@
 import type { DataAdapter } from "obsidian";
 import { getHostDeviceType, getHostOperatingSystem } from "../../platform/hostCapabilities";
+import { isMissingPathError } from "../../utils/errors";
 
 const AUTOMATIC_DIAGNOSTICS_ARCHIVE_PATTERN = /^(?:systemsculpt-\d{8}-\d{6}\.log|resource-metrics-\d{8}-\d{6}\.ndjson|session-\d{8}-\d{6}\.json)$/u;
-const AUTOMATIC_DIAGNOSTICS_SESSION_PATTERN = /^session-(?:latest|\d{8}-\d{6})\.json$/u;
-const LEGACY_PRIVATE_OPERATIONS_ARCHIVE_PATTERN = /^operations-\d{8}-\d{6}\.ndjson$/u;
-const LEGACY_PRIVATE_OPERATIONS_LATEST_NAME = "operations-latest.ndjson";
-const LEGACY_PRIVATE_CHAT_DEBUG_DIRECTORY_NAME = "chat-debug";
-const LEGACY_PRIVATE_CHAT_DEBUG_UI_PREFIX = "chat-";
-const LEGACY_PRIVATE_CHAT_DEBUG_UI_SUFFIX = "-ui.json";
-const LEGACY_PRIVATE_SESSION_KEY_PATTERN = /"(?:vaultName|vault_name|obsidianConfigDir|obsidian_config_dir|enabledPlugins|enabled_plugins)"\s*:/u;
 const DIAGNOSTICS_ARCHIVE_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1_000;
 const DIAGNOSTICS_ARCHIVE_MAX_FILES = 60;
 const DIAGNOSTICS_ARCHIVE_MAX_TOTAL_BYTES = 10 * 1024 * 1024;
-const DIAGNOSTICS_SESSION_MAX_INSPECTION_BYTES = 64 * 1024;
 const DIAGNOSTICS_ARCHIVE_MAX_DIRECTORY_ENTRIES = 1_024;
 const DIAGNOSTICS_ARCHIVE_MAX_CANDIDATES = 128;
-const DIAGNOSTICS_ARCHIVE_MAX_INSPECTED_BYTES = 512 * 1024;
 const DIAGNOSTICS_ARCHIVE_OPERATION_TIMEOUT_MS = 250;
 const DIAGNOSTICS_ARCHIVE_TOTAL_TIMEOUT_MS = 2_000;
 
 type AutomaticDiagnosticsFile = Readonly<{
   name: string;
   path: string;
-}>;
-
-type DiagnosticsCleanupCandidate = AutomaticDiagnosticsFile & Readonly<{
-  kind: "automatic" | "legacy_chat_debug_ui" | "legacy_operations";
 }>;
 
 type AutomaticDiagnosticsArchive = AutomaticDiagnosticsFile & Readonly<{
@@ -37,7 +25,7 @@ type DiagnosticsCleanupOperationResult<T> =
   | Readonly<{ kind: "success"; value: T }>
   | Readonly<{ kind: "failed" | "missing" | "stopped" | "timed_out" }>;
 
-export type DiagnosticsSessionMetadata = Readonly<{
+type DiagnosticsSessionMetadata = Readonly<{
   schemaVersion: 2;
   sessionId: string;
   startedAt: string;
@@ -49,7 +37,7 @@ export type DiagnosticsSessionMetadata = Readonly<{
   }>;
 }>;
 
-export interface DiagnosticsSessionStorage {
+interface DiagnosticsSessionStorage {
   initialize(): Promise<void>;
   getPath(type: "diagnostics"): string;
   writeFile(type: "diagnostics", fileName: string, data: string | object): Promise<unknown>;
@@ -64,25 +52,7 @@ export type DiagnosticsSessionLifecycleOptions = Readonly<{
 }>;
 
 function compareDiagnosticsPaths(left: AutomaticDiagnosticsFile, right: AutomaticDiagnosticsFile): number {
-  if (left.name === "session-latest.json") return right.name === "session-latest.json" ? 0 : -1;
-  if (right.name === "session-latest.json") return 1;
   return left.path < right.path ? -1 : left.path > right.path ? 1 : 0;
-}
-
-function compareDiagnosticsCleanupCandidates(left: DiagnosticsCleanupCandidate, right: DiagnosticsCleanupCandidate): number {
-  const priority = (candidate: DiagnosticsCleanupCandidate): number => {
-    if (candidate.kind === "legacy_operations") return 0;
-    if (candidate.kind === "legacy_chat_debug_ui") return 1;
-    return 2;
-  };
-  const priorityDifference = priority(left) - priority(right);
-  return priorityDifference || compareDiagnosticsPaths(left, right);
-}
-
-function isLegacyPrivateChatDebugUiFileName(name: string): boolean {
-  if (!name.startsWith(LEGACY_PRIVATE_CHAT_DEBUG_UI_PREFIX) || !name.endsWith(LEGACY_PRIVATE_CHAT_DEBUG_UI_SUFFIX)) return false;
-  const chatIdentifier = name.slice(LEGACY_PRIVATE_CHAT_DEBUG_UI_PREFIX.length, -LEGACY_PRIVATE_CHAT_DEBUG_UI_SUFFIX.length);
-  return chatIdentifier.length >= 1 && chatIdentifier.length <= 120 && !/[\\/:*?"<>|\s]/u.test(chatIdentifier);
 }
 
 function warnDiagnostics(message: string): void {
@@ -226,8 +196,6 @@ export class DiagnosticsSessionLifecycle {
     let deadlineTimer: number | null = null;
     let collectionFailureCount = 0;
     let removalFailureCount = 0;
-    let inspectedBytes = 0;
-    let inspectedDirectoryEntries = 0;
     const deadlineSignal = new Promise<DiagnosticsCleanupOperationResult<never>>((resolve) => {
       deadlineTimer = window.setTimeout(() => {
         deadlineReached = true;
@@ -245,7 +213,7 @@ export class DiagnosticsSessionLifecycle {
         .then(operation)
         .then<DiagnosticsCleanupOperationResult<T>, DiagnosticsCleanupOperationResult<T>>(
           (value) => ({ kind: "success", value }),
-          (error: unknown) => ({ kind: error instanceof Error && /ENOENT|not found|does not exist/i.test(error.message) ? "missing" : "failed" }),
+          (error: unknown) => ({ kind: isMissingPathError(error) ? "missing" : "failed" }),
         );
       const operationTimeout = new Promise<DiagnosticsCleanupOperationResult<T>>((resolve) => {
         operationTimer = window.setTimeout(() => resolve({ kind: "timed_out" }), DIAGNOSTICS_ARCHIVE_OPERATION_TIMEOUT_MS);
@@ -259,7 +227,6 @@ export class DiagnosticsSessionLifecycle {
     try {
       const basePath = storage.getPath("diagnostics").replace(/\/$/u, "");
       const prefix = `${basePath}/`;
-      const chatDebugPath = `${prefix}${LEGACY_PRIVATE_CHAT_DEBUG_DIRECTORY_NAME}`;
       const listingResult = await runBoundedOperation(() => adapter.list(basePath));
       if (listingResult.kind !== "success") {
         if (listingResult.kind === "failed") collectionFailureCount += 1;
@@ -267,10 +234,8 @@ export class DiagnosticsSessionLifecycle {
       }
 
       let listedFiles: unknown[];
-      let listedFolders: unknown[];
       try {
         listedFiles = Array.isArray(listingResult.value.files) ? listingResult.value.files : [];
-        listedFolders = Array.isArray(listingResult.value.folders) ? listingResult.value.folders : [];
       } catch {
         collectionFailureCount += 1;
         return;
@@ -284,72 +249,20 @@ export class DiagnosticsSessionLifecycle {
         return name;
       };
 
-      const inspectDirectoryEntries = (entries: unknown[], maximumEntries: number, inspect: (entry: unknown) => void): void => {
-        const remainingEntries = Math.max(0, DIAGNOSTICS_ARCHIVE_MAX_DIRECTORY_ENTRIES - inspectedDirectoryEntries);
-        const allowedEntries = Math.min(remainingEntries, Math.max(0, maximumEntries));
-        let listedEntryCount = 0;
+      const candidatesByPath = new Map<string, AutomaticDiagnosticsFile>();
+      const listedEntryCount = Math.min(listedFiles.length, DIAGNOSTICS_ARCHIVE_MAX_DIRECTORY_ENTRIES);
+      for (let index = 0; index < listedEntryCount && !shouldStop(); index += 1) {
         try {
-          listedEntryCount = Math.min(entries.length, allowedEntries);
+          const name = resolveDirectChildName(basePath, listedFiles[index]);
+          if (name && AUTOMATIC_DIAGNOSTICS_ARCHIVE_PATTERN.test(name)) {
+            candidatesByPath.set(`${prefix}${name}`, { name, path: `${prefix}${name}` });
+          }
         } catch {
           collectionFailureCount += 1;
-          return;
-        }
-        for (let index = 0; index < listedEntryCount && !shouldStop(); index += 1) {
-          inspectedDirectoryEntries += 1;
-          try {
-            inspect(entries[index]);
-          } catch {
-            collectionFailureCount += 1;
-          }
-        }
-      };
-
-      let hasChatDebugDirectory = false;
-      inspectDirectoryEntries(listedFolders, DIAGNOSTICS_ARCHIVE_MAX_DIRECTORY_ENTRIES, (listedPath) => {
-        const name = resolveDirectChildName(basePath, listedPath);
-        if (name === LEGACY_PRIVATE_CHAT_DEBUG_DIRECTORY_NAME) hasChatDebugDirectory = true;
-      });
-
-      const candidatesByPath = new Map<string, DiagnosticsCleanupCandidate>();
-      const addRootCandidate = (listedPath: unknown): void => {
-        const name = resolveDirectChildName(basePath, listedPath);
-        if (!name) return;
-        if (name === LEGACY_PRIVATE_OPERATIONS_LATEST_NAME || LEGACY_PRIVATE_OPERATIONS_ARCHIVE_PATTERN.test(name)) {
-          candidatesByPath.set(`${prefix}${name}`, { kind: "legacy_operations", name, path: `${prefix}${name}` });
-          return;
-        }
-        if (AUTOMATIC_DIAGNOSTICS_ARCHIVE_PATTERN.test(name) || name === "session-latest.json") {
-          candidatesByPath.set(`${prefix}${name}`, { kind: "automatic", name, path: `${prefix}${name}` });
-        }
-      };
-
-      const entriesRemainingAfterFolders = Math.max(0, DIAGNOSTICS_ARCHIVE_MAX_DIRECTORY_ENTRIES - inspectedDirectoryEntries);
-      const rootFileBudget = hasChatDebugDirectory ? Math.ceil(entriesRemainingAfterFolders / 2) : entriesRemainingAfterFolders;
-      inspectDirectoryEntries(listedFiles, rootFileBudget, addRootCandidate);
-
-      if (hasChatDebugDirectory && !shouldStop()) {
-        const chatListingResult = await runBoundedOperation(() => adapter.list(chatDebugPath));
-        if (chatListingResult.kind !== "success") {
-          if (chatListingResult.kind === "failed") collectionFailureCount += 1;
-        } else {
-          let chatFiles: unknown[] | null = null;
-          try {
-            chatFiles = Array.isArray(chatListingResult.value.files) ? chatListingResult.value.files : null;
-          } catch {
-            collectionFailureCount += 1;
-          }
-          if (chatFiles) {
-            inspectDirectoryEntries(chatFiles, DIAGNOSTICS_ARCHIVE_MAX_DIRECTORY_ENTRIES - inspectedDirectoryEntries, (listedPath) => {
-              const name = resolveDirectChildName(chatDebugPath, listedPath);
-              if (!name || !isLegacyPrivateChatDebugUiFileName(name)) return;
-              const path = `${chatDebugPath}/${name}`;
-              candidatesByPath.set(path, { kind: "legacy_chat_debug_ui", name, path });
-            });
-          }
         }
       }
 
-      const selectedCandidates = [...candidatesByPath.values()].sort(compareDiagnosticsCleanupCandidates).slice(0, DIAGNOSTICS_ARCHIVE_MAX_CANDIDATES);
+      const automaticFiles = [...candidatesByPath.values()].sort(compareDiagnosticsPaths).slice(0, DIAGNOSTICS_ARCHIVE_MAX_CANDIDATES);
 
       const removePaths = async (paths: readonly string[]): Promise<void> => {
         for (const path of paths) {
@@ -366,31 +279,6 @@ export class DiagnosticsSessionLifecycle {
         }
       };
 
-      await removePaths(selectedCandidates.filter((candidate) => candidate.kind !== "automatic").map((candidate) => candidate.path));
-
-      if (hasChatDebugDirectory && !shouldStop() && typeof adapter.rmdir === "function") {
-        const emptyCheckResult = await runBoundedOperation(() => adapter.list(chatDebugPath));
-        if (emptyCheckResult.kind === "success") {
-          let isConfirmedEmpty = false;
-          try {
-            isConfirmedEmpty = Array.isArray(emptyCheckResult.value.files) && emptyCheckResult.value.files.length === 0 && Array.isArray(emptyCheckResult.value.folders) && emptyCheckResult.value.folders.length === 0;
-          } catch {
-            collectionFailureCount += 1;
-          }
-          if (isConfirmedEmpty && !shouldStop()) {
-            const directoryRemovalResult = await runBoundedOperation(async () => {
-              if (shouldStop()) return false;
-              await adapter.rmdir(chatDebugPath, false);
-              return true;
-            });
-            if (directoryRemovalResult.kind === "failed" || (directoryRemovalResult.kind === "success" && !directoryRemovalResult.value)) removalFailureCount += 1;
-          }
-        } else if (emptyCheckResult.kind === "failed") {
-          collectionFailureCount += 1;
-        }
-      }
-
-      const automaticFiles = selectedCandidates.filter((candidate): candidate is DiagnosticsCleanupCandidate & Readonly<{ kind: "automatic" }> => candidate.kind === "automatic");
       const fileStats = new Map<string, AutomaticDiagnosticsArchive>();
       for (const file of automaticFiles) {
         if (shouldStop()) break;
@@ -413,32 +301,7 @@ export class DiagnosticsSessionLifecycle {
       }
 
       const pathsToRemove = new Set<string>();
-      const sessionFiles = [...fileStats.values()].filter((file) => AUTOMATIC_DIAGNOSTICS_SESSION_PATTERN.test(file.name)).sort(compareDiagnosticsPaths);
-      for (const file of sessionFiles) {
-        if (shouldStop()) break;
-        if (file.size > DIAGNOSTICS_SESSION_MAX_INSPECTION_BYTES) {
-          pathsToRemove.add(file.path);
-          continue;
-        }
-        if (file.size > DIAGNOSTICS_ARCHIVE_MAX_INSPECTED_BYTES - inspectedBytes) {
-          break;
-        }
-        inspectedBytes += file.size;
-        const readResult = await runBoundedOperation(() => adapter.read(file.path));
-        if (readResult.kind === "stopped" || readResult.kind === "timed_out") {
-          break;
-        }
-        if (readResult.kind === "missing") continue;
-        if (readResult.kind !== "success") {
-          collectionFailureCount += 1;
-          continue;
-        }
-        if (LEGACY_PRIVATE_SESSION_KEY_PATTERN.test(readResult.value)) pathsToRemove.add(file.path);
-      }
-
       const archives = [...fileStats.values()]
-        .filter((file) => AUTOMATIC_DIAGNOSTICS_ARCHIVE_PATTERN.test(file.name))
-        .filter((file) => !pathsToRemove.has(file.path))
         .sort((left, right) => right.mtime - left.mtime || compareDiagnosticsPaths(left, right));
       let retainedFileCount = 0;
       let retainedTotalBytes = 0;

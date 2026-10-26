@@ -1,6 +1,6 @@
 /**
- * Plan gate / first-run welcome modal — sign-in, purchase, and manual-code
- * handoff states. Root: `.ss-upgrade-plan-modal.ss-modal--small` with
+ * Plan gate modal — sign-in, purchase, manual-code handoff, and sign-in
+ * result states. Root: `.ss-upgrade-plan-modal.ss-modal--small` with
  * `.ss-modal--scrollable` so long copy scrolls inside the sheet on mobile
  * (UpgradePlanModal.ts).
  */
@@ -28,6 +28,14 @@
 .ss-upgrade-plan__icon svg {
   width: 34px;
   height: 34px;
+}
+
+.ss-upgrade-plan__icon.is-success {
+  color: var(--ss-success);
+}
+
+.ss-upgrade-plan__icon.is-error {
+  color: var(--ss-warning);
 }
 
 .ss-upgrade-plan__detail {
@@ -76,16 +84,14 @@
 
 /* Purchase and sign-in actions become a full-width stack on the mobile sheet
  * so every choice is an easy touch target. */
-.ss-mobile-layout .ss-upgrade-plan-modal .ss-modal__footer,
-.ss-mobile-layout .ss-account-connect-modal .ss-modal__footer {
+.ss-mobile-layout .ss-upgrade-plan-modal .ss-modal__footer {
   flex-direction: column;
   align-items: stretch;
 }
 
 /* In the column footer, the narrow-container `flex: 1 1 12rem` would turn
  * the 12rem basis into button HEIGHT — reset to natural height. */
-.ss-mobile-layout .ss-upgrade-plan-modal .ss-modal__footer > .ss-button,
-.ss-mobile-layout .ss-account-connect-modal .ss-modal__footer > .ss-button {
+.ss-mobile-layout .ss-upgrade-plan-modal .ss-modal__footer > .ss-button {
   flex: 0 0 auto;
   width: 100%;
   min-height: var(--ss-touch-target);

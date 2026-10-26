@@ -1,12 +1,25 @@
 /** @jest-environment jsdom */
 
-import { App, Platform, Plugin } from "obsidian";
+import { App, Platform, Plugin, TFile } from "obsidian";
 import { ViewManager } from "../views";
 import {
   CHAT_VIEW_TYPE,
   EMBEDDINGS_VIEW_TYPE,
   SYSTEMSCULPT_STUDIO_VIEW_TYPE,
 } from "../viewTypes";
+import { PendingStudioView } from "../../../views/studio/PendingStudioView";
+
+let mockStudioLoadError: Error | null = null;
+// The real view is exercised by the Studio view suites and the bundle tests.
+jest.mock("../../../views/studio/SystemSculptStudioView", () => {
+  if (mockStudioLoadError) throw mockStudioLoadError;
+  const { ItemView } = jest.requireActual("obsidian");
+  return {
+    SystemSculptStudioView: class LoadedStudioView extends ItemView {
+      constructor(leaf: unknown, readonly plugin: unknown) { super(leaf); }
+    },
+  };
+});
 
 type TestApp = App & {
   viewRegistry?: {
@@ -28,7 +41,14 @@ const createFixture = (registeredViewTypes: string[] = []): ViewManagerFixture =
     viewByType: Object.fromEntries(registeredViewTypes.map((type) => [type, jest.fn()])),
   };
 
-  const plugin = new Plugin(app, { id: "systemsculpt-ai", version: "0.0.0" }) as any;
+  const plugin = new Plugin(app, {
+    id: "systemsculpt-ai",
+    name: "SystemSculpt AI",
+    author: "SystemSculpt",
+    version: "0.0.0",
+    minAppVersion: "1.7.2",
+    description: "",
+  }) as any;
   plugin.settings = { selectedModelId: "model" };
   plugin.load();
 
@@ -55,6 +75,14 @@ describe("ViewManager", () => {
     jest.runOnlyPendingTimers();
     fixtures.splice(0).forEach(({ plugin }) => plugin.unload());
     jest.useRealTimers();
+  });
+
+  it("registers ribbon actions before Obsidian restores their hidden state and order", () => {
+    const { plugin, manager } = createFixture();
+    const addRibbon = jest.spyOn(plugin, "addRibbonIcon");
+    manager.initialize();
+    expect(addRibbon).toHaveBeenCalledTimes(7);
+    expect(addRibbon.mock.calls.map(([, title]) => title)).toContain("Open janitor");
   });
 
   it("does not register views more than once when initialize is called repeatedly", () => {
@@ -113,6 +141,49 @@ describe("ViewManager", () => {
     await queue.processRestoreQueue();
     expect(visible.view.setState).toHaveBeenCalledTimes(1);
     expect(hidden.view.setState).toHaveBeenCalledTimes(1);
+  });
+
+  it("waits for the registered chat view before attaching a file and focusing its input", async () => {
+    const { app, manager } = createFixture();
+    const file = new TFile({ path: "Example.md", extension: "md" } as any);
+    const view = { addFileToContext: jest.fn().mockResolvedValue(undefined), focusInput: jest.fn() };
+    let finishOpen!: () => void;
+    const ready = new Promise<void>((resolve) => { finishOpen = resolve; });
+    const leaf = {
+      view: null as typeof view | null,
+      setViewState: jest.fn(async () => { await ready; leaf.view = view; }),
+    };
+    const getLeaf = jest.fn(() => leaf);
+    const setActiveLeaf = jest.fn();
+    Object.assign(app.workspace, { getLeaf, setActiveLeaf });
+
+    const opening = manager.openChat({ file });
+    expect(getLeaf).toHaveBeenCalledWith("tab");
+    expect(leaf.setViewState).toHaveBeenCalledWith({
+      type: CHAT_VIEW_TYPE, active: true,
+      state: { chatId: "", chatTitle: expect.any(String) },
+    });
+    expect(setActiveLeaf).not.toHaveBeenCalled();
+    expect(view.addFileToContext).not.toHaveBeenCalled();
+    finishOpen();
+    await opening;
+
+    expect(setActiveLeaf).toHaveBeenCalledWith(leaf, { focus: true });
+    expect(view.addFileToContext).toHaveBeenCalledTimes(1);
+    expect(view.addFileToContext).toHaveBeenCalledWith(file);
+    expect(view.focusInput).toHaveBeenCalledTimes(1);
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it("propagates a failed chat open without focusing or attaching to an unopened view", async () => {
+    const { app, manager } = createFixture();
+    const error = new Error("Unable to create leaf");
+    const leaf = { setViewState: jest.fn().mockRejectedValue(error) };
+    const setActiveLeaf = jest.fn();
+    Object.assign(app.workspace, { getLeaf: jest.fn(() => leaf), setActiveLeaf });
+
+    await expect(manager.openChat()).rejects.toBe(error);
+    expect(setActiveLeaf).not.toHaveBeenCalled();
   });
 
   it("opens Similar Notes in the desktop right sidebar", async () => {
@@ -217,6 +288,59 @@ describe("ViewManager", () => {
     await expect(quiescing).resolves.toBeUndefined();
     expect(settled).toBe(true);
     expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it("evaluates the Studio view only when something first opens Studio", async () => {
+    const { plugin, manager } = createFixture();
+    manager.registerView();
+    const createStudio = (plugin as any)._views.get(SYSTEMSCULPT_STUDIO_VIEW_TYPE);
+    const leaf = { app: plugin.app } as any;
+
+    expect(createStudio(leaf)).toBeInstanceOf(PendingStudioView);
+    const loading = manager.loadStudioView();
+    expect(manager.loadStudioView()).toBe(loading);
+    await loading;
+
+    const studio = createStudio(leaf);
+    expect(studio.constructor.name).toBe("LoadedStudioView");
+    expect(studio.leaf).toBe(leaf);
+    expect(studio.plugin).toBe(plugin);
+  });
+
+  it("opens Studio from its commands with the real view, never the placeholder", async () => {
+    const { app, plugin, manager } = createFixture();
+    manager.registerView();
+    const leaf: any = { app };
+    leaf.setViewState = jest.fn(async ({ type }: { type: string }) => {
+      leaf.view = (plugin as any)._views.get(type)(leaf);
+    });
+    const revealLeaf = jest.fn();
+    Object.assign(app.workspace, { getLeaf: jest.fn(() => leaf), revealLeaf });
+
+    await manager.activateSystemSculptStudioView("Studio/Plan.systemsculpt");
+
+    expect(leaf.setViewState).toHaveBeenCalledWith({
+      type: SYSTEMSCULPT_STUDIO_VIEW_TYPE,
+      active: true,
+      state: { file: "Studio/Plan.systemsculpt" },
+    });
+    expect(leaf.view.constructor.name).toBe("LoadedStudioView");
+    expect(revealLeaf).toHaveBeenCalledWith(leaf);
+  });
+
+  it("loads Studio again after a failed attempt", async () => {
+    const { manager } = createFixture();
+    // Another test may already have evaluated the module in this registry.
+    jest.resetModules();
+    mockStudioLoadError = new Error("evaluation failed");
+    try {
+      await expect(manager.loadStudioView()).rejects.toThrow("evaluation failed");
+    } finally {
+      mockStudioLoadError = null;
+    }
+
+    const create = await manager.loadStudioView();
+    expect(create({} as any).constructor.name).toBe("LoadedStudioView");
   });
 
   it("keeps normal view and ribbon teardown after producer quiescence", () => {

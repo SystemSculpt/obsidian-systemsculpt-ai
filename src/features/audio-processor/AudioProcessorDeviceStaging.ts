@@ -1,6 +1,8 @@
 import type { DataAdapter } from "obsidian";
 import type SystemSculptPlugin from "../../main";
 import type { PendingAudioProcessorUploadSource } from "../../types";
+import { sha256HexFromArrayBuffer } from "../../utils/sha256";
+import { normalizeVaultRelativePath } from "../../utils/vaultPathUtils";
 import {
   AUDIO_PROCESSOR_MAX_AUDIO_BYTES,
   type AudioProcessorAudioSource,
@@ -41,6 +43,7 @@ export interface AudioProcessorDeviceStagingTestSeam {
   now?: () => number;
 }
 
+/** @internal Tests match this error class. */
 export class AudioProcessorDeviceStagingError extends Error {
   constructor(
     public readonly code: "invalid_staging_request" | "staging_corrupt",
@@ -68,13 +71,13 @@ export class AudioProcessorDeviceStaging {
     plugin: SystemSculptPlugin,
     testSeam: AudioProcessorDeviceStagingTestSeam = {},
   ) {
-    const configDirectory = normalizeRelativePath(plugin?.app?.vault?.configDir);
+    const configDirectory = requireStagingDirectory(plugin?.app?.vault?.configDir);
     const pluginId = normalizePluginId(plugin?.manifest?.id);
     if (pluginId !== "systemsculpt-ai") invalidRequest();
     const pluginDirectory = `${configDirectory}/plugins/${pluginId}`;
     if (
       plugin.manifest.dir !== undefined
-      && normalizeRelativePath(plugin.manifest.dir) !== pluginDirectory
+      && requireStagingDirectory(plugin.manifest.dir) !== pluginDirectory
     ) {
       throw new AudioProcessorDeviceStagingError(
         "invalid_staging_request",
@@ -88,7 +91,7 @@ export class AudioProcessorDeviceStaging {
     this.adapter = plugin.app.vault.adapter;
     this.root = `${pluginDirectory}/${STAGING_DIRECTORY}`;
     this.chunkSizeBytes = chunkSizeBytes;
-    this.digest = testSeam.digest ?? sha256;
+    this.digest = testSeam.digest ?? sha256HexFromArrayBuffer;
     this.now = testSeam.now ?? Date.now;
   }
 
@@ -468,15 +471,17 @@ function validateReadyManifest(manifest: StagingManifest): void {
   }
 }
 
-function normalizeRelativePath(value: unknown): string {
+function requireStagingDirectory(value: unknown): string {
   if (typeof value !== "string") invalidRequest();
-  const normalized = value.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/+$/, "");
-  if (
-    !normalized
-    || normalized.startsWith("/")
-    || normalized.split("/").some((part) => part === ".." || part === "." || !part)
-  ) invalidRequest();
-  return normalized;
+  try {
+    return normalizeVaultRelativePath(value, {
+      trim: false,
+      preserveCharacters: true,
+      validateRelative: { allowLeadingDot: true },
+    });
+  } catch {
+    invalidRequest();
+  }
 }
 
 function normalizePluginId(value: unknown): string {
@@ -503,9 +508,4 @@ function throwIfAborted(signal?: AbortSignal): void {
 
 function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === "AbortError";
-}
-
-async function sha256(bytes: ArrayBuffer): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }

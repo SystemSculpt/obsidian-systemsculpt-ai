@@ -56,12 +56,14 @@ export function planStudioRun(
   cachePolicyOf: (node: StudioNodeInstance) => StudioNodeCachePolicy | undefined,
 ): StudioRunPlan {
   const scopedEntries = normalizeEntries(project, entryNodeIds);
-  const nodes = project.graph.nodes.filter(node => !isStudioVisualOnlyNodeKind(node.kind));
+  // Retired image producers still supply saved outputs to existing consumers.
+  const nodes = project.graph.nodes.filter(node => !isStudioVisualOnlyNodeKind(node.kind) || node.kind === "studio.image_generation");
   const nodeById = new Map(nodes.map(node => [node.id, node]));
   if (scopedEntries.length === 0) {
     return {
       project: nodes.length === project.graph.nodes.length ? project : restrictProject(project, new Set(nodeById.keys())),
-      executeNodeIds: nodes.map(node => node.id), providedNodeIds: [],
+      executeNodeIds: nodes.filter(node => node.kind !== "studio.image_generation").map(node => node.id),
+      providedNodeIds: nodes.filter(node => node.kind === "studio.image_generation").map(node => node.id),
     };
   }
 
@@ -98,12 +100,4 @@ export function planStudioRun(
     executeNodeIds: nodes.filter((node) => execute.has(node.id)).map((node) => node.id),
     providedNodeIds: nodes.filter((node) => provided.has(node.id)).map((node) => node.id),
   };
-}
-
-/** Legacy shape: the entry nodes plus every upstream ancestor, all executable. */
-export function scopeProjectForRun(
-  project: StudioProjectV1,
-  entryNodeIds?: string[]
-): StudioProjectV1 {
-  return planStudioRun(project, entryNodeIds, () => "by_inputs").project;
 }

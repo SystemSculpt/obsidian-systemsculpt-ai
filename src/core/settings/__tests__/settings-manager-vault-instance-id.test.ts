@@ -37,7 +37,7 @@ describe("SettingsManager vaultInstanceId migration", () => {
 
     const settings = manager.getSettings();
     expect(typeof settings.vaultInstanceId).toBe("string");
-    expect(settings.vaultInstanceId.trim().length).toBeGreaterThan(0);
+    expect(settings.vaultInstanceId?.trim().length).toBeGreaterThan(0);
 
     const lastSaveArgs = (plugin.saveData as jest.Mock).mock.calls.at(-1);
     expect(lastSaveArgs).toBeTruthy();
@@ -53,7 +53,7 @@ describe("SettingsManager vaultInstanceId migration", () => {
 
     const settings = manager.getSettings();
     expect(typeof settings.vaultInstanceId).toBe("string");
-    expect(settings.vaultInstanceId.trim().length).toBeGreaterThan(0);
+    expect(settings.vaultInstanceId?.trim().length).toBeGreaterThan(0);
   });
 });
 

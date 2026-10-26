@@ -4,14 +4,21 @@
 
 import type { App } from "obsidian";
 
-import type { ChatMessage, MessagePart } from "../../../types";
+import type { ChatMessage } from "../../../types";
 import type { SupportDiagnosticEvent } from "../../../utils/PluginLogger";
 import { canonicalAgentToolInput } from "../../../chat/managed/MutationJournal";
 import {
-  DEVELOPMENT_TEST_ROOT,
+  DRIVER_ACTIONS,
   runDriverAction,
   type ActionContext,
 } from "../actions";
+import { CHAT_DEVELOPMENT_STATE_ACTIONS } from "../chatDevelopmentState";
+
+const DEVELOPMENT_TEST_ROOT = "SystemSculpt/Development Tests";
+import { CHAT_TOOL_LIFECYCLE_ACTIONS } from "../chatToolLifecycle";
+import { DIAGNOSTICS_EXPORT_ACTIONS } from "../diagnosticsExports";
+import { DOM_ACTIONS } from "../domActions";
+import { SNAPSHOT_AND_WAIT_ACTIONS } from "../snapshotsAndWaits";
 
 function rect(visible = true): DOMRect {
   return {
@@ -64,12 +71,6 @@ function makeDevelopmentHarness(options: { chatId?: string; draft?: string } = {
   stop.onclick = () => { running = false; };
   container.append(stop);
 
-  const approval = document.createElement("select");
-  approval.dataset.testid = "chat.composer.approval-mode";
-  approval.append(new Option("Ask", "ask"), new Option("Full access", "full-access"));
-  approval.value = "full-access";
-  container.append(approval);
-
   const picker = document.createElement("input");
   picker.type = "file";
   picker.dataset.testid = "chat.composer.file-picker";
@@ -92,12 +93,13 @@ function makeDevelopmentHarness(options: { chatId?: string; draft?: string } = {
   };
   const view = {
     agent,
+    approvalMode: "full-access",
     containerEl: container,
     chatId: options.chatId ?? "",
     messages: [] as ChatMessage[],
-    getExpectedChatHistoryFilePath: jest.fn(() =>
+    getExpectedChatHistoryFilePath: jest.fn((): string | null =>
       view.chatId ? `SystemSculpt/Chats/${view.chatId}.md` : null),
-    getChatHistoryFilePath: jest.fn(() =>
+    getChatHistoryFilePath: jest.fn((): string | null =>
       view.chatId ? `SystemSculpt/Chats/${view.chatId}.md` : null),
     loadChatById: jest.fn(async (chatId: string) => {
       view.chatId = chatId;
@@ -105,6 +107,35 @@ function makeDevelopmentHarness(options: { chatId?: string; draft?: string } = {
       for (const turn of container.querySelectorAll(".systemsculpt-agent-turn")) turn.remove();
     }),
   };
+  // The run line's mode segment and its Obsidian menu (AgentRunLine).
+  const mode = document.createElement("button");
+  mode.dataset.testid = "chat.run.mode";
+  mode.dataset.mode = view.approvalMode;
+  mode.getBoundingClientRect = () => rect();
+  const setMode = (value: string): void => {
+    view.approvalMode = value;
+    mode.dataset.mode = value;
+  };
+  mode.onclick = () => {
+    const menu = document.createElement("div");
+    menu.className = "menu";
+    for (const value of ["auto", "ask", "full-access"]) {
+      const item = document.createElement("div");
+      item.className = "menu-item";
+      item.getBoundingClientRect = () => rect();
+      const title = document.createElement("span");
+      title.dataset.menuItem = `mode.${value}`;
+      item.append(title);
+      item.onclick = () => {
+        setMode(value);
+        menu.remove();
+      };
+      menu.append(item);
+    }
+    document.body.append(menu);
+  };
+  container.append(mode);
+
   const newChat = document.createElement("button");
   newChat.dataset.testid = "chat.header.new";
   newChat.scrollIntoView = jest.fn();
@@ -121,15 +152,15 @@ function makeDevelopmentHarness(options: { chatId?: string; draft?: string } = {
   container.append(newChat);
 
   const leaf = { view };
-  const adapterRead = jest.fn(async () => "EXPECTED");
-  const adapterExists = jest.fn(async () => false);
-  const adapterRename = jest.fn(async () => undefined);
-  const adapterRmdir = jest.fn(async () => undefined);
+  const adapterRead = jest.fn<Promise<string>, [string]>(async () => "EXPECTED");
+  const adapterExists = jest.fn<Promise<boolean>, [string]>(async () => false);
+  const adapterRename = jest.fn<Promise<void>, [string, string]>(async () => undefined);
+  const adapterRmdir = jest.fn<Promise<void>, [string, boolean]>(async () => undefined);
   const getAbstractFileByPath = jest.fn<unknown, [string]>(() => null);
-  const trashFile = jest.fn(async () => undefined);
+  const trashFile = jest.fn<Promise<void>, [unknown]>(async () => undefined);
   const workspace = {
     activeLeaf: leaf,
-    getMostRecentLeaf: jest.fn(() => workspace.activeLeaf),
+    getMostRecentLeaf: jest.fn((): typeof leaf => workspace.activeLeaf),
     getLeavesOfType: jest.fn(() => [leaf]),
     revealLeaf: jest.fn(async () => undefined),
     getLeaf: jest.fn(),
@@ -162,7 +193,7 @@ function makeDevelopmentHarness(options: { chatId?: string; draft?: string } = {
     diagnostics: { recentErrorCount: () => 0 } as ActionContext["diagnostics"],
   };
   return {
-    ctx, container, input, send, stop, approval, view, agent, newChat,
+    ctx, container, input, send, stop, mode, setMode, view, agent, newChat,
     adapterExists, adapterRead, adapterRename, adapterRmdir,
     getAbstractFileByPath, trashFile, triggerChatLoaded,
     setRunning(value: boolean) { running = value; },
@@ -192,7 +223,7 @@ function supportDiagnostic(
     timestamp: `2026-08-09T22:00:00.${String(sequence).padStart(3, "0")}Z`,
     severity: "info",
     code,
-    phase: "test",
+    phase: "tool_execution",
     sequence,
     ...(toolExecutionOrdinal !== null ? {
       tool_execution_ordinal: toolExecutionOrdinal,
@@ -447,92 +478,6 @@ function exactSequentialPlanParams(
   };
 }
 
-function persistedExactAssistantMessage(
-  turnId: string,
-  tools: readonly ExactToolSeed[],
-  marker: string,
-  assistantMessageId = `assistant:${turnId}`,
-  content: string | null = marker,
-): ChatMessage {
-  const toolCalls = tools.map((tool, index) => ({
-    id: tool.callId,
-    messageId: assistantMessageId,
-    request: {
-      id: tool.callId,
-      type: "function" as const,
-      function: {
-        name: tool.name,
-        arguments: JSON.stringify(tool.input),
-      },
-    },
-    result: { success: true, data: {} },
-    state: "completed" as const,
-    timestamp: index + 1,
-  }));
-  const messageParts: MessagePart[] = toolCalls.map((tool, index) => ({
-    id: `tool:${tool.id}`,
-    type: "tool_call" as const,
-    timestamp: index + 1,
-    data: tool,
-  }));
-  if (typeof content === "string" && content.length > 0) {
-    messageParts.push({
-      id: `text:${assistantMessageId}:0`,
-      type: "content",
-      timestamp: toolCalls.length + 1,
-      data: content,
-    });
-  }
-  return {
-    role: "assistant",
-    content,
-    message_id: assistantMessageId,
-    messageParts,
-    tool_calls: toolCalls,
-  };
-}
-
-async function replaceWithPersistedExactTurn(
-  harness: ReturnType<typeof makeDevelopmentHarness>,
-  liveTurn: HTMLElement,
-  tools: readonly ExactToolSeed[],
-  marker: string,
-  turnId: string,
-  groupTools = false,
-): Promise<HTMLDivElement> {
-  const historicalTurn = document.createElement("div");
-  historicalTurn.className = "systemsculpt-agent-turn is-assistant";
-  historicalTurn.dataset.turnId = turnId;
-  if (groupTools) {
-    const first = tools[0];
-    if (!first) throw new Error("Expected at least one exact tool.");
-    const grouped = exactToolElement(first.callId, "succeeded");
-    grouped.classList.add("is-grouped");
-    grouped.dataset.toolCount = String(tools.length);
-    const label = grouped.querySelector(".systemsculpt-agent-tool-label");
-    if (label) label.textContent = `Read ${String(tools.length)} files`;
-    historicalTurn.append(grouped);
-  } else {
-    for (const seed of tools) historicalTurn.append(exactToolElement(seed.callId, "succeeded"));
-  }
-  const text = document.createElement("div");
-  text.className = "systemsculpt-agent-part is-text";
-  text.textContent = marker;
-  historicalTurn.append(text);
-  harness.container.prepend(historicalTurn);
-  liveTurn.remove();
-  harness.view.messages = [
-    {
-      role: "user",
-      content: "PRIVATE USER REQUEST",
-      message_id: turnId,
-    },
-    persistedExactAssistantMessage(turnId, tools, marker),
-  ];
-  await new Promise((resolve) => window.setTimeout(resolve, 0));
-  return historicalTurn;
-}
-
 async function rejectionError(promise: Promise<unknown>): Promise<Error> {
   try {
     await promise;
@@ -692,7 +637,7 @@ describe("test driver actions", () => {
   });
 
   it("proves exact vault content without returning the content", async () => {
-    const read = jest.fn(async () => "EXPECTED");
+    const read = jest.fn<Promise<string>, [string]>(async () => "EXPECTED");
     const { ctx } = makeContext(read);
 
     await expect(runDriverAction(ctx, "vault.assertText", {
@@ -717,7 +662,7 @@ describe("test driver actions", () => {
       path: folderPath,
       children: [],
     }));
-    const { ctx } = makeContext(jest.fn(async () => ""), getAbstractFileByPath);
+    const { ctx } = makeContext(jest.fn<Promise<string>, [string]>(async () => ""), getAbstractFileByPath);
 
     await expect(runDriverAction(ctx, "vault.assertFolder", {
       path: folderPath,
@@ -737,6 +682,66 @@ describe("test driver actions", () => {
     await expect(runDriverAction(ctx, "vault.assertFolder", {
       path: folderPath,
     })).rejects.toThrow(/not an exact folder/);
+  });
+});
+
+describe("driver action registry", () => {
+  const areas = [
+    DOM_ACTIONS,
+    SNAPSHOT_AND_WAIT_ACTIONS,
+    CHAT_TOOL_LIFECYCLE_ACTIONS,
+    CHAT_DEVELOPMENT_STATE_ACTIONS,
+    DIAGNOSTICS_EXPORT_ACTIONS,
+  ];
+
+  it("names every registered action when an action is unknown", async () => {
+    const { ctx } = makeContext();
+    const failure = await runDriverAction(ctx, "chat.noSuchAction", {}).then(
+      () => null,
+      (error: unknown) => (error instanceof Error ? error.message : String(error)),
+    );
+    const listed = /^Unknown driver action "chat\.noSuchAction"\. Available: (.+)\.$/u
+      .exec(failure ?? "")?.[1]
+      .split(", ");
+
+    expect(listed).toEqual(Object.keys(DRIVER_ACTIONS));
+    expect(listed).toEqual(expect.arrayContaining([
+      "chat.reopenOwnedDevelopmentHistory",
+      "diagnostics.baselineExports",
+      "diagnostics.attributeNewExport",
+      "diagnostics.trashAttributedExport",
+    ]));
+  });
+
+  it("registers every area's actions under one name each", () => {
+    const names = areas.flatMap((area) => Object.keys(area));
+
+    expect(new Set(names).size).toBe(names.length);
+    expect(Object.keys(DRIVER_ACTIONS)).toHaveLength(names.length);
+    for (const area of areas) {
+      for (const [name, handler] of Object.entries(area)) {
+        expect(DRIVER_ACTIONS[name]).toBe(handler);
+      }
+    }
+  });
+
+  it("treats inherited object keys as unknown actions", async () => {
+    const { ctx } = makeContext();
+    for (const action of ["toString", "constructor", "hasOwnProperty", "__proto__"]) {
+      await expect(runDriverAction(ctx, action, {}))
+        .rejects.toThrow(`Unknown driver action "${action}".`);
+    }
+  });
+
+  it("refuses a cancelled action before looking it up", async () => {
+    const { ctx } = makeContext();
+    const controller = new AbortController();
+    controller.abort();
+    const cancelled = { ...ctx, signal: controller.signal };
+
+    await expect(runDriverAction(cancelled, "status", {})).rejects.toThrow("Driver action cancelled.");
+    await expect(runDriverAction(cancelled, "chat.noSuchAction", {}))
+      .rejects.toThrow("Driver action cancelled.");
   });
 });
 
@@ -1216,7 +1221,7 @@ describe("guarded development driver actions", () => {
         // AgentChatView.startNewChat resets the composer after awaiting its
         // session replacement, even when the old composer was already blank.
         harness.input.value = "";
-        harness.approval.value = "ask";
+        harness.setMode("ask");
         harness.triggerChatLoaded("");
       }, 0);
     };
@@ -1247,9 +1252,9 @@ describe("guarded development driver actions", () => {
     turn.remove();
     await expect(runDriverAction(harness.ctx, "chat.beginDevelopmentState", { marker }))
       .resolves.toMatchObject({ owned: true });
-    expect(harness.approval.value).toBe("ask");
+    expect(harness.view.approvalMode).toBe("ask");
     await runDriverAction(harness.ctx, "chat.resetDevelopmentState", { marker });
-    expect(harness.approval.value).toBe("full-access");
+    expect(harness.view.approvalMode).toBe("full-access");
   });
 
   it("refuses to reuse a pre-existing development marker root", async () => {
@@ -1288,7 +1293,7 @@ describe("guarded development driver actions", () => {
     harness.newChat.onclick = () => {
       harness.view.chatId = "";
       harness.input.value = "";
-      harness.approval.remove();
+      harness.mode.remove();
     };
     const now = jest.spyOn(Date, "now").mockReturnValueOnce(0).mockReturnValue(10000);
     try {
@@ -1299,7 +1304,7 @@ describe("guarded development driver actions", () => {
     }
     expect(harness.view.loadChatById).toHaveBeenCalledWith("private-chat");
 
-    harness.container.append(harness.approval);
+    harness.container.append(harness.mode);
     harness.newChat.onclick = originalNewChat;
     await expect(runDriverAction(harness.ctx, "chat.beginDevelopmentState", { marker }))
       .resolves.toMatchObject({ owned: true });
@@ -4551,7 +4556,7 @@ describe("incident report and reload ownership bridges", () => {
     if (originalClipboardDescriptor) {
       Object.defineProperty(window.navigator, "clipboard", originalClipboardDescriptor);
     } else {
-      delete (window.navigator as Navigator & { clipboard?: Clipboard }).clipboard;
+      Reflect.deleteProperty(window.navigator, "clipboard");
     }
   });
 

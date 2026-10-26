@@ -1,11 +1,11 @@
-import { defaultTextBackend, localTextAgent, usesLocalCodex } from '../CodexExecutionSettings';
+import { defaultTextBackend, localTextAgent } from '../CodexExecutionSettings';
 import { hasHostCapability } from '../../../platform/hostCapabilities';
 jest.mock('../../../platform/hostCapabilities', () => ({ hasHostCapability: jest.fn(() => true) }));
 
 it('selects an on-machine agent on desktop', () => {
   expect(localTextAgent({ textExecutionBackend: 'claude' })).toBe('claude');
   expect(defaultTextBackend({ textExecutionBackend: 'claude' })).toBe('claude');
-  expect(usesLocalCodex({ textExecutionBackend: 'claude' })).toBe(false);
+  expect(localTextAgent({ textExecutionBackend: 'codex' })).toBe('codex');
   expect(defaultTextBackend({ textExecutionBackend: 'codex' })).toBe('codex');
   expect(localTextAgent({ textExecutionBackend: 'unknown' as never })).toBeNull();
 });

@@ -7,6 +7,15 @@ import { extractStudioText } from "./studioTextExtractor";
 import { resolveStudioEntry } from "../../studio/StudioEntry";
 import { STUDIO_PROJECT_EXTENSION } from "../../studio/types";
 import { searchVaultExclusions, type VaultExclusions } from "./VaultExclusions";
+import {
+  BODY_FIELD,
+  copyFlat,
+  PATH_FIELD,
+  SearchTextIndex,
+  TITLE_FIELD,
+  type IndexedNote,
+  type NoteTokens,
+} from "./SearchTextIndex";
 
 export type SearchMode = "smart" | "lexical" | "semantic";
 export type SortMode = "relevance" | "recency";
@@ -32,7 +41,7 @@ export interface EmbeddingsIndicator {
   total?: number;
 }
 
-export interface SearchStats {
+interface SearchStats {
   totalMs: number;
   lexMs?: number;
   semMs?: number;
@@ -52,20 +61,12 @@ export interface SearchResponse {
   embeddings: EmbeddingsIndicator;
 }
 
-interface IndexedDocument {
-  path: string;
-  title: string;
-  lowerTitle: string;
-  lowerPath: string;
-  titleTokens: Set<string>;
-  pathTokens: Set<string>;
-  bodyTokens: Set<string>;
-  tokens: Set<string>;
-  body: string; // truncated, lowercased content (frontmatter stripped)
-  rawBody: string; // truncated, original casing for excerpts
-  preview: string; // short excerpt for list view
-  mtime: number;
-  size: number;
+/** A note's indexed text, read again for one search. */
+interface NoteText {
+  /** Truncated, lowercased content (frontmatter stripped), as indexed. */
+  body: string;
+  /** Truncated, original casing for excerpts. */
+  raw: string;
 }
 
 interface QueryTerm {
@@ -73,6 +74,15 @@ interface QueryTerm {
   exact: Set<string>;
   prefix: Set<string>;
   fuzzy: Set<string>;
+}
+
+/** The notes a query term's tokens reach, with the fields each was found in. */
+interface TermMatches {
+  /** Matching notes in posting order: exact tokens first, then prefix, then fuzzy. */
+  docs: number[];
+  exact: Uint8Array;
+  prefix: Uint8Array;
+  fuzzy: Uint8Array;
 }
 
 interface CachedPreview {
@@ -114,12 +124,7 @@ interface SearchableEmbeddingsManager {
 export class SystemSculptSearchEngine {
   private app: App;
   private plugin: SystemSculptPlugin;
-  private index: Map<string, IndexedDocument> = new Map();
-  private tokenIndex: Map<string, Set<string>> = new Map();
-  private tokenVocabulary: Set<string> = new Set();
-  private sortedTokenVocabulary: string[] = [];
-  private tokenLengthBuckets: Map<number, string[]> = new Map();
-  private tokenLookupsDirty = true;
+  private textIndex = new SearchTextIndex();
   private eligibleFilesCache: TFile[] | null = null;
   private eligibleFilesCacheSignature: string | null = null;
   private metadataTokenCache: Map<string, MetadataTokenSnapshot> = new Map();
@@ -132,6 +137,9 @@ export class SystemSculptSearchEngine {
   private indexGeneration = 0;
   private scheduledIndexHandle: number | null = null;
   private dirtyPaths: Set<string> = new Set();
+  private refreshQueue: Promise<void> = Promise.resolve();
+  private holders = 0;
+  private idleReleaseHandle: number | null = null;
   private eventRefs: EventRef[] = [];
   private workspaceEventRefs: EventRef[] = [];
   private readonly INDEXABLE_EXTENSIONS = new Set(["md", "markdown", "canvas", STUDIO_PROJECT_EXTENSION.slice(1)]);
@@ -145,9 +153,10 @@ export class SystemSculptSearchEngine {
   private readonly INDEX_BUILD_YIELD_EVERY = 128;
   private readonly RECENT_PREVIEW_CONCURRENCY = 2;
   private readonly MAX_RECENT_PREVIEW_FILE_BYTES = 1024 * 1024;
-  private readonly SEMANTIC_TIMEOUT_MS = 1500;
   /** Smart mode skips semantic search for one- and two-character prefixes. */
   private readonly MIN_SEMANTIC_QUERY_CHARS = 3;
+  /** How long the index outlives the last open search before it is freed. */
+  private readonly IDLE_RELEASE_MS = 5 * 60_000;
   private embeddingsIndicatorCache: { key: string; indicator: EmbeddingsIndicator } | null = null;
   private readonly UNICODE_TOKEN_PATTERN = /[\p{L}\p{N}\p{M}]+/gu;
   private lastLexicalInspect = 0;
@@ -159,12 +168,11 @@ export class SystemSculptSearchEngine {
   }
 
   /**
-   * Run a search across the vault
-   */
-  /**
    * Run a search across the vault. `semantic: false` keeps a smart search
    * lexical-only; the search modal uses it for fast per-keystroke results
-   * and adds semantic hits once typing pauses.
+   * and adds semantic hits once typing pauses. The semantic leg runs until it
+   * answers or `signal` aborts: the caller already has word results on
+   * screen, so a slow managed query is worth waiting for.
    */
   async search(
     query: string,
@@ -187,7 +195,7 @@ export class SystemSculptSearchEngine {
         stats: {
           totalMs: performance.now() - searchStart,
           indexMs: 0,
-          indexedCount: this.index.size,
+          indexedCount: this.textIndex.size,
           inspectedCount: 0,
           mode,
           usedEmbeddings: false,
@@ -219,7 +227,7 @@ export class SystemSculptSearchEngine {
           totalMs,
           lexMs: performance.now() - metadataStart,
           indexMs: 0,
-          indexedCount: this.index.size,
+          indexedCount: this.textIndex.size,
           inspectedCount: metadataHits.length,
           mode,
           usedEmbeddings: false,
@@ -243,7 +251,10 @@ export class SystemSculptSearchEngine {
     }
 
     const lexStart = performance.now();
-    const lexicalHits = this.runLexicalSearch(terms, phrase, limit, sort);
+    // One index snapshot for the whole search: a commit by an overlapping
+    // search builds a new index rather than renumbering this one.
+    const bodies = new NoteBodyMatcher(this.textIndex, (note) => this.readNoteText(note));
+    const lexicalHits = await this.runLexicalSearch(terms, phrase, limit, sort, bodies);
     const lexMs = performance.now() - lexStart;
 
     let semanticHits: SearchHit[] = [];
@@ -272,6 +283,7 @@ export class SystemSculptSearchEngine {
     }
 
     const results = this.mergeResults(lexicalHits, semanticHits, limit, sort);
+    await this.attachExcerpts(results, terms, phrase, bodies);
 
     const totalMs = performance.now() - searchStart;
 
@@ -282,7 +294,7 @@ export class SystemSculptSearchEngine {
         lexMs,
         semMs,
         indexMs,
-        indexedCount: this.index.size,
+        indexedCount: this.textIndex.size,
         inspectedCount: this.lastLexicalInspect,
         mode,
         usedEmbeddings,
@@ -311,7 +323,7 @@ export class SystemSculptSearchEngine {
       this.recentHitsCache = {
         limit,
         hits: recentFiles.map((file) => {
-          const indexed = this.index.get(file.path);
+          const indexed = this.textIndex.noteByPath(file.path);
           return {
             path: file.path,
             title: indexed?.title ?? file.basename,
@@ -351,7 +363,7 @@ export class SystemSculptSearchEngine {
       try {
         const content = this.isStudioFile(file) ? "" : await this.safeRead(file);
         if (signal?.aborted) return;
-        const preview = this.buildPreviewFromText(this.getIndexText(file, content));
+        const preview = copyFlat(this.buildPreviewFromText(this.getIndexText(file, content)));
         if (preview) {
           previews.set(path, preview);
           this.recentPreviewCache.set(file.path, { key: cacheKey, preview });
@@ -373,7 +385,36 @@ export class SystemSculptSearchEngine {
     await this.ensureIndex();
   }
 
+  /**
+   * Keeps the content index while a search surface is open. Once the last
+   * holder lets go and IDLE_RELEASE_MS pass unused, the index is freed; the
+   * next search builds it again, as on first use.
+   */
+  hold(): () => void {
+    this.holders += 1;
+    this.clearIdleRelease();
+    let held = true;
+    return () => {
+      if (!held) return;
+      held = false;
+      this.holders -= 1;
+      if (this.holders > 0) return;
+      this.idleReleaseHandle = window.setTimeout(() => {
+        this.idleReleaseHandle = null;
+        if (this.holders === 0) this.clearIndexes();
+      }, this.IDLE_RELEASE_MS);
+    };
+  }
+
+  private clearIdleRelease(): void {
+    if (this.idleReleaseHandle !== null) {
+      window.clearTimeout(this.idleReleaseHandle);
+      this.idleReleaseHandle = null;
+    }
+  }
+
   destroy(): void {
+    this.clearIdleRelease();
     this.eventRefs.forEach((ref) => this.app.vault.offref(ref));
     this.eventRefs = [];
     this.workspaceEventRefs.forEach((ref) => {
@@ -418,11 +459,7 @@ export class SystemSculptSearchEngine {
         this.eligibleFilesCacheSignature = null;
         if (file instanceof TFile) {
           this.metadataTokenCache.delete(file.path);
-          const existing = this.index.get(file.path);
-          if (existing) {
-            this.removeFromTokenIndex(existing);
-          }
-          this.index.delete(file.path);
+          this.textIndex.remove(file.path);
           this.dirtyPaths.delete(file.path);
           this.recentHitsCache = null;
           this.recentPreviewCache.delete(file.path);
@@ -438,11 +475,7 @@ export class SystemSculptSearchEngine {
         if (!(file instanceof TFile)) return;
         this.metadataTokenCache.delete(oldPath);
         this.metadataTokenCache.delete(file.path);
-        const existing = this.index.get(oldPath);
-        if (existing) {
-          this.removeFromTokenIndex(existing);
-        }
-        this.index.delete(oldPath);
+        this.textIndex.remove(oldPath);
         this.recentPreviewCache.delete(oldPath);
         if (this.isEligible(file)) {
           this.dirtyPaths.add(file.path);
@@ -454,8 +487,11 @@ export class SystemSculptSearchEngine {
 
     if (typeof this.app.workspace?.on === "function") {
       this.workspaceEventRefs.push(
-        this.app.workspace.on("systemsculpt:settings-updated", () => {
-          this.clearIndexes();
+        this.app.workspace.on("systemsculpt:settings-updated", (_oldSettings, _newSettings, changedKeys) => {
+          if (changedKeys.some(key => [
+            "embeddingsExclusions", "chatsDirectory", "savedChatsDirectory",
+            "recordingsDirectory", "attachmentsDirectory", "extractionsDirectory",
+          ].includes(key))) this.clearIndexes();
         })
       );
     }
@@ -475,6 +511,8 @@ export class SystemSculptSearchEngine {
       const built = await this.buildIndex(files, false, generation);
       if (built && generation === this.indexGeneration) {
         this.contentIndexReady = true;
+        // Only the title-only search before the index is ready uses these.
+        this.metadataTokenCache.clear();
       }
     })();
 
@@ -490,12 +528,7 @@ export class SystemSculptSearchEngine {
   private clearIndexes(): void {
     this.indexGeneration += 1;
     this.clearScheduledIndexing();
-    this.index.clear();
-    this.tokenIndex.clear();
-    this.tokenVocabulary.clear();
-    this.sortedTokenVocabulary = [];
-    this.tokenLengthBuckets.clear();
-    this.tokenLookupsDirty = true;
+    this.textIndex = new SearchTextIndex();
     this.eligibleFilesCache = null;
     this.eligibleFilesCacheSignature = null;
     this.metadataTokenCache.clear();
@@ -525,62 +558,38 @@ export class SystemSculptSearchEngine {
     }
   }
 
-  private async refreshDirtyIndex(): Promise<void> {
-    if (this.dirtyPaths.size === 0) return;
-    const paths = Array.from(this.dirtyPaths);
-    this.dirtyPaths.clear();
+  /** Applies vault changes to the index, one refresh at a time. */
+  private refreshDirtyIndex(): Promise<void> {
+    const refresh = this.refreshQueue.then(() => this.applyDirtyPaths());
+    this.refreshQueue = refresh.catch(() => undefined);
+    return refresh;
+  }
 
-    const filesToRefresh = paths
-      .map((p) => this.app.vault.getAbstractFileByPath(p))
-      .filter((f): f is TFile => f instanceof TFile && this.isEligible(f));
+  private async applyDirtyPaths(): Promise<void> {
+    if (this.dirtyPaths.size > 0) {
+      const paths = Array.from(this.dirtyPaths);
+      this.dirtyPaths.clear();
 
-    if (filesToRefresh.length === 0) {
-      return;
+      const filesToRefresh = paths
+        .map((p) => this.app.vault.getAbstractFileByPath(p))
+        .filter((f): f is TFile => f instanceof TFile && this.isEligible(f));
+
+      if (filesToRefresh.length > 0) {
+        await this.buildIndex(filesToRefresh, true, this.indexGeneration);
+      }
     }
-
-    await this.buildIndex(filesToRefresh, true, this.indexGeneration);
+    // Deletes and renames drop notes at once; their postings go here.
+    this.textIndex = this.textIndex.commit();
   }
 
   private async buildIndex(files: TFile[], incremental = false, generation = this.indexGeneration): Promise<boolean> {
-    if (!incremental) {
-      const nextIndex = new Map<string, IndexedDocument>();
-      const nextTokenIndex = new Map<string, Set<string>>();
-      const nextVocabulary = new Set<string>();
-
-      const tasks = files.map((file) => async () => {
-        try {
-          const doc = await this.indexFile(file);
-          if (!doc || generation !== this.indexGeneration) return;
-          nextIndex.set(file.path, doc);
-          this.addToTokenIndex(doc, nextTokenIndex, nextVocabulary);
-        } catch {
-          // Skip failed file
-        }
-      });
-
-      await this.runLimited(tasks, this.CONTENT_CONCURRENCY, this.INDEX_BUILD_YIELD_EVERY);
-      if (generation !== this.indexGeneration) return false;
-
-      this.index = nextIndex;
-      this.tokenIndex = nextTokenIndex;
-      this.tokenVocabulary = nextVocabulary;
-      this.rebuildTokenLookups();
-      this.recentHitsCache = null;
-      return true;
-    }
-
+    const index = incremental ? this.textIndex : new SearchTextIndex();
     const tasks = files.map((file) => async () => {
       try {
         if (generation !== this.indexGeneration) return;
         const doc = await this.indexFile(file);
         if (!doc || generation !== this.indexGeneration) return;
-
-        const existing = this.index.get(file.path);
-        if (existing) {
-          this.removeFromTokenIndex(existing);
-        }
-        this.index.set(file.path, doc);
-        this.addToTokenIndex(doc);
+        index.upsert(doc.note, doc.tokens);
       } catch {
         // Skip failed file
       }
@@ -588,12 +597,13 @@ export class SystemSculptSearchEngine {
 
     await this.runLimited(tasks, this.CONTENT_CONCURRENCY, this.INDEX_BUILD_YIELD_EVERY);
     if (generation !== this.indexGeneration) return false;
-    this.tokenLookupsDirty = true;
+    this.textIndex = index.commit();
     this.recentHitsCache = null;
     return true;
   }
 
-  private async indexFile(file: TFile): Promise<IndexedDocument | null> {
+  /** Tokens and list metadata for one note. Only a short preview of its text is kept. */
+  private async indexFile(file: TFile): Promise<{ note: IndexedNote; tokens: NoteTokens } | null> {
     if (this.isStudioFile(file) && !this.studioDocuments.has(file.path)) {
       // A vault event invalidated a source while it was being read. Retry it on
       // the next refresh instead of committing an empty content snapshot.
@@ -602,27 +612,40 @@ export class SystemSculptSearchEngine {
     }
     const content = this.isStudioFile(file) ? "" : await this.safeRead(file);
     const extracted = this.getIndexText(file, content);
-    const metadata = this.getMetadataTokenSnapshot(file);
-    const rawBody = extracted.slice(0, this.MAX_EXCERPT_SOURCE_CHARS);
+    const metadata = this.metadataTokenCache.get(file.path) ?? this.createMetadataTokenSnapshot(file);
     const body = extracted.slice(0, this.MAX_INDEX_CHARS).toLowerCase();
-    const preview = this.buildPreviewFromText(extracted);
-    const bodyTokens = this.tokenizeSearchText(body);
-    const tokens = new Set([...metadata.titleTokens, ...metadata.pathTokens, ...bodyTokens]);
+
+    const tokens: NoteTokens = new Map();
+    for (const token of metadata.titleTokens) tokens.set(token, TITLE_FIELD);
+    for (const token of metadata.pathTokens) tokens.set(token, (tokens.get(token) ?? 0) | PATH_FIELD);
+    // Body tokens keep single-character runs so substring checks can be
+    // answered from the index; word matching ignores them, as before.
+    for (const token of body.toLowerCase().match(this.UNICODE_TOKEN_PATTERN) ?? []) {
+      tokens.set(token, (tokens.get(token) ?? 0) | BODY_FIELD);
+    }
 
     return {
-      path: file.path,
-      title: file.basename,
-      lowerTitle: metadata.lowerTitle,
-      lowerPath: metadata.lowerPath,
-      titleTokens: metadata.titleTokens,
-      pathTokens: metadata.pathTokens,
-      bodyTokens,
+      note: {
+        file,
+        path: file.path,
+        title: file.basename,
+        lowerTitle: metadata.lowerTitle,
+        lowerPath: metadata.lowerPath,
+        preview: copyFlat(this.buildPreviewFromText(extracted)),
+        mtime: this.modifiedTime(file),
+        size: this.fileSize(file),
+      },
       tokens,
-      body,
-      rawBody,
-      preview,
-      mtime: this.modifiedTime(file),
-      size: this.fileSize(file),
+    };
+  }
+
+  /** The note's indexed text, read again: the index keeps no note bodies. */
+  private async readNoteText(note: IndexedNote): Promise<NoteText> {
+    const content = this.isStudioFile(note.file) ? "" : await this.safeRead(note.file);
+    const extracted = this.getIndexText(note.file, content);
+    return {
+      body: extracted.slice(0, this.MAX_INDEX_CHARS).toLowerCase(),
+      raw: extracted.slice(0, this.MAX_EXCERPT_SOURCE_CHARS),
     };
   }
 
@@ -697,9 +720,7 @@ export class SystemSculptSearchEngine {
       return this.eligibleFilesCache;
     }
 
-    const cached = this.plugin.vaultFileCache?.getAllFilesView?.() ?? this.plugin.vaultFileCache?.getAllFiles?.();
-    const files = Array.isArray(cached) ? cached : this.app.vault.getFiles();
-    this.eligibleFilesCache = Array.from(files).filter((f) => this.isEligible(f, exclusions));
+    this.eligibleFilesCache = this.app.vault.getFiles().filter((f) => this.isEligible(f, exclusions));
     this.eligibleFilesCacheSignature = exclusions.signature;
     return this.eligibleFilesCache;
   }
@@ -726,14 +747,18 @@ export class SystemSculptSearchEngine {
     const cached = this.metadataTokenCache.get(file.path);
     if (cached) return cached;
 
-    const snapshot: MetadataTokenSnapshot = {
+    const snapshot = this.createMetadataTokenSnapshot(file);
+    this.metadataTokenCache.set(file.path, snapshot);
+    return snapshot;
+  }
+
+  private createMetadataTokenSnapshot(file: TFile): MetadataTokenSnapshot {
+    return {
       lowerTitle: file.basename.toLowerCase(),
       lowerPath: file.path.toLowerCase(),
       titleTokens: this.tokenizeSearchText(file.basename),
       pathTokens: this.tokenizeSearchText(file.path),
     };
-    this.metadataTokenCache.set(file.path, snapshot);
-    return snapshot;
   }
 
   private selectRecentFiles(files: TFile[], limit: number): TFile[] {
@@ -793,25 +818,32 @@ export class SystemSculptSearchEngine {
     return `${trimmed.slice(0, this.PREVIEW_CHARS)}...`;
   }
 
-  private runLexicalSearch(terms: string[], phrase: string, limit: number, sort: SortMode): SearchHit[] {
-    const queryTerms = this.buildQueryTerms(terms);
-    const candidates = this.collectCandidateDocs(queryTerms, limit, sort);
-    const candidateMap = new Map<string, IndexedDocument>();
-
-    for (const doc of candidates) {
-      candidateMap.set(doc.path, doc);
-    }
-    if (this.shouldUseSubstringCandidateFallback(queryTerms, phrase, candidateMap.size)) {
-      for (const doc of this.collectSubstringCandidateDocs(terms, phrase, limit, sort)) {
-        candidateMap.set(doc.path, doc);
+  private async runLexicalSearch(
+    terms: string[],
+    phrase: string,
+    limit: number,
+    sort: SortMode,
+    bodies: NoteBodyMatcher,
+  ): Promise<SearchHit[]> {
+    const index = bodies.index;
+    const queryTerms = this.buildQueryTerms(index, terms);
+    const matches = queryTerms.map((term) => this.matchTerm(index, term));
+    const pool = new Set(this.collectCandidateDocs(index, matches, limit, sort));
+    if (this.shouldUseSubstringCandidateFallback(queryTerms, matches, phrase, pool.size)) {
+      for (const docId of await this.collectSubstringCandidateDocs(terms, phrase, limit, sort, bodies)) {
+        pool.add(docId);
       }
     }
 
-    const pool = Array.from(candidateMap.values());
-    this.lastLexicalInspect = pool.length;
+    const docs = Array.from(pool);
+    this.lastLexicalInspect = docs.length;
 
-    const scored = pool
-      .map((doc) => this.scoreDocument(doc, queryTerms, phrase))
+    // Body checks that tokens can't settle read each note once, up front.
+    const bodyNeedles = [phrase, ...queryTerms.filter((term) => this.isUnmatchedTerm(term)).map((term) => term.value)];
+    await bodies.load(docs.filter((docId) => bodyNeedles.some((needle) => bodies.needsText(docId, needle))), this.CONTENT_CONCURRENCY);
+
+    const scored = docs
+      .map((docId) => this.scoreDocument(docId, queryTerms, matches, phrase, bodies))
       .filter((r): r is SearchHit => r !== null)
       .sort((a, b) => this.compareHits(a, b, sort))
       .slice(0, limit * 2); // keep extra for merge step
@@ -819,14 +851,21 @@ export class SystemSculptSearchEngine {
     return scored;
   }
 
-  private scoreDocument(doc: IndexedDocument, queryTerms: QueryTerm[], phrase: string): SearchHit | null {
-    if (queryTerms.length === 0) return null;
+  private scoreDocument(
+    docId: number,
+    queryTerms: QueryTerm[],
+    matches: TermMatches[],
+    phrase: string,
+    bodies: NoteBodyMatcher,
+  ): SearchHit | null {
+    const note = bodies.index.note(docId);
+    if (!note || queryTerms.length === 0) return null;
     let total = 0;
     let matchedTerms = 0;
     let phraseMatched = false;
 
-    for (const term of queryTerms) {
-      const fieldScore = this.scoreTermInDocument(doc, term);
+    for (let index = 0; index < queryTerms.length; index += 1) {
+      const fieldScore = this.scoreTermInDocument(docId, note, queryTerms[index], matches[index], bodies);
       if (fieldScore > 0) {
         total += fieldScore;
         matchedTerms += 1;
@@ -834,15 +873,15 @@ export class SystemSculptSearchEngine {
     }
 
     if (phrase) {
-      if (doc.lowerTitle.includes(phrase)) {
+      if (note.lowerTitle.includes(phrase)) {
         total += 20;
         phraseMatched = true;
       }
-      if (doc.lowerPath.includes(phrase)) {
+      if (note.lowerPath.includes(phrase)) {
         total += 10;
         phraseMatched = true;
       }
-      if (doc.body.includes(phrase)) {
+      if (bodies.contains(docId, phrase)) {
         total += 14;
         phraseMatched = true;
       }
@@ -854,7 +893,7 @@ export class SystemSculptSearchEngine {
     const coverageBonus = matchedTerms > 0 ? coverageRatio * 16 : 0;
     total += coverageBonus;
 
-    total += this.computeRecencyBoost(doc.mtime) * Math.max(0.15, coverageRatio);
+    total += this.computeRecencyBoost(note.mtime) * Math.max(0.15, coverageRatio);
 
     const maxPossible = queryTerms.length * 24 + 60;
     const score = Math.min(1, total / maxPossible);
@@ -862,44 +901,42 @@ export class SystemSculptSearchEngine {
     if (score <= 0) return null;
 
     return {
-      path: doc.path,
-      title: doc.title,
-      excerpt: this.extractExcerpt(doc, queryTerms.map((term) => term.value), phrase),
+      path: note.path,
+      title: note.title,
       score,
       lexScore: score,
       origin: "lexical",
-      updatedAt: doc.mtime,
-      size: doc.size,
+      updatedAt: note.mtime,
+      size: note.size,
     };
   }
 
-  private scoreTermInDocument(doc: IndexedDocument, term: QueryTerm): number {
-    const exactTitle = this.hasAny(doc.titleTokens, term.exact);
-    const exactPath = this.hasAny(doc.pathTokens, term.exact);
-    const exactBody = this.hasAny(doc.bodyTokens, term.exact);
-
+  private scoreTermInDocument(
+    docId: number,
+    note: IndexedNote,
+    term: QueryTerm,
+    match: TermMatches,
+    bodies: NoteBodyMatcher,
+  ): number {
+    const exact = match.exact[docId];
     let total = 0;
-    if (exactTitle) total += 14;
-    if (exactPath) total += 7;
-    if (exactBody) total += 5;
+    if (exact & TITLE_FIELD) total += 14;
+    if (exact & PATH_FIELD) total += 7;
+    if (exact & BODY_FIELD) total += 5;
 
     if (total > 0) return total;
 
-    const prefixTitle = this.hasAny(doc.titleTokens, term.prefix);
-    const prefixPath = this.hasAny(doc.pathTokens, term.prefix);
-    const prefixBody = this.hasAny(doc.bodyTokens, term.prefix);
-    if (prefixTitle) total += 11;
-    if (prefixPath) total += 5;
-    if (prefixBody) total += 3.5;
+    const prefix = match.prefix[docId];
+    if (prefix & TITLE_FIELD) total += 11;
+    if (prefix & PATH_FIELD) total += 5;
+    if (prefix & BODY_FIELD) total += 3.5;
 
     if (total > 0) return total;
 
-    const fuzzyTitle = this.hasAny(doc.titleTokens, term.fuzzy);
-    const fuzzyPath = this.hasAny(doc.pathTokens, term.fuzzy);
-    const fuzzyBody = this.hasAny(doc.bodyTokens, term.fuzzy);
-    if (fuzzyTitle) total += 9;
-    if (fuzzyPath) total += 4;
-    if (fuzzyBody) total += 2.5;
+    const fuzzy = match.fuzzy[docId];
+    if (fuzzy & TITLE_FIELD) total += 9;
+    if (fuzzy & PATH_FIELD) total += 4;
+    if (fuzzy & BODY_FIELD) total += 2.5;
 
     if (total > 0) return total;
 
@@ -908,13 +945,18 @@ export class SystemSculptSearchEngine {
     // even when the candidate pool added the doc via substring fallback. Score
     // these by substring so mixed queries like "launch 🚀" still credit docs
     // that only contain the non-tokenizable portion.
-    if (term.exact.size === 0 && term.prefix.size === 0 && term.fuzzy.size === 0 && term.value.length > 0) {
-      if (doc.lowerTitle.includes(term.value)) total += 9;
-      if (doc.lowerPath.includes(term.value)) total += 4;
-      if (doc.body.includes(term.value)) total += 3;
+    if (this.isUnmatchedTerm(term)) {
+      if (note.lowerTitle.includes(term.value)) total += 9;
+      if (note.lowerPath.includes(term.value)) total += 4;
+      if (bodies.contains(docId, term.value)) total += 3;
     }
 
     return total;
+  }
+
+  /** A term no indexed token matches, scored by substring instead. */
+  private isUnmatchedTerm(term: QueryTerm): boolean {
+    return term.exact.size === 0 && term.prefix.size === 0 && term.fuzzy.size === 0 && term.value.length > 0;
   }
 
   private computeRecencyBoost(mtime: number | undefined): number {
@@ -935,61 +977,23 @@ export class SystemSculptSearchEngine {
     return new Set(tokens.filter((token) => token.length > 1));
   }
 
-  private addToTokenIndex(
-    doc: IndexedDocument,
-    tokenIndex: Map<string, Set<string>> = this.tokenIndex,
-    tokenVocabulary: Set<string> = this.tokenVocabulary
-  ): void {
-    for (const token of doc.tokens) {
-      tokenVocabulary.add(token);
-      let paths = tokenIndex.get(token);
-      if (!paths) {
-        paths = new Set();
-        tokenIndex.set(token, paths);
-      }
-      paths.add(doc.path);
-    }
-    if (tokenIndex === this.tokenIndex) {
-      this.tokenLookupsDirty = true;
-    }
-  }
-
-  private removeFromTokenIndex(
-    doc: IndexedDocument,
-    tokenIndex: Map<string, Set<string>> = this.tokenIndex,
-    tokenVocabulary: Set<string> = this.tokenVocabulary
-  ): void {
-    for (const token of doc.tokens) {
-      const paths = tokenIndex.get(token);
-      if (!paths) continue;
-      paths.delete(doc.path);
-      if (paths.size === 0) {
-        tokenIndex.delete(token);
-        tokenVocabulary.delete(token);
-      }
-    }
-    if (tokenIndex === this.tokenIndex) {
-      this.tokenLookupsDirty = true;
-    }
-  }
-
-  private buildQueryTerms(terms: string[]): QueryTerm[] {
-    this.ensureTokenLookups();
+  private buildQueryTerms(index: SearchTextIndex, terms: string[]): QueryTerm[] {
     return terms.map((value) => {
       const exact = new Set<string>();
       const prefix = new Set<string>();
       const fuzzy = new Set<string>();
 
-      if (this.tokenIndex.has(value)) {
+      // Single-character body runs are indexed for substring checks only.
+      if (value.length > 1 && index.hasToken(value)) {
         exact.add(value);
       }
 
       if (value.length >= 3) {
-        for (const token of this.findPrefixTokens(value, this.PREFIX_TOKEN_LIMIT)) {
+        for (const token of index.prefixTokens(value, this.PREFIX_TOKEN_LIMIT)) {
           if (token === value) continue;
           prefix.add(token);
         }
-        for (const token of this.findIndexedQueryPrefixes(value, this.PREFIX_TOKEN_LIMIT - prefix.size)) {
+        for (const token of this.findIndexedQueryPrefixes(index, value, this.PREFIX_TOKEN_LIMIT - prefix.size)) {
           if (token === value) continue;
           prefix.add(token);
         }
@@ -997,7 +1001,7 @@ export class SystemSculptSearchEngine {
         if (value.length >= 5 && prefix.size < 16) {
           const maxGap = Math.max(2, Math.floor(value.length * 0.45));
           let fuzzyCount = 0;
-          for (const token of this.iterLengthBucketTokens(value.length, maxGap)) {
+          for (const token of index.tokensByLength(Math.max(1, value.length - maxGap), value.length + maxGap)) {
             if (token === value || prefix.has(token)) continue;
             const fuzzyScore = fuzzyMatchScore(value, token);
             if (fuzzyScore !== null && fuzzyScore <= maxGap) {
@@ -1013,77 +1017,50 @@ export class SystemSculptSearchEngine {
     });
   }
 
-  private ensureTokenLookups(): void {
-    if (!this.tokenLookupsDirty) return;
-    this.rebuildTokenLookups();
-  }
-
-  private rebuildTokenLookups(): void {
-    this.sortedTokenVocabulary = Array.from(this.tokenVocabulary).sort();
-    this.tokenLengthBuckets.clear();
-    for (const token of this.sortedTokenVocabulary) {
-      const bucket = this.tokenLengthBuckets.get(token.length) ?? [];
-      bucket.push(token);
-      this.tokenLengthBuckets.set(token.length, bucket);
-    }
-    this.tokenLookupsDirty = false;
-  }
-
-  private findPrefixTokens(prefix: string, limit: number): string[] {
-    const matches: string[] = [];
-    let index = this.lowerBound(this.sortedTokenVocabulary, prefix);
-    while (
-      index < this.sortedTokenVocabulary.length &&
-      this.sortedTokenVocabulary[index].startsWith(prefix) &&
-      matches.length < limit
-    ) {
-      matches.push(this.sortedTokenVocabulary[index]);
-      index += 1;
-    }
-    return matches;
-  }
-
-  private findIndexedQueryPrefixes(value: string, limit: number): string[] {
+  private findIndexedQueryPrefixes(index: SearchTextIndex, value: string, limit: number): string[] {
     if (limit <= 0) return [];
     const matches: string[] = [];
     for (let length = value.length - 1; length >= 3 && matches.length < limit; length -= 1) {
       const prefix = value.slice(0, length);
-      if (this.tokenIndex.has(prefix)) {
+      if (index.hasToken(prefix)) {
         matches.push(prefix);
       }
     }
     return matches;
   }
 
-  private lowerBound(values: string[], target: string): number {
-    let low = 0;
-    let high = values.length;
-    while (low < high) {
-      const mid = (low + high) >> 1;
-      if (values[mid] < target) {
-        low = mid + 1;
-      } else {
-        high = mid;
+  /** Every note the term's exact, prefix and fuzzy tokens reach, with their fields. */
+  private matchTerm(index: SearchTextIndex, term: QueryTerm): TermMatches {
+    const count = index.docCount;
+    const seen = new Uint8Array(count);
+    const matches: TermMatches = {
+      docs: [],
+      exact: new Uint8Array(count),
+      prefix: new Uint8Array(count),
+      fuzzy: new Uint8Array(count),
+    };
+    const collect = (tokens: Set<string>, fields: Uint8Array) => {
+      for (const token of tokens) {
+        index.forEachPosting(token, (docId, bits) => {
+          fields[docId] |= bits;
+          if (seen[docId] === 0) {
+            seen[docId] = 1;
+            matches.docs.push(docId);
+          }
+        });
       }
-    }
-    return low;
+    };
+    collect(term.exact, matches.exact);
+    collect(term.prefix, matches.prefix);
+    collect(term.fuzzy, matches.fuzzy);
+    return matches;
   }
 
-  private *iterLengthBucketTokens(length: number, maxGap: number): Iterable<string> {
-    const min = Math.max(1, length - maxGap);
-    const max = length + maxGap;
-    for (let bucketLength = min; bucketLength <= max; bucketLength += 1) {
-      const bucket = this.tokenLengthBuckets.get(bucketLength);
-      if (bucket) yield* bucket;
-    }
-  }
-
-  private collectCandidateDocs(queryTerms: QueryTerm[], limit: number, sort: SortMode): IndexedDocument[] {
-    const counts = new Map<string, number>();
-    for (const term of queryTerms) {
-      const termPaths = this.pathsForQueryTerm(term);
-      for (const path of termPaths) {
-        counts.set(path, (counts.get(path) ?? 0) + 1);
+  private collectCandidateDocs(index: SearchTextIndex, matches: TermMatches[], limit: number, sort: SortMode): number[] {
+    const counts = new Map<number, number>();
+    for (const match of matches) {
+      for (const docId of match.docs) {
+        counts.set(docId, (counts.get(docId) ?? 0) + 1);
       }
     }
 
@@ -1091,24 +1068,29 @@ export class SystemSculptSearchEngine {
       return [];
     }
 
-    const targetMatches = queryTerms.length >= 3
-      ? Math.max(2, queryTerms.length - 1)
+    const targetMatches = matches.length >= 3
+      ? Math.max(2, matches.length - 1)
       : 1;
 
-    let candidates = this.docsForPathCounts(counts, targetMatches, limit, sort);
+    let candidates = this.docsForCounts(index, counts, targetMatches, limit, sort);
     if (candidates.length < limit) {
-      candidates = this.docsForPathCounts(counts, Math.max(1, targetMatches - 1), limit, sort);
+      candidates = this.docsForCounts(index, counts, Math.max(1, targetMatches - 1), limit, sort);
     }
 
     return candidates.slice(0, Math.max(limit * 8, this.CANDIDATE_LIMIT));
   }
 
-  private shouldUseSubstringCandidateFallback(queryTerms: QueryTerm[], phrase: string, candidateCount: number): boolean {
+  private shouldUseSubstringCandidateFallback(
+    queryTerms: QueryTerm[],
+    matches: TermMatches[],
+    phrase: string,
+    candidateCount: number,
+  ): boolean {
     if (!phrase) return false;
     if (candidateCount === 0 && (containsNonAscii(phrase) || this.tokenizeSearchText(phrase).size === 0)) {
       return true;
     }
-    return queryTerms.some((term) => this.needsSubstringFallback(term.value) && this.pathsForQueryTerm(term).size === 0);
+    return queryTerms.some((term, index) => this.needsSubstringFallback(term.value) && matches[index].docs.length === 0);
   }
 
   private needsSubstringFallback(value: string): boolean {
@@ -1116,7 +1098,7 @@ export class SystemSculptSearchEngine {
     // Prefix expansion in buildQueryTerms requires length >= 3, so 1- and
     // 2-char tokenizable terms (e.g. "fr" while typing "fresh") would
     // otherwise have no candidates once the content index is ready. The
-    // `pathsForQueryTerm(...).size === 0` gate in the caller still avoids
+    // `matches[index].docs.length === 0` gate in the caller still avoids
     // running a substring scan when the term has exact token coverage.
     if (value.length < 3) return true;
     // Token index stores punctuation-stripped tokens, so a query term
@@ -1127,28 +1109,40 @@ export class SystemSculptSearchEngine {
     return containsNonAscii(value) || this.tokenizeSearchText(value).size === 0;
   }
 
-  private collectSubstringCandidateDocs(terms: string[], phrase: string, limit: number, sort: SortMode): IndexedDocument[] {
-    const matches: IndexedDocument[] = [];
+  private async collectSubstringCandidateDocs(
+    terms: string[],
+    phrase: string,
+    limit: number,
+    sort: SortMode,
+    bodies: NoteBodyMatcher,
+  ): Promise<number[]> {
+    const matches: number[] = [];
     const cap = Math.max(limit * 8, this.CANDIDATE_LIMIT);
-    const searchableTerms = terms.filter(Boolean);
+    const needles = [phrase, ...terms].filter(Boolean);
 
-    for (const doc of this.index.values()) {
-      if (
-        this.documentContainsSubstring(doc, phrase) ||
-        searchableTerms.some((term) => this.documentContainsSubstring(doc, term))
-      ) {
-        matches.push(doc);
+    const index = bodies.index;
+    for (const docId of index.docIds()) {
+      if (await this.documentContainsAny(docId, needles, bodies)) {
+        matches.push(docId);
         if (sort !== "recency" && matches.length >= cap) break;
       }
     }
 
-    if (sort === "recency") matches.sort((a, b) => b.mtime - a.mtime);
+    if (sort === "recency") matches.sort((a, b) => this.noteMtime(index, b) - this.noteMtime(index, a));
     return matches.slice(0, cap);
   }
 
-  private documentContainsSubstring(doc: IndexedDocument, value: string): boolean {
-    if (!value) return false;
-    return doc.lowerTitle.includes(value) || doc.lowerPath.includes(value) || doc.body.includes(value);
+  private async documentContainsAny(docId: number, needles: string[], bodies: NoteBodyMatcher): Promise<boolean> {
+    const note = bodies.index.note(docId);
+    if (!note) return false;
+    if (needles.some((needle) => note.lowerTitle.includes(needle) || note.lowerPath.includes(needle))) return true;
+    const unread = needles.filter((needle) => bodies.needsText(docId, needle));
+    if (unread.length > 0) await bodies.load([docId], 1);
+    return needles.some((needle) => bodies.contains(docId, needle));
+  }
+
+  private noteMtime(index: SearchTextIndex, docId: number): number {
+    return index.note(docId)?.mtime ?? 0;
   }
 
   private runMetadataSearch(terms: string[], phrase: string, limit: number, sort: SortMode): SearchHit[] {
@@ -1172,22 +1166,7 @@ export class SystemSculptSearchEngine {
     const title = file.basename;
     const path = file.path;
     const metadata = this.getMetadataTokenSnapshot(file);
-    const doc: IndexedDocument = {
-      path,
-      title,
-      lowerTitle: metadata.lowerTitle,
-      lowerPath: metadata.lowerPath,
-      titleTokens: metadata.titleTokens,
-      pathTokens: metadata.pathTokens,
-      bodyTokens: new Set(),
-      tokens: new Set(),
-      body: "",
-      rawBody: "",
-      preview: "",
-      mtime: this.modifiedTime(file),
-      size: this.fileSize(file),
-    };
-    const metadataScore = this.scoreMetadata(doc, queryTerms, phrase);
+    const metadataScore = this.scoreMetadata(metadata, this.modifiedTime(file), queryTerms, phrase);
     if (metadataScore <= 0) return null;
 
     const maxPossible = Math.max(24, queryTerms.length * 20 + 24);
@@ -1203,7 +1182,7 @@ export class SystemSculptSearchEngine {
     };
   }
 
-  private scoreMetadata(doc: IndexedDocument, queryTerms: QueryTerm[], phrase: string): number {
+  private scoreMetadata(doc: MetadataTokenSnapshot, mtime: number, queryTerms: QueryTerm[], phrase: string): number {
     if (queryTerms.length === 0) return 0;
     let score = 0;
     let matchedTerms = 0;
@@ -1254,47 +1233,50 @@ export class SystemSculptSearchEngine {
 
     if (matchedTerms === 0 && !phraseMatched) return 0;
     score += (matchedTerms / queryTerms.length) * 10;
-    score += this.computeRecencyBoost(doc.mtime) * 0.15;
+    score += this.computeRecencyBoost(mtime) * 0.15;
     return score;
   }
 
-  private pathsForQueryTerm(term: QueryTerm): Set<string> {
-    const paths = new Set<string>();
-    const add = (token: string) => {
-      const tokenPaths = this.tokenIndex.get(token);
-      if (!tokenPaths) return;
-      for (const path of tokenPaths) {
-        paths.add(path);
-      }
-    };
-
-    term.exact.forEach(add);
-    term.prefix.forEach(add);
-    term.fuzzy.forEach(add);
-    return paths;
-  }
-
-  private docsForPathCounts(counts: Map<string, number>, minCount: number, limit: number, sort: SortMode): IndexedDocument[] {
+  private docsForCounts(
+    index: SearchTextIndex,
+    counts: Map<number, number>,
+    minCount: number,
+    limit: number,
+    sort: SortMode,
+  ): number[] {
     return Array.from(counts.entries())
       .filter(([, count]) => count >= minCount)
       .sort((a, b) => sort === "recency"
-        ? (this.index.get(b[0])?.mtime || 0) - (this.index.get(a[0])?.mtime || 0) || b[1] - a[1]
+        ? (this.noteMtime(index, b[0]) || 0) - (this.noteMtime(index, a[0]) || 0) || b[1] - a[1]
         : b[1] - a[1])
       .slice(0, Math.max(limit * 8, this.CANDIDATE_LIMIT))
-      .map(([path]) => this.index.get(path))
-      .filter((doc): doc is IndexedDocument => doc !== undefined);
+      .map(([docId]) => docId);
   }
 
-  private hasAny(tokens: Set<string>, candidates: Set<string>): boolean {
-    for (const candidate of candidates) {
-      if (tokens.has(candidate)) return true;
+  /** Excerpts for the word results shown, from each note's text read again. */
+  private async attachExcerpts(
+    results: SearchHit[],
+    terms: string[],
+    phrase: string,
+    bodies: NoteBodyMatcher,
+  ): Promise<void> {
+    const shown: Array<{ hit: SearchHit; docId: number }> = [];
+    for (const hit of results) {
+      if (hit.origin !== "lexical" && hit.origin !== "blend") continue;
+      const docId = bodies.index.idOf(hit.path);
+      if (docId !== undefined) shown.push({ hit, docId });
     }
-    return false;
+    await bodies.load(shown.map(({ docId }) => docId), this.CONTENT_CONCURRENCY);
+    for (const { hit, docId } of shown) {
+      const note = bodies.index.note(docId);
+      if (!note) continue;
+      hit.excerpt = copyFlat(this.extractExcerpt(bodies.text(docId)?.raw ?? "", note.preview, terms, phrase));
+    }
   }
 
-  private extractExcerpt(doc: IndexedDocument, terms: string[], phrase: string): string {
-    const source = doc.rawBody || doc.preview;
-    if (!source) return doc.preview;
+  private extractExcerpt(raw: string, preview: string, terms: string[], phrase: string): string {
+    const source = raw || preview;
+    if (!source) return preview;
 
     const lower = source.toLowerCase();
     let bestIdx = -1;
@@ -1314,7 +1296,7 @@ export class SystemSculptSearchEngine {
     }
 
     if (bestIdx === -1) {
-      return doc.preview;
+      return preview;
     }
 
     const contextRadius = 90;
@@ -1329,13 +1311,12 @@ export class SystemSculptSearchEngine {
   private async runSemanticSearch(query: string, limit: number, signal?: AbortSignal): Promise<SearchHit[]> {
     const manager = this.getExistingEmbeddingsManager();
     if (!manager || signal?.aborted) return [];
-    // One controller for the whole semantic leg: the caller's cancellation and
-    // the timeout both abort the managed query and the vector scan behind it,
-    // instead of leaving them running after the results were dropped.
+    // One controller for the whole semantic leg: the caller's cancellation
+    // aborts the managed query and the vector scan behind it, instead of
+    // leaving them running after the results were dropped.
     const controller = new AbortController();
     const onAbort = () => controller.abort();
     signal?.addEventListener("abort", onAbort, { once: true });
-    const timer = window.setTimeout(() => controller.abort(), this.SEMANTIC_TIMEOUT_MS);
     try {
       const semantic = (async (): Promise<SearchHit[]> => {
         if (typeof manager.awaitReady === "function") {
@@ -1370,7 +1351,6 @@ export class SystemSculptSearchEngine {
     } catch {
       return [];
     } finally {
-      window.clearTimeout(timer);
       signal?.removeEventListener("abort", onAbort);
     }
   }
@@ -1399,57 +1379,36 @@ export class SystemSculptSearchEngine {
     return sort === "recency" ? recency || relevance : relevance || recency;
   }
 
+  /**
+   * Word and meaning scores are separate evidence that a note is the one being
+   * looked for, so they combine as a probabilistic OR: a note found both ways
+   * ranks above a note found either way alone with the same score, and a note
+   * found one way keeps that score. A weighted average would let a weak word
+   * match pull a good meaning match below notes found by meaning alone.
+   */
   private mergeResults(lexical: SearchHit[], semantic: SearchHit[], limit: number, sort: SortMode): SearchHit[] {
-    const K = 60;
-    const entries = new Map<string, { lex?: SearchHit; sem?: SearchHit; rrfLex: number; rrfSem: number }>();
-
-    lexical.forEach((hit, idx) => {
-      const entry = entries.get(hit.path) ?? { rrfLex: 0, rrfSem: 0 };
-      entry.lex = hit;
-      entry.rrfLex += 1 / (K + idx + 1);
-      entries.set(hit.path, entry);
-    });
-
-    semantic.forEach((hit, idx) => {
-      const entry = entries.get(hit.path) ?? { rrfLex: 0, rrfSem: 0 };
-      entry.sem = hit;
-      entry.rrfSem += 1 / (K + idx + 1);
-      entries.set(hit.path, entry);
-    });
+    const entries = new Map<string, { lex?: SearchHit; sem?: SearchHit }>();
+    for (const hit of lexical) entries.set(hit.path, { lex: hit });
+    for (const hit of semantic) {
+      const entry = entries.get(hit.path);
+      if (entry) entry.sem = hit;
+      else entries.set(hit.path, { sem: hit });
+    }
 
     const merged: SearchHit[] = [];
-
-    for (const entry of entries.values()) {
-      const lexScore = entry.lex?.lexScore ?? 0;
-      const semScore = entry.sem?.semScore ?? 0;
-      const rrfBoost = entry.rrfLex + entry.rrfSem;
-
-      let finalScore = lexScore;
-      let origin: SearchHit["origin"] = "lexical";
-
-      if (entry.lex && entry.sem) {
-        finalScore = Math.min(1, 0.55 * lexScore + 0.35 * semScore + 0.10 * rrfBoost);
-        origin = "blend";
-      } else if (entry.sem && !entry.lex) {
-        finalScore = Math.min(1, semScore + 0.25 * rrfBoost);
-        origin = "semantic";
-      }
-
-      const target = entry.lex ?? entry.sem!;
+    for (const { lex, sem } of entries.values()) {
+      const lexScore = lex?.lexScore ?? 0;
+      const semScore = sem?.semScore ?? 0;
       merged.push({
-        ...target,
-        origin,
-        score: finalScore,
-        lexScore: entry.lex?.lexScore,
-        semScore: entry.sem?.semScore,
+        ...(lex ?? sem!),
+        origin: lex && sem ? "blend" : lex ? "lexical" : "semantic",
+        score: 1 - (1 - lexScore) * (1 - semScore),
+        lexScore: lex?.lexScore,
+        semScore: sem?.semScore,
       });
     }
 
-    merged.sort((a, b) => this.compareHits(a, b, sort));
-
-    const sliced = merged.slice(0, limit);
-
-    return sliced;
+    return merged.sort((a, b) => this.compareHits(a, b, sort)).slice(0, limit);
   }
 
   /**
@@ -1544,5 +1503,84 @@ export class SystemSculptSearchEngine {
 
   private yieldToMainThread(): Promise<void> {
     return new Promise((resolve) => window.setTimeout(resolve, 0));
+  }
+}
+
+const WORD_PATTERN = /^[\p{L}\p{N}\p{M}]+$/u;
+const WORD_RUNS_PATTERN = /[\p{L}\p{N}\p{M}]{2,}/gu;
+
+/**
+ * Answers "does this note's indexed body contain this text" for one search,
+ * as `body.includes` did when the index kept bodies. A word (letters, digits
+ * and marks only) is answered from the index. Other text is narrowed to the
+ * notes holding each of its words, then checked against the note's text, read
+ * at most once per search and dropped with the matcher.
+ */
+class NoteBodyMatcher {
+  private wordMasks = new Map<string, Uint8Array>();
+  private candidateMasks = new Map<string, Uint8Array | null>();
+  private texts = new Map<number, NoteText>();
+
+  constructor(
+    readonly index: SearchTextIndex,
+    private readonly read: (note: IndexedNote) => Promise<NoteText>,
+  ) {}
+
+  /** True when only the note's text can settle `contains(docId, needle)`. */
+  needsText(docId: number, needle: string): boolean {
+    if (!needle || WORD_PATTERN.test(needle) || this.texts.has(docId)) return false;
+    const candidates = this.candidates(needle);
+    return candidates === null || candidates[docId] === 1;
+  }
+
+  /** Reads the notes' text; `contains` and `text` answer from it afterwards. */
+  async load(docIds: number[], concurrency: number): Promise<void> {
+    const pending = Array.from(new Set(docIds)).filter((docId) => !this.texts.has(docId));
+    let next = 0;
+    const worker = async () => {
+      while (next < pending.length) {
+        const docId = pending[next++];
+        const note = this.index.note(docId);
+        if (note) this.texts.set(docId, await this.read(note));
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(concurrency, pending.length) }, worker));
+  }
+
+  contains(docId: number, needle: string): boolean {
+    if (!needle) return false;
+    if (WORD_PATTERN.test(needle)) return this.wordMask(needle)[docId] === 1;
+    const candidates = this.candidates(needle);
+    if (candidates !== null && candidates[docId] !== 1) return false;
+    return this.texts.get(docId)?.body.includes(needle) ?? false;
+  }
+
+  text(docId: number): NoteText | undefined {
+    return this.texts.get(docId);
+  }
+
+  private wordMask(word: string): Uint8Array {
+    let mask = this.wordMasks.get(word);
+    if (!mask) {
+      mask = this.index.bodyContainsWord(word);
+      this.wordMasks.set(word, mask);
+    }
+    return mask;
+  }
+
+  /** Notes holding every word of `needle` that is two or more characters long; null when it has none. */
+  private candidates(needle: string): Uint8Array | null {
+    if (this.candidateMasks.has(needle)) return this.candidateMasks.get(needle)!;
+    let candidates: Uint8Array | null = null;
+    for (const word of needle.match(WORD_RUNS_PATTERN) ?? []) {
+      const mask = this.wordMask(word);
+      if (candidates === null) {
+        candidates = mask.slice();
+      } else {
+        for (let docId = 0; docId < candidates.length; docId += 1) candidates[docId] &= mask[docId];
+      }
+    }
+    this.candidateMasks.set(needle, candidates);
+    return candidates;
   }
 }

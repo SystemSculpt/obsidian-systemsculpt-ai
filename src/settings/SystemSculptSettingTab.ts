@@ -1,7 +1,6 @@
 import {
   App,
   PluginSettingTab,
-  Setting,
   Notice,
   setIcon,
   EventRef,
@@ -25,6 +24,7 @@ import {
   type UiTabsHandle,
 } from "../core/ui/surface";
 import SystemSculptPlugin from "../main";
+import type { ConnectOutcome } from "../services/AccountConnectService";
 import { getHostDeviceType, getHostOperatingSystem } from "../platform/hostCapabilities";
 import {
   buildSettingsIndexFromRoot,
@@ -34,7 +34,8 @@ import {
   type SettingsSearchGroup,
   type SettingsSearchMatch,
 } from "./SettingsSearchIndex";
-import { buildSettingsTabConfigs } from "./SettingsTabRegistry";
+import { buildSettingsTabConfigs, type SettingsTabConfig } from "./SettingsTabRegistry";
+import { createCatalogSetting, getSettingsCatalog } from "./SettingsCatalog";
 import {
   decorateRestoreDefaultsButton,
   RESTORE_DEFAULTS_COPY,
@@ -48,12 +49,15 @@ type SettingsSearchViewState = {
 
 export class SystemSculptSettingTab extends PluginSettingTab {
   plugin: SystemSculptPlugin;
-  private listeners: {
-    element: HTMLElement;
-    type: string;
-    listener: EventListener;
-  }[] = [];
-  private renderCleanups = new Set<() => void>();
+  /** The latest sign-in result, shown in Account until settings close or a new sign-in starts. */
+  accountConnectOutcome: ConnectOutcome | null = null;
+  private renderCleanups = new Map<() => void, HTMLElement | null>();
+  private renderingSection: HTMLElement | null = null;
+  private sectionRenderers = new Map<HTMLElement, () => void>();
+  private renderedTabs = new Set<string>();
+  private tabConfigs: SettingsTabConfig[] = [];
+  private searchIndexDirty = true;
+  private phoneCapturesLinked = false;
   private tabContainerEl: HTMLElement | null = null;
   private contentContainerEl: HTMLElement | null = null;
   private searchInputEl: HTMLInputElement | null = null;
@@ -68,9 +72,6 @@ export class SystemSculptSettingTab extends PluginSettingTab {
   private allSettingsIndex: SettingsIndexEntry[] = [];
   private tabsDef: { id: string; label: string }[] = [];
   private tabsHandle: UiTabsHandle<string> | null = null;
-  private contentMutationObserver: MutationObserver | null = null;
-  private indexRebuildTimer: number | null = null;
-  private indexRebuildTimerWindow: Window | null = null;
   private activeTabId: string = "account";
   private focusTabEventRef: EventRef | null = null;
   private searchState: SettingsSearchViewState = {
@@ -87,17 +88,17 @@ export class SystemSculptSettingTab extends PluginSettingTab {
 
   /** Registers work that must stop when settings rerender, hide, or unload. */
   registerRenderCleanup(cleanup: () => void): () => void {
-    this.renderCleanups.add(cleanup);
+    this.renderCleanups.set(cleanup, this.renderingSection);
     return () => this.renderCleanups.delete(cleanup);
   }
 
-  registerListener(
+  registerListener<K extends keyof HTMLElementEventMap>(
     element: HTMLElement,
-    type: string,
-    listener: EventListener,
+    type: K,
+    listener: (event: HTMLElementEventMap[K]) => void,
   ) {
     element.addEventListener(type, listener);
-    this.listeners.push({ element, type, listener });
+    this.registerRenderCleanup(() => element.removeEventListener(type, listener));
   }
 
   private generateFeedbackUrl(): string {
@@ -181,9 +182,7 @@ export class SystemSculptSettingTab extends PluginSettingTab {
   }
 
   public renderQuickActionsSection(containerEl: HTMLElement): void {
-    const actionsSetting = new Setting(containerEl)
-      .setName("Quick actions")
-      .setDesc("");
+    const actionsSetting = createCatalogSetting(containerEl, "advanced.quick-actions");
     actionsSetting.settingEl.addClass("ss-settings-quick-actions");
 
     actionsSetting.addButton((button) => {
@@ -191,7 +190,7 @@ export class SystemSculptSettingTab extends PluginSettingTab {
       button.onClick(async () => {
         const confirm = await showPrompt(this.app, RESTORE_DEFAULTS_COPY.label, {
           description:
-            "This will replace your current configuration with the recommended defaults. Any customizations you've applied will be overwritten. Do you want to continue?",
+            "Restore the recommended chat text size, audio output, Similar notes, output folders, and debug setting? These settings will replace your current choices. Other settings will stay unchanged.",
           primaryButton: "Restore Defaults",
           secondaryButton: "Cancel",
         });
@@ -206,13 +205,10 @@ export class SystemSculptSettingTab extends PluginSettingTab {
             audioProcessorOutputPreset: "detailed",
             embeddingsEnabled: false,
             chatsDirectory: "SystemSculpt/Chats",
-            savedChatsDirectory: "SystemSculpt/Saved Chats",
-            attachmentsDirectory: "SystemSculpt/Attachments",
             extractionsDirectory: "SystemSculpt/Extractions",
             debugMode: false,
           });
-          new Notice("Recommended defaults restored.", 2500);
-          this.display();
+          this.refreshSettings();
         } catch {
           new Notice("Failed to restore recommended defaults.", 4000);
         } finally {
@@ -225,29 +221,25 @@ export class SystemSculptSettingTab extends PluginSettingTab {
       cls: "ss-settings-link",
       text: "Send feedback",
       attr: {
-        href: this.generateFeedbackUrl(),
+        href: "https://github.com/SystemSculpt/obsidian-systemsculpt-ai/issues/new",
         target: "_blank",
         rel: "noopener",
         "aria-label": "Share feedback, report bugs, or suggest improvements",
       },
     });
+    const prepareFeedback = () => { feedbackLink.href = this.generateFeedbackUrl(); };
+    this.registerListener(feedbackLink, "click", prepareFeedback);
+    this.registerListener(feedbackLink, "auxclick", prepareFeedback);
     setIcon(
       feedbackLink.createSpan({ cls: "ss-settings-link-icon" }),
       "external-link",
     );
   }
 
-  private removeAllListeners() {
-    this.listeners.forEach(({ element, type, listener }) => {
-      element.removeEventListener(type, listener);
-    });
-    this.listeners = [];
-  }
-
-  private invalidateRenderCleanups(): void {
-    const cleanups = [...this.renderCleanups];
-    this.renderCleanups.clear();
-    for (const cleanup of cleanups) {
+  private invalidateRenderCleanups(section?: HTMLElement): void {
+    for (const [cleanup, owner] of [...this.renderCleanups]) {
+      if (section && owner !== section) continue;
+      this.renderCleanups.delete(cleanup);
       try {
         cleanup();
       } catch {
@@ -256,22 +248,77 @@ export class SystemSculptSettingTab extends PluginSettingTab {
     }
   }
 
-  private clearSettingsIndexRebuild(): void {
-    if (this.indexRebuildTimer !== null) {
-      this.indexRebuildTimerWindow?.clearTimeout(this.indexRebuildTimer);
-      this.indexRebuildTimer = null;
-      this.indexRebuildTimerWindow = null;
+  /** Refresh one mounted section; hidden sections are invalidated, never rendered. */
+  refreshSection(element: HTMLElement): void {
+    const section = element.closest<HTMLElement>("[data-settings-section]");
+    if (!section) return;
+    const render = this.sectionRenderers.get(section);
+    if (!render) return;
+    this.invalidateRenderCleanups(section);
+    section.empty();
+    this.searchIndexDirty = true;
+    const panel = section.closest<HTMLElement>(".systemsculpt-tab-content");
+    if (panel?.hidden) {
+      section.dataset.settingsDirty = "true";
+      return;
+    }
+    delete section.dataset.settingsDirty;
+    const previous = this.renderingSection;
+    this.renderingSection = section;
+    try {
+      render();
+    } finally {
+      this.renderingSection = previous;
     }
   }
 
-  private scheduleSettingsIndexRebuild(ownerWindow: Window, delayMs: number): void {
-    this.clearSettingsIndexRebuild();
-    this.indexRebuildTimerWindow = ownerWindow;
-    this.indexRebuildTimer = ownerWindow.setTimeout(() => {
-      this.indexRebuildTimer = null;
-      this.indexRebuildTimerWindow = null;
-      this.buildSettingsIndex();
-    }, delayMs);
+  /** A restore replaces settings across sections, but keeps the shell and selection. */
+  refreshSettings(): void {
+    for (const section of this.sectionRenderers.keys()) this.refreshSection(section);
+  }
+
+  /** In-place row changes are indexed on the next search input, not by observing DOM. */
+  invalidateSearchIndex(): void {
+    this.searchIndexDirty = true;
+  }
+
+  private syncPhoneCaptureVisibility(): void {
+    const linked = this.plugin.settings.phoneCapturesLinked === true;
+    if (linked === this.phoneCapturesLinked) return;
+    this.phoneCapturesLinked = linked;
+    this.invalidateSearchIndex();
+    const section = this.contentContainerEl?.querySelector<HTMLElement>('[data-settings-section="workspace-1"]');
+    if (section) this.refreshSection(section);
+    const anchor = this.contentContainerEl?.querySelector<HTMLElement>('[data-tab="workspace"] [data-ss-search]');
+    const config = this.tabConfigs.find((tab) => tab.id === "workspace");
+    if (anchor && config?.anchor) anchor.dataset.ssTitle = config.anchor.title;
+  }
+
+  private renderTab(tabId: string): void {
+    this.syncPhoneCaptureVisibility();
+    const panel = this.contentContainerEl?.querySelector<HTMLElement>(`[data-tab="${tabId}"]`);
+    const config = this.tabConfigs.find((tab) => tab.id === tabId);
+    if (!panel || !config) return;
+    if (!this.renderedTabs.has(tabId)) {
+      this.renderedTabs.add(tabId);
+      for (const [index, render] of config.sections.entries()) {
+        const section = panel.createDiv({ attr: { "data-settings-section": `${tabId}-${index}` } });
+        this.sectionRenderers.set(section, () => render(section));
+        this.refreshSection(section);
+      }
+      if (config.anchor) {
+        panel.createDiv({ attr: {
+          "data-ss-search": "true",
+          "data-ss-title": config.anchor.title,
+          "data-ss-desc": config.anchor.desc,
+          hidden: "",
+        } });
+      }
+    } else {
+      for (const section of panel.querySelectorAll<HTMLElement>("[data-settings-dirty]")) {
+        this.refreshSection(section);
+      }
+    }
   }
 
   display(): void {
@@ -293,7 +340,6 @@ export class SystemSculptSettingTab extends PluginSettingTab {
 
     const surfaceRoot = containerEl.createDiv({ cls: "ss-settings-surface" });
     applyPluginSurface(surfaceRoot, "view");
-    const surfaceWindow = surfaceRoot.ownerDocument.defaultView ?? window;
 
     const titleRow = surfaceRoot.createDiv({ cls: "ss-settings-title-row" });
     const titleGroup = titleRow.createDiv({ cls: "ss-settings-title-group" });
@@ -341,8 +387,8 @@ export class SystemSculptSettingTab extends PluginSettingTab {
     this.tabContainerEl = tabBar;
     this.contentContainerEl = contentContainer;
 
-    const tabConfigsAll = buildSettingsTabConfigs(this);
-    const visibleTabs = tabConfigsAll;
+    this.tabConfigs = buildSettingsTabConfigs(this);
+    const visibleTabs = this.tabConfigs;
     const pendingFocusTabId = String(
       this.plugin.consumePendingSettingsFocusTab() || "",
     ).trim();
@@ -404,42 +450,7 @@ export class SystemSculptSettingTab extends PluginSettingTab {
       },
     });
 
-    for (const cfg of visibleTabs) {
-      const sectionRoot = contentContainer.querySelector<HTMLElement>(
-        `[data-tab="${cfg.id}"]`,
-      );
-      if (!sectionRoot) continue;
-      sectionRoot.empty();
-      for (const render of cfg.sections) {
-        render(sectionRoot);
-      }
-      if (cfg.anchor) {
-        const anchor = sectionRoot.createDiv({
-          attr: {
-            "data-ss-search": "true",
-            "data-ss-title": cfg.anchor.title,
-            "data-ss-desc": cfg.anchor.desc,
-          },
-        });
-        anchor.toggleAttribute("hidden", true);
-      }
-    }
-
-    this.buildSettingsIndex();
-    this.scheduleSettingsIndexRebuild(surfaceWindow, 300);
-
-    if (this.contentContainerEl) {
-      if (this.contentMutationObserver) {
-        this.contentMutationObserver.disconnect();
-      }
-      this.contentMutationObserver = new surfaceWindow.MutationObserver(() => {
-        this.scheduleSettingsIndexRebuild(surfaceWindow, 150);
-      });
-      this.contentMutationObserver.observe(this.contentContainerEl, {
-        childList: true,
-        subtree: true,
-      });
-    }
+    this.renderTab(this.activeTabId);
 
     this.searchResultsContainerEl = layout.createDiv({
       cls: "ss-settings-search-results",
@@ -454,7 +465,26 @@ export class SystemSculptSettingTab extends PluginSettingTab {
   hide(): void {
     this.disposeRender();
     this.backgroundUnfinishedSignIn();
+    this.accountConnectOutcome = null;
     super.hide();
+  }
+
+  /**
+   * Shows a sign-in result in the Account tab when it is the open settings
+   * tab; false otherwise, so the result is shown somewhere visible instead.
+   */
+  showAccountConnectOutcome(outcome: ConnectOutcome): boolean {
+    if (!this.containerEl?.isConnected || this.activeTabId !== "account" || this.searchState.query) return false;
+    this.accountConnectOutcome = outcome;
+    this.refreshAccountSection();
+    return true;
+  }
+
+  refreshAccountSection(): void {
+    this.invalidateSearchIndex();
+    this.syncPhoneCaptureVisibility();
+    const account = this.contentContainerEl?.querySelector<HTMLElement>('[data-settings-section="account-0"]');
+    if (account) this.refreshSection(account);
   }
 
   /**
@@ -470,18 +500,16 @@ export class SystemSculptSettingTab extends PluginSettingTab {
 
   private disposeRender(): void {
     this.invalidateRenderCleanups();
-    this.clearSettingsIndexRebuild();
-    this.removeAllListeners();
+    this.sectionRenderers.clear();
+    this.renderedTabs.clear();
+    this.allSettingsIndex = [];
+    this.searchIndexDirty = true;
     this.tabsHandle?.destroy();
     this.tabsHandle = null;
     this.searchCombobox?.destroy();
     this.searchCombobox = null;
     this.searchHandle?.destroy();
     this.searchHandle = null;
-    if (this.contentMutationObserver) {
-      this.contentMutationObserver.disconnect();
-      this.contentMutationObserver = null;
-    }
     if (this.focusTabEventRef) {
       this.app.workspace.offref(this.focusTabEventRef);
       this.focusTabEventRef = null;
@@ -493,11 +521,14 @@ export class SystemSculptSettingTab extends PluginSettingTab {
    */
   private activateTab(tabId: string) {
     this.tabsHandle?.activate(tabId);
+    this.renderTab(tabId);
   }
 
   private handleTabChange(tabId: string): void {
     if (!this.contentContainerEl) return;
     this.activeTabId = tabId;
+    this.renderTab(tabId);
+    this.searchIndexDirty = true;
   }
 
   private initializeSearchCombobox(): void {
@@ -528,7 +559,7 @@ export class SystemSculptSettingTab extends PluginSettingTab {
         });
       },
       onResultsChange: () => this.searchResultGroupEls.clear(),
-      onCommit: ({ item }) => this.navigateToSetting(item.tabId, item.element),
+      onCommit: ({ item }) => this.navigateToSetting(item),
       onEscape: () => this.clearSearch(true),
     });
   }
@@ -537,6 +568,7 @@ export class SystemSculptSettingTab extends PluginSettingTab {
    * Build an index of all `.setting-item` elements across tabs for fast search
    */
   private buildSettingsIndex() {
+    this.syncPhoneCaptureVisibility();
     this.allSettingsIndex = [];
     if (!this.contentContainerEl) {
       this.renderSearchMeta();
@@ -547,11 +579,22 @@ export class SystemSculptSettingTab extends PluginSettingTab {
       this.contentContainerEl,
       this.tabsDef,
     );
-    if (this.searchState.query) {
-      this.refreshSearchResults(this.searchState.query, false);
-      return;
+    for (const entry of getSettingsCatalog(this.plugin.settings)) {
+      const panel = this.contentContainerEl.querySelector<HTMLElement>(`[data-tab="${entry.tabId}"]`);
+      if (this.renderedTabs.has(entry.tabId) && !panel?.querySelector("[data-settings-dirty]")) continue;
+      if (this.allSettingsIndex.some((existing) => existing.settingId === entry.id)) continue;
+      const tab = this.tabsDef.find((candidate) => candidate.id === entry.tabId);
+      if (!tab) continue;
+      this.allSettingsIndex.push({ ...entry, settingId: entry.id, tabLabel: tab.label, kind: "setting" });
     }
-    this.renderSearchMeta();
+    for (const tab of this.tabConfigs) {
+      if (this.renderedTabs.has(tab.id) || !tab.anchor) continue;
+      this.allSettingsIndex.push({
+        tabId: tab.id, tabLabel: tab.label, title: tab.anchor.title,
+        description: tab.anchor.desc, kind: "anchor",
+      });
+    }
+    this.searchIndexDirty = false;
   }
 
   /**
@@ -566,6 +609,7 @@ export class SystemSculptSettingTab extends PluginSettingTab {
       return;
     }
 
+    if (this.searchIndexDirty) this.buildSettingsIndex();
     this.refreshSearchResults(query, true);
   }
 
@@ -642,6 +686,7 @@ export class SystemSculptSettingTab extends PluginSettingTab {
    * Clear the search shell and restore the normal tab view.
    */
   private clearSearch(restoreFocus: boolean) {
+    this.searchIndexDirty = true;
     this.searchHandle?.setValue("", { notify: false });
     this.searchCombobox?.setQuery("", {
       writeInput: false,
@@ -816,6 +861,7 @@ export class SystemSculptSettingTab extends PluginSettingTab {
   }
 
   private getSearchResultKey(match: SettingsSearchMatch): string {
+    if (!match.element) return `${match.tabId}:${match.settingId ?? match.title}`;
     const existing = this.searchResultKeyByElement.get(match.element);
     if (existing) return existing;
     const key = `setting-${++this.nextSearchResultKey}`;
@@ -846,13 +892,16 @@ export class SystemSculptSettingTab extends PluginSettingTab {
   /**
    * Activate the tab and scroll to the target setting element
    */
-  private navigateToSetting(tabId: string, element: HTMLElement) {
+  private navigateToSetting(match: SettingsSearchMatch) {
     if (!this.tabContainerEl || !this.contentContainerEl) return;
 
-    // Exit search mode and clear input
     this.clearSearch(false);
-
-    this.activateTab(tabId);
+    this.activateTab(match.tabId);
+    const panel = this.contentContainerEl.querySelector<HTMLElement>(`[data-tab="${match.tabId}"]`);
+    const element = match.settingId
+      ? panel?.querySelector<HTMLElement>(`[data-ss-setting="${match.settingId}"]`)
+      : match.element ?? panel;
+    if (!element) return;
 
     // Scroll to element and highlight
     const ownerWindow = this.containerEl.ownerDocument.defaultView ?? window;

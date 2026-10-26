@@ -46,6 +46,7 @@ export const THIN_AGENT_CAPABILITIES = Object.freeze([
   Object.freeze({ id: "obsidian.vault", version: 1 as const }),
 ]);
 
+/** @internal Tests assert against this value. */
 export const THIN_AGENT_DATA_PART_TYPES = Object.freeze([
   "data-systemsculpt-run-terminal",
   "data-systemsculpt-client-tool-request",
@@ -99,7 +100,7 @@ export type ThinAgentContextSource =
  * against the limits negotiated at bootstrap without encoding text or
  * scanning base64 again.
  */
-export type ThinAgentContextMeasurement = Readonly<{
+type ThinAgentContextMeasurement = Readonly<{
   /** UTF-8 bytes of the largest text block's content. */
   largestTextBlockBytes: number;
   /** UTF-8 bytes of every text block's path and content. */
@@ -214,6 +215,7 @@ type ThinAgentContractErrorCode =
   | "invalid_bootstrap"
   | "invalid_context";
 
+/** @internal Tests match this error class. */
 export class ThinAgentContractError extends Error {
   constructor(
     public readonly code: ThinAgentContractErrorCode,
@@ -464,6 +466,7 @@ function parseContextSource(
   return null;
 }
 
+/** @internal Server-parity check in tests; the client builds these requests and never parses them. */
 export function parseThinAgentContextRequest(
   value: unknown,
   limits: ThinAgentInputLimits,
@@ -551,6 +554,7 @@ function parseCapabilityList(value: unknown): readonly ThinAgentCapability[] {
     left.id.localeCompare(right.id) || left.version - right.version));
 }
 
+/** @internal Unit-tested directly. */
 export function parseThinAgentCapabilityManifest(
   value: unknown,
 ): ThinAgentCapabilityManifest {

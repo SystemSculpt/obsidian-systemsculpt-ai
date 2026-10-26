@@ -58,16 +58,18 @@ export type AgentVisibleRunState =
   | AgentAuthoritativeRunState
   | AgentUnknownRunState;
 
-export type AgentTerminal =
+type AgentTerminal =
   AgentTerminalEvent["terminal"];
-export type AgentAuthoritativeEvent =
-  AgentServerEvent;
+/** @internal Test connection ports implement this command type. */
 export type AgentSubmitCommand =
   | ProtocolSubmitCommand
   | AgentRegenerateCommand;
+/** @internal Test connection ports implement this command type. */
 export type AgentToolResultCommand =
   ProtocolToolResultCommand;
+/** @internal Test connection ports implement this command type. */
 export type AgentApprovalCommand = ProtocolApprovalCommand;
+/** @internal Test connection ports implement this command type. */
 export type AgentCancelCommand = ProtocolCancelCommand;
 export type AgentCommandAckEvent = ProtocolCommandAckEvent;
 
@@ -93,7 +95,7 @@ export type AgentConnectionPort = Readonly<{
   ) => void | Promise<void>;
 }>;
 
-export type AgentOptimisticUser = Readonly<{
+type AgentOptimisticUser = Readonly<{
   kind: "optimistic_pending_user";
   request_id: string;
   message: AgentUserMessage;
@@ -115,13 +117,14 @@ export type AgentSessionSnapshot<
   optimisticUser: AgentOptimisticUser | null;
 }>;
 
-export type AgentSessionErrorCode =
+type AgentSessionErrorCode =
   | "invalid_command"
   | "pending_user_exists"
   | "run_state_busy"
   | "run_identity_mismatch"
   | "session_disposed";
 
+/** @internal Tests match this error class. */
 export class AgentSessionError extends Error {
   constructor(
     public readonly code: AgentSessionErrorCode,

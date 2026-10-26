@@ -7,6 +7,7 @@ import type {
   AudioProcessorSignedPart,
 } from "../AudioProcessorApiClient";
 import { AudioProcessorService } from "../AudioProcessorService";
+import { AudioProcessorApiError } from "../AudioProcessorApiClient";
 import { sha256HexFromBytesPortable } from "../../../utils/sha256";
 import type {
   AudioProcessorAudioSource,
@@ -142,7 +143,7 @@ function createPlugin() {
 function createAudioSource(
   bytes: Uint8Array,
   options: Readonly<{ resumable?: boolean }> = {},
-): AudioProcessorAudioSource {
+): AudioProcessorAudioSource & { release: jest.Mock<void, []> } {
   return {
     filename: "product-sync.m4a",
     contentType: "audio/mp4",
@@ -169,7 +170,7 @@ function createApi() {
     }),
     createYouTubeJob: jest.fn(),
     getPartUrl: jest.fn(async (_jobId: string, partNumber: number) => signedPart(partNumber)),
-    uploadPart: jest.fn(async (part: AudioProcessorSignedPart) => ({
+    uploadPart: jest.fn(async (part: AudioProcessorSignedPart, _bytes: ArrayBuffer, _signal?: AbortSignal) => ({
       part_number: part.partNumber,
       etag: `etag-${part.partNumber}`,
     })),
@@ -196,6 +197,210 @@ function createApi() {
 }
 
 describe("AudioProcessorService", () => {
+  describe.each(["getPartUrl", "uploadPart", "completeUpload"] as const)("%s dispatch", (step) => {
+    afterEach(() => jest.useRealTimers());
+
+    it.each([503, 429])("retries a %s after Retry-After with the same upload identity", async (status) => {
+      jest.useFakeTimers();
+      const { plugin } = createPlugin();
+      const api = createApi();
+      api[step].mockRejectedValueOnce(new AudioProcessorApiError("Try later", status, "temporarily_unavailable", 5_000));
+      api.getJob.mockReset();
+      if (step === "completeUpload") api.getJob.mockResolvedValueOnce(job("uploading", "uploading", 0.35));
+      api.getJob.mockResolvedValue(job("succeeded", "complete", 1));
+      const service = new AudioProcessorService(plugin, { apiClient: api as unknown as AudioProcessorApiClient });
+      const running = service.process({ type: "audio", audio: createAudioSource(new Uint8Array(10)) }, {
+        signal: new AbortController().signal,
+      });
+      const finished = expect(running).resolves.toMatchObject({ jobId: "audio_job_123" });
+      await jest.advanceTimersByTimeAsync(4_999);
+      expect(api[step]).toHaveBeenCalledTimes(1);
+      await jest.advanceTimersByTimeAsync(1);
+      await jest.runAllTimersAsync();
+      await finished;
+      expect(api[step].mock.calls[1]).toEqual(api[step].mock.calls[0]);
+      expect(api.createAudioJob).toHaveBeenCalledTimes(1);
+      expect(api.abortUpload).not.toHaveBeenCalled();
+    });
+
+    it("cancels a retry wait without replaying the dispatch", async () => {
+      jest.useFakeTimers();
+      const { plugin } = createPlugin();
+      const api = createApi();
+      api[step].mockRejectedValueOnce(new AudioProcessorApiError("Try later", 503, "temporarily_unavailable", 5_000));
+      api.getJob.mockReset().mockResolvedValue(job("uploading", "uploading", 0.35));
+      const controller = new AbortController();
+      const service = new AudioProcessorService(plugin, { apiClient: api as unknown as AudioProcessorApiClient });
+      const running = service.process({ type: "audio", audio: createAudioSource(new Uint8Array(10)) }, {
+        signal: controller.signal,
+      });
+      const finished = expect(running).rejects.toMatchObject({ name: "AbortError" });
+      await jest.advanceTimersByTimeAsync(4_999);
+      controller.abort();
+      await finished;
+      await jest.advanceTimersByTimeAsync(60_000);
+      expect(api[step]).toHaveBeenCalledTimes(1);
+      expect(jest.getTimerCount()).toBe(0);
+    });
+
+    it("fails a 400 immediately without retry or completion reconciliation", async () => {
+      jest.useFakeTimers();
+      const { plugin } = createPlugin();
+      const api = createApi();
+      api[step].mockRejectedValueOnce(new AudioProcessorApiError("Invalid input", 400, "invalid_request"));
+      const service = new AudioProcessorService(plugin, { apiClient: api as unknown as AudioProcessorApiClient });
+      const running = service.process({ type: "audio", audio: createAudioSource(new Uint8Array(10)) }, {
+        signal: new AbortController().signal,
+      });
+      const finished = expect(running).rejects.toThrow("Invalid input");
+      await jest.advanceTimersByTimeAsync(0);
+      expect(api[step]).toHaveBeenCalledTimes(1);
+      expect(jest.getTimerCount()).toBe(0);
+      await finished;
+      expect(api.getJob).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("completion reconciliation cooldown", () => {
+    afterEach(() => jest.useRealTimers());
+
+    it.each([
+      [undefined, 60_000],
+      [5_000, 60_000],
+      [60_000, 5_000],
+    ])("honors both completion %s and readback %s Retry-After hints", async (completionHint, readHint) => {
+      jest.useFakeTimers();
+      const { plugin } = createPlugin();
+      const api = createApi();
+      api.completeUpload.mockRejectedValueOnce(new AudioProcessorApiError("Try later", 503, "temporarily_unavailable", completionHint));
+      api.getJob.mockReset()
+        .mockRejectedValueOnce(new AudioProcessorApiError("Slow down", 429, "rate_limited", readHint))
+        .mockResolvedValue(job("succeeded", "complete", 1));
+      const service = new AudioProcessorService(plugin, { apiClient: api as unknown as AudioProcessorApiClient });
+      const running = service.process({ type: "audio", audio: createAudioSource(new Uint8Array(10)) }, {
+        signal: new AbortController().signal,
+      });
+      const finished = expect(running).resolves.toMatchObject({ jobId: "audio_job_123" });
+      await jest.advanceTimersByTimeAsync(59_999);
+      expect(api.completeUpload).toHaveBeenCalledTimes(1);
+      await jest.advanceTimersByTimeAsync(1);
+      await jest.runAllTimersAsync();
+      await finished;
+      expect(api.completeUpload.mock.calls[1]).toEqual(api.completeUpload.mock.calls[0]);
+      expect(api.createAudioJob).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("delivers vault-native titles and navigation with technical source metadata only in frontmatter", async () => {
+    const { plugin, contents } = createPlugin();
+    const api = createApi();
+    const fingerprint = "a".repeat(64);
+    const processedAt = "2026-10-25T12:34:56.000Z";
+    const withSource = (markdown: string): string => markdown
+      .replace("---\n\n#", `source-object-fingerprint: "${fingerprint}"\nprocessed-at: "${processedAt}"\n---\n\n#`)
+      .replace(/(\n# [^\n]+\n)/u, `$1\n> [!info] Source\n> Uploaded media \`${fingerprint}\` · 2m 4s · en · processed ${processedAt}\n`);
+    const rawNote = withSource(fullNoteMarkdown());
+    const rawSummary = withSource(summaryMarkdown());
+    const rawTranscript = withSource(transcriptMarkdown());
+    const completedJob = {
+      ...job("succeeded", "complete", 1),
+      result: {
+        ...result,
+        artifactManifest: {
+          version: "audio_processor_artifacts.v1", outputPreset: "detailed",
+          note: { url: result.noteUrl, filename: result.filename, sha256: sha256(rawNote) },
+          summary: { url: result.summaryUrl, filename: "Product sync — Summary.md", sha256: sha256(rawSummary) },
+          transcript: { url: result.transcriptUrl, filename: "Product sync — Transcript.md", sha256: sha256(rawTranscript) },
+        },
+      },
+    };
+    api.createYouTubeJob.mockResolvedValue({ job: completedJob, upload: null });
+    api.getJob.mockReset().mockResolvedValue(completedJob);
+    api.downloadNote.mockImplementation(async (url: string) => url.includes("transcript")
+      ? rawTranscript : url.includes("summary") ? rawSummary : rawNote);
+    const service = new AudioProcessorService(plugin, { apiClient: api as unknown as AudioProcessorApiClient });
+
+    const completed = await service.process({ type: "youtube", url: "https://youtu.be/dQw4w9WgXcQ" }, {
+      signal: new AbortController().signal,
+    });
+    await completed.saveArtifact("summary");
+
+    expect(contents.size).toBe(3);
+    for (const markdown of contents.values()) {
+      const [, frontmatter, body] = markdown.split(/^---\s*$/mu);
+      expect(body).not.toMatch(/^# /mu);
+      expect(body).not.toContain("<!-- systemsculpt-audio-");
+      expect(body).not.toContain(fingerprint);
+      expect(body).not.toContain(processedAt);
+      expect(body).toContain("> Uploaded media · 2m 4s · en");
+      expect(body).toMatch(/\[\[SystemSculpt\/Audio Notes\/Product sync(?: — Transcript)?\|/u);
+      expect(frontmatter).toContain(`source-object-fingerprint: "${fingerprint}"`);
+      expect(frontmatter).toContain(`processed-at: "${processedAt}"`);
+      expect(frontmatter).toContain("systemsculpt-audio-job-id: audio_job_123");
+      expect(frontmatter).toContain("systemsculpt-audio-delivery-job-id: audio_job_123");
+    }
+  });
+
+  it("preserves source attribution, citations, timestamps, and headings within the returned content", async () => {
+    const { plugin, contents } = createPlugin();
+    const api = createApi();
+    const attribution = "> [!info] Source\n> [YouTube](https://www.youtube.com/watch?v=dQw4w9WgXcQ) · Gull Point · 2m 4s · en";
+    const content = "# Quoted slide\n\nA timestamp in the content: 2026-10-25T12:34:56.000Z. [[#seg-000001|00:00]]";
+    api.createYouTubeJob.mockResolvedValue({ job: job("succeeded", "complete", 1), upload: null });
+    api.downloadNote.mockImplementation(async (url: string) => (url.includes("transcript")
+      ? transcriptMarkdown() : fullNoteMarkdown())
+      .replace(/(\n# [^\n]+\n)/u, `$1\n${attribution} · processed 2026-10-25T12:34:56.000Z\n`)
+      + `\n\n${content}\n`);
+    const service = new AudioProcessorService(plugin, { apiClient: api as unknown as AudioProcessorApiClient });
+
+    await service.process({ type: "youtube", url: "https://youtu.be/dQw4w9WgXcQ" }, { signal: new AbortController().signal });
+
+    for (const markdown of contents.values()) {
+      expect(markdown).toContain(attribution + "\n");
+      expect(markdown).toContain(content);
+      expect(markdown).toContain("**00:00** Speaker 1: Hello.");
+      expect(markdown).not.toContain(" · processed 2026-10-25T12:34:56.000Z");
+    }
+  });
+
+  it("migrates legacy navigation markers on resume without duplicating links or changing user content", async () => {
+    const { plugin, contents, files, created, transcriptCreated, app } = createPlugin();
+    const userContent = "\n\n## My edits\nKeep this text exactly.\n";
+    files.set(created.path, created);
+    files.set(transcriptCreated.path, transcriptCreated);
+    contents.set(created.path, fullNoteMarkdown().replace("\n\n# Product sync", "\n\n<!-- systemsculpt-audio-transcript-link -->\n> [!info] Timestamped transcript\n> [[SystemSculpt/Audio Notes/Product sync — Transcript|Open the full timestamped transcript]]\n\n# Product sync") + userContent);
+    contents.set(transcriptCreated.path, transcriptMarkdown().replace("\n\n# Product sync", "\n\n<!-- systemsculpt-audio-note-link -->\n> [!info] Audio note\n> [[SystemSculpt/Audio Notes/Product sync|Back to the audio note]]\n\n# Product sync") + userContent);
+    const api = createApi();
+    const service = new AudioProcessorService(plugin, { apiClient: api as unknown as AudioProcessorApiClient });
+
+    await service.resume(job("succeeded", "complete", 1), { signal: new AbortController().signal });
+    const firstDelivery = [...contents.values()];
+    await service.resume(job("succeeded", "complete", 1), { signal: new AbortController().signal });
+
+    expect([...contents.values()]).toEqual(firstDelivery);
+    expect(app.vault.modify).toHaveBeenCalledTimes(2);
+    expect(api.downloadNote).not.toHaveBeenCalled();
+    for (const markdown of contents.values()) {
+      expect(markdown).not.toContain("<!-- systemsculpt-audio-");
+      expect(markdown.match(/> \[!info\]/gu)).toHaveLength(1);
+      expect(markdown).toContain(userContent);
+      expect(markdown).toMatch(/^systemsculpt-audio-(?:note|transcript)-link: true$/mu);
+    }
+  });
+
+  it("preserves server-generated filenames instead of replacing them with the upload name", async () => {
+    const { plugin } = createPlugin();
+    const api = createApi();
+    api.createAudioJob.mockResolvedValue({ job: job("succeeded", "complete", 1), upload: null });
+    const audio = { ...createAudioSource(new Uint8Array([1])), filename: "Gull Point timetable review.m4a" };
+    const service = new AudioProcessorService(plugin, { apiClient: api as unknown as AudioProcessorApiClient });
+
+    const completed = await service.process({ type: "audio", audio }, { signal: new AbortController().signal });
+
+    expect(api.createAudioJob).toHaveBeenCalledWith(expect.objectContaining({ filename: audio.filename }), expect.any(Object));
+    expect(completed.notePath).toBe("SystemSculpt/Audio Notes/Product sync.md");
+  });
+
   it("saves a paid transcript during summary work without acknowledging and repairs its link on completion", async () => {
     const { plugin, contents } = createPlugin();
     const api = createApi();
@@ -343,7 +548,7 @@ describe("AudioProcessorService", () => {
     expect(audio.readSlice).toHaveBeenCalledWith(0, 4);
     expect(audio.readSlice).toHaveBeenCalledWith(4, 8);
     expect(audio.readSlice).toHaveBeenCalledWith(8, 10);
-    expect(api.uploadPart.mock.calls.map((call) => (call[1] as ArrayBuffer).byteLength))
+    expect(api.uploadPart.mock.calls.map((call) => call[1].byteLength))
       .toEqual([4, 4, 2]);
     expect(api.completeUpload).toHaveBeenCalledWith(
       "audio_job_123",
@@ -548,7 +753,7 @@ describe("AudioProcessorService", () => {
   it("refreshes a signed part URL and retries a transient multipart failure", async () => {
     const { plugin } = createPlugin();
     const api = createApi();
-    api.uploadPart.mockRejectedValueOnce(new Error("temporary object-store failure"));
+    api.uploadPart.mockRejectedValueOnce(new AudioProcessorApiError("temporary object-store failure", 503, "upload_failed"));
     const audio = createAudioSource(new Uint8Array(10));
     const service = new AudioProcessorService(plugin, {
       apiClient: api as unknown as AudioProcessorApiClient,
@@ -718,7 +923,7 @@ describe("AudioProcessorService", () => {
   it("recovers server state when the upload-completion response is lost", async () => {
     const { plugin } = createPlugin();
     const api = createApi();
-    api.completeUpload.mockRejectedValueOnce(new Error("connection lost after request"));
+    api.completeUpload.mockRejectedValueOnce(new TypeError("connection lost after request"));
     api.getJob.mockReset()
       .mockResolvedValueOnce(job("processing", "transcribing", 0.62))
       .mockResolvedValueOnce(job("succeeded", "complete", 1));
@@ -743,7 +948,7 @@ describe("AudioProcessorService", () => {
     const { plugin } = createPlugin();
     const api = createApi();
     api.completeUpload
-      .mockRejectedValueOnce(new Error("temporary completion failure"))
+      .mockRejectedValueOnce(new AudioProcessorApiError("temporary completion failure", 503, "temporarily_unavailable"))
       .mockResolvedValueOnce(job("queued", "queued", 0.36));
     api.getJob.mockReset()
       .mockResolvedValueOnce(job("uploading", "uploading", 0.35))

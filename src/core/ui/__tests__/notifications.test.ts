@@ -13,7 +13,7 @@ jest.mock("../modals/PromptModal", () => ({
 }));
 
 import { showPrompt } from "../modals/PromptModal";
-import { displayNotice, showConfirm } from "../notifications";
+import { askInNotice, flashButtonResult, showActionNotice, showConfirm } from "../notifications";
 
 describe("notifications", () => {
   const app = {} as App;
@@ -45,34 +45,133 @@ describe("notifications", () => {
     await expect(showConfirm(app, "Continue?")).resolves.toEqual({ confirmed: false });
   });
 
-  it("renders a structured notice in the active surface realm", () => {
-    const nodes: Array<{ cls: string; text: string }> = [];
+  it("offers one action that dismisses the notice before it runs", () => {
+    const button = document.createElement("button");
+    const message = document.createElement("div");
     const fragment = {
-      createDiv: jest.fn(({ cls }: { cls: string }) => {
-        const node = {
-          cls,
-          text: "",
-          setText(text: string) {
-            this.text = text;
-          },
-        };
-        nodes.push(node);
-        return node;
+      createDiv: jest.fn(({ cls, text }: { cls: string; text: string }) => {
+        message.className = cls;
+        message.textContent = text;
+        return message;
+      }),
+      createEl: jest.fn((tag: string, { cls, text, attr }: { cls: string; text: string; attr: Record<string, string> }) => {
+        expect(tag).toBe("button");
+        button.className = cls;
+        button.textContent = text;
+        for (const [name, value] of Object.entries(attr)) button.setAttribute(name, value);
+        return button;
       }),
     };
     jest.spyOn(document, "createDocumentFragment").mockReturnValue(fragment as any);
+    const hide = jest.fn();
+    (Notice as unknown as jest.Mock).mockImplementation(function (this: { hide: () => void }) {
+      this.hide = hide;
+    });
+    const onSelect = jest.fn(() => expect(hide).toHaveBeenCalledTimes(1));
 
-    displayNotice({
-      title: "Opened in new tab",
-      path: "Notes/Example.md",
-      message: "Added to the current pane.",
-    }, { duration: 8_000 });
+    showActionNotice("SystemSculpt 6.6.2 is available.", { label: "Open plugin updates", onSelect });
 
-    expect(nodes).toEqual([
-      { cls: "systemsculpt-notice-title", text: "Opened in new tab", setText: expect.any(Function) },
-      { cls: "systemsculpt-notice-path", text: "Notes/Example.md", setText: expect.any(Function) },
-      { cls: "systemsculpt-notice-message", text: "Added to the current pane.", setText: expect.any(Function) },
-    ]);
-    expect(Notice).toHaveBeenCalledWith(fragment, 8_000);
+    expect(Notice).toHaveBeenCalledWith(fragment, 10_000);
+    expect(message.textContent).toBe("SystemSculpt 6.6.2 is available.");
+    expect(button.textContent).toBe("Open plugin updates");
+    expect(button.getAttribute("type")).toBe("button");
+    expect(button.dataset.testid).toBe("notice.action");
+    expect(onSelect).not.toHaveBeenCalled();
+    button.click();
+    expect(onSelect).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("askInNotice", () => {
+  /** Obsidian's notice: the message sits in noticeEl, and clicking the notice hides it. */
+  function emulateNotice() {
+    const hide = jest.fn();
+    (Notice as unknown as jest.Mock).mockImplementation(function (this: { noticeEl: HTMLElement; hide: () => void }, message: DocumentFragment) {
+      const notice = document.body.createDiv({ cls: "notice" });
+      this.noticeEl = notice;
+      notice.appendChild(message);
+      this.hide = () => { hide(); notice.remove(); };
+      notice.addEventListener("click", () => this.hide());
+    });
+    return hide;
+  }
+  const button = (testId: string) => document.querySelector<HTMLButtonElement>(`[data-testid="${testId}"]`)!;
+
+  beforeEach(() => jest.clearAllMocks());
+  afterEach(() => { document.body.innerHTML = ""; });
+
+  it("stays until answered and resolves the chosen answer", async () => {
+    const hide = emulateNotice();
+    const answer = askInNotice("Delete it to free 822 MB?", { confirm: "Delete", cancel: "Keep" });
+
+    expect(Notice).toHaveBeenCalledWith(expect.anything(), 0);
+    expect(document.querySelector(".systemsculpt-notice-message")?.textContent).toBe("Delete it to free 822 MB?");
+    expect(button("notice.confirm").textContent).toBe("Delete");
+    expect(button("notice.cancel").textContent).toBe("Keep");
+    button("notice.confirm").click();
+    await expect(answer).resolves.toBe(true);
+    expect(hide).toHaveBeenCalledTimes(1);
+
+    const kept = askInNotice("Delete it?", { confirm: "Delete", cancel: "Keep" });
+    button("notice.cancel").click();
+    await expect(kept).resolves.toBe(false);
+    expect(hide).toHaveBeenCalledTimes(2);
+  });
+
+  it("counts a dismissed notice as no", async () => {
+    const hide = emulateNotice();
+    const answer = askInNotice("Delete it?", { confirm: "Delete", cancel: "Keep" });
+
+    document.querySelector<HTMLElement>(".systemsculpt-notice-message")!.click();
+
+    await expect(answer).resolves.toBe(false);
+    expect(hide).toHaveBeenCalledTimes(1);
+  });
+
+  it("hides without an answer when its signal aborts", async () => {
+    const hide = emulateNotice();
+    const controller = new AbortController();
+    const answer = askInNotice("Delete it?", { confirm: "Delete", cancel: "Keep" }, controller.signal);
+
+    controller.abort();
+
+    await expect(answer).resolves.toBeNull();
+    expect(hide).toHaveBeenCalledTimes(1);
+    await expect(askInNotice("Delete it?", { confirm: "Delete", cancel: "Keep" }, controller.signal)).resolves.toBeNull();
+    expect(Notice).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("flashButtonResult", () => {
+  afterEach(() => {
+    jest.useRealTimers();
+    document.body.innerHTML = "";
+  });
+
+  it("shows the result on a text button, then restores its label once", () => {
+    jest.useFakeTimers();
+    const button = document.body.createEl("button", { text: "Copy error" });
+
+    flashButtonResult(button, "Copied");
+    expect(button.textContent).toBe("Copied");
+    jest.advanceTimersByTime(1_000);
+    flashButtonResult(button, "Copied");
+    jest.advanceTimersByTime(1_000);
+    expect(button.textContent).toBe("Copied");
+    jest.advanceTimersByTime(500);
+    expect(button.textContent).toBe("Copy error");
+  });
+
+  it("changes only the label of a shared surface action, keeping its icon", () => {
+    jest.useFakeTimers();
+    const button = document.body.createEl("button");
+    const icon = button.createSpan({ cls: "ss-button__icon" });
+    const label = button.createSpan({ cls: "ss-button__label", text: "Copy paths" });
+
+    flashButtonResult(button, "Copied");
+    expect(label.textContent).toBe("Copied");
+    expect(icon.isConnected).toBe(true);
+    jest.runAllTimers();
+    expect(label.textContent).toBe("Copy paths");
   });
 });

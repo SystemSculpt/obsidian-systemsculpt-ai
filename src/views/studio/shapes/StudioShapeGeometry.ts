@@ -44,7 +44,7 @@ export type StudioShapeArrowPath = {
   mid: LinkPoint;
 };
 
-export function studioShapeCenter(shape: StudioArrowAnchor): LinkPoint {
+function studioShapeCenter(shape: StudioArrowAnchor): LinkPoint {
   return {
     x: shape.position.x + shape.size.width / 2,
     y: shape.position.y + shape.size.height / 2,
@@ -129,6 +129,7 @@ function anchorPoint(
 /**
  * Point where the ray from the shape's center toward `towards` leaves the
  * outline. Falls back to the center when the two points coincide.
+ * @internal Unit-tested directly.
  */
 export function studioShapeBorderPoint(
   shape: StudioArrowAnchor,

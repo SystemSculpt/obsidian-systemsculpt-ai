@@ -63,7 +63,7 @@ function createPluginStub(overrides?: Partial<any>) {
 
   const vault = {
     getMarkdownFiles: jest.fn(() => []),
-    getAbstractFileByPath: jest.fn(() => null),
+    getAbstractFileByPath: jest.fn((_path: string): TFile | null => null),
     read: jest.fn(),
     on: jest.fn(() => jest.fn()),
     offref: jest.fn(),
@@ -74,10 +74,6 @@ function createPluginStub(overrides?: Partial<any>) {
   return {
     app,
     settings,
-    emitter: {
-      emit: jest.fn(),
-      on: jest.fn(() => jest.fn()),
-    },
     getManagedCapabilityGraph: jest.fn(() => ({
       embeddingsIndex: {
         activeGeneration: undefined,
@@ -338,14 +334,14 @@ describe("EmbeddingsManager exclusions", () => {
       expect((manager as any).isPathExcluded(includedPath)).toBe(false);
 
       const app = new App();
-      const toolPlugin = { app, settings } as any;
+      const toolPlugin = { app, settings, registerEvent: jest.fn() } as any;
       const files = [excludedPath, includedPath].map((path) => new TFile({
         path,
         stat: { ctime: Date.now(), mtime: Date.now(), size: 14 },
       }));
-      app.vault.getFiles.mockReturnValue(files);
-      app.vault.cachedRead.mockResolvedValue("shared keyword");
-      app.vault.getAbstractFileByPath.mockImplementation((path: string) => files.find((file) => file.path === path) ?? null);
+      jest.spyOn(app.vault, "getFiles").mockReturnValue(files);
+      jest.spyOn(app.vault, "cachedRead").mockResolvedValue("shared keyword");
+      jest.spyOn(app.vault, "getAbstractFileByPath").mockImplementation((path: string) => files.find((file) => file.path === path) ?? null);
       (app.workspace as any).offref = jest.fn();
 
       // Agent vault tools: find by name and search by content.
@@ -384,8 +380,8 @@ describe("EmbeddingsManager exclusions", () => {
         new TFile({ path: "Boards/plan.canvas", stat: { mtime: Date.now() } }),
         new TFile({ path: "Boards/plan.md", stat: { mtime: Date.now() } }),
       ];
-      app.vault.getFiles.mockReturnValue(files);
-      app.vault.cachedRead.mockResolvedValue("{\"nodes\":[{\"id\":\"a\",\"type\":\"text\",\"text\":\"plan\"}]}");
+      jest.spyOn(app.vault, "getFiles").mockReturnValue(files);
+      jest.spyOn(app.vault, "cachedRead").mockResolvedValue("{\"nodes\":[{\"id\":\"a\",\"type\":\"text\",\"text\":\"plan\"}]}");
       (app.workspace as any).offref = jest.fn();
       const engine = new SystemSculptSearchEngine(app as any, { app, settings } as any);
       try {

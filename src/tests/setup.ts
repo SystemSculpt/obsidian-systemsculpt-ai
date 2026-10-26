@@ -497,6 +497,16 @@ const ensureObsidianDomHelpers = (win: any = g.window) => {
     };
   }
 
+  if (!proto.isShown) {
+    proto.isShown = function () {
+      if (!this.isConnected) return false;
+      for (let element = this; element; element = element.parentElement) {
+        if (element.hidden || win.getComputedStyle(element).display === "none") return false;
+      }
+      return true;
+    };
+  }
+
   if (!proto.hide) {
     proto.hide = function () {
       this.style.display = "none";
@@ -564,7 +574,12 @@ const syncGlobalDomFactories = () => {
     createRootElement("div", options);
   (g as any).createSpan = (options?: { cls?: string | string[]; text?: string; attr?: Record<string, any> }) =>
     createRootElement("span", options);
-  (g as any).createFragment = () => createRootFragment();
+  // Obsidian's createFragment runs its callback on the new fragment.
+  (g as any).createFragment = (callback?: (fragment: DocumentFragment) => void) => {
+    const fragment = createRootFragment();
+    callback?.(fragment);
+    return fragment;
+  };
 };
 
 const syncRuntimeWindowGlobals = (win: any = g.window) => {

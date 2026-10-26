@@ -1,9 +1,10 @@
 import { Setting, Notice } from "obsidian";
+import { createCatalogSetting } from "./SettingsCatalog";
 import { SystemSculptSettingTab } from "./SystemSculptSettingTab";
 import { attachFolderSuggester } from "../components/FolderSuggester";
 import type SystemSculptPlugin from "../main";
 import { EmbeddingsPendingFilesModal } from "../modals/EmbeddingsPendingFilesModal";
-import { showConfirm } from "../core/ui/notifications";
+import { confirmSimilarNotesRebuild } from "../modals/SimilarNotesRebuildConfirmation";
 
 export async function displayEmbeddingsTabContent(containerEl: HTMLElement, tabInstance: SystemSculptSettingTab) {
   containerEl.empty();
@@ -17,21 +18,25 @@ export async function displayEmbeddingsTabContent(containerEl: HTMLElement, tabI
     cls: "setting-item-description",
   });
 
-  const isEnabled = await renderCoreSettingsSection(containerEl, tabInstance);
-
-  if (isEnabled) {
-    const refreshStatus = await renderProcessingSection(containerEl, tabInstance);
-    await refreshStatus();
-  }
-
-  await renderExclusionsSection(containerEl, tabInstance);
+  const core = containerEl.createDiv();
+  const processing = containerEl.createDiv();
+  const exclusions = containerEl.createDiv();
+  const refreshProcessing = () => {
+    processing.empty();
+    tabInstance.invalidateSearchIndex();
+    if (tabInstance.plugin.settings.embeddingsEnabled) {
+      const refreshStatus = renderProcessingSection(processing, tabInstance);
+      void refreshStatus();
+    }
+  };
+  renderCoreSettingsSection(core, tabInstance, refreshProcessing);
+  refreshProcessing();
+  renderExclusionsSection(exclusions, tabInstance);
 }
 
-async function renderCoreSettingsSection(containerEl: HTMLElement, tabInstance: SystemSculptSettingTab): Promise<boolean> {
+function renderCoreSettingsSection(containerEl: HTMLElement, tabInstance: SystemSculptSettingTab, refreshProcessing: () => void): void {
   const { plugin } = tabInstance;
-  new Setting(containerEl)
-    .setName("Similar notes")
-    .setDesc("Build a semantic index for your vault.")
+  createCatalogSetting(containerEl, "knowledge.similar-notes")
     .addToggle((toggle) => {
       toggle
         .setValue(plugin.settings.embeddingsEnabled || false)
@@ -39,7 +44,6 @@ async function renderCoreSettingsSection(containerEl: HTMLElement, tabInstance: 
           await plugin.getSettingsManager().updateSettings({ embeddingsEnabled: value });
 
           if (value) {
-            new Notice("Similar notes enabled.");
             try {
               const manager = plugin.getOrCreateEmbeddingsManager();
               plugin.embeddingsStatusBar?.startMonitoring(manager);
@@ -48,30 +52,23 @@ async function renderCoreSettingsSection(containerEl: HTMLElement, tabInstance: 
               new Notice(message);
             }
           } else {
-            new Notice("Similar notes disabled.");
             plugin.embeddingsStatusBar?.stopMonitoring();
           }
 
-          tabInstance.display();
+          refreshProcessing();
         });
     });
-
-  const enabled = plugin.settings.embeddingsEnabled;
-  if (!enabled) {
-    return false;
-  }
-
-  return true;
 }
 
-async function renderProcessingSection(containerEl: HTMLElement, tabInstance: SystemSculptSettingTab) {
+function renderProcessingSection(containerEl: HTMLElement, tabInstance: SystemSculptSettingTab) {
   const { plugin } = tabInstance;
 
-  const statusSetting = new Setting(containerEl).setName("Index status");
+  const statusSetting = createCatalogSetting(containerEl, "knowledge.index-status").setDesc("");
   const statusText = statusSetting.descEl.createSpan();
 
   const refreshStatus = async () => {
     statusText.setText(await buildStatusSummary(plugin));
+    tabInstance.invalidateSearchIndex();
   };
 
   statusSetting.addExtraButton((button) => {
@@ -107,36 +104,23 @@ async function renderProcessingSection(containerEl: HTMLElement, tabInstance: Sy
       });
   });
 
-  new Setting(containerEl)
-    .setName("Rebuild index")
-    .setDesc("Replace the local semantic index with a fresh copy.")
+  createCatalogSetting(containerEl, "knowledge.rebuild-index")
     .addButton((button) => {
       button
         .setWarning()
         .setButtonText("Rebuild")
         .onClick(async () => {
-          const { confirmed } = await showConfirm(
-            tabInstance.app,
-            "Rebuild the Similar notes index? Existing local vectors will be replaced.",
-            {
-              title: "Rebuild Semantic Index",
-              primaryButton: "Rebuild",
-              secondaryButton: "Cancel",
-              icon: "alert-triangle",
-            }
-          );
-          if (!confirmed) return;
+          if (!await confirmSimilarNotesRebuild(tabInstance.app)) return;
 
-          button.setDisabled(true);
+          button.setDisabled(true).setButtonText("Rebuilding…");
           try {
             const manager = plugin.getOrCreateEmbeddingsManager();
             await manager.forceRefreshCurrentNamespace();
-            new Notice("Semantic index rebuilt.");
             await refreshStatus();
           } catch (error: unknown) {
             new Notice(`Failed to rebuild the semantic index: ${error instanceof Error ? error.message : "Unknown error"}`);
           } finally {
-            button.setDisabled(false);
+            button.setDisabled(false).setButtonText("Rebuild");
           }
         });
     });
@@ -144,7 +128,9 @@ async function renderProcessingSection(containerEl: HTMLElement, tabInstance: Sy
   return refreshStatus;
 }
 
-async function renderExclusionsSection(containerEl: HTMLElement, tabInstance: SystemSculptSettingTab) {
+function renderExclusionsSection(containerEl: HTMLElement, tabInstance: SystemSculptSettingTab) {
+  containerEl.empty();
+  tabInstance.invalidateSearchIndex();
   const { plugin } = tabInstance;
   const exclusions = getExclusionsWithDefaults(plugin);
 
@@ -154,33 +140,27 @@ async function renderExclusionsSection(containerEl: HTMLElement, tabInstance: Sy
     cls: "setting-item-description",
   });
 
-  new Setting(containerEl)
-    .setName("Exclude chat history")
-    .setDesc("Skip chat transcripts when building embeddings.")
+  createCatalogSetting(containerEl, "knowledge.exclude-chat-history")
     .addToggle((toggle) => {
       toggle
         .setValue(exclusions.ignoreChatHistory)
         .onChange(async (value) => {
           await updateExclusionSetting(tabInstance, "ignoreChatHistory", value);
-          tabInstance.display();
+          renderExclusionsSection(containerEl, tabInstance);
         });
     });
 
-  new Setting(containerEl)
-    .setName("Respect Obsidian exclusions")
-    .setDesc("Reuse the ignored files configured in settings → files & links.")
+  createCatalogSetting(containerEl, "knowledge.respect-exclusions")
     .addToggle((toggle) => {
       toggle
         .setValue(exclusions.respectObsidianExclusions)
         .onChange(async (value) => {
           await updateExclusionSetting(tabInstance, "respectObsidianExclusions", value);
-          tabInstance.display();
+          renderExclusionsSection(containerEl, tabInstance);
         });
     });
 
-  const folderSetting = new Setting(containerEl)
-    .setName("Excluded folders")
-    .setDesc("Folders that should never be processed.");
+  const folderSetting = createCatalogSetting(containerEl, "knowledge.excluded-folders");
 
   folderSetting.addText((text) => {
     text.setPlaceholder("Select folder...");
@@ -200,26 +180,25 @@ async function renderExclusionsSection(containerEl: HTMLElement, tabInstance: Sy
           return;
         }
         await addExclusionItem(tabInstance, "folders", value);
-        tabInstance.display();
+        renderExclusionsSection(containerEl, tabInstance);
       });
   });
 
-  exclusions.folders.forEach((folder) => {
+  exclusions.folders.forEach((folder, index) => {
     const row = new Setting(containerEl).setName(folder).setDesc("");
+    row.settingEl.dataset.ssSetting = `knowledge.folders.${index}`;
     row.addExtraButton((button) => {
       button
         .setIcon("trash")
         .setTooltip("Remove folder")
         .onClick(async () => {
           await removeExclusion(tabInstance, "folders", folder);
-          tabInstance.display();
+          renderExclusionsSection(containerEl, tabInstance);
         });
     });
   });
 
-  const patternSetting = new Setting(containerEl)
-    .setName("Excluded patterns")
-    .setDesc("File name patterns (glob) to skip, e.g., *.PNG.");
+  const patternSetting = createCatalogSetting(containerEl, "knowledge.excluded-patterns");
 
   patternSetting.addText((text) => {
     text.setPlaceholder("pattern e.g. *.png");
@@ -236,19 +215,20 @@ async function renderExclusionsSection(containerEl: HTMLElement, tabInstance: Sy
           return;
         }
         await addExclusionItem(tabInstance, "patterns", value);
-        tabInstance.display();
+        renderExclusionsSection(containerEl, tabInstance);
       });
   });
 
-  exclusions.patterns.forEach((pattern) => {
+  exclusions.patterns.forEach((pattern, index) => {
     const row = new Setting(containerEl).setName(pattern).setDesc("");
+    row.settingEl.dataset.ssSetting = `knowledge.patterns.${index}`;
     row.addExtraButton((button) => {
       button
         .setIcon("trash")
         .setTooltip("Remove pattern")
         .onClick(async () => {
           await removeExclusion(tabInstance, "patterns", pattern);
-          tabInstance.display();
+          renderExclusionsSection(containerEl, tabInstance);
         });
     });
   });
@@ -319,7 +299,8 @@ async function buildStatusSummary(plugin: SystemSculptPlugin): Promise<string> {
 
   try {
     const snapshot = manager.getLifecycleSnapshot();
-    if (!snapshot.ready || snapshot.phase === "initializing") return "Starting…";
+    // An index that could not open reports its error instead of "Starting".
+    if (snapshot.phase === "initializing" || (!snapshot.ready && snapshot.phase !== "error")) return "Starting…";
     if (snapshot.phase === "paused") return snapshot.pending > 0
       ? `Paused · ${snapshot.pending} remaining`
       : "Paused";

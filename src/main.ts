@@ -6,7 +6,7 @@
 /**
  * SystemSculpt AI Plugin for Obsidian
  */
-import { Plugin, Notice, FileSystemAdapter, apiVersion } from "obsidian";
+import { Plugin, Notice, FileSystemAdapter, apiVersion, requireApiVersion } from "obsidian";
 import { checkObsidianCompatibility, MINIMUM_OBSIDIAN_VERSION } from "./core/plugin/lifecycle/ObsidianCompat";
 import { SystemSculptSettings, DEFAULT_SETTINGS, LogLevel, LICENSE_URL } from "./types";
 import { SystemSculptService, type CreditsBalanceSnapshot } from "./services/SystemSculptService";
@@ -17,7 +17,7 @@ import { FileContextMenuService } from "./context-menu/FileContextMenuService";
 import { SettingsManager } from "./core/settings/SettingsManager";
 import { LicenseManager } from "./core/license/LicenseManager";
 import { AccountConnectService } from "./services/AccountConnectService";
-import { ViewManager } from "./core/plugin/views";
+import { ViewManager, waitForChatProducers } from "./core/plugin/views";
 import { CommandManager } from "./core/plugin/commands";
 import { setLogLevel } from "./utils/errorHandling";
 import { errorLogger } from "./utils/errorLogger";
@@ -26,8 +26,8 @@ import { StorageManager } from "./core/storage";
 import { showConfirm } from "./core/ui/notifications";
 import { legacyCredentialNotice, protectLegacyCredentials } from "./core/security/LegacyCredentialProtection";
 import { ResumeChatService } from "./views/chatview/ResumeChatService";
+import { nativeChatSessions } from "./views/chatview/NativeChatSessions";
 import { EmbeddingsManager } from "./services/embeddings/EmbeddingsManager";
-import { VaultFileCache } from "./utils/VaultFileCache";
 import { EmbeddingsStatusBar } from "./components/EmbeddingsStatusBar";
 import { ResourceMonitorService } from "./services/ResourceMonitorService";
 import { PluginLogger } from "./utils/PluginLogger";
@@ -45,7 +45,6 @@ import {
 import { disposeMobileHostLayoutStates } from "./platform/mobileHostLayout";
 import { waitForIdle, yieldToEventLoop } from "./utils/yieldToEventLoop";
 import { tryCopyToClipboard } from "./utils/clipboard";
-import { EventEmitter } from "./core/EventEmitter";
 import { LifecycleCoordinator, LifecycleFailureEvent } from "./core/plugin/lifecycle/LifecycleCoordinator";
 import { InboxTranscriptionService } from "./features/inbox-transcription/InboxTranscriptionService";
 import {
@@ -53,6 +52,9 @@ import {
   PhoneCaptureInbox,
   type PhoneCaptureSyncResult,
 } from "./features/phone-captures/PhoneCaptureInbox";
+import { PhoneHandoffInbox, type HandoffAgent } from "./features/phone-captures/PhoneHandoffInbox";
+import { detectLocalAgents, isLocalAgentUsable } from "./services/codex/LocalAgentDetection";
+import { localAgentDetectionDirectory } from "./services/codex/CodexExecutionSettings";
 import { SystemSculptSearchEngine } from "./services/search/SystemSculptSearchEngine";
 import { relativeLineNumbersExtension } from "./editor/relative-line-numbers";
 import { studioTextNodeEmptyLines } from "./views/studio/canvas/StudioTextNodeEmptyLines";
@@ -69,8 +71,7 @@ import { ManagedJobRecoveryStore } from "./services/managed/ManagedJobRecoverySt
 import { ObsidianManagedRecoveryAdapter } from "./services/managed/adapters/ObsidianManagedRecoveryAdapter";
 import { PluginUpdateService } from "./services/PluginUpdateService";
 import { PostProcessingService } from "./services/PostProcessingService";
-import { AccountConnectModal } from "./modals/AccountConnectModal";
-import { UpgradePlanModal, defaultAccountConnectActions } from "./modals/UpgradePlanModal";
+import { presentAccountConnectOutcome } from "./modals/UpgradePlanModal";
 import { AudioTranscriptionPanel } from "./modals/AudioTranscriptionPanel";
 import { getDevelopmentBuildIdentity } from "./core/plugin/DevelopmentBuildIdentity";
 import { getLoadedPluginBuildId } from "./core/plugin/LoadedPluginBuildIdentity";
@@ -146,35 +147,33 @@ function projectPublicSupportResourceSample(sample: unknown): PublicSupportResou
 
 export default class SystemSculptPlugin extends Plugin {
   // Make internalSettings public but indicate it's for manager use only
-  public _internal_settings_systemsculpt_plugin: SystemSculptSettings;
+  public _internal_settings_systemsculpt_plugin: SystemSculptSettings = { ...DEFAULT_SETTINGS };
   // Keep the getter for general readonly access
   get settings(): SystemSculptSettings {
     return this._internal_settings_systemsculpt_plugin;
   }
 
   private _aiService: SystemSculptService | undefined;
-  settingsTab: SystemSculptSettingTab;
+  settingsTab: SystemSculptSettingTab | undefined;
   private recorderService: RecorderService | null = null;
-  private transcriptionService: TranscriptionService;
-  private settingsManager: SettingsManager;
-  private licenseManager: LicenseManager;
+  private transcriptionService: TranscriptionService | undefined;
+  private settingsManager: SettingsManager | undefined;
+  private licenseManager: LicenseManager | undefined;
   private accountConnectService: AccountConnectService | null = null;
   private viewManager: ViewManager | null = null;
-  private commandManager: CommandManager;
+  private commandManager: CommandManager | undefined;
   private fileContextMenuService: FileContextMenuService | null = null;
   private isUnloading = false;
   private unloadPromise: Promise<void> | null = null;
   private failures: string[] = [];
   /** True once a fatal load failure has put the plugin into minimal recovery mode. */
   private safeMode = false;
-  emitter: EventEmitter;
-  directoryManager: DirectoryManager;
-  public resumeChatService: ResumeChatService;
-  public storage: StorageManager;
+  directoryManager: DirectoryManager | undefined;
+  public resumeChatService: ResumeChatService | undefined;
+  public storage: StorageManager | undefined;
   private pluginLogger: PluginLogger | null = null;
   private initializationTracer: InitializationTracer | null = null;
   public embeddingsManager: EmbeddingsManager | null = null;
-  public vaultFileCache: VaultFileCache;
   public embeddingsStatusBar: EmbeddingsStatusBar | null = null;
   private resourceMonitor: ResourceMonitorService | null = null;
   private loadedPluginBuildIdPromise: Promise<`sha256:${string}`> | null = null;
@@ -184,6 +183,7 @@ export default class SystemSculptPlugin extends Plugin {
   private diagnosticsSessionLifecycle: DiagnosticsSessionLifecycle | null = null;
   private inboxTranscriptionService: InboxTranscriptionService | null = null;
   private phoneCaptureInbox: PhoneCaptureInbox | null = null;
+  private phoneHandoffInbox: PhoneHandoffInbox | null = null;
   private searchEngine: SystemSculptSearchEngine | null = null;
   private studioService: StudioService | null = null;
   private managedCapabilityGraph: ManagedCapabilityGraph | null = null;
@@ -327,41 +327,13 @@ export default class SystemSculptPlugin extends Plugin {
       // both desktop and mobile. Cheap synchronous registration. Delivery is
       // not guaranteed (the host can gate plugin URIs behind a trust prompt
       // or drop them), so the connect service also polls while a sign-in is
-      // pending and greets the user the moment it completes.
-      this.getAccountConnectService().setBackgroundOutcomeHandler((outcome) => {
-        UpgradePlanModal.closeCurrent();
-        new AccountConnectModal(
-          this.app,
-          () => Promise.resolve(outcome),
-          defaultAccountConnectActions(this),
-        ).open();
+      // pending. Whichever finishes it, the outcome appears once, in the
+      // account surface that started it.
+      this.getAccountConnectService().setOutcomeHandler((outcome) => {
+        presentAccountConnectOutcome(this, outcome);
       });
       this.registerObsidianProtocolHandler("systemsculpt-connect", (params) => {
-        const connect = this.getAccountConnectService();
-        // The upgrade/sign-in modal's browser handoff is superseded the
-        // moment the deep link comes back — close it before the welcome.
-        UpgradePlanModal.closeCurrent();
-        const email = this.settings.userEmail?.trim() ?? "";
-        if (!connect.hasPendingRequest() && email) {
-          // Polling already finished this sign-in; a late deep link should
-          // greet the signed-in user, not show an expired-request error.
-          new AccountConnectModal(
-            this.app,
-            () => Promise.resolve({
-              kind: "signed-in" as const,
-              name: this.settings.userName?.trim() || null,
-              email,
-              licenseValid: this.settings.licenseValid === true,
-            }),
-            defaultAccountConnectActions(this),
-          ).open();
-          return;
-        }
-        new AccountConnectModal(
-          this.app,
-          () => connect.handleProtocolCallback(params),
-          defaultAccountConnectActions(this),
-        ).open();
+        void this.getAccountConnectService().handleProtocolCallback(params);
       });
 
       this.registerLayoutReadyHandler(loadStart);
@@ -523,6 +495,7 @@ export default class SystemSculptPlugin extends Plugin {
         // (#343): a layout task runs it when idle. A diagnostics write that
         // comes first starts it, so no -latest file is appended before it.
         const diagnostics = this.getDiagnosticsSessionLifecycle();
+        if (!this.storage) throw new Error("Storage manager has not been initialized.");
         this.storage.setDiagnosticsWriteGate(() => diagnostics.start());
       },
     });
@@ -545,6 +518,17 @@ export default class SystemSculptPlugin extends Plugin {
     });
 
     coordinator.registerTask("bootstrap", {
+      id: "workspace.ribbons",
+      label: "ribbon actions",
+      run: () => {
+        // Register before onload returns, without starting chat restoration
+        // ahead of loaded settings and services in the deferred phase.
+        this.viewManager ??= new ViewManager(this, this.app);
+        this.viewManager.ribbonManager.initialize();
+      },
+    });
+
+    coordinator.registerTask("bootstrap", {
       id: "settings.tab.register",
       label: "settings tab",
       optional: true,
@@ -559,9 +543,11 @@ export default class SystemSculptPlugin extends Plugin {
       optional: true,
       run: () => {
         this.registerEvent(
-          this.app.workspace.on("systemsculpt:settings-updated", () => {
+          this.app.workspace.on("systemsculpt:settings-updated", (_oldSettings, _newSettings, changedKeys) => {
             try {
-              this.embeddingsManager?.syncFromSettings();
+              if (changedKeys.some(key => ["embeddingsEnabled", "embeddingsExclusions", "chatsDirectory", "savedChatsDirectory"].includes(key))) {
+                this.embeddingsManager?.syncFromSettings();
+              }
             } catch (error) {
               const logger = this.getLogger();
               logger.error("Embeddings manager settings sync failed", error, {
@@ -570,7 +556,7 @@ export default class SystemSculptPlugin extends Plugin {
             }
 
             try {
-              this.syncRelativeLineNumbersExtension();
+              if (changedKeys.includes("relativeLineNumbersEnabled")) this.syncRelativeLineNumbersExtension();
             } catch (error) {
               const logger = this.getLogger();
               logger.error("Relative line numbers settings sync failed", error, {
@@ -579,7 +565,7 @@ export default class SystemSculptPlugin extends Plugin {
             }
 
             try {
-              this.syncDiagnosticsRecording();
+              if (changedKeys.includes("showDiagnostics")) this.syncDiagnosticsRecording();
             } catch (error) {
               const logger = this.getLogger();
               logger.error("Diagnostics recording settings sync failed", error, {
@@ -692,8 +678,15 @@ export default class SystemSculptPlugin extends Plugin {
       optional: true,
       run: () => {
         const sync = () => {
-          if (!this.isUnloading) void this.getPhoneCaptureInbox().maybeSync();
+          if (!this.isUnloading) {
+            // A capture confirmation can stay open; it must not hold the queue.
+            void this.getPhoneCaptureInbox().maybeSync();
+            void this.pollPhoneHandoffs();
+          }
         };
+        this.registerEvent(this.app.workspace.on("systemsculpt:settings-updated", () => {
+          if (this.phoneHandoffInbox || this.settings.phoneCapturesLinked) void this.pollPhoneHandoffs();
+        }));
         this.registerInterval(window.setInterval(sync, PHONE_CAPTURE_POLL_INTERVAL_MS));
         this.registerDomEvent(window, "focus", sync);
         this.registerDomEvent(document, "visibilitychange", () => {
@@ -728,6 +721,26 @@ export default class SystemSculptPlugin extends Plugin {
         void waitForIdle(DEFERRED_STARTUP_IDLE_TIMEOUT_MS, this.deferredStartup.signal).then((idle) => {
           if (!idle || this.isUnloading) return;
           void this.getDiagnosticsSessionLifecycle().start().catch(() => undefined);
+        });
+      },
+    });
+
+    // Studio before 6.10 left per-save snapshots in .systemsculpt/studio/projects;
+    // each device offers once to delete those of projects that open now (#354).
+    coordinator.registerTask("layout", {
+      id: "studio.legacyGenerations",
+      label: "old Studio history check",
+      optional: true,
+      run: () => {
+        void waitForIdle(DEFERRED_STARTUP_IDLE_TIMEOUT_MS, this.deferredStartup.signal).then(async (idle) => {
+          if (!idle || this.isUnloading) return;
+          const { offerStudioLegacyGenerationsCleanup } = await import("./studio/StudioLegacyGenerations");
+          await offerStudioLegacyGenerationsCleanup(this.app.vault, this.deferredStartup.signal);
+        }).catch((error: unknown) => {
+          this.getLogger().warn("Could not check for old Studio history", {
+            source: "SystemSculptPlugin",
+            metadata: { error: error instanceof Error ? error.message : String(error) },
+          });
         });
       },
     });
@@ -888,28 +901,12 @@ export default class SystemSculptPlugin extends Plugin {
           layoutPhase.complete({
             elapsedSinceLoadMs: Number((performance.now() - loadStart).toFixed(1)),
           });
-          this.maybeShowAccountOnboarding();
         })
         .catch((error) => {
           this.failures.push("layout initialization");
           layoutPhase.fail(error);
         });
     });
-  }
-
-  /**
-   * One-time first-run welcome: only for a vault that has never signed in and
-   * never seen it. Persists the flag immediately so it can never nag again.
-   */
-  private maybeShowAccountOnboarding(): void {
-    if (this.settings.accountOnboardingShown === true) return;
-    if (this.settings.licenseKey?.trim() || this.settings.userEmail?.trim()) return;
-    window.setTimeout(() => {
-      if (this.settings.accountOnboardingShown === true) return;
-      if (this.settings.licenseKey?.trim() || this.settings.userEmail?.trim()) return;
-      void this.getSettingsManager().updateSettings({ accountOnboardingShown: true });
-      UpgradePlanModal.openOnce(this, { context: "onboarding" });
-    }, 1500);
   }
 
   private scheduleStorageInitialization(tracer: InitializationTracer): void {
@@ -933,10 +930,6 @@ export default class SystemSculptPlugin extends Plugin {
           storageBootstrapPhase.fail(error);
         });
     }, 0);
-  }
-
-  private showUserNotice(message: string) {
-    new Notice(message, 8000); // Show for 8 seconds to ensure visibility
   }
 
   private showErrorNotice(message: string) {
@@ -1045,16 +1038,10 @@ export default class SystemSculptPlugin extends Plugin {
     const logger = this.getLogger();
 
     try {
-      this.emitter = new EventEmitter();
-      logger.debug("Event emitter ready for critical initialization", {
-        source: "SystemSculptPlugin",
-      });
-
       await this.initializeSettings();
 
       const parallelTasks = [
         this.initializeDirectories(),
-        this.initializeVaultFileCache(),
         this.initializeBasicServices(),
       ];
 
@@ -1142,35 +1129,6 @@ export default class SystemSculptPlugin extends Plugin {
 
       logger.error("Directory manager failed to initialize", error, {
         source: "SystemSculptPlugin",
-      });
-    }
-  }
-
-  private async initializeVaultFileCache() {
-    const tracer = this.getInitializationTracer();
-    const phase = tracer.startPhase("cache.vaultFile.initialize", {
-      slowThresholdMs: 600,
-      timeoutMs: 6000,
-    });
-    const logger = this.getLogger();
-
-    try {
-      this.vaultFileCache = new VaultFileCache(this.app);
-      await this.vaultFileCache.initialize();
-
-      logger.info("Vault file cache primed", {
-        source: "SystemSculptPlugin",
-      });
-
-      phase.complete();
-    } catch (error) {
-      phase.fail(error);
-
-      logger.warn("Vault file cache unavailable", {
-        source: "SystemSculptPlugin",
-        metadata: {
-          error: error instanceof Error ? error.message : String(error),
-        },
       });
     }
   }
@@ -1425,14 +1383,8 @@ export default class SystemSculptPlugin extends Plugin {
       this.directoryManager = new DirectoryManager(this.app, this);
     }
 
-    const result = await this.directoryManager.repair();
-    if (result) {
-      this.showUserNotice("Directory structure has been repaired successfully.");
-    } else {
-      this.showUserNotice("Failed to repair directory structure. Check console for details.");
-    }
-
-    return result;
+    // The settings action that starts a repair shows its result inline.
+    return this.directoryManager.repair();
   }
 
   /**
@@ -1553,13 +1505,8 @@ export default class SystemSculptPlugin extends Plugin {
   }
 
   private ensureViewManager(): ViewManager {
-    if (this.viewManager) {
-      return this.viewManager;
-    }
-
-    const viewManager = new ViewManager(this, this.app);
-    viewManager.initialize();
-    this.viewManager = viewManager;
+    this.viewManager ??= new ViewManager(this, this.app);
+    this.viewManager.initialize();
     return this.viewManager;
   }
 
@@ -1697,6 +1644,9 @@ export default class SystemSculptPlugin extends Plugin {
 
   private async unloadAsync(): Promise<void> {
     this.deferredStartup.abort();
+    this.phoneHandoffInbox?.dispose();
+    // Studio's unsaved typing starts saving now; the service's later close awaits it.
+    void this.studioService?.flushProjectSessions();
     // Microphone privacy is the first teardown action and must never wait on
     // diagnostics disk I/O or an unrelated service cleanup.
     const recorder = this.recorderService;
@@ -1727,13 +1677,19 @@ export default class SystemSculptPlugin extends Plugin {
       // A failed producer stop must not skip the pending diagnostics drain.
     }
 
-    // Wait for each live ChatView to stop session callbacks before closing
-    // incident admission. Each view owns an idempotent close barrier, so the
-    // normal leaf detach below reuses the completed teardown.
+    // Cancel background native runs immediately, then drain them alongside
+    // views within the existing unload window. Slow vault writes can finish
+    // best-effort without preventing the remaining service teardown.
+    const nativeDisposal = nativeChatSessions(this).dispose();
+    // Each view owns an idempotent close barrier, so normal leaf detach below
+    // reuses the completed teardown.
     const viewManager = this.viewManager;
     this.viewManager = null;
     try {
-      await viewManager?.quiesceChatViewProducers();
+      await waitForChatProducers(Promise.allSettled([
+        nativeDisposal,
+        Promise.resolve().then(() => viewManager?.quiesceChatViewProducers()),
+      ]));
     } catch {
       // A stale ViewManager must not skip normal leaf detach or incident drain.
     }
@@ -1858,7 +1814,6 @@ export default class SystemSculptPlugin extends Plugin {
     // every fallible teardown step above.
     await safely("transcription service", () => this.transcriptionService?.unload());
     await safely("resume chat service", () => this.resumeChatService?.cleanup());
-    await safely("vault file cache", () => this.vaultFileCache?.destroy());
     await safely("service singletons", () => {
       SystemSculptService.clearInstance();
       this.managedCapabilityGraph = null;
@@ -1885,7 +1840,7 @@ export default class SystemSculptPlugin extends Plugin {
   }
 
   async saveSettings() {
-    await this.settingsManager.saveSettings();
+    await this.getSettingsManager().saveSettings();
   }
 
   public getLogger(): PluginLogger {
@@ -2095,7 +2050,7 @@ export default class SystemSculptPlugin extends Plugin {
 
   /** Opens a fresh chat tab — the post-sign-in "Get started" destination. */
   public async openNewChat(): Promise<void> {
-    await this.ensureCommandManager().openChatView();
+    await this.getViewManager().openChat();
   }
 
   public async openCreditsBalanceModal(options?: {
@@ -2200,13 +2155,16 @@ export default class SystemSculptPlugin extends Plugin {
         licenseKey: this.settings.licenseKey || "",
         enabled: this.settings.phoneCapturesEnabled,
         folder: this.settings.phoneCapturesFolder,
+        meetingsFolder: this.settings.phoneCapturesMeetingsFolder,
         askBeforeSaving: this.settings.phoneCapturesAskBeforeSaving,
         linked: this.settings.phoneCapturesLinked === true,
       }),
       // The credits balance carries the link; a recent balance is reused.
       checkLinked: async () => (await this.aiService.readCreditsBalance()).iosAppLinked === true,
-      onLinked: (licenseKey) => this.getSettingsManager().updateSettings(current =>
-        current.licenseKey?.trim() === licenseKey ? { phoneCapturesLinked: true } : {}),
+      onLinked: async (licenseKey) => {
+        await this.getSettingsManager().updateSettings(current =>
+          current.licenseKey?.trim() === licenseKey ? { phoneCapturesLinked: true } : {});
+      },
       confirm: async (captures, folder) => (await showConfirm(
         this.app,
         captures.length === 1
@@ -2223,16 +2181,63 @@ export default class SystemSculptPlugin extends Plugin {
     return this.phoneCaptureInbox;
   }
 
+  getPhoneHandoffInbox(): PhoneHandoffInbox {
+    if (!this.phoneHandoffInbox) {
+      // Obsidian's vault-local browser storage is installation-specific, unlike
+      // synced data.json. A fresh session identity is safe if storage is blocked.
+      let instanceId = "";
+      try {
+        if (requireApiVersion("1.8.7")) instanceId = String(this.app.loadLocalStorage("systemsculpt-handoff-instance") ?? "");
+      } catch { /* Older host. */ }
+      if (!/^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(instanceId)) {
+        instanceId = crypto.randomUUID();
+        try {
+          if (requireApiVersion("1.8.7")) this.app.saveLocalStorage("systemsculpt-handoff-instance", instanceId);
+        } catch { /* Session-local identity. */ }
+      }
+      this.phoneHandoffInbox = new PhoneHandoffInbox({
+        app: this.app, pluginVersion: this.manifest.version, instanceId,
+        settings: () => ({ licenseKey: this.settings.licenseKey ?? "", linked: this.settings.phoneCapturesLinked === true,
+          autoRun: this.settings.phoneHandoffsAutoRun === true, vaultId: this.settings.vaultInstanceId ?? "" }),
+        availableAgents: async () => {
+          const agents: HandoffAgent[] = ["systemsculpt"];
+          if (hasHostCapability("local-cli")) {
+            const detection = await detectLocalAgents({ workingDirectory: localAgentDetectionDirectory(this.app) });
+            if (isLocalAgentUsable(detection.agents.claude)) agents.push("claude_code");
+            if (isLocalAgentUsable(detection.agents.codex)) agents.push("codex");
+          }
+          return agents;
+        },
+        execute: execution => this.getViewManager().runPhoneHandoff(execution),
+      });
+    }
+    return this.phoneHandoffInbox;
+  }
+
+  private async pollPhoneHandoffs(): Promise<void> {
+    if (this.isUnloading) return;
+    // An unlinked account never starts queue polling.
+    if (!this.phoneHandoffInbox && this.settings.phoneCapturesLinked !== true) return;
+    try { await this.getPhoneHandoffInbox().poll(); }
+    catch { this.getLogger().warn("Couldn't check for iPhone handoffs.", { source: "PhoneHandoffInbox" }); }
+  }
+
   /** Saves waiting iPhone captures now; a manual sync asks again about declined ones. */
   syncPhoneCaptures(options: Readonly<{ manual?: boolean }> = {}): Promise<PhoneCaptureSyncResult> {
     return this.getPhoneCaptureInbox().sync(options);
   }
 
   getTranscriptionService(): TranscriptionService {
+    if (!this.transcriptionService) {
+      throw new Error("Transcription service has not been initialized.");
+    }
     return this.transcriptionService;
   }
 
   getLicenseManager(): LicenseManager {
+    if (!this.licenseManager) {
+      throw new Error("License manager has not been initialized.");
+    }
     return this.licenseManager;
   }
 
@@ -2244,6 +2249,9 @@ export default class SystemSculptPlugin extends Plugin {
   }
 
   getSettingsManager(): SettingsManager {
+    if (!this.settingsManager) {
+      throw new Error("Settings manager has not been initialized.");
+    }
     return this.settingsManager;
   }
 
@@ -2256,7 +2264,10 @@ export default class SystemSculptPlugin extends Plugin {
 
   getStudioService(): StudioService {
     if (!this.studioService) {
-      this.studioService = new StudioService(this);
+      const studioService = new StudioService(this);
+      this.studioService = studioService;
+      // The app can quit without closing views or unloading plugins: save Studio typing that has not paused yet.
+      this.registerEvent(this.app.workspace.on("quit", tasks => tasks.add(() => studioService.flushProjectSessions())));
     }
     return this.studioService;
   }
@@ -2275,13 +2286,8 @@ export default class SystemSculptPlugin extends Plugin {
         }
         await monitor.captureManualSample("command");
         const { summary, path } = await monitor.exportSummaryReport();
-        const copied = await tryCopyToClipboard(summary);
-        if (copied) {
-          new Notice("Resource report copied to clipboard.", 4000);
-        } else if (path) {
-          new Notice(`Resource report saved to ${path}.`, 5000);
-        } else {
-          new Notice("Unable to copy the report. See .systemsculpt/diagnostics.", 5000);
+        if (!await tryCopyToClipboard(summary)) {
+          new Notice(path ? `Resource report saved to ${path}.` : "Unable to copy the report. See .systemsculpt/diagnostics.", 5000);
         }
       },
     });
@@ -2313,7 +2319,7 @@ export default class SystemSculptPlugin extends Plugin {
           // Activate embeddings view - processing happens automatically
           await this.getViewManager().activateEmbeddingsView();
         } catch (error) {
-          new Notice(`Error finding similar notes: ${error.message}`);
+          new Notice(`Error finding similar notes: ${error instanceof Error ? error.message : String(error)}`);
         }
       },
     });

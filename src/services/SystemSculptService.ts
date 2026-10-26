@@ -27,6 +27,7 @@ import { CreditsBalanceCache, type CreditsBalanceReadOptions } from "./credits/C
  * First-party tools often return an honest structured result instead of throwing.
  * Translate those resolved failures into the same ToolCallResult failure channel
  * used for thrown errors, while retaining the full result for agent recovery.
+ * @internal Unit-tested directly.
  */
 export function normalizeLocalToolOutcome(
   data: unknown,
@@ -73,6 +74,8 @@ export type CreditsBalanceSnapshot = {
   heldInFlight?: number;
   availableUnreserved?: number;
   includedPerMonth: number;
+  /** Undefined when an older server does not report plan entitlement. */
+  includedCreditsEntitled?: boolean;
   usageClass?: "customer" | "master_auth";
   cycleEndsAt: string;
   cycleStartedAt: string;
@@ -112,7 +115,10 @@ const CREDITS_SERVER_TIMING_NAMES = Object.freeze({
 } as const);
 const MAX_CREDITS_SERVER_TIMING_HEADER_LENGTH = 1_024;
 
-/** Parse only the bounded phase durations owned by the credits-balance route. */
+/**
+ * Parse only the bounded phase durations owned by the credits-balance route.
+ * @internal Unit-tested directly.
+ */
 export function parseCreditsBalanceServerTiming(
   header: string | null,
 ): CreditsBalanceServerTiming | undefined {
@@ -151,6 +157,7 @@ const SYSTEMSCULPT_WEBSITE_ALLOWED_HOSTS = new Set(
   [SYSTEMSCULPT_WEBSITE_HOST, `www.${SYSTEMSCULPT_WEBSITE_HOST}`]
 );
 
+/** @internal Unit-tested directly. */
 export const normalizeCreditsCheckoutUrl = (value: unknown): string | null => {
   if (typeof value !== "string") return null;
   const normalized = value.trim();
@@ -177,6 +184,7 @@ export const normalizeCreditsCheckoutUrl = (value: unknown): string | null => {
   return parsed.toString();
 };
 
+/** @internal Unit-tested directly. */
 export function decodeCreditsBalance(payload: unknown): CreditsBalanceSnapshot {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
     return invalidCreditsBalance();
@@ -252,6 +260,9 @@ export function decodeCreditsBalance(payload: unknown): CreditsBalanceSnapshot {
     heldInFlight,
     availableUnreserved,
     includedPerMonth,
+    ...(typeof value.included_credits_entitled === "boolean"
+      ? { includedCreditsEntitled: value.included_credits_entitled }
+      : {}),
     usageClass,
     cycleEndsAt,
     cycleStartedAt,

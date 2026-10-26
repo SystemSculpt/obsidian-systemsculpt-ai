@@ -1,13 +1,14 @@
-import { App, normalizePath, TFolder } from "obsidian";
+import { App, TFolder } from "obsidian";
+import { normalizeVaultRelativePath } from "../utils/vaultPathUtils";
 import type SystemSculptPlugin from "../main";
 import type { SystemSculptSettings } from "../types";
 import { createVaultFolder, isVaultFolder } from "../utils/vaultFolders";
 
+// Only folders the plugin writes to. The retired saved-chats and attachments
+// settings are never created, and an existing folder of theirs is left alone.
 const DIRECTORY_SETTING_KEYS = [
   "chatsDirectory",
-  "savedChatsDirectory",
   "recordingsDirectory",
-  "attachmentsDirectory",
   "extractionsDirectory",
 ] as const satisfies readonly (keyof SystemSculptSettings)[];
 
@@ -112,9 +113,7 @@ export class DirectoryManager {
   }
 
   private normalizedDirectory(value: string): string {
-    const path = normalizePath(value.trim())
-      .replace(/^\/+|\/+$/g, "")
-      .replace(/\/+/g, "/");
+    const path = normalizeVaultRelativePath(value);
     if (!path) throw new Error("Cannot create directory: empty path provided");
     return path;
   }

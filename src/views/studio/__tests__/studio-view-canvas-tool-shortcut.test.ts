@@ -15,7 +15,7 @@ type KeydownContext = {
   busy: boolean;
   currentProject: unknown;
   shapeController: { setSelectedShapeIds: jest.Mock<void, [string[]]>; hasSelection: jest.Mock<boolean, []>; removeSelection: jest.Mock<void, []> };
-  graphInteraction: { getSelectedNodeIds: jest.Mock<string[], []> };
+  graphInteraction: { getSelectedNodeIds: jest.Mock<string[], []>; setSelectedNodeIds: jest.Mock<void, [string[]]> };
   removeNodes: jest.Mock<void, [string[]]>;
 };
 
@@ -26,7 +26,7 @@ const handleCanvasKeyDown = (SystemSculptStudioView as any).prototype.handleCanv
 
 function createContext(overrides?: Partial<KeydownContext>): KeydownContext {
   return {
-    ownsKeyboardTarget: jest.fn(() => true),
+    ownsKeyboardTarget: jest.fn((_target: EventTarget | null) => true),
     isEditableKeyboardTarget: jest.fn(isStudioGraphEditableTarget),
     activeCanvasTool: "diamond",
     selectCanvasTool: jest.fn(),
@@ -116,7 +116,7 @@ describe("SystemSculptStudioView canvas tool shortcut", () => {
   });
 
   it("leaves the key alone while typing", () => {
-    const context = createContext({ isEditableKeyboardTarget: jest.fn(() => true) });
+    const context = createContext({ isEditableKeyboardTarget: jest.fn((_target: EventTarget | null) => true) });
     const event = createKeydownEvent();
 
     handleCanvasKeyDown.call(context, event);
@@ -163,7 +163,7 @@ describe("SystemSculptStudioView canvas tool shortcut", () => {
   it.each([
     { busy: true },
     { currentProject: null },
-    { ownsKeyboardTarget: jest.fn(() => false) },
+    { ownsKeyboardTarget: jest.fn((_target: EventTarget | null) => false) },
   ])("ignores tool shortcuts when unavailable (%j)", (overrides) => {
     const context = createContext(overrides);
     const event = createKeydownEvent({ key: "b" });
@@ -225,7 +225,7 @@ describe("SystemSculptStudioView canvas tool gestures", () => {
     const context = {
       activeCanvasTool: "arrow",
       shapeController: { startArrowGesture: jest.fn(() => true) },
-      isEditableKeyboardTarget: jest.fn(() => true),
+      isEditableKeyboardTarget: jest.fn((_target: EventTarget | null) => true),
       blurActiveStudioEditableTarget: jest.fn(),
     };
 

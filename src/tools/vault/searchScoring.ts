@@ -26,7 +26,7 @@ export interface ScoredResult {
   fileSize?: number;
 }
 
-export interface FormattedScoredResult {
+interface FormattedScoredResult {
   file: string;
   path: string;
   score: number;

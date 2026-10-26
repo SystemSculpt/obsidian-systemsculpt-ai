@@ -3,6 +3,7 @@
 import { App, TFile, TFolder } from "obsidian";
 import { DirectoryManager } from "../DirectoryManager";
 
+// The two retired keys hold the values an older version saved.
 const settings = () => ({
   chatsDirectory: "SystemSculpt/Chats",
   savedChatsDirectory: "SystemSculpt/Saved Chats",
@@ -31,14 +32,28 @@ describe("DirectoryManager", () => {
     await manager.initialize();
 
     expect(manager.isInitialized()).toBe(true);
-    expect(app.vault.createFolder).toHaveBeenCalledTimes(5);
+    expect(app.vault.createFolder).toHaveBeenCalledTimes(3);
     expect((app.vault.createFolder as jest.Mock).mock.calls.map(([path]) => path)).toEqual([
       "SystemSculpt/Chats",
-      "SystemSculpt/Saved Chats",
       "SystemSculpt/Recordings",
-      "SystemSculpt/Attachments",
       "SystemSculpt/Extractions",
     ]);
+  });
+
+  it("never creates, checks or repairs the retired saved-chats and attachments folders", async () => {
+    await manager.initialize();
+    await manager.repair();
+    (app.vault.getAbstractFileByPath as jest.Mock).mockImplementation((path: string) => (
+      path.endsWith("Saved Chats") || path.endsWith("Attachments") ? null : new TFolder({ path })
+    ));
+
+    await expect(manager.verifyDirectories()).resolves.toEqual({ valid: true, issues: [] });
+    const touched = [
+      ...(app.vault.createFolder as jest.Mock).mock.calls,
+      ...(app.vault.getAbstractFileByPath as jest.Mock).mock.calls,
+    ].map(([path]) => path);
+    expect(touched).not.toContain("SystemSculpt/Saved Chats");
+    expect(touched).not.toContain("SystemSculpt/Attachments");
   });
 
   it("shares one in-flight initialization and does not repeat successful work", async () => {
@@ -50,11 +65,11 @@ describe("DirectoryManager", () => {
     const second = manager.initialize();
 
     expect(second).toBe(first);
-    expect(app.vault.createFolder).toHaveBeenCalledTimes(5);
+    expect(app.vault.createFolder).toHaveBeenCalledTimes(3);
     release();
     await first;
     await manager.initialize();
-    expect(app.vault.createFolder).toHaveBeenCalledTimes(5);
+    expect(app.vault.createFolder).toHaveBeenCalledTimes(3);
   });
 
   it("propagates initialization failures and never reports fake readiness", async () => {
@@ -67,9 +82,7 @@ describe("DirectoryManager", () => {
 
   it("normalizes and deduplicates configured paths while skipping existing folders", async () => {
     plugin.settings.chatsDirectory = "  SystemSculpt//Shared/ ";
-    plugin.settings.savedChatsDirectory = "SystemSculpt/Shared";
-    plugin.settings.recordingsDirectory = "";
-    plugin.settings.attachmentsDirectory = "";
+    plugin.settings.recordingsDirectory = "SystemSculpt/Shared";
     plugin.settings.extractionsDirectory = "";
     (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(
       new TFolder({ path: "SystemSculpt/Shared" }),
@@ -109,7 +122,7 @@ describe("DirectoryManager", () => {
     await expect(manager.initialize()).resolves.toBeUndefined();
 
     expect(manager.isInitialized()).toBe(true);
-    expect(app.vault.createFolder).toHaveBeenCalledTimes(5);
+    expect(app.vault.createFolder).toHaveBeenCalledTimes(3);
     expect(app.vault.adapter.stat).toHaveBeenCalledWith("SystemSculpt/Chats");
   });
 
@@ -153,7 +166,7 @@ describe("DirectoryManager", () => {
   });
 
   it("reports configured folders from Obsidian's vault state", async () => {
-    const missing = "SystemSculpt/Attachments";
+    const missing = "SystemSculpt/Recordings";
     (app.vault.getAbstractFileByPath as jest.Mock).mockImplementation((path: string) => (
       path === missing ? null : new TFolder({ path })
     ));
@@ -171,7 +184,7 @@ describe("DirectoryManager", () => {
 
   it("reports folders the adapter confirms on disk as healthy, and a file as an issue", async () => {
     // Initialization accepts these folders, so Verify must not flag them (#416).
-    const onDisk = new Set(["SystemSculpt/Chats", "SystemSculpt/Saved Chats", "SystemSculpt/Recordings", "SystemSculpt/Attachments"]);
+    const onDisk = new Set(["SystemSculpt/Chats", "SystemSculpt/Recordings"]);
     (app.vault.adapter.exists as jest.Mock).mockImplementation(async (path: string) =>
       onDisk.has(path) || path === "SystemSculpt/Extractions");
     (app.vault.adapter.stat as jest.Mock).mockImplementation(async (path: string) => ({

@@ -1,8 +1,9 @@
-import { TFile, type App } from "obsidian";
+import { TFile, type App, type Workspace } from "obsidian";
 import type { ChatMessage } from "../../../types";
 import type { ToolCall } from "../../../types/toolCalls";
 import { AgentTranscriptConflictError, AgentTranscriptRepository } from "../AgentTranscriptRepository";
 import { ChatStorageService } from "../ChatStorageService";
+import { CHAT_TRANSCRIPT_COMMITTED_EVENT, emitChatTranscriptCommitted } from "../ChatTranscriptEvents";
 import { ChatMarkdownSerializer } from "../storage/ChatMarkdownSerializer";
 import { createTextAttachmentPart } from "../../../chat/ChatAttachmentContent";
 import { ConversationProjection } from "../../../chat/managed/ConversationProjection";
@@ -185,6 +186,80 @@ describe("AgentTranscriptRepository", () => {
       { role: "assistant", messageId: "a1", version: 2 },
       { role: "assistant", messageId: "a1", version: 3 },
     ]);
+  });
+
+  it.each(["user", "assistant"] as const)("announces a %s transcript only after its write succeeds", async (role) => {
+    const { repository, storage } = createHarness();
+    if (role === "assistant") {
+      await repository.commitUser({ kind: "append", message: user("u1") });
+    }
+    const trigger = jest.fn();
+    const workspace = { trigger } as unknown as Workspace;
+    const unsubscribe = repository.subscribeToCommits(({ snapshot, role, messageId }) => {
+      emitChatTranscriptCommitted(workspace, {
+        chatId: snapshot.chatId, version: snapshot.version, role, messageId,
+      });
+    });
+    const started = deferred<void>();
+    const write = deferred<{ version: number }>();
+    const save = role === "user" ? storage.createChatExclusive : storage.saveChat;
+    save.mockImplementationOnce(async () => {
+      started.resolve();
+      return write.promise;
+    });
+
+    const saving = role === "user"
+      ? repository.commitUser({ kind: "append", message: user("u1") })
+      : repository.persistAssistant(assistant("a1"));
+    await started.promise;
+    expect(trigger).not.toHaveBeenCalled();
+
+    const version = role === "user" ? 1 : 2;
+    write.resolve({ version });
+    const saved = await saving;
+    expect(saved.version).toBe(version);
+    expect(trigger).toHaveBeenCalledTimes(1);
+    expect(trigger).toHaveBeenCalledWith(CHAT_TRANSCRIPT_COMMITTED_EVENT, {
+      chatId: saved.chatId, version, role, messageId: role === "user" ? "u1" : "a1",
+    });
+    expect(trigger.mock.contexts).toEqual([workspace]);
+
+    unsubscribe();
+    await repository.persistAssistant(assistant("a2"));
+    expect(trigger).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["user", "assistant"] as const)("does not announce a failed %s write, but announces a successful retry", async (role) => {
+    const { repository, storage } = createHarness();
+    if (role === "assistant") {
+      await repository.commitUser({ kind: "append", message: user("u1") });
+    }
+    const before = repository.snapshot();
+    const trigger = jest.fn();
+    const workspace = { trigger } as unknown as Workspace;
+    const unsubscribe = repository.subscribeToCommits(({ snapshot, role, messageId }) => {
+      emitChatTranscriptCommitted(workspace, {
+        chatId: snapshot.chatId, version: snapshot.version, role, messageId,
+      });
+    });
+    const save = role === "user" ? storage.createChatExclusive : storage.saveChat;
+    save.mockRejectedValueOnce(new Error("disk full"));
+    const commit = () => role === "user"
+      ? repository.commitUser({ kind: "append", message: user("u1") })
+      : repository.persistAssistant(assistant("a1"));
+
+    await expect(commit()).rejects.toThrow(
+      role === "user" ? "Failed to exclusively create chat" : "disk full",
+    );
+    expect(trigger).not.toHaveBeenCalled();
+    expect(repository.snapshot()).toEqual(before);
+
+    const saved = await commit();
+    expect(trigger).toHaveBeenCalledTimes(1);
+    expect(trigger).toHaveBeenCalledWith(CHAT_TRANSCRIPT_COMMITTED_EVENT, {
+      chatId: saved.chatId, version: before.version + 1, role, messageId: role === "user" ? "u1" : "a1",
+    });
+    unsubscribe();
   });
 
   it("preserves same-generation serialization for operations invoked together", async () => {
@@ -1370,6 +1445,12 @@ describe("AgentTranscriptRepository with saved chat notes", () => {
     const vault = {
       getAbstractFileByPath: jest.fn((path: string) => notes.get(path)?.file ?? null),
       read: jest.fn(async (file: TFile) => notes.get(file.path)!.content),
+      process: jest.fn(async (file: TFile, transform: (content: string) => string) => {
+        const content = transform(notes.get(file.path)!.content);
+        notes.get(file.path)!.content = content;
+        file.stat = { ...file.stat, mtime: ++clock, size: content.length };
+        return content;
+      }),
       modify: jest.fn(async (file: TFile, content: string) => {
         notes.get(file.path)!.content = content;
         file.stat = { ...file.stat, mtime: ++clock, size: content.length };
@@ -1469,6 +1550,53 @@ describe("AgentTranscriptRepository with saved chat notes", () => {
       () => ({ title: "Plan review" }),
     );
   }
+
+  it("renames the latest durable title without replacing newer turns from a stale view", async () => {
+    const { app, vault, notes } = noteVault();
+    await saveNote(app, [user("u1")]);
+    const stale = openChat(app);
+    const current = openChat(app);
+    await stale.load("chat-1");
+    await current.load("chat-1");
+    await current.commitUser({ kind: "append", message: user("u2", "Newer turn") }, conversationId);
+    const note = notes.get(chatPath)!;
+    note.content = note.content.replace("---\n", "---\ncustom_property: preserved\n");
+    const body = note.content.slice(note.content.indexOf("\n---\n") + 5);
+    const storage = new ChatStorageService(app, "SystemSculpt/Chats");
+    vault.modify.mockClear();
+    await storage.renameChat(chatPath, "chat-1", "Renamed / plan");
+    expect(note.content.slice(note.content.indexOf("\n---\n") + 5)).toBe(body);
+    expect(note.content).toContain("custom_property: preserved");
+    expect((await storage.loadChat("chat-1"))?.title).toBe("Renamed / plan");
+    expect((await storage.loadChat("chat-1"))?.messages).toHaveLength(2);
+    expect(stale.snapshot().messages).toHaveLength(1);
+    expect(vault.modify).not.toHaveBeenCalled();
+  });
+
+  it.each(["truncated", "wrong-id", "missing"])("leaves a %s chat untouched when renaming", async (kind) => {
+    const { app, vault, notes } = noteVault();
+    await saveNote(app, [user("u1")]);
+    const note = notes.get(chatPath)!;
+    if (kind === "truncated") note.content = note.content.replace("<!-- SYSTEMSCULPT-MESSAGE-END -->", "");
+    if (kind === "missing") notes.delete(chatPath);
+    const before = note.content;
+    vault.create.mockClear();
+    await expect(new ChatStorageService(app, "SystemSculpt/Chats").renameChat(chatPath, kind === "wrong-id" ? "other-chat" : "chat-1", "New title")).rejects.toThrow();
+    expect(note.content).toBe(before);
+    expect(vault.create).not.toHaveBeenCalled();
+  });
+
+  it("validates and renames the content current at the atomic process callback", async () => {
+    const { app, vault, notes } = noteVault();
+    await saveNote(app, [user("u1")]);
+    const process = vault.process.getMockImplementation()!;
+    vault.process.mockImplementationOnce(async (file, transform) => {
+      await saveNote(app, [user("u1"), user("u2", "Arrived before processing")]);
+      return process(file, transform);
+    });
+    await new ChatStorageService(app, "SystemSculpt/Chats").renameChat(chatPath, "chat-1", "Renamed");
+    expect(notes.get(chatPath)!.content).toContain("Arrived before processing");
+  });
 
   it("opens a chat saved before tool results were bounded without rewriting its note", async () => {
     const noteText = "Phase one covers research. ".repeat(1_000);

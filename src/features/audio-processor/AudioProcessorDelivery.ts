@@ -6,6 +6,7 @@ import { AudioProcessorApiError } from "./AudioProcessorApiClient";
 import { AUDIO_PROCESSOR_OUTPUT_DIRECTORY, type AudioProcessorArtifactKind } from "./types";
 
 type DeliveryArtifact = "full" | AudioProcessorArtifactKind;
+const FRONTMATTER = /^---\n[\s\S]*?\n---(?:\n|$)/u;
 
 type ArtifactSlot = Readonly<{
   path: string;
@@ -105,7 +106,7 @@ export class AudioProcessorDelivery {
         );
       }
     }
-    return markdown;
+    return formatVaultAudioMarkdown(markdown);
   }
 
   private async resolvePlan(
@@ -277,7 +278,11 @@ export class AudioProcessorDelivery {
   ): Promise<TFile> {
     if (signal.aborted) throw abortError();
     const directory = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
-    if (directory) await this.plugin.directoryManager.ensureDirectoryByPath(directory);
+    if (directory) {
+      const directoryManager = this.plugin.directoryManager;
+      if (!directoryManager) throw new Error("Directory manager has not been initialized.");
+      await directoryManager.ensureDirectoryByPath(directory);
+    }
     if (signal.aborted) throw abortError();
 
     try {
@@ -360,15 +365,36 @@ function sanitizeMarkdownFilename(filename: string): string {
   });
 }
 
+/** Host presentation only: verify server bytes before adapting them for Obsidian. */
+function formatVaultAudioMarkdown(markdown: string): string {
+  const frontmatter = FRONTMATTER.exec(markdown)?.[0] ?? "";
+  let body = markdown.slice(frontmatter.length);
+  // The first heading is the server's document title; Obsidian supplies it
+  // from the filename. Do not remove headings within the summary/transcript.
+  body = body.replace(/^\s*# [^\n]*(?:\n|$)/u, "\n");
+  body = body.replace(/^\s*> \[!info\] Source\n(?:>[^\n]*(?:\n|$))*/u, (source) => source
+    // Both values remain in the original frontmatter, alongside job provenance.
+    .replace(/(Uploaded media) `(?:sha256:)?[a-f0-9]{64}`/giu, "$1")
+    .replace(/ · processed \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z/gu, ""));
+  return frontmatter + body;
+}
+
 function addVaultNavigation(
   markdown: string,
   kind: DeliveryArtifact,
   linkedPath: string,
 ): string {
-  const marker = kind !== "transcript"
-    ? "<!-- systemsculpt-audio-transcript-link -->"
-    : "<!-- systemsculpt-audio-note-link -->";
-  if (markdown.includes(marker)) return markdown;
+  const field = kind !== "transcript"
+    ? "systemsculpt-audio-transcript-link"
+    : "systemsculpt-audio-note-link";
+  // Frontmatter stays out of Live Preview's Markdown body. Migrate our old
+  // HTML marker without adding a second navigation callout on resume.
+  const legacyMarker = `<!-- ${field} -->`;
+  if (markdown.includes(legacyMarker)) {
+    return setFrontmatterField(markdown.replace(`${legacyMarker}\n`, "").replace(legacyMarker, ""), field, "true");
+  }
+  const frontmatter = FRONTMATTER.exec(markdown)?.[0] ?? "";
+  if (new RegExp(`^${field}: true$`, "m").test(frontmatter)) return markdown;
 
   const linkTarget = linkedPath
     .replace(/\.md$/i, "")
@@ -377,16 +403,14 @@ function addVaultNavigation(
     .replace(/\]/g, "\\]");
   const navigation = kind !== "transcript"
     ? [
-      marker,
       "> [!info] Timestamped transcript",
       `> [[${linkTarget}|Open the full timestamped transcript]]`,
     ].join("\n")
     : [
-      marker,
       "> [!info] Audio note",
       `> [[${linkTarget}|Back to the audio note]]`,
     ].join("\n");
-  return insertAfterFrontmatter(markdown, navigation);
+  return insertAfterFrontmatter(setFrontmatterField(markdown, field, "true"), navigation);
 }
 
 function addDeliveryJobMarker(markdown: string, deliveryJobId: string): string {
@@ -394,11 +418,17 @@ function addDeliveryJobMarker(markdown: string, deliveryJobId: string): string {
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$/.test(normalized)) {
     throw new Error("The audio delivery job ID was invalid.");
   }
-  const field = "systemsculpt-audio-delivery-job-id";
-  const marker = `${field}: ${normalized}`;
-  const existing = new RegExp(`^${field}:\\s*.+$`, "im");
-  if (existing.test(markdown)) return markdown.replace(existing, marker);
-  if (!markdown.startsWith("---\n")) return `---\n${marker}\n---\n\n${markdown}`;
+  return setFrontmatterField(markdown, "systemsculpt-audio-delivery-job-id", normalized);
+}
+
+function setFrontmatterField(markdown: string, field: string, value: string): string {
+  const marker = `${field}: ${value}`;
+  const frontmatter = FRONTMATTER.exec(markdown)?.[0] ?? "";
+  const existing = new RegExp(`^${field}:[ \\t]*.+$`, "im");
+  if (existing.test(frontmatter)) {
+    return frontmatter.replace(existing, marker) + markdown.slice(frontmatter.length);
+  }
+  if (!frontmatter) return `---\n${marker}\n---\n\n${markdown}`;
   return `---\n${marker}\n${markdown.slice(4)}`;
 }
 
@@ -411,7 +441,7 @@ function insertAfterFrontmatter(markdown: string, block: string): string {
   return `${markdown.slice(0, afterClosing + 1)}\n${block}\n${markdown.slice(afterClosing + 1)}`;
 }
 
-export function assertAudioArtifact(
+function assertAudioArtifact(
   markdown: string,
   artifactJobId: string,
   kind: DeliveryArtifact,

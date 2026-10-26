@@ -1,15 +1,6 @@
 import { ERROR_CODES, type ErrorCode, SystemSculptError } from "../utils/errors";
 
-function retryAfterSeconds(response: Response, payload: Record<string, unknown>): number | undefined {
-  const raw = response.headers?.get?.("retry-after") ?? payload.retry_after_seconds ?? payload.retry_after;
-  const numeric = Number(raw);
-  if (Number.isFinite(numeric) && numeric >= 0) return Math.ceil(numeric);
-  if (typeof raw === "string") {
-    const at = Date.parse(raw);
-    if (Number.isFinite(at)) return Math.max(0, Math.ceil((at - Date.now()) / 1000));
-  }
-  return undefined;
-}
+import { parseRetryAfterMs } from "../utils/retryAfter";
 
 function decodePayload(text: string): Record<string, unknown> {
   try {
@@ -47,10 +38,13 @@ export class StreamingErrorHandler {
         ? "SystemSculpt is temporarily unavailable."
         : "SystemSculpt could not complete the request.");
 
+    const retryMs = parseRetryAfterMs(response.headers?.get?.("retry-after") ?? null, {
+      payload: { ...payload, ...nested },
+    });
     throw new SystemSculptError(message, code, response.status, {
       endpoint: context?.endpoint,
       serverCode: serverCode || undefined,
-      retryAfterSeconds: retryAfterSeconds(response, { ...payload, ...nested }),
+      retryAfterSeconds: retryMs === undefined ? undefined : Math.ceil(retryMs / 1_000),
       licenseFailure: code === ERROR_CODES.INVALID_LICENSE,
     });
   }

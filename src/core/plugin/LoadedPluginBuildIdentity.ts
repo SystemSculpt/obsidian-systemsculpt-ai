@@ -1,5 +1,6 @@
 import { normalizePath, requireApiVersion, type App, type PluginManifest } from "obsidian";
 import { getDevelopmentBuildIdentity } from "./DevelopmentBuildIdentity";
+import { sha256HexFromArrayBuffer } from "../../utils/sha256";
 
 const SHA256_DIGEST = /^[a-f0-9]{64}$/;
 /** Device-local memo of the last hashed bundle, keyed by its file stat. */
@@ -18,17 +19,6 @@ function sameStat(left: BundleStat, right: Partial<BundleStat>): boolean {
     && left.ctime === right.ctime
     && left.size === right.size
     && left.ino === (right.ino ?? null);
-}
-
-async function sha256(bytes: ArrayBuffer): Promise<string> {
-  const crypto = window.crypto;
-  if (!crypto?.subtle) {
-    throw new Error("This Obsidian host cannot verify the loaded plugin artifact.");
-  }
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
 }
 
 async function statBundle(app: App, path: string): Promise<BundleStat | null> {
@@ -111,7 +101,7 @@ export async function getLoadedPluginBuildId(
     if (cached) return `sha256:${cached}`;
 
     const bytes = await app.vault.adapter.readBinary(path);
-    const digest = await sha256(bytes);
+    const digest = await sha256HexFromArrayBuffer(bytes);
     if (!SHA256_DIGEST.test(digest)) throw new Error("Invalid SHA-256 digest.");
     if (recorded && recorded !== digest) {
       throw new Error(

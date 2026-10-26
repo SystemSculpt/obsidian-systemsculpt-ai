@@ -1,10 +1,10 @@
-import { App, Notice, View, WorkspaceLeaf, TFile, normalizePath } from "obsidian";
+import { App, Notice, View, WorkspaceLeaf, TFile } from "obsidian";
+import { normalizeVaultRelativePath } from "../../utils/vaultPathUtils";
 import type SystemSculptPlugin from "../../main";
-import { RibbonManager } from "./ribbons";
 import { tryCopyToClipboard } from "../../utils/clipboard";
 import { toSafeVaultFileName } from "../../utils/vaultFileName";
-import { showConfirm } from "../ui/notifications";
-import { getSurfaceOwnerWindow, resolveSurfaceDomContext } from "../ui/surface";
+import { confirmSimilarNotesRebuild } from "../../modals/SimilarNotesRebuildConfirmation";
+import { resolveSurfaceDomContext } from "../ui/surface";
 import type { ChatMessage } from "../../types";
 import { CHAT_VIEW_TYPE, SYSTEMSCULPT_STUDIO_VIEW_TYPE } from "./viewTypes";
 import { STUDIO_DISPLAY_NAME, STUDIO_PROJECT_EXTENSION } from "../../studio/types";
@@ -31,8 +31,9 @@ type ActiveAudioArtifactReference = {
 type StudioCommandViewLike = {
   getViewType(): string;
   getState(): unknown;
-  fitSelectionInViewportFromCommand(): void;
-  showGraphOverviewFromCommand(): void;
+  /** Absent while a Studio tab is still loading its canvas. */
+  fitSelectionInViewportFromCommand?(): void;
+  showGraphOverviewFromCommand?(): void;
 };
 
 type ChatCommandViewLike = {
@@ -57,12 +58,10 @@ async function loadTitleGenerationServiceModule(): Promise<
 export class CommandManager {
   private plugin: SystemSculptPlugin;
   private app: App;
-  private ribbonManager: RibbonManager;
 
   constructor(plugin: SystemSculptPlugin, app: App) {
     this.plugin = plugin;
     this.app = app;
-    this.ribbonManager = new RibbonManager(plugin, app);
   }
 
   /**
@@ -86,6 +85,7 @@ export class CommandManager {
   registerCommands() {
     this.registerToggleAudioRecorder();
     this.registerOpenChat();
+    this.registerChatCommands();
     this.registerOpenSystemSculptHistory();
     this.registerOpenJanitor();
     this.registerTranscribeAudioFile();
@@ -165,8 +165,71 @@ export class CommandManager {
       id: "open-systemsculpt-chat",
       name: "Open chat",
       callback: async () => {
-        await this.ribbonManager.openChatView();
+        await this.plugin.getViewManager().openChat();
       },
+    });
+  }
+
+  /**
+   * The chat's own keys only work while focus is in a chat. These palette
+   * commands reach the active chat, or the most recently opened one, from
+   * anywhere, and ship without default hotkeys.
+   */
+  private registerChatCommands() {
+    const chat = (checking: boolean, act: (view: AgentChatView) => boolean | void): boolean => {
+      const active = this.app.workspace.getActiveViewOfType(AgentChatView);
+      const leaf = active?.leaf ?? this.app.workspace.getLeavesOfType(CHAT_VIEW_TYPE)[0];
+      const view = active ?? (leaf?.view instanceof AgentChatView ? leaf.view : null);
+      if (!view || !leaf) return false;
+      if (checking) return true;
+      void this.app.workspace.revealLeaf(leaf).then(() => act(view));
+      return true;
+    };
+    this.plugin.addCommand({
+      id: "chat-new-chat",
+      name: "Chat: New chat",
+      callback: () => {
+        if (!chat(false, (view) => void view.newChat())) void this.plugin.getViewManager().openChat();
+      },
+    });
+    this.plugin.addCommand({
+      id: "chat-open-history",
+      name: "Chat: Open chat history",
+      checkCallback: (checking) => chat(checking, (view) => view.openChatHistory()),
+    });
+    this.plugin.addCommand({
+      id: "chat-focus-message-box",
+      name: "Chat: Focus message box",
+      checkCallback: (checking) => chat(checking, (view) => view.focusInput()),
+    });
+    this.plugin.addCommand({
+      id: "chat-stop-response",
+      name: "Chat: Stop response",
+      checkCallback: (checking) => {
+        const view = this.app.workspace.getActiveViewOfType(AgentChatView)
+          ?? this.app.workspace.getLeavesOfType(CHAT_VIEW_TYPE)
+            .map((leaf) => leaf.view)
+            .find((candidate): candidate is AgentChatView =>
+              candidate instanceof AgentChatView && candidate.isWorking());
+        if (!view?.isWorking()) return false;
+        if (!checking) view.stopResponse();
+        return true;
+      },
+    });
+    this.plugin.addCommand({
+      id: "chat-change-mode",
+      name: "Chat: Change mode",
+      checkCallback: (checking) => chat(checking, (view) => view.openModeMenu()),
+    });
+    this.plugin.addCommand({
+      id: "chat-change-backend",
+      name: "Chat: Change backend",
+      checkCallback: (checking) => chat(checking, (view) => view.openBackendMenu()),
+    });
+    this.plugin.addCommand({
+      id: "chat-review-pending-approval",
+      name: "Chat: Review pending approval",
+      checkCallback: (checking) => chat(checking, (view) => view.reviewPendingApproval()),
     });
   }
 
@@ -175,7 +238,7 @@ export class CommandManager {
       id: "open-systemsculpt-history",
       name: "Open history",
       callback: () => {
-        this.ribbonManager.openSystemSculptHistoryModal();
+        this.plugin.getViewManager().ribbonManager.openSystemSculptHistoryModal();
       },
     });
   }
@@ -185,7 +248,7 @@ export class CommandManager {
       id: "open-systemsculpt-janitor",
       name: "Open janitor",
       callback: () => {
-        this.ribbonManager.openJanitorModal();
+        this.plugin.getViewManager().ribbonManager.openJanitorModal();
       },
     });
   }
@@ -228,12 +291,7 @@ export class CommandManager {
   }
 
   private async openAudioProcessor(initialTab: "audio" | "youtube"): Promise<void> {
-    await this.ribbonManager.openAudioProcessor(initialTab);
-  }
-
-  /** Opens a fresh chat tab; exposed for post-sign-in "Get started". */
-  public async openChatView(): Promise<void> {
-    await this.ribbonManager.openChatView();
+    await this.plugin.getViewManager().ribbonManager.openAudioProcessor(initialTab);
   }
 
   private registerAudioArtifactCommand(kind: AudioProcessorArtifactKind): void {
@@ -292,8 +350,6 @@ export class CommandManager {
           kind,
         );
       await artifact.open();
-      const label = kind === "summary" ? "Summary" : "Transcript";
-      new Notice(`${label} saved to ${artifact.notePath}.`, 6000);
     } catch (error) {
       const fallback = kind === "summary"
         ? "Unable to save the audio summary."
@@ -378,14 +434,7 @@ export class CommandManager {
           || isAudioFileExtension(extension);
         if (!supported) return false;
         if (!checking) {
-          const leaf = this.app.workspace.getLeaf("tab");
-          const view = new AgentChatView(leaf, this.plugin);
-          void leaf.open(view).then(async () => {
-            await new Promise((resolve) => getSurfaceOwnerWindow(view.containerEl).setTimeout(resolve, 50));
-            this.app.workspace.setActiveLeaf(leaf, { focus: true });
-            await view.addFileToContext(activeFile);
-            view.focusInput();
-          }).catch(() => {
+          void this.plugin.getViewManager().openChat({ file: activeFile }).catch(() => {
             new Notice("Unable to open chat with this file.", 5000);
           });
         }
@@ -456,7 +505,6 @@ export class CommandManager {
                 notice.hide();
                 if (title && title !== chatView.getChatTitle()) {
                   await chatView.setTitle(title);
-                  new Notice("Chat title updated successfully!", 4000);
                 }
               } catch (error) {
                 const errorMessage = error instanceof Error ? error.message : String(error);
@@ -506,10 +554,6 @@ export class CommandManager {
               if (title && title !== activeFile.basename) {
                 try {
                   await this.renameTitleTargetFile(activeFile, title);
-                  const successLabel = activeFile.extension.toLowerCase() === STUDIO_PROJECT_EXTENSION.slice(1)
-                    ? "Studio project"
-                    : "Note";
-                  new Notice(`${successLabel} title updated successfully!`, 4000);
                 } catch (error) {
                   const errorMessage = error instanceof Error ? error.message : String(error);
                   new Notice(`Failed to rename file: ${errorMessage}`, 6000);
@@ -548,8 +592,7 @@ export class CommandManager {
       name: `New ${STUDIO_DISPLAY_NAME} project`,
       callback: async () => {
         try {
-          const project = await this.createAndOpenStudioProject();
-          new Notice(`Created Studio project: ${project.name}`);
+          await this.createAndOpenStudioProject();
         } catch (error: unknown) {
           const message = error instanceof Error ? error.message : String(error);
           new Notice(`Unable to create Studio project: ${message}`);
@@ -573,8 +616,7 @@ export class CommandManager {
               .find((file) => file.extension.toLowerCase() === "systemsculpt");
 
           if (!fallbackStudioFile) {
-            const project = await this.createAndOpenStudioProject();
-            new Notice(`Created Studio project: ${project.name}`);
+            await this.createAndOpenStudioProject();
             return;
           }
 
@@ -598,9 +640,7 @@ export class CommandManager {
             return;
           }
           const result = await studio.runProject(projectPath);
-          if (result.status === "success") {
-            new Notice(`Studio run complete: ${result.runId}`);
-          } else {
+          if (result.status !== "success") {
             new Notice(`Studio run failed: ${result.error || result.runId}`);
           }
         } catch (error: unknown) {
@@ -615,7 +655,7 @@ export class CommandManager {
       name: "Studio: fit selection in viewport",
       checkCallback: (checking: boolean) => {
         const activeStudioView = this.getActiveStudioView();
-        if (!activeStudioView) {
+        if (!activeStudioView?.fitSelectionInViewportFromCommand) {
           return false;
         }
         if (!checking) {
@@ -630,7 +670,7 @@ export class CommandManager {
       name: "Studio: overview graph in viewport",
       checkCallback: (checking: boolean) => {
         const activeStudioView = this.getActiveStudioView();
-        if (!activeStudioView) {
+        if (!activeStudioView?.showGraphOverviewFromCommand) {
           return false;
         }
         if (!checking) {
@@ -753,7 +793,7 @@ export class CommandManager {
       return null;
     }
 
-    const normalizedPath = normalizePath(pathCandidate.trim().replace(/\\/g, "/")).replace(/^\/+/, "");
+    const normalizedPath = normalizeVaultRelativePath(pathCandidate);
     if (!normalizedPath) {
       return null;
     }
@@ -821,13 +861,9 @@ export class CommandManager {
   }
 
   private async copyActiveFilePathToClipboard(vaultFilePath: string): Promise<void> {
-    const copied = await tryCopyToClipboard(vaultFilePath);
-    if (!copied) {
+    if (!await tryCopyToClipboard(vaultFilePath)) {
       new Notice("Unable to copy file path to clipboard.");
-      return;
     }
-
-    new Notice("Vault-relative file path copied to clipboard.");
   }
 
   private registerEmbeddingsDatabaseCommands() {
@@ -858,21 +894,10 @@ export class CommandManager {
         if (!checking) {
           void (async () => {
             try {
-              const { confirmed } = await showConfirm(
-                this.app,
-                "This will delete and rebuild the current SystemSculpt embeddings index.",
-                {
-                  title: "Rebuild Embeddings",
-                  primaryButton: "Rebuild",
-                  secondaryButton: "Cancel",
-                  icon: "alert-triangle",
-                }
-              );
-              if (!confirmed) return;
+              if (!await confirmSimilarNotesRebuild(this.app)) return;
               new Notice('Rebuilding SystemSculpt embeddings…', 4000);
               const manager = this.plugin.getOrCreateEmbeddingsManager();
               await manager.forceRefreshCurrentNamespace();
-              new Notice('Embeddings rebuild complete.', 4000);
             } catch (error: unknown) {
               const message = error instanceof Error ? error.message : String(error);
               new Notice(`Failed to rebuild embeddings: ${message}`, 8000);

@@ -13,24 +13,47 @@ public operations and behavioral tests before following private helpers.
 | Chat execution | `src/chat/ChatSession.ts`, `src/chat/managed/ChatSession.ts` | Shared session contract and managed conversation synchronization, local tools, approvals, and replay safety. |
 | Managed conversation projection | `src/chat/managed/ConversationProjection.ts` | Optimistic display, interrupted responses, exact local-result overlays, and live/durable message conversion. |
 | Chat presentation | `src/views/chatview/AgentChatView.ts`, `AgentConversationRenderer.ts` | Composer, conversation projection, interaction, rendering, and view lifecycle. |
-| Saved chats | `src/views/chatview/ChatStorageService.ts`, `storage/`, `persistence/`, `attachments/` | Local transcript and attachment storage, strict parsing, and restore. A saved note is not execution authority. |
+| Saved chats | `src/views/chatview/ChatStorageService.ts`, `storage/`, `persistence/`, `attachments/` | Local transcript and attachment storage, strict parsing, and restore. A saved note is not execution authority. Saved native tool records spell vault paths from their saved working directory and the home folder as `~`, in structured arguments and in native text alike; the live record and the native session keep absolute paths. |
+| Native chat lifetime | `src/views/chatview/NativeChatSessions.ts` | Plugin-owned connections keyed by chat id retain their original transcript while views detach and reattach. Explicit deletion and plugin unload cancel and drain them; idle unobserved connections close. Native agents still own execution. |
 | Managed operations | `src/services/managed/` | First-party capability admission, job transport, reconnect, and delivery contracts. Capability-specific consumers live beside audio, images, video, and embeddings. |
 | Native Codex | `src/services/codex/LocalCodexClient.ts`, `CodexChatSession.ts`, `StudioAgentRuns.ts` | Native transport, one-turn execution, chat adaptation, and explicit project run instances. Codex owns the agent loop. |
-| On-machine agents | `src/services/codex/LocalAgents.ts`, `LocalAgentChatSession.ts`, `src/services/claude/` | The agent registry and the chat adapter every on-machine agent shares. Claude Code adds its stream-json transport, launch settings, permission dialog and controls. A new agent adds an id, a turn runner and its controls. |
+| On-machine agents | `src/services/codex/LocalAgents.ts`, `LocalAgentChatSession.ts`, `src/services/claude/` | The agent registry and shared native chat adapter project tool activity and pending approval requests without owning execution policy. Claude Code adds its stream-json transport, launch settings and controls. A new agent adds an id, a turn runner and its controls. |
+| Chat approvals | `src/views/chatview/AgentApprovalCards.ts`, `NativeToolPresentation.ts`, `ToolCallPreview.ts` | Shared inline cards own keyboard answers and owner-window focus. Native previews reuse vault diffs; raw requests stay behind Details. The session forwards explicit answers to the native agent or hosted protocol, never inferring native grants from a saved transcript. Studio retains its native request modal. |
 | Studio project edits | `src/studio/StudioProjectSession.ts`, `StudioProjectSessionManager.ts` | Shared editable project state, save/rebase, and retained session lifetime. |
 | Studio persistence | `src/studio/StudioProjectStore.ts`, `document/`, `persistence/` | One readable `.systemsculpt` document per project: validated import, three-way merged UI and agent edits, stamped field merges of copies from other devices by the merge record each file carries, atomic publication, and independent support-file reconciliation. |
+| Studio legacy history | `src/studio/StudioLegacyGenerations.ts` | The one-time offer to delete pre-6.10 per-save snapshots in `.systemsculpt/studio/projects/` for projects that pass the same open gate as an import; the answer is recorded beside them. |
 | Studio execution | `src/studio/StudioService.ts`, `StudioRuntime.ts`, `StudioGraphCompiler.ts`, `nodes/` | User-requested scopes, typed dependency plans, immutable run snapshots, execution gates, and node results. |
-| Studio interaction | `src/views/studio/SystemSculptStudioView.ts`, `canvas/`, `connections/` | Obsidian leaf, canvas cards, visual connections, editors, and pointer/keyboard interaction. |
+| Studio interaction | `src/views/studio/SystemSculptStudioView.ts`, `PendingStudioView.ts`, `canvas/`, `connections/` | Obsidian leaf, canvas cards, visual connections, editors, and pointer/keyboard interaction. The view's code is evaluated when Studio first opens (`ViewManager.loadStudioView`); until then `PendingStudioView` holds a tab Obsidian opens and hands it to the real view. The source editor's language packs load with the first source card. |
 | Studio edit history | `src/views/studio/StudioGraphHistory.ts` | Each view's local edit transactions, rebased onto the shared canvas for undo/redo. Restoration preserves unrelated peer edits and the accepted disk baseline. |
 | Vault operations | `src/tools/FirstPartyToolService.ts`, `src/tools/vault/` | Advertised local actions, validated vault paths, execution, and typed results. |
 | Audio Processor | `src/features/audio-processor/AudioProcessorService.ts`, `AudioProcessorDelivery.ts` | Input/job workflow and durable local output delivery respectively. |
+| Choosing audio | `src/components/AudioSourcePicker.ts` | The vault audio list, device dropzone, keyboard navigation and selected-audio preview shared by Transcribe audio and Audio Processor. Each modal keeps only its output options and submit. |
 | Inbox automation | `src/features/inbox-transcription/InboxTranscriptionService.ts` | Vault event admission, batching, user confirmation, and cancellation for automatic transcription. |
 | Search and Similar notes | `src/services/search/`, `src/services/embeddings/` | Vault indexing/search and managed semantic index integration. |
 | Account and settings | `src/core/settings/`, `src/settings/`, `src/services/AccountConnectService.ts` | Settings persistence/migration, settings presentation, and account connection respectively. |
 | Credential hygiene | `src/core/security/` | Keeps plain-text credential files that retired features left in the plugin folder out of Git, and tells the user how to clean them up. |
 | Diagnostics | `src/core/diagnostics/` | Content-free incident capture, bounded persistence, session startup, rotation, and teardown. |
-| Shared data primitives | `src/utils/sha256.ts`, `base64.ts` | Content hashing and byte encoding used across capabilities. These are independent of Studio and presentation. |
+| Shared data primitives | `src/utils/vaultPathUtils.ts`, `vaultFileName.ts`, `sha256.ts`, `base64.ts` | Vault-relative path normalization, generated filename sanitation, content hashing and byte encoding. These are independent of Studio and presentation. |
 | Desktop and window behavior | `src/platform/`, `src/core/ui/surface/` | Host capabilities, desktop adapters, mobile host chrome, owner-window DOM, and shared surface interaction. |
+
+Vault-relative separator and character normalization belongs to `normalizeVaultRelativePath`.
+Its options preserve literal on-disk names, opt tool inputs into URI decoding, and
+validate strict relative directories before repairing separators. It does not
+resolve dot segments or sanitize generated filenames; those remain separate
+validation and `vaultFileName.ts` policies. Callers retain domain errors, root
+mapping, project extensions and directory-prefix boundaries. Native filesystem
+paths (including Studio's desktop picker) must retain their absolute roots and
+must not use a vault-relative normalizer.
+
+`src/utils/SupportDiagnosticEvent.ts` owns the lifecycle scalar inventory and
+immutable snapshot provenance. `AgentLifecycle` normalizes once; the logger
+reuses that metadata rather than validating another copy. Its frozen support
+event passes unchanged through the incident coordinator into the recorder.
+Only a failed report projects retained events into the exported timeline and
+canonicalizes them. During recording, exact scalar-byte arithmetic (no JSON,
+key sorting, or UTF-8 allocation) preserves the existing arrival-order byte and
+event eviction policy and counters. Arbitrary public events, even frozen ones,
+still cross the full admission allowlist; freezing alone is not provenance.
 
 `src/studio/` owns project semantics; `src/views/studio/` owns their presentation.
 Execution edges, diagram arrows, and parent links have distinct meanings even
@@ -54,6 +77,9 @@ type-only, re-exported, and lazy imports. It enforces host independence and
 prevents chat and Studio domain code, vault tools, diagnostics, and generic utilities
 from depending on presentation. Composition belongs in `src/main.ts` and
 `src/core/plugin/`; those modules intentionally know the capabilities they wire.
+A feature that most people never open is reached through `import()`, which
+esbuild evaluates on first use; `scripts/plugin-build-options.test.mjs` checks
+that plugin load evaluates no Studio view code.
 Managed-service and native-process seams use deterministic test adapters.
 
 Use a focused dependency type when a module needs only a small capability from

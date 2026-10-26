@@ -218,7 +218,7 @@ describe("SystemSculptPlugin diagnostics session wiring", () => {
   it.each([
     {
       operation: "list",
-      configure: (adapter: any, path: string) => {
+      configure: (adapter: any, _path: string) => {
         adapter.list.mockImplementation(async (listedPath: string) => {
           expect(listedPath).toBe(DIAGNOSTICS_PATH);
           throw new Error("PRIVATE_LIST_FAILURE");
@@ -235,15 +235,6 @@ describe("SystemSculptPlugin diagnostics session wiring", () => {
       warning: "[SystemSculpt][Diagnostics] Archive cleanup skipped 1 file checks and 0 removals",
     },
     {
-      operation: "read",
-      configure: (adapter: any, path: string) => {
-        adapter.list.mockResolvedValue({ files: [path], folders: [] });
-        adapter.stat.mockResolvedValue({ type: "file", ctime: Date.now(), mtime: Date.now(), size: 2 });
-        adapter.read.mockRejectedValue(new Error("PRIVATE_READ_FAILURE"));
-      },
-      warning: "[SystemSculpt][Diagnostics] Archive cleanup skipped 1 file checks and 0 removals",
-    },
-    {
       operation: "remove",
       configure: (adapter: any, path: string) => {
         adapter.list.mockResolvedValue({ files: [path], folders: [] });
@@ -255,9 +246,7 @@ describe("SystemSculptPlugin diagnostics session wiring", () => {
   ])("contains an adapter $operation failure and emits only a privacy-safe warning", async ({ operation, configure, warning: expectedWarning }) => {
     const app = new App();
     const adapter = app.vault.adapter as any;
-    const path = operation === "read"
-      ? `${DIAGNOSTICS_PATH}/session-20260812-160000.json`
-      : `${DIAGNOSTICS_PATH}/systemsculpt-20260729-160000.log`;
+    const path = `${DIAGNOSTICS_PATH}/systemsculpt-20260729-160000.log`;
     configure(adapter, path);
     const plugin = makePlugin(app);
     installStorage(plugin);
@@ -271,7 +260,7 @@ describe("SystemSculptPlugin diagnostics session wiring", () => {
     expect(serializedWarnings).not.toContain(`PRIVATE_${operation.toUpperCase()}_FAILURE`);
   });
 
-  it("removes an oversize session archive without reading it", async () => {
+  it("retains a recent session archive without the retired content inspection limit", async () => {
     const app = new App();
     const adapter = app.vault.adapter as any;
     const path = `${DIAGNOSTICS_PATH}/session-20260812-160000.json`;
@@ -284,8 +273,9 @@ describe("SystemSculptPlugin diagnostics session wiring", () => {
 
     await expect(prepareAndWaitForCleanup(plugin)).resolves.toBeUndefined();
 
+    expect(adapter.stat).toHaveBeenCalledWith(path);
     expect(adapter.read).not.toHaveBeenCalled();
-    expect(adapter.remove.mock.calls).toEqual([[path]]);
+    expect(adapter.remove).not.toHaveBeenCalled();
   });
 
   it("closes diagnostics cleanup admission during unload", async () => {

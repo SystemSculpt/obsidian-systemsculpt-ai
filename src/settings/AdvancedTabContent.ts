@@ -1,9 +1,11 @@
-import { Setting, Notice, ButtonComponent } from "obsidian";
+import { Notice, ButtonComponent } from "obsidian";
+import { createCatalogSetting } from "./SettingsCatalog";
 import { SystemSculptSettingTab } from "./SystemSculptSettingTab";
 import { showPrompt } from "../core/ui/modals/PromptModal";
 import { DEFAULT_SETTINGS } from "../types";
 import { tryCopyToClipboard } from "../utils/clipboard";
 import { getSurfaceOwnerWindow } from "../core/ui/surface/SurfaceDomContext";
+import { flashButtonResult } from "../core/ui/notifications";
 import { hasHostCapability } from "../platform/hostCapabilities";
 
 export function displayAdvancedTabContent(containerEl: HTMLElement, tabInstance: SystemSculptSettingTab) {
@@ -16,9 +18,7 @@ export function displayAdvancedTabContent(containerEl: HTMLElement, tabInstance:
     containerEl.createEl("h3", { text: "Advanced settings" }); // Added header for clarity
     tabInstance.renderQuickActionsSection(containerEl);
 
-    new Setting(containerEl)
-        .setName("Relative line numbers")
-        .setDesc("Use a vim-style line number gutter in the editor. The current line shows its absolute number; other lines show their distance from the Cursor. Turn off Obsidian's core \"show line number\" setting to avoid a doubled gutter.")
+    createCatalogSetting(containerEl, "advanced.relative-line-numbers")
         .addToggle((toggle) => {
             toggle
                 .setValue(Boolean(plugin.settings.relativeLineNumbersEnabled))
@@ -26,20 +26,11 @@ export function displayAdvancedTabContent(containerEl: HTMLElement, tabInstance:
                     await plugin.getSettingsManager().updateSettings({
                         relativeLineNumbersEnabled: value,
                     });
-                    new Notice(
-                        value
-                            ? "Relative line numbers enabled."
-                            : "Relative line numbers disabled."
-                    );
                 });
         });
 
     // Reset to Factory Settings button
-    const resetSetting = new Setting(containerEl)
-        .setName("Reset to factory settings")
-        .setDesc(
-            "Clear all custom settings and restore defaults for this plugin."
-        );
+    const resetSetting = createCatalogSetting(containerEl, "advanced.reset");
 
     const resetButton = new ButtonComponent(resetSetting.controlEl);
     resetButton.setButtonText("Reset…");
@@ -50,7 +41,7 @@ export function displayAdvancedTabContent(containerEl: HTMLElement, tabInstance:
             "Reset to Factory Defaults",
             {
                 description:
-                    "This will delete ALL saved settings and customizations for SystemSculpt, returning everything to default. Do you want to continue?",
+                    "Reset SystemSculpt’s saved settings to defaults and reload Obsidian? Your current settings will be replaced.",
                 primaryButton: "Reset & Reload",
                 secondaryButton: "Cancel",
             }
@@ -69,7 +60,7 @@ export function displayAdvancedTabContent(containerEl: HTMLElement, tabInstance:
             // The updateSettings call with DEFAULT_SETTINGS will handle everything
 
             // Force reload to ensure clean state
-             new Notice("Settings reset. Reloading Obsidian...", 3000);
+             resetButton.setButtonText("Reloading…").setDisabled(true);
              const ownerWindow = getSurfaceOwnerWindow(containerEl);
              ownerWindow.setTimeout(() => ownerWindow.location.reload(), 1000);
 
@@ -84,9 +75,7 @@ export function displayAdvancedTabContent(containerEl: HTMLElement, tabInstance:
 
     containerEl.createEl("h3", { text: "Diagnostics" });
 
-    new Setting(containerEl)
-        .setName("Record diagnostics")
-        .setDesc("Save resource samples, long-frame reports, and chat lifecycle logs in .systemsculpt/diagnostics. Leave off unless you are troubleshooting. Failed chat runs still save incident reports.")
+    createCatalogSetting(containerEl, "advanced.record-diagnostics")
         .addToggle((toggle) => {
             toggle
                 .setValue(plugin.settings.showDiagnostics === true)
@@ -97,15 +86,13 @@ export function displayAdvancedTabContent(containerEl: HTMLElement, tabInstance:
                 });
         });
 
-    new Setting(containerEl)
-        .setName("Copy diagnostics snapshot")
-        .setDesc("Copies a content-free runtime and resource summary for support.")
+    createCatalogSetting(containerEl, "advanced.copy-diagnostics")
         .addButton((button) => {
             button.setButtonText("Copy snapshot").onClick(async () => {
                 const { text, path } = await plugin.exportDiagnosticsSnapshot();
                 const copied = await tryCopyToClipboard(text);
                 if (copied) {
-                    new Notice("Diagnostics snapshot copied to clipboard.", 4000);
+                    flashButtonResult(button.buttonEl, "Copied");
                 } else if (path) {
                     new Notice(`Diagnostics snapshot saved to ${path}.`, 5000);
                 } else {
@@ -114,16 +101,11 @@ export function displayAdvancedTabContent(containerEl: HTMLElement, tabInstance:
             });
         });
 
-    const diagnosticsFolderSetting = new Setting(containerEl)
-        .setName("Diagnostics folder")
-        .setDesc("Saved in .systemsculpt/diagnostics inside your vault.");
+    const diagnosticsFolderSetting = createCatalogSetting(containerEl, "advanced.diagnostics-folder");
     if (hasHostCapability("file-manager-reveal", containerEl)) {
         diagnosticsFolderSetting.addButton((button) => {
             button.setButtonText("Open folder").onClick(async () => {
-                const opened = await plugin.openDiagnosticsFolder();
-                if (opened) {
-                    new Notice("Opened diagnostics folder in your file manager.", 4000);
-                } else {
+                if (!await plugin.openDiagnosticsFolder()) {
                     new Notice("Unable to open diagnostics folder. Locate .systemsculpt/diagnostics manually.", 5000);
                 }
             });

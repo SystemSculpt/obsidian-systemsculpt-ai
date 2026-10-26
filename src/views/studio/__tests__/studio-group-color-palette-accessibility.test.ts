@@ -43,7 +43,6 @@ describe("Studio group color palette accessibility", () => {
       getNodeElement: () => null,
       notifyNodePositionsChanged: () => undefined,
       requestRender: () => undefined,
-      scheduleProjectSave: () => undefined,
       commitProjectMutation: (_reason, mutator) => mutator(project) !== false,
     });
     const canvas = document.body.createDiv();

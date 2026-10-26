@@ -41,7 +41,10 @@ function runTask(plugin: SystemSculptPlugin, phase: string, id: string): Promise
 }
 
 describe("SystemSculptPlugin startup phases", () => {
-  const idleWindow = window as Window & { requestIdleCallback?: unknown; cancelIdleCallback?: unknown };
+  const idleWindow: Omit<Window, "requestIdleCallback" | "cancelIdleCallback"> & {
+    requestIdleCallback?: unknown;
+    cancelIdleCallback?: unknown;
+  } = window;
   let idleCallbacks: Array<() => void>;
 
   beforeEach(() => {
@@ -64,6 +67,20 @@ describe("SystemSculptPlugin startup phases", () => {
     idleCallbacks = [];
     pending.forEach((callback) => callback());
   };
+
+  it("registers ribbons during bootstrap without starting deferred chat restoration", async () => {
+    const plugin = makePlugin();
+    (plugin as any).configureLifecycle();
+    const addRibbon = jest.spyOn(plugin, "addRibbonIcon");
+    await runTask(plugin, "bootstrap", "workspace.ribbons");
+    expect(addRibbon).toHaveBeenCalledTimes(7);
+    expect((plugin as any).viewManager).toBeDefined();
+    const initialize = jest.spyOn((plugin as any).viewManager, "initialize");
+    // The normal manager entry point still initializes views after bootstrap.
+    plugin.getViewManager();
+    expect(initialize).toHaveBeenCalledTimes(1);
+    expect(addRibbon).toHaveBeenCalledTimes(7);
+  });
 
   it("starts update checks after layout-ready instead of in the critical phase", () => {
     const plugin = makePlugin();
@@ -119,7 +136,6 @@ describe("SystemSculptPlugin startup phases", () => {
     const critical = deferred();
     (plugin as any).lifecycleCoordinator = { runPhase };
     (plugin as any).criticalInitializationPromise = critical.promise;
-    jest.spyOn(plugin as any, "maybeShowAccountOnboarding").mockImplementation(() => undefined);
 
     (plugin as any).registerLayoutReadyHandler(0);
     layoutReady!();

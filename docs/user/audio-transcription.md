@@ -43,7 +43,7 @@ Audio and transcription settings now live inside the `Workflow` tab.
 - On Obsidian 1.12.3 or later, the recorder writes audio every few seconds to a hidden in-progress file in `.systemsculpt/recordings-in-progress`. Obsidian Sync skips that folder, so it does not upload the growing file while you record. When you stop, the finished recording moves to your recordings folder, with a numbered name if that name is taken.
 - If Obsidian quits, reloads, or crashes before you stop, the audio up to the last few seconds stays in the in-progress folder. The next launch moves it to your recordings folder, reports it as an interrupted recording, and transcribes it when **Transcribe automatically** is on.
 - On Obsidian 1.12.3 or later, one recording can reach 512 MiB, about 12 hours at the requested speech bitrate. Earlier versions keep the whole recording in memory until you stop, so one recording is capped at 64 MiB on desktop and 24 MiB on mobile, roughly 90 and 35 minutes. The actual duration varies by device encoder.
-- Transcription has its own size limit: 128 MiB on desktop and 32 MiB on mobile for one source. A longer recording is still saved, but it must be split or processed elsewhere before it can be transcribed.
+- Transcription accepts one source up to the service's 500 MiB limit on desktop and mobile. SystemSculpt hashes and uploads vault audio in small parts rather than loading the whole recording into memory. Device-file imports also copy in parts on Obsidian 1.12.3 or later. On older hosts without binary append, device imports retain their previous limits of 128 MiB on desktop and 32 MiB on mobile; files already in the vault use the sliced upload path. A larger recording is still saved, but must be split or processed elsewhere before transcription.
 
 ## Commands
 
@@ -59,6 +59,14 @@ Audio and transcription settings now live inside the `Workflow` tab.
 - `wav`, `m4a`, `mp4`, `webm`, `ogg`, `mp3`, `flac`
 
 Raw `.aac` and `.opus` files are not accepted by the managed transcription runtime. Use an M4A/MP4 or Ogg/WebM container instead.
+
+## Saved filenames and note presentation
+
+- **Transcribe an audio file** saves Markdown beside the source audio as `<audio name>.md`, without an epoch prefix or words copied from the transcript. If the name is taken, it uses `<audio name> (2).md`, then the next available number; existing notes are not overwritten. SRT output keeps the same audio-based naming and numbered collision behavior.
+- Device imports keep a readable, vault-safe audio filename in your configured recordings folder (by default `SystemSculpt/Recordings`). If that audio filename is taken, the import adds `-2`, `-3`, and so on. Transcripts stay beside that imported audio. Vault-selected audio stays in its existing folder.
+- Existing transcripts are not renamed. An interrupted transcription can still recover an output saved under the older ` - transcript - …` naming pattern.
+- Audio Processor continues to save the server-selected note title and its companion transcript in `SystemSculpt/Audio Notes`. New notes use Obsidian's inline filename title rather than repeating it as a top-level heading. Transcript navigation is a normal callout, with its bookkeeping kept in frontmatter rather than a raw HTML marker in the note body.
+- Audio Processor's Source callout keeps readable attribution, duration, and language. Source fingerprints and the exact processing timestamp remain in frontmatter, not in the visible callout; downloaded artifacts are still integrity-checked before their vault presentation is adjusted.
 
 ## Pipeline behavior notes
 

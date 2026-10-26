@@ -57,7 +57,14 @@ describe("built bundle (main.js)", () => {
     // Settings migration ran: loadData returned null, so defaults applied.
     expect(plugin.settings).toBeDefined();
     expect(typeof plugin.settings).toBe("object");
-    expect(plugin.settings.schemaVersion).toBe(14);
+    expect(plugin.settings.schemaVersion).toBe(17);
+    expect(plugin.settings.codexModel).toBe("");
+    expect(plugin.settings.codexThinkingLevel).toBe("");
+    expect(plugin.settings).not.toHaveProperty("accountOnboardingShown");
+    expect(plugin.settings).not.toHaveProperty("lastAnnouncedPluginRelease");
+    expect(plugin.settings.textExecutionBackendExplicit).toBe(false);
+    expect(plugin.settings.claudePermissionMode).toBe("auto");
+    expect(plugin.settings.codexApprovalMode).toBe("auto");
     expect(plugin.settings).not.toHaveProperty("webSearchEnabledByDefault");
     expect(plugin.settings.audioProcessorOutputPreset).toBe("detailed");
     expect(plugin.settings.licenseKey).toBe("");
@@ -83,6 +90,50 @@ describe("built bundle (main.js)", () => {
     expectProductionStartupIdentity(startupIdentity, manifest.version);
 
     plugin.unload();
+  });
+
+  it("routes settings changes only to affected services after production startup", async () => {
+    const bundleModule = require(BUNDLE_PATH);
+    const PluginClass = bundleModule?.default ?? bundleModule;
+    const { App } = require("obsidian");
+    const app = new App();
+    app.workspace.updateOptions = jest.fn();
+    const listeners = new Map<string, ((...args: any[]) => void)[]>();
+    app.workspace.on.mockImplementation((event: string, listener: (...args: any[]) => void) => {
+      listeners.set(event, [...(listeners.get(event) ?? []), listener]);
+      return {};
+    });
+    app.workspace.trigger.mockImplementation((event: string, ...args: any[]) => {
+      for (const listener of listeners.get(event) ?? []) listener(...args);
+    });
+    const manifest = JSON.parse(readFileSync(MANIFEST_PATH, "utf8"));
+    const plugin = new PluginClass(app, manifest);
+    const startupIdentity = captureStartupIdentity();
+    await plugin.onload();
+    expectProductionStartupIdentity(startupIdentity, manifest.version);
+    await plugin.criticalInitializationPromise;
+    await plugin.deferredInitializationPromise;
+    const syncFromSettings = jest.fn();
+    plugin.embeddingsManager = { syncFromSettings, cleanup: jest.fn(async () => undefined) };
+    app.workspace.updateOptions.mockClear();
+    try {
+      const settings = plugin.getSettingsManager();
+      await settings.updateSettings({ defaultChatTag: "notes" });
+      await settings.updateSettings({ lastValidated: Date.now() });
+      await settings.updateSettings({ lastAutomaticBackup: Date.now() });
+      expect(syncFromSettings).not.toHaveBeenCalled();
+      expect(app.workspace.updateOptions).not.toHaveBeenCalled();
+      await settings.updateSettings({ embeddingsEnabled: true });
+      await settings.updateSettings({ embeddingsExclusions: { ...plugin.settings.embeddingsExclusions, folders: ["Private"] } });
+      expect(syncFromSettings).toHaveBeenCalledTimes(2);
+      expect(app.workspace.updateOptions).not.toHaveBeenCalled();
+      await settings.updateSettings({ relativeLineNumbersEnabled: true });
+      expect(app.workspace.updateOptions).toHaveBeenCalledTimes(1);
+      expect(syncFromSettings).toHaveBeenCalledTimes(2);
+    } finally {
+      plugin.unload();
+      await plugin.unloadPromise;
+    }
   });
 
   it("ships only the thin-agent protocol without legacy SDK runtimes", () => {
@@ -143,16 +194,16 @@ describe("built bundle (main.js)", () => {
     const styles = readFileSync(STYLES_PATH, "utf8");
 
     expect(styles).toMatch(
-      /\.ss-studio-node-card\.ss-studio-text-node-card\s*\{[^}]*contain:\s*layout style;[^}]*overflow:\s*visible;/s
+      /\.ss-studio-node-card\.ss-studio-text-node-card\s*\{[^}]*contain:\s*layout style;[^}]*overflow:\s*visible(?:;|\})/s
     );
     expect(styles).toMatch(
-      /\.ss-studio-text-node-card \.ss-studio-node-ports\s*\{[^}]*right:\s*calc\(var\(--ss-studio-port-size,\s*10px\)\s*\*\s*-0\.5\);[^}]*transform:\s*translateY\(-50%\);[^}]*overflow:\s*visible;/s
+      /\.ss-studio-text-node-card \.ss-studio-node-ports\s*\{[^}]*right:\s*calc\(var\(--ss-studio-port-size,\s*10px\)\s*\*\s*-0?\.5\);[^}]*transform:\s*translateY\(-50%\);[^}]*overflow:\s*visible(?:;|\})/s
     );
     expect(styles).toMatch(
-      /\.ss-studio-text-node-card \.ss-studio-port-pin\s*\{[^}]*opacity:\s*1;/s
+      /\.ss-studio-text-node-card \.ss-studio-port-pin\s*\{[^}]*opacity:\s*1(?:;|\})/s
     );
     expect(styles).toMatch(
-      /@media\s*\(pointer:\s*coarse\)[\s\S]*?\.ss-studio-text-node-card \.ss-studio-port-pin\s*\{[^}]*--ss-studio-port-hit-size:\s*var\(--ss-touch-target\);/
+      /@media\s*\(pointer:\s*coarse\)[\s\S]*?\.ss-studio-text-node-card \.ss-studio-port-pin\s*\{[^}]*--ss-studio-port-hit-size:\s*var\(--ss-touch-target\)(?:;|\})/
     );
   });
 
@@ -194,7 +245,7 @@ describe("built bundle (main.js)", () => {
     visit(source);
 
     // Electron's renderer treats native import() as a URL fetch. Desktop code
-    // must use the plugin's lazy loadDesktopOnly(() => require(...)) seam.
+    // must load Node modules through the plugin's lazy desktopHost seam.
     expect(dynamicNodeImports).toEqual([]);
   });
 

@@ -135,6 +135,110 @@ describe("renderStudioSearchableDropdown", () => {
     setViewportSize(1200, 900);
   });
 
+  it("creates a panel only while open and releases its controls between openings", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const loadOptions = jest.fn(async () => [
+      { value: "model-a", label: "Model A" },
+      { value: "model-b", label: "Model B" },
+    ]);
+    const onValueChange = jest.fn();
+    const dropdown = renderStudioSearchableDropdown({
+      containerEl: host,
+      ariaLabel: "Model",
+      value: "model-a",
+      disabled: false,
+      loadOptions,
+      onValueChange,
+    });
+    const trigger = host.querySelector<HTMLButtonElement>("button")!;
+    await flush();
+
+    expect(trigger.textContent).toContain("Model A");
+    expect(host.querySelector(".ss-studio-searchable-select-panel")).toBeNull();
+    expect(trigger.hasAttribute("aria-controls")).toBe(false);
+
+    dropdown.setDisabled(true);
+    trigger.click();
+    expect(host.querySelector(".ss-studio-searchable-select-panel")).toBeNull();
+    dropdown.setDisabled(false);
+    trigger.click();
+    await flush();
+
+    const firstPanel = host.querySelector<HTMLElement>(".ss-studio-searchable-select-panel")!;
+    const firstSearch = firstPanel.querySelector<HTMLInputElement>("input")!;
+    expect(firstPanel.getAttribute("data-ss-surface")).toBe("transient");
+    firstSearch.value = "Model B";
+    firstSearch.dispatchEvent(new window.Event("input", { bubbles: true }));
+    expect(firstPanel.querySelectorAll("[role=option]")).toHaveLength(1);
+    const firstOption = firstPanel.querySelector<HTMLElement>("[role=option]")!;
+
+    dropdown.setDisabled(true);
+    expect(firstPanel.isConnected).toBe(false);
+    expect(host.querySelector(".ss-studio-searchable-select-panel")).toBeNull();
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    expect(trigger.hasAttribute("aria-controls")).toBe(false);
+    firstOption.dispatchEvent(new window.MouseEvent("pointerdown", { bubbles: true }));
+    expect(onValueChange).not.toHaveBeenCalled();
+
+    dropdown.setDisabled(false);
+    trigger.click();
+    await flush();
+    const nextPanel = host.querySelector<HTMLElement>(".ss-studio-searchable-select-panel")!;
+    expect(nextPanel).not.toBe(firstPanel);
+    expect(nextPanel.querySelector<HTMLInputElement>("input")?.value).toBe("");
+    expect(nextPanel.querySelectorAll("[role=option]")).toHaveLength(2);
+    expect(loadOptions).toHaveBeenCalledTimes(3);
+    expect(trigger.getAttribute("aria-controls")).toBe(nextPanel.querySelector("[role=listbox]")?.id);
+
+    dropdown.destroy();
+    dropdown.destroy();
+    expect(host.children).toHaveLength(0);
+    expect(nextPanel.isConnected).toBe(false);
+    trigger.click();
+    expect(host.children).toHaveLength(0);
+    expect(loadOptions).toHaveBeenCalledTimes(3);
+  });
+
+  it("releases viewport listeners when an open dropdown is removed during loading", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    let releaseOptions!: (options: StudioNodeConfigSelectOption[]) => void;
+    const pendingOptions = new Promise<StudioNodeConfigSelectOption[]>((resolve) => {
+      releaseOptions = resolve;
+    });
+    const dropdown = renderStudioSearchableDropdown({
+      containerEl: host,
+      ariaLabel: "Model",
+      value: "model-a",
+      disabled: false,
+      loadOptions: () => pendingOptions,
+      onValueChange: jest.fn(),
+    });
+    const addListener = jest.spyOn(window, "addEventListener");
+    const removeListener = jest.spyOn(window, "removeEventListener");
+    const trigger = host.querySelector<HTMLButtonElement>("button")!;
+    trigger.click();
+    const search = host.querySelector<HTMLInputElement>("input")!;
+    const focus = jest.spyOn(search, "focus");
+    const resizeListener = addListener.mock.calls.find(([type]) => type === "resize")?.[1];
+    expect(resizeListener).toEqual(expect.any(Function));
+
+    host.remove();
+    await flush();
+    releaseOptions([{ value: "model-a", label: "Model A" }]);
+    await flush();
+
+    expect(removeListener).toHaveBeenCalledWith("resize", resizeListener);
+    expect(removeListener).toHaveBeenCalledWith("scroll", resizeListener, true);
+    expect(dropdown.rootEl.querySelector(".ss-studio-searchable-select-panel")).toBeNull();
+    expect(focus).not.toHaveBeenCalled();
+    expect(dropdown.rootEl.isConnected).toBe(false);
+    dropdown.destroy();
+    addListener.mockRestore();
+    removeListener.mockRestore();
+  });
+
   it("opens downward when there is enough space below the trigger", async () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
@@ -155,6 +259,7 @@ describe("renderStudioSearchableDropdown", () => {
 
     const root = host.querySelector(".ss-studio-searchable-select") as HTMLElement;
     const trigger = host.querySelector(".ss-studio-searchable-select-trigger") as HTMLButtonElement;
+    trigger.click();
     const panel = host.querySelector(".ss-studio-searchable-select-panel") as HTMLElement;
     expect(panel.getAttribute("data-ss-surface")).toBe("transient");
     const list = host.querySelector(".ss-studio-searchable-select-list") as HTMLElement;
@@ -165,7 +270,6 @@ describe("renderStudioSearchableDropdown", () => {
     Object.defineProperty(panel, "scrollHeight", { configurable: true, value: 240 });
     Object.defineProperty(list, "scrollHeight", { configurable: true, value: 160 });
 
-    trigger.click();
     await flush();
 
     expect(root.classList.contains("is-open-upward")).toBe(false);
@@ -250,6 +354,7 @@ describe("renderStudioSearchableDropdown", () => {
 
     const root = host.querySelector(".ss-studio-searchable-select") as HTMLElement;
     const trigger = host.querySelector(".ss-studio-searchable-select-trigger") as HTMLButtonElement;
+    trigger.click();
     const panel = host.querySelector(".ss-studio-searchable-select-panel") as HTMLElement;
     const list = host.querySelector(".ss-studio-searchable-select-list") as HTMLElement;
 
@@ -260,7 +365,6 @@ describe("renderStudioSearchableDropdown", () => {
     Object.defineProperty(panel, "scrollHeight", { configurable: true, value: 240 });
     Object.defineProperty(list, "scrollHeight", { configurable: true, value: 160 });
 
-    trigger.click();
     await flush();
 
     expect(root.classList.contains("is-open-upward")).toBe(true);
@@ -277,7 +381,7 @@ describe("renderStudioSearchableDropdown", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
 
-    let releaseOptions: (() => void) | null = null;
+    let releaseOptions = (): void => {};
     renderStudioSearchableDropdown({
       containerEl: host,
       ariaLabel: "Model",
@@ -297,11 +401,11 @@ describe("renderStudioSearchableDropdown", () => {
     await flush();
 
     const trigger = host.querySelector(".ss-studio-searchable-select-trigger") as HTMLButtonElement;
+    trigger.click();
     const list = host.querySelector(".ss-studio-searchable-select-list") as HTMLElement;
 
-    trigger.click();
     await flush();
-    releaseOptions?.();
+    releaseOptions();
     await flush();
 
     const listMaxHeight = Number.parseInt(list.style.maxHeight || "0", 10);
@@ -311,7 +415,7 @@ describe("renderStudioSearchableDropdown", () => {
   it("does not refocus or render a dropdown closed while options load", async () => {
     const host = document.createElement("div");
     document.body.appendChild(host);
-    let releaseOptions: (() => void) | null = null;
+    let releaseOptions = (): void => {};
     const pendingOptions = new Promise<StudioNodeConfigSelectOption[]>((resolve) => {
       releaseOptions = () => resolve([{ value: "model-a", label: "Model A" }]);
     });
@@ -328,6 +432,7 @@ describe("renderStudioSearchableDropdown", () => {
     const trigger = host.querySelector<HTMLButtonElement>(
       ".ss-studio-searchable-select-trigger"
     );
+    trigger?.click();
     const search = host.querySelector<HTMLInputElement>(
       ".ss-studio-searchable-select-search"
     );
@@ -337,14 +442,103 @@ describe("renderStudioSearchableDropdown", () => {
     const focusSpy = jest.spyOn(search!, "focus");
 
     trigger?.click();
-    trigger?.click();
-    releaseOptions?.();
+    releaseOptions();
     await flush();
 
     expect(panel?.style.display).toBe("none");
     expect(focusSpy).not.toHaveBeenCalled();
     expect(host.querySelector(".ss-studio-searchable-select-item")).toBeNull();
   });
+
+  it("renders only the current panel when reopened during an options load", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    let releaseOptions!: (options: StudioNodeConfigSelectOption[]) => void;
+    const pendingOptions = new Promise<StudioNodeConfigSelectOption[]>((resolve) => {
+      releaseOptions = resolve;
+    });
+    const onValueChange = jest.fn();
+    const dropdown = renderStudioSearchableDropdown({
+      containerEl: host,
+      ariaLabel: "Model",
+      value: "model-a",
+      disabled: false,
+      loadOptions: () => pendingOptions,
+      onValueChange,
+    });
+    const trigger = host.querySelector<HTMLButtonElement>("button")!;
+    trigger.click();
+    const oldSearch = host.querySelector<HTMLInputElement>("input")!;
+    const oldFocus = jest.spyOn(oldSearch, "focus");
+    trigger.click();
+    trigger.click();
+    const currentSearch = host.querySelector<HTMLInputElement>("input")!;
+    expect(currentSearch).not.toBe(oldSearch);
+
+    releaseOptions([{ value: "model-b", label: "Model B" }]);
+    await flush();
+    expect(oldFocus).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(currentSearch);
+    expect(host.querySelectorAll(".ss-studio-searchable-select-panel")).toHaveLength(1);
+    currentSearch.value = "Model B";
+    currentSearch.dispatchEvent(new window.Event("input", { bubbles: true }));
+    host.querySelector<HTMLElement>("[role=option]")!.dispatchEvent(
+      new window.MouseEvent("pointerdown", { bubbles: true, cancelable: true })
+    );
+    expect(onValueChange).toHaveBeenCalledTimes(1);
+    expect(onValueChange).toHaveBeenCalledWith("model-b");
+    expect(trigger.textContent).toContain("Model B");
+    expect(document.activeElement).toBe(trigger);
+    expect(host.querySelector(".ss-studio-searchable-select-panel")).toBeNull();
+    dropdown.destroy();
+    oldFocus.mockRestore();
+  });
+
+  it.each(["disable", "destroy"] as const)(
+    "finishes a selection when its callback synchronously calls %s",
+    async (action) => {
+      const host = document.createElement("div");
+      document.body.appendChild(host);
+      const onValueChange = jest.fn(() => {
+        if (action === "disable") dropdown.setDisabled(true);
+        else dropdown.destroy();
+      });
+      const dropdown = renderStudioSearchableDropdown({
+        containerEl: host,
+        ariaLabel: "Model",
+        value: "model-a",
+        disabled: false,
+        loadOptions: async () => [{ value: "model-b", label: "Model B" }],
+        onValueChange,
+      });
+      const trigger = host.querySelector<HTMLButtonElement>("button")!;
+      trigger.click();
+      await flush();
+      const search = host.querySelector<HTMLInputElement>("input")!;
+      search.value = "Model B";
+      search.dispatchEvent(new window.Event("input", { bubbles: true }));
+      const errors: unknown[] = [];
+      const onError = (event: ErrorEvent) => {
+        errors.push(event.error);
+        event.preventDefault();
+      };
+      window.addEventListener("error", onError);
+      try {
+        search.dispatchEvent(new window.KeyboardEvent("keydown", {
+          key: "Enter", bubbles: true, cancelable: true,
+        }));
+        expect(errors).toEqual([]);
+        expect(onValueChange).toHaveBeenCalledTimes(1);
+        expect(onValueChange).toHaveBeenCalledWith("model-b");
+        expect(host.querySelector(".ss-studio-searchable-select-panel")).toBeNull();
+        if (action === "disable") expect(trigger.disabled).toBe(true);
+        else expect(host.children).toHaveLength(0);
+      } finally {
+        window.removeEventListener("error", onError);
+        dropdown.destroy();
+      }
+    }
+  );
 
   it("caps panel height to the available viewport space", async () => {
     const host = document.createElement("div");
@@ -367,6 +561,7 @@ describe("renderStudioSearchableDropdown", () => {
 
     const root = host.querySelector(".ss-studio-searchable-select") as HTMLElement;
     const trigger = host.querySelector(".ss-studio-searchable-select-trigger") as HTMLButtonElement;
+    trigger.click();
     const panel = host.querySelector(".ss-studio-searchable-select-panel") as HTMLElement;
     const list = host.querySelector(".ss-studio-searchable-select-list") as HTMLElement;
 
@@ -377,7 +572,6 @@ describe("renderStudioSearchableDropdown", () => {
     Object.defineProperty(panel, "scrollHeight", { configurable: true, value: 240 });
     Object.defineProperty(list, "scrollHeight", { configurable: true, value: 160 });
 
-    trigger.click();
     await flush();
 
     expect(root.classList.contains("is-open-upward")).toBe(true);
@@ -406,6 +600,7 @@ describe("renderStudioSearchableDropdown", () => {
     const trigger = host.querySelector<HTMLButtonElement>(
       ".ss-studio-searchable-select-trigger"
     )!;
+    trigger.click();
     const panel = host.querySelector<HTMLElement>(
       ".ss-studio-searchable-select-panel"
     )!;
@@ -413,7 +608,6 @@ describe("renderStudioSearchableDropdown", () => {
       ".ss-studio-searchable-select-search"
     )!;
 
-    trigger.click();
     await flush();
     expect(search.getAttribute("role")).toBe("combobox");
     expect(search.getAttribute("aria-expanded")).toBe("true");
@@ -439,14 +633,18 @@ describe("renderStudioSearchableDropdown", () => {
     expect(search.getAttribute("aria-expanded")).toBe("false");
     expect(document.activeElement).toBe(trigger);
 
+    expect(host.querySelector(".ss-studio-searchable-select-panel")).toBeNull();
     trigger.click();
     await flush();
-    search.dispatchEvent(new window.KeyboardEvent("keydown", {
+    const reopenedSearch = host.querySelector<HTMLInputElement>(
+      ".ss-studio-searchable-select-search"
+    )!;
+    reopenedSearch.dispatchEvent(new window.KeyboardEvent("keydown", {
       key: "Escape",
       bubbles: true,
       cancelable: true,
     }));
-    expect(panel.style.display).toBe("none");
+    expect(host.querySelector(".ss-studio-searchable-select-panel")).toBeNull();
     expect(document.activeElement).toBe(trigger);
   });
 });

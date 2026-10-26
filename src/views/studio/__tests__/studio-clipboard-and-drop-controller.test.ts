@@ -63,6 +63,7 @@ type Harness = {
   app: App;
   controller: StudioClipboardAndDropController;
   host: StudioClipboardAndDropHost & {
+    getSelectedNodeIds: jest.Mock<string[], []>;
     finalizeCreatedNodes: jest.Mock;
     removeNodes: jest.Mock;
     removeDiagramSelection: jest.Mock;
@@ -219,7 +220,7 @@ describe("StudioClipboardAndDropController", () => {
         pendingConnectionMode: "default",
       },
     );
-    expect(noticeMessages()).toContain("Pasted as text.");
+    expect(noticeMessages()).toEqual([]);
   });
 
   it("routes media before text and preserves editable and whitespace defaults", async () => {
@@ -273,7 +274,6 @@ describe("StudioClipboardAndDropController", () => {
     expect(harness.host.insertVaultNoteNodes).toHaveBeenCalledWith(
       [note.path],
       { x: 120, y: 240 },
-      "paste",
     );
 
     const pasteText = jest.spyOn(harness.controller, "pasteClipboardText");
@@ -310,7 +310,7 @@ describe("StudioClipboardAndDropController", () => {
         pendingConnectionMode: "default",
       },
     );
-    expect(noticeMessages()).toContain("Pasted 2 media files as Media nodes.");
+    expect(noticeMessages()).toEqual([]);
   });
 
   describe("copying a picture node", () => {
@@ -349,7 +349,7 @@ describe("StudioClipboardAndDropController", () => {
 
       expect(copyNodeImage).toHaveBeenCalledWith("photo");
       expect(harness.copyText).not.toHaveBeenCalled();
-      expect(noticeMessages()).toContain("Copied 1 item.");
+      expect(noticeMessages()).toEqual([]);
     });
 
     it("copies the node after all when its picture cannot be put on the clipboard", async () => {
@@ -571,7 +571,8 @@ describe("StudioClipboardAndDropController", () => {
     expect(harness.host.selectPastedShapes).toHaveBeenCalledWith(
       pastedShapes.map((shape) => shape.id),
     );
-    expect(noticeMessages()).toContain("Pasted 3 items.");
+    // The pasted items appear selected on the canvas; no notice.
+    expect(noticeMessages()).toEqual([]);
   });
 
   it("cuts a shape-only selection through the diagram layer", () => {
@@ -595,7 +596,7 @@ describe("StudioClipboardAndDropController", () => {
     expect(harness.controller.cutSelectedGraphNodes()).toBe(true);
     expect(harness.host.removeDiagramSelection).toHaveBeenCalledTimes(1);
     expect(harness.host.removeNodes).not.toHaveBeenCalled();
-    expect(noticeMessages()).toContain("Cut 1 item.");
+    expect(noticeMessages()).toEqual([]);
   });
 
   it("mirrors graph clipboard data through the bound viewport owner realm", async () => {
@@ -632,7 +633,8 @@ describe("StudioClipboardAndDropController", () => {
 
     harness.host.removeNodes.mockReturnValue(true);
     expect(harness.controller.cutSelectedGraphNodes()).toBe(true);
-    expect(noticeMessages()).toContain("Cut 1 item.");
+    // A cut that worked is visible: the nodes are gone.
+    expect(noticeMessages()).toHaveLength(1);
   });
 
   it("classifies mixed vault drops and materializes media at the drop point", async () => {
@@ -673,15 +675,13 @@ describe("StudioClipboardAndDropController", () => {
     expect(harness.host.insertVaultNoteNodes).toHaveBeenCalledWith(
       [note.path],
       { x: 30, y: 45 },
-      "drop",
     );
     const mediaNode = harness.getProject()?.graph.nodes.find(
       (node) => node.kind === "studio.media_ingest",
     );
     expect(mediaNode?.config.sourcePath).toBe(media.path);
     expect(mediaNode?.position).toEqual({ x: 30, y: 45 });
-    expect(noticeMessages()).toContain("Dropping folders into Studio is not supported yet.");
-    expect(noticeMessages()).toContain("Added 1 media file as a Media node.");
+    expect(noticeMessages()).toEqual(["Dropping folders into Studio is not supported yet."]);
   });
 
   it("claims drag-over events but advertises copy only for a writable project", () => {
@@ -722,7 +722,6 @@ describe("StudioClipboardAndDropController", () => {
     expect(harness.host.insertVaultNoteNodes).toHaveBeenCalledWith(
       [note.path],
       { x: 120, y: 240 },
-      "drop",
     );
   });
 
@@ -851,7 +850,7 @@ describe("telling a pasted picture from the one that was copied", () => {
       (yieldToEventLoop as jest.Mock).mockClear();
       // A canvas that hands back the rows it was asked to draw.
       getContext = jest.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(() => {
-        let drawn = new Uint8ClampedArray(0);
+        let drawn: Uint8ClampedArray = new Uint8ClampedArray(0);
         return {
           drawImage: (source: FakeBitmap, _sx: number, sy: number, sw: number, sh: number) => {
             drawn = source.pixels.subarray(sy * sw * 4, (sy + sh) * sw * 4);

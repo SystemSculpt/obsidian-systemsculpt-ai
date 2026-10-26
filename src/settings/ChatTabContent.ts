@@ -1,10 +1,12 @@
 import { mountCodexExecutionControls } from "../services/codex/CodexExecutionControls";
-import { Notice, Setting } from "obsidian";
+import { createCatalogSetting } from "./SettingsCatalog";
 import { SystemSculptSettingTab } from "./SystemSculptSettingTab";
+import { beginTextSettings } from "./TextSettings";
 
 const codexSettingsCleanup = new WeakMap<HTMLElement, () => void>();
 
 export async function displayChatTabContent(containerEl: HTMLElement, tabInstance: SystemSculptSettingTab) {
+    const bindTextSetting = beginTextSettings(containerEl, tabInstance);
     codexSettingsCleanup.get(containerEl)?.(); containerEl.empty();
     if (containerEl.classList.contains('systemsculpt-tab-content')) {
         containerEl.dataset.tab = "chat";
@@ -25,23 +27,19 @@ export async function displayChatTabContent(containerEl: HTMLElement, tabInstanc
 
     const normalizeDefaultChatTag = (value: string): string => value.trim().replace(/^#+/, "");
 
-    new Setting(containerEl)
-        .setName("Default chat tag")
-        .setDesc("Optional. Adds this tag to new chat history notes (frontmatter `tags`).")
+    createCatalogSetting(containerEl, "chat.default-tag")
         .addText((text) => {
             text
                 .setPlaceholder("Ai-chat")
-                .setValue(plugin.settings.defaultChatTag || "")
-                .onChange(async (value) => {
-                    const normalized = normalizeDefaultChatTag(value);
-                    await plugin.getSettingsManager().updateSettings({ defaultChatTag: normalized });
-                });
+                .setValue(plugin.settings.defaultChatTag || "");
+            bindTextSetting("defaultChatTag", text.inputEl, async (value) => {
+                const normalized = normalizeDefaultChatTag(value);
+                return plugin.getSettingsManager().updateSettings({ defaultChatTag: normalized });
+            });
         });
 
 // --- Default Chat Font Size ---
-new Setting(containerEl)
-    .setName("Default chat font size")
-    .setDesc("Select the default text size for new chat messages.")
+createCatalogSetting(containerEl, "chat.font-size")
     .addDropdown(dropdown => {
         dropdown
             .addOption("small", "Small")
@@ -51,20 +49,16 @@ new Setting(containerEl)
             .onChange(async (value: string) => {
                 if (value !== "small" && value !== "medium" && value !== "large") return;
                 await plugin.getSettingsManager().updateSettings({ chatFontSize: value });
-                new Notice(`Default chat font size set to: ${value}`);
             });
 	    });
 
 // --- Reduced Motion Preference ---
-new Setting(containerEl)
-    .setName("Honor reduced motion")
-    .setDesc("When enabled, SystemSculpt animations/transitions are minimized if your system prefers reduced motion. Disable this if you want full animations.")
+createCatalogSetting(containerEl, "chat.reduce-motion")
     .addToggle((toggle) => {
         toggle
-            .setValue(plugin.settings.respectReducedMotion ?? true)
+            .setValue(plugin.settings.reduceChatMotion ?? false)
             .onChange(async (value) => {
-                await plugin.getSettingsManager().updateSettings({ respectReducedMotion: value });
-                new Notice(`Reduced motion ${value ? 'enabled' : 'disabled'}.`);
+                await plugin.getSettingsManager().updateSettings({ reduceChatMotion: value });
             });
     });
 }

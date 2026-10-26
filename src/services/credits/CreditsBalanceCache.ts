@@ -4,7 +4,7 @@ import type {
 } from "../SystemSculptService";
 
 /** Display surfaces reuse a balance this recent instead of asking again. */
-export const CREDITS_BALANCE_CACHE_TTL_MS = 60_000;
+const CREDITS_BALANCE_CACHE_TTL_MS = 60_000;
 
 export type CreditsBalanceReadOptions = Readonly<{
   /** Skip the cache and any older request, e.g. after a billed turn or a purchase. */

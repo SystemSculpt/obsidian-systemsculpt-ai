@@ -1,6 +1,5 @@
 /** @jest-environment jsdom */
 
-import { isPluginSurface } from "../../../core/ui/surface";
 import { SystemSculptStudioView } from "../SystemSculptStudioView";
 
 const renderStudioView = (SystemSculptStudioView as any).prototype.render as (
@@ -27,6 +26,43 @@ describe("SystemSculptStudioView Plugin surface", () => {
     renderStudioView.call(context);
     expect(context.renderGraphEditor).not.toHaveBeenCalled();
     expect(contentEl.childElementCount).toBe(0);
+  });
+
+  it("keeps the migration notice and Try again action until retry unlocks the shared session", async () => {
+    let reason: string | undefined = "Read-only: Studio couldn't save the original copy. The project file is unchanged.";
+    let finishRetry!: () => void;
+    const load = jest.fn(() => new Promise<void>(resolve => { finishRetry = resolve; }));
+    const context: Record<string, any> = {
+      contentEl: document.createElement("div"),
+      currentProjectPath: "Studio/Legacy.systemsculpt",
+      currentProjectSession: { getReadOnlyReason: () => reason },
+      projectSessionController: { loadProjectFromPath: load },
+      shapeController: { cancelDrawGesture: jest.fn(), registerLayerHandle: jest.fn() },
+      captureGraphViewportState: jest.fn(), resetViewportScrollingState: jest.fn(), disposeTextNodeEditors: jest.fn(),
+      outputContainers: { dispose: jest.fn() }, graphInteraction: { clearRenderBindings: jest.fn() },
+      clipboardAndDropController: { bindViewport: jest.fn() },
+      renderGraphEditor: jest.fn(), activity: { project: jest.fn(), apply: jest.fn() },
+      lastError: null, projectFileWarning: null,
+    };
+    context.render = () => renderStudioView.call(context);
+    context.retryMigration = (SystemSculptStudioView as any).prototype.retryMigration.bind(context);
+    context.render();
+    const button = () => context.contentEl.querySelector('[data-testid="studio.migration.retry"]') as HTMLButtonElement;
+    expect(context.contentEl.textContent).toContain(reason);
+    expect(button().textContent).toBe("Try again");
+    button().click();
+    expect(load).toHaveBeenCalledWith("Studio/Legacy.systemsculpt", { forceReload: true });
+    expect(button().disabled).toBe(true);
+    finishRetry();
+    await Promise.resolve();
+    expect(button().disabled).toBe(false);
+    expect(context.contentEl.textContent).toContain(reason);
+    button().click();
+    reason = undefined;
+    finishRetry();
+    await Promise.resolve();
+    expect(button()).toBeNull();
+    expect(context.contentEl.querySelector(".ss-studio-warning")).toBeNull();
   });
 
   it("mounts the persistent Studio root without changing graph geometry", () => {
@@ -61,7 +97,8 @@ describe("SystemSculptStudioView Plugin surface", () => {
 
     const root = contentEl.querySelector<HTMLElement>(".ss-studio-view");
     expect(root).not.toBeNull();
-    expect(isPluginSurface(root!, "view")).toBe(true);
+    expect(root?.classList.contains("ss-surface")).toBe(true);
+    expect(root?.getAttribute("data-ss-surface")).toBe("view");
     expect(root?.contains(geometry)).toBe(true);
     expect(geometry.style.width).toBe("16000px");
     expect(geometry.style.height).toBe("10000px");

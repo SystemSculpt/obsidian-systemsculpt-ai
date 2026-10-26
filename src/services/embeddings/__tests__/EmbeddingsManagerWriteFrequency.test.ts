@@ -4,10 +4,10 @@ import { EmbeddingsManager } from "../EmbeddingsManager";
 import { SemanticIndexLifecycle } from "../SemanticIndexLifecycle";
 import { SemanticWorkQueue } from "../SemanticWorkQueue";
 import type { EmbeddingVector, ProcessingResult } from "../types";
-import { buildManagedNamespace } from "../utils/namespace";
+import { managedNamespace } from "./support/managedNamespace";
 import { buildVectorId } from "../utils/vectorId";
 
-const namespace = buildManagedNamespace(2);
+const namespace = managedNamespace(2);
 
 function root(file: TFile): EmbeddingVector {
   return {
@@ -93,7 +93,7 @@ function harness(paths: Array<{ path: string; size?: number }>) {
         }),
       },
     },
-    plugin: { settings, emitter: { emit: jest.fn() } },
+    plugin: { settings },
     markPortableIndexChanged: jest.fn(),
     markPortableIndexDestructive: jest.fn(),
     processor: { processFiles: jest.fn(), cancel: jest.fn() },

@@ -3,9 +3,16 @@ import { App, Platform, TFile } from "obsidian";
 import {
   ManagedTranscriptionRetryError,
   TranscriptionResumeRequiredError,
+  type ManagedTranscriptionAdapter,
+  type ManagedTranscriptionContext,
+  type ManagedTranscriptionResult,
 } from "../ManagedTranscriptionAdapter";
 import { TranscriptionCoordinator } from "../TranscriptionCoordinator";
-import { createLocalCommitReceipt } from "../LocalCommitReceipt";
+import { createLocalCommitReceipt, LocalCommitReceiptMismatchError } from "../LocalCommitReceipt";
+import { createVaultFileSource } from "../../../platform/fileSource";
+import type { ManagedFileSource } from "../../managed/ManagedFileSource";
+
+jest.mock("../../../platform/fileSource", () => ({ createVaultFileSource: jest.fn() }));
 
 const mockClipboardWrite = jest.fn(async () => undefined);
 Object.defineProperty(navigator, "clipboard", {
@@ -20,23 +27,26 @@ jest.mock("../../PostProcessingService", () => ({
   },
 }));
 
-const mockTryRename = jest.fn(async (_app: unknown, file: TFile) => file.path);
-jest.mock("../TranscriptionTitleService", () => ({
-  TranscriptionTitleService: {
-    getInstance: jest.fn(() => ({
-      buildFallbackBasename: (name: string) => `${name} - transcript`,
-      buildTitledBasename: (prefix: string, title: string) => `${prefix} - transcript - ${title}`,
-      tryGenerateTitle: jest.fn(async () => null),
-      tryRenameTranscriptionFile: mockTryRename,
-    })),
-  },
-}));
-
 interface HarnessOverrides {
   autoPaste?: boolean;
   clean?: boolean;
   keep?: boolean;
   postProcess?: boolean;
+}
+
+function requiredOperationId(context: ManagedTranscriptionContext | undefined): string {
+  if (!context?.operationId) throw new Error("Expected the coordinator to own an operation ID.");
+  return context.operationId;
+}
+
+async function readAndReleaseSource(source: ManagedFileSource): Promise<void> {
+  try {
+    await source.fingerprint();
+    const loaded = await source.load();
+    await loaded.readSlice(0, Math.min(loaded.sizeBytes, 1024 * 1024));
+  } finally {
+    source.release?.();
+  }
 }
 
 function harness(overrides: HarnessOverrides = {}) {
@@ -52,9 +62,27 @@ function harness(overrides: HarnessOverrides = {}) {
     (path: string) => path === file.path ? file : null,
   );
   (app.vault.getFiles as jest.Mock).mockReturnValue([]);
-  (app.vault as unknown as { readBinary: jest.Mock }).readBinary = jest.fn(
-    async () => new Uint8Array([1, 2, 3, 4]).buffer,
-  );
+  (app.vault as unknown as { readBinary: jest.Mock }).readBinary = jest.fn(async () => {
+    throw new Error("Whole-file audio reads are forbidden.");
+  });
+  const readSlice = jest.fn(async (start: number, end: number) => {
+    if (start < 0 || end > file.stat.size || end < start || end - start > 1024 * 1024) {
+      throw new Error("Expected a bounded audio slice.");
+    }
+    return Uint8Array.from({ length: end - start }, (_, index) => (start + index + 1) % 256).buffer;
+  });
+  const release = jest.fn();
+  jest.mocked(createVaultFileSource).mockImplementation((_app, selected) => {
+    let released = false;
+    return {
+      sizeBytes: selected.stat.size,
+      readSlice: async (start, end) => {
+        if (released) throw new Error("The vault file source was released.");
+        return readSlice(start, end);
+      },
+      release: () => { released = true; release(); },
+    };
+  });
   (app.vault.create as jest.Mock).mockImplementation(async (path: string) => {
     events.push(`write:${path}`);
     return new TFile({ path, name: path.split("/").pop() });
@@ -65,17 +93,15 @@ function harness(overrides: HarnessOverrides = {}) {
   });
 
   const adapter = {
-    transcribe: jest.fn(async (source: {
-      fingerprint(): Promise<string>;
-      load(): Promise<{ bytes: ArrayBuffer }>;
-    }) => {
+    transcribe: jest.fn<ReturnType<ManagedTranscriptionAdapter["transcribe"]>, Parameters<ManagedTranscriptionAdapter["transcribe"]>>(async (source) => {
       events.push("remote");
-      await source.fingerprint();
-      await source.load();
+      await readAndReleaseSource(source);
       return { kind: "transcript", operationId: "transcription-op-1", text: "managed transcript" };
     }),
-    resume: jest.fn(async (operationId: string) => ({ kind: "transcript", operationId, text: "managed transcript" })),
-    resumeOrStart: jest.fn(async (operationId: string) => ({ kind: "transcript", operationId, text: "managed transcript" })),
+    resume: jest.fn<ReturnType<ManagedTranscriptionAdapter["resume"]>, Parameters<ManagedTranscriptionAdapter["resume"]>>(async (operationId, source) => {
+      await readAndReleaseSource(source);
+      return { kind: "transcript", operationId, text: "managed transcript" };
+    }),
     hasRecoveryOperation: jest.fn(async () => true),
     beginLocalCommit: jest.fn(async () => { events.push("commit:begin"); }),
     recordLocalCommitReceipt: jest.fn(async () => { events.push("commit:receipt"); }),
@@ -92,7 +118,7 @@ function harness(overrides: HarnessOverrides = {}) {
     },
   } as any;
   const coordinator = new TranscriptionCoordinator(app, plugin, adapter as any);
-  return { adapter, app, coordinator, events, file };
+  return { adapter, app, coordinator, events, file, readSlice, release };
 }
 
 describe("TranscriptionCoordinator", () => {
@@ -100,7 +126,6 @@ describe("TranscriptionCoordinator", () => {
     jest.clearAllMocks();
     Object.assign(Platform, { isDesktopApp: true, isMobileApp: false });
     mockProcessTranscription.mockImplementation(async (text: string) => ({ text: `processed:${text}` }));
-    mockTryRename.mockImplementation(async (_app: unknown, file: TFile) => file.path);
   });
 
   it("commits one Markdown output before optionally deleting the recoverable source", async () => {
@@ -116,13 +141,13 @@ describe("TranscriptionCoordinator", () => {
       "remote",
       "commit:begin",
       "commit:receipt",
-      "write:Recordings/demo - transcript.md",
+      "write:Recordings/demo.md",
       "commit:complete",
       "delete-source",
     ]);
     expect(result).toMatchObject({
       operationId: "transcription-op-1",
-      outputPath: "Recordings/demo - transcript.md",
+      outputPath: "Recordings/demo.md",
       sourceDisposition: "trashed",
     });
     expect(adapter.completeLocalCommit).toHaveBeenCalledWith("transcription-op-1");
@@ -151,7 +176,7 @@ describe("TranscriptionCoordinator", () => {
     });
 
     expect(app.vault.create).toHaveBeenCalledWith(
-      "Recordings/demo - transcript.md",
+      "Recordings/demo.md",
       "processed:managed transcript",
     );
     expect(app.vault.create).not.toHaveBeenCalledWith(
@@ -174,14 +199,14 @@ describe("TranscriptionCoordinator", () => {
     });
 
     expect(app.vault.create).toHaveBeenCalledWith(
-      "Recordings/demo - transcript.md",
+      "Recordings/demo.md",
       "managed transcript",
     );
     expect(events).toEqual([
       "remote",
       "commit:begin",
       "commit:receipt",
-      "write:Recordings/demo - transcript.md",
+      "write:Recordings/demo.md",
       "commit:complete",
       "delete-source",
     ]);
@@ -263,7 +288,7 @@ describe("TranscriptionCoordinator", () => {
       await source.load();
       entered();
       await new Promise<void>((resolve) => { release = resolve; });
-      return { operationId: "transcription-op-1", text: "late transcript" };
+      return { kind: "transcript", operationId: "transcription-op-1", text: "late transcript" };
     });
     const running = coordinator.start({
       filePath: "Recordings/demo.webm",
@@ -291,7 +316,7 @@ describe("TranscriptionCoordinator", () => {
       acceptedOperationId = context.operationId;
       entered();
       await delayed;
-      return { operationId: context.operationId, text: "managed transcript" };
+      return { kind: "transcript", operationId: context.operationId, text: "managed transcript" };
     });
     const running = coordinator.transcribeFile(
       file,
@@ -341,21 +366,28 @@ describe("TranscriptionCoordinator", () => {
     expect(adapter.completeLocalCommit).not.toHaveBeenCalled();
   });
 
-  it("hashes the source bytes once and reuses those bytes for upload", async () => {
-    const { adapter, app, coordinator, file } = harness();
-    let fingerprint = "";
-    adapter.transcribe.mockImplementation(async (source: any) => {
-      fingerprint = await source.fingerprint();
-      await source.load();
-      return { operationId: "transcription-op-1", text: "managed transcript" };
+  it("caches the exact source fingerprint and verifies upload slices without whole-file reads", async () => {
+    const { adapter, app, coordinator, file, readSlice } = harness();
+    adapter.transcribe.mockImplementation(async (source: ManagedFileSource) => {
+      const fingerprints = await Promise.all([source.fingerprint(), source.fingerprint()]);
+      expect(fingerprints).toEqual([
+        "sha256:9f64a747e1b97f131fabb6b447296c9b6f0201e79fb3c5356e6c77e89b6a806a",
+        "sha256:9f64a747e1b97f131fabb6b447296c9b6f0201e79fb3c5356e6c77e89b6a806a",
+      ]);
+      expect(readSlice.mock.calls).toEqual([[0, 4]]);
+      const loaded = await source.load();
+      expect(loaded).toMatchObject({ filename: file.name, contentType: "audio/webm", sizeBytes: 4 });
+      expect(loaded).not.toHaveProperty("bytes");
+      expect(new Uint8Array(await loaded.readSlice(1, 3))).toEqual(new Uint8Array([2, 3]));
+      return { kind: "transcript", operationId: "transcription-op-1", text: "managed transcript" };
     });
 
     await coordinator.transcribeFile(file, { type: "note" }, async (text) => text);
 
-    expect(fingerprint).toBe(
-      "sha256:9f64a747e1b97f131fabb6b447296c9b6f0201e79fb3c5356e6c77e89b6a806a",
-    );
-    expect(app.vault.readBinary).toHaveBeenCalledTimes(1);
+    expect(createVaultFileSource).toHaveBeenCalledTimes(1);
+    expect(createVaultFileSource).toHaveBeenCalledWith(app, file);
+    expect(readSlice.mock.calls).toEqual([[0, 4], [0, 4]]);
+    expect(app.vault.readBinary).not.toHaveBeenCalled();
   });
 
   it("inserts only the processed body into the editor captured by the initiating surface", async () => {
@@ -380,11 +412,11 @@ describe("TranscriptionCoordinator", () => {
     expect(mockClipboardWrite).not.toHaveBeenCalled();
     expect(result.insertedIntoOrigin).toBe(true);
     expect(app.vault.create).toHaveBeenCalledWith(
-      "Recordings/demo - transcript.md",
+      "Recordings/demo.md",
       expect.stringContaining("## Raw transcript\nmanaged transcript"),
     );
     expect(app.vault.create).toHaveBeenCalledWith(
-      "Recordings/demo - transcript.md",
+      "Recordings/demo.md",
       expect.stringContaining("## Cleaned transcript\nprocessed:managed transcript"),
     );
   });
@@ -402,7 +434,7 @@ describe("TranscriptionCoordinator", () => {
 
     expect(originEditor.replaceSelection).not.toHaveBeenCalled();
     expect(result).toMatchObject({
-      outputPath: "Recordings/demo - transcript.md",
+      outputPath: "Recordings/demo.md",
       insertedIntoOrigin: false,
       warning: expect.stringContaining("note where transcription started changed or closed"),
     });
@@ -410,8 +442,8 @@ describe("TranscriptionCoordinator", () => {
 
   it.each([
     [0, "empty"],
-    [128 * 1024 * 1024 + 1, "too large"],
-  ])("rejects %s-byte audio before reading it into memory", async (size, message) => {
+    [500 * 1024 * 1024 + 1, "too large"],
+  ])("rejects %s-byte audio before opening its source", async (size, message) => {
     const { adapter, app, coordinator, file } = harness();
     file.stat.size = size;
 
@@ -420,23 +452,48 @@ describe("TranscriptionCoordinator", () => {
       destination: "note",
     })).rejects.toThrow(message);
 
+    expect(createVaultFileSource).not.toHaveBeenCalled();
     expect(app.vault.readBinary).not.toHaveBeenCalled();
     expect(adapter.transcribe).not.toHaveBeenCalled();
     expect(adapter.beginLocalCommit).not.toHaveBeenCalled();
   });
 
-  it("rejects audio above 32 MiB on mobile before allocating the file body", async () => {
+  it("rejects audio above 500 MiB on mobile before opening its source", async () => {
     Object.assign(Platform, { isDesktopApp: false, isMobileApp: true });
     const { adapter, app, coordinator, file } = harness();
-    file.stat.size = 32 * 1024 * 1024 + 1;
+    file.stat.size = 500 * 1024 * 1024 + 1;
 
     await expect(coordinator.start({
       filePath: file.path,
       destination: "note",
-    })).rejects.toThrow("mobile transcription limit is 32.0 MiB");
+    })).rejects.toThrow("500.0 MiB");
 
+    expect(createVaultFileSource).not.toHaveBeenCalled();
     expect(app.vault.readBinary).not.toHaveBeenCalled();
     expect(adapter.transcribe).not.toHaveBeenCalled();
+  });
+
+  it.each(["desktop", "mobile"])("admits the 500 MiB boundary on %s without a whole-file allocation", async (host) => {
+    Object.assign(Platform, { isDesktopApp: host === "desktop", isMobileApp: host === "mobile" });
+    const { adapter, app, coordinator, file, readSlice } = harness();
+    file.stat.size = 500 * 1024 * 1024;
+    adapter.transcribe.mockImplementationOnce(async (source: ManagedFileSource) => {
+      const loaded = await source.load();
+      expect(loaded.sizeBytes).toBe(file.stat.size);
+      expect(loaded).not.toHaveProperty("bytes");
+      // Admission and source construction do not eagerly hash or read the file.
+      expect(readSlice).not.toHaveBeenCalled();
+      return { kind: "transcript", operationId: "transcription-op-1", text: "managed transcript" };
+    });
+
+    await expect(coordinator.start({ filePath: file.path, destination: "note" }))
+      .resolves.toMatchObject({ operationId: "transcription-op-1" });
+
+    expect(adapter.transcribe).toHaveBeenCalledWith(expect.any(Object), expect.objectContaining({
+      maxAudioBytes: 500 * 1024 * 1024,
+    }));
+    expect(createVaultFileSource).toHaveBeenCalledWith(app, file);
+    expect(app.vault.readBinary).not.toHaveBeenCalled();
   });
 
   it("returns a durable success with a warning when source cleanup fails", async () => {
@@ -482,7 +539,7 @@ describe("TranscriptionCoordinator", () => {
 
   it("allocates a new Markdown path instead of modifying an unrelated transcript", async () => {
     const { app, coordinator, file } = harness();
-    const existing = new TFile({ path: "Recordings/demo - transcript.md" });
+    const existing = new TFile({ path: "Recordings/demo.md" });
     (existing as any).parent = { path: "Recordings" };
     (app.vault.getFiles as jest.Mock).mockReturnValue([existing]);
     (app.vault.read as jest.Mock).mockResolvedValue("unrelated notes");
@@ -499,10 +556,69 @@ describe("TranscriptionCoordinator", () => {
 
     expect(app.vault.modify).not.toHaveBeenCalled();
     expect(app.vault.create).toHaveBeenCalledWith(
-      "Recordings/demo - transcript (2).md",
+      "Recordings/demo (2).md",
       expect.stringContaining("managed transcript"),
     );
-    expect(result.outputPath).toBe("Recordings/demo - transcript (2).md");
+    expect(result.outputPath).toBe("Recordings/demo (2).md");
+  });
+
+  it.each([false, true])("allocates a collision suffix for a fresh identical-text output (SRT: %s)", async (timestamped) => {
+    const { app, coordinator, file } = harness({ clean: true });
+    const extension = timestamped ? "srt" : "md";
+    const existing = new TFile({ path: `Recordings/demo.${extension}` });
+    (existing as any).parent = { path: "Recordings" };
+    (app.vault.getFiles as jest.Mock).mockReturnValue([existing]);
+    (app.vault.read as jest.Mock).mockResolvedValue("managed transcript");
+    (app.vault.getAbstractFileByPath as jest.Mock).mockImplementation((path: string) => {
+      if (path === file.path) return file;
+      return path === existing.path ? existing : null;
+    });
+
+    const result = await coordinator.start({ filePath: file.path, destination: "note", timestamped });
+
+    expect(result.outputPath).toBe(`Recordings/demo (2).${extension}`);
+    expect(app.vault.create).toHaveBeenCalledWith(result.outputPath, "managed transcript");
+    expect(app.vault.modify).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])("does not adopt an identical numbered output when the base path is free (SRT: %s)", async (timestamped) => {
+    const { app, coordinator, file } = harness({ clean: true });
+    const extension = timestamped ? "srt" : "md";
+    const existing = new TFile({ path: `Recordings/demo (2).${extension}` });
+    (existing as any).parent = { path: "Recordings" };
+    (app.vault.getFiles as jest.Mock).mockReturnValue([existing]);
+    (app.vault.read as jest.Mock).mockResolvedValue("managed transcript");
+
+    const result = await coordinator.start({ filePath: file.path, destination: "note", timestamped });
+
+    expect(result.outputPath).toBe(`Recordings/demo.${extension}`);
+    expect(app.vault.create).toHaveBeenCalledWith(result.outputPath, "managed transcript");
+  });
+
+  it("uses the audio name in its existing folder, not the first words of the transcript", async () => {
+    const { app, coordinator, file } = harness({ clean: false });
+    file.path = "Custom recordings/Gull Point timetable review.m4a";
+    file.name = "Gull Point timetable review.m4a";
+    file.basename = "Gull Point timetable review";
+    file.extension = "m4a";
+
+    const result = await coordinator.start({ filePath: file.path, destination: "note" });
+
+    expect(result.outputPath).toBe("Custom recordings/Gull Point timetable review.md");
+    expect(app.vault.create).toHaveBeenCalledWith(result.outputPath, expect.stringContaining("managed transcript"));
+  });
+
+  it("does not mistake a similarly named clean note for an already committed output", async () => {
+    const { app, coordinator, file } = harness({ clean: true });
+    const unrelated = new TFile({ path: "Recordings/demo notes.md" });
+    (unrelated as any).parent = { path: "Recordings" };
+    (app.vault.getFiles as jest.Mock).mockReturnValue([unrelated]);
+    (app.vault.read as jest.Mock).mockResolvedValue("managed transcript");
+
+    const result = await coordinator.start({ filePath: file.path, destination: "note" });
+
+    expect(result.outputPath).toBe("Recordings/demo.md");
+    expect(app.vault.create).toHaveBeenCalledTimes(1);
   });
 
   it("allocates a new SRT path instead of reusing or overwriting an unrelated subtitle", async () => {
@@ -549,7 +665,7 @@ describe("TranscriptionCoordinator", () => {
     release();
 
     await expect(running).resolves.toMatchObject({
-      outputPath: "Recordings/demo - transcript.md",
+      outputPath: "Recordings/demo.md",
     });
     expect(adapter.completeLocalCommit).toHaveBeenCalledWith("transcription-op-1");
   });
@@ -577,10 +693,10 @@ describe("TranscriptionCoordinator", () => {
     expect(adapter.completeLocalCommit).toHaveBeenCalledWith(operationId);
   });
 
-  it("reuses exact clean Markdown on same-operation local-commit recovery", async () => {
+  it.each(["demo.md", "demo - transcript - Existing.md"])("reuses exact clean Markdown %s on same-operation local-commit recovery", async (name) => {
     const { adapter, app, coordinator, file } = harness({ clean: true });
     const operationId = "transcription-clean-resume-1";
-    const existing = new TFile({ path: "Recordings/demo - transcript.md" });
+    const existing = new TFile({ path: `Recordings/${name}` });
     (existing as any).parent = { path: "Recordings" };
     (app.vault.getFiles as jest.Mock).mockReturnValue([existing]);
     (app.vault.read as jest.Mock).mockResolvedValue("managed transcript");
@@ -595,6 +711,41 @@ describe("TranscriptionCoordinator", () => {
     expect(app.vault.create).not.toHaveBeenCalled();
     expect(result.outputPath).toBe(existing.path);
     expect(adapter.completeLocalCommit).toHaveBeenCalledWith(operationId);
+  });
+
+  it("recovers exact clean output after the adapter explicitly adopts a preserved operation", async () => {
+    const { adapter, app, coordinator, file } = harness({ clean: true });
+    const existing = new TFile({ path: "Recordings/demo.md" });
+    (existing as any).parent = { path: "Recordings" };
+    (app.vault.getFiles as jest.Mock).mockReturnValue([existing]);
+    (app.vault.read as jest.Mock).mockResolvedValue("managed transcript");
+    adapter.transcribe.mockImplementation(async (_source: unknown, context: any) => {
+      await context.onOperationIdAdopted("preserved-operation");
+      return { kind: "transcript", operationId: "preserved-operation", text: "managed transcript" };
+    });
+
+    const result = await coordinator.start({ filePath: file.path, destination: "note" });
+
+    expect(result.outputPath).toBe(existing.path);
+    expect(app.vault.create).not.toHaveBeenCalled();
+  });
+
+  it("does not claim identical clean output when the requested recovery operation no longer exists", async () => {
+    const { adapter, app, coordinator, file } = harness({ clean: true });
+    const existing = new TFile({ path: "Recordings/demo.md" });
+    (existing as any).parent = { path: "Recordings" };
+    (app.vault.getFiles as jest.Mock).mockReturnValue([existing]);
+    (app.vault.read as jest.Mock).mockResolvedValue("managed transcript");
+    (app.vault.getAbstractFileByPath as jest.Mock).mockImplementation((path: string) => {
+      if (path === file.path) return file;
+      return path === existing.path ? existing : null;
+    });
+    adapter.hasRecoveryOperation.mockResolvedValue(false);
+
+    const result = await coordinator.start({ filePath: file.path, destination: "note", resumeOperationId: "expired-operation" });
+
+    expect(result.outputPath).toBe("Recordings/demo (2).md");
+    expect(app.vault.create).toHaveBeenCalledWith(result.outputPath, "managed transcript");
   });
 
   it("reuses an exact SRT output on same-operation resume instead of creating a duplicate", async () => {
@@ -624,6 +775,61 @@ describe("TranscriptionCoordinator", () => {
     expect(adapter.completeLocalCommit).toHaveBeenCalledWith(operationId);
   });
 
+  describe.each(["start", "transcribeFile"] as const)("%s source ownership", (entrypoint) => {
+    it.each(["completed mismatch", "pending receipt", "expired pending receipt"] as const)(
+      "opens a fresh source for each adapter invocation after a %s",
+      async (scenario) => {
+        const { adapter, app, coordinator, file, release } = harness();
+        const operationId = "retained-receipt-operation";
+        const receipt: ManagedTranscriptionResult = {
+          kind: "local_receipt",
+          operationId,
+          recoveryPhase: scenario === "completed mismatch" ? "completed" : "local_commit_pending",
+          receipt: createLocalCommitReceipt("Recordings/missing.md", "original transcript"),
+        };
+        const sources: ManagedFileSource[] = [];
+        const consume = async (source: ManagedFileSource) => {
+          sources.push(source);
+          await readAndReleaseSource(source);
+        };
+        adapter.transcribe.mockImplementation(async (source: ManagedFileSource, context?: ManagedTranscriptionContext) => {
+          await consume(source);
+          if (entrypoint === "transcribeFile" && sources.length === 1) return receipt;
+          return { kind: "transcript", operationId: requiredOperationId(context), text: "recovered transcript" };
+        });
+        adapter.resume.mockImplementation(async (resumedOperationId, source) => {
+          await consume(source);
+          if (entrypoint === "start" && sources.length === 1) return receipt;
+          if (scenario === "expired pending receipt") {
+            throw new ManagedTranscriptionRetryError(operationId, "restart", "local_commit_pending", new Error("expired"));
+          }
+          return { kind: "transcript", operationId: resumedOperationId, text: "recovered transcript" };
+        });
+
+        if (entrypoint === "start") {
+          await expect(coordinator.start({ filePath: file.path, destination: "note", resumeOperationId: operationId }))
+            .resolves.toMatchObject({ text: "recovered transcript" });
+        } else {
+          await expect(coordinator.transcribeFile(file, {
+            type: "note",
+            recoverLocalCommit: async () => { throw new LocalCommitReceiptMismatchError("Saved output is missing."); },
+          }, async (text) => text)).resolves.toBe("recovered transcript");
+        }
+
+        const expectedCalls = scenario === "expired pending receipt" ? 3 : 2;
+        expect(sources).toHaveLength(expectedCalls);
+        expect(new Set(sources).size).toBe(expectedCalls);
+        expect(new Set(sources.map((source) => source.identity)).size).toBe(1);
+        expect(createVaultFileSource).toHaveBeenCalledTimes(expectedCalls);
+        expect(release).toHaveBeenCalledTimes(expectedCalls);
+        expect(app.vault.readBinary).not.toHaveBeenCalled();
+        for (const source of sources) {
+          await expect(source.load()).rejects.toThrow("released");
+        }
+      },
+    );
+  });
+
   it.each([
     ["edited", "user-edited transcript"],
     ["missing", null],
@@ -639,20 +845,22 @@ describe("TranscriptionCoordinator", () => {
       return null;
     });
     (app.vault.read as jest.Mock).mockResolvedValue(currentContent);
-    adapter.resume.mockResolvedValue({
-      kind: "local_receipt",
-      operationId: oldOperationId,
-      recoveryPhase: "completed",
-      receipt,
+    adapter.resume.mockImplementation(async (_operationId, source) => {
+      await readAndReleaseSource(source);
+      return {
+        kind: "local_receipt",
+        operationId: oldOperationId,
+        recoveryPhase: "completed",
+        receipt,
+      };
     });
     adapter.acknowledgeCompleted.mockImplementation(async () => {
       order.push("ack-old");
     });
-    adapter.transcribe.mockImplementation(async (_source: unknown, context: { operationId: string }) => ({
-      kind: "transcript",
-      operationId: context.operationId,
-      text: "fresh transcript",
-    }));
+    adapter.transcribe.mockImplementation(async (source: ManagedFileSource, context?: ManagedTranscriptionContext) => {
+      await readAndReleaseSource(source);
+      return { kind: "transcript", operationId: requiredOperationId(context), text: "fresh transcript" };
+    });
     const onOperationIdChange = jest.fn(async (operationId: string) => {
       order.push(`persist:${operationId}`);
     });
@@ -688,23 +896,23 @@ describe("TranscriptionCoordinator", () => {
     const { adapter, coordinator } = harness();
     const oldOperationId = "expired-local-commit";
     adapter.resume
-      .mockResolvedValueOnce({
-        kind: "local_receipt",
-        operationId: oldOperationId,
-        recoveryPhase: "local_commit_pending",
-        receipt: createLocalCommitReceipt("Recordings/missing.md", "missing"),
+      .mockImplementationOnce(async (_operationId, source) => {
+        await readAndReleaseSource(source);
+        return {
+          kind: "local_receipt",
+          operationId: oldOperationId,
+          recoveryPhase: "local_commit_pending",
+          receipt: createLocalCommitReceipt("Recordings/missing.md", "missing"),
+        };
       })
-      .mockRejectedValueOnce(new ManagedTranscriptionRetryError(
-        oldOperationId,
-        "restart",
-        "local_commit_pending",
-        new Error("expired"),
-      ));
-    adapter.transcribe.mockImplementation(async (_source: unknown, context: { operationId: string }) => ({
-      kind: "transcript",
-      operationId: context.operationId,
-      text: "fresh transcript",
-    }));
+      .mockImplementationOnce(async (_operationId, source) => {
+        await readAndReleaseSource(source);
+        throw new ManagedTranscriptionRetryError(oldOperationId, "restart", "local_commit_pending", new Error("expired"));
+      });
+    adapter.transcribe.mockImplementation(async (source: ManagedFileSource, context?: ManagedTranscriptionContext) => {
+      await readAndReleaseSource(source);
+      return { kind: "transcript", operationId: requiredOperationId(context), text: "fresh transcript" };
+    });
     const persisted: string[] = [];
 
     const result = await coordinator.start({
@@ -730,12 +938,11 @@ describe("TranscriptionCoordinator", () => {
   it("replaces a persisted operation ID whose recovery record was never created", async () => {
     const { adapter, coordinator } = harness();
     adapter.hasRecoveryOperation.mockResolvedValue(false);
-    adapter.transcribe.mockImplementation(async (_source: unknown, context: { operationId: string }) => ({
-      kind: "transcript",
-      operationId: context.operationId,
-      text: "fresh transcript",
-    }));
-    const onOperationIdChange = jest.fn(async () => undefined);
+    adapter.transcribe.mockImplementation(async (source: ManagedFileSource, context?: ManagedTranscriptionContext) => {
+      await readAndReleaseSource(source);
+      return { kind: "transcript", operationId: requiredOperationId(context), text: "fresh transcript" };
+    });
+    const onOperationIdChange = jest.fn(async (_operationId: string) => undefined);
 
     const result = await coordinator.start({
       filePath: "Recordings/demo.webm",
@@ -827,7 +1034,7 @@ describe("TranscriptionCoordinator", () => {
       "persist:preserved-exact-source-operation",
       "commit:begin",
       "commit:receipt",
-      "write:Recordings/demo - transcript.md",
+      "write:Recordings/demo.md",
       "commit:complete",
     ]);
     expect(result.operationId).toBe("preserved-exact-source-operation");
@@ -874,10 +1081,10 @@ describe("TranscriptionCoordinator", () => {
     let release!: () => void;
     const waiting = new Promise<void>((resolve) => { entered = resolve; });
     const delayed = new Promise<void>((resolve) => { release = resolve; });
-    adapter.transcribe.mockImplementation(async (_source: unknown, context: { operationId: string }) => {
+    adapter.transcribe.mockImplementation(async (_source: unknown, context?: ManagedTranscriptionContext) => {
       entered();
       await delayed;
-      return { kind: "transcript", operationId: context.operationId, text: "managed transcript" };
+      return { kind: "transcript", operationId: requiredOperationId(context), text: "managed transcript" };
     });
     const running = coordinator.start({
       filePath: "Recordings/demo.webm",
@@ -899,7 +1106,7 @@ describe("TranscriptionCoordinator", () => {
 
     expect(mockProcessTranscription).toHaveBeenCalledTimes(1);
     expect(app.vault.create).toHaveBeenCalledWith(
-      "Recordings/demo - transcript.md",
+      "Recordings/demo.md",
       expect.stringContaining("## Cleaned transcript\nprocessed:managed transcript"),
     );
     expect(originEditor.replaceSelection).toHaveBeenCalledWith("processed:managed transcript");

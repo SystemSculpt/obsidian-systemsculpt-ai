@@ -32,6 +32,22 @@ function userFileMessage(mediaType: string, url: string) {
 }
 
 describe("thin-agent protocol parsing", () => {
+  it.each<[unknown, unknown]>([
+    [null, { version: null, cursor: null, state: "unknown" }],
+    [{ version: 2, cursor: 7, state: "future" }, { version: null, cursor: 7, state: "unknown" }],
+    [{ version: 1, cursor: 3, state: "idle" }, { version: 1, cursor: 3, state: "idle" }],
+    ...["running", "waiting_for_client"].map((state): [unknown, unknown] => {
+      const run = { version: 1, cursor: 4, state, request_id: "request_1", run_id: `run_${"a".repeat(32)}`, root_message_id: "message_1" };
+      return [run, run];
+    }),
+  ])("projects and freezes snapshot run state %j without retaining raw fields", (runState, expected) => {
+    const parsed = parseAgentServerEvent({ ...sessionSnapshot([]), run_state: runState }, CONVERSATION_ID);
+    expect(parsed.kind).toBe("session_snapshot");
+    if (parsed.kind !== "session_snapshot") throw new Error("Expected a snapshot");
+    expect(parsed.run_state).toEqual(expected);
+    expect(Object.isFrozen(parsed.run_state)).toBe(true);
+  });
+
   it.each(["image/png", "image/jpeg", "image/webp"])(
     "accepts a matching authoritative %s data image URL",
     (mediaType) => {

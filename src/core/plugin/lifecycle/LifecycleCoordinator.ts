@@ -42,16 +42,6 @@ export interface LifecycleTask {
   };
 }
 
-export interface LifecycleTaskResult {
-  phase: LifecyclePhase;
-  taskId: string;
-  label?: string;
-  status: "success" | "failed";
-  durationMs: number;
-  error?: unknown;
-  optional: boolean;
-}
-
 export interface LifecycleFailureEvent {
   phase: LifecyclePhase;
   taskId: string;
@@ -68,7 +58,6 @@ interface LifecycleCoordinatorOptions {
 
 export class LifecycleCoordinator {
   private readonly phases = new Map<LifecyclePhase, LifecycleTask[]>();
-  private readonly results: LifecycleTaskResult[] = [];
 
   constructor(private readonly options: LifecycleCoordinatorOptions) {}
 
@@ -98,26 +87,9 @@ export class LifecycleCoordinator {
         await task.run();
         const durationMs = Number((performance.now() - start).toFixed(1));
         phaseTracker.complete({ durationMs });
-        this.results.push({
-          phase,
-          taskId,
-          label: task.label,
-          status: "success",
-          durationMs,
-          optional,
-        });
       } catch (error) {
         const durationMs = Number((performance.now() - start).toFixed(1));
         phaseTracker.fail(error, { durationMs });
-        this.results.push({
-          phase,
-          taskId,
-          label: task.label,
-          status: "failed",
-          durationMs,
-          error,
-          optional,
-        });
         this.options.logger.warn(`Lifecycle task failed: ${phase}.${taskId}`, {
           source: "LifecycleCoordinator",
           metadata: {
@@ -131,9 +103,5 @@ export class LifecycleCoordinator {
         }
       }
     }
-  }
-
-  getResults(): LifecycleTaskResult[] {
-    return [...this.results];
   }
 }

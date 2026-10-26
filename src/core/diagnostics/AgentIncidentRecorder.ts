@@ -1,7 +1,7 @@
 import { projectRenderingSnapshot } from "./AgentIncidentRendering";
 import { isThinAgentCommandKind, type ThinAgentCommandKind } from "../../services/managed/ThinAgentV1Contract";
 import { isFirstPartyToolName, type FirstPartyToolName } from "../../tools/toolNames";
-import type { SupportDiagnosticEvent } from "../../utils/SupportDiagnosticEvent";
+import { isLifecycleSnapshot, type SupportDiagnosticEvent } from "../../utils/SupportDiagnosticEvent";
 import {
   boundedThinAgentTiming,
   boundedToolDiagnosticItemCount,
@@ -64,17 +64,11 @@ import {
 } from "./AgentIncidentSchema";
 
 export {
-  AGENT_INCIDENT_MAX_EVENTS,
-  AGENT_INCIDENT_MAX_RENDER_COUNT,
-  AGENT_INCIDENT_MAX_RENDER_DURATION_MS,
-  AGENT_INCIDENT_MAX_REPORT_BYTES,
   AGENT_INCIDENT_MAX_RESOURCE_SAMPLES,
-  AGENT_INCIDENT_MAX_TOOLS,
   AGENT_INCIDENT_MAX_TRANSPORT_SEGMENTS,
-  AGENT_INCIDENT_MISSING_FIELD_CODES,
-  AGENT_INCIDENT_SCHEMA_VERSION,
 } from "./AgentIncidentSchema";
 
+/** @internal Tests assert against this value. */
 export const AGENT_INCIDENT_MAX_ACTIVE_RUNS = 32;
 
 const AGENT_INCIDENT_TIMELINE_PREFIX_EVENTS = 16;
@@ -100,8 +94,7 @@ const TRANSPORT_SEGMENT_CLOSE_REASON_SET = new Set<string>(
 const CAPTURE_FAILURE_CODE_SET = new Set<string>(CAPTURE_FAILURE_CODES);
 
 export type AgentIncidentCaptureFailureCode = typeof CAPTURE_FAILURE_CODES[number];
-export type { AgentIncidentMissingFieldCode } from "./AgentIncidentCompleteness";
-export type AgentIncidentTerminalReceipt =
+type AgentIncidentTerminalReceipt =
   | "client_received_server_terminal"
   | "client_emitted_local_failure"
   | "unknown";
@@ -131,7 +124,7 @@ export type AgentIncidentResourceSampleInput = Readonly<{
   freeze_delta_ms?: number;
 }>;
 
-export type AgentIncidentTransportSegmentCloseReason =
+type AgentIncidentTransportSegmentCloseReason =
   typeof TRANSPORT_SEGMENT_CLOSE_REASONS[number];
 
 export type AgentIncidentTransportSegmentInput = Readonly<{
@@ -231,14 +224,14 @@ export type AgentIncidentCaptureContext = Readonly<{
   rendering?: AgentIncidentRenderingEvidenceInput;
 }>;
 
-export type AgentIncidentRenderingEvidenceInput = Readonly<{
+type AgentIncidentRenderingEvidenceInput = Readonly<{
   beforeTerminalPublish?: AgentIncidentRenderingInput;
   afterTerminalCommit?: AgentIncidentRenderingInput;
   failureSurfaceDomCommitted: boolean;
   failureSurfacePaintOpportunityObserved: boolean;
 }>;
 
-export type AgentIncidentTimelineEvent = Readonly<{
+type AgentIncidentTimelineEvent = Readonly<{
   ordinal: number;
   timestamp: string;
   source_sequence?: number;
@@ -280,7 +273,7 @@ export type AgentIncidentTimelineEvent = Readonly<{
   credits_refresh_server_timing_clock_domain?: "server_response_headers_monotonic_duration";
 }>;
 
-export type AgentIncidentToolSummary = Readonly<{
+type AgentIncidentToolSummary = Readonly<{
   ordinal: number;
   tool_name?: FirstPartyToolName;
   started_at?: string;
@@ -297,7 +290,7 @@ export type AgentIncidentToolSummary = Readonly<{
   lifecycle_event_count: number;
 }>;
 
-export type AgentIncidentResourceSample = Readonly<{
+type AgentIncidentResourceSample = Readonly<{
   ordinal: number;
   captured_at: string;
   heap_used_mb?: number;
@@ -308,7 +301,7 @@ export type AgentIncidentResourceSample = Readonly<{
   freeze_delta_ms?: number;
 }>;
 
-export type AgentIncidentTransportSegment = Readonly<{
+type AgentIncidentTransportSegment = Readonly<{
   command_kind: ThinAgentCommandKind;
   segment_ordinal: number;
   server_latency_correlation_id?: string;
@@ -323,7 +316,7 @@ export type AgentIncidentTransportSegment = Readonly<{
   metrics_truncated: boolean;
 }>;
 
-export type AgentIncidentRunState = Readonly<{
+type AgentIncidentRunState = Readonly<{
   terminal_source: "session_terminal" | "message_reconstruction" | "local_failure";
   run_origin: "submitted" | "recovered";
   run_phase: "submitted" | "thinking" | "working" | "waiting" | "retrying" | "settling" | "complete";
@@ -380,7 +373,7 @@ export type AgentIncidentRenderingSnapshot = Readonly<{
   }>;
 }>;
 
-export type AgentIncidentRenderingEvidence = Readonly<{
+type AgentIncidentRenderingEvidence = Readonly<{
   before_terminal_publish?: AgentIncidentRenderingSnapshot;
   after_terminal_commit?: AgentIncidentRenderingSnapshot;
   failure_surface_dom_committed: boolean;
@@ -554,9 +547,20 @@ type DroppedEvents = {
 
 type StableIdentifierField = "runId" | "serverRunId";
 
+type IncidentObservation = SupportDiagnosticEvent & Readonly<{
+  code: AgentLifecycleCode;
+  tool_name?: FirstPartyToolName;
+}>;
+
+type RetainedLifecycleEvent = Readonly<{
+  ordinal: number;
+  event: IncidentObservation;
+  bytes: number;
+}>;
+
 type ActiveIncident = {
   readonly correlation: SafeCorrelation;
-  readonly timeline: AgentIncidentTimelineEvent[];
+  readonly timeline: RetainedLifecycleEvent[];
   timelineBytes: number;
   nextTimelineOrdinal: number;
   observedEventCount: number;
@@ -578,7 +582,7 @@ type ActiveIncident = {
   readonly serverLatencyCorrelationIdsBySegment: Map<number, string>;
   readonly conflictedServerLatencyCorrelationSegments: Set<number>;
   startedAt?: string;
-  terminal?: AgentIncidentTimelineEvent;
+  terminal?: RetainedLifecycleEvent;
   reservedReportId?: string;
   runId?: string;
   serverRunId?: string;
@@ -604,10 +608,15 @@ type ActiveIncident = {
   rendering?: AgentIncidentRenderingEvidence;
 };
 
+type ReportIncident = Omit<ActiveIncident, "timeline" | "terminal"> & {
+  readonly timeline: AgentIncidentTimelineEvent[];
+  terminal: AgentIncidentTimelineEvent;
+};
+
 /**
  * Records one content-free diagnostic chronology per conversation request.
- * Caller objects never enter recorder state. Every retained value is rebuilt
- * from a bounded scalar allowlist before the failed report is frozen.
+ * Trusted frozen scalar events are retained by identity. Public callers still
+ * cross the full allowlist boundary; report projection waits for a failed run.
  */
 export class AgentIncidentRecorder {
   private readonly active = new Map<string, ActiveIncident>();
@@ -626,11 +635,12 @@ export class AgentIncidentRecorder {
 
   public record(event: ThinAgentLifecycleEvent): boolean {
     try {
-      const projected = projectLifecycleEvent(event);
-      if (!projected) return false;
-      const key = correlationKey(projected.correlation);
+      const observation = observeLifecycleEvent(event);
+      if (!observation) return false;
+      const { correlation, event: safeEvent } = observation;
+      const key = correlationKey(correlation);
       if (this.frozenReportIds.has(key) || this.settledNonFailure.has(key)) return false;
-      const state = this.active.get(key) ?? this.createActive(projected.correlation);
+      const state = this.active.get(key) ?? this.createActive(correlation);
       state.observedEventCount = addBoundedCount(state.observedEventCount, 1);
       if (state.terminal) {
         state.droppedEvents.after_terminal = addBoundedCount(state.droppedEvents.after_terminal, 1);
@@ -638,19 +648,20 @@ export class AgentIncidentRecorder {
       }
 
       state.nextTimelineOrdinal = addBoundedCount(state.nextTimelineOrdinal, 1);
-      const timelineEvent = Object.freeze({
+      const retained = {
         ordinal: state.nextTimelineOrdinal,
-        ...projected.timeline,
-      });
-      this.captureCorrelationFields(state, timelineEvent, projected.pluginBuildId);
-      this.captureLifecycleSummary(state, timelineEvent);
-      this.captureToolSummary(state, timelineEvent);
-      this.appendTimeline(state, timelineEvent);
-      if (timelineEvent.code === "run_finished_completed" || timelineEvent.code === "run_finished_cancelled") {
+        event: safeEvent,
+        bytes: timelineEventBytes(safeEvent, state.nextTimelineOrdinal),
+      };
+      this.captureCorrelationFields(state, safeEvent);
+      this.captureLifecycleSummary(state, safeEvent);
+      this.captureToolSummary(state, safeEvent);
+      this.appendTimeline(state, retained);
+      if (safeEvent.code === "run_finished_completed" || safeEvent.code === "run_finished_cancelled") {
         this.active.delete(key);
         this.rememberNonFailureSettlement(key);
-      } else if (timelineEvent.code === "run_finished_failed") {
-        state.terminal = timelineEvent;
+      } else if (safeEvent.code === "run_finished_failed") {
+        state.terminal = retained;
       }
       return true;
     } catch {
@@ -773,7 +784,7 @@ export class AgentIncidentRecorder {
       const key = correlationKey(safeCorrelation);
       if (this.frozenReportIds.has(key)) return null;
       const state = this.active.get(key);
-      if (!state?.terminal || state.terminal.code !== "run_finished_failed") return null;
+      if (!state?.terminal || state.terminal.event.code !== "run_finished_failed") return null;
 
       this.applyCaptureContext(state, context);
       const reportId = state.reservedReportId ?? this.allocateReportId();
@@ -829,28 +840,30 @@ export class AgentIncidentRecorder {
 
   private captureCorrelationFields(
     state: ActiveIncident,
-    event: AgentIncidentTimelineEvent,
-    pluginBuildId: string | undefined,
+    event: IncidentObservation,
   ): void {
-    setStableIdentifier(state, "runId", event.run_id);
+    setStableIdentifier(state, "runId", isThinAgentServerRunId(event.run_id) ? event.run_id : undefined);
     setStableIdentifier(state, "serverRunId", event.server_run_id);
     setSegmentCorrelationIdentifier(
       state,
       event.command_segment_ordinal,
-      event.server_latency_correlation_id,
+      event.command_segment_ordinal !== undefined && isNonzeroLatencyTraceId(event.latency_trace_id)
+        ? event.latency_trace_id
+        : undefined,
     );
+    const pluginBuildId = safePluginBuildId(event.plugin_build_id);
     if (pluginBuildId && !state.environment.plugin_build_id) {
       state.environment.plugin_build_id = pluginBuildId;
     }
   }
 
-  private captureLifecycleSummary(state: ActiveIncident, event: AgentIncidentTimelineEvent): void {
+  private captureLifecycleSummary(state: ActiveIncident, event: IncidentObservation): void {
     state.codeCounts.set(event.code, addBoundedCount(state.codeCounts.get(event.code) ?? 0, 1));
     state.phaseCounts.set(event.phase, addBoundedCount(state.phaseCounts.get(event.phase) ?? 0, 1));
     if (event.code === "run_started" && !state.startedAt) state.startedAt = event.timestamp;
   }
 
-  private captureToolSummary(state: ActiveIncident, event: AgentIncidentTimelineEvent): void {
+  private captureToolSummary(state: ActiveIncident, event: IncidentObservation): void {
     if (!isToolLifecycleCode(event.code)) return;
     const ordinal = event.tool_execution_ordinal;
     if (ordinal === undefined) {
@@ -911,7 +924,7 @@ export class AgentIncidentRecorder {
   private captureToolItemCounts(
     state: ActiveIncident,
     tool: MutableToolSummary,
-    event: AgentIncidentTimelineEvent,
+    event: IncidentObservation,
   ): void {
     if (tool.item_counts_invalid) return;
     const requested = event.tool_item_count ?? tool.requested_item_count;
@@ -930,9 +943,9 @@ export class AgentIncidentRecorder {
     if (event.tool_failed_item_count !== undefined) tool.failed_item_count = event.tool_failed_item_count;
   }
 
-  private appendTimeline(state: ActiveIncident, event: AgentIncidentTimelineEvent): void {
+  private appendTimeline(state: ActiveIncident, event: RetainedLifecycleEvent): void {
     state.timeline.push(event);
-    state.timelineBytes += jsonBytes(event);
+    state.timelineBytes += event.bytes;
     while (state.timeline.length > AGENT_INCIDENT_MAX_EVENTS) {
       this.dropTimelineEvent(state, "event_limit");
     }
@@ -944,13 +957,14 @@ export class AgentIncidentRecorder {
     }
   }
 
-  private dropTimelineEvent(state: ActiveIncident, reason: "event_limit" | "byte_limit"): void {
+  private dropTimelineEvent(state: ActiveIncident | ReportIncident, reason: "event_limit" | "byte_limit"): void {
     const removalIndex = state.timeline.length > AGENT_INCIDENT_TIMELINE_PREFIX_EVENTS
       ? AGENT_INCIDENT_TIMELINE_PREFIX_EVENTS
       : 0;
     const [removed] = state.timeline.splice(removalIndex, 1);
     if (!removed) return;
-    state.timelineBytes = Math.max(0, state.timelineBytes - jsonBytes(removed));
+    // Report-size trimming no longer needs the running timeline byte total.
+    if ("bytes" in removed) state.timelineBytes = Math.max(0, state.timelineBytes - removed.bytes);
     state.droppedEvents[reason] = addBoundedCount(state.droppedEvents[reason], 1);
   }
 
@@ -1038,7 +1052,12 @@ export class AgentIncidentRecorder {
     }
   }
 
-  private buildBoundedReport(state: ActiveIncident, reportId: string, createdAt: string): AgentIncidentReport {
+  private buildBoundedReport(active: ActiveIncident, reportId: string, createdAt: string): AgentIncidentReport {
+    const state: ReportIncident = {
+      ...active,
+      timeline: active.timeline.map(({ ordinal, event }) => projectObservedTimeline(event, ordinal)),
+      terminal: projectObservedTimeline(active.terminal!.event, active.terminal!.ordinal),
+    };
     let report = buildReport(state, reportId, createdAt, 0);
     let size = jsonBytes(report);
     while (
@@ -1128,6 +1147,92 @@ export class AgentIncidentRecorder {
       if (oldest) this.settledNonFailure.delete(oldest);
     }
   }
+}
+
+function observeLifecycleEvent(event: ThinAgentLifecycleEvent): Readonly<{
+  correlation: SafeCorrelation;
+  event: IncidentObservation;
+}> | null {
+  if (isLifecycleSnapshot(event)) {
+    const correlation = sanitizeCorrelation({
+      conversationId: event.conversation_id ?? "",
+      requestId: event.request_id ?? "",
+    });
+    if (!correlation || normalizeIsoTimestamp(event.timestamp) !== event.timestamp) return null;
+    return { correlation, event: event as IncidentObservation };
+  }
+  // Direct public callers (including hostile getters) still need admission.
+  const projected = projectLifecycleEvent(event);
+  if (!projected) return null;
+  const { source_sequence, server_latency_correlation_id, ...fields } = projected.timeline;
+  return {
+    correlation: projected.correlation,
+    event: Object.freeze({
+      ...fields,
+      severity: "info",
+      conversation_id: projected.correlation.conversationId,
+      request_id: projected.correlation.requestId,
+      plugin_build_id: projected.pluginBuildId,
+      sequence: source_sequence,
+      latency_trace_id: server_latency_correlation_id,
+    }),
+  };
+}
+
+const TIMELINE_SCALAR_FIELDS = [
+  "timestamp", "code", "phase", "server_run_id", "status", "retryable",
+  "command_kind", "command_segment_ordinal", "tool_execution_ordinal", "tool_name",
+  "tool_outcome", "tool_failure_class", "tool_item_count", "tool_completed_item_count",
+  "tool_failed_item_count", "history_sync_kind", "history_sync_ordinal",
+  "response_delivery_mode", "client_monotonic_offset_ms", "client_clock_domain",
+  "server_timing_app_ms", "server_timing_auth_ms", "server_timing_clock_domain",
+  "credits_refresh_reason", "credits_refresh_sequence", "credits_refresh_transport",
+  "credits_refresh_elapsed_ms", "credits_refresh_clock_domain", "credits_refresh_server_auth_ms",
+  "credits_refresh_server_rate_limit_ms", "credits_refresh_server_balance_store_ms",
+  "credits_refresh_server_total_ms", "credits_refresh_server_timing_clock_domain",
+] as const;
+
+type TimelineScalar = string | number | boolean;
+
+function visitTimelineFields(
+  event: IncidentObservation,
+  accept: (key: string, value: TimelineScalar) => void,
+): void {
+  for (const key of TIMELINE_SCALAR_FIELDS) {
+    const value = event[key];
+    if (value !== undefined) accept(key, value);
+  }
+  if (event.sequence !== undefined) accept("source_sequence", event.sequence);
+  // These report-only policies are stricter than the local support log's
+  // accepted identifiers. Do not narrow that log or expose its private fields.
+  if (isThinAgentServerRunId(event.run_id)) accept("run_id", event.run_id);
+  if (isNonzeroIncidentId(event.incident_id)) accept("incident_id", event.incident_id);
+  const failureCode = normalizeAgentIncidentFailureCode(event.failure_code, "server");
+  if (failureCode) accept("failure_code", failureCode);
+  if (event.command_segment_ordinal !== undefined && isNonzeroLatencyTraceId(event.latency_trace_id)) {
+    accept("server_latency_correlation_id", event.latency_trace_id);
+  }
+}
+
+function projectObservedTimeline(event: IncidentObservation, ordinal: number): AgentIncidentTimelineEvent {
+  const fields: Record<string, TimelineScalar> = { ordinal };
+  visitTimelineFields(event, (key, value) => { fields[key] = value; });
+  return fields as AgentIncidentTimelineEvent;
+}
+
+function timelineEventBytes(event: IncidentObservation, ordinal: number): number {
+  // All admitted timeline strings are closed ASCII tokens, canonical UTC
+  // timestamps or UUIDs, so none needs escaping. Count scalar bytes without
+  // constructing a report object, canonical JSON, UTF-8 buffer or sorted keys.
+  // Exact accounting preserves the historical arrival-order eviction counters.
+  let bytes = 12 + String(ordinal).length; // {"ordinal":N}
+  visitTimelineFields(event, (key, value) => {
+    const scalarBytes = typeof value === "string" ? value.length + 2
+      : typeof value === "boolean" ? (value ? 4 : 5)
+        : String(value).length;
+    bytes += key.length + 4 + scalarBytes;
+  });
+  return bytes;
 }
 
 function projectLifecycleEvent(event: ThinAgentLifecycleEvent): ProjectedLifecycleEvent | null {
@@ -1281,12 +1386,12 @@ function projectLifecycleEvent(event: ThinAgentLifecycleEvent): ProjectedLifecyc
 }
 
 function buildReport(
-  state: ActiveIncident,
+  state: ReportIncident,
   reportId: string,
   createdAt: string,
   reportBytes: number,
 ): AgentIncidentReport {
-  const terminal = state.terminal!;
+  const terminal = state.terminal;
   const collectionFailures = CAPTURE_FAILURE_CODES.flatMap((code) => {
     const count = state.collectionFailures.get(code) ?? 0;
     return count > 0 ? [{ code, count }] : [];
@@ -1479,7 +1584,7 @@ function buildReport(
   };
 }
 
-function terminalReceipt(state: ActiveIncident): AgentIncidentTerminalReceipt {
+function terminalReceipt(state: Pick<ActiveIncident, "runState" | "failureAuthority">): AgentIncidentTerminalReceipt {
   const terminalSource = state.runState?.terminal_source;
   if (
     state.failureAuthority === "server"
@@ -1501,7 +1606,7 @@ function isRunStateCompatibleWithFailureAuthority(
   return failureAuthority !== "client";
 }
 
-function timelineForReport(state: ActiveIncident): AgentIncidentTimelineEvent[] {
+function timelineForReport(state: ReportIncident): AgentIncidentTimelineEvent[] {
   if (
     state.conflictedIdentifiers.size === 0
     && state.conflictedServerLatencyCorrelationSegments.size === 0
@@ -1520,7 +1625,7 @@ function timelineForReport(state: ActiveIncident): AgentIncidentTimelineEvent[] 
 }
 
 function transportSegmentsForReport(
-  state: ActiveIncident,
+  state: Pick<ActiveIncident, "transportSegments" | "serverLatencyCorrelationIdsBySegment">,
 ): AgentIncidentTransportSegment[] {
   return state.transportSegments.map((segment) => {
     const serverLatencyCorrelationId = state.serverLatencyCorrelationIdsBySegment.get(
@@ -1536,7 +1641,7 @@ function transportSegmentsForReport(
 }
 
 function serverLatencyCorrelationIdForTerminal(
-  state: ActiveIncident,
+  state: ReportIncident,
 ): string | undefined {
   const terminalTransport = terminalTransportReference(state.timeline);
   if (terminalTransport) {
@@ -1861,7 +1966,7 @@ function setSegmentCorrelationIdentifier(
   state.serverLatencyCorrelationIdsBySegment.set(scopedOrdinal, value);
 }
 
-function incrementFailure(state: ActiveIncident, code: AgentIncidentCaptureFailureCode): void {
+function incrementFailure(state: Pick<ActiveIncident, "collectionFailures">, code: AgentIncidentCaptureFailureCode): void {
   state.collectionFailures.set(code, addBoundedCount(state.collectionFailures.get(code) ?? 0, 1));
 }
 

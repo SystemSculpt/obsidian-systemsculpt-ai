@@ -1,3 +1,5 @@
+import type { AgentApprovalDecision, NativeToolMetadata } from '../chat/ChatConversation';
+
 /**
  * Type definitions for the improved tool call system
  * This implements a single source of truth architecture for tool calls
@@ -6,7 +8,7 @@
 /**
  * Represents the state of a tool call throughout its lifecycle
  */
-export type ToolCallState = 
+type ToolCallState = 
   | 'executing'    // Tool is currently executing
   | 'completed'    // Tool execution completed successfully
   | 'failed';      // Tool execution failed
@@ -28,10 +30,6 @@ export interface ToolCallRequest {
 /**
  * Tool execution result
  */
-export type ToolCancellationErrorCode =
-  | 'TOOL_CANCELLED_BEFORE_START'
-  | 'TOOL_CANCEL_REQUESTED_OUTCOME_UNKNOWN';
-
 export interface ToolCallResult {
   success: boolean;
   data?: unknown;
@@ -72,4 +70,8 @@ export interface ToolCall {
    * must not send a result for it, because one exists there already.
    */
   executedOn?: 'server';
+  /** Native activity is a presentation cache, never a durable permission grant. */
+  native?: NativeToolMetadata;
+  approvalDecision?: AgentApprovalDecision;
+  approvalScope?: 'session';
 }

@@ -84,6 +84,7 @@ export type StudioRenderedImageBoard = {
   height: number;
 };
 
+/** @internal Tests assert against this value. */
 export const STUDIO_IMAGE_BOARD_MAX_OUTPUT_SIDE = 8192;
 export const STUDIO_IMAGE_BOARD_RENDER_UNAVAILABLE =
   "Image rendering is unavailable here, so this edited image cannot be produced.";
@@ -1000,7 +1001,10 @@ export async function renderStudioImageBoardScene(
   }
 }
 
-/** Decodes the node image and every stacked image, renders, and releases them. */
+/**
+ * Decodes the node image and every stacked image, renders, and releases them.
+ * @internal Unit-tested directly.
+ */
 export async function renderStudioImageBoard(options: {
   board: StudioImageBoard;
   baseImage: StudioAssetRef;

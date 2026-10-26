@@ -204,7 +204,7 @@ export class RecorderService {
     if (!settled.length) return;
     const recoverable = settled.filter((capture) => this.shouldRecoverPendingCapture(capture));
     if (!recoverable.length) {
-      new Notice("A saved recording is waiting for transcription. Turn on automatic transcription in settings, or run \"transcribe an audio file\".", 7000);
+      new Notice("A saved recording is waiting for transcription. Run “transcribe an audio file” to continue.", 7000);
       return;
     }
 
@@ -676,6 +676,7 @@ export class RecorderService {
       }
 
       let warning = result.warning;
+      let delivered = result.insertedIntoOrigin;
       if (
         capture.origin.destination === "chat"
         && this.plugin.settings.autoPasteTranscription
@@ -686,6 +687,7 @@ export class RecorderService {
           capture.origin.conversationOriginToken,
           result.outputPath,
         );
+        delivered = insertedIntoOrigin;
         if (!insertedIntoOrigin) {
           const chatWarning = "The transcript was saved, but the chat where recording started changed or closed, so no text was inserted.";
           warning = warning ? `${warning} ${chatWarning}` : chatWarning;
@@ -702,7 +704,10 @@ export class RecorderService {
         });
       }
       if (!isDisplayed || !this.ui.isVisible()) {
-        new Notice(`Transcript saved to ${result.outputPath}.`, 6000);
+        // Out of sight: text inserted where recording started is its own
+        // receipt. A warning, or a transcript that only reached a file, is said.
+        if (warning) new Notice(`${warning} Saved to ${result.outputPath}.`, 8000);
+        else if (!delivered) new Notice(`Transcript saved to ${result.outputPath}.`, 6000);
       } else if (!warning) {
         this.ui.closeAfter(5_000);
       }

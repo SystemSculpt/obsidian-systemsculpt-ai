@@ -141,6 +141,18 @@ test("Agent workspace CSS stays feature-owned under views/agent-workspace", () =
   }
 });
 
+test("chat header titles ellipsize instead of inheriting Obsidian's centered button flex layout", () => {
+  const css = read("src/css/views/agent-workspace/shell.css");
+  const titleButton = /\.systemsculpt-agent-header \.systemsculpt-agent-title-button\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+
+  // text-overflow applies to inline text in a block, not an anonymous flex item.
+  assert.match(titleButton, /display:\s*block;/);
+  assert.match(titleButton, /overflow:\s*hidden;/);
+  assert.match(titleButton, /text-align:\s*left;/);
+  assert.match(titleButton, /text-overflow:\s*ellipsis;/);
+  assert.match(titleButton, /white-space:\s*nowrap;/);
+});
+
 test("every discoverable Obsidian host mounts a direct or named deep surface adapter", () => {
   const sourceRoot = path.join(root, "src");
   const candidates = listProductionTypeScript(sourceRoot)
@@ -178,6 +190,47 @@ test("every discoverable Obsidian host mounts a direct or named deep surface ada
   for (const [file, pattern] of composedContracts) {
     assert.match(read(file), pattern, `${file} must mount its named surface adapter`);
   }
+});
+
+test("continuous activity animations change only compositor properties", () => {
+  const css = readCssDirectory("src/css").replace(/\/\*[\s\S]*?\*\//g, "");
+  const keyframes = new Map([...css.matchAll(/@keyframes\s+([\w-]+)\s*\{([\s\S]*?\n\})/g)]
+    .map((match) => [match[1], match[2]]));
+  const activityCss = readCssDirectory("src/css/views/studio")
+    + readCssDirectory("src/css/views/agent-workspace");
+  const continuous = [...activityCss.matchAll(/animation:\s*([\w-]+)[^;{}]*\binfinite\b[^;{}]*;/g)]
+    .map((match) => match[1]);
+  assert.ok(continuous.length > 0);
+  for (const name of new Set([...continuous, "ss-studio-activity-pulse-card", "ss-studio-activity-pulse-edge"])) {
+    const frames = keyframes.get(name);
+    assert.ok(frames, `${name} needs a keyframe definition`);
+    for (const [, property] of frames.matchAll(/([\w-]+)\s*:/g)) {
+      assert.ok(["transform", "opacity"].includes(property), `${name} animates paint-bound ${property}`);
+    }
+  }
+});
+
+test("chat skeleton shimmer stays inside stationary loading bars", () => {
+  const css = read("src/css/views/agent-workspace/states.css");
+  const bar = css.match(/\.systemsculpt-agent-loading-bar\s*\{([^}]+)\}/)?.[1];
+  const highlight = css.match(/\.systemsculpt-agent-loading-bar::after\s*\{([^}]+)\}/)?.[1];
+  assert.ok(bar && highlight);
+  assert.match(bar, /position:\s*relative;/);
+  assert.match(bar, /overflow:\s*hidden;/);
+  assert.doesNotMatch(bar, /animation:|transform:/);
+  assert.match(highlight, /position:\s*absolute;/);
+  assert.match(highlight, /width:\s*calc\(100% \/ 3\);/);
+  assert.match(highlight, /animation:\s*ss-shimmer/);
+});
+
+test("hidden surfaces and reduced motion override feature animation specificity", () => {
+  const surface = read("src/css/foundation/surface.css");
+  assert.match(surface, /:is\(\.ss-motion-paused, #ss-specificity-boost\) \*::after\s*\{\s*animation-play-state:\s*paused;/);
+  // Studio pulse cleanup depends on animationend, even under reduced motion.
+  assert.match(surface, /prefers-reduced-motion:[\s\S]*#ss-specificity-boost\) \*::after\s*\{\s*animation-duration:\s*0\.01ms;\s*animation-iteration-count:\s*1;/);
+  const chat = read("src/css/views/agent-workspace/reasoning.css");
+  assert.match(chat, /:is\(\.systemsculpt-agent-workspace\.is-reduced-motion, #ss-specificity-boost\) \*::after\s*\{\s*animation:\s*none;/);
+  assert.match(chat, /prefers-reduced-motion:[\s\S]*#ss-specificity-boost\) \*::after\s*\{\s*animation:\s*none;/);
 });
 
 test("the shared surface owns adaptation and obsolete UI seams stay deleted", () => {
@@ -272,6 +325,7 @@ test("desktop capabilities and mobile host chrome stay behind canonical adapters
   assert.match(mobileHostLayout, /const MOBILE_LAYOUT_CLASS = "ss-mobile-layout"/);
   assert.match(mobileHostLayout, /const MOBILE_NAV_VISIBLE_CLASS = "ss-mobile-navbar-visible"/);
   assert.match(mobileHostLayout, /const MOBILE_NAV_HIDDEN_CLASS = "ss-mobile-navbar-hidden"/);
+  assert.match(mobileHostLayout, /const MOBILE_NAV_SUPPRESSED_CLASS = "ss-mobile-navbar-suppressed"/);
   assert.match(pluginSurface, /ensureMobileHostLayoutState\(root\)/);
   assert.match(tokens, /--ss-safe-top:\s*clamp\(/);
   assert.match(
@@ -280,6 +334,16 @@ test("desktop capabilities and mobile host chrome stay behind canonical adapters
   );
   assert.match(allCss, /\.ss-mobile-layout/);
   assert.doesNotMatch(allCss, /\.is-mobile|\.mobile-navbar-action/);
+  // Tablets never show the floating navbar; only a phone's keyboard-suppressed
+  // navbar may collapse the conversation in landscape.
+  assert.doesNotMatch(
+    allCss,
+    /\.ss-mobile-navbar-hidden\s+\.systemsculpt-agent-(header|banner|transcript|queue)\b/,
+  );
+  assert.match(
+    allCss,
+    /\.ss-mobile-navbar-suppressed\s+\.systemsculpt-agent-transcript\b/,
+  );
 
   const productionFiles = listProductionTypeScript(path.join(root, "src"));
   for (const file of productionFiles) {
@@ -388,12 +452,41 @@ test("Janitor owns one typed confirmation-list implementation", () => {
     janitor,
     /class (?:ConfirmationModal|EmptyContentConfirmationModal)|calculateSize/,
   );
-  assert.match(confirmation, /export interface ConfirmationListGroup/);
+  assert.match(confirmation, /interface ConfirmationListGroup \{/);
   assert.match(confirmation, /private resolver: \(\(confirmed: boolean\) => void\) \| null/);
   assert.equal(
     [...confirmation.matchAll(/private resolver:/g)].length,
     1,
     "Janitor confirmation promise ownership must stay singular",
+  );
+});
+
+test("Transcribe and Audio Processor share one audio source picker", () => {
+  const picker = read("src/components/AudioSourcePicker.ts");
+  const pickerCss = read("src/css/components/audio-source-picker.css");
+  const modals = [
+    read("src/modals/TranscribeAudioFileModal.ts"),
+    read("src/features/audio-processor/AudioProcessorModal.ts"),
+  ];
+  const modalCss = [
+    read("src/css/modals/transcribe-audio.css"),
+    read("src/css/modals/audio-processor.css"),
+  ].join("\n");
+
+  assert.match(picker, /export class AudioSourcePicker/);
+  assert.match(pickerCss, /\.ss-audio-source__list \.ss-audio-source__file\s*\{/);
+  for (const modal of modals) {
+    assert.match(modal, /new AudioSourcePicker\(/);
+    assert.doesNotMatch(
+      modal,
+      /createUiSearch|role: "listbox"|"ArrowDown"|dragenter|createObjectURL|revokeObjectURL/,
+      "vault list, keyboard, dropzone and preview code belongs to AudioSourcePicker",
+    );
+  }
+  assert.doesNotMatch(
+    modalCss,
+    /__(?:dropzone|file-input|choose-file|selection|list|audio-list|audio-file|file)\b/,
+    "picker styles belong to components/audio-source-picker.css",
   );
 });
 
@@ -427,7 +520,6 @@ test("the deep combobox interface owns interaction for dissimilar feature adapte
 
 test("radio interaction and DOM realm ownership stay behind shared surface seams", () => {
   const radioGroup = read("src/core/ui/surface/SurfaceRadioGroup.ts");
-  const chatSettings = read("src/modals/StandardChatSettingsModal.ts");
   const studioGroups = read("src/views/studio/StudioGraphGroupController.ts");
   const domContext = read("src/core/ui/surface/SurfaceDomContext.ts");
   const studioDomContext = read("src/views/studio/StudioDomContext.ts");
@@ -438,11 +530,10 @@ test("radio interaction and DOM realm ownership stay behind shared surface seams
   assert.match(radioGroup, /export function createUiRadioGroup/);
   assert.match(radioGroup, /group\.setAttribute\("role", "radiogroup"\)/);
   assert.match(radioGroup, /binding\.button\.setAttribute\("role", "radio"\)/);
-  assert.match(chatSettings, /createUiRadioGroup\(choices, bindings/);
   assert.match(studioGroups, /createUiRadioGroup\(paletteEl, bindings/);
-  for (const source of [chatSettings, studioGroups]) {
-    assert.doesNotMatch(source, /setAttribute\(["']role["'],\s*["']radio(?:group)?["']\)/);
-  }
+  assert.doesNotMatch(studioGroups, /setAttribute\(["']role["'],\s*["']radio(?:group)?["']\)/);
+  // Chat settings moved into the chat's run line and More menu (ChatView R4).
+  assert.equal(fs.existsSync(path.join(root, "src/modals/StandardChatSettingsModal.ts")), false);
 
   assert.match(domContext, /export function getSurfaceOwnerWindow/);
   assert.match(domContext, /export function resolveSurfaceDomContext/);

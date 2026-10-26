@@ -1,10 +1,10 @@
 import { getSurfaceOwnerDocument, getSurfaceOwnerWindow } from "./SurfaceDomContext";
 
-export type SurfaceComboboxNavigation = "clamp" | "wrap";
-export type SurfaceComboboxActiveMode = "first" | "none" | "selected";
-export type SurfaceComboboxCommitEvent = "click" | "pointerdown";
-export type SurfaceComboboxFocusMode = "input" | "options";
-export type SurfaceComboboxOptionActivationEvent = "pointermove" | "mouseenter" | false;
+type SurfaceComboboxNavigation = "clamp" | "wrap";
+type SurfaceComboboxActiveMode = "first" | "none" | "selected";
+type SurfaceComboboxCommitEvent = "click" | "pointerdown";
+type SurfaceComboboxFocusMode = "input" | "options";
+type SurfaceComboboxOptionActivationEvent = "pointermove" | "mouseenter" | false;
 
 export interface SurfaceComboboxCollectionUpdate {
   preserveActive?: boolean;
@@ -18,7 +18,7 @@ export interface SurfaceComboboxStateOptions {
   retainListboxRole?: boolean;
 }
 
-export interface SurfaceComboboxRenderContext<T> {
+interface SurfaceComboboxRenderContext<T> {
   item: T;
   index: number;
   query: string;
@@ -27,20 +27,21 @@ export interface SurfaceComboboxRenderContext<T> {
   ownerDocument: Document;
 }
 
-export interface SurfaceComboboxEmptyContext {
+interface SurfaceComboboxEmptyContext {
   query: string;
   listbox: HTMLElement;
   ownerDocument: Document;
 }
 
-export interface SurfaceComboboxCommitContext<T> {
+interface SurfaceComboboxCommitContext<T> {
   item: T;
   index: number;
   event: Event;
 }
 
 export interface SurfaceComboboxOptions<T> {
-  input: HTMLInputElement;
+  /** A text field, or a multi-line message box whose adapter drives the query. */
+  input: HTMLInputElement | HTMLTextAreaElement;
   listbox: HTMLElement;
   getItemKey: (item: T) => string;
   filterItems: (items: readonly T[], query: string) => readonly T[];
@@ -95,7 +96,7 @@ let nextComboboxId = 0;
  * windows never fall back to the plugin's primary browser realm.
  */
 export class SurfaceCombobox<T> {
-  public readonly input: HTMLInputElement;
+  public readonly input: HTMLInputElement | HTMLTextAreaElement;
   public readonly listbox: HTMLElement;
   public readonly listboxId: string;
   public readonly ownerDocument: Document;
@@ -119,7 +120,7 @@ export class SurfaceCombobox<T> {
   };
 
   private readonly handleKeydown = (event: KeyboardEvent): void => {
-    if (this.destroyed) return;
+    if (this.destroyed || event.defaultPrevented || event.isComposing || event.key === "Process") return;
 
     if (event.key === "Escape") {
       if (!this.open) return;
@@ -131,6 +132,8 @@ export class SurfaceCombobox<T> {
     }
 
     if (!this.open) return;
+    // Modified vertical arrows belong to the host/view, not option navigation.
+    if (event.altKey && (event.key === "ArrowUp" || event.key === "ArrowDown")) return;
 
     if ((this.options.focusMode ?? "input") === "options") {
       if (event.key !== "ArrowDown" || this.visibleItems.length === 0) return;
@@ -202,7 +205,8 @@ export class SurfaceCombobox<T> {
     if (options.bindInputEvents !== false) {
       this.input.addEventListener("input", this.handleInput);
     }
-    this.input.addEventListener("keydown", this.handleKeydown);
+    const inputElement: HTMLElement = this.input;
+    inputElement.addEventListener("keydown", this.handleKeydown);
     this.renderFilteredItems();
   }
 
@@ -348,7 +352,8 @@ export class SurfaceCombobox<T> {
     if (this.options.bindInputEvents !== false) {
       this.input.removeEventListener("input", this.handleInput);
     }
-    this.input.removeEventListener("keydown", this.handleKeydown);
+    const inputElement: HTMLElement = this.input;
+    inputElement.removeEventListener("keydown", this.handleKeydown);
     this.removeOptionListeners();
     if (this.open) {
       this.open = false;

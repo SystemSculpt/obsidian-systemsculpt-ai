@@ -9,8 +9,8 @@ import {
   runWithConcurrency,
   createLineCalculator,
   wouldExceedCharLimit,
-  fuzzyMatchScore,
 } from "../utils";
+import { fuzzyMatchScore } from "../searchUtils";
 import { desktopHost } from "../../../platform/desktopOnly";
 
 beforeEach(() => {
@@ -457,13 +457,13 @@ describe("resolveAdapterPath", () => {
       );
     });
 
-    it("throws on URL-encoded traversal patterns after normalization", () => {
-      const adapter = { getBasePath: () => "/vault" };
-      // Note: normalizeVaultPath doesn't decode URLs, but if someone passes decoded ..
-      expect(() => resolveAdapterPath(adapter, "..%2F..%2Fetc/passwd".replace(/%2F/g, "/"))).toThrow(
-        "Path traversal detected"
-      );
-    });
+    it.each(["..%2F..%2Fetc/passwd", "%252E%252E%252Fsecret", "folder%255C..%255Csecret"])(
+      "rejects encoded traversal %j after tool normalization",
+      (path) => {
+        const adapter = { getBasePath: () => "/vault" };
+        expect(() => resolveAdapterPath(adapter, path)).toThrow("Path traversal detected");
+      },
+    );
   });
 });
 

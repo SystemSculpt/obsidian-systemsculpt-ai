@@ -28,6 +28,7 @@ function createDefinition(): StudioNodeDefinition {
   return {
     kind: "studio.media_ingest",
     version: "1.0.0",
+    requiredHostCapabilities: [],
     capabilityClass: "local_io",
     cachePolicy: "by_inputs",
     inputPorts: [],
@@ -67,7 +68,6 @@ function renderBarHarness(overrides: {
     onRunNode: jest.fn(),
     onRemoveNode: jest.fn(),
     onOpenImageEditor: jest.fn(),
-    onEditImageWithAi: jest.fn(),
     onCopyNodeImageToClipboard: jest.fn(),
   };
 
@@ -122,7 +122,6 @@ describe("renderStudioMediaNodeActionBar", () => {
     );
     expect(labels).toEqual([
       "Run node",
-      "Edit with AI",
       "Edit image",
       "Copy image",
       "Replace media",
@@ -146,15 +145,12 @@ describe("renderStudioMediaNodeActionBar", () => {
     const { nodeEl, node, handlers } = renderBarHarness();
 
     buttonFor(nodeEl, "Run node")?.click();
-    buttonFor(nodeEl, "Edit with AI")?.click();
     buttonFor(nodeEl, "Edit image")?.click();
     buttonFor(nodeEl, "Copy image")?.click();
     buttonFor(nodeEl, "Delete node")?.click();
 
     expect(handlers.onRunNode).toHaveBeenCalledTimes(1);
     expect(handlers.onRunNode).toHaveBeenCalledWith(node.id);
-    expect(handlers.onEditImageWithAi).toHaveBeenCalledTimes(1);
-    expect(handlers.onEditImageWithAi).toHaveBeenCalledWith(node);
     expect(handlers.onOpenImageEditor).toHaveBeenCalledTimes(1);
     expect(handlers.onOpenImageEditor).toHaveBeenCalledWith(node);
     expect(handlers.onCopyNodeImageToClipboard).toHaveBeenCalledTimes(1);

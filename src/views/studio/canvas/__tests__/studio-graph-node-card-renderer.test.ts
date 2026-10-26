@@ -5,6 +5,9 @@ import type { StudioNodeDefinition, StudioNodeInstance } from "../../../../studi
 import type { StudioNodeRunDisplayState } from "../../StudioRunPresentationState";
 import type { StudioNodeActivity } from "../../activity/StudioActivity";
 import { renderStudioGraphNodeCard } from "../StudioGraphNodeCardRenderer";
+import { loadStudioSourceLanguages } from "../StudioSourceEditor";
+import { retiredImageGenerationNode } from "../../../../studio/nodes/retiredImageGenerationNode";
+import { workflowNode } from "../../../../studio/nodes/workflowNode";
 import { EditorView } from "@codemirror/view";
 
 const nodeTeardowns: Array<() => void> = [];
@@ -36,19 +39,12 @@ function definitionFields(kind: string): StudioNodeDefinition["configSchema"]["f
       },
     ];
   }
-  // Mirror the real image-generation schema keys so the static-chrome
-  // contract can assert every field renders on the card.
-  if (kind === "studio.image_generation") {
-    return [
-      { key: "prompt", label: "Prompt", type: "textarea", required: false },
-      { key: "count", label: "Image Count", type: "number", required: true, min: 1, max: 4, integer: true },
-      { key: "aspectRatio", label: "Aspect Ratio", type: "select", required: false, options: [] },
-    ];
-  }
   return [];
 }
 
 function createDefinition(kind: string): StudioNodeDefinition {
+  if (kind === "studio.workflow") return workflowNode;
+  if (kind === "studio.image_generation") return retiredImageGenerationNode;
   return {
     kind,
     version: "1.0.0",
@@ -83,6 +79,7 @@ function createGraphInteractionStub() {
     beginConnection: jest.fn(),
     toggleNodeSelection: jest.fn(),
     ensureSingleSelection: jest.fn(),
+    clearAlignmentGuides: jest.fn(),
   };
 }
 
@@ -126,7 +123,6 @@ function renderNodeCardHarness(options: {
   nodeActivity?: StudioNodeActivity;
   resolveAssetPreviewSrc?: (assetPath: string) => string | null;
   onOpenImageEditor?: (node: StudioNodeInstance) => void;
-  onEditImageWithAi?: (node: StudioNodeInstance) => void;
   onCopyNodeImageToClipboard?: (node: StudioNodeInstance) => void;
   onRunNode?: (nodeId: string) => void;
   onRemoveNode?: (nodeId: string) => void;
@@ -140,7 +136,6 @@ function renderNodeCardHarness(options: {
     nodeActivity,
     resolveAssetPreviewSrc,
     onOpenImageEditor,
-    onEditImageWithAi,
     onCopyNodeImageToClipboard,
     onRunNode = jest.fn(),
     onRemoveNode = jest.fn(),
@@ -173,7 +168,6 @@ function renderNodeCardHarness(options: {
     onNodeSourceApply: options.onNodeSourceApply,
     registerNodeTeardown: (_nodeId, teardown) => nodeTeardowns.push(teardown),
     onOpenImageEditor,
-    onEditImageWithAi,
     onCopyNodeImageToClipboard,
     onNodeGeometryMutated: jest.fn(),
     takeTextNodeEditorMountState: jest.fn(() => ({ isEditing: isTextNodeEditing, shouldAutoFocus: false })),
@@ -202,6 +196,20 @@ function renderNodeCard(options: Parameters<typeof renderNodeCardHarness>[0]): H
 
 describe("content-aware Studio cards", () => {
   afterEach(() => { nodeTeardowns.splice(0).forEach(teardown => teardown()); document.body.innerHTML = ""; });
+  it.each(["studio.text", "studio.json", "studio.media_ingest"])("releases %s resize tracking when its card is disposed during a drag", kind => {
+    const add = jest.spyOn(window, "addEventListener"), remove = jest.spyOn(window, "removeEventListener");
+    try {
+      const { nodeEl } = renderNodeCardHarness({ kind, config: { value: "Text", sourcePath: "image.png" }, resolveAssetPreviewSrc: () => "app://image.png" });
+      const zone = nodeEl.querySelector<HTMLElement>('[data-resize-zone="e"]')!;
+      zone.dispatchEvent(createPointerEvent("pointerdown", { pointerId: 44, clientX: 300, clientY: 50 }));
+      const tracking = add.mock.calls.filter(([type]) => ["pointermove", "pointerup", "pointercancel"].includes(type));
+      expect(tracking).toHaveLength(3);
+      nodeTeardowns[nodeTeardowns.length - 1]();
+      for (const [type, listener] of tracking) expect(remove).toHaveBeenCalledWith(type, listener);
+      expect(nodeEl.querySelector(".ss-studio-node-resize-zone")).toBeNull();
+    } finally { add.mockRestore(); remove.mockRestore(); }
+  });
+
   it.each([
     { value: { saved: "<b>literal</b>" } },
     { value: [1, "two"] },
@@ -251,14 +259,31 @@ describe("content-aware Studio cards", () => {
     expect(activity?.hidden).toBe(true);
     expect(nodeEl.dataset.activity).toBe('idle');
   });
-  it("renders image generation as a form with the prompt on the card and no source view", () => {
-    const nodeEl = renderNodeCard({ kind: "studio.image_generation", config: { prompt: "a lighthouse" } });
-    expect(nodeEl.dataset.surface).toBe("form");
-    expect(nodeEl.querySelector(".ss-studio-node-inline-config-grid")).not.toBeNull();
-    expect(nodeEl.querySelector<HTMLTextAreaElement>(".ss-studio-node-inline-config-textarea")?.value).toBe("a lighthouse");
-    expect(nodeEl.querySelector(".ss-studio-source-code")).toBeNull();
-    expect(nodeEl.querySelector(".ss-studio-source-toolbar")).toBeNull();
-    expect(nodeEl.querySelector(".ss-studio-node-source-toggle")).toBeNull();
+  it("opens retired images read-only with saved outputs, source inspection and no execution controls", () => {
+    const config = { prompt: "a lighthouse", model: "saved-model", future: { keep: true } };
+    const apply = jest.fn();
+    const outputs = { images: [{ path: "saved.png", mimeType: "image/png", hash: "a".repeat(64), sizeBytes: 10 }] };
+    const { nodeEl, graphInteraction } = renderNodeCardHarness({ kind: "studio.image_generation", config,
+      nodeRunState: { ...IDLE_NODE_RUN_STATE, status: "succeeded", outputs },
+      resolveAssetPreviewSrc: path => `app://vault/${path}`, onNodeSourceApply: apply });
+    expect(nodeEl.dataset.surface).toBe("panel");
+    expect(nodeEl.textContent).toContain("Image generation was retired. Saved outputs are preserved.");
+    expect(nodeEl.querySelector<HTMLImageElement>("img")?.src).toBe("app://vault/saved.png");
+    expect(nodeEl.querySelector(".ss-studio-node-run")).toBeNull();
+    expect(nodeEl.querySelector("textarea")).toBeNull();
+    expect(nodeEl.querySelector<HTMLInputElement>(".ss-studio-node-title-input")?.disabled).toBe(true);
+    const pins = nodeEl.querySelectorAll<HTMLButtonElement>(".ss-studio-port-pin");
+    expect(pins).toHaveLength(3);
+    for (const pin of pins) { expect(pin.disabled).toBe(true); pin.click(); }
+    expect(graphInteraction.beginConnection).not.toHaveBeenCalled();
+    expect(graphInteraction.completeConnection).not.toHaveBeenCalled();
+    nodeEl.querySelector<HTMLButtonElement>(".ss-studio-node-source-toggle")!.click();
+    expect(nodeEl.querySelector(".ss-studio-source-code")?.textContent).toContain("a lighthouse");
+    const edit = nodeEl.querySelector<HTMLButtonElement>('[data-testid="studio.source.edit.studio.image_generation_node"]')!;
+    expect(edit.disabled).toBe(true);
+    edit.click();
+    expect(apply).not.toHaveBeenCalled();
+    expect(config).toEqual({ prompt: "a lighthouse", model: "saved-model", future: { keep: true } });
   });
   it("keeps text chromeless: no header, no source, ports only", () => {
     const nodeEl = renderNodeCard({ kind: "studio.text", config: { value: "Hello" } });
@@ -317,8 +342,11 @@ describe("content-aware Studio cards", () => {
     expect(nodeEl.style.getPropertyValue("--ss-activity-progress")).toBe("0.500");
     expect(nodeEl.querySelector('.ss-studio-node-activity-progress')?.textContent).toBe("50%");
   });
-  it("highlights syntax and treats markup in source as literal text", () => {
+  it("highlights syntax and treats markup in source as literal text", async () => {
     const nodeEl = renderNodeCard({kind:"studio.script", config:{source:'export default () => ({result:"<img src=x onerror=alert(1)>"});'}});
+    // The language packs load on first use, so wait for the highlighted repaint whichever test ran first.
+    await loadStudioSourceLanguages();
+    await Promise.resolve();
     expect(nodeEl.querySelector('.tok-keyword')).not.toBeNull();
     expect(nodeEl.querySelector('img')).toBeNull();
     expect(nodeEl.querySelector('.ss-studio-source-code')?.textContent).toContain('<img');
@@ -336,12 +364,27 @@ describe("content-aware Studio cards", () => {
     expect(h.graphInteraction.startConnectionDrag).toHaveBeenCalled();
     expect(h.graphInteraction.startNodeDrag).not.toHaveBeenCalled();
   });
-  it("keeps unavailable workflows inspectable with Run disabled", () => {
-    const nodeEl = renderNodeCard({kind:"studio.workflow",config:{availability:{status:"unavailable"}}});
-    expect(nodeEl.querySelector<HTMLButtonElement>('.ss-studio-node-run')?.disabled).toBe(true);
-    expect(nodeEl.querySelector('.ss-studio-workflow')).not.toBeNull();
+  it("keeps retired workflows inspectable without Run or new connection actions", () => {
+    const config = { description: "Saved objective", lastRunId: "saved-run", pendingRequest: { requestId: "saved-request" }, futureField: "<img src=x>" };
+    const { nodeEl, node, graphInteraction } = renderNodeCardHarness({ kind: "studio.workflow", config });
+    expect(nodeEl.querySelector('.ss-studio-node-run')).toBeNull();
+    expect(nodeEl.querySelector('.ss-studio-workflow')?.textContent).toContain("Retired workflow note");
+    expect(nodeEl.querySelector<HTMLInputElement>('.ss-studio-node-title-input')?.value).toBe(node.title);
+    const pins = nodeEl.querySelectorAll<HTMLButtonElement>('.ss-studio-port-pin');
+    expect(pins).toHaveLength(2);
+    for (const pin of pins) {
+      expect(pin.disabled).toBe(true);
+      pin.click();
+      pin.dispatchEvent(createPointerEvent('pointerdown', { pointerId: 1, clientX: 20, clientY: 20 }));
+    }
+    expect(graphInteraction.beginConnection).not.toHaveBeenCalled();
+    expect(graphInteraction.completeConnection).not.toHaveBeenCalled();
+    expect(graphInteraction.startConnectionDrag).not.toHaveBeenCalled();
     nodeEl.querySelector<HTMLButtonElement>('.ss-studio-node-source-toggle')!.click();
-    expect(nodeEl.querySelector('.ss-studio-source-code')).not.toBeNull();
+    const source = nodeEl.querySelector('.ss-studio-source-code')!;
+    for (const text of ["saved-run", "saved-request", "futureField", "<img src=x>"]) expect(source.textContent).toContain(text);
+    expect(source.querySelector("img")).toBeNull();
+    expect(node.config).toEqual(config);
   });
   it("retains Run and remove actions", () => {
     const run = jest.fn(), remove = jest.fn();

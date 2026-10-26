@@ -3,6 +3,7 @@ import { JSDOM } from "jsdom";
 import { App, requestUrl } from "obsidian";
 import fixture from "../fixtures/managed/managed-capabilities-v2.json";
 import manifest from "../../manifest.json";
+import { hostRequest } from "./host-request";
 
 describe("built managed capability composition", () => {
   const dom = new JSDOM("<!doctype html><html><body></body></html>");
@@ -12,7 +13,7 @@ describe("built managed capability composition", () => {
   it("lazily reuses concrete capabilities while isolating vault state and reading the current license", async () => {
     const request = jest.mocked(requestUrl);
     request.mockReset();
-    request.mockImplementation(async input => {
+    request.mockImplementation(hostRequest(async input => {
       const url = typeof input === "string" ? input : input.url;
       let value: unknown;
       if (url.endsWith("/config")) value = fixture;
@@ -41,7 +42,7 @@ describe("built managed capability composition", () => {
         },
         text, json: value, arrayBuffer: new TextEncoder().encode(text).buffer,
       };
-    });
+    }));
 
     // Exercise the shipped artifact, including its composition and host transport.
     const bundle = require(path.resolve(__dirname, "../../main.js"));

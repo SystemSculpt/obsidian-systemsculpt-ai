@@ -12,7 +12,7 @@ import type { StudioShapeKind } from "../../../studio/types";
 
 const STUDIO_SHAPE_DRAW_TAP_SLOP_PX = 6;
 
-export type StudioShapeDrawRect = {
+type StudioShapeDrawRect = {
   x: number;
   y: number;
   width: number;

@@ -1,4 +1,5 @@
 import { renderStudioOrchestrator } from './StudioOrchestratorRenderer';
+import { StudioPresentation } from '../StudioPresentation';
 import { renderStudioCommandExecution } from './StudioCommandExecutionControls';
 import type { StudioCommandExecution } from '../../../studio/StudioCommandExecution';
 import { statusLabelForNode, type StudioNodeRunDisplayState } from '../StudioRunPresentationState';
@@ -13,6 +14,7 @@ import { markStudioNodeCardInteractive } from './StudioGraphNodeCardPointer';
 
 export function renderStudioCommandCenter(root: HTMLElement, options: {
   node: StudioNodeInstance; nodes: StudioNodeInstance[]; busy: boolean; projectId: string; projectPath?: string; runs?: StudioAgentRuns;
+  presentation?: StudioPresentation;
   onExecutionChange?: (value: StudioCommandExecution) => void;
   getRunState?: (nodeId: string) => StudioNodeRunDisplayState;
   definition: (node: StudioNodeInstance) => StudioNodeDefinition | null;
@@ -24,8 +26,8 @@ export function renderStudioCommandCenter(root: HTMLElement, options: {
   if (single) panel.addClass('is-single-button');
   try { actions = readStudioCommandActions(single ? (options.node.config.target ? [{ id: 'button', label: options.node.config.label, kind: options.node.config.action, target: options.node.config.target, section: 'Actions', description: options.node.config.description }] : []) : options.node.config.actions); }
   catch (error) { panel.createDiv({ text: error instanceof Error ? error.message : 'Invalid command configuration.' }); return () => {}; }
-  const execution = (root: HTMLElement) => renderStudioCommandExecution(root, { value: options.node.config.execution, app: options.runs?.app, onChange: options.onExecutionChange });
-  const disposeExecution = single ? () => {} : options.runs && options.projectPath ? renderStudioOrchestrator(panel, { runs: options.runs, projectId: options.projectId, projectPath: options.projectPath, centerId: options.node.id, execution }) : execution(panel);
+  const execution = (root: HTMLElement) => renderStudioCommandExecution(root, { value: options.node.config.execution, app: options.runs?.app, onChange: options.onExecutionChange, presentation: options.presentation });
+  const disposeExecution = single ? () => {} : options.runs && options.projectPath ? renderStudioOrchestrator(panel, { runs: options.runs, projectId: options.projectId, projectPath: options.projectPath, centerId: options.node.id, execution, presentation: options.presentation }) : execution(panel);
   if (!actions.length) panel.createDiv({ cls: 'ss-studio-command-intro', text: single ? 'Choose this button’s target in Source.' : 'Add actions in Source.' });
   if (!single && options.node.config.description) panel.createDiv({ cls: 'ss-studio-command-intro', text: String(options.node.config.description) });
   const targets = new Map(options.nodes.map(node => [node.id, node]));
@@ -47,9 +49,10 @@ export function renderStudioCommandCenter(root: HTMLElement, options: {
     }
   }
   const update = (): void => { for (const [id, element] of summaries) {
-    const records = options.runs?.list(options.projectId, [id]) || [], active = records.filter(run => isActiveAgentRun(run.status));
-    element.setText(active.length ? `${active.length} active · ${active[0].currentActivity.slice(0, 80)}` : records.length ? `Last run: ${records[0].status}` : '');
+    const records = options.runs?.list(options.projectId, [id]) || [], active = records.filter(run => isActiveAgentRun(run.status) && !options.runs?.isStale(run.id));
+    element.setText(active.length ? `${active.length} active · ${active[0].currentActivity.slice(0, 80)}` : records.length ? `Last run: ${options.runs?.isStale(records[0].id) ? 'stale' : records[0].status}` : '');
   } };
-  update(); const unsubscribe = options.runs?.subscribe(id => { if (id === options.projectId) update(); });
-  return () => { disposeExecution(); unsubscribe?.(); };
+  const observation = (options.presentation ?? new StudioPresentation()).watch(update,
+    refresh => options.runs?.subscribe(id => { if (id === options.projectId) refresh(); }) ?? (() => {}));
+  return () => { disposeExecution(); observation.dispose(); };
 }

@@ -5,25 +5,24 @@
  */
 
 /* ------------------------------------------------------------------ *
- * Notices (Obsidian Notice API content — displayNotice in
+ * Notices (Obsidian Notice API content — showActionNotice in
  * src/core/ui/notifications.ts builds these fragment parts)
  * ------------------------------------------------------------------ */
-.systemsculpt-notice-title {
-  font-weight: var(--ss-weight-semibold);
-  margin-bottom: var(--ss-space-1);
-}
-
 .systemsculpt-notice-message {
   font-size: var(--ss-text-sm);
 }
 
-.systemsculpt-notice-path {
-  font-family: var(--ss-font-mono);
-  font-size: var(--ss-text-sm);
-  color: var(--ss-ink-accent);
-  padding: var(--ss-space-1) var(--ss-space-2);
-  border: 1px solid var(--ss-line);
-  border-radius: var(--ss-radius-xs);
-  margin-bottom: var(--ss-space-1);
-  word-break: break-all;
+.systemsculpt-notice-action {
+  margin-top: var(--ss-space-2);
+}
+
+.systemsculpt-notice-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ss-space-2);
+  margin-top: var(--ss-space-2);
+}
+
+.systemsculpt-notice-actions > .systemsculpt-notice-action {
+  margin-top: 0;
 }

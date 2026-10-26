@@ -12,6 +12,7 @@ import {
   captureStartupIdentity,
   expectProductionStartupIdentity,
 } from "./startup-identity-assertions";
+import { createObsidianLeaf } from "./obsidian-leaf";
 
 const DEFAULT_ARTIFACT_ROOT = path.resolve(__dirname, "..", "..");
 const ARTIFACT_ROOT = process.env.SYSTEMSCULPT_PLUGIN_ARTIFACT_ROOT?.trim()
@@ -43,14 +44,12 @@ async function openView(options: {
   plugin: any;
   type: string;
   state?: Record<string, unknown>;
-  prepare?: (view: any) => void;
 }): Promise<any> {
   const leaf = new options.host.WorkspaceLeaf(options.plugin.app);
   await leaf.setViewState({ type: options.type, state: options.state ?? {} });
   const view = options.creator(leaf);
   leaf.view = view;
   options.plugin.app.workspace.activeLeaf = leaf;
-  options.prepare?.(view);
   await view.onOpen();
   await flushAsyncWork();
   await view.onClose();
@@ -80,15 +79,30 @@ describe("built bundle in Obsidian Mobile", () => {
     const styles = readFileSync(STYLES_PATH, "utf8");
     expect(styles).toMatch(/--ss-touch-target:\s*44px/);
     expect(styles).toMatch(/--ss-safe-bottom:[^;]*safe-area-inset-bottom/s);
-    expect(styles).toContain("@media (pointer: coarse)");
+    expect(styles).toMatch(/@media\s*\(pointer:\s*coarse\)/);
     expect(styles).toContain("@container ss-surface (max-width: 500px)");
-    expect(styles).toMatch(/\.ss-mobile-layout \.systemsculpt-agent-workspace\s*\{/);
+    expect(styles).toMatch(/\.ss-mobile-layout \.systemsculpt-agent-workspace\s*\{[^}]*padding-bottom:\s*var\(--ss-mobile-bottom-clearance\)/s);
+    expect(styles).toMatch(/\.ss-mobile-layout \.systemsculpt-agent-composer\s*\{/);
+    expect(styles).toMatch(/@media\s*\(pointer:\s*coarse\)\s*\{[^@]*\.systemsculpt-agent-attachment-open\s*\{[^}]*min-height:\s*var\(--ss-touch-target\)/s);
     expect(styles).toMatch(/\.ss-mobile-layout \.ss-settings-surface\s*\{/);
     expect(styles).toMatch(/\.ss-mobile-layout \.ss-embeddings-view__results-list\s*\{/);
     expect(styles).not.toMatch(/\.is-mobile|\.mobile-navbar-action/);
   });
 
-  it("onloads cleanly and opens Studio, Similar Notes, and Chat from the production mobile bundle", async () => {
+  it("ships the final ChatView focus invariant after feature styles", () => {
+    const styles = readFileSync(STYLES_PATH, "utf8");
+    const selector = /:is\(\.ss-surface\.systemsculpt-agent-workspace,\s*#ss-specificity-boost\) :focus-visible:not\(\.systemsculpt-agent-prompt-input\)/;
+    const index = styles.search(selector);
+    expect(index).toBeGreaterThanOrEqual(0);
+    expect(styles.slice(index)).toMatch(/^[^{]+\{\s*outline:\s*2px solid var\(--ss-ink-accent\);\s*outline-offset:\s*2px;\s*box-shadow:\s*var\(--ss-ring\)(?:;|\})/);
+    expect(index).toBeGreaterThan(styles.lastIndexOf(".ss-studio-"));
+  });
+
+  it.each([
+    ["default settings", {}, false],
+    ["explicit reduced chat motion", { reduceChatMotion: true }, true],
+    ["legacy OS preference", { respectReducedMotion: true }, false],
+  ])("onloads and opens Studio, Similar Notes, and Chat with %s", async (_label, storedSettings, reducedMotion) => {
     for (const specifier of DESKTOP_NODE_MODULES) {
       jest.doMock(specifier, () => {
         throw new Error(`Desktop adapter was evaluated on mobile: ${specifier}`);
@@ -126,6 +140,7 @@ describe("built bundle in Obsidian Mobile", () => {
         return { unload: jest.fn() };
       });
       plugin = new PluginClass(app, manifest);
+      jest.spyOn(plugin, "loadData").mockResolvedValue(storedSettings);
       addStatusBarItemSpy = jest.spyOn(plugin, "addStatusBarItem");
     });
 
@@ -173,17 +188,20 @@ describe("built bundle in Obsidian Mobile", () => {
     expect(document.body.classList.contains("ss-mobile-layout")).toBe(true);
     settingsTab.hide();
 
-    const studioView = await openView({
-      creator: plugin._views.get(STUDIO_VIEW_TYPE),
-      host,
-      plugin,
-      type: STUDIO_VIEW_TYPE,
-      prepare: (view) => {
-        view.contentEl.onWindowMigrated = () => () => {};
-      },
+    // Studio's view code is evaluated only when something first opens Studio:
+    // until then the factory returns a placeholder that opens the real view.
+    const studioLeaf = createObsidianLeaf(host, plugin.app, (type) => plugin._views.get(type), (view: any) => {
+      view.contentEl.onWindowMigrated = () => () => {};
     });
+    expect(plugin._views.get(STUDIO_VIEW_TYPE)(studioLeaf).constructor.name).toBe("PendingStudioView");
+    await studioLeaf.setViewState({ type: STUDIO_VIEW_TYPE, state: {} });
+    await flushAsyncWork();
+    const studioView = studioLeaf.view as any;
+    expect(studioView.constructor.name).toBe("SystemSculptStudioView");
     expect(studioView.getViewType()).toBe(STUDIO_VIEW_TYPE);
+    expect(studioView.contentEl.querySelector(".ss-studio-view")).not.toBeNull();
     expect(studioView.contentEl.textContent).not.toMatch(/Studio is desktop-only/i);
+    await studioLeaf.detach();
 
     const embeddingsView = await openView({
       creator: plugin._views.get(EMBEDDINGS_VIEW_TYPE),
@@ -203,6 +221,8 @@ describe("built bundle in Obsidian Mobile", () => {
     });
     expect(chatView.getViewType()).toBe(CHAT_VIEW_TYPE);
     expect(chatView.contentEl.querySelector(".systemsculpt-agent-workspace")).not.toBeNull();
+    expect(chatView.contentEl.querySelector(".systemsculpt-agent-workspace")
+      .classList.contains("is-reduced-motion")).toBe(reducedMotion);
     expect(
       chatView.contentEl.querySelector('.ss-surface[data-ss-surface="view"]'),
     ).not.toBeNull();
@@ -213,12 +233,10 @@ describe("built bundle in Obsidian Mobile", () => {
       chatView.contentEl.querySelector('button[aria-label="Send message"]'),
     ).not.toBeNull();
     expect(
-      chatView.contentEl.querySelector('button[aria-label="Attach files"]'),
+      chatView.contentEl.querySelector('button[aria-label="Add files and notes"][aria-haspopup="menu"]'),
     ).not.toBeNull();
     expect(
-      chatView.contentEl.querySelector(
-        'button[aria-label="Pin files for every message"]',
-      ),
+      chatView.contentEl.querySelector(".systemsculpt-agent-composer > .systemsculpt-agent-composer-footer"),
     ).not.toBeNull();
     expect(
       chatView.contentEl.querySelector(".systemsculpt-agent-viewport")?.getAttribute("tabindex"),

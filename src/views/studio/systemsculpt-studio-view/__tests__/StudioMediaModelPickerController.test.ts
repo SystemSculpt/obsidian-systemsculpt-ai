@@ -1,5 +1,5 @@
 import type SystemSculptPlugin from "../../../../main";
-import type { StudioNodeInstance } from "../../../../studio/types";
+import type { StudioNodeConfigDynamicOptionsSource, StudioNodeInstance } from "../../../../studio/types";
 import { getStudioMediaCatalogs } from "../../../../studio/StudioMediaCatalogs";
 import { openStudioMediaModelPickerModal } from "../../canvas/StudioMediaModelPickerModal";
 import { StudioMediaModelPickerController } from "../StudioMediaModelPickerController";
@@ -9,7 +9,7 @@ jest.mock("../../canvas/StudioMediaModelPickerModal");
 jest.mock("../../canvas/studioMediaModelFavorites", () => ({ readMediaModelFavorites: () => [], toggleMediaModelFavorite: jest.fn() }));
 
 const settle = async () => { for (let i = 0; i < 8; i += 1) await Promise.resolve(); };
-const node = { id: "image", kind: "studio.image_generation", config: {} } as StudioNodeInstance;
+const node = { id: "video", kind: "studio.video_generation", config: {} } as StudioNodeInstance;
 
 describe("Studio model picker lifetime", () => {
   beforeEach(() => jest.clearAllMocks());
@@ -19,13 +19,38 @@ describe("Studio model picker lifetime", () => {
     const pending = new Promise<void>(resolve => { release = resolve; });
     const catalog = { peek: () => null, load: jest.fn(async () => {
       await pending;
-      return { models: [{ id: "model", name: "Model" }], defaultModelId: "model" };
+      return { models: [{ id: "model", name: "Model" }] };
     }) };
-    jest.mocked(getStudioMediaCatalogs).mockReturnValue({ images: catalog, videos: catalog } as unknown as ReturnType<typeof getStudioMediaCatalogs>);
+    jest.mocked(getStudioMediaCatalogs).mockReturnValue({ videos: catalog } as unknown as ReturnType<typeof getStudioMediaCatalogs>);
     const requestRender = jest.fn();
     const controller = new StudioMediaModelPickerController({ plugin: () => ({ app: {} }) as SystemSculptPlugin, requestRender });
-    return { controller, requestRender, release };
+    return { controller, catalog, requestRender, release };
   }
+
+  it("does not load a catalog or open a picker for retired image controls", async () => {
+    const { controller, catalog, release } = fixture();
+    const imageNode = { ...node, id: "image", kind: "studio.image_generation" };
+    expect(controller.planInputs(imageNode)).toBeNull();
+    controller.open("image_models" as StudioNodeConfigDynamicOptionsSource, imageNode, "saved/image", jest.fn());
+    controller.open("video_generation_models", imageNode, "saved/image", jest.fn());
+    release();
+    await settle();
+    expect(getStudioMediaCatalogs).not.toHaveBeenCalled();
+    expect(catalog.load).not.toHaveBeenCalled();
+    expect(openStudioMediaModelPickerModal).not.toHaveBeenCalled();
+    controller.dispose();
+  });
+
+  it("warms a video catalog once for concurrent card renders", async () => {
+    const { controller, catalog, requestRender, release } = fixture();
+    expect(controller.planInputs(node)).toMatchObject({ kind: "video", model: null });
+    controller.planInputs(node);
+    expect(catalog.load).toHaveBeenCalledTimes(1);
+    release();
+    await settle();
+    expect(requestRender).toHaveBeenCalledTimes(1);
+    controller.dispose();
+  });
 
   it("does not repaint a closed view when catalog warming finishes", async () => {
     const { controller, requestRender, release } = fixture();
@@ -38,7 +63,7 @@ describe("Studio model picker lifetime", () => {
 
   it("does not open a pending model dialog after the owning view closes", async () => {
     const { controller, release } = fixture();
-    controller.open("image_generation_models", node, "", jest.fn());
+    controller.open("video_generation_models", node, "", jest.fn());
     controller.dispose();
     release();
     await settle();
@@ -49,41 +74,43 @@ describe("Studio model picker lifetime", () => {
     const { controller, release } = fixture();
     const modal = { close: jest.fn() };
     jest.mocked(openStudioMediaModelPickerModal).mockReturnValue(modal as unknown as ReturnType<typeof openStudioMediaModelPickerModal>);
-    controller.open("image_generation_models", node, "", jest.fn());
+    controller.open("video_generation_models", node, "", jest.fn());
     release();
     await settle();
     expect(openStudioMediaModelPickerModal).toHaveBeenCalledTimes(1);
+    expect(jest.mocked(openStudioMediaModelPickerModal).mock.calls[0][1]).toMatchObject({ selectedId: "" });
     controller.dispose();
     expect(modal.close).toHaveBeenCalledTimes(1);
   });
+
   it("keeps the latest picker when an earlier catalog request resolves last", async () => {
     const { controller } = fixture();
-    let releaseImages!: () => void;
-    const imagesPending = new Promise<void>(resolve => { releaseImages = resolve; });
-    const imageModel = { id: "image-model", name: "Image model" };
-    const videoModel = { id: "video-model", name: "Video model" };
+    let releaseEarlier!: () => void;
+    const earlierPending = new Promise<void>(resolve => { releaseEarlier = resolve; });
+    const earlierModel = { id: "earlier-model", name: "Earlier model" };
+    const latestModel = { id: "latest-model", name: "Latest model" };
     jest.mocked(getStudioMediaCatalogs).mockReturnValue({
-      images: { load: async () => { await imagesPending; return { models: [imageModel] }; } },
-      videos: { load: async () => ({ models: [videoModel] }) },
+      videos: { load: jest.fn()
+        .mockImplementationOnce(async () => { await earlierPending; return { models: [earlierModel] }; })
+        .mockResolvedValue({ models: [latestModel] }) },
     } as unknown as ReturnType<typeof getStudioMediaCatalogs>);
     const modal = { close: jest.fn() };
     jest.mocked(openStudioMediaModelPickerModal).mockReturnValue(modal as unknown as ReturnType<typeof openStudioMediaModelPickerModal>);
-    const imageSelection = jest.fn();
-    const videoSelection = jest.fn();
-    controller.open("image_generation_models", node, "", imageSelection);
-    controller.open("video_generation_models", { ...node, id: "video", kind: "studio.video_generation" }, "", videoSelection);
+    const earlierSelection = jest.fn();
+    const latestSelection = jest.fn();
+    controller.open("video_generation_models", node, "earlier-model", earlierSelection);
+    controller.open("video_generation_models", { ...node, id: "other-video" }, "latest-model", latestSelection);
     await settle();
     expect(openStudioMediaModelPickerModal).toHaveBeenCalledTimes(1);
-    expect(jest.mocked(openStudioMediaModelPickerModal).mock.calls[0][1].kind).toBe("video");
-    releaseImages();
+    expect(jest.mocked(openStudioMediaModelPickerModal).mock.calls[0][1].selectedId).toBe("latest-model");
+    releaseEarlier();
     await settle();
     expect(openStudioMediaModelPickerModal).toHaveBeenCalledTimes(1);
     expect(modal.close).not.toHaveBeenCalled();
     const options = jest.mocked(openStudioMediaModelPickerModal).mock.calls[0][1];
     options.onSelect(options.models[0]);
-    expect(videoSelection).toHaveBeenCalledWith("video-model", "Video model");
-    expect(imageSelection).not.toHaveBeenCalled();
+    expect(latestSelection).toHaveBeenCalledWith("latest-model", "Latest model");
+    expect(earlierSelection).not.toHaveBeenCalled();
     controller.dispose();
   });
-
 });

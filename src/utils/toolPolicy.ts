@@ -17,15 +17,12 @@ export function splitToolName(fullName: string): ToolNameParts {
   };
 }
 
-export type ToolApprovalDecision = {
-  autoApprove: boolean;
-  reason: "non-mutating" | "allowlisted" | "mutating-default" | "invalid";
-};
-
 export type ToolApprovalPolicy = {
   trustedToolNames?: Set<string>;
   requireDestructiveApproval?: boolean;
   autoApproveAllowlist?: string[];
+  /** Routine vault edits are automatic; moving and trashing still need a yes. */
+  mode?: "auto" | "ask" | "full-access";
 };
 
 const MUTATING_TOOLS = new Set<FirstPartyToolName>([
@@ -50,7 +47,7 @@ function normalizedNames(values: Iterable<string> | undefined): Set<string> {
   return result;
 }
 
-export function isToolAllowlisted(functionName: string, allowlist: string[] = []): boolean {
+function isToolAllowlisted(functionName: string, allowlist: string[] = []): boolean {
   const canonicalName = normalizePolicyName(functionName);
   if (!canonicalName) return false;
   const normalizedAllowlist = normalizedNames(Array.isArray(allowlist) ? allowlist : []);
@@ -62,26 +59,6 @@ export function isMutatingTool(fullName: string): boolean {
   return isFirstPartyToolName(canonicalName) && MUTATING_TOOLS.has(canonicalName);
 }
 
-export function getToolApprovalDecision(
-  functionName: string,
-  allowlist: string[] = [],
-): ToolApprovalDecision {
-  const canonicalName = normalizeFirstPartyToolName(functionName);
-  if (!isFirstPartyToolName(canonicalName)) {
-    return { autoApprove: false, reason: "invalid" };
-  }
-  if (!MUTATING_TOOLS.has(canonicalName)) {
-    return { autoApprove: true, reason: "non-mutating" };
-  }
-  if (canonicalName === "trash") {
-    return { autoApprove: false, reason: "mutating-default" };
-  }
-  if (isToolAllowlisted(canonicalName, allowlist)) {
-    return { autoApprove: true, reason: "allowlisted" };
-  }
-  return { autoApprove: false, reason: "mutating-default" };
-}
-
 export function requiresUserApproval(
   toolName: string,
   policy: ToolApprovalPolicy = {},
@@ -89,7 +66,8 @@ export function requiresUserApproval(
   const canonicalName = normalizeFirstPartyToolName(toolName);
   if (!isFirstPartyToolName(canonicalName)) return true;
   if (!MUTATING_TOOLS.has(canonicalName)) return false;
-  if (policy.requireDestructiveApproval === false) return false;
+  if (policy.requireDestructiveApproval === false || policy.mode === "full-access") return false;
+  if (policy.mode === "auto") return canonicalName === "move" || canonicalName === "trash";
   if (canonicalName === "trash") return true;
 
   const trusted = normalizedNames(policy.trustedToolNames);

@@ -16,6 +16,7 @@ function harness() {
   (app.vault.getAllLoadedFiles as jest.Mock).mockImplementation(() => [...files, ...folders]);
   (app.vault.getAbstractFileByPath as jest.Mock).mockImplementation((path) => [...files, ...folders].find((file) => file.path === path) ?? null);
   (app.vault.read as jest.Mock).mockImplementation(async (file) => contents.get(file) ?? "content");
+  (app.vault.cachedRead as jest.Mock).mockImplementation(async (file) => contents.get(file) ?? "content");
   const trash = jest.fn(async (file: TFile | TFolder) => {
     const list = file instanceof TFile ? files : folders;
     list.splice(list.indexOf(file as never), 1);
@@ -51,11 +52,57 @@ describe("reviewed vault cleanup", () => {
     expect((await scanVaultCleanup(h.app, { ...settings, chatsDirectory: directory })).chat.items).toEqual([]);
   });
 
+  it("normalizes accepted directory separators without crossing a sibling boundary", async () => {
+    const h = harness();
+    const chat = h.addFile("SystemSculpt/Chats/saved.md");
+    h.addFile("SystemSculpt/Chats-archive/keep.md");
+    const plan = await scanVaultCleanup(h.app, { ...settings, chatsDirectory: " SystemSculpt\\\\Chats/// " });
+    expect(plan.chat.directory).toBe("SystemSculpt/Chats");
+    expect(plan.chat.items.map((item) => item.file)).toEqual([chat]);
+  });
+
   it("does not treat authored frontmatter as empty", async () => {
     const h = harness();
     const empty = h.addFile("empty.md", " \n\t");
     h.addFile("metadata.md", "---\nimportant: saved\n---\n");
     expect((await scanVaultCleanup(h.app, settings)).empty.items.map((item) => item.file)).toEqual([empty]);
+  });
+
+  it("reads small notes concurrently from cache and preserves the full plan order", async () => {
+    const h = harness();
+    const whitespace = h.addFile(`${settings.chatsDirectory}/whitespace.md`, " \n");
+    const authored = h.addFile(`${settings.extractionsDirectory}/authored.txt`, "content");
+    const zero = h.addFile("zero.bin", "");
+    const recording = h.addFile(`${settings.recordingsDirectory}/take.wav`);
+    const markdown = h.addFile("blank.MARKDOWN", "\t");
+    const failed = h.addFile("unreadable.md");
+    h.addFile("large.md", " ".repeat(1024));
+    const folder = new TFolder({ path: `${settings.chatsDirectory}/empty`, children: [] });
+    h.folders.push(folder);
+    const reads = new Map<TFile, { resolve: (content: string) => void; reject: (error: Error) => void }>();
+    (h.app.vault.cachedRead as jest.Mock).mockImplementation((file: TFile) => new Promise<string>((resolve, reject) => {
+      reads.set(file, { resolve, reject });
+    }));
+
+    const scanning = scanVaultCleanup(h.app, settings);
+    expect([...reads.keys()]).toEqual([whitespace, authored, markdown, failed]);
+    expect(h.app.vault.read).not.toHaveBeenCalled();
+    reads.get(failed)!.reject(new Error("unreadable"));
+    reads.get(markdown)!.resolve("\t");
+    reads.get(authored)!.resolve("content");
+    reads.get(whitespace)!.resolve(" \n");
+    const plan = await scanning;
+    const entry = (file: TFile | TFolder) => ({
+      file, path: file.path,
+      size: file instanceof TFile ? file.stat.size : 0,
+      mtime: file instanceof TFile ? file.stat.mtime : 0,
+    });
+    expect(plan).toEqual({
+      empty: { kind: "empty", directory: null, items: [whitespace, zero, markdown, folder].map(entry), folders: [] },
+      chat: { kind: "chat", directory: settings.chatsDirectory, items: [entry(whitespace)], folders: [entry(folder)] },
+      extraction: { kind: "extraction", directory: settings.extractionsDirectory, items: [entry(authored)], folders: [] },
+      recording: { kind: "recording", directory: settings.recordingsDirectory, items: [entry(recording)], folders: [] },
+    });
   });
 
   it("applies only the unchanged identities from the confirmed snapshot", async () => {
@@ -80,7 +127,11 @@ describe("reviewed vault cleanup", () => {
     const file = h.addFile("empty.md", "  ");
     const plan = await scanVaultCleanup(h.app, settings);
     h.contents.set(file, "hi");
+    (h.app.vault.cachedRead as jest.Mock).mockResolvedValue("  ");
+    const cachedReads = (h.app.vault.cachedRead as jest.Mock).mock.calls.length;
     expect(await applyVaultCleanup(h.app, plan.empty)).toEqual({ trashed: 0, skipped: 1 });
+    expect(h.app.vault.read).toHaveBeenCalledWith(file);
+    expect(h.app.vault.cachedRead).toHaveBeenCalledTimes(cachedReads);
     expect(h.trash).not.toHaveBeenCalled();
   });
 

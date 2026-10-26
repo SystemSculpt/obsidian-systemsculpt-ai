@@ -2,24 +2,21 @@ import { App, setIcon } from "obsidian";
 import { StandardModal } from "../core/ui/modals/standard/StandardModal";
 import { isAudioFileExtension } from "../constants/fileTypes";
 
-export interface ConfirmationListItem {
+interface ConfirmationListItem {
   path: string;
   icon: string;
   detail?: string;
 }
 
-export interface ConfirmationListGroup {
+interface ConfirmationListGroup {
   title?: string;
-  icon?: string;
   items: readonly ConfirmationListItem[];
   previewLimit?: number;
-  moreLabel: string;
 }
 
 export interface ConfirmationListModalOptions {
   title: string;
   description: string;
-  summary?: string;
   groups: readonly ConfirmationListGroup[];
   confirmLabel?: string;
   confirmIcon?: string;
@@ -60,7 +57,7 @@ export class JanitorConfirmationListModal extends StandardModal {
   ) {
     super(app);
     this.setSize("medium");
-    this.modalEl.addClass("ss-janitor-confirmation-modal");
+    this.modalEl.addClass("ss-janitor-confirmation-modal", "ss-modal--scrollable");
   }
 
   onOpen(): void {
@@ -92,29 +89,11 @@ export class JanitorConfirmationListModal extends StandardModal {
 
   private renderPreview(): void {
     const preview = this.contentEl.createDiv({ cls: "ss-janitor-preview" });
-    if (this.options.summary) {
-      preview.createDiv({
-        cls: "ss-janitor-preview-header ss-janitor-preview-count",
-        text: this.options.summary,
-      });
-    }
-
     for (const group of this.options.groups) {
       if (group.items.length === 0) continue;
-      const section = group.title
-        ? preview.createDiv({ cls: "ss-janitor-preview-section" })
-        : preview;
-
+      const section = preview.createDiv({ cls: "ss-janitor-preview-section" });
       if (group.title) {
-        const header = section.createDiv({ cls: "ss-janitor-preview-section-header" });
-        if (group.icon) {
-          const icon = header.createDiv({ cls: "ss-janitor-preview-section-icon" });
-          setIcon(icon, group.icon);
-        }
-        header.createSpan({
-          cls: "ss-janitor-preview-section-title",
-          text: `${group.title} (${group.items.length})`,
-        });
+        section.createDiv({ cls: "ss-janitor-preview-section-title", text: group.title });
       }
 
       const list = section.createDiv({ cls: "ss-janitor-preview-list" });
@@ -133,7 +112,7 @@ export class JanitorConfirmationListModal extends StandardModal {
       if (hiddenCount > 0) {
         list.createDiv({
           cls: "ss-janitor-preview-more",
-          text: `... and ${hiddenCount} more ${group.moreLabel}`,
+          text: `and ${hiddenCount} more`,
         });
       }
     }

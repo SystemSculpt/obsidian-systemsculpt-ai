@@ -1,11 +1,122 @@
-# Tool use in Chat
+# Tool use and modes in Chat
 
-SystemSculpt can use built-in tools during chat when the current flow needs them. There is no separate Agent Mode toggle in the plugin.
+SystemSculpt can use tools during chat when the current flow needs them. There is no separate Agent Mode toggle in the plugin.
+
+## Motion
+
+Chat activity animations pause while the view is hidden or its window is
+unfocused; this does not stop the running task. **Settings → Chat → Reduce chat
+motion** is off by default. Turn it on to minimize chat animations even without a
+system reduced-motion preference. System reduced motion is always honored.
+
+## Approval behavior
+
+The run line under the composer says who answers and where it runs, the mode, and
+the model (or, for hosted chat, your credits), for example
+`Claude Code on this Mac · Auto · Default`. Each part opens a menu in one click;
+`Mod+.` opens the mode menu while the chat has focus. New chats default to
+**Auto**; Auto uses the selected backend's safety policy, not permission bypass.
+Mode changes apply from the next message, even while a response is running, and
+never start a new chat. Saved hosted chats keep their saved mode; missing or
+unrecognized saved modes use **Ask**.
+
+### Claude Code (desktop)
+
+| Mode | Behavior |
+| --- | --- |
+| **Auto** (default) | Runs safe actions without asking. Claude Code's safety check blocks risky ones. |
+| **Ask before edits** | Asks before every edit and command. |
+| **Accept edits** | Edits notes without asking. Asks before commands. |
+| **Plan only** | Reads and plans. Changes nothing until you approve the plan. |
+| **Claude Code settings** | Uses the permission rules in your Claude Code settings. |
+
+These are Claude Code's native modes (`auto`, `manual`, `acceptEdits`, and `plan`);
+**Claude Code settings** leaves the mode to your native configuration. When Claude
+Code asks to use a tool, an inline card in the conversation shows what it wants to
+change, including a diff for edits. The original request is available under **Details**.
+
+If Auto is unavailable, the chat shows **Accept edits · Auto unavailable** and a
+notice explaining that edits are accepted automatically while other actions ask.
+Update Claude Code to use Auto. The plugin never passes `bypassPermissions` or
+`dontAsk`.
+
+### Codex (desktop)
+
+| Mode | Behavior |
+| --- | --- |
+| **Auto** (default) | Works inside this vault. Codex's reviewer only asks you about unsafe actions. |
+| **Ask** | Works inside this vault. Asks before editing other files or using the internet. |
+| **Read only** | Reads your vault without changing it. |
+| **Codex settings** | Uses your own Codex configuration. |
+
+Auto uses native `on-request` approvals, a `workspace-write` sandbox rooted in the
+vault, and `approvalsReviewer: auto_review`. Ask keeps that sandbox and approval
+policy but uses the `user` reviewer. Read only uses a `read-only` sandbox and
+`never` approvals: it cannot escalate into a write. The plugin-defined modes never
+request `danger-full-access` or combine `never` with a writable sandbox.
+
+Codex settings inherits your native approval policy, sandbox, permission profiles
+and reviewer. When resuming a chat in that mode, the plugin resolves current
+configuration through an ephemeral thread without running a model turn, rather
+than keeping stale permissions from the saved thread. Native approval and question
+requests appear inline in the conversation. Studio retains its native request dialogs.
+
+These Codex chat modes do not change Studio permissions. Studio Codex execution
+continues to inherit your native configuration.
+
+### SystemSculpt (hosted, desktop and mobile)
+
+| Mode | Behavior |
+| --- | --- |
+| **Auto** (default for new chats) | Reads, creates and edits notes without asking. Asks before moving or deleting. |
+| **Ask** | Asks before every change to your vault. |
+| **Full access** | Makes every change without asking, including moves and deletes. |
+
+Read, list, find, search, open, and context actions run without approval in every
+hosted mode. Auto also allows write, edit, multi-edit and folder creation without
+asking, but move/rename and trash still require approval. Ask pauses before any
+vault mutation. For a pending request, you can deny, allow once, or allow that
+action until the chat closes. Full access also allows moving files or folders to
+Obsidian trash without pausing; choose it only when you intend that access.
+
+## Reviewing inline approvals
+
+All three chat backends use inline approval cards, not pop-up dialogs. Focus a
+pending card and press **Enter** or **⌘/Ctrl+Enter** to approve, or **Esc** to deny.
+Use **↑/↓** to move between pending cards. **⇧⌘/Ctrl+Enter** chooses **Approve all
+in this chat** when the agent offers a session-scoped grant.
+
+A session approval covers only the scope shown by that action; it is not blanket
+permission. Native agents own the grant, and already-pending requests still need
+their own answer. Closing the live chat ends its native session grants.
+
+A new card does not interrupt typing. Use **Approval needed · Review** or
+**⌥/Alt+↑** (also **⌥/Alt+↓**) anywhere in the chat view to focus the first pending
+card. With no card pending, these keys keep their normal behavior. Resolved cards
+retain their result, and focus moves to the next pending card or back to the composer.
+
+## Answering inline questions
+
+When Claude Code or Codex asks an interactive question, it appears in the
+conversation without opening a modal. On a card with one single-choice question,
+focus the card and press **1–9** to choose and send an option. On a card with one
+multiple-choice Claude Code question, those keys toggle selections; use **Send**
+or **⌘/Ctrl+Enter** when ready. For a card with several questions, select or type
+an answer for each, then use **Send**. You can also focus **Your answer**, type a
+different answer, and press **Enter** to send. **Esc** skips the card without
+sending the text you typed.
+
+Questions use the same focus and **Review** shortcuts as approvals. Answering a
+question never grants permission for later tools. Available question tools depend
+on the native agent's configuration; SystemSculpt does not override native rules
+that disable them. Studio's permission dialogs are unchanged.
 
 ## Where tools come from
 
-Vault actions are built directly into SystemSculpt. No separate tool server or
-client-side model runtime is required.
+Hosted vault actions are built directly into SystemSculpt. No separate tool server
+or client-side model runtime is required. On-machine Claude Code and Codex use
+their own native tools, permissions and session history instead of the hosted tool
+list below.
 
 ## Built-in tool list
 
@@ -34,25 +145,16 @@ web-research corpus directory.
 
 ## Vault and image context
 
-Use the files control in the composer to add vault context, including supported
-images. SystemSculpt sends image context as image input, so you can ask about
+Use **+** in the message box, an `@` or `[[` mention, or a drop to add vault notes
+and supported images to a message, or pin them for every message. SystemSculpt sends image context as image input, so you can ask about
 what is visible in a diagram, screenshot, or other supported vault image. The
 supported formats are PNG, JPG, and WebP, with a 10 MB limit per image. The
 semantic vault index remains text-based; adding an image to the current chat is
 different from searching every image in the vault.
 
-## Approval behavior
-
-Choose the approval mode in the chat composer:
-
-- **Ask Approval** pauses before vault changes. You can deny, allow once, or allow that action until the chat closes.
-- **Full Access** runs all vault actions without pausing, including moving files or folders to trash.
-
-Read, list, find, search, open, and context actions run without approval. Write,
-edit, multi-edit, folder creation, move, and trash actions follow the selected
-approval mode.
-
 ## Paths and arguments
+
+For hosted built-in tools:
 
 - Filesystem paths are vault-relative.
 - URL-encoded paths are normalized by tool layers when possible.
@@ -70,4 +172,4 @@ approval mode.
 
 - Prefer read/search/list tools before edit/write/move/trash.
 - Deny any unclear destructive request and ask the model for a plan first.
-- Use **Allow until closed** only when you expect the same kind of change repeatedly.
+- Use **Approve all in this chat** only when you expect more actions within its displayed scope.

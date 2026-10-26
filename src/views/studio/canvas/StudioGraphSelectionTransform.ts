@@ -67,7 +67,7 @@ export type StudioSelectionResizePatchEntry = {
   patch: StudioGraphNodeResizePatch;
 };
 
-export type StudioSelectionGroupResizeResult = {
+type StudioSelectionGroupResizeResult = {
   bounds: StudioSelectionRect;
   scaleX: number;
   scaleY: number;
@@ -80,6 +80,7 @@ export type StudioSelectionResizeResult = StudioSelectionGroupResizeResult & {
 /**
  * Floor for the group scale factor: bounds shrink toward — but never
  * through — zero, so the transform can never invert or divide by zero.
+ * @internal Tests assert against this value.
  */
 export const STUDIO_SELECTION_MIN_GROUP_SCALE = 0.05;
 
@@ -120,6 +121,7 @@ export function computeStudioSelectionBounds(
  * single-node frame — the edge opposite the dragged zone stays fixed.
  * Deltas are canvas-space (already zoom-compensated via
  * resolveStudioCanvasDelta).
+ * @internal Unit-tested directly.
  */
 export function resolveStudioSelectionGroupResize(params: {
   zone: StudioGraphResizeZone;

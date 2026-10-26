@@ -10,7 +10,9 @@
   width: min(100%, var(--ss-agent-content-width));
   min-height: 100%;
   margin: 0 auto;
-  padding: var(--ss-space-6) var(--ss-space-5) var(--ss-space-10);
+  padding: var(--ss-space-5) var(--ss-space-3) var(--ss-space-6);
+  font-family: var(--font-text);
+  line-height: var(--ss-leading-relaxed);
 }
 
 .systemsculpt-agent-history,
@@ -46,7 +48,7 @@
 
 .systemsculpt-agent-turn.is-user {
   align-self: flex-end;
-  max-width: min(86%, var(--ss-agent-user-width));
+  max-width: 85%;
 }
 
 .systemsculpt-agent-turn.is-user.is-editing {
@@ -56,7 +58,7 @@
 
 .systemsculpt-agent-turn.is-user .systemsculpt-agent-turn-body {
   padding: var(--ss-space-3) var(--ss-space-4);
-  border: 1px solid var(--ss-line);
+  border: none;
   border-radius: var(--ss-radius-lg);
   background: var(--ss-surface-2);
 }
@@ -91,7 +93,7 @@
 }
 
 .systemsculpt-agent-message-editor-hint {
-  color: var(--ss-ink-faint);
+  color: var(--ss-ink-muted);
   font-size: var(--ss-text-xs);
   line-height: var(--ss-leading-base);
 }
@@ -107,10 +109,6 @@
   min-height: var(--ss-control-height);
 }
 
-.systemsculpt-agent-composer.is-history-editing {
-  opacity: 0.72;
-}
-
 .systemsculpt-agent-turn.is-assistant {
   width: 100%;
 }
@@ -118,7 +116,7 @@
 .systemsculpt-agent-turn.is-assistant .systemsculpt-agent-turn-body {
   display: flex;
   flex-direction: column;
-  gap: var(--ss-space-3);
+  gap: var(--ss-space-2);
   min-width: 0;
 }
 
@@ -177,7 +175,7 @@
 }
 
 .systemsculpt-agent-message-attachment-copy span {
-  color: var(--ss-ink-faint);
+  color: var(--ss-ink-muted);
   font-size: var(--ss-text-xs);
 }
 
@@ -189,67 +187,6 @@
 .systemsculpt-agent-turn-body > :last-child,
 .systemsculpt-agent-part.is-text > :last-child {
   margin-bottom: 0;
-}
-
-.systemsculpt-agent-conversation .systemsculpt-agent-code-block {
-  position: relative;
-  max-width: 100%;
-  margin: var(--ss-space-3) 0;
-  padding: var(--ss-space-8) var(--ss-space-3) var(--ss-space-3);
-  overflow: auto;
-  border: 1px solid var(--ss-line);
-  border-radius: var(--ss-radius-md);
-  background: var(--ss-surface-sunken);
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--ss-ink) 4%, transparent);
-  color: var(--ss-ink);
-}
-
-.systemsculpt-agent-conversation .systemsculpt-agent-code-block > code {
-  display: block;
-  min-width: max-content;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font-family: var(--ss-font-mono);
-  font-size: var(--ss-text-sm);
-  line-height: var(--ss-leading-base);
-}
-
-.systemsculpt-agent-conversation .copy-code-button {
-  display: none;
-}
-
-.systemsculpt-agent-conversation .systemsculpt-agent-code-copy {
-  position: absolute;
-  inset-block-start: var(--ss-space-1);
-  inset-inline-end: var(--ss-space-1);
-  min-height: var(--ss-control-height-sm);
-  padding: 0 var(--ss-space-2);
-  border-color: var(--ss-line);
-  background: var(--ss-surface-1);
-  color: var(--ss-ink-muted);
-  font-size: var(--ss-text-xs);
-  opacity: 0.78;
-}
-
-.systemsculpt-agent-conversation .systemsculpt-agent-code-block:hover > .systemsculpt-agent-code-copy,
-.systemsculpt-agent-conversation .systemsculpt-agent-code-copy:focus-visible,
-.systemsculpt-agent-conversation .systemsculpt-agent-code-copy.is-copied,
-.systemsculpt-agent-conversation .systemsculpt-agent-code-copy.is-copy-failed {
-  opacity: 1;
-}
-
-.systemsculpt-agent-conversation .systemsculpt-agent-code-copy.is-copied {
-  border-color: var(--ss-success-line);
-  background: var(--ss-success-tint);
-  color: var(--ss-success);
-}
-
-.systemsculpt-agent-conversation .systemsculpt-agent-code-copy.is-copy-failed {
-  border-color: var(--ss-danger-line);
-  background: var(--ss-danger-tint);
-  color: var(--ss-danger);
 }
 
 .systemsculpt-agent-message-actions {
@@ -275,42 +212,64 @@
   color: var(--ss-danger);
 }
 
-.systemsculpt-agent-message-copy.is-copied .ss-button__icon {
-  animation: ss-agent-copy-confirm var(--ss-dur-slow) var(--ss-ease);
-}
-
-.systemsculpt-agent-message-copy.is-copy-failed .ss-button__icon {
-  animation: ss-agent-copy-failed var(--ss-dur-slow) var(--ss-ease);
-}
-
-@keyframes ss-agent-copy-confirm {
-  0% { transform: scale(0.78); opacity: 0.45; }
-  58% { transform: scale(1.16); opacity: 1; }
-  100% { transform: scale(1); opacity: 1; }
-}
-
-@keyframes ss-agent-copy-failed {
-  0%, 100% { transform: translateX(0); }
-  35% { transform: translateX(-1px); }
-  70% { transform: translateX(1px); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .systemsculpt-agent-message-copy.is-copied .ss-button__icon,
-  .systemsculpt-agent-message-copy.is-copy-failed .ss-button__icon {
-    animation: none;
-  }
-}
-
 .systemsculpt-agent-turn:hover .systemsculpt-agent-message-actions,
 .systemsculpt-agent-turn:focus-within .systemsculpt-agent-message-actions {
   opacity: 1;
 }
 
-@media (hover: none) {
+@media (pointer: coarse) {
   .systemsculpt-agent-message-actions {
-    opacity: 1;
+    opacity: 0.72;
   }
+
+  .systemsculpt-agent-message-actions .ss-button {
+    min-width: var(--ss-touch-target);
+    min-height: var(--ss-touch-target);
+  }
+}
+
+.systemsculpt-agent-message-duration {
+  order: 3;
+  margin-inline-start: auto;
+  align-self: center;
+  color: var(--ss-ink-muted);
+  font-family: var(--font-interface);
+  font-size: var(--ss-text-xs);
+}
+
+.systemsculpt-agent-message-copy { order: -1; }
+
+.systemsculpt-agent-turn-changes {
+  color: var(--ss-ink-muted);
+  font-family: var(--font-interface);
+  font-size: var(--ss-text-base);
+}
+
+.systemsculpt-agent-turn-changes a { color: var(--ss-ink-muted); }
+
+.systemsculpt-agent-message-attachment.is-file {
+  min-height: var(--ss-control-height-sm);
+  padding: 0 var(--ss-space-2);
+  border: 0;
+  border-radius: var(--ss-radius-full);
+}
+
+.systemsculpt-agent-message-attachments {
+  margin: 0 0 var(--ss-space-2);
+}
+
+@container ss-surface (min-width: 600px) {
+  .systemsculpt-agent-conversation { padding-inline: var(--ss-space-5); }
+}
+
+.is-reduced-motion .systemsculpt-agent-message-actions,
+.is-reduced-motion .systemsculpt-agent-message-copy .ss-button__icon {
+  transition: none;
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .systemsculpt-agent-message-actions { transition: none; }
 }
 
 @container ss-surface (max-width: 500px) {
@@ -332,10 +291,6 @@
 .ss-mobile-layout .systemsculpt-agent-conversation {
   padding-top: var(--ss-space-4);
   padding-bottom: var(--ss-space-6);
-}
-
-.ss-mobile-layout .systemsculpt-agent-turn.is-user {
-  max-width: 92%;
 }
 
 .ss-mobile-layout .systemsculpt-agent-turn.is-user.is-editing {

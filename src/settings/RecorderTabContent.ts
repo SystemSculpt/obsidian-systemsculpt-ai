@@ -1,4 +1,5 @@
-import { Setting, Notice, DropdownComponent, type ToggleComponent } from "obsidian";
+import { Notice, DropdownComponent, type ToggleComponent } from "obsidian";
+import { createCatalogSetting } from "./SettingsCatalog";
 import { SystemSculptSettingTab } from "./SystemSculptSettingTab";
 import { DEFAULT_SETTINGS } from "../types";
 import { getSurfaceOwnerWindow } from "../core/ui/surface/SurfaceDomContext";
@@ -61,9 +62,7 @@ export async function displayRecorderTabContent(
 
   containerEl.createEl("h3", { text: "After recording" });
 
-  new Setting(containerEl)
-    .setName("Transcribe automatically")
-    .setDesc("Start transcription when a recording ends.")
+  createCatalogSetting(containerEl, "workflow.auto-transcribe")
     .addToggle((toggle) => {
       toggle
         .setValue(plugin.settings.autoTranscribeRecordings)
@@ -79,9 +78,7 @@ export async function displayRecorderTabContent(
         });
     });
 
-  new Setting(containerEl)
-    .setName("Keep source audio")
-    .setDesc("Keep the recording in your vault after transcription succeeds.")
+  createCatalogSetting(containerEl, "workflow.keep-source-audio")
     .addToggle((toggle) => {
       toggle
         .setValue(plugin.settings.keepRecordingsAfterTranscription)
@@ -92,16 +89,15 @@ export async function displayRecorderTabContent(
 
   containerEl.createEl("h3", { text: "Audio output" });
 
-  new Setting(containerEl)
-    .setName("Default output")
-    .setDesc("Choose the output selected when the processor opens.")
+  createCatalogSetting(containerEl, "workflow.default-output")
     .addDropdown((dropdown) => {
       dropdown
         .addOption("detailed", "Detailed note + transcript")
         .addOption("meeting_brief", "Meeting brief")
         .addOption("clean_transcript", "Clean transcript")
         .setValue(plugin.settings.audioProcessorOutputPreset)
-        .onChange(async (value: "detailed" | "meeting_brief" | "clean_transcript") => {
+        .onChange(async (value) => {
+          if (value !== "detailed" && value !== "meeting_brief" && value !== "clean_transcript") return;
           await plugin.getSettingsManager().updateSettings({
             audioProcessorOutputPreset: value,
           });
@@ -112,9 +108,7 @@ export async function displayRecorderTabContent(
 
   let submitAfterDictationToggle: ToggleComponent | null = null;
 
-  new Setting(containerEl)
-    .setName("Insert transcript at origin")
-    .setDesc("Add the finished text only if its exact note insertion target remains unchanged, or if the original chat conversation is still active.")
+  createCatalogSetting(containerEl, "workflow.insert-transcript")
     .addToggle((toggle) => {
       toggle
         .setValue(plugin.settings.autoPasteTranscription)
@@ -124,22 +118,19 @@ export async function displayRecorderTabContent(
         });
     });
 
-  new Setting(containerEl)
-    .setName("Default file format")
-    .setDesc("Choose the format used when you transcribe an audio file.")
+  createCatalogSetting(containerEl, "workflow.file-format")
     .addDropdown((dropdown) => {
       dropdown
         .addOption("markdown", "Markdown note (.md)")
         .addOption("srt", "Subtitle file (.srt)")
         .setValue(plugin.settings.transcriptionOutputFormat ?? "markdown")
-        .onChange(async (value: "markdown" | "srt") => {
+        .onChange(async (value) => {
+          if (value !== "markdown" && value !== "srt") return;
           await plugin.getSettingsManager().updateSettings({ transcriptionOutputFormat: value });
         });
     });
 
-  new Setting(containerEl)
-    .setName("Clean transcript output")
-    .setDesc("Save only the transcript text, without source details or metadata.")
+  createCatalogSetting(containerEl, "workflow.clean-output")
     .addToggle((toggle) => {
       toggle
         .setValue(plugin.settings.cleanTranscriptionOutput)
@@ -148,16 +139,15 @@ export async function displayRecorderTabContent(
         });
     });
 
-  const cleanupSetting = new Setting(containerEl);
+  const cleanupSetting = createCatalogSetting(containerEl, "workflow.cleanup");
   const cleanupPromptContainer = containerEl.createDiv({ cls: "ss-recorder-cleanup-settings" });
   const renderCleanupPrompt = (enabled: boolean): void => {
     cleanupPromptContainer.empty();
+    tabInstance.invalidateSearchIndex();
     if (!enabled) return;
 
     let promptText: HTMLTextAreaElement | null = null;
-    new Setting(cleanupPromptContainer)
-      .setName("Cleanup instructions")
-      .setDesc("Tell SystemSculpt how to improve readability. Cleanup always keeps the original languages, names, and code-switches.")
+    createCatalogSetting(cleanupPromptContainer, "workflow.cleanup-instructions")
       .addTextArea((text) => {
         promptText = text.inputEl;
         text
@@ -165,7 +155,7 @@ export async function displayRecorderTabContent(
           .setValue(plugin.settings.postProcessingPrompt || DEFAULT_SETTINGS.postProcessingPrompt);
         text.inputEl.rows = 8;
         text.inputEl.addClass("ss-settings-textarea");
-        tabInstance.registerListener(text.inputEl, "change", () => {
+        text.inputEl.addEventListener("change", () => {
           const value = text.inputEl.value.trim()
             ? text.inputEl.value
             : DEFAULT_SETTINGS.postProcessingPrompt;
@@ -181,14 +171,11 @@ export async function displayRecorderTabContent(
               postProcessingPrompt: DEFAULT_SETTINGS.postProcessingPrompt,
             });
             if (promptText) promptText.value = DEFAULT_SETTINGS.postProcessingPrompt;
-            new Notice("Cleanup instructions reset.");
           });
       });
   };
 
   cleanupSetting
-    .setName("Clean up transcript")
-    .setDesc("Fix punctuation, remove filler words, and format the transcript after transcription.")
     .addToggle((toggle) => {
       toggle
         .setValue(plugin.settings.postProcessingEnabled)
@@ -201,9 +188,7 @@ export async function displayRecorderTabContent(
 
   containerEl.createEl("h3", { text: "Chat dictation" });
 
-  new Setting(containerEl)
-    .setName("Send after dictation")
-    .setDesc("Send the dictated chat message after the transcript is inserted.")
+  createCatalogSetting(containerEl, "workflow.send-after-dictation")
     .addToggle((toggle) => {
       submitAfterDictationToggle = toggle;
       toggle
@@ -226,9 +211,7 @@ function renderMicrophoneSetting(
   const ownerWindow = getSurfaceOwnerWindow(containerEl);
   const vaultIdentity = plugin.settings.vaultInstanceId || plugin.app.vault.getName();
 
-  const setting = new Setting(containerEl)
-    .setName("Microphone")
-    .setDesc("Choose the microphone used for new recordings on this device.");
+  const setting = createCatalogSetting(containerEl, "workflow.microphone");
 
   let dropdownComponent: DropdownComponent | null = null;
   let dropdownEl: HTMLSelectElement | null = null;
@@ -240,8 +223,6 @@ function renderMicrophoneSetting(
 
     dropdown.onChange((value) => {
       setCurrentHostPreferredMicrophoneId(ownerWindow, vaultIdentity, value);
-      const label = dropdown.selectEl?.selectedOptions[0]?.text || value;
-      new Notice(`Microphone set to ${label}.`);
     });
   });
 
@@ -249,6 +230,11 @@ function renderMicrophoneSetting(
     cls: "ss-inline-note",
     attr: { "aria-live": "polite" },
   });
+
+  const setStatus = (text: string) => {
+    statusEl.setText(text);
+    tabInstance.invalidateSearchIndex();
+  };
 
   const loadDevices = async (requestLabelPermission = false) => {
     if (!renderScope.isCurrent() || !dropdownComponent || !dropdownEl) return;
@@ -259,7 +245,7 @@ function renderMicrophoneSetting(
     };
 
     addOption("", "Default microphone");
-    statusEl.setText("Loading microphones...");
+    setStatus("Loading microphones...");
     const result = requestLabelPermission
       ? await renderScope.catalog.refreshWithLabelPermission()
       : await renderScope.catalog.refresh();
@@ -270,12 +256,12 @@ function renderMicrophoneSetting(
     if (result.status === "unavailable") {
       if (savedMicrophoneId) addOption(savedMicrophoneId, "Saved microphone (unavailable)");
       dropdown.setValue(savedMicrophoneId);
-      statusEl.setText("Microphone selection unavailable in this environment.");
+      setStatus("Microphone selection unavailable in this environment.");
       return;
     }
     if (result.status === "error") {
       if (savedMicrophoneId) addOption(savedMicrophoneId, "Saved microphone (unavailable)");
-      statusEl.setText(`Unable to load microphones: ${result.message}`);
+      setStatus(`Unable to load microphones: ${result.message}`);
       dropdown.setValue(savedMicrophoneId);
       return;
     }
@@ -291,7 +277,7 @@ function renderMicrophoneSetting(
       addOption(savedMicrophoneId, "Saved microphone (unavailable)");
     }
     dropdown.setValue(savedMicrophoneId);
-    statusEl.setText(
+    setStatus(
       savedMicrophoneUnavailable
         ? "The saved microphone is unavailable. Recording will fall back to the default microphone."
         : result.labelRefresh === "skipped"

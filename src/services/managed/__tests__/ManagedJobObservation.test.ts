@@ -5,8 +5,9 @@ import {
   isRetryableManagedJobObservationError,
   normalizedPollAfterMs,
   observeManagedJob,
-  retryAfterHeaderMs,
 } from "../ManagedJobObservation";
+import fixture from "../../../../testing/fixtures/retry-after.json";
+import { parseRetryAfterMs } from "../../../utils/retryAfter";
 import { PlatformRequestTimeoutError } from "../../PlatformRequestClient";
 
 describe("ManagedJobObservation", () => {
@@ -222,14 +223,35 @@ describe("ManagedJobObservation", () => {
     expect(isRetryableManagedJobObservationError(new DOMException("Aborted", "AbortError"))).toBe(false);
   });
 
-  it("parses bounded Retry-After delta seconds and HTTP dates", () => {
-    expect(retryAfterHeaderMs("3")).toBe(3_000);
-    expect(retryAfterHeaderMs(
-      "Wed, 21 Oct 2015 07:28:00 GMT",
-      Date.parse("Wed, 21 Oct 2015 07:27:58 GMT"),
-    )).toBe(2_000);
-    expect(retryAfterHeaderMs("999999")).toBeUndefined();
-    expect(retryAfterHeaderMs("not-a-delay")).toBeUndefined();
+  it.each(fixture.cases)("waits for $name, clamped rather than discarded at the existing one-hour ceiling", async ({ header, milliseconds }) => {
+    const hint = parseRetryAfterMs(header, { now: fixture.now });
+    const waits: number[] = [];
+    const read = jest.fn().mockRejectedValueOnce({ status: 503, retryAfterMs: hint }).mockResolvedValue({ done: true });
+    for await (const _status of observeManagedJob({
+      read,
+      signal: new AbortController().signal,
+      isRetryableError: isRetryableManagedJobObservationError,
+      retryAfterMs: error => (error as { retryAfterMs?: number }).retryAfterMs,
+      wait: async ms => { waits.push(ms); },
+    })) {
+      break;
+    }
+    expect(waits).toEqual([Math.max(1_000, Math.min(3_600_000, milliseconds ?? 1_000))]);
+
+    const pollWait = jest.fn().mockResolvedValue(undefined);
+    const observation = observeManagedJob({
+      initial: { poll_after_ms: hint },
+      read: async () => ({ poll_after_ms: undefined }),
+      pollAfterMs: value => value.poll_after_ms,
+      signal: new AbortController().signal,
+      wait: pollWait,
+    });
+    await observation.next();
+    await observation.next();
+    await observation.return(undefined as never);
+    expect(pollWait).toHaveBeenCalledWith(
+      Math.max(1_000, Math.min(3_600_000, milliseconds ?? 2_000)), expect.any(AbortSignal),
+    );
   });
 });
 
@@ -240,6 +262,34 @@ describe("ManagedJobObservation", () => {
  * abandoned recordings that had already finished uploading.
  */
 describe("dispatchManagedJob", () => {
+  it.each(fixture.cases)("dispatch waits for $name up to the existing one-hour ceiling", async ({ header, milliseconds }) => {
+    const send = jest.fn().mockRejectedValueOnce({ status: 503, retryAfterMs: parseRetryAfterMs(header, { now: fixture.now }) }).mockResolvedValue("ok");
+    const wait = jest.fn().mockResolvedValue(undefined);
+    await expect(dispatchManagedJob({ send, signal: new AbortController().signal, wait })).resolves.toBe("ok");
+    expect(wait).toHaveBeenCalledWith(
+      Math.max(1_000, Math.min(3_600_000, milliseconds ?? 1_000)), expect.any(AbortSignal),
+    );
+  });
+
+  it("cancels the real backoff timer without replaying or leaving a timer behind", async () => {
+    jest.useFakeTimers();
+    try {
+      const controller = new AbortController();
+      const send = jest.fn().mockRejectedValue(Object.assign(new Error("Try later"), { status: 503, retryAfterMs: 5_000 }));
+      const running = dispatchManagedJob({ send, signal: controller.signal });
+      const stopped = expect(running).rejects.toMatchObject({ name: "AbortError" });
+      await jest.advanceTimersByTimeAsync(4_999);
+      expect(send).toHaveBeenCalledTimes(1);
+      controller.abort();
+      await stopped;
+      await jest.advanceTimersByTimeAsync(60_000);
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(jest.getTimerCount()).toBe(0);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it("replays an idempotent dispatch until the transient fault clears", async () => {
     const waits: number[] = [];
     let attempts = 0;

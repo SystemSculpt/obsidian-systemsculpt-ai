@@ -25,7 +25,6 @@ function createContext(options: {
   config?: Record<string, StudioJsonValue>;
   inputs?: Record<string, StudioJsonValue>;
   generateTextMock?: jest.Mock;
-  generateImageMock?: jest.Mock;
   runCliMock?: jest.Mock;
   storeAssetMock?: jest.Mock;
   readAssetMock?: jest.Mock;
@@ -43,9 +42,7 @@ function createContext(options: {
       text: "ok",
       modelId: "openai/gpt-5-mini",
     }));
-  const generateImageMock =
-    options.generateImageMock ||
-    jest.fn(async () => ({ images: [], modelId: "openai/gpt-5-image-mini" }));
+
   const runCliMock =
     options.runCliMock || jest.fn(async () => ({ exitCode: 0, stdout: "", stderr: "", timedOut: false }));
   const storeAssetMock =
@@ -81,45 +78,37 @@ function createContext(options: {
     signal: new AbortController().signal,
     services: {
       api: {
-        estimateRunCredits: async () => ({ ok: true }),
         generateText: generateTextMock,
-        generateImage: generateImageMock,
-        transcribeAudio: jest.fn(async () => ({ text: "" })),
-      },
-      secretStore: {
-        isAvailable: () => false,
-        getSecret: async () => "",
+        generateVideo: jest.fn(async () => {
+          throw new Error("Video generation is not used by these nodes.");
+        }),
+        transcribeAudio: jest.fn(async () => {
+          throw new Error("Transcription is not used by these nodes.");
+        }),
+        beginLocalCommit: jest.fn(async () => {}),
+        completeLocalCommit: jest.fn(async () => {}),
       },
       storeAsset: storeAssetMock,
       readAsset: readAssetMock,
       resolveAbsolutePath: (path) => path,
       readVaultText: readVaultTextMock,
       statVaultFileSize: statVaultFileSizeMock,
+      openVaultFileSource: jest.fn(async () => {
+        throw new Error("File sources are not used by these nodes.");
+      }),
       readVaultBinary: readVaultBinaryMock,
       statLocalFileSize: statLocalFileSizeMock,
+      openLocalFileSource: jest.fn(async () => {
+        throw new Error("File sources are not used by these nodes.");
+      }),
       readLocalFileBinary: readLocalFileBinaryMock,
       writeTempFile: writeTempFileMock,
       deleteLocalFile: deleteLocalFileMock,
       runCli: runCliMock,
       assertFilesystemPath: () => {},
-      assertNetworkUrl: () => {},
     },
     log: () => {},
   };
-}
-
-function tinyPngBytes(): ArrayBuffer {
-  return Uint8Array.from([
-    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
-    0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
-    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
-    0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
-    0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41,
-    0x54, 0x78, 0x9c, 0x63, 0x60, 0x00, 0x00, 0x00,
-    0x02, 0x00, 0x01, 0xe5, 0x27, 0xd4, 0xa2, 0x00,
-    0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae,
-    0x42, 0x60, 0x82,
-  ]).buffer;
 }
 
 function captionBoardBaseSvgBytes(): ArrayBuffer {
@@ -128,7 +117,7 @@ function captionBoardBaseSvgBytes(): ArrayBuffer {
   ).buffer;
 }
 
-describe("Studio built-in text/image node execution", () => {
+describe("Studio built-in text/media node execution", () => {
   const registry = new StudioNodeRegistry();
   registerBuiltInStudioNodes(registry);
 

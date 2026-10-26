@@ -3,8 +3,18 @@ import {
   DocumentProcessingService,
   ManagedDocumentLocalEffectError,
   type DocumentProcessingDependencies,
+  type DocumentProcessingReceipt,
 } from "../DocumentProcessingService";
-import { sha256HexFromBytesPortable } from "../../utils/sha256";
+import { sha256HexFromArrayBuffer, sha256HexFromBytesPortable } from "../../utils/sha256";
+import { createVaultFileSource } from "../../platform/fileSource";
+import type { ManagedFileSource } from "../managed/ManagedFileSource";
+
+jest.mock("../../platform/fileSource", () => ({ createVaultFileSource: jest.fn() }));
+
+jest.mock("../../utils/sha256", () => {
+  const actual = jest.requireActual("../../utils/sha256");
+  return { ...actual, sha256HexFromArrayBuffer: jest.fn(actual.sha256HexFromArrayBuffer) };
+});
 import { errorLogger } from "../../utils/errorLogger";
 
 jest.mock("obsidian", () => {
@@ -14,11 +24,11 @@ jest.mock("obsidian", () => {
 
 jest.mock("../../utils/errorLogger", () => ({ errorLogger: { error: jest.fn() } }));
 
-const sourceBytes = new Uint8Array([1, 2, 3, 4]).buffer;
+const HASH_SLICE_BYTES = 1024 * 1024;
 const imageBase64 = Buffer.from("managed-image-bytes", "utf8").toString("base64");
 
 function file(path = "documents/report.pdf"): TFile {
-  const value = new TFile({ path });
+  const value = new TFile({ path, stat: { size: 4 } });
   Object.defineProperty(value, "extension", { value: "pdf" });
   Object.defineProperty(value, "name", { value: "report.pdf" });
   Object.defineProperty(value, "basename", { value: "report" });
@@ -28,7 +38,22 @@ function file(path = "documents/report.pdf"): TFile {
 function harness(options: { images?: boolean; exists?: boolean; existingMarkdown?: string } = {}) {
   const events: string[] = [];
   const app = new App();
-  app.vault.readBinary = jest.fn(async () => { events.push("vault-read"); return sourceBytes; });
+  app.vault.readBinary = jest.fn(async () => { throw new Error("Whole-file document reads are forbidden."); });
+  const readSlice = jest.fn(async (start: number, end: number) => {
+    if (start < 0 || end < start || end - start > HASH_SLICE_BYTES) {
+      throw new Error("Expected a bounded document slice.");
+    }
+    return Uint8Array.from({ length: end - start }, (_, index) => (start + index + 1) % 256).buffer;
+  });
+  const release = jest.fn();
+  jest.mocked(createVaultFileSource).mockImplementation((_app, selected) => ({
+    sizeBytes: selected.stat.size,
+    readSlice: (start, end) => {
+      if (end > selected.stat.size) throw new Error("Document slice exceeds source size.");
+      return readSlice(start, end);
+    },
+    release,
+  }));
   app.vault.createBinary = jest.fn(async () => { events.push("image-effect"); return file("out.png"); });
   app.vault.create = jest.fn(async () => { events.push("markdown-effect"); return file("out.md"); });
   app.vault.adapter.exists = jest.fn(async () => options.exists ?? false);
@@ -43,10 +68,11 @@ function harness(options: { images?: boolean; exists?: boolean; existingMarkdown
     metadata: { title: "Managed" },
   };
   const managed = {
-    processAndCommit: jest.fn(async (source: any, context: any, commit: (value: any) => Promise<unknown>) => {
+    processAndCommit: jest.fn(async (source: ManagedFileSource, context: any, commit: (value: any) => Promise<unknown>) => {
       events.push("managed");
-      await source.fingerprint();
-      await source.load();
+      await source.fingerprint(context.signal);
+      const loaded = await source.load();
+      await loaded.readSlice(0, Math.min(loaded.sizeBytes, HASH_SLICE_BYTES));
       context.onProgress?.(50, "Uploading document…");
       return commit({ operationId: "document-op-1", documentId: "document-1", result });
     }),
@@ -56,7 +82,7 @@ function harness(options: { images?: boolean; exists?: boolean; existingMarkdown
   };
   let artifacts: ReadonlyArray<{ kind: "image" | "markdown"; bytes: ArrayBuffer }> = [];
   const staging = {
-    stage: jest.fn(async (_operationId: string, values: typeof artifacts) => {
+    stage: jest.fn(async (_operationId: string, values: typeof artifacts, _signal?: AbortSignal) => {
       events.push("stage");
       artifacts = values;
       return values.map((value, index) => ({
@@ -77,7 +103,7 @@ function harness(options: { images?: boolean; exists?: boolean; existingMarkdown
     createDirectory: jest.fn(),
   } as any;
   const dependencies: DocumentProcessingDependencies = { managed: managed as any, staging: staging as any };
-  return { app, dependencies, events, managed, plugin, staging };
+  return { app, dependencies, events, managed, plugin, staging, readSlice, release };
 }
 
 describe("DocumentProcessingService managed local effects", () => {
@@ -86,11 +112,59 @@ describe("DocumentProcessingService managed local effects", () => {
     globalThis.atob ??= (value: string) => Buffer.from(value, "base64").toString("binary");
   });
 
+  it.each([
+    [4, "9f64a747e1b97f131fabb6b447296c9b6f0201e79fb3c5356e6c77e89b6a806a"],
+    [HASH_SLICE_BYTES + 4, "3516c0e390bf2c6467c0dd255b76a134f0f0d9c27c6ecadeb71cd5cd173f2af1"],
+  ] as const)("caches the exact %s-byte SHA-256 while hashing and verifying only bounded windows", async (sizeBytes, expectedHash) => {
+    const { app, dependencies, managed, plugin, readSlice } = harness();
+    const selected = file();
+    selected.stat.size = sizeBytes;
+    const ranges = sizeBytes > HASH_SLICE_BYTES ? [[0, HASH_SLICE_BYTES], [HASH_SLICE_BYTES, sizeBytes]] : [[0, sizeBytes]];
+    managed.processAndCommit.mockImplementationOnce(async (source: ManagedFileSource) => {
+      const [first, second] = await Promise.all([source.fingerprint(), source.fingerprint()]);
+      expect(first).toBe(`sha256:${expectedHash}`);
+      expect(second).toBe(first);
+      expect(readSlice.mock.calls).toEqual(ranges);
+      expect(sha256HexFromArrayBuffer).toHaveBeenCalledTimes(ranges.length);
+      const loaded = await source.load();
+      expect(loaded).toMatchObject({ filename: "report.pdf", contentType: "application/pdf", sizeBytes });
+      expect(loaded).not.toHaveProperty("bytes");
+      expect(new Uint8Array(await loaded.readSlice(sizeBytes - 4, sizeBytes))).toEqual(new Uint8Array([1, 2, 3, 4]));
+      return {};
+    });
+    await new DocumentProcessingService(app, plugin, dependencies).processDocumentWithReceipt(selected, { showNotices: false });
+    expect(createVaultFileSource).toHaveBeenCalledTimes(1);
+    expect(createVaultFileSource).toHaveBeenCalledWith(app, selected);
+    expect(app.vault.readBinary).not.toHaveBeenCalled();
+    expect(readSlice.mock.calls).toEqual([...ranges, ranges.at(-1)]);
+    expect(jest.mocked(sha256HexFromArrayBuffer).mock.calls.map(([bytes]) => bytes.byteLength))
+      .toEqual([...ranges, ranges.at(-1)!].map(([start, end]) => end - start));
+  });
+
+  it("does not stage or write results when cancellation wins an asynchronous image digest", async () => {
+    const { app, dependencies, managed, plugin, staging } = harness({ images: true });
+    const controller = new AbortController();
+    jest.mocked(sha256HexFromArrayBuffer)
+      // Fingerprint window, then verification of the upload slice, then image.
+      .mockImplementationOnce(async (bytes) => sha256HexFromBytesPortable(new Uint8Array(bytes)))
+      .mockImplementationOnce(async (bytes) => sha256HexFromBytesPortable(new Uint8Array(bytes)))
+      .mockImplementationOnce(async (bytes) => {
+        controller.abort();
+        return sha256HexFromBytesPortable(new Uint8Array(bytes));
+      });
+    await expect(new DocumentProcessingService(app, plugin, dependencies).processDocument(file(), {
+      signal: controller.signal, showNotices: false,
+    })).rejects.toMatchObject({ name: "AbortError" });
+    expect(staging.stage).not.toHaveBeenCalled();
+    expect(app.vault.createBinary).not.toHaveBeenCalled();
+    expect(managed.completeLocalCommit).not.toHaveBeenCalled();
+  });
+
   it("uses one signal and commits verified image, Markdown, and context effects in order", async () => {
     const { app, dependencies, events, managed, plugin, staging } = harness({ images: true });
     const service = new DocumentProcessingService(app, plugin, dependencies);
     const controller = new AbortController();
-    const context = jest.fn(async () => { events.push("context-effect"); });
+    const context = jest.fn(async (_receipt: DocumentProcessingReceipt, _signal: AbortSignal) => { events.push("context-effect"); });
 
     const receipt = await service.processDocumentWithReceipt(file(), {
       signal: controller.signal,

@@ -1,3 +1,5 @@
+import { sha256HexFromBytes } from "../../utils/sha256";
+
 /** Reads one verified output without retaining both chunks and a joined copy. */
 export async function readVerifiedManagedOutput(
   response: Response,
@@ -34,9 +36,8 @@ export async function readVerifiedManagedOutput(
     reader.releaseLock();
   }
   if (offset !== expected.size_bytes) malformed("integrity mismatch");
-  const digest = await window.crypto.subtle.digest("SHA-256", bytes.buffer);
+  const hash = await sha256HexFromBytes(bytes);
   if (signal?.aborted) throw abortError();
-  const hash = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
   if (hash !== expected.sha256) malformed("integrity mismatch");
   return bytes.buffer;
 }

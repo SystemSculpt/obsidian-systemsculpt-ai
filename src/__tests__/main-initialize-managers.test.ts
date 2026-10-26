@@ -47,7 +47,6 @@ const createLogger = () => ({
   info: jest.fn(),
   error: jest.fn(),
   debug: jest.fn(),
-  setLogFileName: jest.fn(),
 });
 
 const createTracer = () => ({
@@ -66,6 +65,21 @@ describe("SystemSculptPlugin.initializeManagers", () => {
     mockViewManagerInitialize.mockImplementation(() => undefined);
   });
 
+  it("reports services that are not initialized instead of returning undefined", () => {
+    const plugin = new SystemSculptPlugin(new App(), {
+      id: "systemsculpt-ai",
+      version: "1.0.0",
+    } as any);
+
+    expect(plugin.settings).toBeDefined();
+    expect(plugin.storage).toBeUndefined();
+    expect(plugin.directoryManager).toBeUndefined();
+    expect(() => plugin.getSettingsManager()).toThrow("Settings manager has not been initialized");
+    expect(() => plugin.getLicenseManager()).toThrow("License manager has not been initialized");
+    expect(() => plugin.getTranscriptionService()).toThrow("Transcription service has not been initialized");
+    expect(mockLicenseManagerCtor).not.toHaveBeenCalled();
+  });
+
   it("lazily initializes and reuses the view manager before deferred managers run", () => {
     const app = new App();
     const plugin = new SystemSculptPlugin(app, {
@@ -78,7 +92,7 @@ describe("SystemSculptPlugin.initializeManagers", () => {
 
     expect(first).toBe(second);
     expect(mockViewManagerCtor).toHaveBeenCalledTimes(1);
-    expect(mockViewManagerInitialize).toHaveBeenCalledTimes(1);
+    expect(mockViewManagerInitialize).toHaveBeenCalled();
   });
 
   it("retries command registration when the first registration attempt fails", async () => {

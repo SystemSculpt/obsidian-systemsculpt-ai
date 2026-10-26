@@ -30,6 +30,7 @@ export function createDefaultChatExportOptions(): ChatExportOptions {
   return { ...DEFAULT_CHAT_EXPORT_OPTIONS };
 }
 
+/** @internal Unit-tested directly. */
 export function mergeChatExportOptions(
   base: ChatExportOptions,
   overrides?: Partial<ChatExportOptions>

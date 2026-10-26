@@ -1,8 +1,6 @@
 import { registerBuiltInStudioNodes } from "../StudioBuiltInNodes";
 import {
-  getUnknownNodeConfigKeys,
   mergeNodeConfigWithDefaults,
-  rebuildConfigWithUnknownKeys,
   validateNodeConfig,
 } from "../StudioNodeConfigValidation";
 import { StudioNodeRegistry } from "../StudioNodeRegistry";
@@ -48,38 +46,6 @@ describe("Studio node config validation", () => {
     expect(result.errors).toHaveLength(0);
   });
 
-  it("rejects invalid image-generation aspect-ratio values", () => {
-    const registry = registryWithBuiltIns();
-    const definition = registry.get("studio.image_generation", "1.0.0");
-    expect(definition).not.toBeNull();
-
-    const result = validateNodeConfig(definition!, {
-      count: 1,
-      aspectRatio: "bad-ratio",
-    });
-
-    expect(result.isValid).toBe(false);
-    expect(result.errors.some((error) => error.fieldKey === "aspectRatio")).toBe(true);
-  });
-
-  it("accepts the portrait and landscape aspect ratios used by AI image edit flows", () => {
-    const registry = registryWithBuiltIns();
-    const definition = registry.get("studio.image_generation", "1.0.0");
-    expect(definition).not.toBeNull();
-
-    const wide = validateNodeConfig(definition!, {
-      count: 1,
-      aspectRatio: "3:2",
-    });
-    const tall = validateNodeConfig(definition!, {
-      count: 1,
-      aspectRatio: "2:3",
-    });
-
-    expect(wide.isValid).toBe(true);
-    expect(tall.isValid).toBe(true);
-  });
-
   it("accepts legacy provider key as unknown config key during validation", () => {
     const registry = registryWithBuiltIns();
     const definition = registry.get("studio.image_generation", "1.0.0");
@@ -95,7 +61,7 @@ describe("Studio node config validation", () => {
     expect(result.errors).toHaveLength(0);
   });
 
-  it("preserves unknown keys while rebuilding config", () => {
+  it("preserves unknown keys while merging defaults", () => {
     const registry = registryWithBuiltIns();
     const definition = registry.get("studio.text_generation", "1.0.0");
     expect(definition).not.toBeNull();
@@ -107,18 +73,7 @@ describe("Studio node config validation", () => {
 
     const merged = mergeNodeConfigWithDefaults(definition!, baseConfig);
     expect(merged.modelId).toBe("openai/gpt-5-mini");
-
-    const unknown = getUnknownNodeConfigKeys(definition!, baseConfig);
-    expect(unknown.custom_internal_key).toBe("keep-me");
-
-    const rebuilt = rebuildConfigWithUnknownKeys(definition!, baseConfig, {
-      custom_internal_key: "still-here",
-      next_unknown: 42,
-    });
-
-    expect(rebuilt).not.toHaveProperty("modelId");
-    expect(rebuilt.custom_internal_key).toBe("still-here");
-    expect(rebuilt.next_unknown).toBe(42);
+    expect(merged.custom_internal_key).toBe("keep-me");
   });
 
   it("validates media ingest source path field types", () => {

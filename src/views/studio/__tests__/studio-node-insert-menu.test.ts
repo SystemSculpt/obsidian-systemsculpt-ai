@@ -34,6 +34,22 @@ describe("buildNodeInsertMenuItems", () => {
     expect(items.some((item) => item.definition.kind === "studio.terminal")).toBe(false);
   });
 
+  describe.each(["studio.workflow", "studio.image_generation"])("retired %s", kind => {
+  it.each([true, false])("keeps saved cards as portable, hidden compatibility notes (desktop: %s)", (isDesktopApp) => {
+    platform.isDesktopApp = isDesktopApp;
+    const registry = new StudioNodeRegistry();
+    registerBuiltInStudioNodes(registry);
+
+    expect(registry.get(kind, "1.0.0")).toMatchObject({
+      hiddenFromInsertMenu: true,
+      requiredHostCapabilities: [],
+      capabilityClass: "local_cpu",
+    });
+    expect(buildNodeInsertMenuItems(registry.list()).some(item => item.definition.kind === kind)).toBe(false);
+  });
+
+  });
+
   it("offers the visual text node under the Text display name", () => {
     const items = buildNodeInsertMenuItems(definitions);
     const textItem = items.find((item) => item.definition.kind === "studio.text");
@@ -79,7 +95,7 @@ describe("buildNodeInsertMenuItems", () => {
 
     const capabilitiesByKind = Object.fromEntries(
       registry.list()
-        .map((definition) => [definition.kind, definition.requiredHostCapabilities])
+        .map((definition) => [definition.kind, definition.requiredHostCapabilities] as const)
         .sort(([left], [right]) => left.localeCompare(right)),
     );
 
@@ -91,7 +107,7 @@ describe("buildNodeInsertMenuItems", () => {
       "studio.run_collection": [],
       "studio.command_center": [],
       "studio.button": [],
-      "studio.workflow": ["local-cli"],
+      "studio.workflow": [],
       "studio.dataset": ["local-filesystem", "absolute-paths", "local-cli"],
       "studio.image_generation": [],
       "studio.input": [],

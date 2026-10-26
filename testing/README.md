@@ -1,6 +1,6 @@
 # Testing architecture
 
-The plugin has four local test layers:
+The plugin has three local test layers:
 
 1. src/**/__tests__ proves module behavior with Jest, including seeded
    lifecycle, persistence, rendering, approval, queue, and recovery races.
@@ -8,10 +8,13 @@ The plugin has four local test layers:
    contracts plus Obsidian host composition.
 3. scripts/*.test.mjs proves build, release, workflow, mobile-import, sync, and
    repository policy.
-4. The retired managed-chat replay fixture remains hash-pinned as a released
-   compatibility artifact. Behavioral validation of that legacy server route
-   belongs to the website API; the plugin does not replay it through a second
-   client-owned projector.
+
+Tests are type-checked too. tsconfig.test.json checks src and testing in one
+program in which obsidian resolves to src/tests/mocks/obsidian.d.ts: the real
+obsidian.d.ts types plus the constructors the Jest mock accepts (for example
+`new TFile({ path })`). Give fakes the real shape instead of casting them;
+reach a private member with `view["member"]`, which keeps its declared type.
+`npm run check:types:tests` runs that program alone.
 
 Managed fixtures live in testing/fixtures/managed; versioned settings inputs
 live in testing/fixtures/settings. Default tests need no provider key, hosted
@@ -53,8 +56,12 @@ npm run check:compat
 - test:integration imports the production artifact in the Obsidian host mock.
   It also drives the credential-free thin-agent endurance fixture through the
   real headless Chat, native transport, approval, mutation-journal, reconnect,
-  and terminal seams.
-- check:plugin adds types, mobile, sync, artifact, and release guards.
+  and terminal seams, and unloads and reloads the artifact in place as an
+  update does: every window and document listener, timer, observer and
+  workspace, vault and metadataCache event ref returns to its count before
+  load, and the first instance must be collected.
+- check:plugin adds source and test types, mobile, sync, artifact, and release
+  guards.
 - test:chatview:critical uses strict console, randomized test order with a
   printed replay seed, open-handle detection, adversarial thin-session and
   local-persistence cases, and a global coverage floor on the high-risk
@@ -65,15 +72,21 @@ npm run check:compat
   integration.
 - test:unit:ci is the partitioned remainder. It excludes every focused
   critical-risk and mobile path already run earlier in check:ci, so breadth
-  does not require a third execution of the same suites.
+  does not repeat suites. The mobile CI subset also excludes critical-owned
+  suites; standalone mobile checks retain them. Embeddings owns its service
+  tree only, while embeddings-named UI/tool suites run as ordinary unit tests.
 - check:compat is the exact smaller gate for the Node and operating-system
   compatibility matrix. It reruns every critical ChatView suite without
-  repeating the coverage instrumentation already enforced by check:ci.
+  repeating coverage instrumentation or OS-independent ESLint already enforced
+  by check:ci.
 
 CI runs check:ci on Ubuntu/Node 22. It also runs check:compat on Node 22.18,
 Node 24, macOS/Node 22, and Windows/Node 22 with fail-fast disabled. All jobs
-are credential-free. A stable `required` job fails unless every lane succeeds.
-There is no native-device or provider matrix.
+use no provider credentials. A stable `required` job requires every lane to
+succeed, except main pushes may reuse a successful PR/merge-group run whose
+GitHub job records prove every lane tested the identical Git tree. Missing
+proof or API failures run the full matrix; manual dispatch always runs it.
+Release publication remains independent. There is no native-device or provider matrix.
 
 Each top-level hosted Jest gate writes its normalized child argv and replay
 seed into `.cache/ci-evidence/jest-seeds`. Failed jobs retain that evidence,

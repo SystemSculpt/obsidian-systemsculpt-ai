@@ -1,4 +1,4 @@
-import { readCodexCatalog, type CodexModel } from './CodexModelCatalog';
+import { codexDefaultLabel, readCodexCatalog, type CodexModel } from './CodexModelCatalog';
 import type { CodexExecutionOptions } from './CodexExecutionSettings';
 
 type Options = {
@@ -6,6 +6,7 @@ type Options = {
   value: () => Required<CodexExecutionOptions>;
   onChange?: (patch: CodexExecutionOptions) => void | Promise<void>;
   enabled: () => boolean;
+  isVisible?: () => boolean;
   workingDirectory: () => string;
   onPermissions?: (description: string) => void;
 };
@@ -22,44 +23,45 @@ export function mountCodexModelControls(root: HTMLElement, options: Options): { 
   if (command) root.createSpan({ cls: 'ss-studio-command-standard', text: 'Standard', attr: { title: 'All agents launched here use Standard service.' } });
   const status = root.createEl('small', { cls: command ? 'ss-studio-command-execution-status' : 'ss-codex-controls-status', attr: { role: 'status', 'aria-live': 'polite' } });
   const retry = root.createEl('button', { cls: 'ss-codex-retry', text: command ? 'Retry' : 'Reconnect Codex', attr: { type: 'button', 'data-testid': command ? 'studio.command.models-retry' : 'codex.execution.reconnect' } });
-  const controller = new AbortController(); let models: CodexModel[] = [], disposed = false, loading = false, loaded = false, error = '', actionError = '', pendingChanges = 0;
+  const controller = new AbortController(); let models: CodexModel[] = [], disposed = false, loading = false, loaded = false, activated = !command, error = '', actionError = '', pendingChanges = 0;
   const option = (select: HTMLSelectElement, value: string, label: string, disabled = false) => { select.createEl('option', { value, text: label }).disabled = disabled; };
   const render = () => {
-    if (disposed || pendingChanges) return;
-    const enabled = options.enabled(), selected = options.value(), current = models.find(item => item.model === selected.model);
+    if (disposed || pendingChanges || options.isVisible?.() === false) return;
+    const enabled = options.enabled(), selected = options.value(), current = models.find(item => selected.model ? item.model === selected.model : item.isDefault);
     model.empty(); effort.empty(); speed?.empty();
+    if (!command) option(model, '', codexDefaultLabel(models));
     for (const entry of models) option(model, entry.model, entry.name);
-    if (!current) option(model, selected.model, selected.model);
+    if (selected.model && !current) option(model, selected.model, selected.model);
     model.value = selected.model;
     const supported = current?.efforts || [];
-    for (const value of new Set([...supported, selected.effort])) option(effort, value, value === 'xhigh' ? 'Extra high' : value[0].toUpperCase() + value.slice(1), !!current && !supported.includes(value));
+    for (const value of new Set([...(command ? [] : ['']), ...supported, selected.effort])) option(effort, value, !value ? 'Codex default' : value === 'xhigh' ? 'Extra high' : value[0].toUpperCase() + value.slice(1), !!value && !!current && !supported.includes(value));
     effort.value = selected.effort;
     if (speed) {
       option(speed, 'default', 'Normal'); option(speed, current?.fastTier || 'priority', current && !current.fastTier ? 'Fast (unavailable)' : 'Fast', !!current && !current.fastTier);
       speed.value = selected.serviceTier; speed.title = selected.serviceTier === 'default' ? '' : 'Fast mode uses more of your Codex allowance.';
     }
     for (const select of [model, effort, speed].filter((value): value is HTMLSelectElement => !!value)) {
-      select.disabled = !enabled || !options.onChange || !models.length;
+      select.disabled = !enabled || !options.onChange || (!command && !models.length);
       select.parentElement!.hidden = !command && !enabled;
     }
-    if (command) effort.disabled ||= !supported.length;
-    const message = actionError || (!enabled ? (command ? 'Agent execution settings are available on desktop.' : '') : error || (loading ? 'Connecting…' : loaded && !current ? 'Saved model is unavailable in the current Codex catalog.' : loaded && !supported.includes(selected.effort) ? 'Choose a supported reasoning level for this model.' : ''));
+    if (command) effort.disabled ||= loaded && !supported.length;
+    const message = actionError || (!enabled ? (command ? 'Agent execution settings are available on desktop.' : '') : error || (loading ? 'Connecting…' : loaded && selected.model && !current ? 'Saved model is unavailable in the current Codex catalog.' : loaded && selected.effort && !supported.includes(selected.effort) ? 'Choose a supported reasoning level for this model.' : ''));
     status.setText(message); status.hidden = !message; retry.hidden = !enabled || !error || loading;
     if (retry.hidden) retry.remove(); else status.after(retry);
   };
   const showError = (message: string) => { actionError = message; render(); };
-  const load = async () => {
+  const load = async (force = false) => {
     if (disposed || loading || !options.enabled()) return;
     loading = true; error = ''; actionError = ''; render();
     try {
-      const catalog = await readCodexCatalog(options.workingDirectory(), controller.signal); if (disposed) return;
+      const catalog = await readCodexCatalog(options.workingDirectory(), controller.signal, force); if (disposed) return;
       models = catalog.models; loaded = true; options.onPermissions?.(catalog.permissions);
       if (!models.length) error = 'No Codex models are available for this login.';
     } catch (cause) { error = cause instanceof Error ? cause.message : 'Could not read Codex models.'; }
     finally { loading = false; render(); }
   };
   const change = (patch: CodexExecutionOptions) => {
-    if (disposed || !options.enabled() || !options.onChange) return;
+    if (disposed || !loaded || !options.enabled() || !options.onChange) return;
     pendingChanges++; actionError = '';
     const settled = () => { pendingChanges--; render(); };
     try {
@@ -69,13 +71,22 @@ export function mountCodexModelControls(root: HTMLElement, options: Options): { 
     } catch (cause) { showError(cause instanceof Error ? cause.message : 'Could not save Codex options.'); settled(); }
   };
   model.addEventListener('change', () => {
+    if (!command && !model.value) { change({ model: '', effort: '' }); return; }
     const next = models.find(item => item.model === model.value); if (!next) return;
-    change({ model: next.model, effort: next.efforts.includes(effort.value) ? effort.value : next.defaultEffort, serviceTier: speed && speed.value !== 'default' && next.fastTier ? next.fastTier : 'default' });
+    change({ model: next.model, effort: !effort.value || next.efforts.includes(effort.value) ? effort.value : next.defaultEffort, serviceTier: speed && speed.value !== 'default' && next.fastTier ? next.fastTier : 'default' });
   });
   effort.addEventListener('change', () => change({ effort: effort.value }));
   speed?.addEventListener('change', () => change({ serviceTier: speed.value }));
-  retry.addEventListener('click', () => { void load(); });
-  const refresh = () => { render(); if (!loaded && !error) void load(); };
+  retry.addEventListener('click', () => { void load(true); });
+  const refresh = () => { render(); if (activated && !loaded && !error) void load(); };
+  const activate = () => { if (activated || disposed) return; activated = true; refresh(); };
+  if (command) {
+    root.addEventListener('focusin', activate);
+    root.addEventListener('pointerdown', activate);
+  }
   refresh();
-  return { refresh, showError, dispose: () => { disposed = true; controller.abort(); } };
+  return { refresh, showError, dispose: () => {
+    disposed = true; controller.abort();
+    root.removeEventListener('focusin', activate); root.removeEventListener('pointerdown', activate);
+  } };
 }

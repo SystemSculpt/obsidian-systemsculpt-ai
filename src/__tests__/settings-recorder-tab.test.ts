@@ -90,6 +90,7 @@ const createTabHarness = (app: App, plugin: unknown) => {
   const tab = {
     app,
     plugin,
+    invalidateSearchIndex: jest.fn(),
     registerRenderCleanup: jest.fn((cleanup: () => void) => {
       cleanups.add(cleanup);
       return () => {
@@ -131,7 +132,8 @@ describe("Recorder settings tab", () => {
     if (originalMediaDevices) {
       Object.defineProperty(navigator, "mediaDevices", originalMediaDevices);
     } else {
-      delete (navigator as Navigator & { mediaDevices?: MediaDevices }).mediaDevices;
+      const mutableNavigator: Omit<Navigator, "mediaDevices"> & { mediaDevices?: MediaDevices } = navigator;
+      delete mutableNavigator.mediaDevices;
     }
     jest.clearAllMocks();
   });
@@ -180,6 +182,33 @@ describe("Recorder settings tab", () => {
     expect(container.textContent).toContain(
       "exact note insertion target remains unchanged",
     );
+  });
+
+  it.each([
+    ["detailed", "meeting_brief", "audioProcessorOutputPreset"],
+    ["markdown", "srt", "transcriptionOutputFormat"],
+  ])("validates the %s dropdown before persisting", async (initialValue, validValue, settingKey) => {
+    setMediaDevices(navigator, { enumerateDevices: jest.fn().mockResolvedValue([]) });
+    const app = new App();
+    const { plugin, updateSettings } = createPlugin(app);
+    const { tab, cleanup } = createTabHarness(app, plugin);
+    const container = document.createElement("div");
+    await displayRecorderTabContent(container, tab as any);
+    const select = Array.from(container.querySelectorAll("select"))
+      .find((candidate) => candidate.value === initialValue);
+    if (!select) throw new Error(`Missing ${settingKey} dropdown`);
+
+    select.value = "not-an-option";
+    expect(select.value).toBe("");
+    select.dispatchEvent(new Event("change"));
+    await flush();
+    expect(updateSettings).not.toHaveBeenCalled();
+
+    select.value = validValue;
+    select.dispatchEvent(new Event("change"));
+    await flush();
+    expect(updateSettings).toHaveBeenCalledWith({ [settingKey]: validValue });
+    cleanup();
   });
 
   it("persists the default Audio Processor output preset", async () => {
@@ -350,14 +379,14 @@ describe("Recorder settings tab", () => {
     expect(mainEnumerate).not.toHaveBeenCalled();
 
     select.value = "popout";
-    select.dispatchEvent(new foreignWindow.Event("change"));
+    select.dispatchEvent(new foreignWindow.window.Event("change"));
     await flush();
     expect(getCurrentHostPreferredMicrophoneId(
       foreignWindow,
       app.vault.getName(),
     )).toBe("popout");
     expect(updateSettings).not.toHaveBeenCalled();
-    expect(mockedNotice).toHaveBeenCalledWith("Microphone set to Popout microphone.");
+    expect(mockedNotice).not.toHaveBeenCalled();
   });
 
   it("keeps device-local mobile and desktop microphone preferences isolated", async () => {
@@ -391,7 +420,7 @@ describe("Recorder settings tab", () => {
 
     expect(getCurrentHostPreferredMicrophoneId(window, app.vault.getName())).toBe("headset");
     expect(updateSettings).not.toHaveBeenCalled();
-    expect(mockedNotice).toHaveBeenCalledWith("Microphone set to USB headset.");
+    expect(mockedNotice).not.toHaveBeenCalled();
 
     Object.assign(Platform, {
       isDesktopApp: true,
@@ -472,7 +501,7 @@ describe("Recorder settings tab", () => {
 
     expect(select.value).toBe("");
     expect(select.selectedOptions[0]?.text).toBe("Default microphone");
-    expect(mockedNotice).toHaveBeenCalledWith("Microphone set to Default microphone.");
+    expect(mockedNotice).not.toHaveBeenCalled();
   });
 
   it("invalidates an older render before applying its device result", async () => {

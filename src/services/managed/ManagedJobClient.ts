@@ -1,13 +1,15 @@
 import { readVerifiedManagedOutput } from "./ManagedOutputBytes";
 import { HostedTransportAdapter } from "./adapters/HostedTransportAdapter";
 import { MANAGED_CAPABILITY_CONTRACT, MANAGED_IMAGE_OUTPUT_MAX_BYTES, ManagedImageOutputBytes, ManagedImageOutputMetadata, ManagedJobCapability, ManagedJobStatus, ManagedTransportResult } from "./ManagedTypes";
-import { retryAfterHeaderMs } from "./ManagedJobObservation";
+import { parseRetryAfterMs } from "../../utils/retryAfter";
 import { CREDITS_REQUIRED_MESSAGE } from "../../utils/errors";
 
+/** @internal Tests assert against this value. */
 export const MANAGED_JOB_PROTOCOL = "managed-job-protocol-v1" as const;
 // Bounds only the transfer of a completed document, never server processing.
 const DOCUMENT_DOWNLOAD_TIMEOUT_MS = 10 * 60_000;
 const MANAGED_IMAGE_OUTPUT_PROTOCOL = "managed-image-output-v1" as const;
+/** @internal Tests assert against this value. */
 export const MANAGED_IMAGE_OUTPUT_DESCRIPTOR = Object.freeze({
   contract_version: MANAGED_IMAGE_OUTPUT_PROTOCOL,
   negotiation: { header: "x-systemsculpt-image-output-contract", required_value: MANAGED_IMAGE_OUTPUT_PROTOCOL, required_headers: { "x-systemsculpt-contract": MANAGED_CAPABILITY_CONTRACT, "x-systemsculpt-job-contract": MANAGED_JOB_PROTOCOL, "x-systemsculpt-capability": "image_generation", "x-license-key": "<license-key>", "x-request-id": "<1-128 characters matching [A-Za-z0-9._:-]+>" } },
@@ -43,19 +45,20 @@ function jobFailureDetail(holder: unknown): { jobId: string | null; code: string
   return { jobId, code, message };
 }
 
+/** @internal Tests assert against this value. */
 export const MANAGED_JOB_OPERATION_STATUSES = {
   transcription: { create: ["uploading"], upload_complete: ["queued"], upload_abort: ["failed"], start: ["queued", "processing", "succeeded", "failed"], status: ["uploading", "queued", "processing", "succeeded", "failed", "expired"] },
   document_processing: { create: ["uploading"], upload_complete: ["queued"], upload_abort: ["failed"], start: ["queued", "processing", "completed", "failed"], status: ["uploading", "queued", "processing", "completed", "failed"] },
   image_generation: { generation_create: ["queued", "processing", "succeeded", "failed", "expired"], generation_list: ["queued", "processing", "succeeded", "failed", "expired"], generation_status: ["queued", "processing", "succeeded", "failed", "expired"] },
 } as const;
 
+/** @internal Tests assert against this value. */
 export const MANAGED_JOB_DESCRIPTORS: Record<ManagedJobCapability, { paths: Partial<Record<Operation, [string, string]>>; statuses: ManagedJobStatus[]; version: Operation[]; idempotent: Operation[] }> = {
   transcription: { paths: { create: ["POST", "/api/plugin/audio/transcriptions/jobs"], part_url: ["GET", "/api/plugin/audio/transcriptions/jobs/{jobId}/upload/part-url"], upload_complete: ["POST", "/api/plugin/audio/transcriptions/jobs/{jobId}/upload/complete"], upload_abort: ["POST", "/api/plugin/audio/transcriptions/jobs/{jobId}/upload/abort"], start: ["POST", "/api/plugin/audio/transcriptions/jobs/{jobId}/start"], status: ["GET", "/api/plugin/audio/transcriptions/jobs/{jobId}"] }, statuses: ["uploading", "queued", "processing", "succeeded", "failed", "expired"], version: ["create", "upload_complete", "start"], idempotent: ["create", "upload_complete", "start"] },
   document_processing: { paths: { create: ["POST", "/api/plugin/documents/jobs"], part_url: ["GET", "/api/plugin/documents/jobs/{documentId}/upload/part-url"], upload_complete: ["POST", "/api/plugin/documents/jobs/{documentId}/upload/complete"], upload_abort: ["POST", "/api/plugin/documents/jobs/{documentId}/upload/abort"], start: ["POST", "/api/plugin/documents/jobs/{documentId}/start"], status: ["GET", "/api/plugin/documents/{documentId}"], download: ["GET", "/api/plugin/documents/{documentId}/download"] }, statuses: ["uploading", "queued", "processing", "completed", "failed"], version: ["create", "upload_complete", "start"], idempotent: ["create", "upload_complete", "start"] },
   image_generation: { paths: { input_prepare: ["POST", "/api/plugin/images/inputs/prepare"], generation_create: ["POST", "/api/plugin/images/generations/jobs"], generation_list: ["GET", "/api/plugin/images/generations/jobs"], generation_status: ["GET", "/api/plugin/images/generations/jobs/{jobId}"] }, statuses: ["queued", "processing", "succeeded", "failed", "expired"], version: [], idempotent: ["generation_create"] },
 };
 
-export interface ManagedMultipartPart { part_number: number; expected_content_length_bytes: number }
 export interface ManagedUploadedImageInput {
   type: "uploaded";
   key: string;
@@ -63,7 +66,7 @@ export interface ManagedUploadedImageInput {
   size_bytes: number;
   sha256: string;
 }
-export interface ManagedImageUsage { raw_usd: number; cost_source: string; estimated: boolean }
+interface ManagedImageUsage { raw_usd: number; cost_source: string; estimated: boolean }
 type JsonObject = Record<string, unknown>;
 type PreparedImageInputsResponse = {
   uploadId: string;
@@ -153,7 +156,7 @@ export class ManagedJobClient {
   private imageOutputHeaders(requestId: string): Record<string, string> { return { "x-systemsculpt-contract": MANAGED_CAPABILITY_CONTRACT, "x-systemsculpt-job-contract": MANAGED_JOB_PROTOCOL, "x-systemsculpt-capability": "image_generation", "x-systemsculpt-image-output-contract": MANAGED_IMAGE_OUTPUT_PROTOCOL, "x-request-id": requestId }; }
   private requestId(): string { const requestId = this.createRequestId(); if (!/^[A-Za-z0-9._:-]{1,128}$/.test(requestId)) throw new Error("Invalid generated request ID."); return requestId; }
   private validateImageOutputResponseHeaders(response: Response, requestId: string): void { const expected = { "x-request-id": requestId, "x-systemsculpt-contract": MANAGED_CAPABILITY_CONTRACT, "x-systemsculpt-job-contract": MANAGED_JOB_PROTOCOL, "x-systemsculpt-image-output-contract": MANAGED_IMAGE_OUTPUT_PROTOCOL, "x-systemsculpt-capability": "image_generation" }; if (Object.entries(expected).some(([name, value]) => response.headers.get(name) !== value)) malformed("Invalid managed image output response headers."); }
-  private async imageOutputError(result: ManagedTransportResult, requestId: string): Promise<never> { this.validateImageOutputResponseHeaders(result.response, requestId); let value: unknown; try { value = await result.response.json(); } catch { malformed("Malformed managed image output error response."); } const envelope = exact(value, ["contract_version", "code", "message", "request_id"]); if (envelope.contract_version !== MANAGED_IMAGE_OUTPUT_PROTOCOL || envelope.request_id !== requestId || typeof envelope.code !== "string" || typeof envelope.message !== "string") malformed("Malformed managed image output error response."); const descriptor = (MANAGED_IMAGE_OUTPUT_DESCRIPTOR.errors as Record<string, { status: number; message: string }>)[envelope.code]; if (!descriptor || descriptor.status !== result.response.status || descriptor.message !== envelope.message) malformed("Malformed managed image output error response."); const code = envelope.code as ErrorCode; throw new ManagedJobError(code, descriptor.message, descriptor.status, requestId, code === "rate_limited" || code === "temporarily_unavailable", null, retryAfterHeaderMs(result.response.headers.get("retry-after"))); }
+  private async imageOutputError(result: ManagedTransportResult, requestId: string): Promise<never> { this.validateImageOutputResponseHeaders(result.response, requestId); let value: unknown; try { value = await result.response.json(); } catch { malformed("Malformed managed image output error response."); } const envelope = exact(value, ["contract_version", "code", "message", "request_id"]); if (envelope.contract_version !== MANAGED_IMAGE_OUTPUT_PROTOCOL || envelope.request_id !== requestId || typeof envelope.code !== "string" || typeof envelope.message !== "string") malformed("Malformed managed image output error response."); const descriptor = (MANAGED_IMAGE_OUTPUT_DESCRIPTOR.errors as Record<string, { status: number; message: string }>)[envelope.code]; if (!descriptor || descriptor.status !== result.response.status || descriptor.message !== envelope.message) malformed("Malformed managed image output error response."); const code = envelope.code as ErrorCode; throw new ManagedJobError(code, descriptor.message, descriptor.status, requestId, code === "rate_limited" || code === "temporarily_unavailable", null, result.diagnostics.retryAfterMs); }
 
   private async uploadPart(capability: "transcription" | "document_processing", jobId: string, partNumber: number, bytes: ArrayBuffer, maxParts: number, signal?: AbortSignal): Promise<{ partNumber: number; etag: string }> {
     if (signal?.aborted) throw new DOMException("Aborted", "AbortError"); this.partNumber(partNumber, maxParts); if (!(bytes instanceof ArrayBuffer)) this.invalid("Multipart bytes must be an ArrayBuffer.");
@@ -162,7 +165,7 @@ export class ManagedJobClient {
     const response = await this.transport.job({ path, method: descriptor[0], headers, signal }); const parsed = await this.parse(capability, "part_url", response) as { internal: { partNumber: number; method: string; url: string; expectedBytes: number } };
     if (parsed.internal.partNumber !== partNumber) malformed("Multipart part identity mismatch.");
     if (bytes.byteLength !== parsed.internal.expectedBytes) this.invalid("Multipart bytes do not match expected length."); const upload = await this.transport.uploadSignedJobPart(parsed.internal.url, parsed.internal.method, {}, bytes, signal);
-    if (!upload.ok) throw new ManagedJobError("managed_job_error", `Signed part upload failed (${upload.status}).`, upload.status, upload.headers.get("x-request-id"), upload.status >= 500 || upload.status === 429);
+    if (!upload.ok) throw new ManagedJobError("managed_job_error", `Signed part upload failed (${upload.status}).`, upload.status, upload.headers.get("x-request-id"), upload.status >= 500 || upload.status === 429, null, parseRetryAfterMs(upload.headers.get("retry-after")));
     const etag = upload.headers.get("etag"); if (!etag || !/^"?[A-Fa-f0-9]{8,128}(?:-[1-9][0-9]{0,9})?"?$/.test(etag) || (etag.startsWith('"') !== etag.endsWith('"'))) malformed("Invalid multipart ETag."); return { partNumber, etag };
   }
 
@@ -240,7 +243,7 @@ export class ManagedJobClient {
       && !Array.isArray(parsed)
       && !Object.prototype.hasOwnProperty.call(parsed, "poll_after_ms")
     ) {
-      const pollAfterMs = retryAfterHeaderMs(result.response.headers.get("retry-after"));
+      const pollAfterMs = result.diagnostics.retryAfterMs;
       if (pollAfterMs !== undefined) {
         return { ...parsed, poll_after_ms: pollAfterMs };
       }
@@ -249,7 +252,7 @@ export class ManagedJobClient {
   }
 
   private async parse(capability: ManagedJobCapability, operation: Operation, result: ManagedTransportResult, imageOutputRequestId?: string): Promise<unknown> {
-    if (!result.response.ok) { if (imageOutputRequestId) return this.imageOutputError(result, imageOutputRequestId); const map: Record<number, [ErrorCode, boolean]> = { 400: ["invalid_request", false], 401: ["license_required", false], 402: ["payment_required", false], 403: ["license_rejected", false], 409: ["operation_conflict", false], 426: ["upgrade_required", false], 429: ["rate_limited", true], 502: ["temporarily_unavailable", true], 503: ["temporarily_unavailable", true] }; const [code, retryable] = map[result.response.status] ?? ["managed_job_error", false]; const message = MANAGED_JOB_HTTP_ERROR_MESSAGES[result.response.status] ?? `Managed job request failed (${result.response.status}).`; throw new ManagedJobError(code, message, result.response.status, result.diagnostics.requestId, retryable, null, retryAfterHeaderMs(result.response.headers.get("retry-after"))); }
+    if (!result.response.ok) { if (imageOutputRequestId) return this.imageOutputError(result, imageOutputRequestId); const map: Record<number, [ErrorCode, boolean]> = { 400: ["invalid_request", false], 401: ["license_required", false], 402: ["payment_required", false], 403: ["license_rejected", false], 409: ["operation_conflict", false], 426: ["upgrade_required", false], 429: ["rate_limited", true], 502: ["temporarily_unavailable", true], 503: ["temporarily_unavailable", true] }; const [code, retryable] = map[result.response.status] ?? ["managed_job_error", false]; const message = MANAGED_JOB_HTTP_ERROR_MESSAGES[result.response.status] ?? `Managed job request failed (${result.response.status}).`; throw new ManagedJobError(code, message, result.response.status, result.diagnostics.requestId, retryable, null, result.diagnostics.retryAfterMs); }
     if (imageOutputRequestId && result.response.headers.get("x-request-id") !== imageOutputRequestId) malformed("Invalid managed image output response request ID.");
     let value: unknown; try { value = await result.response.json(); } catch { malformed("Expected a JSON response."); }
     const parsed = this.validateResponse(capability, operation, value); const terminal = operation === "upload_abort" ? null : this.terminalError(capability, parsed);

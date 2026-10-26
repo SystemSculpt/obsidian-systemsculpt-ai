@@ -121,6 +121,28 @@ describe("failed terminal receipt metadata", () => {
     expect(normalizeFailedTerminalReceipt({ ...BASE_RECEIPT, ...fields })).toBeNull();
   });
 
+  it.each(["local_claude_failed", "local_codex_failed", "local_claude_usage_limit", "local_codex_usage_limit"])(
+    "normalizes %s without hosted identifiers", (terminalFailureCode) => {
+      const candidate = { ...BASE_RECEIPT, terminalFailureCode, terminalFailureMessage: "Not signed in." };
+      expect(normalizeFailedTerminalReceipt(candidate)).toEqual(candidate);
+      expect(normalizeFailedTerminalReceipt({ ...candidate, terminalFailureMessage: "" }))
+        .toEqual({ ...candidate, terminalFailureMessage: "" });
+      for (const terminalFailureMessage of [undefined, null, false, {}, 1]) {
+        expect(normalizeFailedTerminalReceipt({ ...candidate, terminalFailureMessage })).toBeNull();
+      }
+      for (const identifiers of [{ terminalReportId: LOCAL_REPORT_ID }, { terminalIncidentId: INCIDENT_ID }, { terminalServerRunId: SERVER_RUN_ID }]) {
+        expect(normalizeFailedTerminalReceipt({ ...candidate, ...identifiers })).toBeNull();
+      }
+    },
+  );
+
+  it("keeps hosted receipts content-free and still requires their identifiers", () => {
+    expect(normalizeFailedTerminalReceipt({ ...BASE_RECEIPT, terminalFailureMessage: "Raw service error" })).toBeNull();
+    expect(normalizeFailedTerminalReceipt({ ...BASE_RECEIPT, terminalReportId: LOCAL_REPORT_ID, terminalFailureMessage: "Raw service error" }))
+      .toEqual({ ...BASE_RECEIPT, terminalReportId: LOCAL_REPORT_ID });
+    expect(normalizeFailedTerminalReceipt({ ...BASE_RECEIPT, terminalFailureCode: "local_future_failed", terminalFailureMessage: "Unknown agent" })).toBeNull();
+  });
+
   it.each([
     [LOCAL_REPORT_ID, true],
     [`report_${"0".repeat(32)}`, false],

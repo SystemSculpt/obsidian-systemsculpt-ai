@@ -27,8 +27,11 @@
  * change without a plugin settings event.
  */
 
+import { normalizeVaultRelativePath } from "../../utils/vaultPathUtils";
+
 export type VaultExclusionSurface = "embeddings" | "search";
 
+/** @internal Tests type their fixtures with this. */
 export type VaultExclusionSettings = Readonly<{
   folders?: readonly unknown[] | null;
   patterns?: readonly unknown[] | null;
@@ -145,7 +148,7 @@ function compileVaultExclusions(
   return Object.freeze({
     signature,
     isExcluded(path: string): boolean {
-      const normalized = normalizePath(path);
+      const normalized = normalizeVaultRelativePath(path, { trim: false, preserveCharacters: true });
       if (!normalized) return false;
       const lower = normalized.toLowerCase();
       if (inPrefixDirectory(lower) || inChatFolder(lower)) return true;
@@ -156,7 +159,7 @@ function compileVaultExclusions(
       return filters.some((filter) => filter.regex.test(normalized));
     },
     isFolderExcluded(path: string): boolean {
-      const normalized = normalizePath(path);
+      const normalized = normalizeVaultRelativePath(path, { trim: false, preserveCharacters: true });
       if (!normalized) return false;
       if (inPrefixDirectory(normalized.toLowerCase())) return true;
       // Every descendant path starts with `folder/`. The chat-folder substrings
@@ -212,10 +215,6 @@ function stringList(value: unknown): string[] {
 
 function directoryList(value: unknown): string[] {
   return stringList(value)
-    .map(normalizePath)
+    .map((path) => normalizeVaultRelativePath(path, { preserveCharacters: true }))
     .filter((directory) => directory.length > 0);
-}
-
-function normalizePath(path: string): string {
-  return String(path || "").replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
 }

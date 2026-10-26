@@ -6,9 +6,10 @@ import { App, MarkdownRenderer, setIcon, TFile } from "obsidian";
 import type { ChatMessage, MessagePart } from "../../../types";
 import type { AgentConversationSnapshot, AgentPart } from "../../../chat/ChatConversation";
 import type { ToolCall } from "../../../types/toolCalls";
-import type {
-  AgentConversationPresentation,
-  AgentPresentationPhase,
+import {
+  presentAgentConversation,
+  type AgentConversationPresentation,
+  type AgentPresentationPhase,
 } from "../AgentConversationPresentation";
 import { AgentConversationRenderer } from "../AgentConversationRenderer";
 
@@ -22,16 +23,19 @@ function presentation(
     phase,
     busy,
     composerRunning: busy,
+    progressActive: busy && phase !== "recovering" && snapshot.phase !== "retrying",
     visibleParts: snapshot.parts,
     activityStatus,
   };
 }
 
 describe("AgentConversationRenderer tail status", () => {
-  afterEach(() => {
+  afterEach(async () => {
+    jest.useRealTimers();
+    // jsdom queues <details> toggle events as tasks; let them run before this file's window closes.
+    await new Promise((resolve) => setTimeout(resolve, 0));
     document.body.empty();
     jest.clearAllMocks();
-    jest.useRealTimers();
   });
 
   it("maintains a frozen scalar-only incident snapshot without reading rendered content", async () => {
@@ -79,7 +83,7 @@ describe("AgentConversationRenderer tail status", () => {
 
     const rendering = renderer.renderActive(
       snapshot,
-      presentation("responding", true, "Working", snapshot),
+      presentation("responding", true, "Writing", snapshot),
     );
     expect(renderer.captureIncidentSnapshot()).toMatchObject({
       renderPassCount: 1,
@@ -167,12 +171,18 @@ describe("AgentConversationRenderer tail status", () => {
     const unavailableToolSnapshot: AgentConversationSnapshot = {
       ...snapshot,
       parts: snapshot.parts.map((part) => part.kind === "tool"
-        ? { ...part, input: {} }
+        ? {
+          ...part,
+          name: "unknown_server_action",
+          location: "server" as const,
+          input: { private: "private-hosted-input-canary" },
+          output: { data: { private: "private-hosted-output-canary" } },
+        }
         : part),
     };
     await renderer.renderActive(
       unavailableToolSnapshot,
-      presentation("responding", true, "Working", unavailableToolSnapshot),
+      presentation("responding", true, "Writing", unavailableToolSnapshot),
     );
     expect(renderer.captureIncidentSnapshot()).toMatchObject({
       disclosureCount: 2,
@@ -182,6 +192,9 @@ describe("AgentConversationRenderer tail status", () => {
       toolDisclosureCount: 0,
       overflowDisclosureCount: 1,
     });
+    expect(parent.textContent).not.toContain("private-hosted-input-canary");
+    expect(parent.textContent).not.toContain("private-hosted-output-canary");
+    expect(parent.querySelector(".systemsculpt-agent-tool-raw")).toBeNull();
 
     const reasoningOnlySnapshot: AgentConversationSnapshot = {
       ...snapshot,
@@ -193,7 +206,7 @@ describe("AgentConversationRenderer tail status", () => {
     };
     await renderer.renderActive(
       reasoningOnlySnapshot,
-      presentation("reasoning", true, "Working", reasoningOnlySnapshot),
+      presentation("reasoning", true, "Thinking", reasoningOnlySnapshot),
     );
     expect(renderer.captureIncidentSnapshot()).toMatchObject({
       activePartCount: 1,
@@ -258,7 +271,7 @@ describe("AgentConversationRenderer tail status", () => {
 
     await renderer.renderActive(
       snapshot,
-      presentation("responding", true, "Working", snapshot),
+      presentation("responding", true, "Writing", snapshot),
     );
     expect(renderer.captureIncidentSnapshot().disclosureCount).toBe(3);
     renderer.unload();
@@ -601,10 +614,18 @@ describe("AgentConversationRenderer tail status", () => {
     const codeHost = parent.createDiv();
     codeHost.createEl("pre");
     const enhanced = codeHost.createEl("pre");
-    enhanced.createEl("code", { text: "private-code-canary" });
-    enhanced.createEl("button", { cls: "systemsculpt-agent-code-copy" });
+    const code = enhanced.createEl("code", { text: "private-code-canary", cls: "language-typescript" });
+    const nativeCopy = enhanced.createEl("button", { cls: "copy-code-button", text: "Copy" });
+    internals.enhanceCodeBlocks(codeHost);
     internals.enhanceCodeBlocks(codeHost);
     expect(codeHost.querySelectorAll(".systemsculpt-agent-code-copy")).toHaveLength(1);
+    expect(codeHost.querySelectorAll(".copy-code-button")).toHaveLength(1);
+    expect(enhanced.querySelector(".systemsculpt-agent-code-copy")).toBe(nativeCopy);
+    expect(enhanced.querySelector("code")).toBe(code);
+    expect(code.textContent).toBe("private-code-canary");
+    expect(nativeCopy.getAttribute("aria-label")).toBe("Copy code");
+    expect(enhanced.tabIndex).toBe(0);
+    expect(enhanced.getAttribute("aria-label")).toBe("typescript code");
 
     renderer.unload();
     const inactive: AgentConversationSnapshot = {
@@ -617,7 +638,7 @@ describe("AgentConversationRenderer tail status", () => {
     };
     await expect(renderer.renderActive(
       inactive,
-      presentation("responding", true, "Working", inactive),
+      presentation("responding", true, "Writing", inactive),
     )).resolves.toBeUndefined();
   });
 
@@ -695,7 +716,235 @@ describe("AgentConversationRenderer tail status", () => {
     renderer.unload();
   });
 
-  it("rebases delayed elapsed samples without replacing or rewinding Working text", async () => {
+  it.each(["claude", "codex"] as const)("keeps %s approval waiting text through timer ticks until every request resolves", async agent => {
+    jest.useFakeTimers();
+    const parent = document.body.createDiv();
+    const renderer = new AgentConversationRenderer(parent, {
+      app: new App(), sourcePath: () => "", onApprove: jest.fn(), onOpenArtifact: jest.fn(), onCopyArtifactPath: jest.fn(),
+    });
+    renderer.load();
+    const pending: Extract<AgentPart, { kind: "tool" }>[] = [0, 1].map(index => ({
+      id: `tool-${index}`, callId: `tool-${index}`, messageId: "assistant", order: index, kind: "tool",
+      name: agent === "claude" ? "Bash" : "commandExecution", input: { command: "pwd" },
+      location: "server", state: "approval-required", approvalId: `approval-${index}`,
+      native: { agent, workingDirectory: "/vault", vaultRoot: "/vault" },
+    }));
+    const snapshot = (parts: readonly AgentPart[]): AgentConversationSnapshot => ({
+      runId: "run", turnId: "turn", status: "running", phase: "working", elapsedMs: 1_500,
+      messages: [{ id: "assistant", role: "assistant", partIds: parts.map(part => part.id) }], parts,
+    });
+    const render = async (parts: readonly AgentPart[]) => {
+      const value = snapshot(parts);
+      await renderer.renderActive(value, presentAgentConversation(value, true));
+    };
+    try {
+      await render([]);
+      const status = parent.querySelector<HTMLElement>(".systemsculpt-agent-tail-status")!;
+      const label = status.querySelector<HTMLElement>(".systemsculpt-agent-tail-status-label")!;
+      const text = label.firstChild;
+      expect(label.textContent).toBe("Thinking · 1s");
+      await render(pending);
+      expect(parent.querySelector(".systemsculpt-agent-tail-status")).toBe(status);
+      expect(label.firstChild).toBe(text);
+      expect(label.textContent).toBe("Waiting for your approval");
+      expect(status.hasAttribute("data-agent-working-timer")).toBe(false);
+      expect(label.hasAttribute("data-agent-working-duration")).toBe(false);
+      expect(status.querySelector(".is-animated")).toBeNull();
+      jest.advanceTimersByTime(5_000);
+      expect(label.textContent).toBe("Waiting for your approval");
+      await render([{ ...pending[0], state: "approved" }, pending[1]]);
+      jest.advanceTimersByTime(1_000);
+      expect(label.textContent).toBe("Waiting for your approval");
+      for (const state of ["approved", "denied", "cancelled"] as const) {
+        await render([{ ...pending[0], state: "approved" }, { ...pending[1], state }]);
+        expect(label.textContent).toMatch(/ · \d+s$/);
+        expect(status.hasAttribute("data-agent-working-timer")).toBe(true);
+        expect(label.firstChild).toBe(text);
+      }
+    } finally { renderer.unload(); }
+  });
+
+  it.each(["idle", "recovering", "completed", "cancelled", "failed"] as const)(
+    "freezes stale part animations and elapsed timers on %s snapshots without rewriting source parts",
+    async (phase) => {
+      jest.useFakeTimers();
+      const parent = document.body.createDiv();
+      const renderer = new AgentConversationRenderer(parent, {
+        app: new App(), sourcePath: () => "", onApprove: jest.fn(),
+        onOpenArtifact: jest.fn(), onCopyArtifactPath: jest.fn(),
+      });
+      renderer.load();
+      const parts: readonly AgentPart[] = Object.freeze([
+        Object.freeze({
+          id: "tool", kind: "tool", messageId: "assistant", callId: "call", order: 0,
+          name: "web_search", input: { query: "latest" }, location: "server", state: "running",
+        } as const),
+        Object.freeze({
+          id: "reasoning", kind: "reasoning", messageId: "assistant", order: 1,
+          summary: "Partial reasoning", state: "streaming",
+        } as const),
+        Object.freeze({
+          id: "text", kind: "text", messageId: "assistant", order: 2,
+          markdown: "Partial answer", state: "streaming",
+        } as const),
+      ]);
+      const running: AgentConversationSnapshot = {
+        runId: "run", turnId: "turn", status: "running", phase: "working",
+        elapsedMs: 2_000, messages: [], parts,
+      };
+      try {
+        await renderer.renderActive(running, presentAgentConversation(running, true));
+        const overflow = parent.querySelector<HTMLButtonElement>("[data-agent-activity-overflow]")!;
+        overflow.click();
+        const reasoning = parent.querySelector<HTMLDetailsElement>(".systemsculpt-agent-reasoning-details")!;
+        reasoning.open = true;
+        reasoning.dispatchEvent(new Event("toggle"));
+        await jest.advanceTimersByTimeAsync(100);
+        const text = parent.querySelector<HTMLElement>('[data-part-key="text"]')!;
+        const tool = parent.querySelector<HTMLElement>('[data-part-key="tool:call"]')!;
+        const tail = parent.querySelector<HTMLElement>(".systemsculpt-agent-tail-status")!;
+        expect(text.classList).toContain("is-streaming");
+        expect(tool.querySelector(".is-animated")).not.toBeNull();
+        expect(reasoning.querySelector(".is-animated")).not.toBeNull();
+        expect(overflow.querySelector(".is-animated")).not.toBeNull();
+        expect(tail.textContent).toBe("Writing · 2s");
+
+        const frozen: AgentConversationSnapshot = {
+          ...running,
+          status: phase === "recovering" ? "running" : phase,
+          phase: "retrying",
+          statusLabel: "Connection interrupted",
+        };
+        const frozenPresentation = presentAgentConversation(frozen, true);
+        await renderer.renderActive(frozen, frozenPresentation);
+        await jest.advanceTimersByTimeAsync(100);
+        expect(parent.querySelector(".is-animated, .is-streaming, [data-agent-working-timer]")).toBeNull();
+        expect(jest.getTimerCount()).toBe(0);
+        expect(renderer.element.getAttribute("aria-busy")).toBe(String(phase === "recovering"));
+        expect(frozenPresentation.composerRunning).toBe(phase === "recovering");
+        expect(parent.querySelector('[data-part-key="text"]')).toBe(text);
+        expect(text.textContent).toBe("Partial answer");
+        expect(reasoning.textContent).toContain("Partial reasoning");
+        expect(reasoning.querySelector("strong")!.textContent).toBe("Reasoning");
+        expect(parts.map(part => part.kind === "error" ? null : part.state))
+          .toEqual(["running", "streaming", "streaming"]);
+        if (phase === "recovering" || phase === "idle") {
+          expect(tool.classList).toContain("is-running");
+          expect(tool.classList).not.toContain("is-outcome-unknown");
+          expect(tool.querySelector("[aria-description='Done']")).toBeNull();
+          expect(parent.querySelector("[data-agent-turn-fold]")).toBeNull();
+        }
+        if (phase === "idle") expect(parent.querySelector(".systemsculpt-agent-tail-status")).toBeNull();
+        const frozenDom = parent.innerHTML;
+        await jest.advanceTimersByTimeAsync(60_000);
+        expect(parent.innerHTML).toBe(frozenDom);
+        expect(jest.getTimerCount()).toBe(0);
+
+        if (phase === "recovering") {
+          expect(tail.textContent).toBe("Reconnecting");
+          // Only lifecycle and server elapsed time change: cached part identities
+          // must not prevent the live cursor, spinners, and timer from resuming.
+          const resumed = { ...running, elapsedMs: 4_000 };
+          await renderer.renderActive(resumed, presentAgentConversation(resumed, false));
+          expect(parent.querySelector(".systemsculpt-agent-tail-status")).toBe(tail);
+          expect(parent.querySelector('[data-part-key="text"]')).toBe(text);
+          expect(text.classList).toContain("is-streaming");
+          expect(tool.querySelector(".is-animated")).not.toBeNull();
+          expect(reasoning.querySelector(".is-animated")).not.toBeNull();
+          expect(overflow.querySelector(".is-animated")).not.toBeNull();
+          expect(tail.textContent).toBe("Writing · 4s");
+          await jest.advanceTimersByTimeAsync(1_000);
+          expect(tail.textContent).toBe("Writing · 5s");
+          const updated: AgentConversationSnapshot = {
+            ...resumed,
+            parts: parts.map(part => part.kind === "text"
+              ? { ...part, markdown: "Answer continues after recovery" }
+              : part.kind === "reasoning"
+                ? { ...part, summary: "Reasoning continues after recovery" }
+                : part),
+          };
+          await renderer.renderActive(updated, presentAgentConversation(updated, false));
+          await jest.advanceTimersByTimeAsync(100);
+          expect(text.textContent).toBe("Answer continues after recovery");
+          expect(reasoning.textContent).toContain("Reasoning continues after recovery");
+        }
+      } finally {
+        renderer.unload();
+      }
+      expect(jest.getTimerCount()).toBe(0);
+    },
+  );
+
+  it("never starts an elapsed timer for an idle snapshot while the request promise is pending", async () => {
+    jest.useFakeTimers();
+    const onAnnounce = jest.fn();
+    const parent = document.body.createDiv();
+    const renderer = new AgentConversationRenderer(parent, {
+      app: new App(), sourcePath: () => "", onApprove: jest.fn(), onAnnounce,
+      onOpenArtifact: jest.fn(), onCopyArtifactPath: jest.fn(),
+    });
+    renderer.load();
+    const idle: AgentConversationSnapshot = {
+      runId: null, turnId: null, status: "idle", elapsedMs: 1_000, messages: [], parts: [],
+    };
+    try {
+      await renderer.renderActive(idle, presentAgentConversation(idle, true));
+      expect(renderer.element.getAttribute("aria-busy")).toBe("false");
+      expect(parent.querySelector(".systemsculpt-agent-tail-status, .is-active, .is-animated")).toBeNull();
+      expect(jest.getTimerCount()).toBe(0);
+      await jest.advanceTimersByTimeAsync(10_000);
+      expect(jest.getTimerCount()).toBe(0);
+      expect(onAnnounce).not.toHaveBeenCalled();
+    } finally { renderer.unload(); }
+  });
+
+  it.each(["hosted", "native"] as const)("keeps inline %s approval actionable during frozen recovery and resumes after resolution", async (backend) => {
+    jest.useFakeTimers();
+    const onApprove = jest.fn();
+    const parent = document.body.createDiv();
+    const renderer = new AgentConversationRenderer(parent, {
+      app: new App(), sourcePath: () => "", onApprove,
+      onOpenArtifact: jest.fn(), onCopyArtifactPath: jest.fn(),
+    });
+    renderer.load();
+    const pending: Extract<AgentPart, { kind: "tool" }> = {
+      id: "pending", kind: "tool", messageId: "assistant", callId: "call", order: 0,
+      name: backend === "hosted" ? "read" : "Bash", input: {},
+      location: backend === "hosted" ? "vault" : "server",
+      ...(backend === "native" ? { native: { agent: "claude" as const, workingDirectory: "/vault" } } : {}),
+      state: "approval-required", approvalId: "approval",
+    };
+    const running: AgentConversationSnapshot = {
+      runId: "run", turnId: "turn", status: "waiting", phase: "waiting",
+      elapsedMs: 2_000, messages: [], parts: [pending],
+    };
+    try {
+      await renderer.renderActive(running, presentAgentConversation(running, true));
+      const approve = parent.querySelector<HTMLButtonElement>('[data-testid="chat.approval.allow-once"]')!;
+      approve.focus();
+      const recovering = { ...running, phase: "retrying" as const, statusLabel: "Connection interrupted" };
+      await renderer.renderActive(recovering, presentAgentConversation(recovering, true));
+      const tail = parent.querySelector<HTMLElement>(".systemsculpt-agent-tail-status")!;
+      expect(parent.querySelector('[data-testid="chat.approval.allow-once"]')).toBe(approve);
+      expect(document.activeElement).toBe(approve);
+      expect(approve.disabled).toBe(false);
+      expect(tail.textContent).toBe("Waiting for your approval");
+      expect(parent.querySelector(".is-animated, [data-agent-working-timer]")).toBeNull();
+      approve.click();
+      await jest.advanceTimersByTimeAsync(1_000);
+      expect(onApprove).toHaveBeenCalledWith("approval", true);
+      const approved = { ...recovering, parts: [{ ...pending, state: "approved" as const }] };
+      await renderer.renderActive(approved, presentAgentConversation(approved, true));
+      expect(tail.textContent).toBe("Reconnecting");
+      expect(parent.querySelector(".systemsculpt-agent-approval, .is-animated, [data-agent-working-timer]")).toBeNull();
+      const resumed = { ...approved, status: "running" as const, phase: "working" as const, statusLabel: "Working" };
+      await renderer.renderActive(resumed, presentAgentConversation(resumed, true));
+      expect(tail.hasAttribute("data-agent-working-timer")).toBe(true);
+      expect(tail.querySelector(".is-animated")).not.toBeNull();
+    } finally { renderer.unload(); }
+  });
+
+  it("rebases delayed elapsed samples without replacing or rewinding progressive status text", async () => {
     jest.useFakeTimers();
     let now = 0;
     const performanceNow = jest.spyOn(window.performance, "now").mockImplementation(() => now);
@@ -722,38 +971,38 @@ describe("AgentConversationRenderer tail status", () => {
       const first = snapshot(2_500);
       await renderer.renderActive(
         first,
-        presentation("responding", true, "Working", first),
+        presentation("responding", true, "Writing", first),
       );
       const label = parent.querySelector<HTMLElement>(
         ".systemsculpt-agent-tail-status-label",
       )!;
       const textNode = label.firstChild;
-      expect(textNode?.nodeValue).toBe("Working for 2s");
+      expect(textNode?.nodeValue).toBe("Writing · 2s");
 
       now = 1_000;
       jest.advanceTimersByTime(1_000);
       expect(label.firstChild).toBe(textNode);
-      expect(textNode?.nodeValue).toBe("Working for 3s");
+      expect(textNode?.nodeValue).toBe("Writing · 3s");
 
       const delayed = snapshot(1_000);
       await renderer.renderActive(
         delayed,
-        presentation("responding", true, "Working", delayed),
+        presentation("responding", true, "Writing", delayed),
       );
       expect(label.firstChild).toBe(textNode);
-      expect(textNode?.nodeValue).toBe("Working for 3s");
+      expect(textNode?.nodeValue).toBe("Writing · 3s");
 
       now = 2_000;
       jest.advanceTimersByTime(1_000);
       expect(label.firstChild).toBe(textNode);
-      expect(textNode?.nodeValue).toBe("Working for 4s");
+      expect(textNode?.nodeValue).toBe("Writing · 4s");
     } finally {
       renderer.unload();
       performanceNow.mockRestore();
     }
   });
 
-  it("skips an interval write when the visible Working duration has not changed", async () => {
+  it("skips an interval write when the visible progressive status duration has not changed", async () => {
     jest.useFakeTimers();
     let now = 0;
     const performanceNow = jest.spyOn(window.performance, "now").mockImplementation(() => now);
@@ -779,7 +1028,7 @@ describe("AgentConversationRenderer tail status", () => {
     try {
       await renderer.renderActive(
         running,
-        presentation("responding", true, "Working", running),
+        presentation("responding", true, "Writing", running),
       );
       const label = parent.querySelector<HTMLElement>(
         ".systemsculpt-agent-tail-status-label",
@@ -795,23 +1044,25 @@ describe("AgentConversationRenderer tail status", () => {
       jest.advanceTimersByTime(1_000);
       expect(setTextNode).not.toHaveBeenCalled();
       expect(label.firstChild).toBe(textNode);
-      expect(textNode?.nodeValue).toBe("Working for 1s");
+      expect(textNode?.nodeValue).toBe("Writing · 1s");
 
       now = 1_000;
       jest.advanceTimersByTime(1_000);
       expect(setTextNode).toHaveBeenCalledTimes(1);
       expect(label.firstChild).toBe(textNode);
-      expect(textNode?.nodeValue).toBe("Working for 2s");
+      expect(textNode?.nodeValue).toBe("Writing · 2s");
     } finally {
       renderer.unload();
       performanceNow.mockRestore();
     }
   });
 
-  it("uses live-region semantics only for static terminal tail statuses", async () => {
+  it("announces lifecycle events once without making tail statuses live regions", async () => {
     const parent = document.body.createDiv();
+    const onAnnounce = jest.fn();
     const renderer = new AgentConversationRenderer(parent, {
       app: new App(),
+      onAnnounce,
       sourcePath: () => "SystemSculpt/Chats/chat.md",
       onApprove: jest.fn(),
       onOpenArtifact: jest.fn(),
@@ -829,7 +1080,7 @@ describe("AgentConversationRenderer tail status", () => {
 
     await renderer.renderActive(
       running,
-      presentation("responding", true, "Working", running),
+      presentation("responding", true, "Writing", running),
     );
     const status = parent.querySelector<HTMLElement>(".systemsculpt-agent-tail-status")!;
     expect(status.hasAttribute("role")).toBe(false);
@@ -846,9 +1097,12 @@ describe("AgentConversationRenderer tail status", () => {
       presentation("cancelled", false, "Stopped", stopped),
     );
     expect(parent.querySelector(".systemsculpt-agent-tail-status")).toBe(status);
-    expect(status.getAttribute("role")).toBe("status");
-    expect(status.getAttribute("aria-live")).toBe("polite");
-    expect(status.getAttribute("aria-atomic")).toBe("true");
+    expect(status.hasAttribute("role")).toBe(false);
+    expect(status.hasAttribute("aria-live")).toBe(false);
+    expect(status.hasAttribute("aria-atomic")).toBe(false);
+    expect(onAnnounce.mock.calls).toEqual([["SystemSculpt is working"], ["Stopped"]]);
+    await renderer.renderActive(stopped, presentation("cancelled", false, "Stopped", stopped));
+    expect(onAnnounce).toHaveBeenCalledTimes(2);
 
     const failed: AgentConversationSnapshot = {
       ...running,
@@ -859,11 +1113,80 @@ describe("AgentConversationRenderer tail status", () => {
       failed,
       presentation("failed", false, "Failed", failed),
     );
+    // With no error card to carry it, the failed status itself is the one alert.
     expect(parent.querySelector(".systemsculpt-agent-tail-status")).toBe(status);
     expect(status.getAttribute("role")).toBe("alert");
     expect(status.getAttribute("aria-live")).toBe("assertive");
-    expect(status.getAttribute("aria-atomic")).toBe("true");
+    expect(onAnnounce).toHaveBeenCalledTimes(2);
+
+    const failedWithCard: AgentConversationSnapshot = {
+      ...failed,
+      parts: [{
+        id: "error-tail-semantics",
+        kind: "error",
+        order: 0,
+        retryable: true,
+        error: { code: "agent_turn_failed", message: "private-failure-canary", retryable: true },
+      }],
+    };
+    await renderer.renderActive(failedWithCard, presentation("failed", false, "Failed", failedWithCard));
+    const error = parent.querySelector<HTMLElement>(".systemsculpt-agent-part.is-error")!;
+    expect(error.getAttribute("role")).toBe("alert");
+    expect(error.getAttribute("aria-live")).toBe("assertive");
+    expect(error.textContent).not.toContain("private-failure-canary");
+    expect(parent.querySelectorAll('[role="alert"]')).toHaveLength(1);
     renderer.unload();
+  });
+
+  it.each([
+    { name: "Bash", input: { command: "pwd" }, expected: "Waiting for your approval" },
+    { name: "AskUserQuestion", input: { questions: [{ question: "Which folder?", options: [{ label: "Notes" }] }] }, expected: "Waiting for your answer" },
+  ])("stops an existing timer while native $name waits for the user", async ({ name, input, expected }) => {
+    jest.useFakeTimers();
+    const parent = document.body.createDiv();
+    const renderer = new AgentConversationRenderer(parent, {
+      app: new App(),
+      sourcePath: () => "SystemSculpt/Chats/chat.md",
+      onApprove: jest.fn(),
+      onOpenArtifact: jest.fn(),
+      onCopyArtifactPath: jest.fn(),
+    });
+    renderer.load();
+    const running: AgentConversationSnapshot = {
+      runId: "native-wait-run", turnId: "native-wait-turn", status: "running", phase: "working",
+      elapsedMs: 2_000, messages: [], parts: [],
+    };
+    try {
+      await renderer.renderActive(running, presentAgentConversation(running, true));
+      const status = parent.querySelector<HTMLElement>(".systemsculpt-agent-tail-status")!;
+      const internals = renderer as unknown as { activeWorkingTimer: number | null };
+      expect(internals.activeWorkingTimer).not.toBeNull();
+      const waiting: AgentConversationSnapshot = {
+        ...running,
+        status: "waiting",
+        phase: "waiting",
+        elapsedMs: 3_000,
+        parts: [{
+          id: "native-wait-tool", kind: "tool", callId: "native-wait-call", messageId: "native-wait-assistant",
+          order: 0, name, input, state: "approval-required", location: "server", approvalId: "native-wait-approval",
+          native: { agent: "claude", workingDirectory: "/vault" },
+        }],
+      };
+      await renderer.renderActive(waiting, presentAgentConversation(waiting, true));
+      expect(parent.querySelector(".systemsculpt-agent-tail-status")).toBe(status);
+      expect(status.textContent).toBe(expected);
+      expect(status.querySelector(".is-animated")).toBeNull();
+      expect(status.hasAttribute("data-agent-working-timer")).toBe(false);
+      expect(status.querySelector("[data-agent-working-duration]")).toBeNull();
+      expect(internals.activeWorkingTimer).toBeNull();
+      const textNode = status.querySelector(".systemsculpt-agent-tail-status-label")!.firstChild;
+      jest.advanceTimersByTime(10_000);
+      expect(status.textContent).toBe(expected);
+      expect(status.querySelector(".systemsculpt-agent-tail-status-label")!.firstChild).toBe(textNode);
+      expect(internals.activeWorkingTimer).toBeNull();
+    } finally {
+      renderer.unload();
+    }
   });
 
   it("drops an asynchronous history render after unload instead of writing stale DOM", async () => {
@@ -1414,7 +1737,7 @@ describe("AgentConversationRenderer tail status", () => {
       ...initial[0]!,
       content: "Corrected final answer",
       messageParts: initial[0]!.messageParts!.map((part) =>
-        part.id === "answer-lazy-stale"
+        part.type === "content" && part.id === "answer-lazy-stale"
           ? { ...part, data: "Corrected final answer" }
           : { ...part }),
     }];
@@ -1664,7 +1987,7 @@ describe("AgentConversationRenderer tail status", () => {
       ...initial[0]!,
       content: "Corrected answer",
       messageParts: initial[0]!.messageParts!.map((part) =>
-        part.id === "answer-late-correction"
+        part.type === "content" && part.id === "answer-late-correction"
           ? { ...part, data: "Corrected answer" }
           : { ...part }),
     }]);
@@ -1703,7 +2026,7 @@ describe("AgentConversationRenderer tail status", () => {
       ...initial[0]!,
       content: "Second corrected answer",
       messageParts: initial[0]!.messageParts!.map((part) =>
-        part.id === "answer-late-correction"
+        part.type === "content" && part.id === "answer-late-correction"
           ? { ...part, data: "Second corrected answer" }
           : { ...part }),
     }]);
@@ -1724,7 +2047,7 @@ describe("AgentConversationRenderer tail status", () => {
       ...initial[0]!,
       content: "Third corrected answer",
       messageParts: initial[0]!.messageParts!.map((part) =>
-        part.id === "answer-late-correction"
+        part.type === "content" && part.id === "answer-late-correction"
           ? { ...part, data: "Third corrected answer" }
           : { ...part }),
     }]);
@@ -1748,7 +2071,7 @@ describe("AgentConversationRenderer tail status", () => {
       ...initial[0]!,
       content: "Activity corrected answer",
       messageParts: initial[0]!.messageParts!.map((part) => {
-        if (part.id === "reasoning-late-correction") {
+        if (part.type === "reasoning" && part.id === "reasoning-late-correction") {
           return { ...part, data: "Corrected reasoning detail" };
         }
         if (part.type === "tool_call" && part.data.id === "call-late-one") {
@@ -1763,7 +2086,7 @@ describe("AgentConversationRenderer tail status", () => {
             },
           };
         }
-        if (part.id === "answer-late-correction") {
+        if (part.type === "content" && part.id === "answer-late-correction") {
           return { ...part, data: "Activity corrected answer" };
         }
         return { ...part };
@@ -1790,7 +2113,7 @@ describe("AgentConversationRenderer tail status", () => {
       content: "Removed reasoning answer",
       messageParts: initial[0]!.messageParts!
         .filter((part) => part.id !== "reasoning-late-correction")
-        .map((part) => part.id === "answer-late-correction"
+        .map((part) => part.type === "content" && part.id === "answer-late-correction"
           ? { ...part, data: "Removed reasoning answer" }
           : { ...part }),
     }]);
@@ -1801,19 +2124,21 @@ describe("AgentConversationRenderer tail status", () => {
       ...initial[0]!,
       message_id: "assistant-cold-correction",
       content: "Cold initial",
-      messageParts: initial[0]!.messageParts!.map((part, index) => ({
+      messageParts: initial[0]!.messageParts!.map((part, index) => part.type === "tool_call" ? {
         ...part,
         id: `${part.id}-cold`,
         timestamp: index + 1,
-        ...(part.type === "tool_call" ? {
-          data: {
-            ...part.data,
-            id: `${part.data.id}-cold`,
-            messageId: "assistant-cold-correction",
-            request: { ...part.data.request, id: `${part.data.id}-cold` },
-          },
-        } : {}),
-      })),
+        data: {
+          ...part.data,
+          id: `${part.data.id}-cold`,
+          messageId: "assistant-cold-correction",
+          request: { ...part.data.request, id: `${part.data.id}-cold` },
+        },
+      } : {
+        ...part,
+        id: `${part.id}-cold`,
+        timestamp: index + 1,
+      }),
     }] satisfies ChatMessage[];
     await renderer.renderHistory(cold);
     const coldWorked = parent.querySelector<HTMLDetailsElement>(
@@ -2040,7 +2365,7 @@ describe("AgentConversationRenderer tail status", () => {
     };
     await renderer.renderActive(
       unanchored,
-      presentation("responding", true, "Working", unanchored),
+      presentation("responding", true, "Writing", unanchored),
     );
     expect(parent.querySelector(".systemsculpt-agent-turn.is-active")?.hasAttribute("data-turn-id"))
       .toBe(false);
@@ -2301,18 +2626,52 @@ describe("AgentConversationRenderer tail status", () => {
     expect(tails).toHaveLength(1);
     const tail = tails[0]!;
     expect(tail.textContent).toBe("Stopped");
-    expect(tail.getAttribute("role")).toBe("status");
-    expect(tail.getAttribute("aria-live")).toBe("polite");
-    expect(tail.getAttribute("aria-atomic")).toBe("true");
+    expect(tail.hasAttribute("role")).toBe(false);
+    expect(tail.hasAttribute("aria-live")).toBe(false);
+    expect(tail.hasAttribute("aria-atomic")).toBe(false);
     expect(tail.closest(".systemsculpt-agent-turn")?.getAttribute("data-message-id"))
       .toBe("assistant-cancel-restored");
-    expect(setIcon).toHaveBeenCalledWith(expect.anything(), "circle-stop");
+    expect(setIcon).toHaveBeenCalledWith(tail.querySelector(".systemsculpt-agent-tail-status-icon"), "square");
     expect(Array.from(parent.querySelectorAll<HTMLElement>(
       ".systemsculpt-agent-activity-label",
     )).map((label) => label.textContent)).toEqual([
       "You stopped after 45s",
       "You stopped this response",
     ]);
+    renderer.unload();
+  });
+
+  it.each([true, false])("renders a billing receipt with a plan action only when offered (%s)", async (showPlanOffer) => {
+    const parent = document.body.createDiv();
+    const onViewPlans = jest.fn();
+    const renderer = new AgentConversationRenderer(parent, {
+      app: new App(),
+      sourcePath: () => "",
+      onApprove: jest.fn(),
+      onOpenArtifact: jest.fn(),
+      onCopyArtifactPath: jest.fn(),
+      showPlanOffer: () => showPlanOffer,
+      onViewPlans,
+    });
+    renderer.load();
+    await renderer.renderHistory([{
+      role: "user", message_id: "question", content: "Hello",
+    }, {
+      role: "assistant", message_id: "failure", content: "",
+      terminalOutcome: "failed", terminalFailureCode: "out_of_credits", terminalRetryable: false,
+      terminalReportId: `report_${"a".repeat(32)}`,
+    }]);
+    expect(parent.querySelector(".systemsculpt-agent-error-heading")?.textContent).toBe("Out of credits");
+    const action = parent.querySelector<HTMLButtonElement>('[data-testid="chat.turn.see-plans"]');
+    if (showPlanOffer) {
+      expect(parent.textContent).toContain("Monthly is $9 and includes 10,000 credits every month. You can also add a credit pack.");
+      expect(action?.textContent).toBe("See plans");
+      action!.click();
+      expect(onViewPlans).toHaveBeenCalledTimes(1);
+    } else {
+      expect(parent.textContent).toContain("Add credits to continue using Chat.");
+      expect(action).toBeNull();
+    }
     renderer.unload();
   });
 
@@ -2328,6 +2687,7 @@ describe("AgentConversationRenderer tail status", () => {
       onApprove: jest.fn(),
       onOpenArtifact: jest.fn(),
       onCopyArtifactPath: jest.fn(),
+      onPrepareIncidentReport: async () => true,
       onCopyIncidentReport: copyIncidentReport,
       onRetryFailedTurn: retryFailedTurn,
     });
@@ -2360,6 +2720,7 @@ describe("AgentConversationRenderer tail status", () => {
     const copy = parent.querySelector<HTMLButtonElement>(
       '[data-testid="chat.turn.copy-incident-report"]',
     )!;
+    expect(copy.textContent).toBe("Copy report ID");
     retry.click();
     copy.click();
     await Promise.resolve();
@@ -2406,6 +2767,77 @@ describe("AgentConversationRenderer tail status", () => {
     renderer.unload();
   });
 
+  it("hides report IDs while saving, offers a save retry, then enables copying", async () => {
+    const parent = document.body.createDiv();
+    let finishSave!: (saved: boolean) => void;
+    const prepare = jest.fn(() => new Promise<boolean>((resolve) => { finishSave = resolve; }));
+    const copy = jest.fn(async () => true);
+    const retryTurn = jest.fn();
+    const renderer = new AgentConversationRenderer(parent, {
+      app: new App(),
+      sourcePath: () => "SystemSculpt/Chats/chat.md",
+      onApprove: jest.fn(),
+      onOpenArtifact: jest.fn(),
+      onCopyArtifactPath: jest.fn(),
+      onPrepareIncidentReport: prepare,
+      onCopyIncidentReport: copy,
+      onRetryFailedTurn: retryTurn,
+    });
+    renderer.load();
+    const reportId = `report_${"d".repeat(32)}`;
+    await renderer.renderHistory([{
+      role: "user", message_id: "user-report-save", content: "Submitted prompt",
+    }, {
+      role: "assistant", message_id: "failed-report-save", content: "",
+      terminalOutcome: "failed", terminalReportId: reportId,
+      terminalFailureCode: "response_start_failed", terminalRetryable: true,
+    }]);
+    expect(parent.textContent).toContain("Preparing report…");
+    expect(parent.textContent).not.toContain(reportId);
+    expect(parent.querySelector('[data-testid="chat.turn.copy-incident-report"]')).toBeNull();
+    finishSave(false);
+    await Promise.resolve();
+    expect(parent.textContent).toContain("Report unavailable");
+    expect(parent.textContent).not.toContain(reportId);
+    expect(parent.querySelector('[data-testid="chat.turn.copy-incident-report"]')).toBeNull();
+    const retry = parent.querySelector<HTMLButtonElement>('[data-testid="chat.turn.retry-incident-report"]')!;
+    retry.click();
+    expect(prepare).toHaveBeenLastCalledWith(reportId, true);
+    expect(retryTurn).not.toHaveBeenCalled();
+    expect(parent.textContent).toContain("Preparing report…");
+    expect(parent.querySelector('[data-testid="chat.turn.retry-incident-report"]')).toBeNull();
+    finishSave(true);
+    await Promise.resolve();
+    expect(parent.textContent).toContain(`Report ID: ${reportId}`);
+    parent.querySelector<HTMLButtonElement>('[data-testid="chat.turn.copy-incident-report"]')!.click();
+    await Promise.resolve();
+    expect(copy).toHaveBeenCalledWith(reportId);
+    renderer.unload();
+  });
+
+  it("does not add report actions after the renderer unloads", async () => {
+    const parent = document.body.createDiv();
+    let finishSave!: (saved: boolean) => void;
+    const renderer = new AgentConversationRenderer(parent, {
+      app: new App(), sourcePath: () => "chat.md", onApprove: jest.fn(),
+      onOpenArtifact: jest.fn(), onCopyArtifactPath: jest.fn(),
+      onCopyIncidentReport: jest.fn(),
+      onPrepareIncidentReport: () => new Promise<boolean>((resolve) => { finishSave = resolve; }),
+    });
+    renderer.load();
+    await renderer.renderHistory([{
+      role: "user", message_id: "user-unload-report", content: "Prompt",
+    }, {
+      role: "assistant", message_id: "failure-unload-report", content: "",
+      terminalOutcome: "failed", terminalReportId: `report_${"f".repeat(32)}`,
+      terminalFailureCode: "response_start_failed", terminalRetryable: true,
+    }]);
+    renderer.unload();
+    finishSave(true);
+    await Promise.resolve();
+    expect(parent.querySelector('[data-testid="chat.turn.copy-incident-report"]')).toBeNull();
+  });
+
   it("shows a compact copying state and blocks duplicate report ID copies", async () => {
     const parent = document.body.createDiv();
     let resolveCopy!: (value: boolean) => void;
@@ -2419,6 +2851,7 @@ describe("AgentConversationRenderer tail status", () => {
       onApprove: jest.fn(),
       onOpenArtifact: jest.fn(),
       onCopyArtifactPath: jest.fn(),
+      onPrepareIncidentReport: async () => true,
       onCopyIncidentReport: copyIncidentReport,
     });
     renderer.load();
@@ -2441,6 +2874,7 @@ describe("AgentConversationRenderer tail status", () => {
     const copy = parent.querySelector<HTMLButtonElement>(
       '[data-testid="chat.turn.copy-incident-report"]',
     )!;
+    expect(copy.textContent).toBe("Copy report ID");
     copy.click();
     expect(copy.disabled).toBe(true);
     expect(copy.getAttribute("aria-busy")).toBe("true");
@@ -2676,18 +3110,19 @@ describe("AgentConversationRenderer tail status", () => {
     };
     await renderer.renderActive(
       running,
-      presentation("responding", true, "Working", running),
+      presentation("responding", true, "Writing", running),
     );
 
     expect(renderer.element.getAttribute("role")).toBe("log");
-    expect(renderer.element.hasAttribute("aria-label")).toBe(false);
+    expect(renderer.element.getAttribute("aria-label")).toBe("Conversation");
+    expect(renderer.element.getAttribute("aria-live")).toBe("off");
     expect(renderer.element.hasAttribute("title")).toBe(false);
     for (const turn of parent.querySelectorAll<HTMLElement>(".systemsculpt-agent-turn")) {
       expect(turn.hasAttribute("aria-label")).toBe(false);
       expect(turn.hasAttribute("title")).toBe(false);
     }
     const tail = parent.querySelector<HTMLElement>(".systemsculpt-agent-tail-status")!;
-    expect(tail.textContent).toContain("Working");
+    expect(tail.textContent).toBe("Writing");
     expect(tail.hasAttribute("aria-label")).toBe(false);
     expect(tail.hasAttribute("title")).toBe(false);
     expect(parent.querySelector<HTMLButtonElement>(".systemsculpt-agent-message-copy")
@@ -2739,7 +3174,7 @@ describe("AgentConversationRenderer tail status", () => {
     renderer.unload();
   });
 
-  it("keeps tool identity on the left and renders state and disclosure marks on the right", async () => {
+  it("leads with a stable state icon instead of an action icon as a tool completes", async () => {
     const parent = document.body.createDiv();
     const renderer = new AgentConversationRenderer(parent, {
       app: new App(),
@@ -2779,10 +3214,13 @@ describe("AgentConversationRenderer tail status", () => {
     expect(Array.from(header.children)).toEqual([actionIcon, copy, controls]);
     expect(Array.from(copy.children)).toEqual([label, summary]);
     expect(Array.from(controls.children)).toEqual([disclosure, stateIcon]);
-    expect(setIcon).toHaveBeenCalledWith(actionIcon, "file-text");
+    expect(setIcon).toHaveBeenCalledWith(actionIcon, "loader-circle");
+    expect(setIcon).not.toHaveBeenCalledWith(actionIcon, "file-text");
     expect(setIcon).toHaveBeenCalledWith(disclosure, "chevron-down");
-    expect(setIcon).toHaveBeenCalledWith(stateIcon, "minus");
-    expect(actionIcon.classList).not.toContain("is-animated");
+    expect(setIcon).toHaveBeenCalledWith(stateIcon, "loader-circle");
+    expect(actionIcon.classList).toContain("is-animated");
+    expect(actionIcon.getAttribute("aria-hidden")).toBe("true");
+    expect(label.textContent).toBe("Reading Plan.md…");
     expect(stateIcon.classList).not.toContain("is-animated");
     expect(header.querySelector(".systemsculpt-agent-tool-state")).toBeNull();
     expect(details.open).toBe(false);
@@ -2797,7 +3235,10 @@ describe("AgentConversationRenderer tail status", () => {
 
     expect(header.querySelector(".systemsculpt-agent-tool-icon")).toBe(actionIcon);
     expect(header.querySelector(".systemsculpt-agent-tool-state-icon")).toBe(stateIcon);
-    expect(actionIcon.dataset.iconName).toBe("file-text");
+    expect(actionIcon.dataset.iconName).toBe("check");
+    expect(setIcon).toHaveBeenCalledWith(actionIcon, "check");
+    expect(actionIcon.classList).not.toContain("is-animated");
+    expect(label.textContent).toBe("Read Plan.md");
     expect(stateIcon.dataset.iconState).toBe("check");
     expect(setIcon).toHaveBeenCalledWith(stateIcon, "check");
     expect(stateIcon.classList).not.toContain("is-animated");
@@ -2899,6 +3340,68 @@ describe("AgentConversationRenderer tail status", () => {
     renderer.unload();
   });
 
+  it.each(["vault", "native", "hosted", "web-search"] as const)(
+    "exposes raw Details only for native or vault tools, not %s server payloads",
+    async (kind) => {
+      const parent = document.body.createDiv();
+      const renderer = new AgentConversationRenderer(parent, {
+        app: new App(),
+        sourcePath: () => "SystemSculpt/Chats/chat.md",
+        onApprove: jest.fn(),
+        onOpenArtifact: jest.fn(),
+        onCopyArtifactPath: jest.fn(),
+      });
+      renderer.load();
+      const tool: Extract<AgentPart, { kind: "tool" }> = {
+        id: "raw-tool",
+        callId: "raw-call",
+        messageId: "raw-assistant",
+        kind: "tool",
+        order: 0,
+        name: kind === "native" ? "Bash" : kind === "vault" ? "read"
+          : kind === "web-search" ? "web_search" : "unknown_server_action",
+        location: kind === "vault" ? "vault" : "server",
+        ...(kind === "native" ? { native: { agent: "claude" as const, workingDirectory: "/vault" } } : {}),
+        input: { paths: ["Plan.md"], command: "pwd", query: "Obsidian", private: "raw-input-canary" },
+        output: { data: { private: "raw-output-canary" } },
+        state: "succeeded",
+      };
+      const snapshot: AgentConversationSnapshot = {
+        runId: "raw-run", turnId: "raw-turn", status: "running", phase: "working",
+        messages: [], parts: [tool],
+      };
+      try {
+        await renderer.renderActive(snapshot, presentAgentConversation(snapshot, false));
+        const shell = parent.querySelector<HTMLDetailsElement>("details.systemsculpt-agent-tool")!;
+        const raw = shell.querySelector<HTMLDetailsElement>(".systemsculpt-agent-tool-raw");
+        expect(shell.open).toBe(false);
+        if (kind === "vault" || kind === "native") {
+          expect(raw).not.toBeNull();
+          expect(raw!.open).toBe(false);
+          expect(raw!.querySelector("summary")?.textContent).toBe("Details");
+          expect(raw!.querySelector("code")!.textContent).toBe("");
+          shell.open = true;
+          shell.dispatchEvent(new Event("toggle"));
+          expect(raw!.querySelector("code")!.textContent).toBe("");
+          raw!.open = true;
+          raw!.dispatchEvent(new Event("toggle"));
+          expect(JSON.parse(raw!.querySelector("code")!.textContent!)).toEqual({
+            input: tool.input, output: tool.output!.data,
+          });
+        } else {
+          expect(raw).toBeNull();
+          shell.open = true;
+          shell.dispatchEvent(new Event("toggle"));
+          expect(parent.textContent).not.toContain("raw-input-canary");
+          expect(parent.textContent).not.toContain("raw-output-canary");
+          expect(parent.textContent).not.toContain("unknown_server_action");
+        }
+      } finally {
+        renderer.unload();
+      }
+    },
+  );
+
   it("reuses the committed display fingerprint for an unchanged active tool", async () => {
     const parent = document.body.createDiv();
     const renderer = new AgentConversationRenderer(parent, {
@@ -2951,7 +3454,7 @@ describe("AgentConversationRenderer tail status", () => {
     });
     const render = async (parts: readonly AgentPart[]): Promise<void> => {
       const next = snapshot(parts);
-      await renderer.renderActive(next, presentation("responding", true, "Working", next));
+      await renderer.renderActive(next, presentation("responding", true, "Writing", next));
     };
 
     await render([tool]);
@@ -3014,7 +3517,7 @@ describe("AgentConversationRenderer tail status", () => {
 
     await renderer.renderActive(
       snapshot,
-      presentation("reasoning", true, "Working", snapshot),
+      presentation("reasoning", true, "Thinking", snapshot),
     );
 
     const details = parent.querySelector<HTMLDetailsElement>(
@@ -3078,7 +3581,7 @@ describe("AgentConversationRenderer tail status", () => {
     });
     const render = async (parts: readonly AgentPart[]): Promise<void> => {
       const next = snapshot(parts);
-      await renderer.renderActive(next, presentation("responding", true, "Working", next));
+      await renderer.renderActive(next, presentation("responding", true, "Writing", next));
     };
 
     await render(tools);
@@ -3095,7 +3598,7 @@ describe("AgentConversationRenderer tail status", () => {
     expect(overflow.getAttribute("aria-expanded")).toBe("false");
     expect(overflow.querySelector<HTMLElement>(
       ".systemsculpt-agent-activity-overflow-icon",
-    )?.dataset.iconName).toBe("file-text");
+    )?.dataset.iconName).toBe("check");
     expect(overflow.lastElementChild?.classList)
       .toContain("systemsculpt-agent-activity-overflow-disclosure");
     const drawer = overflow.nextElementSibling as HTMLElement;
@@ -3110,7 +3613,7 @@ describe("AgentConversationRenderer tail status", () => {
     expect(drawer.lastElementChild?.getAttribute("data-part-key"))
       .toBe("tool:call-overflow-three");
     expect(overflow.querySelector(".systemsculpt-agent-activity-overflow-label")?.textContent)
-      .toBe("Read 1 file + 2 other tool calls");
+      .toBe("Read 3 notes");
 
     drawer.insertBefore(drawer.lastElementChild!, drawer.firstElementChild);
     (renderer as unknown as {
@@ -3137,7 +3640,7 @@ describe("AgentConversationRenderer tail status", () => {
     };
     await render([tools[0]!, finalReasoning]);
     expect(overflow.querySelector(".systemsculpt-agent-activity-overflow-label")?.textContent)
-      .toBe("Reasoned + 1 other tool call");
+      .toBe("Read One.md, thought");
     expect(overflow.querySelector<HTMLElement>(
       ".systemsculpt-agent-activity-overflow-icon",
     )?.dataset.iconName).toBe("sparkles");
@@ -3302,7 +3805,7 @@ describe("AgentConversationRenderer tail status", () => {
     };
     await renderer.renderActive(
       running,
-      presentation("responding", true, "Working", running),
+      presentation("responding", true, "Writing", running),
     );
     const liveReasoning = (renderer as unknown as {
       activeNodes: Map<string, HTMLElement>;
@@ -3348,7 +3851,9 @@ describe("AgentConversationRenderer tail status", () => {
     const worked = row.querySelector<HTMLDetailsElement>("details[data-agent-turn-fold]")!;
     expect(worked.open).toBe(false);
     expect(worked.querySelector(".systemsculpt-agent-activity-label")?.textContent)
-      .toBe("Worked for 1m 2s");
+      .toBe("Thought, read Plan.md");
+    expect(worked.querySelector(".systemsculpt-agent-activity-duration")?.textContent)
+      .toBe("1m 2s");
     const overflow = worked.querySelector<HTMLButtonElement>(
       "button[data-agent-activity-overflow]",
     )!;
@@ -3406,7 +3911,7 @@ describe("AgentConversationRenderer tail status", () => {
     const running = snapshot("running", 30_000);
     await renderer.renderActive(
       running,
-      presentation("reasoning", true, "Working", running),
+      presentation("reasoning", true, "Thinking", running),
     );
     parent.querySelector<HTMLElement>(".systemsculpt-agent-reasoning-header")!.focus();
 
@@ -3422,7 +3927,9 @@ describe("AgentConversationRenderer tail status", () => {
     expect(worked.open).toBe(false);
     expect(document.activeElement).toBe(workedHeader);
     expect(worked.querySelector(".systemsculpt-agent-activity-label")?.textContent)
-      .toBe("Worked for 31s");
+      .toBe("Thought");
+    expect(worked.querySelector(".systemsculpt-agent-activity-duration")?.textContent)
+      .toBe("31s");
 
     const refreshed = snapshot("completed", 45_000);
     await renderer.renderActive(
@@ -3431,7 +3938,10 @@ describe("AgentConversationRenderer tail status", () => {
     );
     expect(parent.querySelector("details[data-agent-turn-fold]")).toBe(worked);
     expect(worked.querySelector(".systemsculpt-agent-activity-label")?.textContent)
-      .toBe("Worked for 45s");
+      .toBe("Thought");
+    expect(worked.querySelector(".systemsculpt-agent-activity-duration")?.textContent)
+      .toBe("45s");
+    expect(document.activeElement).toBe(workedHeader);
     renderer.unload();
   });
 
@@ -4015,7 +4525,7 @@ describe("AgentConversationRenderer tail status", () => {
     };
     await renderer.renderActive(
       running,
-      presentation("reasoning", true, "Working", running),
+      presentation("reasoning", true, "Thinking", running),
     );
     const liveDetails = parent.querySelector<HTMLDetailsElement>(
       ".systemsculpt-agent-active-run .systemsculpt-agent-reasoning-details",
@@ -4094,7 +4604,7 @@ describe("AgentConversationRenderer tail status", () => {
     const initial = snapshot(summary);
     await renderer.renderActive(
       initial,
-      presentation("reasoning", true, "Working", initial),
+      presentation("reasoning", true, "Thinking", initial),
     );
     const details = parent.querySelector<HTMLDetailsElement>(
       ".systemsculpt-agent-reasoning-details",
@@ -4118,7 +4628,7 @@ describe("AgentConversationRenderer tail status", () => {
     const empty = snapshot("");
     await renderer.renderActive(
       empty,
-      presentation("reasoning", true, "Working", empty),
+      presentation("reasoning", true, "Thinking", empty),
     );
     expect(details.open).toBe(true);
     expect(body.textContent).toBe("");
@@ -4127,7 +4637,7 @@ describe("AgentConversationRenderer tail status", () => {
     const repairedSnapshot = snapshot("Recovered summary");
     await renderer.renderActive(
       repairedSnapshot,
-      presentation("reasoning", true, "Working", repairedSnapshot),
+      presentation("reasoning", true, "Thinking", repairedSnapshot),
     );
     const repairedDetails = parent.querySelector<HTMLDetailsElement>(
       ".systemsculpt-agent-reasoning-details",
@@ -4142,7 +4652,7 @@ describe("AgentConversationRenderer tail status", () => {
     const rebuiltSnapshot = snapshot("Recovered summary again");
     await renderer.renderActive(
       rebuiltSnapshot,
-      presentation("reasoning", true, "Working", rebuiltSnapshot),
+      presentation("reasoning", true, "Thinking", rebuiltSnapshot),
     );
     const rebuiltDetails = parent.querySelector<HTMLDetailsElement>(
       ".systemsculpt-agent-reasoning-details",
@@ -4186,7 +4696,7 @@ describe("AgentConversationRenderer tail status", () => {
     };
     await renderer.renderActive(
       running,
-      presentation("responding", true, "Working", running),
+      presentation("responding", true, "Writing", running),
     );
     const status = parent.querySelector<HTMLElement>(".systemsculpt-agent-tail-status")!;
     expect((renderer as unknown as { activeWorkingTimer: number | null }).activeWorkingTimer)
@@ -4242,7 +4752,7 @@ describe("AgentConversationRenderer tail status", () => {
 
     await renderer.renderActive(
       snapshot(baseTool),
-      presentation("responding", true, "Working", snapshot(baseTool)),
+      presentation("responding", true, "Writing", snapshot(baseTool)),
     );
     const toolNode = parent.querySelector<HTMLElement>(".systemsculpt-agent-part.is-tool")!;
     const shell = toolNode.querySelector<HTMLDetailsElement>(".systemsculpt-agent-tool")!;
@@ -4270,7 +4780,7 @@ describe("AgentConversationRenderer tail status", () => {
     const waiting = snapshot(approvalTool, "waiting");
     const pending = renderer.renderActive(
       waiting,
-      presentation("awaiting-approval", true, "Needs approval", waiting),
+      presentation("awaiting-approval", true, "Waiting for your approval", waiting),
     );
     await pending;
     expect(app.vault.read).toHaveBeenCalledTimes(1);
@@ -4284,20 +4794,23 @@ describe("AgentConversationRenderer tail status", () => {
     const preview = approval.querySelector<HTMLElement>(
       ".systemsculpt-agent-approval-preview",
     )!;
-    expect(approval.textContent).toContain("Allow this change in your vault?");
+    expect(approval.querySelector(".systemsculpt-agent-approval-copy")?.textContent)
+      .toBe("SystemSculpt wants to create Plan.md");
+    expect(approval.querySelector(".systemsculpt-agent-approval-meta")?.textContent).toBe("Projects");
     expect(approval.querySelector('[data-testid="chat.approval.deny"]')).not.toBeNull();
     expect(approval.querySelector('[data-testid="chat.approval.allow-once"]')).not.toBeNull();
     expect(approval.querySelector('[data-testid="chat.approval.allow-for-chat"]')).not.toBeNull();
     expect(preview.hidden).toBe(true);
     expect(preview.childElementCount).toBe(0);
     expect(shell.open).toBe(true);
-    expect(document.activeElement).toBe(header);
+    expect(shell.hidden).toBe(true);
+    expect(document.activeElement).toBe(approval.querySelector('[data-testid="chat.approval.allow-once"]'));
 
     const reordered = { ...approvalTool, order: 1 };
     const reorderedSnapshot = snapshot(reordered, "waiting");
     await renderer.renderActive(
       reorderedSnapshot,
-      presentation("awaiting-approval", true, "Needs approval", reorderedSnapshot),
+      presentation("awaiting-approval", true, "Waiting for your approval", reorderedSnapshot),
     );
     expect(toolNode.querySelector(".systemsculpt-agent-approval")).toBe(approval);
     expect(approval.querySelector(".systemsculpt-agent-approval-preview")).toBe(preview);
@@ -4323,7 +4836,20 @@ describe("AgentConversationRenderer tail status", () => {
     expect(beginLayoutMutation).toHaveBeenCalledWith(undefined, preview);
     expect(finishLayoutMutation).toHaveBeenCalledTimes(1);
     expect(shell.open).toBe(true);
-    expect(document.activeElement).toBe(header);
+    expect(document.activeElement).toBe(approval.querySelector('[data-testid="chat.approval.allow-once"]'));
+
+    const reviewedDiff = preview.querySelector(".systemsculpt-inline-diff");
+    const resolved = snapshot({ ...approvalTool, state: "succeeded", approvalDecision: "approved" });
+    await renderer.renderActive(resolved, presentation("responding", true, "Writing", resolved));
+    expect(toolNode.querySelector(".systemsculpt-agent-approval")).toBeNull();
+    expect(toolNode.querySelector(".systemsculpt-agent-approval-preview")).toBe(preview);
+    expect(toolNode.querySelector(".systemsculpt-inline-diff")).toBe(reviewedDiff);
+    expect(shell.hidden).toBe(false);
+    expect(shell.open).toBe(false);
+    expect(toolNode.querySelector('[data-testid="chat.approval.allow-once"]')).toBeNull();
+    expect(toolNode.querySelector('[data-testid="chat.approval.allow-for-chat"]')).toBeNull();
+    expect(toolNode.querySelector('[data-testid="chat.approval.deny"]')).toBeNull();
+    expect(app.vault.read).toHaveBeenCalledTimes(1);
     renderer.unload();
   });
 
@@ -4374,7 +4900,7 @@ describe("AgentConversationRenderer tail status", () => {
 
     await renderer.renderActive(
       snapshot,
-      presentation("awaiting-approval", true, "Needs approval", snapshot),
+      presentation("awaiting-approval", true, "Waiting for your approval", snapshot),
     );
     const node = parent.querySelector<HTMLElement>(
       '[data-part-key="tool:call-first-frame-approval"]',
@@ -4444,7 +4970,7 @@ describe("AgentConversationRenderer tail status", () => {
 
     await renderer.renderActive(
       snapshot(approvalTool),
-      presentation("awaiting-approval", true, "Needs approval", snapshot(approvalTool)),
+      presentation("awaiting-approval", true, "Waiting for your approval", snapshot(approvalTool)),
     );
     expect(app.vault.read).toHaveBeenCalledTimes(1);
     const committed = parent.querySelector<HTMLElement>(".systemsculpt-agent-part.is-tool")!;
@@ -4470,7 +4996,7 @@ describe("AgentConversationRenderer tail status", () => {
     };
     await renderer.renderActive(
       snapshot(succeededTool),
-      presentation("responding", true, "Working", snapshot(succeededTool)),
+      presentation("responding", true, "Writing", snapshot(succeededTool)),
     );
     expect(parent.querySelector(".systemsculpt-agent-part.is-tool")).toBe(committed);
     expect(committed.classList).toContain("is-succeeded");
@@ -4540,7 +5066,7 @@ describe("AgentConversationRenderer tail status", () => {
       };
       await renderer.renderActive(
         snapshot,
-        presentation("awaiting-approval", true, "Needs approval", snapshot),
+        presentation("awaiting-approval", true, "Waiting for your approval", snapshot),
       );
       const node = parent.querySelector<HTMLElement>(".systemsculpt-agent-part.is-tool")!;
       const preview = node.querySelector<HTMLElement>(
@@ -4566,7 +5092,7 @@ describe("AgentConversationRenderer tail status", () => {
         };
         await renderer.renderActive(
           next,
-          presentation("responding", true, "Working", next),
+          presentation("responding", true, "Writing", next),
         );
       } else {
         renderer.unload();
@@ -4645,7 +5171,7 @@ describe("AgentConversationRenderer tail status", () => {
     };
     await renderer.renderActive(
       snapshot,
-      presentation("awaiting-approval", true, "Needs approval", snapshot),
+      presentation("awaiting-approval", true, "Waiting for your approval", snapshot),
     );
     const node = parent.querySelector<HTMLElement>('[data-part-key="tool:call-preview-layout-guard"]')!;
     const preview = node.querySelector<HTMLElement>(".systemsculpt-agent-approval-preview")!;
@@ -4770,6 +5296,56 @@ describe("AgentConversationRenderer tail status", () => {
     jest.advanceTimersByTime(500);
     expect(onCancelMessageEdit).toHaveBeenCalledTimes(1);
     expect(onCancelMessageEdit).toHaveBeenCalledWith("user-keyup-fallback");
+    renderer.unload();
+  });
+
+  it("summarizes repeated approved edits, denials and a withdrawn edit like the change receipt", async () => {
+    const parent = document.body.createDiv();
+    const renderer = new AgentConversationRenderer(parent, {
+      app: new App(),
+      sourcePath: () => "Notes/Launch plan.md",
+      onApprove: jest.fn(),
+      onOpenArtifact: jest.fn(),
+      onCopyArtifactPath: jest.fn(),
+    });
+    renderer.load();
+    const native = { agent: "claude" as const, workingDirectory: "/synthetic-vault", vaultRoot: "/synthetic-vault" };
+    const edit = (id: string, order: number, overrides: Partial<Extract<AgentPart, { kind: "tool" }>>): AgentPart => ({
+      id, kind: "tool", messageId: "resolved-answer", callId: id, approvalId: id, order,
+      name: "Edit", location: "server", native, state: "succeeded",
+      input: { file_path: "/synthetic-vault/Notes/Launch plan.md", old_string: "- Plan the launch.", new_string: "- Finalize the launch plan." },
+      ...overrides,
+    });
+    const parts: AgentPart[] = [
+      edit("approved", 0, { approvalDecision: "approved" }),
+      edit("chat-approved", 1, { approvalDecision: "approved", approvalScope: "session" }),
+      edit("denied", 2, { state: "denied", approvalDecision: "denied" }),
+      edit("withdrawn", 3, { state: "cancelled", approvalDecision: "withdrawn" }),
+      edit("kept-planning", 4, { name: "ExitPlanMode", state: "denied", approvalDecision: "denied", input: { plan: "Review the checklist before editing." } }),
+      { id: "resolved-text", kind: "text", messageId: "resolved-answer", state: "complete", markdown: "The completed changes are ready for review.", order: 10 },
+    ];
+    const snapshot: AgentConversationSnapshot = {
+      runId: "resolved-run", turnId: "resolved-turn", status: "completed", phase: "complete", elapsedMs: 12_000,
+      messages: [{ id: "resolved-answer", role: "assistant", partIds: parts.map(part => part.id) }],
+      parts,
+    };
+
+    await renderer.renderActive(snapshot, presentation("completed", false, "Done", snapshot));
+
+    expect(parent.querySelector("details[data-agent-turn-fold] > summary .systemsculpt-agent-activity-label")?.textContent)
+      .toBe("Edited Launch plan.md, denied 2 actions, edit Launch plan.md · Withdrawn");
+    expect(parent.querySelector('[data-testid="chat.turn.changes"]')?.textContent).toBe("Changed 1 note: Launch plan.md");
+    const overflow = parent.querySelector<HTMLButtonElement>("button[data-agent-activity-overflow]")!;
+    expect(overflow.dataset.activitySummary).toBe("Edited Launch plan.md, denied 2 actions, edit Launch plan.md · Withdrawn");
+    overflow.click();
+    // Rows keep their order, decisions and approval scope.
+    expect([...parent.querySelectorAll(".systemsculpt-agent-part.is-tool .systemsculpt-agent-tool-label")].map(label => label.textContent)).toEqual([
+      "Edited Launch plan.md · Approved",
+      "Edited Launch plan.md · Approved for this chat",
+      "Edit Launch plan.md · Denied",
+      "Edit Launch plan.md · Withdrawn",
+      "Kept planning",
+    ]);
     renderer.unload();
   });
 });

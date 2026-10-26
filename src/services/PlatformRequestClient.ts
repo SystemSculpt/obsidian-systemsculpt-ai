@@ -1,5 +1,4 @@
 import { requestUrl } from "obsidian";
-import { postJsonStreaming } from "../utils/streaming";
 import { toError } from "../utils/errors";
 
 export type PlatformTransport = "fetch" | "requestUrl";
@@ -20,7 +19,12 @@ export type PlatformRequestInput = {
   signal?: AbortSignal;
   cache?: RequestCache;
   licenseKey?: string;
-  preserveResponseHeaders?: boolean;
+  /**
+   * Resends the request through requestUrl when direct fetch fails before any
+   * response, where the server may already have received it. Defaults to true,
+   * except for streaming requests, which carry state-changing commands such as
+   * a chat turn and are never sent twice unless the caller opts in.
+   */
   allowTransportFallback?: boolean;
   transport?: PlatformTransport;
   bodyEncoding?: "json" | "raw";
@@ -54,6 +58,7 @@ export type PlatformResponseDeliveryMode =
  * Obsidian's native request gateway may attempt TLS for a loopback HTTP URL.
  * Direct fetch is both the browser-native transport and the only correct local
  * development path for these exact loopback origins.
+ * @internal Unit-tested directly.
  */
 export function isSafeLoopbackHttpUrl(value: string): boolean {
   try {
@@ -112,6 +117,7 @@ export function platformTransferTimeoutMs(bytes: number): number {
 /**
  * The client stopped waiting at its deadline. The server may still have
  * received and processed the request, exactly as after a dropped connection.
+ * @internal Tests match this error class.
  */
 export class PlatformRequestTimeoutError extends Error {
   readonly name = "TimeoutError";
@@ -259,24 +265,6 @@ export class PlatformRequestClient {
       ? null
       : { at: Date.now() + timeoutMs, timeoutMs };
 
-    if (input.stream && !input.preserveResponseHeaders) {
-      this.observeTransport(input, transport);
-      const send = (signal?: AbortSignal) => postJsonStreaming(
-        input.url,
-        headers,
-        input.body,
-        transport !== "fetch",
-        signal,
-      );
-      const response = deadline === null
-        ? await send(input.signal)
-        : await this.fetchWithin(input.signal, deadline, true, send);
-      return markResponseDeliveryMode(
-        response,
-        transport === "fetch" ? "fetch_stream" : "request_url_buffered",
-      );
-    }
-
     if (transport === "fetch" && typeof window.fetch === "function") {
       let responded = false;
       try {
@@ -304,7 +292,8 @@ export class PlatformRequestClient {
           throw error;
         }
         // A body that failed after the server answered is never replayed.
-        if (responded || directLoopbackFetch || input.allowTransportFallback === false) throw error;
+        const fallback = input.allowTransportFallback ?? input.stream !== true;
+        if (responded || directLoopbackFetch || !fallback) throw error;
       }
     }
     if (directLoopbackFetch) {
@@ -318,20 +307,36 @@ export class PlatformRequestClient {
     this.observeTransport(input, "requestUrl");
     // requestUrl takes no signal: on abort or deadline the client only stops
     // waiting, and the host finishes or fails the detached request itself.
-    const result = await this.within(input.signal, deadline, () => requestUrl({
-      url: input.url,
-      method: input.method,
-      headers,
-      body,
-      throw: false,
-    }));
+    const result = await this.within(input.signal, deadline, async () => {
+      try {
+        return await requestUrl({
+          url: input.url,
+          method: input.method,
+          headers,
+          body,
+          throw: false,
+        });
+      } catch (error) {
+        const failure = toError(error, "The request failed.");
+        if (failure.name === "AbortError") throw failure;
+        if (error instanceof DOMException && error.name === "AbortError") {
+          throw Object.assign(new Error(error.message), { name: "AbortError", cause: error });
+        }
+        // HTTP failures are responses with throw:false. Native connection
+        // failures are ordinary Errors; expose the same category as fetch.
+        if (failure instanceof TypeError) throw failure;
+        throw Object.assign(new TypeError(failure.message), { cause: failure });
+      }
+    });
 
     const status = result.status || 500;
-    const responseBody = input.responseEncoding === "arrayBuffer"
-      ? result.arrayBuffer
-      : typeof result.text === "string"
-        ? result.text
-        : JSON.stringify(result.json || {});
+    const responseBody = NULL_BODY_STATUSES.has(status)
+      ? null
+      : input.responseEncoding === "arrayBuffer"
+        ? result.arrayBuffer
+        : typeof result.text === "string"
+          ? result.text
+          : JSON.stringify(result.json || {});
     if (
       input.maxResponseBytes !== undefined
       && input.responseEncoding === "arrayBuffer"

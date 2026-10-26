@@ -10,20 +10,28 @@ import {
   resolveStudioGraphNodeMinHeight,
 } from "./StudioNodeGeometry";
 
+/** @internal Tests build saved output nodes with this key. */
 export const MANAGED_MEDIA_OWNER_KEY = "__studio_managed_by";
+/** @internal Tests build saved output nodes with this owner. */
 export const MANAGED_MEDIA_OWNER = "studio.image_generation_output.v1";
+/** @internal Tests build saved output nodes with this key. */
 export const MANAGED_MEDIA_SOURCE_NODE_ID_KEY = "__studio_source_node_id";
+/** @internal Tests build saved output nodes with this key. */
 export const MANAGED_MEDIA_SLOT_INDEX_KEY = "__studio_source_output_index";
+/** @internal Tests build saved output nodes with this key. */
 export const MANAGED_OUTPUT_PENDING_KEY = "__studio_pending";
+/** @internal Tests build saved output nodes with this key. */
 export const MANAGED_OUTPUT_PENDING_RUN_ID_KEY = "__studio_pending_run_id";
 const MANAGED_OUTPUT_RUN_ID_KEY = "__studio_output_run_id";
 const MANAGED_OUTPUT_PENDING_AT_KEY = "__studio_pending_at";
-export const MANAGED_OUTPUT_PENDING_MEDIA_KIND_KEY = "__studio_pending_media_kind";
+const MANAGED_OUTPUT_PENDING_MEDIA_KIND_KEY = "__studio_pending_media_kind";
 
+/** @internal Tests build saved output nodes with this key. */
 export const MANAGED_TEXT_OWNER_KEY = "__studio_managed_by";
+/** @internal Tests build saved output nodes with this owner. */
 export const MANAGED_TEXT_OWNER = "studio.text_generation_output.v1";
+/** @internal Tests build saved output nodes with this key. */
 export const MANAGED_TEXT_SOURCE_NODE_ID_KEY = "__studio_source_node_id";
-export const MANAGED_TEXT_SLOT_INDEX_KEY = "__studio_source_output_index";
 
 export type StudioManagedMediaKind = "image" | "video";
 type ManagedMediaProfile = Readonly<{ kind: StudioManagedMediaKind; outputsKey: "images" | "videos"; fromPort: "images" | "videos"; titleNoun: string; defaultBaseTitle: string }>;
@@ -454,10 +462,6 @@ export function isManagedOutputPlaceholderNode(node: StudioNodeInstance): boolea
 // nodes. Retiring an output must remove those references in the same mutation.
 function removeOutputPresentationReferences(project: StudioProjectV1, removed: Set<string>): void {
   removeStudioArrowsForItems(project, removed);
-  if (project.graph.layout?.pinnedNodeIds) {
-    project.graph.layout.pinnedNodeIds = project.graph.layout.pinnedNodeIds.filter(id => !removed.has(id));
-  }
-  project.graph.entryNodeIds = project.graph.entryNodeIds.filter(id => !removed.has(id));
   for (const node of project.graph.nodes) if (node.parentId && removed.has(node.parentId)) delete node.parentId;
 }
 

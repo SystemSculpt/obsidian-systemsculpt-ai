@@ -2,15 +2,17 @@
  * @jest-environment jsdom
  */
 import { findLeafByPath, openFileInMainWorkspace } from "../workspaceUtils";
-import { App, TFile, WorkspaceLeaf, Platform } from "obsidian";
+import { Notice, TFile, WorkspaceLeaf } from "obsidian";
 
-// Mock displayNotice
-jest.mock("../../core/ui/notifications", () => ({
-  displayNotice: jest.fn(),
-}));
+// Opening a file is its own feedback: no navigation notices.
+jest.mock("obsidian", () => ({ ...jest.requireActual("obsidian"), Notice: jest.fn() }));
+
+// Production compares leaf parents by identity only, so a plain object stands
+// in for a tab group.
+type MockLeafOverrides = Omit<Partial<WorkspaceLeaf>, "parent"> & { parent?: object | null };
 
 // Create mock leaf
-const createMockLeaf = (overrides: Partial<WorkspaceLeaf> = {}): WorkspaceLeaf =>
+const createMockLeaf = (overrides: MockLeafOverrides = {}): WorkspaceLeaf =>
   ({
     view: { file: null },
     getViewState: jest.fn().mockReturnValue({ type: "empty", state: {} }),
@@ -27,7 +29,7 @@ const createMockWorkspace = (leaves: WorkspaceLeaf[] = []) => {
       leaves.forEach(callback);
     }),
     activeLeaf: null as WorkspaceLeaf | null,
-    getMostRecentLeaf: jest.fn(() => workspace.activeLeaf),
+    getMostRecentLeaf: jest.fn((): WorkspaceLeaf | null => workspace.activeLeaf),
     rootSplit: { id: "root" },
     setActiveLeaf: jest.fn(),
     getLeaf: jest.fn().mockReturnValue(createMockLeaf()),
@@ -210,6 +212,7 @@ describe("workspaceUtils", () => {
       expect(workspace.setActiveLeaf).toHaveBeenCalledWith(existingLeaf, {
         focus: true,
       });
+      expect(Notice).not.toHaveBeenCalled();
     });
 
     it("focuses existing tab in different pane", async () => {
@@ -244,6 +247,7 @@ describe("workspaceUtils", () => {
       expect(workspace.setActiveLeaf).toHaveBeenCalledWith(existingLeaf, {
         focus: false,
       });
+      expect(Notice).not.toHaveBeenCalled();
     });
 
     it("creates new leaf when file not open", async () => {
@@ -269,6 +273,7 @@ describe("workspaceUtils", () => {
 
       expect(result.action).toBe("created_new");
       expect(newLeaf.openFile).toHaveBeenCalledWith(mockFile);
+      expect(Notice).not.toHaveBeenCalled();
     });
   });
 });

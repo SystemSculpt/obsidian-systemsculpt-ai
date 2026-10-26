@@ -1,6 +1,6 @@
 /**
  * Agent workspace shell: mounted view host, root surface, typography, header,
- * and viewport ownership.
+ * viewport ownership, the run line under the composer, and the empty states.
  */
 
 .workspace-leaf-content[data-type="systemsculpt-chat-view"] > .view-content {
@@ -18,6 +18,37 @@
   overflow: hidden;
   background: var(--ss-surface-0);
   font-size: var(--ss-text-base);
+}
+
+/* Placeholder copy is meaningful too (history search and approval answers). */
+.systemsculpt-agent-workspace :is(input, textarea)::placeholder {
+  color: var(--ss-ink-muted);
+  opacity: 1;
+}
+
+/* Keep action labels readable in both default themes without changing the
+ * accent used for selection, focus or other plugin surfaces. */
+.systemsculpt-agent-workspace .ss-button--primary,
+.systemsculpt-agent-workspace .ss-button.mod-cta {
+  background-color: var(--ss-agent-action);
+  border-color: var(--ss-agent-action);
+}
+
+.systemsculpt-agent-workspace .ss-button--primary:is(:hover, :active),
+.systemsculpt-agent-workspace .ss-button.mod-cta:is(:hover, :active) {
+  background-color: var(--ss-agent-action-hover);
+  border-color: var(--ss-agent-action-hover);
+}
+
+/* Status ink is readable on its tint, not a white-on-status button fill. */
+.systemsculpt-agent-workspace .ss-button--danger:is(:hover, :active) {
+  background-color: var(--ss-danger-tint);
+  color: var(--ss-danger);
+}
+
+.systemsculpt-agent-workspace .ss-button.mod-warning:is(:hover, :active) {
+  background-color: var(--ss-warning-tint);
+  color: var(--ss-warning);
 }
 
 /* Obsidian's button styles can override the browser's low-specificity hidden
@@ -42,56 +73,100 @@
   z-index: var(--ss-z-raised);
   display: flex;
   align-items: center;
-  min-height: var(--ss-control-height-lg);
-  padding: var(--ss-space-2) var(--ss-space-3);
+  gap: var(--ss-space-2);
+  min-height: 36px;
+  padding: var(--ss-space-1) var(--ss-space-2) var(--ss-space-1) var(--ss-space-3);
   border-bottom: 1px solid var(--ss-line);
   background: var(--ss-surface-0);
 }
 
 .systemsculpt-agent-header-title {
+  display: flex;
+  flex: 1 1 auto;
   min-width: 0;
-  overflow: hidden;
+}
+
+.systemsculpt-agent-header .systemsculpt-agent-title-button,
+.systemsculpt-agent-header .systemsculpt-agent-title-input {
+  min-width: 0;
+  max-width: 100%;
+  height: 28px;
+  padding: 0 var(--ss-space-1);
+  margin-left: calc(var(--ss-space-1) * -1);
+  border: 1px solid transparent;
+  border-radius: var(--ss-radius-sm);
+  font-size: var(--ss-text-base);
   font-weight: var(--ss-weight-semibold);
+}
+
+.systemsculpt-agent-header .systemsculpt-agent-title-button {
+  /* Override Obsidian's button flex layout so the text can ellipsize. */
+  display: block;
+  overflow: hidden;
+  background: transparent;
+  box-shadow: none;
+  color: var(--ss-ink);
+  cursor: text;
+  text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
+  transition: var(--ss-transition-colors);
+}
+
+.systemsculpt-agent-header .systemsculpt-agent-title-button:hover {
+  background: var(--ss-state-hover);
+}
+
+.systemsculpt-agent-header .systemsculpt-agent-title-input {
+  flex: 1 1 auto;
+  border-color: var(--ss-line-accent);
+  background: var(--ss-surface-0);
+  color: var(--ss-ink);
 }
 
 .systemsculpt-agent-header-actions {
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
   gap: var(--ss-space-1);
   margin-left: auto;
 }
 
-.systemsculpt-agent-credits {
-  min-height: var(--ss-control-height-sm);
-  padding: 0 var(--ss-space-2);
-  border: 1px solid var(--ss-line);
-  border-radius: var(--ss-radius-full);
-  background: transparent;
-  color: var(--ss-ink-muted);
-  font-size: var(--ss-text-xs);
+.systemsculpt-agent-header-button {
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  min-height: 28px;
 }
 
-.systemsculpt-agent-credits.is-low {
-  border-color: var(--ss-warning-line);
-  background: var(--ss-warning-tint);
-  color: var(--ss-warning);
+/* History replaces the conversation and the composer while it is open. */
+.systemsculpt-agent-workspace.is-history-open > :not(.systemsculpt-history-panel, .systemsculpt-agent-sr-only) {
+  display: none;
 }
 
-.systemsculpt-agent-credits.is-empty {
-  border-color: var(--ss-danger-line);
-  background: var(--ss-danger-tint);
-  color: var(--ss-danger);
+.systemsculpt-agent-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
 }
 
-.systemsculpt-agent-credits.is-internal-qa {
-  border-color: var(--interactive-accent);
-  color: var(--text-accent);
+/* The Latest overlay belongs to the transcript, above the variable-height
+ * composer and outside the scrolling content. */
+.systemsculpt-agent-transcript {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .systemsculpt-agent-viewport {
   position: relative;
+  min-width: 0;
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
@@ -121,27 +196,299 @@
   display: none;
 }
 
-.ss-mobile-layout .systemsculpt-agent-header-actions {
-  width: 100%;
-  margin-left: 0;
+.ss-mobile-layout .systemsculpt-agent-header-button {
+  width: var(--ss-touch-target);
+  min-width: var(--ss-touch-target);
+  height: var(--ss-touch-target);
 }
 
-.ss-mobile-layout .systemsculpt-agent-credits {
-  margin-right: auto;
-}
-
-/* Android landscape leaves only a single control row beneath Obsidian's
+/* A landscape phone leaves only a single control row beneath Obsidian's
  * native header while the software keyboard is visible. The composer owns
- * that scarce row; secondary workspace chrome returns with the navbar. */
+ * that scarce row; secondary workspace chrome returns with the navbar.
+ * Tablets have no floating navbar and keep the whole workspace. */
 @media (orientation: landscape) {
-  .ss-mobile-layout.ss-mobile-navbar-hidden .systemsculpt-agent-workspace {
+  .ss-mobile-layout.ss-mobile-navbar-suppressed .systemsculpt-agent-workspace {
     padding-bottom: 0;
   }
 
-  .ss-mobile-layout.ss-mobile-navbar-hidden .systemsculpt-agent-header,
-  .ss-mobile-layout.ss-mobile-navbar-hidden .systemsculpt-agent-banner,
-  .ss-mobile-layout.ss-mobile-navbar-hidden .systemsculpt-agent-viewport,
-  .ss-mobile-layout.ss-mobile-navbar-hidden .systemsculpt-agent-queue {
+  .ss-mobile-layout.ss-mobile-navbar-suppressed .systemsculpt-agent-header,
+  .ss-mobile-layout.ss-mobile-navbar-suppressed .systemsculpt-agent-banner,
+  .ss-mobile-layout.ss-mobile-navbar-suppressed .systemsculpt-agent-transcript,
+  .ss-mobile-layout.ss-mobile-navbar-suppressed .systemsculpt-agent-queue {
     display: none;
   }
+}
+
+/* ── Run line: backend · mode · model or credits, under the composer ── */
+
+/* One row of controls: models may truncate; modes and balances stay readable. */
+.systemsculpt-agent-run-line {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0 var(--ss-space-1);
+  min-height: var(--ss-control-height-sm);
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-sm);
+  line-height: var(--ss-leading-tight);
+}
+
+.systemsculpt-agent-run-line .systemsculpt-agent-run-segment {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: var(--ss-space-1);
+  min-width: 0;
+  max-width: 100%;
+  height: auto;
+  min-height: var(--ss-control-height-sm);
+  padding: 0 var(--ss-space-1);
+  border: 1px solid transparent;
+  border-radius: var(--ss-radius-sm);
+  background: transparent;
+  box-shadow: none;
+  color: inherit;
+  font-size: inherit;
+  cursor: pointer;
+  transition: var(--ss-transition-colors);
+}
+
+.systemsculpt-agent-header .systemsculpt-agent-title-button:focus-visible,
+.systemsculpt-agent-run-line .systemsculpt-agent-run-segment:focus-visible {
+  box-shadow: var(--ss-ring);
+}
+
+.systemsculpt-agent-run-line .systemsculpt-agent-run-segment:hover,
+.systemsculpt-agent-run-line .systemsculpt-agent-run-segment[aria-expanded="true"] {
+  background: var(--ss-state-hover);
+  color: var(--ss-ink);
+}
+
+.systemsculpt-agent-run-line .systemsculpt-agent-run-segment.is-warning {
+  color: var(--ss-warning);
+}
+
+.systemsculpt-agent-run-line .systemsculpt-agent-run-segment.is-danger {
+  color: var(--ss-danger);
+}
+
+.systemsculpt-agent-run-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A permission mode must not become "A…", nor a balance lose its units.
+ * Allow labels to use the control's height, including larger interface fonts. */
+.systemsculpt-agent-run-segment.is-mode .systemsculpt-agent-run-label,
+.systemsculpt-agent-run-segment.is-detail:not([aria-haspopup]) .systemsculpt-agent-run-label {
+  overflow: visible;
+  overflow-wrap: normal;
+  white-space: normal;
+}
+
+.systemsculpt-agent-run-line .systemsculpt-agent-run-segment.is-mode {
+  min-width: min-content;
+}
+
+.systemsculpt-agent-run-segment.is-detail:not([aria-haspopup]) .systemsculpt-agent-run-label {
+  overflow-wrap: anywhere;
+}
+
+.systemsculpt-agent-run-icon,
+.systemsculpt-agent-run-chevron {
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.systemsculpt-agent-run-icon svg {
+  width: var(--ss-icon-size-sm);
+  height: var(--ss-icon-size-sm);
+}
+
+.systemsculpt-agent-run-chevron {
+  opacity: 0.7;
+}
+
+.systemsculpt-agent-run-chevron svg {
+  width: 12px;
+  height: 12px;
+}
+
+.systemsculpt-agent-run-line .systemsculpt-agent-run-segment.is-backend {
+  flex-shrink: 0;
+}
+
+.systemsculpt-agent-run-separator {
+  flex: 0 0 auto;
+  color: var(--ss-ink-muted);
+  user-select: none;
+}
+
+.systemsculpt-agent-run-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ss-space-2);
+  padding: 0 var(--ss-space-1);
+}
+
+.systemsculpt-agent-run-icon.is-spinning svg,
+.systemsculpt-history-row-icon.is-spinning svg {
+  animation: ss-spin 1s linear infinite;
+}
+
+/* Spec 4.1's narrow form ("Claude Code ▾", "gpt-6.1 ▾"), measured on the
+ * view: a 380 px sidebar leaves the line about 350 px after padding. */
+@container ss-surface (max-width: 439px) {
+  .systemsculpt-agent-run-line {
+    column-gap: 0;
+  }
+
+  .systemsculpt-agent-run-wide {
+    display: none;
+  }
+}
+
+@media (pointer: coarse) {
+  .systemsculpt-agent-run-line .systemsculpt-agent-run-segment {
+    min-width: var(--ss-touch-target);
+    min-height: var(--ss-touch-target);
+  }
+}
+
+/* Menu items carry a muted second line (Obsidian's menu, our spans). */
+.systemsculpt-agent-menu-title,
+.systemsculpt-agent-menu-description {
+  display: block;
+}
+
+.systemsculpt-agent-menu-label {
+  display: block;
+  max-width: 34ch;
+  white-space: normal;
+}
+
+.systemsculpt-agent-menu-description {
+  max-width: 34ch;
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-sm);
+  line-height: var(--ss-leading-base);
+  white-space: normal;
+}
+
+/* ── Empty states (spec 3.1) ── */
+
+.systemsculpt-agent-empty {
+  position: absolute;
+  inset: 0;
+  z-index: var(--ss-z-raised);
+  display: grid;
+  place-items: center;
+  min-height: var(--ss-agent-empty-height);
+  padding: var(--ss-space-4) var(--ss-space-3);
+  overflow-y: auto;
+  color: var(--ss-ink-muted);
+  pointer-events: none;
+  text-align: center;
+}
+
+.systemsculpt-agent-empty-body {
+  display: grid;
+  justify-items: center;
+  gap: var(--ss-space-2);
+  width: 100%;
+  max-width: 32em;
+}
+
+.systemsculpt-agent-empty-body > p {
+  margin: 0;
+  line-height: var(--ss-leading-relaxed);
+}
+
+.systemsculpt-agent-empty-title {
+  margin: 0;
+  color: var(--ss-ink);
+  font-size: var(--ss-text-xl);
+  font-weight: var(--ss-weight-semibold);
+  line-height: var(--ss-leading-tight);
+}
+
+.systemsculpt-agent-empty-note {
+  font-size: var(--ss-text-sm);
+}
+
+.systemsculpt-agent-empty-offer {
+  display: grid;
+  justify-items: center;
+  gap: var(--ss-space-2);
+  margin-top: var(--ss-space-2);
+}
+
+.systemsculpt-agent-empty-offer p {
+  margin: 0;
+  line-height: var(--ss-leading-relaxed);
+}
+
+.systemsculpt-agent-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--ss-space-2);
+}
+
+.systemsculpt-agent-empty-hint {
+  margin-top: var(--ss-space-3);
+  font-size: var(--ss-text-sm);
+}
+
+.systemsculpt-agent-empty .systemsculpt-agent-empty-link {
+  display: inline;
+  height: auto;
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  color: var(--ss-ink-accent);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.systemsculpt-agent-empty .systemsculpt-agent-empty-link:hover {
+  color: var(--ss-ink);
+}
+
+.systemsculpt-agent-starters {
+  display: grid;
+  gap: var(--ss-space-2);
+  width: min(100%, 22rem);
+  margin-top: var(--ss-space-4);
+}
+
+.systemsculpt-agent-starters .systemsculpt-agent-starter {
+  justify-content: flex-start;
+  width: 100%;
+  min-height: var(--ss-control-height);
+  padding: var(--ss-space-1) var(--ss-space-3);
+  overflow: hidden;
+  color: var(--ss-ink);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.systemsculpt-agent-empty :where(button) {
+  pointer-events: auto;
+}
+
+/* View-level banners (spec 4.2): message and its one action share a row. */
+.systemsculpt-agent-workspace > .systemsculpt-agent-banner:not([hidden]) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ss-space-2);
+  width: min(calc(100% - 2 * var(--ss-space-3)), var(--ss-agent-content-width));
 }

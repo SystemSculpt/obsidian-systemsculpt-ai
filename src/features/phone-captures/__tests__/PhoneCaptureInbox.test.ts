@@ -1,5 +1,10 @@
 import { TFile, TFolder, type App } from "obsidian";
 import YAML from "yaml";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { capture as MEETING } from "../../../../testing/fixtures/managed/meeting-capture/capture.json";
+
+const MEETING_NOTE = readFileSync(resolve(__dirname, "../../../../testing/fixtures/managed/meeting-capture/note.md"), "utf8");
 import {
   PHONE_CAPTURE_LINK_CHECK_GAP_MS,
   PHONE_CAPTURE_MIN_SYNC_GAP_MS,
@@ -119,6 +124,7 @@ function setup(options: Readonly<{
     licenseKey: "lic_test",
     enabled: true,
     folder: "",
+    meetingsFolder: "",
     askBeforeSaving: false,
     linked: true,
     ...options.settings,
@@ -147,6 +153,97 @@ function setup(options: Readonly<{
 }
 
 describe("PhoneCaptureInbox", () => {
+  it("saves the server's golden meeting bytes in Meetings and verifies the receipt", async () => {
+    const h = setup({ captures: [MEETING] });
+    const path = "SystemSculpt/Meetings/Q4 launch sync 2026-10-20.md";
+    expect(await h.inbox.sync()).toMatchObject({ saved: [path], failed: 0 });
+    expect(h.files.get(path)).toBe(MEETING_NOTE);
+    expect(h.vault.read).toHaveBeenCalled();
+    expect(h.server.acks).toEqual([expect.objectContaining({ id: MEETING.id, body: { vault_path: path } })]);
+    // A background save is its own receipt: the note is in the vault.
+    expect(h.notify).not.toHaveBeenCalled();
+  });
+
+  it("keeps transcript mode in the ordinary inbox with the words unchanged", async () => {
+    const markdown = "First paragraph.\n\nSecond paragraph: 日本語.";
+    const h = setup({ captures: [{ ...CAPTURE, mode: "transcript", meeting: null, markdown }] });
+    const result = await h.inbox.sync();
+    expect(result.saved[0]).toMatch(/^SystemSculpt\/Inbox\//);
+    expect(h.files.get(result.saved[0])).toBe(
+      "---\nsource: ios\ncaptured: 2026-10-14T12:00:00.000Z\ntags:\n  - groceries\n  - errands\ncapture_id: cap_1\n---\n\n" + markdown + "\n",
+    );
+  });
+
+  it("preserves an unformatted meeting's unfolded transcript without inventing a brief", async () => {
+    const markdown = "> [!note]+ Transcript\n> **00:00** Just the words.";
+    const h = setup({ captures: [{ ...MEETING, formatted: false, markdown, meeting: { ...MEETING.meeting, summary: null } }] });
+    const result = await h.inbox.sync();
+    expect(h.files.get(result.saved[0])).toBe(`---\n${MEETING.meeting.frontmatter}---\n\n${markdown}\n`);
+    expect(h.server.acks).toHaveLength(1);
+  });
+
+  it("asks once for a mixed batch with both actual destination folders", async () => {
+    const h = setup({ captures: [CAPTURE, MEETING], settings: {
+      folder: "Notes/Phone", meetingsFolder: "Work/Meetings", askBeforeSaving: true,
+    } });
+    const result = await h.inbox.sync({ manual: true });
+    expect(result.saved).toEqual([
+      "Notes/Phone/Friday oat milk 2026-10-14.md", "Work/Meetings/Q4 launch sync 2026-10-20.md",
+    ]);
+    expect(h.confirm).toHaveBeenCalledTimes(1);
+    expect(h.confirm).toHaveBeenCalledWith(expect.any(Array), "Notes/Phone and Work/Meetings");
+    expect(h.notify).toHaveBeenCalledWith("Saved 2 iOS captures to Notes/Phone and Work/Meetings.");
+  });
+
+  it("reports the vault root when a meeting moves there before verification", async () => {
+    const h = setup({ captures: [MEETING] });
+    const create = h.vault.create.getMockImplementation()!;
+    h.vault.create.mockImplementationOnce(async (path, content) => {
+      const file = await create(path, content);
+      const rootPath = "Meeting.md";
+      h.files.delete(path);
+      h.emit("delete", file);
+      return create(rootPath, content);
+    });
+    expect(await h.inbox.sync({ manual: true })).toMatchObject({ saved: ["Meeting.md"], failed: 0 });
+    expect(h.server.acks[0].body).toEqual({ vault_path: "Meeting.md" });
+    expect(h.notify).toHaveBeenCalledWith("Saved 1 iOS capture to the vault root.");
+  });
+
+  it("reconciles a moved meeting after a lost receipt without rewriting or duplicating it", async () => {
+    const h = setup({ captures: [MEETING], files: { "Archive/Meeting.md": MEETING_NOTE } });
+    h.unindexed.add("Archive/Meeting.md");
+    expect(await h.inbox.sync()).toMatchObject({ saved: [], alreadyInVault: 1, failed: 0 });
+    expect(h.vault.create).not.toHaveBeenCalled();
+    expect(h.server.acks[0].body).toEqual({ vault_path: "Archive/Meeting.md" });
+  });
+
+  it.each([
+    null, {}, { frontmatter: 42 }, { frontmatter: "" },
+    { frontmatter: MEETING.meeting.frontmatter.replace(MEETING.id, "another_capture") },
+    { frontmatter: MEETING.meeting.frontmatter + "---\nInjected body\n" },
+    { frontmatter: "capture_id: [broken\n" },
+    { frontmatter: MEETING.meeting.frontmatter.repeat(300) },
+  ])("does not save or acknowledge a meeting with invalid frontmatter (case %#)", async (meeting) => {
+    const h = setup({ captures: [{ ...MEETING, meeting }] });
+    expect((await h.inbox.sync()).saved).toEqual([]);
+    expect(h.vault.create).not.toHaveBeenCalled();
+    expect(h.server.acks).toEqual([]);
+  });
+
+  it("preserves a meeting at the existing markdown limit and leaves oversized captures pending", async () => {
+    const markdown = "会".repeat(1_000_000);
+    const h = setup({ captures: [{ ...MEETING, markdown }, {
+      ...MEETING, id: "too_long", markdown: markdown + "x",
+      meeting: { ...MEETING.meeting, frontmatter: MEETING.meeting.frontmatter.replace(MEETING.id, "too_long") },
+    }] });
+    const result = await h.inbox.sync();
+    expect(result).toMatchObject({ failed: 0 });
+    expect(result.saved).toHaveLength(1);
+    expect(h.files.get(result.saved[0])).toBe(`---\n${MEETING.meeting.frontmatter}---\n\n${markdown}\n`);
+    expect(h.server.acks.map(ack => ack.id)).toEqual([MEETING.id]);
+  });
+
   it("writes a ready capture as a new note and acknowledges its vault path", async () => {
     const { inbox, files, server, notify } = setup();
 
@@ -169,7 +266,7 @@ describe("PhoneCaptureInbox", () => {
     expect(server.requests[0].headers).toMatchObject({ "x-license-key": "lic_test", "x-plugin-version": "6.12.0" });
     expect(server.acks).toEqual([expect.objectContaining({ id: "cap_1", body: { vault_path: path } })]);
     expect(server.acks[0].headers["Idempotency-Key"]).toMatch(/^ack-cap_1-[0-9a-f]{16}$/);
-    expect(notify).toHaveBeenCalledWith("Saved 1 iOS capture to SystemSculpt/Inbox.");
+    expect(notify).not.toHaveBeenCalled();
   });
 
   it("ignores a previous account's delayed link response and checks the new account immediately", async () => {
@@ -236,6 +333,39 @@ describe("PhoneCaptureInbox", () => {
     expect(files.get(existing)).toBe("mine");
     expect(result).toMatchObject({ saved: [path], failed: 0 });
     expect(server.acks).toEqual([expect.objectContaining({ id: "cap_1", body: { vault_path: path } })]);
+  });
+
+  it("saves the transcript of an 8-hour recording (450,000 characters)", async () => {
+    const line = "Speaker 2: Let's go back to the launch plan and who owns each step.\n";
+    const markdown = `${line.repeat(Math.ceil(450_000 / line.length)).slice(0, 449_999)}.`;
+    expect(markdown).toHaveLength(450_000);
+    const { inbox, files, server } = setup({
+      captures: [{ ...CAPTURE, kind: "voice", title: "Planning offsite", markdown, tags: [] }],
+    });
+
+    const result = await inbox.sync();
+
+    const path = "SystemSculpt/Inbox/Planning offsite 2026-10-14.md";
+    expect(result).toMatchObject({ saved: [path], failed: 0 });
+    expect(files.get(path)!.endsWith(`\n\n${markdown}\n`)).toBe(true);
+    expect(server.acks).toEqual([expect.objectContaining({ id: "cap_1", body: { vault_path: path } })]);
+  });
+
+  it("saves several of the largest multi-byte captures in one sync and skips longer ones", async () => {
+    const largest = "会議の記録".repeat(200_000);
+    expect(largest).toHaveLength(1_000_000);
+    const captures = ["cap_a", "cap_b", "cap_c"].map((id) => ({ ...CAPTURE, id, title: id, markdown: largest }));
+    const { inbox, files, server } = setup({
+      captures: [...captures, { ...CAPTURE, id: "cap_long", title: "Too long", markdown: `${largest}x` }],
+    });
+
+    const result = await inbox.sync();
+
+    expect(result).toMatchObject({ failed: 0 });
+    expect(result.saved).toHaveLength(3);
+    for (const path of result.saved) expect(Buffer.byteLength(files.get(path)!)).toBeGreaterThan(3_000_000);
+    expect(server.acks.map((ack) => ack.id)).toEqual(["cap_a", "cap_b", "cap_c"]);
+    expect([...server.pending.keys()]).toEqual(["cap_long"]);
   });
 
   it("acknowledges a re-delivered capture that is already in the vault without writing again", async () => {
@@ -417,7 +547,7 @@ describe("PhoneCaptureInbox", () => {
     expect(unreadable.server.acks).toHaveLength(0);
     expect(unreadable.listeners.size).toBe(0);
 
-    const large = setup({ files: { "Large.md": "x".repeat(1024 * 1024 + 1) } });
+    const large = setup({ files: { "Large.md": "x".repeat(4 * 1024 * 1024 + 1) } });
     large.unindexed.add("Large.md");
     expect(await large.inbox.sync()).toMatchObject({ saved: [], failed: 1 });
     expect(large.vault.read).not.toHaveBeenCalled();
@@ -505,6 +635,26 @@ describe("PhoneCaptureInbox", () => {
     }
   });
 
+  it("reports a background save that came with a failure, and only that", async () => {
+    const h = setup({ captures: [CAPTURE, { ...CAPTURE, id: "cap_2", title: "Second" }] });
+    h.vault.create.mockRejectedValueOnce(new Error("Disk full: private detail"));
+
+    expect(await h.inbox.sync()).toMatchObject({ failed: 1, unacknowledged: 0 });
+
+    expect(h.notify).toHaveBeenCalledTimes(1);
+    expect(h.notify).toHaveBeenCalledWith("Saved 1 iOS capture to SystemSculpt/Inbox. Couldn't save 1 iOS capture. Sync again to retry.");
+    expect(h.server.pending.size).toBe(1);
+  });
+
+  it("reports a background save whose delivery confirmation is pending", async () => {
+    const h = setup();
+    h.server.setOverride(input => input.method === "POST" ? { status: 503, body: {} } : null);
+
+    expect(await h.inbox.sync()).toMatchObject({ failed: 1, unacknowledged: 1 });
+
+    expect(h.notify).toHaveBeenCalledWith("Saved 1 iOS capture to SystemSculpt/Inbox. Delivery confirmation pending for 1 iOS capture already in this vault. Sync again to retry.");
+  });
+
   it("keeps the real empty inbox message and stays quiet in the background", async () => {
     const h = setup({ captures: [] });
     await h.inbox.sync();
@@ -585,7 +735,7 @@ describe("PhoneCaptureInbox", () => {
     expect(notify).not.toHaveBeenCalled();
   });
 
-  it("starts saving and announces it once when the account becomes linked", async () => {
+  it("starts saving quietly when the account becomes linked", async () => {
     let linkedOnServer = false;
     const { inbox, server, notify, onLinked, advance } = setup({
       settings: { linked: false },
@@ -599,15 +749,12 @@ describe("PhoneCaptureInbox", () => {
     const result = await inbox.maybeSync();
     expect(result?.saved).toEqual(["SystemSculpt/Inbox/Friday oat milk 2026-10-14.md"]);
     expect(onLinked).toHaveBeenCalledTimes(1);
-    expect(notify.mock.calls.map(([message]) => message)).toEqual([
-      "iOS captures will be saved to SystemSculpt/Inbox.",
-      "Saved 1 iOS capture to SystemSculpt/Inbox.",
-    ]);
+    expect(notify).not.toHaveBeenCalled();
 
     advance(PHONE_CAPTURE_MIN_SYNC_GAP_MS);
     await inbox.maybeSync();
     expect(onLinked).toHaveBeenCalledTimes(1);
-    expect(notify).toHaveBeenCalledTimes(2);
+    expect(notify).not.toHaveBeenCalled();
     expect(server.requests.filter((r) => r.method === "GET")).toHaveLength(2);
   });
 
@@ -633,7 +780,7 @@ describe("PhoneCaptureInbox", () => {
     const result = await inbox.linkReported();
     expect(result?.saved).toHaveLength(1);
     expect(onLinked).toHaveBeenCalledTimes(1);
-    expect(notify).toHaveBeenCalledWith("iOS captures will be saved to SystemSculpt/Inbox.");
+    expect(notify).not.toHaveBeenCalled();
     expect(inbox.linkReported()).toBeNull();
     expect(server.requests.filter((r) => r.method === "GET")).toHaveLength(1);
   });

@@ -56,8 +56,8 @@ describe('actual Node module execution', () => {
     return {
       runId:'run_test',projectPath:'Test.systemsculpt',node:node('studio.script',{source}),inputs:{value:{n:4}},signal:new AbortController().signal,log:jest.fn(),reportProgress:jest.fn(),
       services:{
-        api:{generateText:jest.fn(),generateImage:jest.fn(),transcribeAudio:jest.fn(),beginLocalCommit:jest.fn(),completeLocalCommit:jest.fn()},
-        storeAsset:jest.fn(),readAsset:jest.fn(),readVaultText:jest.fn(),statVaultFileSize:jest.fn(),readVaultBinary:jest.fn(),statLocalFileSize:jest.fn(),
+        api:{generateText:jest.fn(),generateVideo:jest.fn(),transcribeAudio:jest.fn(),beginLocalCommit:jest.fn(),completeLocalCommit:jest.fn()},
+        storeAsset:jest.fn(),readAsset:jest.fn(),readVaultText:jest.fn(),statVaultFileSize:jest.fn(),openVaultFileSource:jest.fn(),readVaultBinary:jest.fn(),statLocalFileSize:jest.fn(),openLocalFileSource:jest.fn(),
         resolveAbsolutePath: p => p === '.' ? directory : p,
         assertFilesystemPath:jest.fn(),
         writeTempFile:async (bytes, options) => { const file = join(directory,`${options?.prefix}-${count++}.${options?.extension}`); await writeFile(file,new Uint8Array(bytes)); return file; },

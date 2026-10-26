@@ -44,6 +44,19 @@ describe("OperationProgressPanel", () => {
     });
   });
 
+  it("hands each action the button that was clicked", () => {
+    const panel = new OperationProgressPanel({ title: "Test operation", icon: "loader" });
+    const onClick = jest.fn();
+    panel.setActions([{ label: "Copy error", testId: "test.progress.copy", onClick }]);
+    const button = document.querySelector<HTMLButtonElement>('[data-testid="test.progress.copy"]')!;
+
+    button.click();
+
+    expect(onClick).toHaveBeenCalledTimes(1);
+    expect(onClick).toHaveBeenCalledWith(button);
+    panel.close();
+  });
+
   it("fires dismiss callback and detaches itself", () => {
     const onDismiss = jest.fn();
     const panel = new OperationProgressPanel({
@@ -59,6 +72,33 @@ describe("OperationProgressPanel", () => {
     expect(document.querySelector(".systemsculpt-progress-panel")).toBeNull();
 
     panel.close();
+  });
+
+  it("calls onClose once however the panel closes", () => {
+    jest.useFakeTimers();
+    try {
+      const closes = [
+        (panel: OperationProgressPanel) => panel.close(),
+        (panel: OperationProgressPanel) => {
+          panel.closeAfter(1000);
+          jest.advanceTimersByTime(1000);
+        },
+        () => document.querySelector<HTMLButtonElement>(".systemsculpt-progress-dismiss")!.click(),
+      ];
+      for (const close of closes) {
+        const onClose = jest.fn();
+        const panel = new OperationProgressPanel({ title: "Closing", icon: "loader", onClose });
+        expect(onClose).not.toHaveBeenCalled();
+
+        close(panel);
+        panel.close();
+
+        expect(onClose).toHaveBeenCalledTimes(1);
+        expect(document.querySelector(".systemsculpt-progress-panel")).toBeNull();
+      }
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it("mounts in the supplied document host as a transient surface", () => {

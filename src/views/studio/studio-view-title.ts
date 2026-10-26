@@ -1,3 +1,4 @@
+/** @internal Tests assert against this value. */
 export const DEFAULT_STUDIO_VIEW_TITLE = "SystemSculpt Studio";
 
 export function resolveStudioViewTitle(projectPath: string | null | undefined): string {

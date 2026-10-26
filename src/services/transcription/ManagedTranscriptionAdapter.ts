@@ -1,3 +1,4 @@
+import type { ManagedFileContent, ManagedFileSource } from "../managed/ManagedFileSource";
 import type { ManagedAdmission } from "../managed/ManagedAdmission";
 import { ManagedJobClient, ManagedJobError } from "../managed/ManagedJobClient";
 import { isRetiredManagedRecoveryRecord, ManagedJobRecoveryStore } from "../managed/ManagedJobRecoveryStore";
@@ -10,13 +11,14 @@ import type {
   ManagedPendingDispatch,
 } from "../managed/ManagedTypes";
 import {
+  dispatchManagedJob,
   isRetryableManagedJobObservationError,
   observeManagedJob,
   waitForManagedJob,
 } from "../managed/ManagedJobObservation";
 
 const CAPABILITY = "transcription" as const;
-const MAX_AUDIO_BYTES = 128 * 1024 * 1024;
+const MAX_AUDIO_BYTES = 500 * 1024 * 1024;
 
 export type ManagedTranscriptionContext = Readonly<{
   operationId?: string;
@@ -30,18 +32,7 @@ export type ManagedTranscriptionContext = Readonly<{
   allowPendingLocalReceipt?: boolean;
 }>;
 
-export type ManagedTranscriptionSource = Readonly<{
-  /** Opaque hashed invocation identity. Must not include raw paths or filenames. */
-  identity: string;
-  fingerprint: () => string | Promise<string>;
-  load: () => Promise<Readonly<{
-    filename: string;
-    contentType: string;
-    bytes: ArrayBuffer;
-  }>>;
-  /** Drop caller-owned references as soon as multipart upload no longer needs them. */
-  release?: () => void;
-}>;
+export type ManagedTranscriptionSource = ManagedFileSource;
 
 export type ManagedTranscriptionResult =
   | Readonly<{
@@ -266,7 +257,7 @@ export class ManagedTranscriptionAdapter {
         ? source
         : {
             identity: record.source.identity,
-            fingerprint: () => source.fingerprint(),
+            fingerprint: (signal?: AbortSignal) => source.fingerprint(signal),
             load: () => source.load(),
             ...(source.release ? { release: () => source.release?.() } : {}),
           };
@@ -677,7 +668,7 @@ export class ManagedTranscriptionAdapter {
     source: ManagedTranscriptionSource,
     signal: AbortSignal,
   ): Promise<string> {
-    const fingerprint = await source.fingerprint();
+    const fingerprint = await source.fingerprint(signal);
     throwIfAborted(signal);
     if (!/^sha256:[a-f0-9]{64}$/.test(fingerprint)) {
       throw new Error("Managed transcription source fingerprint must be SHA-256.");
@@ -745,7 +736,11 @@ export class ManagedTranscriptionAdapter {
     }
     if (record.phase === "start_dispatching") {
       context.onProgress?.(72, "Resuming transcription…");
-      await this.dependencies.jobs.start(jobId, record.operationId, signal);
+      await dispatchManagedJob({
+        send: () => this.dependencies.jobs.start(jobId, record.operationId, signal),
+        signal,
+        wait: this.wait,
+      });
       throwIfAborted(signal);
       record = await this.dependencies.recovery.acknowledgeStarted(CAPABILITY, record.operationId, record.revision);
       throwIfAborted(signal);
@@ -795,11 +790,15 @@ export class ManagedTranscriptionAdapter {
         context.onProgress?.(2, "Resuming preserved upload…");
       }
 
-      const created = await this.dependencies.jobs.create(createRequest, record.operationId, signal);
+      const created = await dispatchManagedJob({
+        send: () => this.dependencies.jobs.create(createRequest, record.operationId, signal),
+        signal,
+        wait: this.wait,
+      });
       throwIfAborted(signal);
       const jobId = readJobId(created);
       const multipartUpload = this.buildMultipartUploadDescriptor(createRequest, readUpload(created));
-      this.assertLoadedBytesMatchUpload(loaded.bytes.byteLength, multipartUpload);
+      this.assertLoadedBytesMatchUpload(loaded.sizeBytes, multipartUpload);
       record = await this.dependencies.recovery.acknowledgeCreated(
         CAPABILITY,
         record.operationId,
@@ -811,7 +810,7 @@ export class ManagedTranscriptionAdapter {
     }
 
     if (["created", "part_dispatching", "uploading"].includes(record.phase)) {
-      const multipartUpload = await this.requireMultipartUpload(record, loaded.bytes.byteLength);
+      const multipartUpload = await this.requireMultipartUpload(record, loaded.sizeBytes);
       const jobId = record.jobId;
       if (!jobId) throw new Error("Managed transcription recovery record has no acknowledged job ID.");
       const completedParts = new Map(
@@ -821,15 +820,21 @@ export class ManagedTranscriptionAdapter {
         if (completedParts.has(partNumber)) continue;
         throwIfAborted(signal);
         const offset = (partNumber - 1) * multipartUpload.partSizeBytes;
-        const length = Math.min(multipartUpload.partSizeBytes, loaded.bytes.byteLength - offset);
-        const bytes = loaded.bytes.slice(offset, offset + length);
+        const length = Math.min(multipartUpload.partSizeBytes, loaded.sizeBytes - offset);
+        const bytes = await loaded.readSlice(offset, offset + length);
+        throwIfAborted(signal);
+        if (bytes.byteLength !== length) throw new Error("The selected audio changed while it was being read.");
         const replayingPendingPart = record.phase === "part_dispatching"
           && record.pendingDispatch?.partNumber === partNumber;
         if (!replayingPendingPart) {
           record = await this.beginDispatch(record, "part", partNumber);
           throwIfAborted(signal);
         }
-        const part = await this.dependencies.jobs.uploadPart(jobId, partNumber, bytes, signal);
+        const part = await dispatchManagedJob({
+          send: () => this.dependencies.jobs.uploadPart(jobId, partNumber, bytes, signal),
+          signal,
+          wait: this.wait,
+        });
         throwIfAborted(signal);
         record = await this.dependencies.recovery.acknowledgePart(CAPABILITY, record.operationId, record.revision, part);
         throwIfAborted(signal);
@@ -841,25 +846,24 @@ export class ManagedTranscriptionAdapter {
       }
     }
 
-    if (record.phase === "complete_dispatching") {
-      if (!record.completedParts?.length || !record.jobId) {
-        throw new Error("Managed transcription upload completion cannot resume without acknowledged parts.");
-      }
-      context.onProgress?.(68, "Finalizing preserved upload…");
-      await this.dependencies.jobs.complete(record.jobId, record.completedParts, record.operationId, signal);
-      throwIfAborted(signal);
-      record = await this.dependencies.recovery.acknowledgeComplete(CAPABILITY, record.operationId, record.revision);
-      throwIfAborted(signal);
-    } else if (["created", "part_dispatching", "uploading"].includes(record.phase)) {
-      const resumedJobId = record.jobId;
+    if (["complete_dispatching", "created", "part_dispatching", "uploading"].includes(record.phase)) {
+      const jobId = record.jobId;
       const completedParts = record.completedParts;
-      if (!completedParts?.length || !resumedJobId) {
+      if (!completedParts?.length || !jobId) {
         throw new Error("Managed transcription upload completion cannot resume without acknowledged parts.");
       }
-      throwIfAborted(signal);
-      record = await this.beginDispatch(record, "complete");
-      throwIfAborted(signal);
-      await this.dependencies.jobs.complete(resumedJobId, completedParts, record.operationId, signal);
+      if (record.phase === "complete_dispatching") {
+        context.onProgress?.(68, "Finalizing preserved upload…");
+      } else {
+        throwIfAborted(signal);
+        record = await this.beginDispatch(record, "complete");
+        throwIfAborted(signal);
+      }
+      await dispatchManagedJob({
+        send: () => this.dependencies.jobs.complete(jobId, completedParts, record.operationId, signal),
+        signal,
+        wait: this.wait,
+      });
       throwIfAborted(signal);
       record = await this.dependencies.recovery.acknowledgeComplete(CAPABILITY, record.operationId, record.revision);
       throwIfAborted(signal);
@@ -875,11 +879,7 @@ export class ManagedTranscriptionAdapter {
     source: ManagedTranscriptionSource,
     context: ManagedTranscriptionContext,
     signal: AbortSignal,
-  ): Promise<Readonly<{
-    filename: string;
-    contentType: string;
-    bytes: ArrayBuffer;
-  }>> {
+  ): Promise<ManagedFileContent> {
     return source.load().then((loaded) => {
       throwIfAborted(signal);
       this.validateLoadedSource(loaded, context.maxAudioBytes ?? MAX_AUDIO_BYTES);
@@ -888,10 +888,10 @@ export class ManagedTranscriptionAdapter {
   }
 
   private validateLoadedSource(
-    loaded: Readonly<{ filename: string; contentType: string; bytes: ArrayBuffer }>,
+    loaded: ManagedFileContent,
     maxAudioBytes: number,
   ): void {
-    if (!(loaded.bytes instanceof ArrayBuffer) || loaded.bytes.byteLength < 1 || loaded.bytes.byteLength > maxAudioBytes) {
+    if (!Number.isSafeInteger(loaded.sizeBytes) || loaded.sizeBytes < 1 || loaded.sizeBytes > maxAudioBytes) {
       throw new Error(`Audio must contain between 1 byte and ${Math.floor(maxAudioBytes / (1024 * 1024))} MiB.`);
     }
     if (!loaded.filename || loaded.filename.length > 512 || !loaded.contentType) {
@@ -901,13 +901,13 @@ export class ManagedTranscriptionAdapter {
 
   private buildCreateRequest(
     sourceIdentity: string,
-    loaded: Readonly<{ filename: string; contentType: string; bytes: ArrayBuffer }>,
+    loaded: ManagedFileContent,
     context: ManagedTranscriptionContext,
   ): ManagedMultipartCreateRequest {
     return {
       filename: this.buildOpaqueUploadFilename(sourceIdentity, loaded.contentType, loaded.filename),
       contentType: loaded.contentType,
-      contentLengthBytes: loaded.bytes.byteLength,
+      contentLengthBytes: loaded.sizeBytes,
       ...(context.timestamped === undefined ? {} : { timestamped: context.timestamped }),
       ...(context.language === undefined ? {} : { language: context.language }),
     };
@@ -1014,7 +1014,7 @@ export class ManagedTranscriptionAdapter {
     try {
       source.release?.();
     } catch {
-      // Releasing caller-owned buffers is best-effort.
+      // Releasing caller-owned readers is best-effort.
     }
   }
 

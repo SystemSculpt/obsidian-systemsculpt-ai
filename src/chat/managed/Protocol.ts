@@ -7,6 +7,7 @@ import { isBase64 } from "../../utils/base64";
 
 export const THIN_AGENT_COMMAND_TYPE =
   "systemsculpt.agent.command.v1" as const;
+/** @internal Tests assert against this value. */
 export const THIN_AGENT_EVENT_TYPE =
   "systemsculpt.agent.event.v1" as const;
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/u;
@@ -40,7 +41,6 @@ const MAX_SERVER_MESSAGE_PARTS = 2_048;
 const MAX_QUEUED_TURNS = 256;
 const MAX_ASSISTANT_DELTA_CHARS = 1_000_000;
 const INVALID_JSON_VALUE = Symbol("invalid-json-value");
-const runStateCanonicals = new WeakMap<object, string>();
 
 export type AgentJsonValue =
   | null
@@ -136,13 +136,13 @@ export type AgentKnownRunState =
       root_message_id: string;
     }>;
 
-export type AgentUnknownRunState = Readonly<{
+type AgentUnknownRunState = Readonly<{
   version: 1 | null;
   cursor: number | null;
   state: "unknown";
 }>;
 
-export type AgentRunState =
+type AgentRunState =
   | AgentKnownRunState
   | AgentUnknownRunState;
 
@@ -152,7 +152,7 @@ type ServerEventBase = Readonly<{
   conversation_id: string;
 }>;
 
-export type AgentSessionSnapshotEvent = ServerEventBase & Readonly<{
+type AgentSessionSnapshotEvent = ServerEventBase & Readonly<{
   kind: "session_snapshot";
   snapshot_epoch?: number;
   snapshot_sequence?: number;
@@ -162,7 +162,7 @@ export type AgentSessionSnapshotEvent = ServerEventBase & Readonly<{
   cancelled_queued_request_ids: readonly string[];
 }>;
 
-export type AgentAssistantSnapshotEvent = ServerEventBase & Readonly<{
+type AgentAssistantSnapshotEvent = ServerEventBase & Readonly<{
   kind: "assistant_snapshot";
   request_id: string;
   snapshot_epoch?: number;
@@ -176,7 +176,7 @@ export type AgentAssistantSnapshotEvent = ServerEventBase & Readonly<{
  * matches the local part text exactly, and any missed or dropped delta is
  * healed by the next assistant snapshot.
  */
-export type AgentAssistantDeltaEvent = ServerEventBase & Readonly<{
+type AgentAssistantDeltaEvent = ServerEventBase & Readonly<{
   kind: "assistant_delta";
   request_id: string;
   message_id: string;
@@ -186,7 +186,7 @@ export type AgentAssistantDeltaEvent = ServerEventBase & Readonly<{
   delta: string;
 }>;
 
-export type AgentRunStateEvent = ServerEventBase & Readonly<{
+type AgentRunStateEvent = ServerEventBase & Readonly<{
   kind: "run_state";
   run_state: AgentRunState;
 }>;
@@ -197,7 +197,7 @@ export type AgentTerminalEvent = ServerEventBase & Readonly<{
   terminal: ThinAgentRunTerminalData;
 }>;
 
-export type AgentQueuedTurn =
+type AgentQueuedTurn =
   | Readonly<{
       kind: "submit";
       request_id: string;
@@ -234,7 +234,7 @@ export type AgentCommandAckEvent = ServerEventBase & (
     }>
 );
 
-export type AgentUnknownEvent = ServerEventBase & Readonly<{
+type AgentUnknownEvent = ServerEventBase & Readonly<{
   kind: "unknown";
   raw_kind: string;
   raw: Readonly<Record<string, unknown>>;
@@ -250,6 +250,7 @@ export type AgentServerEvent =
   | AgentCommandAckEvent
   | AgentUnknownEvent;
 
+/** @internal Tests match this error class. */
 export class AgentProtocolError extends Error {
   public constructor(
     public readonly code: string,
@@ -509,36 +510,6 @@ function parseTerminal(value: unknown): ThinAgentRunTerminalData {
   return fail("invalid_server_event", "The terminal event is invalid.");
 }
 
-function canonicalJson(value: unknown): string {
-  let nodes = 0;
-  const visit = (current: unknown, depth: number): string => {
-    nodes += 1;
-    if (nodes > MAX_JSON_NODES || depth > MAX_JSON_DEPTH) return "[too-complex]";
-    if (current === null) return "null";
-    if (typeof current === "boolean" || typeof current === "string") {
-      return JSON.stringify(current);
-    }
-    if (typeof current === "number") {
-      return Number.isFinite(current) ? JSON.stringify(current) : "[non-finite]";
-    }
-    if (Array.isArray(current)) {
-      return `[${current.map((entry) => visit(entry, depth + 1)).join(",")}]`;
-    }
-    if (!isRecord(current)) return `[${typeof current}]`;
-    return `{${Object.keys(current).sort().map((key) =>
-      `${JSON.stringify(key)}:${visit(current[key], depth + 1)}`).join(",")}}`;
-  };
-  return visit(value, 0);
-}
-
-function rememberRunState<T extends AgentRunState>(
-  state: T,
-  raw: unknown,
-): T {
-  runStateCanonicals.set(state, canonicalJson(raw));
-  return state;
-}
-
 function parseUserMessage(
   value: unknown,
 ): AgentUserMessage {
@@ -763,14 +734,11 @@ export function parseAgentCommand(
   return fail("unsupported_command", "The client command kind is unsupported.");
 }
 
-export function parseAgentRunState(
+function parseAgentRunState(
   value: unknown,
 ): AgentRunState {
   if (!isRecord(value)) {
-    return rememberRunState(
-      Object.freeze({ version: null, cursor: null, state: "unknown" }),
-      { version: null, cursor: null, state: "unknown" },
-    );
+    return Object.freeze({ version: null, cursor: null, state: "unknown" });
   }
   const version = value.version === 1 ? 1 : null;
   const cursor = safeInteger(value.cursor) ? value.cursor : null;
@@ -779,10 +747,7 @@ export function parseAgentRunState(
     && cursor !== null
     && value.state === "idle"
     && hasExactKeys(value, ["version", "cursor", "state"])
-  ) return rememberRunState(
-    Object.freeze({ version: 1, cursor, state: "idle" }),
-    value,
-  );
+  ) return Object.freeze({ version: 1, cursor, state: "idle" });
   if (
     version === 1
     && cursor !== null
@@ -795,27 +760,16 @@ export function parseAgentRunState(
     && RUN_ID.test(value.run_id)
     && safeId(value.root_message_id)
   ) {
-    return rememberRunState(Object.freeze({
+    return Object.freeze({
       version: 1,
       cursor,
       state: value.state,
       request_id: value.request_id,
       run_id: value.run_id,
       root_message_id: value.root_message_id,
-    }), value);
+    });
   }
-  return rememberRunState(
-    Object.freeze({ version, cursor, state: "unknown" }),
-    {
-      version,
-      cursor,
-      state: typeof value.state === "string"
-        && value.state.length >= 1
-        && value.state.length <= 80
-        ? value.state
-        : "unknown",
-    },
-  );
+  return Object.freeze({ version, cursor, state: "unknown" });
 }
 
 function serverBase(
@@ -1087,30 +1041,5 @@ export function parseAgentServerEvent(
       kind: value.kind,
       conversation_id: base.conversation_id,
     }),
-  });
-}
-
-export function canonicalAgentRunState(
-  value: AgentRunState,
-): string {
-  const remembered = runStateCanonicals.get(value);
-  if (remembered !== undefined) return remembered;
-  if (value.state === "idle") {
-    return JSON.stringify({ version: 1, cursor: value.cursor, state: "idle" });
-  }
-  if (value.state === "running" || value.state === "waiting_for_client") {
-    return JSON.stringify({
-      version: 1,
-      cursor: value.cursor,
-      state: value.state,
-      request_id: value.request_id,
-      run_id: value.run_id,
-      root_message_id: value.root_message_id,
-    });
-  }
-  return JSON.stringify({
-    version: value.version,
-    cursor: value.cursor,
-    state: "unknown",
   });
 }

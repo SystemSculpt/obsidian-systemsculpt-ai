@@ -1,3 +1,4 @@
+import retryFixture from "../../../../testing/fixtures/retry-after.json";
 import {
   PlatformRequestClient,
   platformTransferTimeoutMs,
@@ -88,6 +89,23 @@ describe("AudioProcessorApiClient", () => {
     });
     return { client, requestClient };
   };
+
+  it.each(retryFixture.cases)("carries $name through signed uploads, API failures and audio poll hints", async ({ header, milliseconds }) => {
+    const now = jest.spyOn(Date, "now").mockReturnValue(retryFixture.now);
+    const headers: Record<string, string> = header === null ? {} : { "Retry-After": header };
+    const { client, requestClient } = setup();
+    try {
+      requestClient.responses.push(new Response("busy", { status: 503, headers }));
+      await expect(client.uploadPart({ partNumber: 1, url: "https://signed.test/part", headers: {}, expiresInSeconds: 900 }, new ArrayBuffer(1)))
+        .rejects.toMatchObject({ status: 503, retryAfterMs: milliseconds ?? undefined });
+      requestClient.responses.push(new Response("busy", { status: 503, headers }));
+      await expect(client.getPartUrl("audio_job_123", 1)).rejects.toMatchObject({ status: 503, retryAfterMs: milliseconds ?? undefined });
+      requestClient.responses.push(json({ job: pendingJob }, 200, headers));
+      expect((await client.getJob("audio_job_123")).pollAfterMs).toBe(milliseconds ?? undefined);
+    } finally {
+      now.mockRestore();
+    }
+  });
 
   it("creates an audio job with the exact source contract and upload plan", async () => {
     const { client, requestClient } = setup();
@@ -188,6 +206,36 @@ describe("AudioProcessorApiClient", () => {
     }));
   });
 
+  it.each(["5", "Sat, 24 Oct 2026 18:00:05 GMT"])("preserves signed upload Retry-After %s", async (retryAfter) => {
+    jest.useFakeTimers().setSystemTime(new Date("2026-10-24T18:00:00Z"));
+    try {
+      const { client, requestClient } = setup();
+      requestClient.responses.push(new Response("Unavailable", { status: 503, headers: { "Retry-After": retryAfter } }));
+      await expect(client.uploadPart({
+        partNumber: 1, url: "https://objects.example.com/upload", headers: {}, expiresInSeconds: 900,
+      }, new Uint8Array([1]).buffer)).rejects.toMatchObject({ status: 503, retryAfterMs: 5_000 });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it.each([429, 503, 400])("keeps HTTP %s and Retry-After when a gateway returns HTML", async (status) => {
+    const { client, requestClient } = setup();
+    requestClient.responses.push(new Response("<html>Gateway unavailable</html>", { status, headers: { "Retry-After": "5" } }));
+    await expect(client.getPartUrl("audio_job_123", 1)).rejects.toMatchObject({ status, code: "request_failed", retryAfterMs: 5_000 });
+    requestClient.responses.push(new Response("<html>Gateway unavailable</html>", { status, headers: { "Retry-After": "5" } }));
+    await expect(client.completeUpload("audio_job_123", [{ part_number: 1, etag: "etag" }], "operation-1"))
+      .rejects.toMatchObject({ status, code: "request_failed", retryAfterMs: 5_000 });
+  });
+
+  it("keeps HTTP failures for oversized error bodies but rejects malformed successful JSON", async () => {
+    const { client, requestClient } = setup();
+    requestClient.responses.push(new Response("x".repeat(1024 * 1024 + 1), { status: 503, headers: { "Retry-After": "5" } }));
+    await expect(client.getPartUrl("audio_job_123", 1)).rejects.toMatchObject({ status: 503, retryAfterMs: 5_000 });
+    requestClient.responses.push(new Response("<html>Not JSON</html>", { status: 200 }));
+    await expect(client.getPartUrl("audio_job_123", 1)).rejects.toMatchObject({ status: 0, code: "malformed_response" });
+  });
+
   it("uses raw requestUrl transport for signed multipart uploads and preserves the ETag", async () => {
     const { client, requestClient } = setup();
     const bytes = new Uint8Array([1, 2, 3, 4]).buffer;
@@ -208,7 +256,6 @@ describe("AudioProcessorApiClient", () => {
       body: bytes,
       bodyEncoding: "raw",
       transport: "requestUrl",
-      preserveResponseHeaders: true,
       allowTransportFallback: false,
       headers: { "x-amz-checksum-sha256": "checksum" },
     }));

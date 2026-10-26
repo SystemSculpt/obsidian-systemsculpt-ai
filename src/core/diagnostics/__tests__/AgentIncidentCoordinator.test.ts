@@ -1,3 +1,9 @@
+import { createHash } from "node:crypto";
+import { AgentLifecycle, type AgentLifecycleInput } from "../../../chat/managed/Lifecycle";
+import { PluginLogger } from "../../../utils/PluginLogger";
+import * as canonicalJson from "../AgentIncidentCanonicalJson";
+import { snapshotSupportDiagnosticEvent } from "../../../utils/SupportDiagnosticEvent";
+import * as lifecycleSchema from "../../../utils/ThinAgentLifecycleSchema";
 import type { ListedFiles, Stat } from "obsidian";
 import {
   AgentIncidentCoordinator,
@@ -17,6 +23,15 @@ import type {
   AgentChatTransportSegmentSummaryEvent,
   AgentRunFailureCaptureEvent,
 } from "../AgentIncidentCapture";
+
+jest.mock("../AgentIncidentCanonicalJson", () => {
+  const actual = jest.requireActual<typeof import("../AgentIncidentCanonicalJson")>("../AgentIncidentCanonicalJson");
+  return { ...actual, canonicalJsonStringify: jest.fn(actual.canonicalJsonStringify) };
+});
+jest.mock("../../../utils/ThinAgentLifecycleSchema", () => {
+  const actual = jest.requireActual<typeof import("../../../utils/ThinAgentLifecycleSchema")>("../../../utils/ThinAgentLifecycleSchema");
+  return { ...actual, isAgentLifecycleCode: jest.fn(actual.isAgentLifecycleCode) };
+});
 
 const BASE_TIME = Date.parse("2026-08-13T18:00:00.000Z");
 const PLUGIN_BUILD_ID = `sha256:${"a".repeat(64)}`;
@@ -375,6 +390,128 @@ function persistedBytes(adapter: MemoryAdapter, id: string): string | undefined 
   return adapter.files.get(`${AGENT_INCIDENT_STORE_PATH}/${id}.json`)?.data;
 }
 
+describe("lifecycle snapshot pipeline", () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+    jest.useRealTimers();
+  });
+
+  function pipeline() {
+    const harness = realHarness();
+    const logger = new PluginLogger({
+      settings: { logLevel: 1 },
+      isPluginUnloading: () => false,
+    } as unknown as ConstructorParameters<typeof PluginLogger>[0]);
+    const lifecycle = new AgentLifecycle((record) => {
+      const event = logger.lifecycle(record);
+      if (event) harness.coordinator.recordLifecycle(event);
+    });
+    return { ...harness, logger, lifecycle };
+  }
+
+  it("shares frozen support snapshots and never canonicalizes a successful run", async () => {
+    const { recorder, coordinator, logger, lifecycle } = pipeline();
+    const ids = correlation(101);
+    const recorded = jest.spyOn(recorder, "record");
+    const canonical = jest.mocked(canonicalJson.canonicalJsonStringify).mockClear();
+    const logged = jest.spyOn(logger, "lifecycle");
+    const validateCode = jest.mocked(lifecycleSchema.isAgentLifecycleCode).mockClear();
+    lifecycle.record({ code: "run_started", phase: "start", ...ids });
+    const event = logged.mock.results[0].value as SupportDiagnosticEvent;
+    expect(Object.isFrozen(event)).toBe(true);
+    expect(snapshotSupportDiagnosticEvent(event)).toBe(event);
+    expect(recorded).toHaveBeenLastCalledWith(event);
+    expect(recorded.mock.calls[0][0]).toBe(event);
+    lifecycle.record({ code: "run_finished_completed", phase: "response", ...ids });
+    expect(canonical).not.toHaveBeenCalled();
+    expect(validateCode).toHaveBeenCalledTimes(2);
+    const impostor = Object.freeze({
+      ...event,
+      get status(): number { throw new Error("untrusted frozen getter"); },
+    });
+    expect(snapshotSupportDiagnosticEvent(impostor)).toBeNull();
+    expect(recorder.record(impostor)).toBe(false);
+    expect(recorder.finalize(ids)).toBeNull();
+    await coordinator.closeAdmissionAndDrain();
+    await logger.flushBeforeUnload();
+    logger.dispose();
+  });
+
+  // SHA-256 pins the exact real store.save bytes from pre-change main 36ea21cb,
+  // not a newly approved serialization. Dense/mixed cases pin both eviction
+  // counters and their arrival order, including byte pressure that later eases.
+  it.each([
+    ["sparse", 500, () => false, "a2f49dc1e5cdb70e97107b305d408327f327dec144e6d764d7a6745043e33951"],
+    ["dense", 256, () => true, "aa5d0c4ccf08be48be0868625b8700b89ca274531e798e25e57fe2aeaee81a1c"],
+    ["dense overflow", 257, () => true, "ca92ef6c390a2465780ff780b6403dd9050e3faf13b49d0331e5287f04e11eff"],
+    ["count then bytes", 500, (index: number) => index >= 300 && index < 460, "02ffead4d4d564b010c6bbb8904956460e8fd0375c2fbcf6e5f2fd9c2c6674be"],
+    ["bytes then count", 700, (index: number) => index < 200, "a957a73cd8bda0fd90e4d4c0f91b91d2e2ef775b2b0d6cbf34cfde754752676d"],
+  ] as const)("saves byte-identical baseline reports: %s", async (_name, count, dense, expectedHash) => {
+    jest.useFakeTimers({ doNotFake: ["performance"] });
+    jest.setSystemTime(BASE_TIME);
+    const { adapter, coordinator, logger, lifecycle } = pipeline();
+    const ids = correlation(101);
+    await coordinator.initialize();
+    coordinator.recordTransport(transport(ids));
+    for (let index = 0; index < count; index += 1) {
+      jest.setSystemTime(BASE_TIME + index * 17);
+      const terminal = index === count - 1;
+      const extra: Partial<AgentLifecycleInput> = dense(index) ? {
+        clientInstanceId: `client_${"8".repeat(32)}`,
+        pluginBuildId: PLUGIN_BUILD_ID,
+        runId: ids.runId,
+        serverRunId: ids.runId,
+        toolName: "multi_edit",
+        toolCallId: `call_${"9".repeat(96)}`,
+        incidentId: ids.incidentId,
+        failureCode: "response_capacity_unavailable",
+        latencyTraceId: "7".repeat(32),
+        commandKind: "client_tool_result",
+        commandSegmentOrdinal: 1,
+        toolExecutionOrdinal: 1,
+        toolOutcome: "outcome_unknown",
+        toolFailureClass: "outcome_unknown",
+        toolItemCount: 10_000,
+        toolCompletedItemCount: 5_000,
+        toolFailedItemCount: 5_000,
+        historySyncKind: "authoritative_prefix",
+        historySyncOrdinal: index + 1,
+        responseDeliveryMode: "request_url_buffered",
+        clientMonotonicOffsetMs: index === 0 ? -0 : index * 17.125,
+        serverTimingAppMs: 604_800_000,
+        serverTimingAuthMs: index % 2 ? 0 : 12.345,
+        creditsRefreshReason: "billing_failure",
+        creditsRefreshSequence: index + 1,
+        creditsRefreshTransport: "request_url",
+        creditsRefreshElapsedMs: 604_800_000,
+        creditsRefreshServerAuthMs: 12.345,
+        creditsRefreshServerRateLimitMs: 0,
+        creditsRefreshServerBalanceStoreMs: 604_800_000,
+        creditsRefreshServerTotalMs: 604_800_000,
+        status: 503,
+        retryable: true,
+      } : {};
+      expect(lifecycle.record({
+        code: index === 0 ? "run_started" : terminal ? "run_finished_failed" : "phase_working",
+        phase: index === 0 ? "start" : "response",
+        conversationId: ids.conversationId,
+        requestId: ids.requestId,
+        ...extra,
+        ...(terminal ? { incidentId: ids.incidentId, failureCode: "response_capacity_unavailable" } : {}),
+      })).not.toBeNull();
+    }
+    const receipt = coordinator.captureFailure(failure(ids), rendering());
+    recordFailureSurface(coordinator, ids);
+    expect(await coordinator.prepareReport(receipt!.reportId)).toBe(true);
+    await coordinator.closeAdmissionAndDrain();
+    await logger.flushBeforeUnload();
+    logger.dispose();
+    const bytes = persistedBytes(adapter, receipt!.reportId)!;
+    expect(adapter.writeCalls).toBe(1);
+    expect(createHash("sha256").update(bytes, "utf8").digest("hex")).toBe(expectedHash);
+  });
+});
+
 function persistedReports(adapter: MemoryAdapter): AgentIncidentReport[] {
   return [...adapter.files.entries()]
     .filter(([path]) => path.startsWith(`${AGENT_INCIDENT_STORE_PATH}/`) && path.endsWith(".json"))
@@ -437,6 +574,145 @@ function fakeDependencies(options: {
 }
 
 describe("AgentIncidentCoordinator", () => {
+  it("does not make a reserved report available until the save completes", async () => {
+    const save = createDeferred();
+    const { coordinator } = fakeDependencies({
+      finalize: () => fakeReport(301),
+      save: () => save.promise,
+    });
+    const ids = correlation(301);
+    begin(coordinator, ids);
+    const receipt = coordinator.captureFailure(failure(ids))!;
+    const ready = jest.fn();
+    const preparation = coordinator.prepareReport(receipt.reportId).then(ready);
+    finish(coordinator, ids);
+    recordFailureSurface(coordinator, ids);
+    await waitForTimers();
+    expect(ready).not.toHaveBeenCalled();
+    save.resolve();
+    await preparation;
+    expect(ready).toHaveBeenCalledWith(true);
+    await coordinator.closeAdmissionAndDrain();
+  });
+
+  it.each([false, true])("settles unavailable when terminal admission fails (painted: %s)", async (painted) => {
+    jest.useFakeTimers();
+    const { coordinator, recorder } = fakeDependencies({ finalize: () => fakeReport(304) });
+    const ids = correlation(304);
+    begin(coordinator, ids);
+    const receipt = coordinator.captureFailure(failure(ids))!;
+    if (painted) recordFailureSurface(coordinator, ids);
+    recorder.record.mockReturnValueOnce(false);
+    finish(coordinator, ids);
+    const ready = jest.fn();
+    const preparation = coordinator.prepareReport(receipt.reportId).then(ready);
+    await jest.advanceTimersByTimeAsync(1_000);
+    await preparation;
+    expect(ready).toHaveBeenCalledWith(false);
+    await expect(coordinator.prepareReport(receipt.reportId, true)).resolves.toBe(false);
+    expect(recorder.finalize).not.toHaveBeenCalled();
+    await coordinator.closeAdmissionAndDrain();
+  });
+
+  it("reports save failure and coalesces explicit retries of the same report", async () => {
+    const retrySave = createDeferred();
+    const { coordinator, store, recorder } = fakeDependencies({ finalize: () => fakeReport(302) });
+    store.save.mockRejectedValueOnce(new Error("disk unavailable"))
+      .mockImplementationOnce(() => retrySave.promise);
+    const ids = correlation(302);
+    begin(coordinator, ids);
+    const receipt = coordinator.captureFailure(failure(ids))!;
+    finish(coordinator, ids);
+    recordFailureSurface(coordinator, ids);
+    await expect(coordinator.prepareReport(receipt.reportId)).resolves.toBe(false);
+    const retry = coordinator.prepareReport(receipt.reportId, true);
+    const duplicate = coordinator.prepareReport(receipt.reportId, true);
+    expect(store.save).toHaveBeenCalledTimes(2);
+    retrySave.resolve();
+    await expect(retry).resolves.toBe(true);
+    await expect(duplicate).resolves.toBe(true);
+    expect(recorder.finalize).toHaveBeenCalledTimes(1);
+    expect(store.save.mock.calls[1][0]).toBe(store.save.mock.calls[0][0]);
+    await coordinator.closeAdmissionAndDrain();
+  });
+
+  it("retries failed canonicalization without finalizing the report twice", async () => {
+    const { coordinator, recorder, store } = fakeDependencies({ finalize: () => fakeReport(305) });
+    store.serialize.mockImplementationOnce(() => { throw new Error("serialization unavailable"); });
+    const ids = correlation(305);
+    begin(coordinator, ids);
+    const receipt = coordinator.captureFailure(failure(ids))!;
+    finish(coordinator, ids);
+    recordFailureSurface(coordinator, ids);
+    await expect(coordinator.prepareReport(receipt.reportId)).resolves.toBe(false);
+    await expect(coordinator.prepareReport(receipt.reportId, true)).resolves.toBe(true);
+    expect(recorder.finalize).toHaveBeenCalledTimes(1);
+    expect(store.serialize).toHaveBeenCalledTimes(2);
+    expect(store.save).toHaveBeenCalledTimes(1);
+    await coordinator.closeAdmissionAndDrain();
+  });
+
+  it("retries an actual failed adapter save with the original report bytes", async () => {
+    const { adapter, coordinator, store } = realHarness();
+    adapter.writeFailures = 3;
+    const ids = correlation(306);
+    begin(coordinator, ids);
+    const receipt = coordinator.captureFailure(failure(ids))!;
+    finish(coordinator, ids);
+    recordFailureSurface(coordinator, ids);
+    await expect(coordinator.prepareReport(receipt.reportId)).resolves.toBe(false);
+    await expect(coordinator.isReportPersisted(receipt.reportId)).resolves.toBe(false);
+    await expect(coordinator.prepareReport(receipt.reportId, true)).resolves.toBe(true);
+    await expect(coordinator.isReportPersisted(receipt.reportId)).resolves.toBe(true);
+    const bytes = persistedBytes(adapter, receipt.reportId)!;
+    expect(bytes).toBe(store.serialize(JSON.parse(bytes) as AgentIncidentReport));
+    await coordinator.closeAdmissionAndDrain();
+  });
+
+  it("marks an evicted queued save unavailable and can save it on retry", async () => {
+    const blocked = createDeferred();
+    const { coordinator, store } = fakeDependencies({
+      finalize: (ids) => fakeReport(Number.parseInt(ids.conversationId.slice(-8), 16)),
+    });
+    store.save.mockImplementationOnce(() => blocked.promise);
+    for (let value = 400; value <= 420; value += 1) {
+      const ids = correlation(value);
+      begin(coordinator, ids);
+      coordinator.captureFailure(failure(ids));
+      finish(coordinator, ids);
+      recordFailureSurface(coordinator, ids);
+      await Promise.resolve();
+      await Promise.resolve();
+    }
+    await expect(coordinator.prepareReport(reportId(401))).resolves.toBe(false);
+    const retry = coordinator.prepareReport(reportId(401), true);
+    blocked.resolve();
+    await expect(retry).resolves.toBe(true);
+    expect(store.save).toHaveBeenCalledWith(fakeReport(401));
+    await coordinator.closeAdmissionAndDrain();
+  });
+
+  it("checks persisted bytes after restart and refuses missing or corrupt reports", async () => {
+    const { adapter, coordinator } = realHarness();
+    const ids = correlation(303);
+    begin(coordinator, ids);
+    const receipt = coordinator.captureFailure(failure(ids))!;
+    finish(coordinator, ids);
+    await coordinator.closeAdmissionAndDrain();
+    const restarted = realHarness(adapter).coordinator;
+    await expect(restarted.prepareReport(receipt.reportId)).resolves.toBe(true);
+    await expect(restarted.prepareReport(reportId(999))).resolves.toBe(false);
+    const path = `${AGENT_INCIDENT_STORE_PATH}/${receipt.reportId}.json`;
+    adapter.files.get(path)!.data = "truncated";
+    await expect(restarted.prepareReport(receipt.reportId)).resolves.toBe(false);
+    await expect(restarted.prepareReport("../../invalid")).resolves.toBe(false);
+    await restarted.closeAdmissionAndDrain();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
   it.each([
     ["user-01234567-89ab-4cde-8fab-0123456789ab", true],
     ["user-1700000000-abcde", true],
@@ -650,7 +926,7 @@ describe("AgentIncidentCoordinator", () => {
 
   it("contains recorder attachment and finalization failures", async () => {
     const ids = correlation(8);
-    const { coordinator, recorder } = fakeDependencies();
+    const { recorder } = fakeDependencies();
     recorder.attachEnvironment.mockImplementation(() => { throw new Error("attach-environment"); });
     recorder.attachResourceSamples.mockImplementation(() => { throw new Error("attach-resources"); });
     recorder.finalize.mockImplementation(() => { throw new Error("finalize"); });
@@ -724,6 +1000,7 @@ describe("AgentIncidentCoordinator", () => {
   });
 
   it("evicts the oldest pending capture after 32 correlations", async () => {
+    jest.useFakeTimers();
     const first = correlation(20);
     const last = correlation(52);
     const { coordinator, recorder } = fakeDependencies();
@@ -742,7 +1019,9 @@ describe("AgentIncidentCoordinator", () => {
       { conversationId: last.conversationId, requestId: last.requestId },
       expect.objectContaining({ assistantTextPartCount: 2 }),
     );
-    await coordinator.closeAdmissionAndDrain();
+    const draining = coordinator.closeAdmissionAndDrain();
+    await jest.advanceTimersByTimeAsync(1_000);
+    await draining;
   });
 
   it("drains tracked initialization and save work without rejecting", async () => {
@@ -819,6 +1098,7 @@ describe("AgentIncidentCoordinator", () => {
   });
 
   it("contains recorder record and transport attachment failures", async () => {
+    jest.useFakeTimers();
     const ids = correlation(126);
     const { coordinator, recorder } = fakeDependencies({
       finalize: () => fakeReport(126),
@@ -829,11 +1109,14 @@ describe("AgentIncidentCoordinator", () => {
     expect(() => coordinator.recordLifecycle(lifecycle(ids, "run_finished_failed", 1))).not.toThrow();
     expect(() => coordinator.recordTransport(transport(ids))).not.toThrow();
     expect(() => coordinator.captureFailure(failure(ids))).not.toThrow();
-    await expect(coordinator.closeAdmissionAndDrain()).resolves.toBeUndefined();
+    const draining = coordinator.closeAdmissionAndDrain();
+    await jest.advanceTimersByTimeAsync(1_000);
+    await expect(draining).resolves.toBeUndefined();
     expect(recorder.finalize).not.toHaveBeenCalled();
   });
 
   it("does not finalize when the failed lifecycle projection is not accepted", async () => {
+    jest.useFakeTimers();
     const ids = correlation(128);
     const { coordinator, recorder, store } = fakeDependencies();
     recorder.record.mockReturnValue(false);
@@ -841,6 +1124,8 @@ describe("AgentIncidentCoordinator", () => {
     coordinator.recordLifecycle(lifecycle(ids, "run_finished_failed", 1));
 
     await coordinator.closeAdmissionAndDrain();
+    await expect(coordinator.prepareReport(receipt!.reportId)).resolves.toBe(false);
+    expect(jest.getTimerCount()).toBe(0);
     expect(receipt).toEqual({ reportId: `report_${ids.conversationId.slice(-32)}` });
     expect(recorder.finalize).not.toHaveBeenCalled();
     expect(store.save).not.toHaveBeenCalled();
@@ -862,6 +1147,7 @@ describe("AgentIncidentCoordinator", () => {
   });
 
   it("does not throw or retain hostile lifecycle, capture, transport, rendering, or provider getters", async () => {
+    jest.useFakeTimers();
     const ids = correlation(122);
     const { coordinator, recorder } = fakeDependencies();
     const throwing = () => { throw new Error("hostile-getter"); };
@@ -874,7 +1160,9 @@ describe("AgentIncidentCoordinator", () => {
     expect(() => coordinator.captureFailure(hostileFailure as AgentRunFailureCaptureEvent)).not.toThrow();
     expect(() => coordinator.recordTransport(hostileTransport as AgentChatTransportSegmentSummaryEvent)).not.toThrow();
     expect(() => coordinator.captureFailure(failure(ids), hostileRendering as ReturnType<typeof rendering>)).not.toThrow();
-    await expect(coordinator.closeAdmissionAndDrain()).resolves.toBeUndefined();
+    const draining = coordinator.closeAdmissionAndDrain();
+    await jest.advanceTimersByTimeAsync(1_000);
+    await expect(draining).resolves.toBeUndefined();
     expect(recorder.finalize).not.toHaveBeenCalled();
   });
 

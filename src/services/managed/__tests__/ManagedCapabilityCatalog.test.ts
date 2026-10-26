@@ -1,9 +1,24 @@
 import admissionFixture from "../../../../testing/fixtures/managed/admission-v1.json";
 import fixture from "../../../../testing/fixtures/managed/managed-capabilities-v2.json";
 import { ManagedCapabilityCatalog } from "../ManagedCapabilityCatalog";
-import type { ManagedAdmissionContract, ManagedCapabilityCatalogContract } from "../ManagedTypes";
+import type { MANAGED_ADMISSION_CONTRACT, ManagedCapabilityCatalogContract, ManagedServerOutcome } from "../ManagedTypes";
 
-const typedCatalog: ManagedCapabilityCatalogContract = fixture as ManagedCapabilityCatalogContract;
+/** The shape of testing/fixtures/managed/admission-v1.json, shared with the server. */
+interface ManagedAdmissionContractResponse {
+  status: number; code: ManagedServerOutcome; message: string;
+  reasons?: string[]; retryable?: boolean; grace_eligible?: boolean;
+}
+interface ManagedAdmissionContract {
+  contract_version: typeof MANAGED_ADMISSION_CONTRACT;
+  negotiation_header: { name: "x-systemsculpt-admission-contract"; value: typeof MANAGED_ADMISSION_CONTRACT };
+  responses: Record<ManagedServerOutcome, ManagedAdmissionContractResponse>;
+  required_response_body_fields: string[];
+  required_response_headers: string[];
+  conditional_response_headers: Record<string, ManagedServerOutcome[]>;
+  forbidden_response_fields: string[];
+}
+
+const typedCatalog: ManagedCapabilityCatalogContract = ManagedCapabilityCatalog.parse(fixture);
 const typedAdmission: ManagedAdmissionContract = admissionFixture as ManagedAdmissionContract;
 
 describe("ManagedCapabilityCatalog", () => {
@@ -26,8 +41,10 @@ describe("ManagedCapabilityCatalog", () => {
       "chat_turn", "text_generation", "embeddings",
     ]);
     const chat = catalog.capabilities[0].request_contracts[0];
-    expect(chat.request?.body).toEqual(fixture.capabilities[0].request_contracts[0].request.body);
-    expect(chat.response?.definitions).toEqual(fixture.capabilities[0].request_contracts[0].response.definitions);
+    const fixtureChat = fixture.capabilities[0].request_contracts[0];
+    if (!fixtureChat.request || !("definitions" in fixtureChat.response)) throw new Error("Expected the fixture chat contract.");
+    expect(chat.request?.body).toEqual(fixtureChat.request.body);
+    expect(chat.response?.definitions).toEqual(fixtureChat.response.definitions);
     expect(catalog.capabilities[1].generation).toEqual({
       id: "semantic-v1",
       index_schema_version: 2,

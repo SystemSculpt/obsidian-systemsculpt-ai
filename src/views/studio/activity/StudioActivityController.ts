@@ -13,6 +13,7 @@ import {
 export type StudioActivityRunSource = Readonly<{
   list: (projectId: string) => ReadonlyArray<StudioActivityAgentRun>;
   subscribe: (listener: (projectId: string) => void) => () => void;
+  isStale: (runId: string) => boolean;
 }>;
 
 export type StudioActivityControllerHost = Readonly<{
@@ -32,6 +33,7 @@ export class StudioActivityController {
   private readonly applier: StudioActivityDomApplier;
   private runs: StudioActivityRunSource | null = null;
   private detachRuns: (() => void) | null = null;
+  private visible = true;
 
   constructor(private readonly host: StudioActivityControllerHost) {
     this.applier = new StudioActivityDomApplier(host.targets);
@@ -40,8 +42,24 @@ export class StudioActivityController {
   /** Follow native Codex run changes for the open project. */
   bind(runs: StudioActivityRunSource): void {
     this.detachRuns?.();
+    this.detachRuns = null;
     this.runs = runs;
-    this.detachRuns = runs.subscribe((projectId) => {
+    this.subscribeRuns();
+  }
+
+  /** State ingestion lives elsewhere; only the activity projection sleeps. */
+  setVisible(visible: boolean): void {
+    if (this.visible === visible) return;
+    this.visible = visible;
+    this.detachRuns?.();
+    this.detachRuns = null;
+    this.subscribeRuns();
+    // The view projects/applies once after reconciling its latest graph on show.
+  }
+
+  private subscribeRuns(): void {
+    if (!this.visible || !this.runs) return;
+    this.detachRuns = this.runs.subscribe((projectId) => {
       if (this.host.getProject()?.projectId === projectId) this.refresh();
     });
   }
@@ -76,6 +94,7 @@ export class StudioActivityController {
       getNodeRunState: (nodeId) => this.host.presentation.getNodeState(nodeId),
       agentRuns: this.runs?.list(project.projectId) ?? [],
       isPlaceholder: (nodeId) => placeholders.has(nodeId),
+      isStaleAgentRun: (runId) => this.runs?.isStale(runId) ?? false,
     });
     return this.snapshot;
   }
@@ -87,6 +106,7 @@ export class StudioActivityController {
 
   /** Activity-only update: no DOM rebuild, animations keep their phase. */
   refresh(): void {
+    if (!this.visible) return;
     this.project();
     this.apply();
   }

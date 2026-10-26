@@ -12,14 +12,10 @@ const OBSERVATION_RETRY_MAX_MS = 5 * 60_000;
 const DISPATCH_MAX_ATTEMPTS = 4;
 
 /** A status read failed transiently; the observer waits and reads again. */
-export type ManagedJobObservationRetry = Readonly<{
+type ManagedJobObservationRetry = Readonly<{
   consecutiveFailures: number;
   retryInMs: number;
   error: unknown;
-}>;
-
-export type ManagedJobPollHint = Readonly<{
-  poll_after_ms?: number;
 }>;
 
 export type ManagedJobObservationOptions<T> = Readonly<{
@@ -66,14 +62,15 @@ export async function waitForManagedJob(
   throwIfAborted(signal);
 }
 
+/** @internal Unit-tested directly. */
 export function normalizedPollAfterMs(
   value: unknown,
   fallback = DEFAULT_POLL_AFTER_MS,
 ): number {
-  const milliseconds = Number.isInteger(value) && (value as number) >= 0 && (value as number) <= MAX_POLL_AFTER_MS
+  const milliseconds = Number.isInteger(value) && (value as number) >= 0
     ? value as number
     : fallback;
-  return Math.max(MIN_POLL_AFTER_MS, milliseconds);
+  return Math.max(MIN_POLL_AFTER_MS, Math.min(MAX_POLL_AFTER_MS, milliseconds));
 }
 
 function isHostOffline(): boolean {
@@ -81,7 +78,7 @@ function isHostOffline(): boolean {
 }
 
 /** Waits, abortably, for the host's `online` event when it reports being offline. */
-export async function waitForManagedJobHostOnline(signal: AbortSignal): Promise<void> {
+async function waitForManagedJobHostOnline(signal: AbortSignal): Promise<void> {
   throwIfAborted(signal);
   if (!isHostOffline() || typeof window === "undefined") return;
   await new Promise<void>((resolve, reject) => {
@@ -101,22 +98,6 @@ export async function waitForManagedJobHostOnline(signal: AbortSignal): Promise<
     signal.addEventListener("abort", onAbort, { once: true });
   });
   throwIfAborted(signal);
-}
-
-export function retryAfterHeaderMs(
-  value: string | null,
-  now = Date.now(),
-): number | undefined {
-  if (value === null) return undefined;
-  const trimmed = value.trim();
-  if (/^(0|[1-9]\d*)$/.test(trimmed)) {
-    const milliseconds = Number(trimmed) * 1_000;
-    return milliseconds <= MAX_POLL_AFTER_MS ? milliseconds : undefined;
-  }
-  const timestamp = Date.parse(trimmed);
-  if (!Number.isFinite(timestamp)) return undefined;
-  const milliseconds = Math.max(0, timestamp - now);
-  return milliseconds <= MAX_POLL_AFTER_MS ? milliseconds : undefined;
 }
 
 export function isRetryableManagedJobObservationError(error: unknown): boolean {
@@ -208,18 +189,18 @@ export type ManagedJobDispatchOptions<T> = Readonly<{
  * Sends one idempotent managed job request, retrying while the server says the
  * failure is transient.
  *
- * Polling already survives a blip because observeManagedJob retries; the
- * request that starts the work did not, so a lock wait during credit
- * reservation ended a whole Studio run. Every caller carries an idempotency
- * key, so a replay returns the original job instead of paying twice. Attempts
- * are bounded because, unlike polling, there is no server-side job yet to keep
- * waiting on.
+ * Creates, completion and start carry the original operation's idempotency
+ * key; a part replay replaces the same part with the same bytes. Keep recovery
+ * writes outside send so a local persistence failure never replays a request.
+ * Dispatch attempts are bounded; observing an acknowledged job is not.
  */
 export async function dispatchManagedJob<T>(
   options: ManagedJobDispatchOptions<T>,
 ): Promise<T> {
   const wait = options.wait ?? waitForManagedJob;
   const isRetryable = options.isRetryableError ?? isRetryableManagedJobObservationError;
+  const retryAfterMs = options.retryAfterMs
+    ?? ((error: unknown) => (error as { retryAfterMs?: number } | null)?.retryAfterMs);
   let backoffMs = TRANSIENT_RETRY_BASE_MS;
 
   for (let attempt = 1; ; attempt += 1) {
@@ -230,7 +211,7 @@ export async function dispatchManagedJob<T>(
       throwIfAborted(options.signal);
       if (attempt >= DISPATCH_MAX_ATTEMPTS || !isRetryable(error)) throw error;
       await wait(
-        normalizedPollAfterMs(options.retryAfterMs?.(error), backoffMs),
+        normalizedPollAfterMs(retryAfterMs(error), backoffMs),
         options.signal,
       );
       backoffMs = Math.min(TRANSIENT_RETRY_MAX_MS, backoffMs * 2);

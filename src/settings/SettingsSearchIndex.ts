@@ -1,11 +1,12 @@
-export type SettingsIndexEntryKind = "setting" | "anchor";
+type SettingsIndexEntryKind = "setting" | "anchor";
 
 export interface SettingsIndexEntry {
   tabId: string;
   tabLabel: string;
   title: string;
   description: string;
-  element: HTMLElement;
+  element?: HTMLElement;
+  settingId?: string;
   kind: SettingsIndexEntryKind;
 }
 
@@ -158,6 +159,7 @@ export function buildSettingsIndexFromRoot(
         title,
         description,
         element: setting,
+        settingId: setting.dataset.ssSetting,
         kind: "setting",
       });
     }

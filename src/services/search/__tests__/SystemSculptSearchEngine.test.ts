@@ -11,7 +11,6 @@ const makePlugin = (app: App) =>
         respectObsidianExclusions: false,
       },
     },
-    vaultFileCache: undefined,
   } as any);
 
 describe("SystemSculptSearchEngine lexical mode", () => {
@@ -46,11 +45,10 @@ describe("SystemSculptSearchEngine lexical mode", () => {
       "notes/cyrillic.md": "Привет мир from the multilingual search fixture.",
     };
 
-    app.vault.getFiles.mockReturnValue(files);
-    // @ts-expect-error mock injected for tests
+    jest.spyOn(app.vault, "getFiles").mockReturnValue(files);
     app.vault.cachedRead = jest.fn((file) => Promise.resolve(contents[file.path] ?? ""));
-    app.vault.read.mockImplementation(app.vault.cachedRead);
-    app.vault.getAbstractFileByPath.mockImplementation((p) => files.find((f) => f.path === p) ?? null);
+    jest.spyOn(app.vault, "read").mockImplementation(app.vault.cachedRead);
+    jest.spyOn(app.vault, "getAbstractFileByPath").mockImplementation((p) => files.find((f) => f.path === p) ?? null);
     app.workspace.offref = jest.fn();
 
     return { app, files };
@@ -72,9 +70,80 @@ describe("SystemSculptSearchEngine lexical mode", () => {
     engine.destroy();
     releaseRead("late orange content");
     await indexing;
-    expect((engine as any).index.size).toBe(0);
-    expect((engine as any).tokenIndex.size).toBe(0);
+    expect((engine as any).textIndex.size).toBe(0);
+    expect((engine as any).textIndex.hasToken("orange")).toBe(false);
     expect((engine as any).contentIndexReady).toBe(false);
+  });
+
+  describe("idle release", () => {
+    const IDLE_MS = 5 * 60_000;
+
+    beforeEach(() => jest.useFakeTimers());
+    afterEach(() => jest.useRealTimers());
+
+    it("frees the index once the last search closes and sits unused, then rebuilds on the next search", async () => {
+      const { app } = buildFixture();
+      const engine = new SystemSculptSearchEngine(app as any, makePlugin(app));
+      const release = engine.hold();
+      await engine.search("orange", { mode: "lexical", limit: 10 });
+      expect((engine as any).textIndex.size).toBe(7);
+
+      release();
+      jest.advanceTimersByTime(IDLE_MS - 1);
+      expect((engine as any).textIndex.size).toBe(7);
+      jest.advanceTimersByTime(1);
+      expect((engine as any).textIndex.size).toBe(0);
+      expect((engine as any).contentIndexReady).toBe(false);
+
+      (app.vault.cachedRead as jest.Mock).mockClear();
+      const cold = await engine.search("orange", { mode: "smart", limit: 10 });
+      expect(cold.stats.metadataOnly).toBe(true);
+      const warm = await engine.search("orange juice", { mode: "lexical", limit: 10 });
+      expect(warm.results[0]?.path).toBe("notes/orange-juice.md");
+      expect(app.vault.cachedRead).toHaveBeenCalledTimes(7 + warm.results.length);
+      engine.destroy();
+    });
+
+    it("keeps the index while any search is open or reopens within the idle window", async () => {
+      const { app } = buildFixture();
+      const engine = new SystemSculptSearchEngine(app as any, makePlugin(app));
+      const first = engine.hold();
+      const second = engine.hold();
+      await engine.search("orange", { mode: "lexical", limit: 10 });
+
+      first();
+      first();
+      jest.advanceTimersByTime(IDLE_MS * 2);
+      expect((engine as any).textIndex.size).toBe(7);
+
+      second();
+      jest.advanceTimersByTime(IDLE_MS - 1_000);
+      const reopened = engine.hold();
+      jest.advanceTimersByTime(IDLE_MS * 2);
+      expect((engine as any).textIndex.size).toBe(7);
+
+      reopened();
+      engine.destroy();
+      expect(jest.getTimerCount()).toBe(0);
+    });
+  });
+
+  it("keeps no note text in the index: excerpts come from reading the results shown", async () => {
+    const { app } = buildFixture();
+    const engine = new SystemSculptSearchEngine(app as any, makePlugin(app));
+    await engine.startIndexing();
+    const notes = Array.from((engine as any).textIndex.docIds(), (docId: number) => (engine as any).textIndex.note(docId));
+    for (const note of notes) {
+      expect(Object.keys(note).sort()).toEqual(["file", "lowerPath", "lowerTitle", "mtime", "path", "preview", "size", "title"]);
+      expect(note.preview.length).toBeLessThanOrEqual(243);
+    }
+
+    (app.vault.cachedRead as jest.Mock).mockClear();
+    const res = await engine.search("bright", { mode: "lexical", limit: 10 });
+    expect(res.results.map((r) => r.path)).toEqual(["notes/orange-juice.md"]);
+    expect(res.results[0].excerpt).toBe("Orange juice is delicious and bright. Fresh squeezed orange juice every day.");
+    expect((app.vault.cachedRead as jest.Mock).mock.calls.map(([file]) => file.path)).toEqual(["notes/orange-juice.md"]);
+    engine.destroy();
   });
 
   it("returns matches in Fast (lexical) mode for body content", async () => {
@@ -160,6 +229,24 @@ describe("SystemSculptSearchEngine lexical mode", () => {
     expect(res.results).toEqual([]);
   });
 
+  it.each(["defaultChatTag", "lastValidated", "lastAutomaticBackup", "pendingAudioProcessorUploads", "licenseKey", "embeddingsEnabled"])("keeps the warm content index when %s changes", async (key) => {
+    const { app } = buildFixture();
+    const plugin = makePlugin(app);
+    const engine = new SystemSculptSearchEngine(app as any, plugin);
+    await engine.search("orange", { mode: "lexical", limit: 10 });
+    (app.vault.cachedRead as jest.Mock).mockClear();
+    const listener = (app.workspace.on as jest.Mock).mock.calls.find(([event]) => event === "systemsculpt:settings-updated")![1];
+    listener(plugin.settings, plugin.settings, [key]);
+    const result = await engine.search("orange juice", { mode: "lexical", limit: 10 });
+    const resultPaths = result.results.map(hit => hit.path);
+    expect(resultPaths).toContain("notes/orange-juice.md");
+    // Only the results shown are read again, for their excerpts; a rebuild would read every note.
+    const readPaths = (app.vault.cachedRead as jest.Mock).mock.calls.map(([file]) => file.path);
+    expect(readPaths.length).toBeLessThanOrEqual(resultPaths.length);
+    expect(resultPaths).toEqual(expect.arrayContaining(readPaths));
+    engine.destroy();
+  });
+
   it("clears the content index when search-affecting settings change", async () => {
     jest.useFakeTimers();
     const { app } = buildFixture();
@@ -171,7 +258,7 @@ describe("SystemSculptSearchEngine lexical mode", () => {
 
     const settingsListener = (app.workspace.on as jest.Mock).mock.calls.find(([event]) => event === "systemsculpt:settings-updated")?.[1];
     expect(settingsListener).toBeDefined();
-    settingsListener();
+    settingsListener(plugin.settings, plugin.settings, ["embeddingsExclusions"]);
 
     (app.vault.cachedRead as jest.Mock).mockClear();
     const res = await engine.search("fresh", { mode: "smart", limit: 10 });
@@ -185,11 +272,7 @@ describe("SystemSculptSearchEngine lexical mode", () => {
 
   it("does not mutate the cached vault file array when selecting recents", async () => {
     const { app, files } = buildFixture();
-    const plugin = makePlugin(app);
-    plugin.vaultFileCache = {
-      getAllFilesView: jest.fn(() => files),
-    };
-    const engine = new SystemSculptSearchEngine(app as any, plugin);
+    const engine = new SystemSculptSearchEngine(app as any, makePlugin(app));
 
     await engine.getRecent(2);
 
@@ -206,16 +289,13 @@ describe("SystemSculptSearchEngine lexical mode", () => {
 
   it("reuses the eligible file snapshot across metadata searches", async () => {
     jest.useFakeTimers();
-    const { app, files } = buildFixture();
-    const plugin = makePlugin(app);
-    const getAllFilesView = jest.fn(() => files);
-    plugin.vaultFileCache = { getAllFilesView };
-    const engine = new SystemSculptSearchEngine(app as any, plugin);
+    const { app } = buildFixture();
+    const engine = new SystemSculptSearchEngine(app as any, makePlugin(app));
 
     await engine.search("fresh", { mode: "smart", limit: 10 });
     await engine.search("orange", { mode: "smart", limit: 10 });
 
-    expect(getAllFilesView).toHaveBeenCalledTimes(1);
+    expect(app.vault.getFiles).toHaveBeenCalledTimes(1);
 
     engine.destroy();
     jest.useRealTimers();
@@ -370,11 +450,8 @@ describe("SystemSculptSearchEngine lexical mode", () => {
 
   it("invalidates the eligible file snapshot when files are created", async () => {
     jest.useFakeTimers();
-    const { app, files } = buildFixture();
-    const plugin = makePlugin(app);
-    const getAllFilesView = jest.fn(() => files);
-    plugin.vaultFileCache = { getAllFilesView };
-    const engine = new SystemSculptSearchEngine(app as any, plugin);
+    const { app } = buildFixture();
+    const engine = new SystemSculptSearchEngine(app as any, makePlugin(app));
 
     await engine.search("fresh", { mode: "smart", limit: 10 });
     const createListener = (app.vault.on as jest.Mock).mock.calls.find(([event]) => event === "create")?.[1];
@@ -382,7 +459,7 @@ describe("SystemSculptSearchEngine lexical mode", () => {
     createListener(new TFile({ path: "notes/new.md", stat: { mtime: NOW } }));
     await engine.search("orange", { mode: "smart", limit: 10 });
 
-    expect(getAllFilesView).toHaveBeenCalledTimes(2);
+    expect(app.vault.getFiles).toHaveBeenCalledTimes(2);
 
     engine.destroy();
     jest.useRealTimers();
@@ -539,11 +616,10 @@ describe("SystemSculptSearchEngine lexical mode", () => {
       "notes/co-op.md": "The co-op meeting is tomorrow.",
       "notes/unrelated.md": "Nothing relevant here.",
     };
-    app.vault.getFiles.mockReturnValue(files);
-    // @ts-expect-error mock injected for tests
+    jest.spyOn(app.vault, "getFiles").mockReturnValue(files);
     app.vault.cachedRead = jest.fn((file) => Promise.resolve(contents[file.path] ?? ""));
-    app.vault.read.mockImplementation(app.vault.cachedRead);
-    app.vault.getAbstractFileByPath.mockImplementation((p) => files.find((f) => f.path === p) ?? null);
+    jest.spyOn(app.vault, "read").mockImplementation(app.vault.cachedRead);
+    jest.spyOn(app.vault, "getAbstractFileByPath").mockImplementation((p) => files.find((f) => f.path === p) ?? null);
 
     const plugin = makePlugin(app);
     const engine = new SystemSculptSearchEngine(app as any, plugin);

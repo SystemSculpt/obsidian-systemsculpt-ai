@@ -1,4 +1,4 @@
-export interface MicrophoneDeviceCatalogEntry {
+interface MicrophoneDeviceCatalogEntry {
   id: string;
   label: string;
 }

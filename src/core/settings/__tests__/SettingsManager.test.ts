@@ -74,7 +74,7 @@ function createPlugin(loadDataResult: unknown = {}) {
 describe("SettingsManager managed settings contract", () => {
   beforeEach(() => jest.clearAllMocks());
   afterEach(() => {
-    delete (globalThis as typeof globalThis & { window?: Window }).window;
+    Reflect.deleteProperty(globalThis, "window");
   });
 
   it("loads current settings, stamps v4, and prunes retired client authority", async () => {
@@ -96,7 +96,9 @@ describe("SettingsManager managed settings contract", () => {
     expect(manager.settings).not.toHaveProperty("customProviders");
     expect(manager.settings).not.toHaveProperty("selectedModelId");
     expect(manager.settings).not.toHaveProperty("readwiseApiToken");
-    expect(plugin.saveData).toHaveBeenCalledWith(manager.settings);
+    expect(plugin.saveData).toHaveBeenCalledWith(Object.fromEntries(
+      Object.entries(manager.settings).filter(([key]) => key !== "lastValidated"),
+    ));
     expect(backupStart).toHaveBeenCalledTimes(1);
   });
 
@@ -110,6 +112,36 @@ describe("SettingsManager managed settings contract", () => {
     expect(typeof manager.settings.chatsDirectory).toBe("string");
     expect(typeof manager.settings.vaultInstanceId).toBe("string");
     expect(manager.settings.thinAgentClientId).toMatch(/^client_[a-f0-9]{32}$/);
+  });
+
+  it.each([undefined, null, "true", 1, false, true])("requires an explicit boolean opt-in for unattended handoffs (case %#)", async value => {
+    const manager = new SettingsManager(createPlugin({ phoneHandoffsAutoRun: value }));
+    await manager.loadSettings();
+    expect(manager.settings.phoneHandoffsAutoRun).toBe(value === true);
+  });
+
+  it.each([undefined, null, 42, "Work/Meetings", ""])("loads the meeting capture folder without changing the inbox (case %#)", async (value) => {
+    const manager = new SettingsManager(createPlugin({ phoneCapturesFolder: "Phone", phoneCapturesMeetingsFolder: value }));
+    await manager.loadSettings();
+    expect(manager.settings.phoneCapturesFolder).toBe("Phone");
+    expect(manager.settings.phoneCapturesMeetingsFolder).toBe(typeof value === "string" ? value : "SystemSculpt/Meetings");
+    await manager.updateSettings({ phoneCapturesMeetingsFolder: "Meetings/Team" });
+    expect(manager.settings.phoneCapturesMeetingsFolder).toBe("Meetings/Team");
+  });
+
+  it.each([
+    ["defaults", {}, false],
+    ["legacy true", { respectReducedMotion: true }, false],
+    ["legacy false", { respectReducedMotion: false }, false],
+    ["explicit opt-in", { reduceChatMotion: true, respectReducedMotion: false }, true],
+    ["explicit opt-out", { reduceChatMotion: false, respectReducedMotion: true }, false],
+    ["invalid new value", { reduceChatMotion: "true", respectReducedMotion: true }, false],
+  ])("loads reduced chat motion as an independent opt-in: %s", async (_label, storedSettings, expected) => {
+    const plugin = createPlugin({ schemaVersion: CURRENT_SCHEMA_VERSION, ...storedSettings });
+    const manager = new SettingsManager(plugin);
+    await manager.loadSettings();
+    expect(manager.settings).toHaveProperty("reduceChatMotion", expected);
+    expect(plugin.saveData).toHaveBeenCalledWith(expect.objectContaining({ reduceChatMotion: expected }));
   });
 
   it("persists one stable thin-agent installation client id across reloads", async () => {
@@ -128,6 +160,18 @@ describe("SettingsManager managed settings contract", () => {
     expect(second.settings.thinAgentClientId).toBe(first.settings.thinAgentClientId);
   });
 
+  it.each(['systemsculpt', 'claude', 'codex'] as const)('records an explicit %s choice without marking unrelated saves', async backend => {
+    const plugin = createPlugin({ schemaVersion: CURRENT_SCHEMA_VERSION });
+    const manager = new SettingsManager(plugin);
+    await manager.loadSettings();
+    expect(manager.settings.textExecutionBackendExplicit).toBe(false);
+    await manager.updateSettings({ chatFontSize: 'large' });
+    expect(manager.settings.textExecutionBackendExplicit).toBe(false);
+    await manager.updateSettings({ textExecutionBackend: backend });
+    expect(manager.settings.textExecutionBackendExplicit).toBe(true);
+    expect(plugin.saveData).toHaveBeenLastCalledWith(expect.objectContaining({ textExecutionBackend: backend, textExecutionBackendExplicit: true }));
+  });
+
   it("persists updates and emits the settings-updated event", async () => {
     const plugin = createPlugin({ schemaVersion: CURRENT_SCHEMA_VERSION });
     const manager = new SettingsManager(plugin);
@@ -141,9 +185,81 @@ describe("SettingsManager managed settings contract", () => {
     expect(plugin.saveData).toHaveBeenCalledWith(expect.objectContaining({ chatFontSize: "large" }));
     expect(plugin.app.workspace.trigger).toHaveBeenCalledWith(
       "systemsculpt:settings-updated",
-      expect.any(Object),
+      expect.objectContaining({ chatFontSize: "medium" }),
       manager.settings,
+      ["chatFontSize"],
     );
+  });
+
+  it("skips equivalent updates, including normalized and nested values", async () => {
+    const plugin = createPlugin();
+    const manager = new SettingsManager(plugin);
+    await manager.loadSettings();
+    jest.clearAllMocks();
+
+    await manager.updateSettings({});
+    await manager.updateSettings({ chatFontSize: "medium" });
+    await manager.updateSettings({ knownChatsDirectories: [...(manager.settings.knownChatsDirectories ?? [])] });
+    await manager.updateSettings({ workflowEngine: JSON.parse(JSON.stringify(manager.settings.workflowEngine)) });
+    await manager.updateSettings({ workflowEngine: Object.fromEntries(Object.entries(manager.settings.workflowEngine).reverse()) as any });
+    await manager.saveSettings();
+
+    expect(plugin.saveData).not.toHaveBeenCalled();
+    expect(plugin.app.vault.adapter.write).not.toHaveBeenCalled();
+    expect(plugin.app.workspace.trigger).not.toHaveBeenCalled();
+  });
+
+  it("keeps validation timestamps in memory without rewriting settings or backups", async () => {
+    const plugin = createPlugin({ lastValidated: 123 });
+    const manager = new SettingsManager(plugin);
+    await manager.loadSettings();
+    expect(manager.settings.lastValidated).toBe(0);
+    expect(plugin.saveData.mock.calls.at(-1)[0]).not.toHaveProperty("lastValidated");
+    expect(JSON.parse(plugin.app.vault.adapter.write.mock.calls.at(-1)[1])).not.toHaveProperty("lastValidated");
+    jest.clearAllMocks();
+
+    await manager.updateSettings({ lastValidated: 456 });
+    expect(manager.settings.lastValidated).toBe(456);
+    expect(plugin.saveData).not.toHaveBeenCalled();
+    expect(plugin.app.vault.adapter.write).not.toHaveBeenCalled();
+  });
+
+  it("detects nested mutations against a detached snapshot", async () => {
+    const plugin = createPlugin();
+    const manager = new SettingsManager(plugin);
+    await manager.loadSettings();
+    jest.clearAllMocks();
+    plugin._internal_settings_systemsculpt_plugin.workflowEngine.enabled = false;
+    await manager.saveSettings();
+    expect(plugin.app.workspace.trigger).toHaveBeenCalledWith(
+      "systemsculpt:settings-updated",
+      expect.objectContaining({ workflowEngine: expect.objectContaining({ enabled: true }) }),
+      expect.objectContaining({ workflowEngine: expect.objectContaining({ enabled: false }) }),
+      ["workflowEngine"],
+    );
+  });
+
+  it("retries an identical update after a failed write", async () => {
+    const plugin = createPlugin();
+    const manager = new SettingsManager(plugin);
+    await manager.loadSettings();
+    jest.clearAllMocks();
+    plugin.saveData.mockRejectedValueOnce(new Error("disk full"));
+    await manager.updateSettings({ chatFontSize: "large" });
+    expect(plugin.app.workspace.trigger).not.toHaveBeenCalled();
+    await manager.updateSettings({ chatFontSize: "large" });
+    expect(plugin.saveData).toHaveBeenCalledTimes(2);
+    expect(plugin.app.workspace.trigger).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not rewrite an unchanged current settings file on reload", async () => {
+    const plugin = createPlugin();
+    const manager = new SettingsManager(plugin);
+    await manager.loadSettings();
+    const reloaded = createPlugin(plugin.saveData.mock.calls.at(-1)[0]);
+    await new SettingsManager(reloaded).loadSettings();
+    expect(reloaded.saveData).not.toHaveBeenCalled();
+    expect(reloaded.app.vault.adapter.write).not.toHaveBeenCalled();
   });
 
   it("keeps the iOS link only for the account that reported it", async () => {
@@ -184,12 +300,14 @@ describe("SettingsManager managed settings contract", () => {
     await manager.restoreFromExternalSettings({
       schemaVersion: 3,
       licenseKey: "backup-license",
+      lastValidated: Date.now() + 86_400_000,
       customProviders: [{ id: "retired" }],
       serverUrl: "http://localhost:3002/api/plugin",
     });
 
     expect(manager.settings.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
     expect(manager.settings.licenseKey).toBe("backup-license");
+    expect(manager.settings.lastValidated).toBe(0);
     expect(manager.settings).not.toHaveProperty("customProviders");
     expect(manager.settings).not.toHaveProperty("serverUrl");
   });
@@ -516,7 +634,7 @@ describe("SettingsManager managed settings contract", () => {
     await manager.loadSettings();
 
     plugin.saveData.mockRejectedValueOnce(new Error("disk full"));
-    await expect(manager.updateSettings({ chatFontSize: "large" })).resolves.toBeUndefined();
+    await expect(manager.updateSettings({ chatFontSize: "large" })).resolves.toBe(false);
     expect(plugin.logger.error).toHaveBeenCalledWith(
       "Failed to save SystemSculpt settings",
       expect.any(Error),
@@ -525,12 +643,48 @@ describe("SettingsManager managed settings contract", () => {
 
     plugin.saveData.mockResolvedValue(undefined);
     plugin.app.vault.adapter.write.mockRejectedValueOnce(new Error("backup unavailable"));
-    await expect(manager.updateSettings({ chatFontSize: "small" })).resolves.toBeUndefined();
+    await expect(manager.updateSettings({ chatFontSize: "small" })).resolves.toBe(true);
     expect(plugin.logger.error).toHaveBeenCalledWith(
       "Failed to write SystemSculpt settings backup",
       expect.any(Error),
       expect.objectContaining({ source: "SettingsManager" }),
     );
+  });
+
+  it("retries only the backup after its write fails", async () => {
+    const plugin = createPlugin();
+    const manager = new SettingsManager(plugin);
+    await manager.loadSettings();
+    jest.clearAllMocks();
+    plugin.app.vault.adapter.write.mockRejectedValueOnce(new Error("backup unavailable"));
+    await manager.updateSettings({ chatFontSize: "large" });
+    await manager.updateSettings({ chatFontSize: "large" });
+    await manager.saveSettings();
+    expect(plugin.saveData).toHaveBeenCalledTimes(1);
+    expect(plugin.app.workspace.trigger).toHaveBeenCalledTimes(1);
+    expect(plugin.app.vault.adapter.write).toHaveBeenCalledTimes(2);
+  });
+
+  it("backs up the committed revision rather than a mutation during the primary write", async () => {
+    const plugin = createPlugin();
+    const manager = new SettingsManager(plugin);
+    await manager.loadSettings();
+    let release!: () => void;
+    let started!: () => void;
+    const writing = new Promise<void>(resolve => { started = resolve; });
+    plugin.saveData.mockImplementationOnce(async () => {
+      started();
+      await new Promise<void>(resolve => { release = resolve; });
+    });
+    const update = manager.updateSettings({ defaultChatTag: "committed" });
+    await writing;
+    plugin._internal_settings_systemsculpt_plugin.workflowEngine.enabled = false;
+    release();
+    await update;
+    expect(plugin.saveData.mock.calls.at(-1)[0].workflowEngine.enabled).toBe(true);
+    expect(JSON.parse(plugin.app.vault.adapter.write.mock.calls.at(-1)[1]).workflowEngine.enabled).toBe(true);
+    await manager.saveSettings();
+    expect(JSON.parse(plugin.app.vault.adapter.write.mock.calls.at(-1)[1]).workflowEngine.enabled).toBe(false);
   });
 
   it("writes the settings backup when a concurrent save already created its folder", async () => {
@@ -627,6 +781,66 @@ describe("SettingsManager managed settings contract", () => {
       expect(manager.settings.defaultChatTag).toBe("restored-from-backup");
     });
 
+    function installHiddenBackups(plugin: ReturnType<typeof createPlugin>, backups: Record<string, unknown>) {
+      // The hidden .systemsculpt/settings/backups copies older versions wrote.
+      plugin.storage = {
+        listFiles: jest.fn(async (type: string, subPath: string) =>
+          type === "settings" && subPath === "backups" ? Object.keys(backups) : []),
+        readFile: jest.fn(async (_type: string, fileName: string) => backups[fileName.replace(/^backups\//, "")] ?? null),
+        writeFile: jest.fn(),
+      };
+    }
+
+    it("restores from an old hidden backup copy when it is the only backup left", async () => {
+      const plugin = createPlugin(null);
+      installHiddenBackups(plugin, { "settings-backup-2026-09-01.json": restoredBackup });
+      const manager = new SettingsManager(plugin);
+
+      await manager.loadSettings();
+
+      expect(manager.settings.defaultChatTag).toBe("restored-from-backup");
+      expect(plugin.storage.readFile).toHaveBeenCalledWith("settings", "backups/settings-backup-2026-09-01.json", true);
+    });
+
+    it("restores the newest dated backup from either folder, the visible copy first on the same day", async () => {
+      const visible = (day: string) => `.systemsculpt/settings-backups/settings-backup-2026-09-${day}.json`;
+      const visibleBackups: Record<string, unknown> = {
+        [visible("10")]: { ...restoredBackup, defaultChatTag: "visible-10" },
+        [visible("12")]: { ...restoredBackup, defaultChatTag: "visible-12" },
+      };
+      const restore = async (hidden: Record<string, unknown>) => {
+        const plugin = createPlugin(null);
+        plugin.app.vault.adapter.exists.mockImplementation(async (path: string) => path in visibleBackups);
+        plugin.app.vault.adapter.list.mockResolvedValue({ files: Object.keys(visibleBackups), folders: [] });
+        plugin.app.vault.adapter.read.mockImplementation(async (path: string) => JSON.stringify(visibleBackups[path]));
+        installHiddenBackups(plugin, hidden);
+        const manager = new SettingsManager(plugin);
+        await manager.loadSettings();
+        return manager.settings.defaultChatTag;
+      };
+
+      await expect(restore({
+        "settings-backup-2026-09-11.json": { ...restoredBackup, defaultChatTag: "hidden-11" },
+        "settings-backup-2026-09-12.json": { ...restoredBackup, defaultChatTag: "hidden-12" },
+      })).resolves.toBe("visible-12");
+      await expect(restore({
+        "settings-backup-2026-09-13.json": { ...restoredBackup, defaultChatTag: "hidden-13" },
+      })).resolves.toBe("hidden-13");
+    });
+
+    it("writes the pre-migration backup once, to settings-backups only", async () => {
+      const plugin = createPlugin({ schemaVersion: 3, licenseKey: "license_test" });
+      installHiddenBackups(plugin, {});
+      const manager = new SettingsManager(plugin);
+
+      await manager.loadSettings();
+
+      expect(plugin.app.vault.adapter.write.mock.calls.map(([path]: [string]) => path)
+        .filter((path: string) => path.includes("premigration")))
+        .toEqual([".systemsculpt/settings-backups/settings-backup-premigration-v3.json"]);
+      expect(plugin.storage.writeFile).not.toHaveBeenCalled();
+    });
+
     it("still ends up with defaults on a fresh install with no data and no backup", async () => {
       const plugin = createPlugin(null);
       plugin.app.vault.adapter.list.mockRejectedValue(new Error("ENOENT: .systemsculpt/settings-backups"));
@@ -637,8 +851,53 @@ describe("SettingsManager managed settings contract", () => {
       expect(manager.settings.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
       expect(manager.settings.chatFontSize).toBe("medium");
       expect(manager.settings.defaultChatTag).toBe("");
-      expect(plugin.saveData).toHaveBeenCalledWith(manager.settings);
+      expect(plugin.saveData).toHaveBeenCalledWith(Object.fromEntries(
+      Object.entries(manager.settings).filter(([key]) => key !== "lastValidated"),
+    ));
       expect(plugin.logger.warn).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("automatic backups timer", () => {
+    it("re-checks the timer whenever an update switches automatic backups, and only then", async () => {
+      const plugin = createPlugin({ schemaVersion: CURRENT_SCHEMA_VERSION });
+      const manager = new SettingsManager(plugin);
+      await manager.loadSettings();
+      expect(backupStart).toHaveBeenCalledTimes(1);
+
+      await manager.updateSettings({ chatFontSize: "large" });
+      await manager.updateSettings({ automaticBackupsEnabled: true });
+      expect(backupStart).toHaveBeenCalledTimes(1);
+
+      await manager.updateSettings({ automaticBackupsEnabled: false });
+      expect(backupStart).toHaveBeenCalledTimes(2);
+      // A restored backup or an import can turn them back on.
+      await manager.restoreFromExternalSettings({ schemaVersion: CURRENT_SCHEMA_VERSION, automaticBackupsEnabled: true });
+      expect(backupStart).toHaveBeenCalledTimes(3);
+    });
+  });
+
+  describe("retired saved-chats and attachments folders", () => {
+    it("seeds neither setting on a fresh vault and keeps a value an older version saved", async () => {
+      const fresh = new SettingsManager(createPlugin(null));
+      await fresh.loadSettings();
+      expect(fresh.settings).not.toHaveProperty("savedChatsDirectory");
+      expect(fresh.settings).not.toHaveProperty("attachmentsDirectory");
+
+      const plugin = createPlugin({
+        schemaVersion: CURRENT_SCHEMA_VERSION,
+        savedChatsDirectory: "Archive/Saved Chats",
+        attachmentsDirectory: "Archive/Attachments",
+      });
+      const upgraded = new SettingsManager(plugin);
+      await upgraded.loadSettings();
+      await upgraded.updateSettings({ chatFontSize: "large" });
+
+      // Search keeps excluding the folders those values name.
+      expect(plugin.saveData.mock.calls.at(-1)?.[0]).toMatchObject({
+        savedChatsDirectory: "Archive/Saved Chats",
+        attachmentsDirectory: "Archive/Attachments",
+      });
     });
   });
 
@@ -660,8 +919,8 @@ describe("SettingsManager managed settings contract", () => {
         chatFontSize: "large",
         defaultChatTag: "queued",
       });
-      expect(plugin.saveData).toHaveBeenCalledTimes(3);
-      expect(plugin.saveData.mock.calls.map(([data]: [any]) => data.chatFontSize)).toEqual(["large", "large", "large"]);
+      expect(plugin.saveData).toHaveBeenCalledTimes(2);
+      expect(plugin.saveData.mock.calls.map(([data]: [any]) => data.chatFontSize)).toEqual(["large", "large"]);
       expect(plugin.saveData.mock.calls.at(-1)?.[0]).toMatchObject({ chatFontSize: "large", defaultChatTag: "queued" });
     });
 
@@ -674,8 +933,8 @@ describe("SettingsManager managed settings contract", () => {
       const failing = manager.updateSettings({ chatFontSize: "large" });
       const following = manager.updateSettings({ defaultChatTag: "after-failure" });
 
-      await expect(failing).resolves.toBeUndefined();
-      await expect(following).resolves.toBeUndefined();
+      await expect(failing).resolves.toBe(false);
+      await expect(following).resolves.toBe(true);
       expect(manager.settings).toMatchObject({ chatFontSize: "large", defaultChatTag: "after-failure" });
       expect(plugin.saveData.mock.calls.at(-1)?.[0]).toMatchObject({ defaultChatTag: "after-failure" });
     });

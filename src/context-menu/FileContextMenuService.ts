@@ -32,11 +32,9 @@ import {
   type DocumentProcessingPanelLauncher,
 } from "../modals/DocumentProcessingPanel";
 import { tryCopyImageFileToClipboard } from "../utils/clipboard";
-import { getSurfaceOwnerWindow } from "../core/ui/surface";
 import { isPlanAccessError } from "../utils/errors";
 import { requireActivePlan, UpgradePlanModal } from "../modals/UpgradePlanModal";
 import { STUDIO_DISPLAY_NAME } from "../studio/types";
-import { AgentChatView } from "../views/chatview/AgentChatView";
 
 const CHAT_TEXT_EXTENSIONS = new Set(["md", "txt", "markdown"]);
 const COPYABLE_IMAGE_EXTENSIONS = new Set([
@@ -84,23 +82,6 @@ interface MenuContext {
   multiSelectCount?: number;
 }
 
-class DefaultChatWithFileLauncher implements ChatWithFileLauncher {
-  constructor(private readonly app: App, private readonly plugin: SystemSculptPlugin) {}
-
-  async open(file: TFile): Promise<void> {
-    const leaf = this.app.workspace.getLeaf("tab");
-    const view = new AgentChatView(leaf, this.plugin);
-    await leaf.open(view);
-    await this.focusLeaf(leaf, view.containerEl);
-    await view.addFileToContext(file);
-  }
-
-  private async focusLeaf(leaf: WorkspaceLeaf, host: HTMLElement) {
-    await new Promise((resolve) => getSurfaceOwnerWindow(host).setTimeout(resolve, 50));
-    this.app.workspace.setActiveLeaf(leaf, { focus: true });
-  }
-}
-
 export class FileContextMenuService {
   private readonly app: App;
   private readonly plugin: SystemSculptPlugin;
@@ -118,8 +99,9 @@ export class FileContextMenuService {
     this.documentProcessor =
       options.documentProcessor ??
       DocumentProcessingService.getInstance(this.app, this.plugin);
-    this.chatLauncher =
-      options.chatLauncher ?? new DefaultChatWithFileLauncher(this.app, this.plugin);
+    this.chatLauncher = options.chatLauncher ?? {
+      open: (file) => this.plugin.getViewManager().openChat({ file }),
+    };
     this.pluginLogger =
       options.pluginLogger ??
       this.plugin.getPluginLogger();
@@ -287,7 +269,6 @@ export class FileContextMenuService {
 
     try {
       await this.plugin.getViewManager().activateSystemSculptStudioView(created.path);
-      new Notice(`Created Studio project: ${created.project.name}`);
     } catch (error) {
       this.error("Opening new Studio project failed", error, {
         folderPath: folder.path,
@@ -413,10 +394,7 @@ export class FileContextMenuService {
             source: context.source,
           });
 
-          const copied = await tryCopyImageFileToClipboard(this.app, file);
-          if (copied) {
-            new Notice("Image copied to clipboard.");
-          } else {
+          if (!await tryCopyImageFileToClipboard(this.app, file)) {
             new Notice("Unable to copy image to clipboard.");
           }
         });
@@ -504,17 +482,19 @@ export class FileContextMenuService {
         filePath: file.path,
       });
 
-      progressPanel?.markFailure({
+      // The progress panel owns the failure; a toast stands in only when the
+      // panel was hidden before the conversion ended.
+      const shownInPanel = progressPanel?.markFailure({
         error,
         file,
-      });
+      }) ?? false;
 
       if (isPlanAccessError(error)) {
         UpgradePlanModal.openOnce(this.plugin, { feature: "Document conversion" });
         return;
       }
 
-      new Notice(`Document conversion failed: ${message}`, 6000);
+      if (!shownInPanel) new Notice(`Document conversion failed: ${message}`, 6000);
     } finally {
       if (this.activeDocumentConversion === controller) {
         this.activeDocumentConversion = null;
@@ -546,9 +526,6 @@ export class FileContextMenuService {
       extractionPath,
       durationMs,
     });
-
-    new Notice(`Converted ${file.name} to Markdown`, 4000);
-    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
 
     const output = await this.openExtractionFile(extractionPath);
     if (signal?.aborted) throw new DOMException("Aborted", "AbortError");

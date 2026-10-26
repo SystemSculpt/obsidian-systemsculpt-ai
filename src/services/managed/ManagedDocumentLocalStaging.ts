@@ -1,4 +1,6 @@
 import type SystemSculptPlugin from "../../main";
+import { sha256HexFromArrayBuffer } from "../../utils/sha256";
+import { normalizeVaultRelativePath } from "../../utils/vaultPathUtils";
 
 const STAGING_DIRECTORY = ".managed-document-staging";
 const MANIFEST_PATTERN = /\/manifest-(\d{6})\.json$/;
@@ -25,6 +27,7 @@ export interface ManagedDocumentStagingTestSeam {
   digest?: (bytes: ArrayBuffer) => Promise<string>;
 }
 
+/** @internal Tests match this error class. */
 export class ManagedDocumentLocalStagingError extends Error {
   constructor(
     public readonly code: "local_staging_corrupt" | "invalid_staging_request",
@@ -45,15 +48,15 @@ export class ManagedDocumentLocalStaging {
   private readonly digest: (bytes: ArrayBuffer) => Promise<string>;
 
   constructor(plugin: SystemSculptPlugin, testSeam: ManagedDocumentStagingTestSeam = {}) {
-    const configDirectory = normalizeRelativePath(plugin?.app?.vault?.configDir);
+    const configDirectory = requireStagingDirectory(plugin?.app?.vault?.configDir);
     const pluginId = normalizePluginId(plugin?.manifest?.id);
     if (pluginId !== "systemsculpt-ai") invalidRequest();
     const derivedDirectory = `${configDirectory}/plugins/${pluginId}`;
-    if (plugin.manifest.dir !== undefined && normalizeRelativePath(plugin.manifest.dir) !== derivedDirectory) {
+    if (plugin.manifest.dir !== undefined && requireStagingDirectory(plugin.manifest.dir) !== derivedDirectory) {
       throw new ManagedDocumentLocalStagingError("invalid_staging_request", "Plugin manifest directory does not match the installed plugin location.");
     }
     this.adapter = plugin.app.vault.adapter;
-    this.digest = testSeam.digest ?? sha256;
+    this.digest = testSeam.digest ?? sha256HexFromArrayBuffer;
     this.root = `${derivedDirectory}/${STAGING_DIRECTORY}`;
   }
 
@@ -214,11 +217,17 @@ export class ManagedDocumentLocalStaging {
   }
 }
 
-function normalizeRelativePath(value: unknown): string {
+function requireStagingDirectory(value: unknown): string {
   if (typeof value !== "string") invalidRequest();
-  const normalized = value.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/+$/, "");
-  if (!normalized || normalized.startsWith("/") || normalized.split("/").some((part) => part === ".." || part === "." || !part)) invalidRequest();
-  return normalized;
+  try {
+    return normalizeVaultRelativePath(value, {
+      trim: false,
+      preserveCharacters: true,
+      validateRelative: { allowLeadingDot: true },
+    });
+  } catch {
+    invalidRequest();
+  }
 }
 
 function normalizePluginId(value: unknown): string {
@@ -236,9 +245,4 @@ function corrupt(message: string): never {
 
 function throwIfAborted(signal?: AbortSignal): void {
   if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
-}
-
-async function sha256(bytes: ArrayBuffer): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }

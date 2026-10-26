@@ -43,7 +43,20 @@ describe("InboxTranscriptionService through its host interface", () => {
       } },
       getLogger: jest.fn(() => ({ info: jest.fn(), debug: jest.fn(), error: jest.fn(), warn: jest.fn() })),
       registerEvent: jest.fn(),
+      addCommand: jest.fn(),
       saveSettings: jest.fn().mockResolvedValue(undefined),
+    };
+  }
+
+  /** The palette's view of Resume inbox transcription: shown, and run when chosen. */
+  function resumeCommand() {
+    const command = plugin.addCommand.mock.calls
+      .map(([registered]) => registered)
+      .find((registered) => registered.id === "resume-inbox-transcription");
+    expect(command).toMatchObject({ name: "Resume inbox transcription" });
+    return {
+      available: () => command.checkCallback(true) === true,
+      run: () => command.checkCallback(false),
     };
   }
 
@@ -57,7 +70,11 @@ describe("InboxTranscriptionService through its host interface", () => {
   async function flushInbox() { await jest.advanceTimersByTimeAsync(800); }
   function confirmation() { return confirmations.mock.calls.at(-1)![0]; }
   function widget() { return widgets.mock.results.at(-1)!.value; }
-  function stop() { widgets.mock.calls.at(-1)![0].onStop(); }
+  function stop() {
+    const onStop = widgets.mock.calls.at(-1)![0].onStop;
+    expect(onStop).toEqual(expect.any(Function));
+    onStop?.();
+  }
 
   async function queueBulk(count = 4) {
     const files = Array.from({ length: count }, (_, i) => audio(`Inbox/${i + 1}.mp3`));
@@ -106,6 +123,8 @@ describe("InboxTranscriptionService through its host interface", () => {
       recoveryVariant: "workflow-inbox-transcription-v2", signal: expect.any(AbortSignal),
     }), expect.any(Function));
     expect(app.vault.create).toHaveBeenCalledWith("Inbox/audio.md", expect.stringContaining("## Transcript\nTranscribed text"));
+    // The new transcript note is the receipt.
+    expect(Notice).not.toHaveBeenCalled();
   });
 
   it("deduplicates create and rename notifications for the same queued file", async () => {
@@ -217,21 +236,67 @@ describe("InboxTranscriptionService through its host interface", () => {
     expect(widget().markFailed).not.toHaveBeenCalled();
   });
 
-  it("Cancel persists exact skip identities and later vault events do not retry them", async () => {
+  it("Not now or closing uploads nothing, records no skip, and does not reopen the dialog", async () => {
     const files = await queueBulk(3);
-    confirmation().onCancel();
+    expect(resumeCommand().available()).toBe(false);
+    confirmation().onDefer();
     await settle();
-    expect(plugin.settings.workflowEngine.skippedFiles).toEqual(Object.fromEntries(files.map(file => [
-      `transcription::default::${file.path}`,
-      expect.objectContaining({ path: file.path, type: "transcription", reason: "user_skip", skippedAt: expect.any(String) }),
-    ])));
-    expect(plugin.saveSettings).toHaveBeenCalledTimes(1);
-    expect(Notice).toHaveBeenCalledWith(expect.stringContaining("Skipped 3 files"), 7000);
-    files.forEach(file => emit("rename", file));
-    await flushInbox();
+
     expect(mockTranscribeFile).not.toHaveBeenCalled();
+    expect(plugin.settings.workflowEngine.skippedFiles).toEqual({});
+    expect(plugin.saveSettings).not.toHaveBeenCalled();
+    expect(Notice).not.toHaveBeenCalled();
+    expect(resumeCommand().available()).toBe(true);
+
+    // The next arrival is handled on its own; the waiting files do not reopen the dialog.
+    const next = audio("Inbox/next.mp3");
+    emit("create", next);
+    await flushInbox();
     expect(confirmations).toHaveBeenCalledTimes(1);
-    expect(plugin.saveSettings).toHaveBeenCalledTimes(1);
+    expect(mockTranscribeFile.mock.calls.map(([file]) => file)).toEqual([next]);
+    expect(files.every((file) => !mockTranscribeFile.mock.calls.some(([sent]) => sent === file))).toBe(true);
+  });
+
+  it("Resume inbox transcription sends the waiting files once, without asking again", async () => {
+    const files = await queueBulk(3);
+    const vaultFiles = new Map(files.map((file) => [file.path, file]));
+    (app.vault.getAbstractFileByPath as jest.Mock).mockImplementation((path: string) => vaultFiles.get(path) ?? null);
+    confirmation().onDefer();
+    await settle();
+
+    resumeCommand().run();
+    await jest.advanceTimersByTimeAsync(1000);
+
+    expect(confirmations).toHaveBeenCalledTimes(1);
+    expect(mockTranscribeFile.mock.calls.map(([file]) => file)).toEqual(files);
+    expect(app.vault.create).toHaveBeenCalledTimes(3);
+    expect(widget().markComplete).toHaveBeenCalledTimes(1);
+    expect(resumeCommand().available()).toBe(false);
+    resumeCommand().run();
+    await jest.advanceTimersByTimeAsync(1000);
+    expect(mockTranscribeFile).toHaveBeenCalledTimes(3);
+  });
+
+  it("Resume leaves waiting files alone once they are deleted, moved, or already skipped", async () => {
+    plugin.settings.workflowEngine.skippedFiles = {
+      "transcription::default::Inbox/3.mp3": { path: "Inbox/3.mp3", type: "transcription", skippedAt: "2026-10-01T00:00:00.000Z" },
+    };
+    const files = [1, 2, 3, 4].map((index) => audio(`Inbox/${index}.mp3`));
+    files.forEach((file) => emit("create", file));
+    await flushInbox();
+    // An earlier skip keeps its file out of the batch.
+    expect(confirmation().pendingFiles.map((pending) => pending.file)).toEqual([files[0], files[1], files[3]]);
+    const vaultFiles = new Map([[files[0].path, files[0]], [files[3].path, files[3]]]);
+    (app.vault.getAbstractFileByPath as jest.Mock).mockImplementation((path: string) => vaultFiles.get(path) ?? null);
+    confirmation().onDefer();
+    await settle();
+    vaultFiles.delete(files[0].path);
+
+    resumeCommand().run();
+    await jest.advanceTimersByTimeAsync(1000);
+
+    expect(mockTranscribeFile.mock.calls.map(([file]) => file)).toEqual([files[3]]);
+    expect(Object.keys(plugin.settings.workflowEngine.skippedFiles)).toEqual(["transcription::default::Inbox/3.mp3"]);
   });
 
   it("destroy cancels the pending debounce and ignores later vault events", async () => {

@@ -1,7 +1,12 @@
 # Plugin development
 
-Work from ~/gits/systemsculpt/plugin with Node 22.18 or newer. Node 22 is the
-local and CI baseline; version managers can select it from .nvmrc.
+The canonical checkout is ~/gits/systemsculpt/plugin, whose watcher deploys
+into a live vault. Do task work in a task-private ordinary clone on a branch
+from current origin/main; leave the canonical checkout and watcher alone and
+never install or run the watcher from a task clone.
+
+Use Node 22.18 or newer. Node 22 is the local and CI baseline; version managers
+can select it from .nvmrc.
 
 ## Setup
 
@@ -45,6 +50,18 @@ runs the focused mobile interaction suite before opening settings, Chat,
 Similar Notes, and portable Studio from the artifact with desktop-only
 adapters unavailable. It does not launch Android or iOS.
 
+## Production reachability
+
+`npm run check:knip`, also run by `check:ci`, runs `knip --production` from
+`src/main.ts`: it fails on unused production files, dependencies and exported
+values or types, and on unlisted or unresolved imports. Tests and development
+scripts are not entry points, so an export only a test imports is a finding.
+Delete it with its tests, or stop exporting it when its own file uses it. Keep a
+deliberate test seam (a pure function unit-tested directly, an error class or
+limit a test asserts) with a JSDoc `@internal` tag and a one-line reason, for
+example `/** @internal Unit-tested directly. */`. knip.jsonc exempts
+`src/views/chatview/**` exports until its refactor (#398) lands.
+
 ## Checkpoints
 
 ~~~bash
@@ -53,27 +70,42 @@ npm run check:ci
 npm run check:compat
 ~~~
 
-check:plugin adds TypeScript, mobile compatibility, sync, artifact, and release
-guards. test:chatview:critical runs the thin Bridge, session transport,
+check:plugin adds TypeScript for sources and tests (tsconfig.test.json, see
+testing/README.md), mobile compatibility, sync, artifact, and release guards. test:chatview:critical runs the thin Bridge, session transport,
 transcript persistence, approvals, queue and recovery controls, and
 restored-history UI with strict console, randomized order, open-handle
 detection, adversarial race cases, and a global coverage floor over the
 critical ChatView modules (the small identity and tool-execution modules stay
 at 100%). check:ci is the exact exhaustive PR contract and adds strict mobile
 interaction, unit, embeddings, and already-built integration suites.
-The unit CI remainder excludes focused mobile and ChatView paths already proven
-by earlier gates, keeping the exhaustive workflow broad without rerunning the
-same suites a third time.
+Source CI partitions are disjoint: the mobile CI subset excludes suites owned
+by the critical coverage gate, and the unit remainder excludes both focused
+sets and the embeddings service tree. Embeddings-named UI/tool suites outside
+that tree run as ordinary unit tests. Standalone mobile checks retain all their
+scenarios. Every Jest config shares the same transform and setup base.
 check:compat is the smaller Node and operating-system compatibility contract.
 It runs the same critical ChatView suites without repeating coverage collection
-already enforced by check:ci.
+or OS-independent ESLint already enforced by check:ci. lint:obsidian runs the
+repository's source rules and the community-directory scan in one type-aware
+pass over one TypeScript program; lint:community still runs the directory scan
+alone. Fast ESLint passes use separate local cache files. Full check:plugin/check:ci
+(and therefore pre-push and release) disable ESLint caches: a changed import's
+types can introduce lint errors in an otherwise unchanged caller.
 
-CI runs check:ci on Ubuntu/Node 22, then runs check:compat on Node 22.18,
-Node 24, macOS/Node 22, and Windows/Node 22. The merge queue runs the same
-workflow. A final `required` job fails unless every exhaustive and compatibility
-lane succeeds. All jobs are credential-free. The installed pre-push hook runs
-check:ci locally, while hosted CI and the repository rule requiring `required`
-remain authoritative.
+CI runs check:ci on Ubuntu/Node 22 and check:compat on Node 22.18,
+Node 24, macOS/Node 22, and Windows/Node 22. PRs, merge groups and manual dispatch
+always run all lanes. A main push reuses a successful run only when GitHub's
+completed job records prove the exact checked-out Git tree passed the exhaustive
+and all four compatibility lanes. Comparing the tree, not the PR head or merge
+message, preserves validation when another PR changes the base before merge.
+Missing proof, API errors and untested direct pushes fall back to full CI.
+The small main-push decision workflow remains; the duplicate full matrix does not.
+
+The final `required` job accepts either every lane succeeding or verified
+identical-tree reuse with both expensive jobs intentionally skipped. Release
+publication is independent: `release: published` rebuilds and attests exact tag
+bytes, and the local release command still requires check:ci. No provider
+credentials are used. The installed pre-push hook still runs check:ci locally.
 
 Each top-level hosted Jest gate records its replay seed and normalized child
 Jest argv in `.cache/ci-evidence/jest-seeds`. A failed lane uploads those
@@ -170,8 +202,16 @@ watcher afterwards. Staging and local-agent watchers always include the
 driver.
 
 Production-shaped builds are minified and retain class/function names for
-diagnostics. `npm run dev` keeps readable output and inline source maps for
-source-level debugging.
+diagnostics. esbuild bundles the CSS entry and minifies `styles.css` for these
+builds too, preserving import order and the entry's final cascade invariants.
+`npm run dev` keeps readable JavaScript/CSS output and inline JavaScript source
+maps for source-level debugging. CSS rebuilds publish atomically before vault
+sync; a failed development CSS build keeps the last complete stylesheet.
+
+Obsidian and its host-provided CodeMirror/Lezer modules are build-time
+`devDependencies` and remain external in the plugin bundle (some have runtime
+imports resolved by Obsidian). Bundled language packs stay in `dependencies`.
+The Obsidian API declarations are pinned to the tested version in the lockfile.
 
 Successful development syncs copy main.js, manifest.json, and styles.css. The
 synced manifest retains the release version used by server wire contracts and
@@ -246,6 +286,13 @@ untagged raw elements and only shrinks. Script mode runs a whole journey —
 clicks, typing, waits, assertions — in one invocation and reports per-step
 results. The CLI resolves the vault from systemsculpt-sync.config.json; use
 --vault or --plugin-dir to override.
+
+Script steps name driver actions (`waitFor`, `click`,
+`chat.waitForDevelopmentRun`, ...). Each area module in src/testing/driver
+(domActions, snapshotsAndWaits, chatToolLifecycle, chatDevelopmentState,
+diagnosticsExports) exports a record of its actions by name; actions.ts merges
+them into the one registry the driver dispatches from, and an unknown action's
+error lists every registered name.
 
 The guarded live ChatView lanes drive the visible UI, use synthetic
 `SS-DEV-TEST-*` ownership markers, stay in Ask Approval, and trash only the
@@ -335,10 +382,33 @@ Then install the exact production-built candidate in real Obsidian. Verify one s
 ## Native Codex discovery
 
 On-machine Codex launches the installed `codex app-server` directly and uses
-`~/.codex` for its existing native login and configuration. This is independent
-of an agent-specific `CODEX_HOME` inherited when Obsidian was opened. The plugin
-adds common Homebrew and user CLI directories to the desktop application's PATH.
-Codex continues to own credentials, permissions, tools, and thread history.
+`~/.codex` for its existing native login and configuration, or the inherited
+`CODEX_HOME` when set. Codex continues to own credentials, permissions, tools,
+and thread history.
+
+For both native agents, the plugin preserves the desktop application's PATH
+first, then adds Homebrew, user CLI folders, Volta, asdf, nvm, fnm, bun and pnpm
+install locations. Windows includes `%APPDATA%\\npm`. The older
+`~/.claude/local` installation is also found automatically. Version-manager
+home environment variables are honored. For nvm, the active `NVM_BIN` or
+current symlink (Windows: `NVM_SYMLINK`) wins when present; otherwise the newest
+installed version is used. fnm uses its active/default runtime or newest
+installed version. These runtime folders stay on the launched process's PATH
+so Node-based CLI scripts can find `node`, even when Obsidian starts from the
+Dock or Start menu. No shell startup scripts are loaded.
+
+On Windows, standard npm `.cmd` shims are recognized. Node scripts launch with
+the adjacent `node.exe`, or Node from that same PATH; npm shims for native
+executables (including newer Claude Code installs) launch their target directly.
+Detection and both native transports use this shell-free launch: paths and
+arguments are not interpreted by `cmd.exe`. Native executables continue to run
+directly. Customized batch wrappers (including added commands,
+environment setup or interpreter flags) are not reinterpreted; use a native
+executable wrapper or reinstall the standard npm CLI instead. Login checks keep
+the existing three-second detection deadline and use the native CLI's login.
+
+After installing an agent while Obsidian is open, use **Detect again** in the
+chat's backend menu. Detection remains cached for the Obsidian session.
 
 For a custom installation or provider wrapper, create the machine-local file
 `~/.config/systemsculpt/codex.json`, for example:
@@ -361,7 +431,8 @@ without a ChatGPT account.
 On-machine Claude Code launches the installed `claude` CLI in print mode with
 JSON streams on standard input and output, in the vault folder. It uses the
 same PATH additions as Codex. Claude Code continues to own its login, settings,
-permissions, tools, and session history; the plugin never reads `~/.claude`.
+permissions, tools, and session history; discovery only lists/stats install
+and session paths, never reads file contents under `~/.claude`.
 
 For a custom installation, create the machine-local file
 `~/.config/systemsculpt/claude.json`, for example:

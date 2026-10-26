@@ -16,6 +16,7 @@ import {
  * is not mounted inside a Studio text node.
  */
 
+/** @internal Tests assert against this value. */
 export const STUDIO_TEXT_NODE_EMPTY_LINE_CLASS = "ss-studio-text-node-empty-line";
 const STUDIO_TEXT_NODE_EDITOR_SELECTOR = ".ss-studio-text-node-live-editor";
 

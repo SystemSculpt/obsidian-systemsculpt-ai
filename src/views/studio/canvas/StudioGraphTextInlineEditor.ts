@@ -2,6 +2,7 @@ import type { StudioNodeInstance } from "../../../studio/types";
 import { createStudioAction } from "../StudioAction";
 import type { StudioNodeRunDisplayState } from "../StudioRunPresentationState";
 import type { StudioGraphNodeMutationOptions } from "./StudioGraphNodeCardTypes";
+import { isStudioCardLocked, lockStudioControl, watchStudioCardLock, type StudioCardLockState } from "./StudioCardLock";
 
 type StudioTextDisplayMode = "raw" | "rendered";
 
@@ -9,7 +10,7 @@ export type RenderStudioTextNodeInlineEditorOptions = {
   nodeEl: HTMLElement;
   node: StudioNodeInstance;
   nodeRunState: StudioNodeRunDisplayState;
-  interactionLocked: boolean;
+  interactionLocked: StudioCardLockState;
   onNodeConfigMutated: (node: StudioNodeInstance) => void;
   onNodeConfigValueChange?: (
     nodeId: string,
@@ -169,7 +170,7 @@ export function renderTextNodeInlineEditor(options: RenderStudioTextNodeInlineEd
   }
   const isNoteNode = node.kind === "studio.note";
   const outputLocked = node.kind === "studio.text_generation" && node.config.lockOutput === true;
-  const editorReadOnly = interactionLocked || outputLocked || isNoteNode;
+  const editorReadOnly = (): boolean => isStudioCardLocked(interactionLocked) || outputLocked || isNoteNode;
   let textDisplayMode = readTextDisplayMode(node);
   let previewRenderRequest = 0;
 
@@ -193,8 +194,8 @@ export function renderTextNodeInlineEditor(options: RenderStudioTextNodeInlineEd
     ariaLabel: "Show raw Markdown source",
     size: "small",
     selected: false,
-    disabled: interactionLocked || isNoteNode,
   });
+  lockStudioControl(interactionLocked, rawModeButtonEl, isNoteNode);
 
   const renderedModeButtonEl = createStudioAction(modeToggleEl, {
     className: "ss-studio-node-text-display-mode-button",
@@ -203,8 +204,8 @@ export function renderTextNodeInlineEditor(options: RenderStudioTextNodeInlineEd
     ariaLabel: "Show rendered Markdown preview",
     size: "small",
     selected: false,
-    disabled: interactionLocked || isNoteNode,
   });
+  lockStudioControl(interactionLocked, renderedModeButtonEl, isNoteNode);
 
   const rawSurfaceEl = editorWrapEl.createDiv({ cls: "ss-studio-node-text-editor-surface" });
   const textEditorEl = rawSurfaceEl.createEl("textarea", {
@@ -215,7 +216,6 @@ export function renderTextNodeInlineEditor(options: RenderStudioTextNodeInlineEd
     },
   });
   textEditorEl.value = readEditableNodeText(node, nodeRunState);
-  textEditorEl.readOnly = editorReadOnly;
   textEditorEl.disabled = false;
   if (!isNoteNode) {
     textEditorEl.addEventListener("input", (event) => {
@@ -302,14 +302,14 @@ export function renderTextNodeInlineEditor(options: RenderStudioTextNodeInlineEd
     renderedModeButtonEl.classList.toggle("is-selected", !showRaw);
     rawModeButtonEl.setAttr("aria-pressed", showRaw ? "true" : "false");
     renderedModeButtonEl.setAttr("aria-pressed", showRaw ? "false" : "true");
-    textEditorEl.readOnly = editorReadOnly || !showRaw;
+    textEditorEl.readOnly = editorReadOnly() || !showRaw;
     textEditorEl.disabled = false;
   };
 
   rawModeButtonEl.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
-    if (interactionLocked || isNoteNode || textDisplayMode === "raw") {
+    if (isStudioCardLocked(interactionLocked) || isNoteNode || textDisplayMode === "raw") {
       return;
     }
     textDisplayMode = "raw";
@@ -320,7 +320,7 @@ export function renderTextNodeInlineEditor(options: RenderStudioTextNodeInlineEd
   renderedModeButtonEl.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
-    if (interactionLocked || isNoteNode || textDisplayMode === "rendered") {
+    if (isStudioCardLocked(interactionLocked) || isNoteNode || textDisplayMode === "rendered") {
       return;
     }
     textDisplayMode = "rendered";
@@ -332,5 +332,8 @@ export function renderTextNodeInlineEditor(options: RenderStudioTextNodeInlineEd
     modeToggleEl.addClass("is-hidden");
   }
   applyDisplayMode();
+  watchStudioCardLock(interactionLocked, () => {
+    textEditorEl.readOnly = editorReadOnly() || textDisplayMode !== "raw";
+  }, textEditorEl);
   return true;
 }

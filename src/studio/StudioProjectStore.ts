@@ -1,4 +1,4 @@
-import { requireApiVersion, type App } from "obsidian";
+import type { App } from "obsidian";
 import type { StudioProjectV1, StudioPermissionPolicyV1 } from "./types";
 import { createEmptyStudioProject, createDefaultStudioPolicy, parseStudioPolicy, serializeStudioPolicy, serializeStudioProject, parseStudioProject } from "./schema";
 import { DEFAULT_STUDIO_PROJECTS_DIR, deriveStudioAssetsDir, deriveStudioPolicyPath, normalizeStudioProjectPath } from "./paths";
@@ -7,6 +7,7 @@ import type { StudioProjectReconciliation } from "./StudioProjectReconciliation"
 import { resolveStudioEntry } from "./StudioEntry";
 import { reconcileStudioSupportDocument } from "./persistence/StudioSupportReconciliation";
 import { StudioHybridClock } from "./document/StudioDocumentClock";
+import { studioDevice } from "./StudioDevice";
 
 /** Immutable media bytes stored under the project's support tree by content hash. */
 export type StudioAssetFile = { contentAddressedPath: string; bytes: Uint8Array };
@@ -27,33 +28,7 @@ export type StudioRunPublication = {
 const decoder = new TextDecoder();
 const encoder = new TextEncoder();
 const operations = new WeakMap<object, Map<string, Promise<unknown>>>();
-const devices = new WeakMap<object, string>();
 const clocks = new WeakMap<object, Map<string, StudioHybridClock>>();
-const DEVICE_KEY = "systemsculpt-studio-device";
-
-/**
- * A stable, device-local identity for this vault: it names the device's clock
- * file and breaks stamp ties. Vault-scoped local storage is not synchronized;
- * hosts without it use one identity per session.
- */
-function studioDeviceId(app: App): string {
-  const known = devices.get(app);
-  if (known) return known;
-  let device = "";
-  // Vault-scoped local storage exists from Obsidian 1.8.7.
-  try {
-    if (requireApiVersion("1.8.7")) {
-      const stored: unknown = app.loadLocalStorage(DEVICE_KEY);
-      if (typeof stored === "string" && /^[0-9a-f]{12}$/.test(stored)) device = stored;
-    }
-  } catch { /* Unreadable storage: a new identity. */ }
-  if (!device) {
-    device = Array.from({length: 12}, () => Math.floor(Math.random() * 16).toString(16)).join("");
-    try { if (requireApiVersion("1.8.7")) app.saveLocalStorage(DEVICE_KEY, device); } catch { /* A per-session identity still orders its own stamps. */ }
-  }
-  devices.set(app, device);
-  return device;
-}
 
 /** One authored file; media and execution records are stored separately. */
 export class StudioProjectStore {
@@ -66,7 +41,7 @@ export class StudioProjectStore {
     deviceId?: string;
     now?: () => number;
   } = {}) {
-    const device = options.deviceId || studioDeviceId(app), adapter = app.vault.adapter;
+    const device = options.deviceId || studioDevice(app).id, adapter = app.vault.adapter;
     let byDevice = clocks.get(adapter); if (!byDevice) {byDevice = new Map(); clocks.set(adapter, byDevice);}
     let clock = byDevice.get(device); if (!clock) {clock = new StudioHybridClock(device, options.now); byDevice.set(device, clock);}
     this.clock = clock;
@@ -115,6 +90,8 @@ export class StudioProjectStore {
     return {path, project: await this.loadProject(path)};
     });
   }
+  getReadOnlyReason(path: string): string | undefined { return this.document(path).getReadOnlyReason(); }
+  assertWritable(path: string): void { this.document(path).assertWritable(); }
   async loadProject(path: string, _options?: {forceReload?: boolean}): Promise<StudioProjectV1> { return (await this.document(path).refresh()).project; }
   /** The file bytes as published, merge record included, so a watcher's event for them is recognized. */
   async readProjectRawText(path: string): Promise<string | null> { try { return await this.document(path).source(); } catch { return null; } }
@@ -185,7 +162,11 @@ export class StudioProjectStore {
     if (!relative || relative.startsWith("/") || relative.includes("\\") || relative.split("/").some(part => !part || part === "." || part === "..")) throw new Error("Invalid Studio support path.");
     return `${deriveStudioAssetsDir(projectPath)}/${relative.replace(/^support\//, "")}`;
   }
-  private async checkIdentity(path: string, id: string): Promise<void> { if ((await this.loadProject(path)).projectId !== id) throw new Error("Studio project identity mismatch."); }
+  private async checkIdentity(path: string, id: string): Promise<void> {
+    this.assertWritable(path);
+    if ((await this.loadProject(path)).projectId !== id) throw new Error("Studio project identity mismatch.");
+    this.assertWritable(path);
+  }
   async putAsset(path: string, id: string, asset: StudioAssetFile): Promise<void> {
     await this.checkIdentity(path, id);
     if (!/^[0-9a-f]{2}\/[0-9a-f]{64}\.[a-z0-9]+$/.test(asset.contentAddressedPath)) throw new Error("Invalid content-addressed asset path.");

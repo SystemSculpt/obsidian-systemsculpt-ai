@@ -11,7 +11,10 @@ export type AgentRunMessage = { id: string; from: string; to: string; text: stri
 export type StudioAgentRun = {
   schema: 'studio.agent-run.v1'; id: string; projectId: string; projectPath: string; nodeId: string; title: string;
   workflow?: StudioWorkflow; workflowId?: string; assignmentId?: string; preparationPending?: boolean;
-  parentRunId?: string; owner: string; machine: string; status: AgentRunStatus; createdAt: string; updatedAt: string; finishedAt?: string;
+  parentRunId?: string; owner: string;
+  /** The executing machine: its hostname, shown to people, and its stable device ID, absent on records saved before machines had one. */
+  machine: string; machineId?: string;
+  status: AgentRunStatus; createdAt: string; updatedAt: string; finishedAt?: string;
   threadId: string; turnId: string; request: CodexRequest; result: string; error: string; currentActivity: string;
   activity: CodexActivity[]; messages: AgentRunMessage[]; persistenceError?: string;
 };
@@ -22,12 +25,19 @@ export type AgentRunMessageView = DeepReadonly<AgentRunMessage>;
 export type AgentRunPage = { records: StudioAgentRun[]; before: string | null; olderRemaining: number };
 
 export const isActiveAgentRun = (status: AgentRunStatus): boolean => ['queued', 'running', 'waiting'].includes(status);
+/** @internal Unit-tested directly. */
 export const agentRunFolder = (projectPath: string): string => `${deriveStudioAssetsDir(projectPath)}/agent-runs`;
-/** Records read when a board opens; older pages load on request. */
+/**
+ * Records read when a board opens; older pages load on request.
+ * @internal Tests assert against this value.
+ */
 export const AGENT_RUN_PAGE_SIZE = 50;
-/** On-disk retention mirrors the in-memory cap, plus an age limit. Live runs are never removed. */
+/**
+ * On-disk retention mirrors the in-memory cap, plus an age limit. Live runs are never removed.
+ * @internal Tests assert against this value.
+ */
 export const AGENT_RUN_RETAINED_RECORDS = 1000;
-export const AGENT_RUN_RETAINED_DAYS = 90;
+const AGENT_RUN_RETAINED_DAYS = 90;
 /** Background retention yields to the host after this many records. */
 const RECORD_BATCH = 50;
 const INDEX_WRITE_DELAY_MS = 1000;
@@ -82,7 +92,7 @@ function parseRunRecord(raw: string, projectPath: string, projectId: string): St
   const record: unknown = JSON.parse(raw);
   if (!isRecord(record) || record.schema !== 'studio.agent-run.v1' || record.projectId !== projectId || record.projectPath !== projectPath || !/^agent_[0-9]+_[a-f0-9-]+$/.test(String(record.id)) || !isRecord(record.request) || typeof record.request.prompt !== 'string' || typeof record.request.workingDirectory !== 'string' || !Array.isArray(record.activity) || !Array.isArray(record.messages) || !['queued','running','waiting','completed','failed','stopped','interrupted'].includes(String(record.status))) throw new Error('A saved run record is invalid; it was left unchanged.');
   const stringFields = ['id','projectId','projectPath','nodeId','title','owner','machine','createdAt','updatedAt','threadId','turnId','result','error','currentActivity'];
-  if (stringFields.some(key => typeof record[key] !== 'string') || record.activity.length > 40 || record.messages.length > 100
+  if (stringFields.some(key => typeof record[key] !== 'string') || (record.machineId !== undefined && typeof record.machineId !== 'string') || record.activity.length > 40 || record.messages.length > 100
     || record.activity.some(item => !isRecord(item) || ['id','kind','title','detail','status','at'].some(key => typeof item[key] !== 'string') || !['command','file','tool','plan','message'].includes(String(item.kind)))
     || record.messages.some(item => !isRecord(item) || ['id','from','to','text','at','status'].some(key => typeof item[key] !== 'string') || !['pending','delivered','failed'].includes(String(item.status)))) throw new Error('A saved run has invalid presentation fields; it was left unchanged.');
   if ((record.workflow !== undefined && !validStudioWorkflow(record.workflow)) || ['workflowId','assignmentId'].some(key => record[key] !== undefined && typeof record[key] !== 'string')) throw new Error('Saved workflow state is invalid; it was left unchanged.');
@@ -94,6 +104,8 @@ export class StudioAgentRunStore {
   private readonly writes = new Map<string, Promise<void>>();
   private readonly indexes = new Map<string, Promise<RunIndex>>();
   private readonly retention = new Map<string, Promise<number>>();
+  /** Run folders this session created or found, so each save doesn't re-check every folder level. */
+  private readonly folders = new Set<string>();
   private closed = false;
   constructor(private readonly app: App) {}
 
@@ -125,20 +137,33 @@ export class StudioAgentRunStore {
     for (const record of records) this.noteRecord(projectPath, index, record);
     return { records, before: page[0] ?? null, olderRemaining: older.length - page.length };
   }
+  /** One saved record as it is on disk now, or null when it is gone or unreadable. */
+  async read(projectPath: string, projectId: string, id: string): Promise<StudioAgentRun | null> {
+    const adapter = this.app.vault.adapter, path = `${agentRunFolder(projectPath)}/${id}.json`;
+    try {
+      const stat = await adapter.stat(path);
+      if (!stat || stat.size > 2_000_000) return null;
+      const record = parseRunRecord(await adapter.read(path), projectPath, projectId);
+      this.noteRecord(projectPath, await this.index(projectPath), record);
+      return record;
+    } catch { return null; }
+  }
   write(record: StudioAgentRun): Promise<void> {
     const snapshot = JSON.stringify(record);
     if (new TextEncoder().encode(snapshot).byteLength > 2_000_000) return Promise.reject(new Error('The run presentation record exceeds 2 MB.'));
     const path = `${agentRunFolder(record.projectPath)}/${record.id}.json`;
     const previous = this.writes.get(path) || Promise.resolve();
     const pending = previous.catch(() => {}).then(async () => {
-      const adapter = this.app.vault.adapter, parts = agentRunFolder(record.projectPath).split('/');
-      for (let index = 1; index <= parts.length; index++) {
-        const folder = parts.slice(0, index).join('/');
-        if (!await adapter.exists(folder)) {
-          try { await adapter.mkdir(folder); } catch (error) { if (!await adapter.exists(folder)) throw error; }
-        }
+      const adapter = this.app.vault.adapter, folder = agentRunFolder(record.projectPath);
+      if (this.folders.has(folder)) {
+        // The folder may have been removed since; recreate it once.
+        try { await adapter.write(path, snapshot); } catch { this.folders.delete(folder); }
       }
-      await adapter.write(path, snapshot);
+      if (!this.folders.has(folder)) {
+        await this.ensureFolder(folder);
+        await adapter.write(path, snapshot);
+        this.folders.add(folder);
+      }
       this.noteRecord(record.projectPath, await this.index(record.projectPath), record);
     });
     this.track(path, pending);
@@ -168,6 +193,15 @@ export class StudioAgentRunStore {
   /** Stop retention early and save everything pending. */
   async close(): Promise<void> { this.closed = true; await this.flush(); }
 
+  private async ensureFolder(folder: string): Promise<void> {
+    const adapter = this.app.vault.adapter, parts = folder.split('/');
+    for (let index = 1; index <= parts.length; index++) {
+      const level = parts.slice(0, index).join('/');
+      if (!await adapter.exists(level)) {
+        try { await adapter.mkdir(level); } catch (error) { if (!await adapter.exists(level)) throw error; }
+      }
+    }
+  }
   private track(path: string, pending: Promise<void>): void {
     this.writes.set(path, pending);
     void pending.finally(() => { if (this.writes.get(path) === pending) this.writes.delete(path); }).catch(() => {});

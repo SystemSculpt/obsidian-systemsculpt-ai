@@ -55,7 +55,6 @@
 .ss-studio-group-tag .ss-studio-group-tag-button,
 .ss-studio-group-tag .ss-studio-group-tag-input,
 .ss-studio-group-tag .ss-studio-group-tag-action,
-.ss-studio-group-tag .ss-studio-group-align-button,
 .ss-studio-group-tag .ss-studio-group-color-button {
   display: inline-flex;
   align-items: center;
@@ -74,7 +73,6 @@
 
 .ss-studio-group-tag .ss-studio-group-tag-button:hover,
 .ss-studio-group-tag .ss-studio-group-tag-action:hover,
-.ss-studio-group-tag .ss-studio-group-align-button:hover,
 .ss-studio-group-tag .ss-studio-group-color-button:hover {
   background-color: var(--ss-surface-2);
   color: var(--ss-ink);

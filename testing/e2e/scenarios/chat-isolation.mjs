@@ -42,10 +42,11 @@ export default [
     action: "waitFor",
     params: { target: "chat.composer.stop", state: "hidden", timeoutMs: 8000 },
   },
+  { label: "B opens the mode menu", action: "click", params: { target: "chat.run.mode" } },
   {
-    label: "B accepts a tool-access change",
-    action: "select",
-    params: { target: "chat.composer.approval-mode", value: "full-access" },
+    label: "B accepts a mode change",
+    action: "click",
+    params: { target: "css:.menu [data-menu-item='mode.full-access']" },
   },
   {
     label: "B has no error banner",

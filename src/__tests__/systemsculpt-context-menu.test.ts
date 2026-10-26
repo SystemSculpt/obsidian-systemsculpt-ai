@@ -14,12 +14,6 @@ jest.mock("obsidian", () => {
   return { ...actual, Notice: jest.fn() };
 });
 
-jest.mock("../views/chatview/AgentChatView", () => ({
-  AgentChatView: jest.fn().mockImplementation(() => ({
-    addFileToContext: jest.fn(),
-  })),
-}));
-
 jest.mock("../utils/clipboard", () => ({
   tryCopyImageFileToClipboard: jest.fn(),
 }));
@@ -273,6 +267,8 @@ const bootstrap = (
     expect(activateSystemSculptStudioView).toHaveBeenCalledWith(
       "Projects/Client/New Studio Project.systemsculpt",
     );
+    // The opened project is the result.
+    expect(Notice).not.toHaveBeenCalled();
   });
 
   it("supports a root-folder Studio action through the single-file menu event", async () => {
@@ -438,6 +434,8 @@ const bootstrap = (
         extractionPath: "site/extracted.md",
       })
     );
+    // The panel and the opened note show the result; no toast on top.
+    expect(Notice).not.toHaveBeenCalled();
   });
 
   it("marks the progress panel as failed when conversion errors", async () => {
@@ -470,6 +468,24 @@ const bootstrap = (
       },
       error,
     );
+  });
+
+  it.each([
+    ["shows the failure only in the open progress panel", true, 0],
+    ["falls back to one notice when the progress panel was hidden", false, 1],
+  ])("%s", async (_label, shownInPanel, notices) => {
+    jest.spyOn(console, "error").mockImplementation(() => undefined);
+    const { handlers, documentProcessor, progressPanel } = bootstrap();
+    (progressPanel.markFailure as jest.Mock).mockReturnValueOnce(shownInPanel);
+    (documentProcessor.processDocument as jest.Mock).mockRejectedValueOnce(new Error("server unavailable"));
+    const menu = createMenuStub();
+    emitFileMenu(handlers, menu, createFile("pdf"), "file-explorer");
+
+    await menu.recordedItems.find((item) => item.title === "Convert to Markdown")!.onClick?.();
+
+    expect(progressPanel.markFailure).toHaveBeenCalledTimes(1);
+    expect(Notice).toHaveBeenCalledTimes(notices);
+    if (notices) expect(Notice).toHaveBeenCalledWith("Document conversion failed: server unavailable", 6000);
   });
 
   it("does not add entries for unsupported files", () => {
@@ -510,6 +526,7 @@ const bootstrap = (
       expect.any(Object),
       expect.objectContaining({ path: file.path })
     );
+    expect(Notice).not.toHaveBeenCalled();
   });
 
   it("shows failure notice when copy image fails", async () => {

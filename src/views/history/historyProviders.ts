@@ -3,6 +3,7 @@ import { createChatHistoryProvider } from "./chatHistoryProvider";
 import { createStudioSessionHistoryProvider } from "./studioSessionHistoryProvider";
 import type { SystemSculptHistoryEntry, SystemSculptHistoryProvider } from "./types";
 
+/** @internal Unit-tested directly. */
 export function createSystemSculptHistoryProviders(
   plugin: SystemSculptPlugin,
   includeStudioSessions: boolean = true
@@ -14,6 +15,7 @@ export function createSystemSculptHistoryProviders(
   return providers;
 }
 
+/** @internal Unit-tested directly. */
 export function sortHistoryEntriesNewestFirst(entries: SystemSculptHistoryEntry[]): SystemSculptHistoryEntry[] {
   return [...entries].sort((a, b) => {
     if (b.timestampMs !== a.timestampMs) {

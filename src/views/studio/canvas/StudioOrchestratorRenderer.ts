@@ -1,10 +1,11 @@
 import { Notice } from 'obsidian';
+import { StudioPresentation } from '../StudioPresentation';
 import type { StudioAgentRuns } from '../../../services/codex/StudioAgentRuns';
 import { isActiveAgentRun } from '../../../services/codex/StudioAgentRunStore';
 import { workflowOpen } from '../../../services/codex/StudioWorkflow';
 import { hasHostCapability } from '../../../platform/hostCapabilities';
 import { createStudioAction } from '../StudioAction';
-import { StudioRunDetailModal } from './StudioRunDetailModal';
+import { StudioRunDetailModal, markStoppedHint } from './StudioRunDetailModal';
 import { activityPhaseFromWorkflowStatus, activityPhaseFromWorkflowStepStatus } from '../activity/StudioActivity';
 const drafts = new Map<string, string>();
 const report = (error: unknown): void => { new Notice(error instanceof Error ? error.message : 'Workflow action failed.'); };
@@ -13,11 +14,13 @@ const report = (error: unknown): void => { new Notice(error instanceof Error ? e
 export function renderStudioOrchestrator(root: HTMLElement, options: {
   runs: StudioAgentRuns; projectId: string; projectPath: string; centerId: string;
   execution: (root: HTMLElement) => () => void;
+  presentation?: StudioPresentation;
 }): () => void {
   const { runs, projectId, projectPath, centerId } = options;
   const region = root.createEl('section', { cls: 'ss-studio-orchestrator', attr: { 'aria-label': 'Studio workflows' } });
   const key = `${projectId}:${centerId}`;
   let disposeExecution = () => {};
+  let refreshStart = () => {};
   if (hasHostCapability('local-cli', region)) {
     region.createEl('h3', { text: 'What do you want to accomplish?' });
     const prompt = region.createEl('textarea', { cls: 'ss-studio-workflow-prompt', attr: { 'data-testid': 'studio.workflow.prompt', 'aria-label': 'Workflow objective', placeholder: 'Find and test a new benchmark. Prepare a local branch for my review…', rows: '3', maxlength: '16000' } });
@@ -25,18 +28,29 @@ export function renderStudioOrchestrator(root: HTMLElement, options: {
     prompt.addEventListener('input', () => { drafts.set(key, prompt.value); while (drafts.size > 50) drafts.delete(drafts.keys().next().value!); });
     disposeExecution = options.execution(region);
     let starting = false;
+    let submittedObjective: string | null = null;
     const start = createStudioAction(region, { label: 'Start workflow', icon: 'play', testId: 'studio.workflow.start', className: 'ss-studio-workflow-start', onSelect: () => {
       if (starting || !prompt.value.trim()) return;
       const objective = prompt.value; starting = true; start.disabled = true;
-      void runs.startWorkflow(projectPath, centerId, objective).then(() => { if (prompt.value === objective) { prompt.value = ''; drafts.delete(key); } update(); }).catch(report).finally(() => { starting = false; start.disabled = false; });
+      void runs.startWorkflow(projectPath, centerId, objective).then(() => {
+        submittedObjective = objective;
+        if (prompt.value === objective) drafts.delete(key);
+        update();
+      }).catch(report).finally(() => { starting = false; update(); });
     } });
+    refreshStart = () => {
+      if (submittedObjective !== null && prompt.value === submittedObjective) prompt.value = '';
+      submittedObjective = null;
+      start.disabled = starting;
+    };
     prompt.addEventListener('keydown', event => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); event.stopPropagation(); start.click(); } });
   }
   const list = region.createDiv({ cls: 'ss-studio-workflow-list' });
   let limit = 8;
   const more = createStudioAction(region, { label: 'Show more workflows', testId: 'studio.workflow.more', onSelect: () => { limit += 8; update(); } });
   const cards = new Map<string, { root: HTMLElement; update: () => void }>();
-  const update = (): void => {
+  const paint = (): void => {
+    refreshStart();
     const all = runs.list(projectId), matching = all.filter(run => run.nodeId === centerId && run.workflow);
     const active = matching.filter(run => workflowOpen(run.workflow) || isActiveAgentRun(run.status));
     const workflows = [...active, ...matching.filter(run => !active.includes(run))].slice(0, limit);
@@ -54,22 +68,31 @@ export function renderStudioOrchestrator(root: HTMLElement, options: {
         const toolbar = card.createDiv({ cls: 'ss-studio-run-actions' });
         createStudioAction(toolbar, { label: 'Open orchestrator', testId: 'studio.workflow.open', onSelect: () => new StudioRunDetailModal(runs, run.id).open() });
         const stop = createStudioAction(toolbar, { label: 'Stop workflow', testId: 'studio.workflow.stop', onSelect: () => { runs.stop(run.id); update(); } });
+        const markStopped = createStudioAction(toolbar, { label: 'Mark stopped', testId: 'studio.workflow.mark-stopped', title: markStoppedHint(run.machine), onSelect: () => { void runs.markStopped(run.id).catch(report); } });
         const review = createStudioAction(toolbar, { label: 'Review request', testId: 'studio.workflow.review', onSelect: () => { void runs.review(run.id).catch(report); } });
         const body = card.createDiv({ cls: 'ss-studio-workflow-plan' });
         const followup = card.createEl('textarea', { cls: 'ss-studio-workflow-followup', attr: { 'data-testid': 'studio.workflow.followup', 'aria-label': 'Steer this workflow', placeholder: 'Add context or change direction…', rows: '2', maxlength: '16000' } });
         let sending = false;
+        let submittedMessage: string | null = null;
         const send = createStudioAction(card, { label: 'Send follow-up', testId: 'studio.workflow.send', onSelect: () => {
           if (sending || !followup.value.trim()) return;
           const message = followup.value; sending = true; send.disabled = true;
-          void runs.send(run.id, message).then(receipt => { if (receipt.status === 'failed') throw new Error(receipt.error); if (followup.value === message) followup.value = ''; }).catch(report).finally(() => { sending = false; send.disabled = !runs.canControl(run.id); });
+          void runs.send(run.id, message).then(receipt => {
+            if (receipt.status === 'failed') throw new Error(receipt.error);
+            submittedMessage = message;
+            update();
+          }).catch(report).finally(() => { sending = false; update(); });
         } });
         let signature = '';
         cards.set(run.id, { root: card, update: () => {
           const current = runs.get(run.id); if (!current?.workflow) return;
+          if (submittedMessage !== null && followup.value === submittedMessage) followup.value = '';
+          submittedMessage = null;
           const workflow = current.workflow, children = runs.list(projectId).filter(child => child.workflowId === run.id);
           const label = { active: 'Working', waiting: 'Waiting for results', needs_input: 'Needs your input', completed: 'Completed', stopped: 'Stopped' }[workflow.status];
-          status.setText(children.some(child => runs.hasRequest(child.id)) ? 'A child needs your input' : label); card.dataset.status = workflow.status; card.dataset.activity = activityPhaseFromWorkflowStatus(workflow.status); activity.setText(current.persistenceError || current.error || current.currentActivity);
-          stop.hidden = !runs.canControl(run.id) || (!workflowOpen(workflow) && !isActiveAgentRun(current.status));
+          const stale = runs.isStale(run.id);
+          status.setText(children.some(child => runs.hasRequest(child.id)) ? 'A child needs your input' : stale ? 'Stale' : label); card.dataset.status = workflow.status; card.dataset.activity = stale ? 'stopped' : activityPhaseFromWorkflowStatus(workflow.status); activity.setText(current.persistenceError || current.error || current.currentActivity);
+          stop.hidden = !runs.canControl(run.id) || (!workflowOpen(workflow) && !isActiveAgentRun(current.status)); markStopped.hidden = !runs.canMarkStopped(run.id);
           review.hidden = !runs.hasRequest(run.id); followup.disabled = !runs.canControl(run.id); send.disabled = sending || followup.disabled;
           const next = JSON.stringify([workflow, children.map(child => [child.id, child.status, child.currentActivity])]);
           if (signature === next) return; signature = next; body.empty();
@@ -90,7 +113,9 @@ export function renderStudioOrchestrator(root: HTMLElement, options: {
       if (list.children[index] !== card) list.insertBefore(card, list.children[index] || null);
     }
   };
-  update(); const unsubscribe = runs.subscribe(id => { if (id === projectId) update(); });
+  const observation = (options.presentation ?? new StudioPresentation()).watch(paint,
+    refresh => runs.subscribe(id => { if (id === projectId) refresh(); }));
+  function update(): void { observation.refresh(); }
   void runs.load(projectPath, projectId).then(update).catch(report);
-  return () => { disposeExecution(); unsubscribe(); };
+  return () => { disposeExecution(); observation.dispose(); };
 }

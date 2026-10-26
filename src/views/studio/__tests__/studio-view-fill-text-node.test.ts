@@ -57,7 +57,6 @@ function createHarness(nodes: StudioNodeInstance[] = []) {
       notifyNodePositionsChanged: jest.fn(),
     },
     computeDefaultNodePosition: jest.fn(() => ({ x: 500, y: 400 })),
-    recomputeEntryNodes: jest.fn(),
     setError: jest.fn(),
     render: jest.fn(),
   };

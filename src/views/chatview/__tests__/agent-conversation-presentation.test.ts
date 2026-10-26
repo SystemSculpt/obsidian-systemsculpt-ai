@@ -1,3 +1,4 @@
+import type { AgentConversationSnapshot, AgentToolPart } from "../../../chat/ChatConversation";
 import {
   presentAgentConversation,
   presentAgentError,
@@ -135,6 +136,7 @@ describe("AgentConversationPresentation product-copy boundary", () => {
     }, false)).toEqual({
       heading: "Out of credits",
       message: "You have no credits left. Add credits to continue using Chat.",
+      action: "add-credits",
     });
   });
 
@@ -146,6 +148,21 @@ describe("AgentConversationPresentation product-copy boundary", () => {
       heading: "Could not finish",
       message: "SystemSculpt could not complete the response.",
     });
+  });
+
+  it.each(["license_rejected", "license_required"])("offers recovery for %s without changing failure copy or report ids", (code) => {
+    for (const showPlanOffer of [false, true]) {
+      expect(presentAgentError({
+        code,
+        message: "Private license service detail.",
+        reportId: "report_0123456789abcdef0123456789abcdef",
+      }, false, showPlanOffer)).toEqual({
+        heading: "Could not finish",
+        message: "SystemSculpt could not complete the response.",
+        action: "see-plans",
+        reportId: "report_0123456789abcdef0123456789abcdef",
+      });
+    }
   });
 
   it("shows actionable first-party copy for a safety filter", () => {
@@ -173,8 +190,19 @@ describe("AgentConversationPresentation product-copy boundary", () => {
     expect(presentAgentError({
       code,
       message: "Unsafe remote billing detail.",
-    }, false)).toEqual({ heading, message });
+    }, false)).toEqual({ heading, message, action: "add-credits" });
   });
+
+  it.each(["out_of_credits", "insufficient_credits", "payment_required"])(
+    "offers monthly before credit packs for a non-entitled account with %s",
+    (code) => {
+      expect(presentAgentError({ code, message: "Remote billing detail." }, false, true)).toEqual({
+        heading: "Out of credits",
+        message: "Monthly is $9 and includes 10,000 credits every month. You can also add a credit pack.",
+        action: "see-plans",
+      });
+    },
+  );
 
   it("uses the same final copy filter for global banners and tool failures", () => {
     expect(presentAgentErrorMessage(
@@ -218,7 +246,7 @@ describe("AgentConversationPresentation product-copy boundary", () => {
       parts: [visibleText],
     }, true);
 
-    expect(presentation.activityStatus).toBe("Thinking");
+    expect(presentation.activityStatus).toBe("Writing");
     expect(presentation.visibleParts).toEqual([visibleText]);
   });
 
@@ -256,6 +284,57 @@ describe("AgentConversationPresentation product-copy boundary", () => {
     });
   });
 
+  it.each([false, true])("keeps idle snapshots idle despite stale activity and outer pending %s", (pending) => {
+    const idle: AgentConversationSnapshot = {
+      runId: null,
+      turnId: null,
+      status: "idle",
+      phase: "retrying",
+      statusLabel: "Connection interrupted",
+      messages: [],
+      parts: [{
+        id: "stale-text", kind: "text", messageId: "assistant", order: 0,
+        state: "streaming", markdown: "Partial answer",
+      }, {
+        id: "stale-approval", kind: "tool", messageId: "assistant", order: 1,
+        callId: "call", name: "write", input: {}, location: "vault",
+        state: "approval-required", approvalId: "approval",
+      }],
+    };
+    expect(presentAgentConversation(idle, pending)).toMatchObject({
+      phase: "idle", busy: false, composerRunning: false, progressActive: false,
+      activityStatus: "Idle", visibleParts: idle.parts,
+    });
+    expect(presentAgentConversation({ ...idle, parts: [] }, pending)).toMatchObject({
+      phase: "idle", busy: false, composerRunning: false, progressActive: false,
+    });
+  });
+
+  it.each(["running", "waiting"] as const)("pauses progress without ending a %s run during recovery", (status) => {
+    const recovering: AgentConversationSnapshot = {
+      runId: "run", turnId: "turn", status, phase: "retrying", messages: [],
+      parts: [{
+        id: "tool", kind: "tool", messageId: "assistant", order: 0,
+        callId: "call", name: "web_search", location: "server",
+        input: { query: "latest" }, state: "running",
+      }],
+    };
+    for (const statusLabel of ["Reconnecting", "Recovering", "Continuing", "Connection interrupted"]) {
+      for (const pending of [false, true]) {
+        const presentation = presentAgentConversation({ ...recovering, statusLabel }, pending);
+        expect(presentation).toMatchObject({
+          phase: "recovering", busy: true, composerRunning: true, progressActive: false,
+          activityStatus: statusLabel === "Connection interrupted" ? "Reconnecting" : "Continuing",
+        });
+        expect(presentation.visibleParts).toBe(recovering.parts);
+      }
+    }
+    expect(presentAgentConversation({ ...recovering, phase: "working" }, false)).toMatchObject({
+      phase: "acting", busy: true, composerRunning: true, progressActive: true,
+      activityStatus: "Searching",
+    });
+  });
+
   it("presents a sustained connection interruption above stale tool activity", () => {
     const staleSearch = {
       id: "tool-1",
@@ -290,7 +369,117 @@ describe("AgentConversationPresentation product-copy boundary", () => {
     });
   });
 
-  it("never turns a server-owned approval-shaped part into vault approval UX", () => {
+  it.each(["claude", "codex", "hosted"] as const)("waits for %s approval without marking the turn idle or losing terminal truth", (backend) => {
+    const snapshot = {
+      runId: "run-approval", turnId: "turn-approval", status: "waiting" as const,
+      phase: "waiting" as const, waitingReason: "approval" as const, messages: [],
+      parts: [{ id: "tool", kind: "tool" as const, messageId: "assistant", callId: "call", name: "Edit", input: {}, order: 0,
+        location: backend === "hosted" ? "vault" as const : "server" as const,
+        state: "approval-required" as const, approvalId: "approval",
+        ...(backend === "hosted" ? {} : { native: { agent: backend, workingDirectory: "/vault" } }),
+      }],
+    };
+    expect(presentAgentConversation(snapshot, true)).toMatchObject({
+      phase: "awaiting-approval", activityStatus: "Waiting for your approval", busy: true, composerRunning: true,
+    });
+    for (const status of ["completed", "cancelled", "failed"] as const) {
+      expect(presentAgentConversation({ ...snapshot, status }, true)).toMatchObject({ phase: status, busy: false, composerRunning: false });
+    }
+    expect(presentAgentConversation({ ...snapshot, status: "running", parts: [{ ...snapshot.parts[0], state: "approved" }] }, true).phase).toBe("acting");
+  });
+
+  it.each([
+    { name: "Bash", native: { agent: "claude" as const, workingDirectory: "/vault" }, expected: "Waiting for your approval" },
+    { name: "AskUserQuestion", native: { agent: "claude" as const, workingDirectory: "/vault" }, expected: "Waiting for your answer" },
+    { name: "requestUserInput", native: { agent: "codex" as const, workingDirectory: "/vault", requestMethod: "item/tool/requestUserInput" }, expected: "Waiting for your answer" },
+  ])("projects native $name as a user wait even at the server location", ({ name, native, expected }) => {
+    const presentation = presentAgentConversation({
+      runId: "run-native-wait",
+      turnId: "user-native-wait",
+      status: "waiting",
+      phase: "waiting",
+      elapsedMs: 45_000,
+      messages: [],
+      parts: [{
+        id: "native-wait",
+        kind: "tool",
+        messageId: "assistant-native-wait",
+        callId: "call-native-wait",
+        name,
+        native,
+        location: "server",
+        input: {},
+        state: "approval-required",
+        approvalId: "approval-native-wait",
+        order: 0,
+      }],
+    }, true);
+
+    expect(presentation).toMatchObject({
+      phase: "awaiting-approval",
+      busy: true,
+      composerRunning: true,
+      activityStatus: expected,
+    });
+  });
+
+  it.each(["hosted", "native"] as const)("keeps a pending %s approval actionable through a connection interruption", (backend) => {
+    const pending: AgentToolPart = {
+      id: "pending-disconnected",
+      kind: "tool",
+      messageId: "assistant-disconnected",
+      callId: "call-disconnected",
+      name: backend === "native" ? "Bash" : "write",
+      location: backend === "native" ? "server" : "vault",
+      ...(backend === "native" ? { native: { agent: "claude" as const, workingDirectory: "/vault" } } : {}),
+      input: {},
+      state: "approval-required",
+      approvalId: "approval-disconnected",
+      order: 0,
+    };
+    const disconnected: AgentConversationSnapshot = {
+      runId: "run-disconnected",
+      turnId: "user-disconnected",
+      status: "running",
+      phase: "retrying",
+      statusLabel: "Connection interrupted",
+      messages: [],
+      parts: [pending],
+    };
+
+    expect(presentAgentConversation(disconnected, true)).toMatchObject({
+      phase: "awaiting-approval",
+      busy: true,
+      composerRunning: true,
+      activityStatus: "Waiting for your approval",
+    });
+    expect(presentAgentConversation({
+      ...disconnected,
+      parts: [{ ...pending, state: "approved" }],
+    }, true)).toMatchObject({
+      phase: "recovering",
+      busy: true,
+      activityStatus: "Reconnecting",
+    });
+    expect(presentAgentConversation({ ...disconnected, status: "failed" }, true)).toMatchObject({
+      phase: "failed",
+      busy: false,
+      composerRunning: false,
+      activityStatus: "Failed",
+    });
+  });
+
+  it("uses a connection-specific label before any response arrives", () => {
+    expect(presentAgentConversation(null, true)).toMatchObject({
+      phase: "submitting",
+      busy: true,
+      composerRunning: true,
+      activityStatus: "Connecting…",
+      visibleParts: [],
+    });
+  });
+
+  it.each(["write", "AskUserQuestion", "requestUserInput"])("never turns a server-owned %s approval-shaped part into vault approval UX", (name) => {
     const presentation = presentAgentConversation({
       runId: "run-server-approval",
       turnId: "user-server-approval",
@@ -306,7 +495,7 @@ describe("AgentConversationPresentation product-copy boundary", () => {
         kind: "tool",
         messageId: "assistant-server-approval",
         callId: "call-server-approval",
-        name: "write",
+        name,
         location: "server",
         input: {},
         state: "approval-required",

@@ -20,7 +20,7 @@ import {
   AUDIO_PROCESSOR_OUTPUT_PRESETS,
   AUDIO_PROCESSOR_PRESET_ARTIFACT_MANIFEST_VERSION,
 } from "./types";
-import { retryAfterHeaderMs } from "../../services/managed/ManagedJobObservation";
+import { parseRetryAfterMs } from "../../utils/retryAfter";
 import { CREDITS_REQUIRED_MESSAGE } from "../../utils/errors";
 
 type JsonRecord = Record<string, unknown>;
@@ -50,7 +50,7 @@ export interface AudioProcessorUploadedPart {
   etag: string;
 }
 
-export interface AudioProcessorRemoteUploadPart {
+interface AudioProcessorRemoteUploadPart {
   part_number: number;
   etag: string;
   size_bytes: number;
@@ -169,7 +169,6 @@ export class AudioProcessorApiClient {
       bodyEncoding: "raw",
       responseEncoding: "text",
       transport: "requestUrl",
-      preserveResponseHeaders: true,
       allowTransportFallback: false,
       signal,
     });
@@ -178,6 +177,7 @@ export class AudioProcessorApiClient {
         `Audio upload failed (${response.status}).`,
         response.status,
         "upload_failed",
+        parseRetryAfterMs(response.headers.get("retry-after")),
       );
     }
     const etag = response.headers.get("etag")?.trim();
@@ -243,7 +243,7 @@ export class AudioProcessorApiClient {
       signal,
     );
     const job = parseJobEnvelope(payload, "Audio job response");
-    const pollAfterMs = retryAfterHeaderMs(response.headers.get("retry-after"));
+    const pollAfterMs = parseRetryAfterMs(response.headers.get("retry-after"));
     return pollAfterMs === undefined ? job : { ...job, pollAfterMs };
   }
 
@@ -298,7 +298,6 @@ export class AudioProcessorApiClient {
       bodyEncoding: "raw",
       responseEncoding: "text",
       transport: "requestUrl",
-      preserveResponseHeaders: true,
       allowTransportFallback: false,
       signal,
       timeoutMs: NOTE_DOWNLOAD_TIMEOUT_MS,
@@ -366,17 +365,18 @@ export class AudioProcessorApiClient {
       body,
       signal,
       licenseKey: licenseKey || undefined,
-      preserveResponseHeaders: true,
       allowTransportFallback: method === "GET",
     });
     const text = await response.text();
-    if (text.length > MAX_JSON_RESPONSE_CHARS) malformed("The audio service response was too large.");
+    if (response.ok && text.length > MAX_JSON_RESPONSE_CHARS) malformed("The audio service response was too large.");
 
     let payload: unknown = null;
     try {
-      payload = text ? JSON.parse(text) : null;
+      if (text && text.length <= MAX_JSON_RESPONSE_CHARS) payload = JSON.parse(text);
     } catch {
-      malformed("The audio service returned malformed JSON.");
+      // Gateways can return HTML or text for HTTP failures. Preserve their
+      // status and Retry-After instead of treating them as malformed success.
+      if (response.ok) malformed("The audio service returned malformed JSON.");
     }
     if (!response.ok) {
       const root = isRecord(payload) ? payload : {};
@@ -396,7 +396,7 @@ export class AudioProcessorApiClient {
         message,
         response.status,
         code,
-        retryAfterHeaderMs(response.headers.get("retry-after")),
+        parseRetryAfterMs(response.headers.get("retry-after")),
       );
     }
     return { payload, response };

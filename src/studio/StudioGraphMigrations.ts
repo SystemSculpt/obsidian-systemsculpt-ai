@@ -11,7 +11,7 @@ const LEGACY_TEXT_NODE_MODEL_MIGRATION_ID = "studio.pi-text-model-selector.v1";
 const IMAGE_NODE_LEVERS_MIGRATION_ID = "studio.image-node-levers.v1";
 const MANAGED_NODE_CONFIG_MIGRATION_ID = "studio.managed-node-config.v1";
 const RETIRED_HTTP_NODE_MIGRATION_ID = "studio.retire-http-request.v1";
-export const TEXT_NODE_KINDS_MIGRATION_ID = "studio.text-node-kinds.v1";
+const TEXT_NODE_KINDS_MIGRATION_ID = "studio.text-node-kinds.v1";
 
 /**
  * Every migration stamp a born-current project starts with. v2 documents do
@@ -273,27 +273,8 @@ function migrateImageGenerationNodes(
     const nextConfig: Record<string, StudioJsonValue> = { ...currentConfig };
     for (const key of [
       "modelId", "provider", "providerId", "endpoint", "apiKey", "oauth", "fallback", "price", "pricing",
-      "imageSize", "seed",
     ]) delete nextConfig[key];
-    // Older projects could save count 5-8 under the previous schema (max 8). The
-    // new max is 4, and config validation rejects out-of-range values before the
-    // node's runtime clamp runs, so normalize legacy counts here or the flow
-    // would fail to compile instead of being capped.
-    const countValue = nextConfig.count;
-    const countNumeric =
-      typeof countValue === "number"
-        ? countValue
-        : typeof countValue === "string"
-          ? Number(countValue.trim())
-          : Number.NaN;
-    if (Number.isFinite(countNumeric)) {
-      // Floor as well as clamp: the schema is integer-constrained, so a stray
-      // decimal would also fail validation, not just an out-of-range integer.
-      const normalizedCount = Math.min(4, Math.floor(countNumeric));
-      if (normalizedCount !== countValue) {
-        nextConfig.count = normalizedCount;
-      }
-    }
+    // The card no longer executes: retain its historical image settings verbatim.
 
     if (JSON.stringify(nextConfig) !== JSON.stringify(currentConfig)) {
       changed = true;

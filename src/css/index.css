@@ -23,6 +23,7 @@
 @import 'components/chat-attachments.css';
 @import 'components/history.css';
 @import 'components/recorder.css';
+@import 'components/audio-source-picker.css';
 @import 'components/diff-viewer.css';
 
 /* Modal system */
@@ -30,11 +31,9 @@
 @import 'modals/chat-settings.css';
 @import 'modals/janitor.css';
 @import 'modals/credits-balance.css';
-@import 'modals/account-connect.css';
 @import 'modals/upgrade-plan.css';
-@import 'modals/bulk-transcription.css';
 @import 'modals/progress-toast.css';
-@import 'modals/file-pickers.css';
+@import 'modals/transcribe-audio.css';
 @import 'modals/audio-processor.css';
 @import 'modals/search.css';
 @import 'modals/misc-modals.css';
@@ -43,11 +42,13 @@
 /* Agent workspace: ordered from shell through responsive composer states. */
 @import 'views/agent-workspace/shell.css';
 @import 'views/agent-workspace/conversation.css';
+@import 'views/agent-workspace/code.css';
 @import 'views/agent-workspace/activity.css';
 @import 'views/agent-workspace/reasoning.css';
 @import 'views/agent-workspace/tools.css';
 @import 'views/agent-workspace/states.css';
 @import 'views/agent-workspace/composer.css';
+@import 'views/agent-workspace/history.css';
 @import 'views/settings.css';
 @import 'views/similar-notes.css';
 /* Studio canvas: ordered from surface foundations through floating overlays. */
@@ -83,6 +84,19 @@
  * but every canonical action retains the same keyboard focus treatment. */
 .ss-surface .ss-button:focus-visible {
   outline: none;
+  box-shadow: var(--ss-ring);
+}
+
+/* Chat includes native disclosures, links, a listbox and text fields. Keep
+ * their keyboard focus visible even when local chrome has its own shadow.
+ * The solid outline also survives forced-colors mode (shadows do not).
+ * Use the surface contract's specificity boost: icon variants use multiple
+ * :not() classes and must not erase the ring with their resting shadow.
+ * The message box is the one exception: its card draws its focus
+ * (composer.css), so focus shows once. */
+:is(.ss-surface.systemsculpt-agent-workspace, #ss-specificity-boost) :focus-visible:not(.systemsculpt-agent-prompt-input) {
+  outline: 2px solid var(--ss-ink-accent);
+  outline-offset: 2px;
   box-shadow: var(--ss-ring);
 }
 

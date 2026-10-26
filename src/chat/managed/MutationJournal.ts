@@ -1,4 +1,5 @@
 import type { DataAdapter } from "obsidian";
+import { sha256HexFromBytes } from "../../utils/sha256";
 
 type JournalRecord = Readonly<{
   conversationId: string;
@@ -25,15 +26,18 @@ type MutationJournalAdapter = Pick<DataAdapter, "exists" | "read" | "write" | "m
 const KEYED_RECORD_VERSION = 1;
 const LEGACY_MIGRATION_MARKER = "_legacy-v2-migrated.json";
 const RECORD_FILE_NAME = /^[a-f0-9]{64}\.json$/;
+/** @internal Tests assert against this value. */
 export const MAX_LEGACY_JOURNAL_CHARACTERS = 4 * 1024 * 1024;
-export const MAX_LEGACY_JOURNAL_BYTES = 4 * 1024 * 1024;
+const MAX_LEGACY_JOURNAL_BYTES = 4 * 1024 * 1024;
+/** @internal Tests assert against this value. */
 export const MAX_LEGACY_JOURNAL_RECORDS = 10_000;
 /**
  * A receipt only matters while the server may still ask for its tool call
  * again after a reconnect, which is minutes, not weeks.
+ * @internal Tests assert against this value.
  */
 export const MUTATION_RECEIPT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
-export const MAX_RETAINED_MUTATION_RECEIPTS = 5_000;
+const MAX_RETAINED_MUTATION_RECEIPTS = 5_000;
 /** The size bound only removes completed receipts, and never one from the last day. */
 const MIN_TRIMMED_RECEIPT_AGE_MS = 24 * 60 * 60 * 1000;
 /** Cleanup yields to claims between batches. */
@@ -77,14 +81,8 @@ export function canonicalAgentToolInput(value: unknown): string {
   return canonicalize(value).text;
 }
 
-async function sha256(value: string): Promise<string> {
-  const bytes = new TextEncoder().encode(value);
-  const digest = new Uint8Array(await window.crypto.subtle.digest("SHA-256", bytes));
-  return [...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
 async function fingerprint(name: string, input: unknown): Promise<string> {
-  return sha256(`${name}\n${canonicalAgentToolInput(input)}`);
+  return sha256HexFromBytes(new TextEncoder().encode(`${name}\n${canonicalAgentToolInput(input)}`));
 }
 
 function recordKey(conversationId: string, toolCallId: string): string {
@@ -92,7 +90,7 @@ function recordKey(conversationId: string, toolCallId: string): string {
 }
 
 async function recordFileName(conversationId: string, toolCallId: string): Promise<string> {
-  return `${await sha256(recordKey(conversationId, toolCallId))}.json`;
+  return `${await sha256HexFromBytes(new TextEncoder().encode(recordKey(conversationId, toolCallId)))}.json`;
 }
 
 function parseRecord(value: unknown): JournalRecord {

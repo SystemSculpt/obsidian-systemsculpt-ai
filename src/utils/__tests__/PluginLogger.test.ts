@@ -3,7 +3,7 @@
  */
 import { PluginLogger } from "../PluginLogger";
 import { LogLevel } from "../errorHandling";
-import { THIN_AGENT_LIFECYCLE_CODES } from "../../chat/managed/Lifecycle";
+import { THIN_AGENT_LIFECYCLE_CODES } from "../ThinAgentLifecycleSchema";
 
 const FIRST_PARTY_LIFECYCLE_CODES = THIN_AGENT_LIFECYCLE_CODES.filter(
   (code) => !code.startsWith("response_resume_"),
@@ -156,9 +156,9 @@ describe("PluginLogger", () => {
       expect(consoleSpy.warn).toHaveBeenCalled();
     });
 
-    it("persists sanitized lifecycle info while diagnostics recording is on and ordinary info remains filtered", async () => {
+    it("persists sanitized lifecycle info at an info log level", async () => {
       mockPlugin.settings.showDiagnostics = true;
-      logger.info("ordinary info");
+      mockPlugin.settings.logLevel = LogLevel.INFO;
       const lifecycle = logger.lifecycle({
         sequence: 7,
         timestamp: 123,
@@ -267,8 +267,12 @@ describe("PluginLogger", () => {
       expect(consoleSpy.debug).not.toHaveBeenCalled();
     });
 
-    it("keeps lifecycle info in the in-memory ring without a flush timer while diagnostics recording is off", async () => {
+    it.each([false, true])("keeps lifecycle info in memory without disk work below info level (showDiagnostics=%s)", async (showDiagnostics) => {
+      mockPlugin.settings.showDiagnostics = showDiagnostics;
+      const stringify = jest.spyOn(JSON, "stringify");
       const event = logger.lifecycle({ code: "run_started", phase: "response", runId: "run-local-safe" });
+      expect(stringify).not.toHaveBeenCalled();
+      stringify.mockRestore();
 
       expect(event).toEqual(expect.objectContaining({ code: "run_started", run_id: "run-local-safe" }));
       expect(logger.getRecentEntries()).toHaveLength(1);
@@ -311,6 +315,7 @@ describe("PluginLogger", () => {
 
       await logger.flushNow();
 
+      expect(mockStorage.appendToFile.mock.calls[0][2]).not.toContain("thin-agent:lifecycle");
       const rewritten = mockPlugin.app.vault.adapter.write.mock.calls[0][1];
       expect(rewritten).toContain("Retained warning");
       expect(rewritten).not.toContain("thin-agent:lifecycle");
@@ -319,6 +324,7 @@ describe("PluginLogger", () => {
     it("keeps entries captured while recording was off out of a later size-cap rewrite (#416)", async () => {
       logger.lifecycle({ code: "run_started", phase: "response", runId: "run-while-off" });
       mockPlugin.settings.showDiagnostics = true;
+      mockPlugin.settings.logLevel = LogLevel.INFO;
       mockPlugin.app.vault.adapter.stat.mockResolvedValue({ size: 2_000_000 });
       logger.lifecycle({ code: "run_finished_completed", phase: "response", runId: "run-while-on" });
 
@@ -774,23 +780,6 @@ describe("PluginLogger", () => {
       expect(logger.getSupportDiagnostics(1)).toEqual([
         expect.objectContaining({ code: "run_started" }),
       ]);
-    });
-  });
-
-  describe("setLogFileName", () => {
-    it("updates log file name", () => {
-      logger.setLogFileName("new-log.log");
-
-      // File name should be updated (verified by flush behavior)
-      expect(() => logger.setLogFileName("another.log")).not.toThrow();
-    });
-
-    it("ignores empty string", () => {
-      logger.setLogFileName("test.log");
-      logger.setLogFileName("");
-
-      // Should not throw or change behavior
-      expect(() => logger.setLogFileName("")).not.toThrow();
     });
   });
 
@@ -1270,16 +1259,46 @@ describe("PluginLogger", () => {
       });
     });
 
-    it("handles unserializable metadata", () => {
+    it("snapshots persisted details once without JSON round-trip cloning", async () => {
       mockPlugin.settings.debugMode = true;
+      const toJSON = jest.fn(() => ({ count: 1 }));
+      const metadata = { nested: { toJSON }, count: 1 };
+      const parse = jest.spyOn(JSON, "parse");
 
-      const circular: any = {};
+      logger.info("Message", { metadata });
+
+      expect(toJSON).toHaveBeenCalledTimes(1);
+      expect(parse).not.toHaveBeenCalled();
+      parse.mockRestore();
+      metadata.count = 2;
+      toJSON.mockImplementation(() => ({ count: 2 }));
+      mockPlugin.app.vault.adapter.stat.mockResolvedValue({ size: 2_000_000 });
+      await logger.flushNow();
+
+      expect(toJSON).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(mockStorage.appendToFile.mock.calls[0][2]).context.metadata).toEqual({
+        nested: { count: 1 }, count: 1,
+      });
+      expect(mockPlugin.app.vault.adapter.write.mock.calls[0][1]).toBe(mockStorage.appendToFile.mock.calls[0][2]);
+    });
+
+    it("contains unserializable details without poisoning later entries or retrying the batch", async () => {
+      mockPlugin.settings.debugMode = true;
+      const circular: Record<string, unknown> = {};
       circular.self = circular;
 
-      logger.info("Message", { metadata: circular });
+      logger.info("Circular metadata", { source: "Test", metadata: circular });
+      logger.error("Circular error", circular);
+      logger.info("Valid entry", { metadata: { count: 1 } });
+      await logger.flushNow();
+      await jest.advanceTimersByTimeAsync(3_000);
 
-      const entries = logger.getRecentEntries();
-      expect(entries[0].context?.metadata).toEqual({ note: "metadata_unserializable" });
+      expect(mockStorage.appendToFile).toHaveBeenCalledTimes(1);
+      const entries = mockStorage.appendToFile.mock.calls[0][2].trim().split("\n").map(JSON.parse);
+      expect(entries.map((entry: any) => entry.message)).toEqual(["Circular metadata", "Circular error", "Valid entry"]);
+      expect(entries[0].context).toEqual({ source: "Test", metadata: { note: "details_unserializable" } });
+      expect(entries[1].error).toEqual({ message: "details_unserializable" });
+      expect(entries[2].context.metadata).toEqual({ count: 1 });
     });
   });
 

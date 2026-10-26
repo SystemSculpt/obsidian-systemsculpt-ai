@@ -1,6 +1,6 @@
 /** @jest-environment jsdom */
 
-import { applyPluginSurface, isPluginSurface } from "../PluginSurface";
+import { applyPluginSurface } from "../PluginSurface";
 import { disposeMobileHostLayoutStates } from "../../../../platform/mobileHostLayout";
 
 describe("PluginSurface", () => {
@@ -18,7 +18,8 @@ describe("PluginSurface", () => {
 
       applyPluginSurface(root, kind);
 
-      expect(isPluginSurface(root, kind)).toBe(true);
+      expect(root.classList.contains("ss-surface")).toBe(true);
+      expect(root.getAttribute("data-ss-surface")).toBe(kind);
       expect(root.classList.contains("feature-root")).toBe(true);
       expect(root.style.transform).toBe("translate(12px, 8px)");
       expect(root.firstElementChild).toBe(child);
@@ -39,7 +40,7 @@ describe("PluginSurface", () => {
     expect(() => applyPluginSurface(root, "view")).toThrow(
       "already mounted as modal",
     );
-    expect(isPluginSurface(root, "modal")).toBe(true);
+    expect(root.getAttribute("data-ss-surface")).toBe("modal");
   });
 
   it("works before a root is connected", () => {

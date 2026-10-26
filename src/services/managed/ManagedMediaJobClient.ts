@@ -12,7 +12,6 @@ import {
   ManagedVideoOutputMetadata,
 } from "./ManagedTypes";
 import type { ManagedUploadedImageInput } from "./ManagedJobClient";
-import { retryAfterHeaderMs } from "./ManagedJobObservation";
 
 /**
  * managed-job-protocol-v2 — the negotiated media contract that adds model
@@ -20,11 +19,12 @@ import { retryAfterHeaderMs } from "./ManagedJobObservation";
  * (typical_duration_ms). managed-job-protocol-v1 and its client
  * (ManagedJobClient) stay frozen for released artifacts; this sibling client
  * never shares parsing state with it.
+ * @internal Tests assert against this value.
  */
 export const MANAGED_MEDIA_JOB_PROTOCOL = "managed-job-protocol-v2" as const;
 
 export type ManagedMediaKind = "image" | "video";
-export type ManagedMediaJobStatus = "queued" | "processing" | "succeeded" | "failed" | "expired";
+type ManagedMediaJobStatus = "queued" | "processing" | "succeeded" | "failed" | "expired";
 export type ManagedVideoFrameRole = "first_frame" | "last_frame";
 export type ManagedVideoFrameImage = ManagedUploadedImageInput & Readonly<{ role: ManagedVideoFrameRole }>;
 
@@ -218,7 +218,7 @@ export class ManagedMediaJobClient {
 
   private async protocolError(result: ManagedTransportResult, requestId: string): Promise<never> {
     const status = result.response.status;
-    const retryAfterMs = retryAfterHeaderMs(result.response.headers.get("retry-after"));
+    const retryAfterMs = result.diagnostics.retryAfterMs;
     const retryable = status === 429 || status === 502 || status === 503;
     let envelope: { code: string; message: string } | null = null;
     try {
@@ -336,7 +336,7 @@ export class ManagedMediaJobClient {
     if (item.job.id !== jobId) malformed("Managed media status identity changed.");
     this.throwTerminal(kind, item.job, result.response.status, requestId);
     const pollAfterMs = root.poll_after_ms === undefined
-      ? retryAfterHeaderMs(result.response.headers.get("retry-after"))
+      ? result.diagnostics.retryAfterMs
       : root.poll_after_ms as number;
     return {
       ...item,

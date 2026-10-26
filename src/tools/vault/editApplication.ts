@@ -47,7 +47,7 @@ export function applyFileEdits(
 }
 
 /** Apply one edit. Throws when the edit matches nothing. */
-export function applySingleFileEdit(source: string, edit: FileEdit): string {
+function applySingleFileEdit(source: string, edit: FileEdit): string {
   const text = normalizeLineEndings(source);
   const oldText = normalizeLineEndings(edit.oldText ?? "");
   const newText = normalizeLineEndings(edit.newText ?? "");
@@ -79,7 +79,7 @@ export function applySingleFileEdit(source: string, edit: FileEdit): string {
   return head + replaced + tail;
 }
 
-export function computeRange(
+function computeRange(
   text: string,
   range?: FileEditRange | null,
 ): { sliceStart: number; sliceEnd: number } {

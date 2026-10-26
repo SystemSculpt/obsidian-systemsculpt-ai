@@ -1,22 +1,23 @@
 import { Notice } from "obsidian";
 import type { StudioNodeDefinition, StudioNodeInstance } from "../../../studio/types";
-import { isStudioVisualOnlyNodeKind } from "../../../studio/StudioNodeKinds";
+import { isStudioRetiredNodeKind, isStudioVisualOnlyNodeKind } from "../../../studio/StudioNodeKinds";
 import type { StudioGraphInteractionEngine } from "../StudioGraphInteractionEngine";
 import { createStudioAction } from "../StudioAction";
 import type { StudioNodeActivity } from "../activity/StudioActivity";
 import { renderStudioActivityBadge } from "../activity/StudioActivityBadge";
+import { lockStudioControl, type StudioCardLockState } from "./StudioCardLock";
 
 export function renderNodeHeader(options: {
   nodeEl: HTMLElement;
   node: StudioNodeInstance;
-  interactionLocked: boolean;
+  interactionLocked: StudioCardLockState;
   runUnavailableReason?: string;
-  runLocked?: boolean;
+  runLocked?: StudioCardLockState;
   /** Panel surfaces expose their definition through one header toggle. */
   sourceToggle?: { isActive: () => boolean; onToggle: () => void };
   onNodeTitleInput: (node: StudioNodeInstance, title: string) => void;
   onRunNode: (nodeId: string) => void;
-  onCopyTextGenerationPromptBundle: (nodeId: string) => void;
+  onCopyTextGenerationPromptBundle: (nodeId: string, button: HTMLButtonElement) => void;
   onToggleTextGenerationOutputLock: (nodeId: string) => void;
   onRemoveNode: (nodeId: string) => void;
 }): { sourceToggle: HTMLButtonElement | null } {
@@ -38,46 +39,43 @@ export function renderNodeHeader(options: {
     cls: "ss-studio-node-title-input",
   });
   titleInput.value = node.title;
-  titleInput.disabled = interactionLocked;
+  lockStudioControl(interactionLocked, titleInput, node.kind === "studio.image_generation");
   titleInput.addEventListener("input", (event) => {
     onNodeTitleInput(node, (event.target as HTMLInputElement).value);
   });
 
   const isVisualOnlyNode = isStudioVisualOnlyNodeKind(node.kind);
-  const unavailable = node.kind === 'studio.workflow';
-  if (!["studio.button", "studio.command_center"].includes(node.kind)) createStudioAction(header, {
+  if (!["studio.button", "studio.command_center"].includes(node.kind) && !isStudioRetiredNodeKind(node.kind)) lockStudioControl(options.runLocked ?? interactionLocked, createStudioAction(header, {
     className: "ss-studio-node-run",
     label: "Run",
     testId: "studio.node.run",
     ariaLabel: isVisualOnlyNode
       ? "Interactive node (not part of graph execution)"
       : "Run node",
-    title: options.runUnavailableReason || (unavailable ? 'Execution connection unavailable' : isVisualOnlyNode
+    title: options.runUnavailableReason || (isVisualOnlyNode
       ? "Interactive node (not part of graph execution)"
       : "Run node"),
     size: "small",
-    disabled: (options.runLocked ?? interactionLocked) || isVisualOnlyNode || unavailable || Boolean(options.runUnavailableReason),
     onSelect: () => {
-      if (!isVisualOnlyNode && !unavailable && !options.runUnavailableReason) {
+      if (!isVisualOnlyNode && !options.runUnavailableReason) {
         onRunNode(node.id);
       }
     },
-  });
+  }), isVisualOnlyNode || Boolean(options.runUnavailableReason));
 
   if (node.kind === "studio.text_generation") {
     const outputLocked = node.config.lockOutput === true;
-    createStudioAction(header, {
+    lockStudioControl(interactionLocked, createStudioAction(header, {
       className: "ss-studio-node-copy-prompt",
       label: "Copy",
       testId: "studio.node.copy-prompt",
       ariaLabel: "Copy prompt bundle for handoff",
       title: "Copy prompt bundle for handoff",
       size: "small",
-      disabled: interactionLocked,
-      onSelect: () => onCopyTextGenerationPromptBundle(node.id),
-    });
+      onSelect: (event) => onCopyTextGenerationPromptBundle(node.id, event.currentTarget as HTMLButtonElement),
+    }));
 
-    createStudioAction(header, {
+    lockStudioControl(interactionLocked, createStudioAction(header, {
       className: "ss-studio-node-lock-output",
       label: outputLocked ? "Unlock" : "Lock",
       testId: "studio.node.lock-output",
@@ -85,9 +83,8 @@ export function renderNodeHeader(options: {
       title: outputLocked ? "Unlock text output" : "Lock text output",
       size: "small",
       selected: outputLocked,
-      disabled: interactionLocked,
       onSelect: () => onToggleTextGenerationOutputLock(node.id),
-    });
+    }));
   }
 
   let sourceToggle: HTMLButtonElement | null = null;
@@ -105,16 +102,15 @@ export function renderNodeHeader(options: {
     });
   }
 
-  createStudioAction(header, {
+  lockStudioControl(interactionLocked, createStudioAction(header, {
     className: "ss-studio-node-remove",
     label: "×",
     testId: "studio.node.remove",
     ariaLabel: "Remove node",
     title: "Remove node",
     size: "small",
-    disabled: interactionLocked,
     onSelect: () => onRemoveNode(node.id),
-  });
+  }));
   return { sourceToggle };
 }
 
@@ -142,13 +138,15 @@ export function renderNodePorts(options: {
   node: StudioNodeInstance;
   definition: StudioNodeDefinition | null;
   graphInteraction: StudioGraphInteractionEngine;
-  interactionLocked: boolean;
+  interactionLocked: StudioCardLockState;
   /** Inputs the selected model does not accept; hidden unless something is wired to them. */
   hiddenInputPortIds?: ReadonlySet<string>;
   inputPortNotes?: Readonly<Record<string, string>>;
   connectedInputPortIds?: ReadonlySet<string>;
 }): void {
   const { nodeEl, node, definition, graphInteraction, interactionLocked } = options;
+  // Keep anchors for saved retired-node connections without offering new wiring.
+  const savedConnectionsOnly = isStudioRetiredNodeKind(node.kind);
   const hidden = options.hiddenInputPortIds;
   const connected = options.connectedInputPortIds;
   const inputPorts = (definition?.inputPorts || []).filter(port => !hidden?.has(port.id) || connected?.has(port.id));
@@ -179,20 +177,12 @@ export function renderNodePorts(options: {
       pin.dataset.nodeId = node.id;
       pin.dataset.portId = port.id;
       pin.dataset.portDirection = "in";
-      pin.disabled = interactionLocked;
+      lockStudioControl(interactionLocked, pin, savedConnectionsOnly);
       row.createSpan({
         cls: "ss-studio-port-label",
         text: `${port.id}${port.required ? "*" : ""}`,
       });
       graphInteraction.registerPortElement(node.id, "in", port.id, pin);
-      pin.addEventListener("click", (event) => {
-        event.stopPropagation();
-        if (!graphInteraction.getPendingConnection()) {
-          new Notice("Select an output port first.");
-          return;
-        }
-        graphInteraction.completeConnection(node.id, port.id);
-      });
     }
   }
 
@@ -214,19 +204,34 @@ export function renderNodePorts(options: {
       pin.dataset.nodeId = node.id;
       pin.dataset.portId = port.id;
       pin.dataset.portDirection = "out";
-      pin.disabled = interactionLocked;
+      lockStudioControl(interactionLocked, pin, savedConnectionsOnly);
       graphInteraction.registerPortElement(node.id, "out", port.id, pin);
-      pin.addEventListener("pointerdown", (event) => {
-        event.stopPropagation();
-        graphInteraction.startConnectionDrag(node.id, port.id, event, pin);
-      });
-      pin.addEventListener("click", (event) => {
-        event.stopPropagation();
-        if (graphInteraction.consumeSuppressedOutputPortClick(node.id, port.id)) {
-          return;
-        }
-        graphInteraction.beginConnection(node.id, port.id);
-      });
     }
   }
+  if (savedConnectionsOnly) return;
+  const eventPin = (event: Event): HTMLButtonElement | null => {
+    // Adopted cards retain their original realm's element prototypes.
+    const target = event.target as Element | null;
+    const pin = target?.closest?.<HTMLButtonElement>(".ss-studio-port-pin");
+    return pin && ports.contains(pin) && !pin.disabled ? pin : null;
+  };
+  ports.addEventListener("pointerdown", event => {
+    const pin = eventPin(event);
+    if (!pin || pin.dataset.portDirection !== "out") return;
+    event.stopPropagation();
+    graphInteraction.startConnectionDrag(node.id, pin.dataset.portId!, event, pin);
+  });
+  ports.addEventListener("click", event => {
+    const pin = eventPin(event);
+    if (!pin) return;
+    event.stopPropagation();
+    const portId = pin.dataset.portId!;
+    if (pin.dataset.portDirection === "out") {
+      if (!graphInteraction.consumeSuppressedOutputPortClick(node.id, portId)) graphInteraction.beginConnection(node.id, portId);
+    } else if (!graphInteraction.getPendingConnection()) {
+      new Notice("Select an output port first.");
+    } else {
+      graphInteraction.completeConnection(node.id, portId);
+    }
+  });
 }

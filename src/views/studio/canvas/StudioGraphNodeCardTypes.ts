@@ -1,4 +1,5 @@
 import type { App } from "obsidian";
+import type { StudioPresentation } from "../StudioPresentation";
 import type { StudioTextEditorMountState } from "../StudioTextEditSessions";
 import type { StudioImageBoardEditorHandle } from "./image-board/StudioImageBoardEditor";
 import type { StudioMediaModelPickerOpener } from "./StudioGraphInlineConfigPanel";
@@ -61,6 +62,7 @@ export type RenderStudioGraphNodeCardOptions = {
   projectId?: string;
   projectPath?: string;
   agentRuns?: StudioAgentRuns;
+  presentation?: StudioPresentation;
   projectNodes?: StudioNodeInstance[];
   getRelatedNodeRunState?: (nodeId: string) => StudioNodeRunDisplayState;
   layer: HTMLElement;
@@ -88,7 +90,7 @@ export type RenderStudioGraphNodeCardOptions = {
     title: string;
   }) => void;
   onRunNode: (nodeId: string) => void;
-  onCopyTextGenerationPromptBundle: (nodeId: string) => void;
+  onCopyTextGenerationPromptBundle: (nodeId: string, button: HTMLButtonElement) => void;
   onToggleTextGenerationOutputLock: (nodeId: string) => void;
   onRemoveNode: (nodeId: string) => void;
   onNodeTitleInput: (node: StudioNodeInstance, title: string) => void;
@@ -108,12 +110,12 @@ export type RenderStudioGraphNodeCardOptions = {
   /** Toggles in-place editing of this node's image. */
   onOpenImageEditor?: (node: StudioNodeInstance) => void;
   imageBoard?: StudioGraphNodeImageBoardOptions;
-  onEditImageWithAi?: (node: StudioNodeInstance) => void;
   onCopyNodeImageToClipboard?: (node: StudioNodeInstance) => void;
   renderMarkdownPreview?: (
     node: StudioNodeInstance,
     markdown: string,
-    containerEl: HTMLElement
+    containerEl: HTMLElement,
+    lifetime: AbortSignal
   ) => Promise<void> | void;
   onNodeGeometryMutated: (node: StudioNodeInstance) => void;
   resolveDynamicSelectOptions?: (

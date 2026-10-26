@@ -162,12 +162,12 @@ function createEditEndHarness(options: {
       selectOnlyNode: jest.fn(),
       setSelectedNodeIds: jest.fn(),
     },
-    recomputeEntryNodes: jest.fn(),
     clearTransientFieldErrorsForNode: jest.fn(),
     cloneJsonValue: jest.fn((value: unknown) => value),
     refreshNodeCardPreview: jest.fn(),
     handleNoteNodeConfigMutated: jest.fn(),
     render: jest.fn(),
+    scheduleRender: jest.fn(),
     commitCurrentProjectMutationAsync: jest.fn(() => Promise.resolve(false)),
   };
   for (const id of options.editingNodeIds ?? []) context.textEdits.begin(id);
@@ -191,6 +191,7 @@ function createTextNodeDefinition(): StudioNodeDefinition {
   return {
     kind: "studio.text",
     version: "1.0.0",
+    requiredHostCapabilities: [],
     capabilityClass: "local_cpu",
     cachePolicy: "never",
     inputPorts: [],

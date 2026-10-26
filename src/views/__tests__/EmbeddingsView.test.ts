@@ -2,10 +2,11 @@
  * @jest-environment jsdom
  */
 
-import { EmbeddingsView, EMBEDDINGS_VIEW_TYPE } from "../EmbeddingsView";
-import { WorkspaceLeaf, TFile } from "obsidian";
+import { EmbeddingsView } from "../EmbeddingsView";
+import { EMBEDDINGS_VIEW_TYPE } from "../../core/plugin/viewTypes";
+import { TFile } from "obsidian";
 import { MANAGED_EMBEDDINGS_INDEX_MAX_QUERY_CHARS } from "../../services/embeddings/gateway/ManagedEmbeddingsIndexAdapter";
-import { CHAT_TRANSCRIPT_COMMITTED_EVENT } from "../chatview/ChatTranscriptEvents";
+import { emitChatTranscriptCommitted } from "../chatview/ChatTranscriptEvents";
 
 function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void; reject: (error: unknown) => void } {
   let resolve!: (value: T) => void;
@@ -109,6 +110,25 @@ describe("EmbeddingsView", () => {
   afterEach(() => {
     jest.useRealTimers();
     jest.clearAllMocks();
+  });
+
+  it("ignores unrelated settings events but refreshes for indexing configuration", async () => {
+    await view.onOpen();
+    const listener = mockPlugin.app.workspace.on.mock.calls.find(([event]: [string]) => event === "systemsculpt:settings-updated")![1];
+    const refresh = jest.spyOn(view as any, "debouncedCheckActiveFile").mockImplementation(() => undefined);
+    const settings = mockPlugin.settings;
+    listener(settings, settings, ["lastValidated"]);
+    listener(settings, settings, ["defaultChatTag"]);
+    expect(refresh).not.toHaveBeenCalled();
+    mockPlugin.settings = { ...settings, embeddingsEnabled: false };
+    listener(settings, mockPlugin.settings, ["embeddingsEnabled"]);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    listener(mockPlugin.settings, { ...mockPlugin.settings, chatsDirectory: "Moved/Chats" }, ["chatsDirectory"]);
+    expect(refresh).toHaveBeenCalledTimes(2);
+    listener(settings, { ...settings, embeddingsExclusions: { folders: ["Private"] } }, ["embeddingsExclusions"]);
+    expect(refresh).toHaveBeenCalledTimes(3);
+    refresh.mockRestore();
+    await view.onClose();
   });
 
   describe("view basics", () => {
@@ -461,14 +481,19 @@ describe("EmbeddingsView", () => {
       (view as any).registerEvents();
       (view as any).currentFile = new TFile({ path: "notes/current.md", stat: { mtime: 1, size: 100 } });
       (view as any).currentResults = [{ path: "Projects/result.md", score: 0.9, metadata: {} }];
-      const handlers = new Map(mockPlugin.app.vault.on.mock.calls.map(([eventName, handler]: [string, any]) => [eventName, handler]));
+      const handlers = new Map<string, (...args: unknown[]) => unknown>(mockPlugin.app.vault.on.mock.calls.map(([eventName, handler]: [string, any]) => [eventName, handler]));
+      const handler = (eventName: string) => {
+        const registered = handlers.get(eventName);
+        if (!registered) throw new Error(`Missing ${eventName} handler`);
+        return registered;
+      };
       const check = jest.spyOn(view as any, "debouncedCheckActiveFile");
 
-      handlers.get("rename")(new TFile({ path: "Elsewhere/new.md" }), "Elsewhere/old.md");
-      handlers.get("delete")({ path: "Elsewhere/gone.md" });
+      handler("rename")(new TFile({ path: "Elsewhere/new.md" }), "Elsewhere/old.md");
+      handler("delete")({ path: "Elsewhere/gone.md" });
       expect(check).not.toHaveBeenCalled();
 
-      handlers.get("delete")({ path: "Projects" });
+      handler("delete")({ path: "Projects" });
       expect(check).toHaveBeenCalledTimes(1);
       expect((view as any).currentResults).toEqual([]);
     });
@@ -508,29 +533,39 @@ describe("EmbeddingsView", () => {
       expect(checkActiveFileSpy).toHaveBeenCalledTimes(1);
     });
 
-    it("refreshes only the matching chat after a durable transcript commit", async () => {
+    it.each(["user", "assistant"] as const)("refreshes only the matching chat after a durable %s transcript commit", async (role) => {
       const chatView = createMockChatView({
         chatId: "chat-current",
-        messages: [{ message_id: "1", role: "user", content: "Committed transcript" }],
+        messages: [{ message_id: "current", role, content: "Committed transcript" }],
+      });
+      const workspace = mockPlugin.app.workspace;
+      workspace.trigger = jest.fn((name: string, payload: unknown) => {
+        for (const [eventName, handler] of workspace.on.mock.calls) {
+          if (eventName === name) handler(payload);
+        }
       });
       (view as any).currentChatView = chatView;
       (view as any).registerEvents();
-      const registration = mockPlugin.app.workspace.on.mock.calls.find(
-        ([eventName]: [string]) => eventName === CHAT_TRANSCRIPT_COMMITTED_EVENT,
-      );
-      const handler = registration?.[1] as (event: { chatId: string; version: number; role: "user"; messageId: string }) => void;
 
-      handler({ chatId: "another-chat", version: 1, role: "user", messageId: "other" });
+      emitChatTranscriptCommitted(workspace, { chatId: "another-chat", version: 1, role, messageId: "other" });
       await jest.advanceTimersByTimeAsync(600);
       expect(mockManager.searchSimilar).not.toHaveBeenCalled();
 
-      handler({ chatId: "chat-current", version: 2, role: "user", messageId: "current" });
+      emitChatTranscriptCommitted(workspace, { chatId: "chat-current", version: 2, role, messageId: "current" });
+      expect(mockManager.searchSimilar).not.toHaveBeenCalled();
       await jest.advanceTimersByTimeAsync(600);
+      expect(mockManager.searchSimilar).toHaveBeenCalledTimes(1);
       expect(mockManager.searchSimilar).toHaveBeenCalledWith(
         expect.stringContaining("Committed transcript"),
         15,
         expect.any(AbortSignal),
       );
+
+      mockManager.searchSimilar.mockClear();
+      (view as any).currentChatView = null;
+      emitChatTranscriptCommitted(workspace, { chatId: "chat-current", version: 3, role, messageId: "later" });
+      await jest.advanceTimersByTimeAsync(600);
+      expect(mockManager.searchSimilar).not.toHaveBeenCalled();
     });
   });
 
@@ -693,13 +728,12 @@ describe("EmbeddingsView", () => {
         { path: "notes/remaining.md", score: 0.8 },
       ];
       (view as any).currentFile = new TFile({ path: "notes/current.md", stat: { mtime: Date.now(), size: 100 } });
-      (view as any).updateResults = jest.fn();
+      view["updateResults"] = jest.fn(async () => undefined);
 
       const mockDeletedFile = { path: deletedPath };
 
       (view as any).isDragging = false;
-      const filtered = (view as any).currentResults.filter((r: any) => r.path !== deletedPath);
-      (view as any).currentResults = filtered;
+      view["handleVaultDelete"](mockDeletedFile);
 
       expect((view as any).currentResults).toHaveLength(1);
       expect((view as any).currentResults[0].path).toBe("notes/remaining.md");
@@ -732,37 +766,6 @@ describe("EmbeddingsView", () => {
 
       expect(mockManager.resumeProcessing).toHaveBeenCalledTimes(1);
       expect(refreshChat).toHaveBeenCalledWith(chatView);
-    });
-  });
-
-  describe("config change detection", () => {
-    it("generates different config keys for different settings", () => {
-      const settings1 = {
-        embeddingsEnabled: true,
-        embeddingsExclusions: { folders: [] },
-      };
-
-      const settings2 = {
-        embeddingsEnabled: true,
-        embeddingsExclusions: { folders: ["Private"] },
-      };
-
-      const key1 = (view as any).getEmbeddingsConfigKey(settings1);
-      const key2 = (view as any).getEmbeddingsConfigKey(settings2);
-
-      expect(key1).not.toBe(key2);
-    });
-
-    it("generates same config key for same settings", () => {
-      const settings = {
-        embeddingsEnabled: true,
-        embeddingsExclusions: { folders: [] },
-      };
-
-      const key1 = (view as any).getEmbeddingsConfigKey(settings);
-      const key2 = (view as any).getEmbeddingsConfigKey(settings);
-
-      expect(key1).toBe(key2);
     });
   });
 

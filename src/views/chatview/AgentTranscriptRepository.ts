@@ -17,6 +17,7 @@ import { ChatIdAllocator } from "./persistence/ChatIdAllocator";
 import { ChatMarkdownSerializer } from "./storage/ChatMarkdownSerializer";
 import {
   parseAgentConversationId,
+  parseChatApprovalMode,
   type ChatApprovalMode,
 } from "./storage/ChatPersistenceTypes";
 
@@ -208,6 +209,7 @@ function omitsTerminalMetadata(message: ChatMessage): boolean {
     && message.terminalReportId === undefined
     && message.terminalIncidentId === undefined
     && message.terminalFailureCode === undefined
+    && message.terminalFailureMessage === undefined
     && message.terminalRetryable === undefined
     && message.terminalServerRunId === undefined;
 }
@@ -392,8 +394,24 @@ export class AgentTranscriptRepository {
 
   constructor(
     private readonly storage: ChatStorageService,
-    private readonly getSaveOptions: () => AgentTranscriptSaveOptions,
+    private getSaveOptions: () => AgentTranscriptSaveOptions,
   ) {}
+
+  private readonly saveOptionsProviders = new Map<object, () => AgentTranscriptSaveOptions>();
+
+  /** Attached panes supply metadata; the last departure leaves an owned snapshot. */
+  public bindSaveOptions(owner: object, provider: () => AgentTranscriptSaveOptions): () => void {
+    this.saveOptionsProviders.set(owner, provider);
+    this.getSaveOptions = provider;
+    return () => {
+      if (this.saveOptionsProviders.get(owner) !== provider) return;
+      const retained = this.getSaveOptions();
+      this.saveOptionsProviders.delete(owner);
+      if (this.getSaveOptions === provider) {
+        this.getSaveOptions = [...this.saveOptionsProviders.values()].pop() ?? (() => retained);
+      }
+    };
+  }
 
   public snapshot(): AgentTranscriptSnapshot {
     return Object.freeze({
@@ -448,7 +466,7 @@ export class AgentTranscriptRepository {
         ...this.snapshot(),
         contextFiles: Object.freeze([...(loaded.context_files || [])]),
         ...(loaded.chatFontSize ? { chatFontSize: loaded.chatFontSize } : {}),
-        approvalMode: loaded.approvalMode === "full-access" ? "full-access" : "ask",
+        approvalMode: parseChatApprovalMode(loaded.approvalMode),
       });
     });
   }
@@ -625,7 +643,9 @@ export class AgentTranscriptRepository {
     });
   }
 
-  public saveMetadata(): Promise<AgentTranscriptSnapshot> {
+  public saveMetadata(owner?: object): Promise<AgentTranscriptSnapshot> {
+    const provider = owner ? this.saveOptionsProviders.get(owner) : undefined;
+    if (provider) this.getSaveOptions = provider;
     const generation = this.generation;
     return this.serializeForGeneration(generation, async () => {
       if (!this.chatId) return this.snapshot();

@@ -1,11 +1,14 @@
 import { TFile, TFolder, type App, type EventRef, type TAbstractFile } from "obsidian";
 import type SystemSculptPlugin from "../../main";
+import type { ChatMessage } from "../../types";
+import { parseAttachedTextContent } from "../../chat/ChatAttachmentContent";
 import {
   isPathInDirectory,
   resolveKnownChatsDirectories,
 } from "../chatview/ChatStorageService";
 import { hasChatIdentityMetadata } from "../chatview/storage/ChatFrontmatterIdentity";
 import { ChatMarkdownSerializer } from "../chatview/storage/ChatMarkdownSerializer";
+import { parseAgentConversationId } from "../chatview/storage/ChatPersistenceTypes";
 
 export type ChatHistoryRecord = Readonly<{
   chatId: string;
@@ -14,6 +17,8 @@ export type ChatHistoryRecord = Readonly<{
   lastModified: number;
   /** Null for chats saved before the count was recorded in frontmatter. */
   messageCount: number | null;
+  /** Routes the chat to its backend; absent for older saved chats. */
+  agentConversationId?: string;
 }>;
 
 type SearchTextEntry = Readonly<{
@@ -41,8 +46,12 @@ export function chatHistoryIndex(plugin: HistoryHost): ChatHistoryIndex {
   return index;
 }
 
-function messageText(content: unknown): string {
-  return typeof content === "string" ? content : "";
+/** The text a chat shows: attached images and files show as chips, not text. */
+function messageText(content: ChatMessage["content"]): string {
+  if (typeof content === "string") return content;
+  return (content ?? [])
+    .flatMap((part) => part.type === "text" && !parseAttachedTextContent(part.text) ? [part.text] : [])
+    .join("\n");
 }
 
 async function withTimeout<T>(promise: Promise<T>, fallback: T): Promise<T> {
@@ -166,12 +175,14 @@ export class ChatHistoryIndex {
     }
     const title = typeof frontmatter?.title === "string" ? frontmatter.title.trim() : "";
     const count = Number(frontmatter?.messageCount);
+    const agentConversationId = parseAgentConversationId(frontmatter?.agentConversationId);
     return Object.freeze({
       chatId,
       title: title || "Untitled Chat",
       chatPath: file.path,
       lastModified: file.stat.mtime,
       messageCount: Number.isSafeInteger(count) && count >= 0 ? count : null,
+      ...(agentConversationId ? { agentConversationId } : {}),
     });
   }
 

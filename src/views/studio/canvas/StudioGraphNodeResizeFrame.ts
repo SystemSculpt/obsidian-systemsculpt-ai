@@ -17,6 +17,7 @@ import {
   type StudioNodeResizeMode,
 } from "../../../studio/StudioNodeGeometry";
 import { getStudioOwnerWindow } from "../StudioDomContext";
+import { isStudioCardLocked, watchStudioCardLock, type StudioCardLockState } from "./StudioCardLock";
 
 /**
  * tldraw-style 8-zone resize frame: four edge strips plus four corner zones
@@ -47,9 +48,15 @@ export const STUDIO_GRAPH_RESIZE_ZONES: readonly StudioGraphResizeZone[] = [
   "se",
 ];
 
-/** Thickness of the edge hit strips (straddles the card border). */
+/**
+ * Thickness of the edge hit strips (straddles the card border).
+ * @internal Tests assert against this value.
+ */
 export const STUDIO_GRAPH_RESIZE_EDGE_HIT_PX = 6;
-/** Side length of the square corner hit zones. */
+/**
+ * Side length of the square corner hit zones.
+ * @internal Tests assert against this value.
+ */
 export const STUDIO_GRAPH_RESIZE_CORNER_HIT_PX = 12;
 
 /** Guard against inverted/degenerate scale factors on text drags. */
@@ -132,7 +139,7 @@ type MountStudioGraphNodeResizeFrameOptions = {
   nodeEl: HTMLElement;
   title: string;
   ariaLabel: string;
-  interactionLocked: boolean;
+  interactionLocked: StudioCardLockState;
   getGraphZoom: () => number;
   /**
    * True when the card body is an image/video media preview whose rendered
@@ -218,7 +225,9 @@ export function mountStudioGraphNodeResizeFrame(
     for (const [property, value] of Object.entries(resolveStudioGraphResizeZoneLayout(zone))) {
       zoneEl.style.setProperty(property, value);
     }
-    zoneEl.classList.toggle("is-disabled", options.interactionLocked);
+    watchStudioCardLock(options.interactionLocked, (locked) => {
+      zoneEl.classList.toggle("is-disabled", locked);
+    }, zoneEl);
     zoneEls.set(zone, zoneEl);
   }
 
@@ -228,10 +237,6 @@ export function mountStudioGraphNodeResizeFrame(
       zoneEl.remove();
     }
   };
-
-  if (options.interactionLocked) {
-    return removeFrame;
-  }
 
   const semanticsMode: StudioNodeResizeMode = resolveStudioNodeResizeSemantics(node.kind, {
     hasAspectMediaContent: options.hasAspectMediaContent,
@@ -513,14 +518,14 @@ export function mountStudioGraphNodeResizeFrame(
     }
   };
 
-  const stopTracking = (): void => {
+  const stopTracking = (commit = true): void => {
     if (activePointerId === null) {
       return;
     }
     if (frameId !== null) {
       ownerWindow.cancelAnimationFrame(frameId);
       frameId = null;
-      applyPendingFrame();
+      if (commit) applyPendingFrame();
     }
     ownerWindow.removeEventListener("pointermove", onPointerMove);
     ownerWindow.removeEventListener("pointerup", onPointerFinish);
@@ -539,7 +544,7 @@ export function mountStudioGraphNodeResizeFrame(
         }
       }
     }
-    if (didMutateDuringDrag && lastApplied) {
+    if (commit && didMutateDuringDrag && lastApplied) {
       commitTarget(lastApplied, "discrete");
     }
     lastApplied = null;
@@ -570,7 +575,8 @@ export function mountStudioGraphNodeResizeFrame(
   };
 
   const startDrag = (zone: StudioGraphResizeZone, zoneEl: HTMLElement, event: PointerEvent): void => {
-    if (event.button !== 0 || activePointerId !== null) {
+    // A locked card's zones stay inert: the press goes on to the card as if they weren't there.
+    if (isStudioCardLocked(options.interactionLocked) || event.button !== 0 || activePointerId !== null) {
       return;
     }
     event.preventDefault();
@@ -640,18 +646,21 @@ export function mountStudioGraphNodeResizeFrame(
     ownerWindow.addEventListener("pointercancel", onPointerFinish);
   };
 
-  const zoneListeners = new Map<HTMLElement, (event: PointerEvent) => void>();
-  for (const [zone, zoneEl] of zoneEls) {
-    const listener = (event: PointerEvent): void => startDrag(zone, zoneEl, event);
-    zoneEl.addEventListener("pointerdown", listener);
-    zoneListeners.set(zoneEl, listener);
-  }
+  const onPointerDown = (event: PointerEvent): void => {
+    const target = event.target as Element | null;
+    const zoneEl = target?.closest?.<HTMLElement>(".ss-studio-node-resize-zone");
+    const zone = zoneEl?.dataset.resizeZone as StudioGraphResizeZone | undefined;
+    if (!zoneEl || !zone || zoneEls.get(zone) !== zoneEl) {
+      return;
+    }
+    startDrag(zone, zoneEl, event);
+  };
+  nodeEl.addEventListener("pointerdown", onPointerDown);
 
   return () => {
-    for (const [zoneEl, listener] of zoneListeners) {
-      zoneEl.removeEventListener("pointerdown", listener);
-    }
-    stopTracking();
+    nodeEl.removeEventListener("pointerdown", onPointerDown);
+    // Teardown must not replay stale geometry over the replacement card.
+    stopTracking(false);
     removeFrame();
   };
 }

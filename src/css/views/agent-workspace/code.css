@@ -1,0 +1,127 @@
+/** Obsidian-rendered code with compact chat labels and reversible disclosure. */
+.systemsculpt-agent-conversation .systemsculpt-agent-code-block {
+  position: relative;
+  max-width: 100%;
+  margin: var(--ss-space-3) 0;
+  padding: var(--ss-space-8) var(--ss-space-3) var(--ss-space-3);
+  overflow: auto;
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-sm);
+  background: var(--ss-surface-1);
+  box-shadow: none;
+  color: var(--ss-ink);
+  font-family: var(--ss-font-mono);
+  font-size: calc(1em * 0.9);
+  line-height: var(--ss-leading-base);
+  white-space: pre;
+}
+
+.systemsculpt-agent-conversation .systemsculpt-agent-code-block > code {
+  display: block;
+  min-width: max-content;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  line-height: inherit;
+  white-space: pre;
+  overflow-wrap: normal;
+}
+
+.systemsculpt-agent-code-language {
+  position: absolute;
+  inset-block-start: var(--ss-space-2);
+  inset-inline-start: var(--ss-space-3);
+  color: var(--ss-ink-muted);
+  font-family: var(--ss-font);
+  font-size: var(--ss-text-xs);
+}
+
+.systemsculpt-agent-conversation .systemsculpt-agent-code-copy {
+  display: inline-flex;
+  position: absolute;
+  inset-block-start: var(--ss-space-1);
+  inset-inline-end: var(--ss-space-1);
+  min-height: var(--ss-control-height-sm);
+  padding: 0 var(--ss-space-2);
+  border-color: transparent;
+  background: var(--ss-surface-1);
+  color: var(--ss-ink-muted);
+  font-family: var(--ss-font);
+  font-size: var(--ss-text-xs);
+  opacity: 0;
+}
+
+.systemsculpt-agent-conversation .systemsculpt-agent-code-block:hover > .systemsculpt-agent-code-copy,
+.systemsculpt-agent-conversation .systemsculpt-agent-code-block:focus-within > .systemsculpt-agent-code-copy,
+.systemsculpt-agent-conversation .systemsculpt-agent-code-copy.is-copied,
+.systemsculpt-agent-conversation .systemsculpt-agent-code-copy.is-copy-failed {
+  opacity: 1;
+}
+
+.systemsculpt-agent-conversation .systemsculpt-agent-code-copy.is-copied {
+  color: var(--ss-success);
+}
+
+.systemsculpt-agent-conversation .systemsculpt-agent-code-copy.is-copy-failed {
+  color: var(--ss-danger);
+}
+
+.systemsculpt-agent-conversation .systemsculpt-agent-code-block:focus-visible,
+.systemsculpt-agent-conversation .systemsculpt-agent-code-copy:focus-visible,
+.systemsculpt-agent-conversation .systemsculpt-agent-code-show-all:focus-visible {
+  outline: none;
+  box-shadow: var(--ss-ring);
+}
+
+.systemsculpt-agent-code-block.is-code-collapsible:not(.is-code-expanded) > code,
+.systemsculpt-agent-code-block.is-code-collapsible:not(.is-code-expanded) > .systemsculpt-agent-fenced-diff {
+  max-block-size: 20lh;
+  overflow: hidden;
+}
+
+.systemsculpt-agent-conversation .systemsculpt-agent-code-show-all {
+  position: sticky;
+  inset-inline-start: 0;
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  margin-top: var(--ss-space-2);
+  border: 0;
+  border-top: 1px solid var(--ss-line);
+  border-radius: 0;
+  background: var(--ss-surface-1);
+  color: var(--ss-ink-muted);
+  font-family: var(--ss-font);
+  font-size: var(--ss-text-xs);
+  white-space: normal;
+}
+
+.systemsculpt-agent-code-block.is-fenced-diff > code {
+  display: none;
+}
+
+.systemsculpt-agent-fenced-diff.systemsculpt-diff-viewer {
+  border: 0;
+  border-radius: 0;
+  font-size: inherit;
+}
+
+.systemsculpt-agent-fenced-diff .systemsculpt-diff-content {
+  overflow: visible;
+}
+
+@media (pointer: coarse) {
+  .systemsculpt-agent-conversation .systemsculpt-agent-code-copy {
+    opacity: 1;
+  }
+
+  .systemsculpt-agent-conversation .systemsculpt-agent-code-copy,
+  .systemsculpt-agent-conversation .systemsculpt-agent-code-show-all {
+    min-height: var(--ss-touch-target);
+  }
+
+  .systemsculpt-agent-conversation .systemsculpt-agent-code-block {
+    padding-block-start: calc(var(--ss-touch-target) + var(--ss-space-2));
+  }
+}

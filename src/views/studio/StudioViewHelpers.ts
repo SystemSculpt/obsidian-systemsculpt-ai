@@ -8,7 +8,7 @@ export function definitionKey(definition: StudioNodeDefinition): string {
 const NODE_DESCRIPTION_BY_KIND: Record<string, string> = {
   "studio.input": "Injects starter text or JSON into your graph.",
   "studio.collection": "A live collection of records, grouped as a Kanban board.",
-  "studio.workflow": "A durable workflow with native agent tasks, linked evidence and reconnectable runs.",
+  "studio.workflow": "Retired workflow note. Saved configuration is preserved; this node never runs.",
   "studio.json":
     "Edit JSON source, pass through upstream JSON, or validate and parse connected text.",
   "studio.value": "Generic value preview node for scalar or unknown output types.",
@@ -16,7 +16,7 @@ const NODE_DESCRIPTION_BY_KIND: Record<string, string> = {
   "studio.note": "Reads selected markdown vault notes and keeps a live read-only preview.",
   "studio.text_output": "Stores editable text and outputs it for downstream nodes.",
   "studio.text_generation": "Calls a text model and returns generated text output.",
-  "studio.image_generation": "Generates one or more images from your prompt.",
+  "studio.image_generation": "Image generation was retired. Saved outputs are preserved.",
   "studio.video_generation": "Generates a video clip from your prompt and optional frame images.",
   "studio.media_ingest": "Stores media files and outputs a reusable media path.",
   "studio.audio_extract": "Extracts an audio track from a media file.",

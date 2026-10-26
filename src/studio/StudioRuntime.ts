@@ -7,6 +7,7 @@ import { App, normalizePath, TFile } from "obsidian";
 import type SystemSculptPlugin from "../main";
 import { desktopHost } from "../platform/desktopOnly";
 import { hasHostCapability } from "../platform/hostCapabilities";
+import { createDeviceFileSource, createLocalFileSource, createVaultFileSource } from "../platform/fileSource";
 import { StudioAssetStore } from "./StudioAssetStore";
 import { StudioGraphCompiler, type StudioCompiledRun } from "./StudioGraphCompiler";
 import { StudioNodeRegistry } from "./StudioNodeRegistry";
@@ -83,6 +84,16 @@ export class StudioRuntime {
   private readonly projectQueues = new Map<string, PendingRun[]>();
   private readonly activeProjects = new Set<string>();
   private readonly nodeResultCacheStore: StudioNodeResultCacheStore;
+  /**
+   * Per project: the transcription operations each published run recorded (a
+   * published run's events never change) and the operations whose cleanup
+   * succeeded, so a retry reads only runs it hasn't seen and sends only what
+   * is still pending.
+   */
+  private readonly transcriptionCleanup = new Map<string, {
+    runs: Map<string, StudioManagedOperationRef[]>;
+    completed: Set<string>;
+  }>();
   readonly runs = new StudioRunObserver((error) => {
     this.plugin.getLogger().warn("Studio run observer failed", { source: "StudioRuntime", metadata: { error: String(error) } });
   });
@@ -145,45 +156,35 @@ export class StudioRuntime {
     index: readonly StudioRunSummary[] = [],
   ): Promise<void> {
     const runs = index.length > 0 ? index : await this.readRunIndex(projectPath);
+    let cleanup = this.transcriptionCleanup.get(projectPath);
+    if (!cleanup) {
+      cleanup = { runs: new Map(), completed: new Set() };
+      this.transcriptionCleanup.set(projectPath, cleanup);
+    }
+    const retained = new Set(runs.map((run) => run.runId));
+    for (const [runId, found] of cleanup.runs) {
+      if (retained.has(runId)) continue;
+      cleanup.runs.delete(runId);
+      for (const operation of found) cleanup.completed.delete(operation.operationId);
+    }
     const operations = new Map<string, StudioManagedOperationRef>();
     for (const run of runs) {
-      const eventsPath = normalizePath(
-        `${deriveStudioRunsDir(projectPath)}/${run.runId}/events.ndjson`,
-      );
-      const bytes = await this.projectStore.readSupportFile(projectPath, eventsPath);
-      if (!bytes || bytes.byteLength > MAX_RECOVERY_EVENT_LOG_BYTES) continue;
-      for (const line of new TextDecoder().decode(bytes).split("\n")) {
-        if (!line.trim()) continue;
-        let event: unknown;
-        try {
-          event = JSON.parse(line);
-        } catch {
-          continue;
-        }
-        if (
-          !event
-          || typeof event !== "object"
-          || (event as { type?: unknown }).type !== "node.output"
-          || !Array.isArray((event as { managedOperations?: unknown }).managedOperations)
-        ) continue;
-        for (const operation of (event as { managedOperations: unknown[] }).managedOperations) {
-          if (
-            !operation
-            || typeof operation !== "object"
-            || (operation as { capability?: unknown }).capability !== "transcription"
-          ) continue;
-          const operationId = (operation as { operationId?: unknown }).operationId;
-          if (
-            typeof operationId !== "string"
-            || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(operationId)
-          ) continue;
-          operations.set(operationId, { capability: "transcription", operationId });
-        }
+      let found = cleanup.runs.get(run.runId);
+      if (!found) {
+        const read = await this.readPublishedTranscriptionOperations(projectPath, run.runId);
+        // A run whose events haven't arrived yet (e.g. still syncing) is read again next time.
+        if (!read) continue;
+        found = read;
+        cleanup.runs.set(run.runId, found);
+      }
+      for (const operation of found) {
+        if (!cleanup.completed.has(operation.operationId)) operations.set(operation.operationId, operation);
       }
     }
     if (operations.size === 0) return;
     try {
       await this.apiAdapter.completeLocalCommit([...operations.values()]);
+      for (const operationId of operations.keys()) cleanup.completed.add(operationId);
     } catch (error) {
       this.plugin.getLogger().warn("Studio published transcription cleanup remains pending", {
         source: "StudioRuntime",
@@ -192,6 +193,49 @@ export class StudioRuntime {
         },
       });
     }
+  }
+
+  /** Transcription operations a published run recorded; null when its events can't be read yet. */
+  private async readPublishedTranscriptionOperations(
+    projectPath: string,
+    runId: string,
+  ): Promise<StudioManagedOperationRef[] | null> {
+    const eventsPath = normalizePath(
+      `${deriveStudioRunsDir(projectPath)}/${runId}/events.ndjson`,
+    );
+    const bytes = await this.projectStore.readSupportFile(projectPath, eventsPath);
+    if (!bytes) return null;
+    if (bytes.byteLength > MAX_RECOVERY_EVENT_LOG_BYTES) return [];
+    const operations = new Map<string, StudioManagedOperationRef>();
+    for (const line of new TextDecoder().decode(bytes).split("\n")) {
+      if (!line.trim()) continue;
+      let event: unknown;
+      try {
+        event = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (
+        !event
+        || typeof event !== "object"
+        || (event as { type?: unknown }).type !== "node.output"
+        || !Array.isArray((event as { managedOperations?: unknown }).managedOperations)
+      ) continue;
+      for (const operation of (event as { managedOperations: unknown[] }).managedOperations) {
+        if (
+          !operation
+          || typeof operation !== "object"
+          || (operation as { capability?: unknown }).capability !== "transcription"
+        ) continue;
+        const operationId = (operation as { operationId?: unknown }).operationId;
+        if (
+          typeof operationId !== "string"
+          || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(operationId)
+        ) continue;
+        operations.set(operationId, { capability: "transcription", operationId });
+      }
+    }
+    return [...operations.values()];
   }
 
   /**
@@ -223,10 +267,10 @@ export class StudioRuntime {
     return found;
   }
 
-  async getNodeCacheSnapshot(projectPath: string): Promise<StudioNodeCacheSnapshotV1> {
+  async getNodeCacheSnapshot(projectPath: string, projectId?: string): Promise<StudioNodeCacheSnapshotV1> {
     const normalizedPath = normalizePath(projectPath);
-    const project = await this.projectStore.loadProject(normalizedPath);
-    return this.nodeResultCacheStore.load(normalizedPath, project.projectId);
+    const identity = projectId ?? (await this.projectStore.loadProject(normalizedPath)).projectId;
+    return this.nodeResultCacheStore.load(normalizedPath, identity);
   }
 
   async getLatestRunEvents(projectPath: string): Promise<StudioRunEvent[]> {
@@ -676,6 +720,17 @@ export class StudioRuntime {
               }
               return size;
             },
+            openVaultFileSource: async (vaultPath: string) => {
+              permissions.assertFilesystemPath(vaultPath);
+              const staged = stagedAssetBytesByProjectionPath.get(normalizePath(vaultPath));
+              // stageArrayBuffer owns an ArrayBuffer-backed copy of these bytes.
+              if (staged) return createDeviceFileSource(new Blob([staged as Uint8Array<ArrayBuffer>]));
+              const file = this.app.vault.getAbstractFileByPath(vaultPath);
+              if (!(file instanceof TFile)) {
+                throw new Error(`Vault file not found: ${vaultPath}`);
+              }
+              return createVaultFileSource(this.app, file);
+            },
             readVaultBinary: async (vaultPath: string) => {
               permissions.assertFilesystemPath(vaultPath);
               const staged = stagedAssetBytesByProjectionPath.get(normalizePath(vaultPath));
@@ -706,6 +761,27 @@ export class StudioRuntime {
                 throw new Error(`Unable to determine local file size: ${normalized}`);
               }
               return size;
+            },
+            openLocalFileSource: async (absolutePath: string) => {
+              const normalized = String(absolutePath || "").trim();
+              if (!desktop) {
+                throw new Error("Local filesystem reads require Obsidian Desktop.");
+              }
+              if (!normalized) {
+                throw new Error("Local filesystem read path is empty.");
+              }
+              if (!desktop.path.isAbsolute(normalized)) {
+                throw new Error(
+                  `Local filesystem read requires an absolute path. Received "${normalized}".`
+                );
+              }
+              permissions.assertFilesystemPath(normalized);
+              const stat = await desktop.fs.stat(normalized);
+              const size = Number(stat.size);
+              if (!Number.isFinite(size)) {
+                throw new Error(`Unable to determine local file size: ${normalized}`);
+              }
+              return createLocalFileSource(normalized, size, stat.mtimeMs);
             },
             readLocalFileBinary: async (absolutePath: string, maxBytes?: number) => {
               const normalized = String(absolutePath || "").trim();
@@ -996,6 +1072,8 @@ export class StudioRuntime {
     });
     try {
       await this.apiAdapter.completeLocalCommit(managedOperationRefs);
+      const cleanup = this.transcriptionCleanup.get(projectPath);
+      for (const operation of managedOperationRefs) cleanup?.completed.add(operation.operationId);
     } catch (error) {
       this.plugin.getLogger().warn("Studio managed-operation cleanup remains pending after run publication", {
         source: "StudioRuntime",

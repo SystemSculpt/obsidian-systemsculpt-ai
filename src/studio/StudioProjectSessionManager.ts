@@ -66,6 +66,11 @@ export class StudioProjectSessionManager {
     }));
   }
 
+  /** Save every session's pending edits now. A failed save keeps that session's edits pending. */
+  async flushAll(): Promise<void> {
+    await Promise.allSettled([...this.entriesByPath.values()].map(entry => entry.session.flushPendingSaveWork({ force: true })));
+  }
+
   async closeAll(): Promise<void> {
     this.disposed = true;
     // Include pending creations: disposal cannot finish while a load can still

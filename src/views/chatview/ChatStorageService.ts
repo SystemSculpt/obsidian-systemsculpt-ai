@@ -5,14 +5,14 @@ import {
   collectChatAttachmentRefKeys,
   isChatAttachmentContentRef,
 } from "./attachments/ChatAttachmentVaultStore";
-import { hasChatIdentityFrontmatter } from "./storage/ChatFrontmatterIdentity";
+import { hasChatIdentityFrontmatter, parseChatFrontmatterYaml, splitChatFrontmatter } from "./storage/ChatFrontmatterIdentity";
 import { ChatMarkdownSerializer } from "./storage/ChatMarkdownSerializer";
 import type {
   ChatApprovalMode,
   ChatMetadata,
   ChatResumeDescriptor,
 } from "./storage/ChatPersistenceTypes";
-import { parseAgentConversationId } from "./storage/ChatPersistenceTypes";
+import { parseAgentConversationId, parseChatApprovalMode } from "./storage/ChatPersistenceTypes";
 import type SystemSculptPlugin from "../../main";
 
 type LoadedChatRecord = {
@@ -268,6 +268,23 @@ export class ChatStorageService {
     return Array.from(new Set(merged));
   }
 
+  /** Rename the latest durable note without replacing its transcript with a view's snapshot. */
+  async renameChat(filePath: string, chatId: string, title: string): Promise<void> {
+    const file = this.app.vault.getAbstractFileByPath(filePath);
+    if (!(file instanceof TFile)) throw new Error("This chat could not be loaded.");
+    await this.app.vault.process(file, (current) => {
+      const parsed = ChatMarkdownSerializer.parseMarkdown(current);
+      const envelope = splitChatFrontmatter(current);
+      const frontmatter = envelope ? parseChatFrontmatterYaml(envelope.yamlContent) : null;
+      if (!parsed || parsed.metadata.id !== chatId || !envelope || !frontmatter) {
+        throw new SavedChatCorruptedError(filePath);
+      }
+      const bom = current.startsWith("﻿") ? "﻿" : "";
+      return `${bom}---\n${stringifyYaml({ ...frontmatter, title })}---\n${envelope.body}`;
+    });
+    this.knownMetadata.delete(filePath);
+  }
+
   // Master save method - always saves in the new, simple format
   async saveChat(
     chatId: string,
@@ -371,7 +388,7 @@ export class ChatStorageService {
         version: newVersion,
         messageCount: messages.length,
         chatFontSize: options.chatFontSize || "medium",
-        approvalMode: options.approvalMode === "full-access" ? "full-access" : "ask",
+        approvalMode: parseChatApprovalMode(options.approvalMode),
       };
       if (agentConversationId) metadata.agentConversationId = agentConversationId;
 
@@ -578,7 +595,7 @@ export class ChatStorageService {
       version: metadata.version || 0,
       context_files: metadata.context_files?.map((f) => f.path) || [],
       chatFontSize: metadata.chatFontSize,
-      approvalMode: metadata.approvalMode === "full-access" ? "full-access" : "ask",
+      approvalMode: parseChatApprovalMode(metadata.approvalMode),
       agentConversationId: parseAgentConversationId(metadata.agentConversationId),
       chatPath: filePath || `${this.chatDirectory}/${metadata.id}.md`,
     };

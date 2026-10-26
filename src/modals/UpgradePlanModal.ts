@@ -1,19 +1,22 @@
-import { setIcon } from "obsidian";
+import { Notice, setIcon } from "obsidian";
 import { StandardModal } from "../core/ui/modals/standard/StandardModal";
 import { getSurfaceOwnerWindow } from "../core/ui/surface";
 import { SYSTEMSCULPT_WEBSITE, withPluginAttribution } from "../constants/externalServices";
 import { PLAN_REQUIRED_MESSAGE } from "../utils/errors";
 import { openExternalUrl } from "../utils/externalUrl";
-import { AccountConnectModal, type AccountConnectActions } from "./AccountConnectModal";
+import {
+  CONNECT_ERROR_COPY,
+  LICENSE_CONFIRMING_COPY,
+  RETRYABLE_CONNECT_REASONS,
+  connectOutcomeMessage,
+  signedInLine,
+} from "./AccountConnectOutcome";
 import type SystemSculptPlugin from "../main";
-import type { AccountConnectMode } from "../services/AccountConnectService";
-
-export type UpgradePlanContext = "gate" | "onboarding";
+import type { AccountConnectMode, ConnectOutcome } from "../services/AccountConnectService";
 
 export type UpgradePlanOptions = Readonly<{
   /** Feature name shown in the description, e.g. "Chat" or "Transcription". */
   feature?: string;
-  context?: UpgradePlanContext;
 }>;
 
 /** True when the vault has a license key to send with managed requests. */
@@ -32,34 +35,28 @@ export function requireActivePlan(plugin: SystemSculptPlugin, feature: string): 
   return false;
 }
 
-/** Standard post-sign-in actions for AccountConnectModal call sites. */
-export function defaultAccountConnectActions(plugin: SystemSculptPlugin): AccountConnectActions {
-  return {
-    onGetStarted: () => {
-      void plugin.openNewChat();
-    },
-    onChoosePlan: () => {
-      UpgradePlanModal.openOnce(plugin);
-    },
-    onRetrySignIn: () => {
-      void plugin.getAccountConnectService().begin("sign-in");
-    },
-  };
+/**
+ * Shows a sign-in outcome once, in the account surface on screen: this modal,
+ * else Account settings, else one notice when neither is open.
+ */
+export function presentAccountConnectOutcome(plugin: SystemSculptPlugin, outcome: ConnectOutcome): void {
+  if (UpgradePlanModal.showConnectOutcome(outcome)) return;
+  if (plugin.settingsTab?.showAccountConnectOutcome(outcome)) return;
+  new Notice(connectOutcomeMessage(outcome), outcome.kind === "error" ? 10_000 : 6_000);
 }
 
 /**
  * The one place a user lands when SystemSculpt AI needs a plan: signed-out
  * users get the sign-in/create-account path, signed-in free accounts get the
- * lifetime/monthly purchase path, and both get a manual-code fallback so the
+ * yearly/monthly purchase path, and both get a manual-code fallback so the
  * flow completes even when the browser cannot deep-link back into Obsidian
- * (common on iOS). Also renders the one-time first-run welcome.
+ * (common on iOS). A sign-in started here finishes here.
  */
 export class UpgradePlanModal extends StandardModal {
   private static current: UpgradePlanModal | null = null;
   /** The browser handoff is on screen and its sign-in has not finished. */
   private awaitingSignIn = false;
-  /** Closing because the sign-in finished or moved to a code exchange. */
-  private closingForCompletion = false;
+  private connectMode: AccountConnectMode = "sign-in";
 
   /** Opens the modal unless one is already on screen (gate calls can race). */
   static openOnce(plugin: SystemSculptPlugin, options: UpgradePlanOptions = {}): UpgradePlanModal {
@@ -69,12 +66,23 @@ export class UpgradePlanModal extends StandardModal {
     return modal;
   }
 
-  /** Closes any open instance — used when the sign-in callback arrives. */
-  static closeCurrent(): void {
+  /** Opens straight into the browser sign-up or sign-in handoff, as the welcome's buttons do. */
+  static openConnect(
+    plugin: SystemSculptPlugin,
+    mode: AccountConnectMode,
+    options: UpgradePlanOptions = {},
+  ): UpgradePlanModal {
+    const modal = UpgradePlanModal.openOnce(plugin, options);
+    modal.beginConnect(mode);
+    return modal;
+  }
+
+  /** Shows a sign-in outcome in the open instance; false when none is open. */
+  static showConnectOutcome(outcome: ConnectOutcome): boolean {
     const current = UpgradePlanModal.current;
-    if (!current) return;
-    current.closingForCompletion = true;
-    current.close();
+    if (!current) return false;
+    current.renderConnectOutcome(outcome);
+    return true;
   }
 
   constructor(
@@ -94,7 +102,7 @@ export class UpgradePlanModal extends StandardModal {
 
   onClose(): void {
     if (UpgradePlanModal.current === this) UpgradePlanModal.current = null;
-    if (!this.closingForCompletion) this.abandonSignIn();
+    this.abandonSignIn();
     super.onClose();
   }
 
@@ -112,10 +120,6 @@ export class UpgradePlanModal extends StandardModal {
   private renderMain(): void {
     this.abandonSignIn();
     this.resetSections();
-    if (this.options.context === "onboarding") {
-      this.renderOnboarding();
-      return;
-    }
     if (this.signedInEmail()) {
       this.renderChoosePlan();
     } else {
@@ -123,27 +127,58 @@ export class UpgradePlanModal extends StandardModal {
     }
   }
 
-  private renderOnboarding(): void {
-    this.addTitle(
-      "Welcome to SystemSculpt AI",
-      "AI chat, transcription, and document intelligence — right inside your vault.",
-    );
-    this.renderIcon("sparkles");
-    this.addDetail("Sign in to connect your account. View paid plans and credit packs for hosted AI features.");
-    this.addLink("upgrade-plan.pricing", "View plans", SYSTEMSCULPT_WEBSITE.LICENSE);
-    this.addActionButton("upgrade-plan.sign-in", "Sign in", () => this.beginConnect("sign-in"), true, "log-in");
-    this.addActionButton("upgrade-plan.create-account", "Create free account", () => this.beginConnect("sign-up"));
-    this.addActionButton("upgrade-plan.explore", "Explore on my own", () => this.close());
+  /**
+   * The result of the sign-in, in place of the handoff. A plan-less account
+   * continues to the plan choice; failures offer the one useful next step.
+   */
+  private renderConnectOutcome(outcome: ConnectOutcome): void {
+    const service = this.plugin.getAccountConnectService();
+    // A failed code can leave the same sign-in open; leaving then still backgrounds it.
+    this.awaitingSignIn = outcome.kind === "error" && service.hasPendingRequest();
+    if (outcome.kind === "no-license") {
+      this.renderMain();
+      return;
+    }
+    this.resetSections();
+    if (outcome.kind === "signed-in") {
+      this.addTitle("You're signed in", signedInLine(outcome.email));
+      this.renderIcon("check-circle-2", "is-success");
+      if (!outcome.licenseValid) this.addDetail(LICENSE_CONFIRMING_COPY);
+      this.addActionButton("upgrade-plan.done", "Done", () => this.close(), true);
+      return;
+    }
+    this.addTitle("Sign-in didn't finish", CONNECT_ERROR_COPY[outcome.reason]);
+    this.renderIcon("alert-triangle", "is-error");
+    if (RETRYABLE_CONNECT_REASONS.has(outcome.reason)) {
+      this.addActionButton(
+        "upgrade-plan.retry",
+        "Start sign-in again",
+        () => this.beginConnect(this.connectMode),
+        true,
+        "log-in",
+      );
+    } else if (this.awaitingSignIn) {
+      this.addActionButton(
+        "upgrade-plan.enter-code",
+        "Enter the code again",
+        () => this.renderHandoff(this.connectMode),
+        true,
+      );
+    }
+    this.addActionButton("upgrade-plan.back", "Back", () => this.renderMain());
   }
 
   private renderSignedOut(): void {
     this.addTitle("Unlock SystemSculpt AI", this.featureLine());
     this.renderIcon("sparkles");
-    this.addDetail(PLAN_REQUIRED_MESSAGE);
-    this.addDetail("Sign in with your SystemSculpt account to get started — creating one is free.");
+    this.addDetail("Create a free SystemSculpt account to get 500 starter credits. No card needed.");
     this.addLink("upgrade-plan.pricing", "Compare plans on systemsculpt.com", SYSTEMSCULPT_WEBSITE.LICENSE);
-    this.addActionButton("upgrade-plan.sign-in", "Sign in", () => this.beginConnect("sign-in"), true, "log-in");
-    this.addActionButton("upgrade-plan.create-account", "Create free account", () => this.beginConnect("sign-up"));
+    this.addLink("upgrade-plan.license-key", "I have a license key", () => {
+      this.close();
+      this.plugin.openSettingsTab("account");
+    });
+    this.addActionButton("upgrade-plan.create-account", "Start free", () => this.beginConnect("sign-up"), true);
+    this.addActionButton("upgrade-plan.sign-in", "Sign in", () => this.beginConnect("sign-in"), false, "log-in");
   }
 
   private renderChoosePlan(): void {
@@ -159,9 +194,9 @@ export class UpgradePlanModal extends StandardModal {
     }
     this.addLink("upgrade-plan.sync", "Already purchased? Sync your license", () => this.beginConnect("sign-in"));
     this.addActionButton(
-      "upgrade-plan.lifetime",
-      "Get lifetime license",
-      () => this.openPurchase(SYSTEMSCULPT_WEBSITE.LIFETIME),
+      "upgrade-plan.yearly",
+      "Subscribe yearly",
+      () => this.openPurchase(SYSTEMSCULPT_WEBSITE.YEARLY),
       true,
       "external-link",
     );
@@ -210,6 +245,24 @@ export class UpgradePlanModal extends StandardModal {
    * completes when the obsidian:// deep link never fires.
    */
   private beginConnect(mode: AccountConnectMode): void {
+    this.connectMode = mode;
+    const status = this.renderHandoff(mode);
+    const ownerWindow = getSurfaceOwnerWindow(this.modalEl);
+    void this.plugin
+      .getAccountConnectService()
+      .begin(mode, ownerWindow)
+      .then((opened) => {
+        if (opened !== false || !this.contentEl.contains(status)) return;
+        status.empty();
+        status.createDiv({
+          cls: "ss-upgrade-plan__status-text",
+          text: "Couldn't open your browser. Reopen the sign-in page, then paste the connection code shown there.",
+        });
+      });
+  }
+
+  /** The browser handoff for the pending sign-in; returns its status line. */
+  private renderHandoff(mode: AccountConnectMode): HTMLElement {
     this.resetSections();
     this.awaitingSignIn = true;
     this.addTitle(
@@ -243,36 +296,21 @@ export class UpgradePlanModal extends StandardModal {
     this.addActionButton(
       "upgrade-plan.complete-code",
       "Complete sign-in",
-      () => this.completeManualCode(codeInput.value),
+      () => this.completeManualCode(codeInput.value, status),
       true,
     );
     this.addActionButton("upgrade-plan.back", "Back", () => this.renderMain());
-
-    const ownerWindow = getSurfaceOwnerWindow(this.modalEl);
-    void this.plugin
-      .getAccountConnectService()
-      .begin(mode, ownerWindow)
-      .then((opened) => {
-        if (opened !== false) return;
-        status.empty();
-        status.createDiv({
-          cls: "ss-upgrade-plan__status-text",
-          text: "Couldn't open your browser. Reopen the sign-in page, then paste the connection code shown there.",
-        });
-      });
+    return status;
   }
 
-  private completeManualCode(rawCode: string): void {
+  /** Exchanges a pasted code; its outcome replaces this handoff when it arrives. */
+  private completeManualCode(rawCode: string, status: HTMLElement): void {
     const code = rawCode.trim();
     if (!code) return;
-    const plugin = this.plugin;
-    this.closingForCompletion = true;
-    this.close();
-    new AccountConnectModal(
-      plugin.app,
-      () => plugin.getAccountConnectService().submitManualCode(code),
-      defaultAccountConnectActions(plugin),
-    ).open();
+    status.empty();
+    status.createDiv({ cls: "ss-upgrade-plan__spinner", attr: { "aria-hidden": "true" } });
+    status.createDiv({ cls: "ss-upgrade-plan__status-text", text: "Signing you in…" });
+    void this.plugin.getAccountConnectService().submitManualCode(code);
   }
 
   private featureLine(): string {
@@ -304,9 +342,9 @@ export class UpgradePlanModal extends StandardModal {
     });
   }
 
-  private renderIcon(icon: string): void {
+  private renderIcon(icon: string, toneClass = ""): void {
     const iconEl = this.contentEl.createDiv({
-      cls: "ss-upgrade-plan__icon",
+      cls: `ss-upgrade-plan__icon ${toneClass}`.trim(),
       attr: { "aria-hidden": "true" },
     });
     setIcon(iconEl, icon);

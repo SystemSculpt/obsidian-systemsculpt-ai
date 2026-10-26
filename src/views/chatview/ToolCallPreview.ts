@@ -1,7 +1,11 @@
 import { App, TFile, normalizePath } from "obsidian";
 import { DiffViewer } from "../../components/DiffViewer";
+import { comparableNativePath, nativeToolPath, normalizedNativePath } from "../../utils/nativeToolPath";
 import type { ToolCall } from "../../types/toolCalls";
+import type { AgentToolPart } from "../../chat/ChatConversation";
 import { getFunctionDataFromToolCall } from "../../utils/toolDisplay";
+import { resolveAbsoluteVaultPath } from "../../utils/vaultPathUtils";
+import { localAgentChatDirectory } from "../../services/codex/CodexExecutionSettings";
 import { extractPrimaryPathArg, splitToolName } from "../../utils/toolPolicy";
 import { generateDiff, DiffResult } from "../../utils/diffUtils";
 import { applyFileEdits } from "../../tools/vault/editApplication";
@@ -14,7 +18,7 @@ import type { FileEdit, FileEditRange, SkippedEdit } from "../../tools/vault/typ
  * a no-op; every other value is a reason the edit cannot be applied and must
  * be said out loud before the user approves it.
  */
-export type WriteEditPreviewStatus = "changed" | "identical" | "unmatched" | "missing";
+export type WriteEditPreviewStatus = "changed" | "identical" | "unmatched" | "missing" | "unavailable";
 
 export interface WriteEditPreview {
   path: string;
@@ -25,6 +29,8 @@ export interface WriteEditPreview {
   requestedCount: number;
   appliedCount: number;
   skipped: SkippedEdit[];
+  notice?: string;
+  isNewFile?: boolean;
 }
 
 export function isWriteOrEditTool(toolName: string): boolean {
@@ -117,7 +123,83 @@ export async function prepareWriteEditPreview(app: App, toolCall: ToolCall): Pro
   if (status === "changed" && newContent === oldContent) status = "identical";
 
   const diff = generateDiff(oldContent ?? "", newContent ?? "", 5);
-  return { path, oldContent, newContent, diff, status, requestedCount, appliedCount, skipped };
+  return { path, oldContent, newContent, diff, status, requestedCount, appliedCount, skipped, ...(base === "write" && !file ? { isNewFile: true } : {}) };
+}
+
+function nativeRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown> : {};
+}
+
+/** Native edits use literal strings, never the hosted tool's fuzzy/range applier. */
+export async function prepareNativeWriteEditPreview(app: App, part: AgentToolPart): Promise<WriteEditPreview | null> {
+  if (part.native?.agent !== "claude" || !["Edit", "MultiEdit", "Write"].includes(part.name)) return null;
+  const input = nativeRecord(part.input);
+  if (typeof input.file_path !== "string" || !input.file_path) return null;
+  const { workingDirectory, vaultRoot: nativeRoot = workingDirectory, vaultRootAlias, homeDirectory } = part.native;
+  const target = nativeToolPath(input.file_path, workingDirectory, nativeRoot, vaultRootAlias, homeDirectory);
+  const adapter = app.vault.adapter as { getBasePath?: () => string } | undefined;
+  const hostRoot = adapter?.getBasePath?.() ?? resolveAbsoluteVaultPath(adapter, ".");
+  let vaultRoot = hostRoot;
+  const samePath = (first: string, second: string) => comparableNativePath(normalizedNativePath(first))
+    === comparableNativePath(normalizedNativePath(second));
+  const sameRoot = (root: string) => samePath(root, nativeRoot);
+  if (target.vaultPath) {
+    if (vaultRoot && !sameRoot(vaultRoot)) {
+      try { vaultRoot = await localAgentChatDirectory(app); }
+      catch { vaultRoot = null; }
+    }
+    // Saved native metadata is not authority to read a same-named file in another vault.
+    if (!vaultRoot || !sameRoot(vaultRoot)
+      || (vaultRootAlias && (!hostRoot || !samePath(vaultRootAlias, hostRoot)))) target.vaultPath = null;
+  }
+  const edits = part.name === "MultiEdit" ? (Array.isArray(input.edits) ? input.edits : []) : [input];
+  const requestedCount = part.name === "Write" ? 0 : edits.length;
+  const result = (oldContent: string, newContent: string, status: WriteEditPreviewStatus, appliedCount = 0, skipped: SkippedEdit[] = [], notice?: string): WriteEditPreview => ({
+    path: target.displayPath, oldContent, newContent, status, requestedCount, appliedCount, skipped,
+    diff: generateDiff(oldContent, newContent, 5), notice,
+  });
+  if (!target.vaultPath) return result("", "", "unavailable", 0, [], "This file is outside your vault or its vault location could not be verified. Its current contents were not read; review the requested change in Details.");
+  // Never use folder-note aliases or synthesize a missing file's before-content.
+  const file = app.vault.getAbstractFileByPath(target.vaultPath);
+  if (file && !(file instanceof TFile)) return result("", "", "unavailable", 0, [], "This path is a folder, not a file.");
+  let original = "";
+  if (file instanceof TFile) {
+    try { original = await app.vault.read(file); }
+    catch { return result("", "", "unavailable", 0, [], "The current file could not be read. Review the requested change in Details."); }
+  }
+  if (part.name === "Write") {
+    if (typeof input.content !== "string") return result(original, original, "unavailable", 0, [], "The file content is not available yet.");
+    const status = file && input.content === original ? "identical" : "changed";
+    const preview = result(original, input.content, status);
+    if (!file) { preview.notice = "Create a new file."; preview.isNewFile = true; }
+    else if (status === "changed" && !preview.diff.stats.additions && !preview.diff.stats.deletions) preview.notice = "Change the final line break.";
+    return preview;
+  }
+  if (!file) return result("", "", "missing");
+  if (!edits.length) return result(original, original, "unavailable", 0, [], "The requested edits are not available yet.");
+  let changed = original;
+  for (const [index, value] of edits.entries()) {
+    const edit = nativeRecord(value);
+    const before = edit.old_string, after = edit.new_string;
+    let reason: string | undefined;
+    if (typeof before !== "string" || typeof after !== "string") reason = "The original and replacement text are required.";
+    else if (!before && changed) reason = "The text to replace is empty, but the file is not.";
+    else if (before && !changed.includes(before)) reason = "The original text does not match exactly, including spaces and line endings.";
+    else if (before && edit.replace_all !== true && changed.indexOf(before, changed.indexOf(before) + before.length) !== -1) reason = "The original text appears more than once. This request does not replace every occurrence.";
+    if (reason) {
+      // MultiEdit is one proposed operation: an unmatched step must not look like
+      // the remaining steps succeeded, or expose a fictitious partial after-file.
+      return result(original, original, "unmatched", 0, [{ index, reason }], `Edit ${index + 1}: ${reason} No proposed changes are shown for this request.`);
+    }
+    const oldText = before as string, newText = after as string;
+    changed = oldText === "" ? newText : edit.replace_all === true
+      ? changed.split(oldText).join(newText)
+      : changed.replace(oldText, () => newText);
+  }
+  const preview = result(original, changed, changed === original ? "identical" : "changed", edits.length);
+  if (preview.status === "changed" && !preview.diff.stats.additions && !preview.diff.stats.deletions) preview.notice = "Change the final line break.";
+  return preview;
 }
 
 export type ToolEditOccurrence = "first" | "last" | "all";
@@ -141,6 +223,11 @@ export function applyEditsLocally(original: string, edits: ToolFileEdit[]): stri
  */
 export async function renderWriteEditInlineDiff(app: App, hostElement: HTMLElement, toolCall: ToolCall): Promise<HTMLElement | null> {
   const previews = await prepareWriteEditPreviews(app, toolCall);
+  return renderPreparedWriteEditPreviews(hostElement, previews, { approval: true });
+}
+
+/** Shared appearance for native exact previews and hosted executor previews. */
+export function renderPreparedWriteEditPreviews(hostElement: HTMLElement, previews: readonly WriteEditPreview[], options: { approval?: boolean } = {}): HTMLElement | null {
   if (previews.length === 0) return null;
 
   // Remove any existing inline diff to avoid duplicates
@@ -150,17 +237,29 @@ export async function renderWriteEditInlineDiff(app: App, hostElement: HTMLEleme
   const container = hostElement.createDiv({ cls: "systemsculpt-inline-diff" });
 
   if (previews.length > 1) renderInlineDiffSummary(container, previews);
+  if (options.approval) hostElement.dataset.changeSize = `+${previews.reduce((sum, preview) => sum + preview.diff.stats.additions, 0)} −${previews.reduce((sum, preview) => sum + preview.diff.stats.deletions, 0)}`;
 
   for (const preview of previews) {
-    const body = container.createDiv({ cls: "systemsculpt-inline-diff__body" });
+    const section = options.approval && previews.length > 1 ? container.createEl("details", { cls: "systemsculpt-inline-diff__file" }) : container;
+    if (section !== container) section.createEl("summary", { text: `${preview.path} · +${preview.diff.stats.additions} −${preview.diff.stats.deletions}` });
+    const body = section.createDiv({ cls: "systemsculpt-inline-diff__body" });
+    if (preview.status === "unavailable" || (preview.notice && preview.status === "changed" && !preview.diff.stats.additions && !preview.diff.stats.deletions)) {
+      if (!options.approval || previews.length > 1) body.createDiv({ cls: "systemsculpt-diff-filename", text: preview.path });
+      body.createDiv({ cls: "systemsculpt-diff-no-changes-notice", text: preview.notice ?? "The change preview is unavailable. Review Details before approving." });
+      continue;
+    }
+    if (preview.isNewFile) body.createDiv({ cls: "systemsculpt-inline-diff__new-file", text: "New file" });
+    if (preview.notice) body.createDiv({ cls: "systemsculpt-diff-no-changes-notice", text: preview.notice });
     const viewer = new DiffViewer({
-      container: body,
+      container: body.createDiv(),
       diffResult: preview.diff,
       fileName: preview.path,
       maxContextLines: 3,
       showLineNumbers: true,
+      hideHeader: options.approval === true,
+      ...(options.approval ? { maxVisibleLines: 12 } : {}),
       emptyReason: preview.status === "changed" ? "identical" : preview.status,
-      emptyDetail: describeSkippedEdits(preview),
+      emptyDetail: preview.notice ? undefined : describeSkippedEdits(preview),
     });
     viewer.render();
   }

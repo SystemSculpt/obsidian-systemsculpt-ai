@@ -1,9 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
-import {
-  normalizeLineEndings,
-  replaceFileAtomically,
-} from "./platform-portability.mjs";
+import esbuild from "esbuild";
+import { replaceFileAtomically } from "./platform-portability.mjs";
 
 const FAILURE_SENTINEL = "/* CSS build failed */\n";
 
@@ -12,13 +10,6 @@ class CssBuildSecurityError extends Error {
     super(message);
     this.name = "CssBuildSecurityError";
   }
-}
-
-function parseImports(indexPath) {
-  const content = fs.readFileSync(indexPath, "utf8");
-  const withoutComments = content.replace(/\/\*[\s\S]*?\*\//g, "");
-  return [...withoutComments.matchAll(/@import\s+['"](.+)['"]/g)]
-    .map((match) => match[1]);
 }
 
 function lstatIfPresent(filePath) {
@@ -62,13 +53,10 @@ function inspectCssSourceRoot(indexPath) {
       `CSS entry must be a regular file inside a regular source directory: ${indexPath}`,
     );
   }
-  return {
-    sourceRoot,
-    realSourceRoot: fs.realpathSync(sourceRoot),
-  };
+  return fs.realpathSync(sourceRoot);
 }
 
-function resolveCssImport(sourceRoot, realSourceRoot, importPath) {
+function resolveCssImport(sourceRoot, importPath, resolveDir) {
   const normalizedImportPath = importPath.replace(/\\/g, "/");
   if (
     !normalizedImportPath
@@ -81,7 +69,7 @@ function resolveCssImport(sourceRoot, realSourceRoot, importPath) {
     );
   }
 
-  const resolvedPath = path.resolve(sourceRoot, normalizedImportPath);
+  const resolvedPath = path.resolve(resolveDir, normalizedImportPath);
   if (escapesRoot(sourceRoot, resolvedPath)) {
     throw new CssBuildSecurityError(
       `CSS import must be a relative path without traversal: ${importPath}`,
@@ -96,7 +84,7 @@ function resolveCssImport(sourceRoot, realSourceRoot, importPath) {
     );
   }
   const realPath = fs.realpathSync(resolvedPath);
-  if (escapesRoot(realSourceRoot, realPath)) {
+  if (escapesRoot(sourceRoot, realPath)) {
     throw new CssBuildSecurityError(
       `CSS import must resolve to a regular file inside the CSS source root: ${importPath}`,
     );
@@ -104,7 +92,7 @@ function resolveCssImport(sourceRoot, realSourceRoot, importPath) {
   return resolvedPath;
 }
 
-export function buildCssArtifact({
+export async function buildCssArtifact({
   indexPath,
   outputPath,
   production = true,
@@ -113,55 +101,59 @@ export function buildCssArtifact({
   const resolvedIndexPath = path.resolve(String(indexPath || ""));
   const resolvedOutputPath = path.resolve(String(outputPath || ""));
   const hadExistingOutput = assertSafeOutputPath(resolvedOutputPath);
-  let combinedCss;
-  let missingFiles;
-  let processedCount;
-  let startedAt;
+  const startedAt = Date.now();
+  let result;
 
   try {
     if (!fs.existsSync(resolvedIndexPath)) {
       throw new Error(`CSS entry file missing at ${resolvedIndexPath}`);
     }
 
-    const { sourceRoot, realSourceRoot } = inspectCssSourceRoot(resolvedIndexPath);
-    startedAt = Date.now();
-    const imports = parseImports(resolvedIndexPath);
-    missingFiles = [];
-    combinedCss = `/**\n * SystemSculpt CSS\n * Generated from src/css/ sources.\n * DO NOT EDIT DIRECTLY.\n */\n\n`;
-    processedCount = 0;
-
-    for (const importPath of imports) {
-      const resolvedPath = resolveCssImport(sourceRoot, realSourceRoot, importPath);
-      if (!resolvedPath) {
-        missingFiles.push(importPath);
-        continue;
-      }
-      const content = normalizeLineEndings(fs.readFileSync(resolvedPath, "utf8"));
-      combinedCss += `/* ${path.basename(importPath)} */\n${content}\n\n`;
-      processedCount += 1;
-    }
-
-    if (missingFiles.length > 0 && production) {
-      throw new Error(`Missing CSS imports: ${missingFiles.join(", ")}`);
-    }
+    const sourceRoot = inspectCssSourceRoot(resolvedIndexPath);
+    result = await esbuild.build({
+      absWorkingDir: sourceRoot,
+      entryPoints: [resolvedIndexPath],
+      outfile: resolvedOutputPath,
+      bundle: true,
+      minify: production,
+      write: false,
+      metafile: true,
+      logLevel: "silent",
+      plugins: [{
+        name: "css-source-paths",
+        setup(build) {
+          build.onResolve({ filter: /.*/ }, (args) => {
+            // Preserve asset URLs as authored, as the concatenator did. Only
+            // stylesheets are build inputs; URLs must not read/embed local files.
+            if (args.kind === "url-token") return { path: args.path, external: true };
+            if (args.kind !== "import-rule") return;
+            const resolvedPath = resolveCssImport(sourceRoot, args.path, args.resolveDir);
+            if (!resolvedPath) throw new Error(`Missing CSS imports: ${args.path}`);
+            return { path: resolvedPath };
+          });
+        },
+      }],
+    });
   } catch (error) {
     logger.error?.("CSS build failed", error instanceof Error ? error.message : error);
-    if (production || error instanceof CssBuildSecurityError) throw error;
+    const securityError = error instanceof CssBuildSecurityError
+      || error?.errors?.some((entry) => entry.detail instanceof CssBuildSecurityError);
+    if (production || securityError) throw error;
     if (!hadExistingOutput) {
       replaceFileAtomically(resolvedOutputPath, FAILURE_SENTINEL);
     }
     return null;
   }
 
+  const css = result.outputFiles[0].text;
   try {
-    replaceFileAtomically(resolvedOutputPath, combinedCss);
+    assertSafeOutputPath(resolvedOutputPath);
+    replaceFileAtomically(resolvedOutputPath, css);
   } catch (error) {
     logger.error?.("CSS build failed", error instanceof Error ? error.message : error);
     throw error;
   }
-  logger.success?.(`Built CSS (${processedCount} files, ${Date.now() - startedAt}ms)`);
-  if (missingFiles.length > 0) {
-    logger.warn?.(`Missing imports: ${missingFiles.join(", ")}`);
-  }
-  return combinedCss;
+  for (const warning of result.warnings) logger.warn?.(warning.text);
+  logger.success?.(`Built CSS (${Object.keys(result.metafile.inputs).length} files, ${Date.now() - startedAt}ms)`);
+  return css;
 }

@@ -81,7 +81,6 @@ export interface StudioClipboardAndDropHost {
   insertVaultNoteNodes(
     notePaths: string[],
     anchor: StudioGraphPoint,
-    source: "paste" | "drop",
   ): Promise<void>;
   storeAsset(
     projectPath: string,
@@ -102,11 +101,6 @@ type ProjectOperationScope = {
   projectPath: string;
   lifecycleEpoch: number;
 };
-
-/** Nodes and shapes are one clipboard, so the notice counts items, not kinds. */
-function describeClipboardCount(verb: string, count: number): string {
-  return count === 1 ? `${verb} 1 item.` : `${verb} ${count} items.`;
-}
 
 const DEFAULT_DEPENDENCIES: StudioClipboardAndDropDependencies = {
   createId: (prefix) => randomId(prefix),
@@ -207,7 +201,7 @@ export class StudioClipboardAndDropController {
     this.graphClipboardImage = null;
   }
 
-  copySelectedGraphNodes(options?: { showNotice?: boolean }): boolean {
+  copySelectedGraphNodes(): boolean {
     if (this.disposed || this.host.isBusy()) return false;
     const project = this.host.getCurrentProject();
     if (!project) return false;
@@ -231,9 +225,6 @@ export class StudioClipboardAndDropController {
       this.graphClipboardImage = null;
       void this.syncGraphClipboardToSystemClipboard(payload);
     }
-    if (options?.showNotice !== false) {
-      new Notice(describeClipboardCount("Copied", payload.nodes.length + payload.shapes.length));
-    }
     return true;
   }
 
@@ -242,7 +233,7 @@ export class StudioClipboardAndDropController {
     const selectedNodeIds = this.host.getSelectedNodeIds();
     const selectedShapeIds = this.host.getSelectedShapeIds?.() || [];
     if (selectedNodeIds.length === 0 && selectedShapeIds.length === 0) return false;
-    if (!this.copySelectedGraphNodes({ showNotice: false })) return false;
+    if (!this.copySelectedGraphNodes()) return false;
 
     // Shapes go first: removing them cannot invalidate a node id, and the
     // diagram removal already takes its own arrows with it.
@@ -256,9 +247,6 @@ export class StudioClipboardAndDropController {
       new Notice("Unable to cut: the selection no longer exists in this project.");
       return false;
     }
-    new Notice(
-      describeClipboardCount("Cut", selectedNodeIds.length + selectedShapeIds.length)
-    );
     return true;
   }
 
@@ -319,7 +307,6 @@ export class StudioClipboardAndDropController {
       refreshNoteNodeIds: pastedNoteNodeIds,
     });
     this.graphClipboardPasteCount += 1;
-    new Notice(describeClipboardCount("Pasted", newNodes.length + newShapes.length));
     return true;
   }
 
@@ -372,7 +359,6 @@ export class StudioClipboardAndDropController {
         await this.host.insertVaultNoteNodes(
           [notePath],
           this.resolvePasteAnchorPosition(),
-          "paste",
         );
         return;
       }
@@ -408,7 +394,6 @@ export class StudioClipboardAndDropController {
       selectionMode: "only",
       pendingConnectionMode: "default",
     });
-    new Notice("Pasted as text.");
     return true;
   }
 
@@ -443,11 +428,6 @@ export class StudioClipboardAndDropController {
       selectionMode: "only",
       pendingConnectionMode: "default",
     });
-    new Notice(
-      nodes.length === 1
-        ? "Pasted 1 media file as a Media node."
-        : `Pasted ${nodes.length} media files as Media nodes.`,
-    );
     return true;
   }
 
@@ -511,7 +491,7 @@ export class StudioClipboardAndDropController {
       }
     }
     if (dropped.notePaths.length > 0 && this.isScopeCurrent(scope)) {
-      await this.host.insertVaultNoteNodes(dropped.notePaths, anchor, "drop");
+      await this.host.insertVaultNoteNodes(dropped.notePaths, anchor);
       handledSomething = true;
     }
     if (!handledSomething && dropped.unsupportedPaths.length > 0) {
@@ -564,11 +544,6 @@ export class StudioClipboardAndDropController {
       selectionMode: "only",
       pendingConnectionMode: "default",
     });
-    new Notice(
-      newNodes.length === 1
-        ? "Added 1 media file as a Media node."
-        : `Added ${newNodes.length} media files as Media nodes.`,
-    );
     return true;
   }
 

@@ -1,4 +1,5 @@
-import { FileSystemAdapter, Setting, Notice } from "obsidian";
+import { FileSystemAdapter, Notice } from "obsidian";
+import { createCatalogSetting } from "./SettingsCatalog";
 import { SystemSculptSettingTab } from "./SystemSculptSettingTab";
 import { showPrompt } from "../core/ui/modals/PromptModal";
 import { BackupRestoreModal } from "../core/settings/BackupRestoreModal";
@@ -14,32 +15,19 @@ export function displayBackupTabContent(containerEl: HTMLElement, tabInstance: S
 
   containerEl.createEl('h3', { text: 'Settings backup' });
 
-  new Setting(containerEl)
-    .setName('Automatic backups')
-    .setDesc('Create a backup every 24 hours. Backups include SystemSculpt preferences and feature settings, but exclude secret keys and tokens.')
+  createCatalogSetting(containerEl, "workspace.automatic-backups")
     .addToggle((toggle) => {
       toggle
         .setValue(plugin.settings.automaticBackupsEnabled)
         .onChange(async (value) => {
+          // The settings manager arms or clears the backup timer on this change.
           await plugin.getSettingsManager().updateSettings({ automaticBackupsEnabled: value });
-          const backupService = plugin.getSettingsManager().getAutomaticBackupService();
-          if (value) {
-            backupService.start();
-            new Notice('Automatic backups enabled');
-          } else {
-            backupService.stop();
-            new Notice('Automatic backups disabled');
-          }
         });
     });
 
-  new Setting(containerEl)
-    .setName('Manual backups')
-    .setDesc('Create or restore backups on demand. Files live in .systemsculpt/settings-backups inside your vault, with sensitive keys redacted.');
+  createCatalogSetting(containerEl, "workspace.manual-backups");
 
-  new Setting(containerEl)
-    .setName('Restore from backup')
-    .setDesc('Replace your current settings with a saved backup.')
+  createCatalogSetting(containerEl, "workspace.restore-backup")
     .addButton((button) => {
       button
         .setButtonText('Select backup')
@@ -50,12 +38,10 @@ export function displayBackupTabContent(containerEl: HTMLElement, tabInstance: S
 
           const confirmRestore = async (details: string | null) => {
             const description = details
-              ? `This will replace your current settings.
+              ? `Replace your current settings with this backup?
 
-${details}
-
-Continue?`
-              : 'This will replace your current settings with the selected backup. Continue?';
+${details}`
+              : 'Replace your current settings with the selected backup?';
             const confirmed = await showPrompt(app, 'Restore settings from backup', {
               description,
               primaryButton: 'Restore',
@@ -64,7 +50,7 @@ Continue?`
             if (confirmed?.confirmed) {
               const success = await backupModal.restoreFromBackup(selectedBackupPath);
               if (success) {
-                tabInstance.display();
+                tabInstance.refreshSettings();
               }
             }
           };
@@ -83,9 +69,7 @@ Continue?`
         });
     });
 
-  const backupFolderSetting = new Setting(containerEl)
-    .setName('Backup folder')
-    .setDesc('Stored in .systemsculpt/settings-backups inside your vault.');
+  const backupFolderSetting = createCatalogSetting(containerEl, "workspace.backup-folder");
   if (hasHostCapability("file-manager-reveal", containerEl)) {
     backupFolderSetting.addButton((button) => {
       button
@@ -112,7 +96,5 @@ Continue?`
     });
   }
 
-  new Setting(containerEl)
-    .setName('Tips')
-    .setDesc('Automatic backups run in the background. Manual backups with custom names are useful before big changes. You can copy backup files to other devices to share your SystemSculpt configuration.');
+  createCatalogSetting(containerEl, "workspace.backup-tips");
 }

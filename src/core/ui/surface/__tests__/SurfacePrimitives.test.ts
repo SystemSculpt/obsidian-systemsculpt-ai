@@ -1,5 +1,10 @@
 /** @jest-environment jsdom */
 
+import * as obsidian from "obsidian";
+jest.mock("obsidian", () => {
+  const actual = jest.requireActual("obsidian");
+  return { ...actual, setTooltip: jest.fn(actual.setTooltip) };
+});
 import {
   createUiAction,
   createUiSearch,
@@ -13,6 +18,7 @@ describe("SurfacePrimitives", () => {
     const onSelect = jest.fn();
     const button = createUiAction(parent, {
       label: "Delete note",
+      testId: "test.delete",
       icon: "trash",
       size: "icon",
       tone: "danger",
@@ -31,6 +37,7 @@ describe("SurfacePrimitives", () => {
     const parent = document.createElement("div");
     const button = createUiAction(parent, {
       label: "Send message",
+      testId: "test.send",
       icon: "arrow-up",
       size: "icon",
     });
@@ -55,6 +62,7 @@ describe("SurfacePrimitives", () => {
     const parent = document.createElement("div");
     const button = createUiAction(parent, {
       label: "Chat history",
+      testId: "test.history",
       icon: "history",
       size: "icon",
       tooltip: false,
@@ -69,12 +77,31 @@ describe("SurfacePrimitives", () => {
     expect(button.hasAttribute("title")).toBe(false);
   });
 
+  it.each([true, false])("uses matching Obsidian tooltip and accessible text with native title %s", (tooltip) => {
+    const setTooltip = jest.mocked(obsidian.setTooltip);
+    setTooltip.mockClear();
+    try {
+      const button = createUiAction(document.createElement("div"), {
+        label: "Copy response · 10:30 AM", title: "Copy response · 10:30 AM", testId: "test.copy", size: "icon", tooltip,
+      });
+      const initial = "Copy response · 10:30 AM";
+      expect(button.getAttribute("aria-label")).toBe(initial);
+      expect(setTooltip).toHaveBeenLastCalledWith(button, initial);
+      updateUiAction(button, { label: "Copied", icon: "check" });
+      expect(button.getAttribute("aria-label")).toBe("Copied");
+      expect(setTooltip).toHaveBeenLastCalledWith(button, "Copied");
+      expect(button.hasAttribute("title")).toBe(tooltip);
+      if (tooltip) expect(button.title).toBe("Copied");
+    } finally { setTooltip.mockClear(); }
+  });
+
   it("keeps search clear state and query callbacks synchronized", () => {
     const parent = document.createElement("div");
     const onQuery = jest.fn();
     const search = createUiSearch(parent, {
       label: "Search vault notes",
       placeholder: "Search notes",
+      testId: "test.search",
       value: "inbox",
       onQuery,
     });
@@ -107,6 +134,7 @@ describe("SurfacePrimitives", () => {
     const search = createUiSearch(parent, {
       label: "Search notes",
       placeholder: "Search notes",
+      testId: "test.search",
       onQuery,
     });
     expect(parent.contains(search.root)).toBe(true);

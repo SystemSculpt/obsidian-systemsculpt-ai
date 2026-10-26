@@ -2,9 +2,10 @@ import { Notice } from "obsidian";
 
 import type SystemSculptPlugin from "../main";
 import { API_BASE_URL } from "../constants/api";
-import { showPrompt } from "../core/ui/modals/PromptModal";
+import { showActionNotice } from "../core/ui/notifications";
 import { hasHostCapability } from "../platform/hostCapabilities";
 import { compareNumericVersions, parseNumericVersion } from "../utils/semver";
+import { parseRetryAfterMs } from "../utils/retryAfter";
 import { PlatformRequestClient } from "./PlatformRequestClient";
 
 const RELEASE_CONTRACT = "plugin-release-v1" as const;
@@ -19,7 +20,7 @@ const REQUEST_TIMEOUT_MS = 8_000;
 const UPDATE_URI = "obsidian://show-plugin?id=systemsculpt-ai";
 const RELEASE_URL_PREFIX = "https://github.com/SystemSculpt/obsidian-systemsculpt-ai/releases/tag/";
 
-export type PluginReleaseInfo = Readonly<{
+type PluginReleaseInfo = Readonly<{
   contractVersion: typeof RELEASE_CONTRACT;
   pluginId: typeof PLUGIN_ID;
   latestVersion: string;
@@ -38,7 +39,10 @@ export type PluginUpdateCheckResult =
  */
 export type PluginReleaseFetch = Readonly<{ body: unknown; freshForMs?: number }>;
 
-/** A failed release read; retryAfterMs carries the server's Retry-After. */
+/**
+ * A failed release read; retryAfterMs carries the server's Retry-After.
+ * @internal Tests match this error class.
+ */
 export class PluginReleaseRequestError extends Error {
   constructor(message: string, public readonly retryAfterMs?: number) {
     super(message);
@@ -46,11 +50,13 @@ export class PluginReleaseRequestError extends Error {
   }
 }
 
+/** The one follow-up a manual check's result can offer. */
+type PluginUpdateNoticeAction = Readonly<{ label: string; onSelect: () => void }>;
+
 type PluginUpdateServiceOptions = Readonly<{
   request?: () => Promise<PluginReleaseFetch>;
-  notify?: (message: string, durationMs?: number) => void;
+  notify?: (message: string, durationMs?: number, action?: PluginUpdateNoticeAction) => void;
   openUpdatePage?: () => void;
-  showUpdatePrompt?: (version: string) => Promise<boolean>;
   now?: () => number;
 }>;
 
@@ -59,7 +65,10 @@ function boundedDelayMs(value: number | undefined): number {
   return Math.min(MAX_CHECK_DELAY_MS, Math.floor(value));
 }
 
-/** Reads `max-age` from Cache-Control; `no-store`/`no-cache` give no hint. */
+/**
+ * Reads `max-age` from Cache-Control; `no-store`/`no-cache` give no hint.
+ * @internal Unit-tested directly.
+ */
 export function cacheControlMaxAgeMs(value: string | null): number | undefined {
   if (!value) return undefined;
   const directives = value.toLowerCase().split(",").map((part) => part.trim());
@@ -71,21 +80,13 @@ export function cacheControlMaxAgeMs(value: string | null): number | undefined {
   return undefined;
 }
 
-/** Reads Retry-After as delta-seconds or an HTTP date. */
-export function retryAfterMs(value: string | null, now: number): number | undefined {
-  if (!value) return undefined;
-  const trimmed = value.trim();
-  if (/^\d{1,10}$/.test(trimmed)) return Number(trimmed) * 1_000;
-  const at = Date.parse(trimmed);
-  return Number.isFinite(at) ? Math.max(0, at - now) : undefined;
-}
-
 function hasExactKeys(record: Record<string, unknown>, expected: readonly string[]): boolean {
   const actual = Object.keys(record).sort();
   const wanted = [...expected].sort();
   return actual.length === wanted.length && actual.every((key, index) => key === wanted[index]);
 }
 
+/** @internal Unit-tested directly. */
 export function parsePluginReleaseInfo(value: unknown): PluginReleaseInfo | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
@@ -117,7 +118,10 @@ export function parsePluginReleaseInfo(value: unknown): PluginReleaseInfo | null
 }
 
 /**
- * Announces published releases. Obsidian Community Plugins owns installation.
+ * Discovers published releases. Obsidian Community Plugins owns installation.
+ *
+ * A background check only updates the passive status-bar action; nothing
+ * opens or announces itself. A manual check reports one result.
  *
  * Checks run once at launch, then at most once per CHECK_INTERVAL_MS. A single
  * timeout is armed only while the window is visible and the host is online;
@@ -129,7 +133,6 @@ export class PluginUpdateService {
   private readonly request: NonNullable<PluginUpdateServiceOptions["request"]>;
   private readonly notify: NonNullable<PluginUpdateServiceOptions["notify"]>;
   private readonly openUpdatePage: NonNullable<PluginUpdateServiceOptions["openUpdatePage"]>;
-  private readonly showUpdatePrompt: NonNullable<PluginUpdateServiceOptions["showUpdatePrompt"]>;
   private readonly now: NonNullable<PluginUpdateServiceOptions["now"]>;
   private statusBarEl: HTMLElement | null = null;
   private scheduledCheck: number | null = null;
@@ -137,7 +140,6 @@ export class PluginUpdateService {
   /** The next background check may not run before this time. */
   private nextCheckAt = 0;
   private consecutiveFailures = 0;
-  private announcedVersion = "";
   private pendingCheck: Promise<PluginUpdateCheckResult> | null = null;
   private pendingManualFeedback = false;
 
@@ -154,24 +156,13 @@ export class PluginUpdateService {
     options: PluginUpdateServiceOptions = {},
   ) {
     this.request = options.request ?? (() => this.fetchLatestRelease());
-    this.notify = options.notify ?? ((message, durationMs) => new Notice(message, durationMs));
+    this.notify = options.notify ?? ((message, durationMs, action) => {
+      if (action) showActionNotice(message, action, { duration: durationMs });
+      else new Notice(message, durationMs);
+    });
     this.openUpdatePage = options.openUpdatePage ?? (() => {
       const ownerWindow = typeof window !== "undefined" ? window.activeWindow ?? window : undefined;
       ownerWindow?.open?.(UPDATE_URI, "_blank");
-    });
-    this.showUpdatePrompt = options.showUpdatePrompt ?? (async (version) => {
-      const result = await showPrompt(
-        this.plugin.app,
-        "Update to unlock the newest capabilities, sharper workflows, and fresh improvements.",
-        {
-          title: "SystemSculpt just evolved",
-          description: `Version ${version} has landed.`,
-          primaryButton: "Let's evolve",
-          secondaryButton: "Stay here for now",
-          icon: "sparkles",
-        },
-      );
-      return result?.confirmed === true;
     });
     this.now = options.now ?? (() => Date.now());
   }
@@ -195,7 +186,6 @@ export class PluginUpdateService {
       window.addEventListener("online", this.handleWake);
       window.addEventListener("offline", this.handlePause);
     }
-    void this.recordInstalledVersion();
     this.checkIfDue();
   }
 
@@ -271,14 +261,11 @@ export class PluginUpdateService {
 
       if (compareNumericVersions(release.latestVersion, this.plugin.manifest.version) > 0) {
         this.showUpdateAction(release.latestVersion);
-        if (
-          this.pendingManualFeedback
-          || (
-            this.announcedVersion !== release.latestVersion
-            && this.plugin.settings.lastAnnouncedPluginRelease !== release.latestVersion
-          )
-        ) {
-          await this.presentUpdate(release.latestVersion);
+        if (this.pendingManualFeedback) {
+          this.notify(`SystemSculpt ${release.latestVersion} is available.`, 10_000, {
+            label: "Open plugin updates",
+            onSelect: this.openUpdatePage,
+          });
         }
         return { outcome: "update_available", release };
       }
@@ -318,7 +305,7 @@ export class PluginUpdateService {
     if (!response.ok) {
       throw new PluginReleaseRequestError(
         `Plugin release request failed (${response.status})`,
-        retryAfterMs(response.headers.get("retry-after"), this.now()),
+        parseRetryAfterMs(response.headers.get("retry-after"), { now: this.now() }),
       );
     }
     const text = await response.text();
@@ -327,26 +314,6 @@ export class PluginUpdateService {
       body: JSON.parse(text) as unknown,
       freshForMs: cacheControlMaxAgeMs(response.headers.get("cache-control")),
     };
-  }
-
-  private async recordInstalledVersion(): Promise<void> {
-    const currentVersion = this.plugin.manifest.version;
-    const previousVersion = this.plugin.settings.lastLoadedPluginVersion;
-    if (previousVersion && compareNumericVersions(currentVersion, previousVersion) > 0) {
-      this.notify(`SystemSculpt updated to ${currentVersion}.`, 6_000);
-    }
-    if (previousVersion !== currentVersion) {
-      await this.plugin.getSettingsManager().updateSettings({ lastLoadedPluginVersion: currentVersion });
-    }
-  }
-
-  private async presentUpdate(version: string): Promise<void> {
-    this.announcedVersion = version;
-    const shouldOpenUpdatePage = await this.showUpdatePrompt(version);
-    if (this.plugin.settings.lastAnnouncedPluginRelease !== version) {
-      await this.plugin.getSettingsManager().updateSettings({ lastAnnouncedPluginRelease: version });
-    }
-    if (shouldOpenUpdatePage) this.openUpdatePage();
   }
 
   private prepareStatusBar(): void {

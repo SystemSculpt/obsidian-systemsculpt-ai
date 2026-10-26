@@ -110,6 +110,8 @@ export class AnchoredScroller {
   private layoutMutation: ActiveLayoutMutation | null = null;
   private resizeObserver: ResizeObserver | null = null;
   private geometryFrame: number | null = null;
+  private rowBatchDepth = 0;
+  private rowBatchChanged = false;
   private geometryFrameIncludesContentResize = false;
   private geometryFrameContentScrollIntentVersion = 0;
   private readonly submittedPromptSpacer: SVGSVGElement;
@@ -184,7 +186,24 @@ export class AnchoredScroller {
       id,
       element,
     });
-    this.updateScrollButton();
+    this.rowsChanged();
+  }
+
+  /**
+   * Applies many row changes with one measurement at the end. Measuring after
+   * each row write forces a layout per row (500 on a long saved chat).
+   */
+  public batchRowChanges(apply: () => void): void {
+    this.rowBatchDepth += 1;
+    try {
+      apply();
+    } finally {
+      this.rowBatchDepth -= 1;
+      if (this.rowBatchDepth === 0 && this.rowBatchChanged) {
+        this.rowBatchChanged = false;
+        if (!this.destroyed) this.updateScrollButton();
+      }
+    }
   }
 
   public unregisterRow(rowId: string): void {
@@ -195,7 +214,12 @@ export class AnchoredScroller {
       this.lastKnownManualAnchor = null;
     }
     if (row.element.dataset.agentRowId === rowId) delete row.element.dataset.agentRowId;
-    this.updateScrollButton();
+    this.rowsChanged();
+  }
+
+  private rowsChanged(): void {
+    if (this.rowBatchDepth > 0) this.rowBatchChanged = true;
+    else this.updateScrollButton();
   }
 
   public notifyTurnStarted(options: Readonly<{

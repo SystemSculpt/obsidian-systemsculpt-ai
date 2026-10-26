@@ -7,7 +7,7 @@ export type AgentRunPhase =
   | "settling"
   | "complete";
 
-export type AgentRunStatus =
+type AgentRunStatus =
   | "idle"
   | "running"
   | "waiting"
@@ -15,7 +15,7 @@ export type AgentRunStatus =
   | "cancelled"
   | "failed";
 
-export type AgentToolState =
+type AgentToolState =
   | "input-streaming"
   | "input-ready"
   | "approval-required"
@@ -68,12 +68,28 @@ export type AgentTextPart = AgentPartBase & Readonly<{
   markdown: string;
 }>;
 
-export type AgentReasoningPart = AgentPartBase & Readonly<{
+type AgentReasoningPart = AgentPartBase & Readonly<{
   kind: "reasoning";
   messageId: string;
   state: "streaming" | "complete";
   summary: string;
 }>;
+
+export type NativeToolMetadata = Readonly<{
+  agent: "claude" | "codex";
+  workingDirectory: string;
+  /** Presentation roots supplied by Chat, never native permission authority. */
+  vaultRoot?: string;
+  vaultRootAlias?: string;
+  /** Lets paths outside the vault read as ~/…; presentation only. */
+  homeDirectory?: string;
+  requestMethod?: string;
+  requestId?: string | number;
+  description?: string;
+  permissionSuggestions?: readonly Record<string, unknown>[];
+}>;
+
+export type AgentApprovalDecision = "approved" | "denied" | "withdrawn";
 
 export type AgentToolPart = AgentPartBase & Readonly<{
   kind: "tool";
@@ -85,11 +101,14 @@ export type AgentToolPart = AgentPartBase & Readonly<{
   inputText?: string;
   state: AgentToolState;
   approvalId?: string;
+  approvalDecision?: AgentApprovalDecision;
+  approvalScope?: "session";
+  native?: NativeToolMetadata;
   output?: ToolResultSummary;
   error?: ManagedAgentError;
 }>;
 
-export type AgentErrorPart = AgentPartBase & Readonly<{
+type AgentErrorPart = AgentPartBase & Readonly<{
   kind: "error";
   error: ManagedAgentError;
   retryable: boolean;
@@ -102,7 +121,7 @@ export type AgentPart =
   | AgentToolPart
   | AgentErrorPart;
 
-export type AgentMessageProjection = Readonly<{
+type AgentMessageProjection = Readonly<{
   id: string;
   role: "assistant";
   partIds: readonly string[];

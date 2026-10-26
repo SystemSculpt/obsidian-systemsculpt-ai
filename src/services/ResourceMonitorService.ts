@@ -592,6 +592,7 @@ export class ResourceMonitorService {
   private async readMetricsFileBytes(): Promise<number | null> {
     try {
       const storage = this.plugin.storage;
+      if (!storage) return null;
       const stat = await this.plugin.app.vault.adapter.stat(storage.getPath("diagnostics", this.metricsFileName));
       return stat && Number.isFinite(stat.size) ? stat.size : null;
     } catch {
@@ -666,6 +667,7 @@ export class ResourceMonitorService {
 
 /**
  * Projects an internal sample through the only resource fields allowed in incident reports.
+ * @internal Unit-tested directly.
  */
 export function projectIncidentResourceSample(sample: unknown): IncidentResourceSample | null {
   try {

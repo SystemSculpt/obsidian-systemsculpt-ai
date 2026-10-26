@@ -13,7 +13,6 @@ function createHost(): TestHost {
     isBusy: () => false,
     getCurrentProject: () => null,
     renderEdgeLayer: () => undefined,
-    scheduleProjectSave: () => undefined,
     commitProjectMutation: (_reason, mutator) => {
       const project = host.getCurrentProject();
       if (!project) {
@@ -333,8 +332,8 @@ describe("StudioGraphSelectionController wheel behavior", () => {
     const viewport = createViewport();
     controller.registerViewportElement(viewport);
 
-    const focusedTextarea = {} as Element & { ownerDocument: { activeElement: Element | null } };
-    focusedTextarea.ownerDocument = { activeElement: focusedTextarea };
+    const focusedTextarea: { ownerDocument: { activeElement: object | null } } = { ownerDocument: { activeElement: null } };
+    focusedTextarea.ownerDocument.activeElement = focusedTextarea;
     const preventDefault = jest.fn();
     const event = {
       target: {
@@ -771,7 +770,7 @@ describe("StudioGraphSelectionController drag behavior", () => {
           pointerId: 11,
           clientX: 140,
           clientY: 180,
-          preventDefault: movePreventDefault,
+          preventDefault: () => movePreventDefault(),
         } as PointerEvent
       );
       harness.emit(
@@ -927,7 +926,7 @@ describe("StudioGraphSelectionController drag behavior", () => {
           pointerId: 9,
           clientX: 180,
           clientY: 260,
-          preventDefault: movePreventDefault,
+          preventDefault: () => movePreventDefault(),
         } as PointerEvent
       );
       harness.emit(

@@ -229,7 +229,11 @@ export async function exerciseBuiltStandardChatIdentity(
   expect(content.querySelector(".systemsculpt-agent-workspace")).not.toBeNull();
   expect(content.querySelector(".systemsculpt-agent-prompt-input")).not.toBeNull();
   expect(content.querySelector(".systemsculpt-chat-identity")).toBeNull();
-  expect(content.querySelector("[aria-haspopup]")).toBeNull();
+  // Hosted chat has no model picker: its menus are More, Add files and notes,
+  // and the run line's backend and mode; the third part is credits, not a menu.
+  const menus = Array.from(content.querySelectorAll<HTMLElement>("[aria-haspopup]"), (element) => element.dataset.testid);
+  expect(menus.filter((id) => !["chat.header.more", "chat.composer.add", "chat.run.backend", "chat.run.mode"].includes(id ?? ""))).toEqual([]);
+  expect(content.querySelector('[data-testid="chat.run.detail"][aria-haspopup]')).toBeNull();
   expect(view.getState()).not.toHaveProperty("selectedModelId");
   expect(view).not.toHaveProperty("isLegacyReadOnlyChat");
 
@@ -313,8 +317,14 @@ export async function exerciseBuiltStandardChatIdentity(
     expect.objectContaining({ role: "assistant", content: "Managed agent bundle proof" }),
   ]));
 
+  const recoverySubscription = app.workspace.on.mock.calls.findLastIndex(
+    ([name]: [string]) => name === "active-leaf-change",
+  );
+  expect(recoverySubscription).toBeGreaterThanOrEqual(0);
+  const recoveryEvent = app.workspace.on.mock.results[recoverySubscription].value;
   await view.onClose();
   viewClosed = true;
+  expect(app.workspace.offref).toHaveBeenCalledWith(recoveryEvent);
   plugin.unload();
   pluginUnloaded = true;
   } finally {

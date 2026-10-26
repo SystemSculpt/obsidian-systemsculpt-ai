@@ -28,7 +28,7 @@ type VideoOutputMeasurement = {
   durationSeconds: number | null;
 };
 
-export type ManagedVideoFrameInput = Readonly<{
+type ManagedVideoFrameInput = Readonly<{
   role: ManagedVideoFrameRole;
   mimeType: "image/png" | "image/jpeg" | "image/webp";
   sizeBytes: number;
@@ -36,7 +36,7 @@ export type ManagedVideoFrameInput = Readonly<{
   load: () => Promise<ArrayBuffer>;
 }>;
 
-export type ManagedVideoGenerationPayload = Readonly<{
+type ManagedVideoGenerationPayload = Readonly<{
   /** Server catalog model ID. Required: video generation has no server default. */
   model: string;
   prompt: string;

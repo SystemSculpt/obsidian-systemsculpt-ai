@@ -47,6 +47,7 @@ function shapeLayerStub() {
     onMoveSelection: jest.fn(),
     onResizeShape: jest.fn(),
     onLabelChange: jest.fn(),
+    onArrowLabelChange: jest.fn(),
     onConnectShapes: jest.fn(),
     registerLayerHandle: jest.fn(),
   };
@@ -59,7 +60,7 @@ function createPointerDown(pointerType: string): MouseEvent {
 }
 
 describe("StudioGraphWorkspaceRenderer controls", () => {
-  it("wires right-ribbon control callbacks", () => {
+  it.each([false, true])("wires navigation but disables editing controls when read-only=%s", (readOnly) => {
     const root = document.createElement("div");
     const runSpy = jest.fn();
     const addSpy = jest.fn();
@@ -70,9 +71,10 @@ describe("StudioGraphWorkspaceRenderer controls", () => {
     const toggleDetailSpy = jest.fn();
     const zoomLabel = { value: "" };
 
-    renderStudioGraphWorkspace({
+    const options = {
       root,
       busy: false,
+      readOnly,
       currentProject: projectFixture(),
       currentProjectPath: "SystemSculpt/Studio/Controls.systemsculpt",
       nodeDetailMode: "expanded",
@@ -127,7 +129,9 @@ describe("StudioGraphWorkspaceRenderer controls", () => {
       onRequestTextNodeEdit: jest.fn(),
       onStopTextNodeEdit: jest.fn(),
       onRevealPathInFinder: jest.fn(),
-    });
+    } as Parameters<typeof renderStudioGraphWorkspace>[0];
+    const workspace = renderStudioGraphWorkspace(options);
+    expect(workspace.refresh(options)).toBe(true);
 
     const click = (selector: string): void => {
       const button = root.querySelector<HTMLButtonElement>(selector);
@@ -143,8 +147,20 @@ describe("StudioGraphWorkspaceRenderer controls", () => {
     click('button[aria-label="Overview graph"]');
     click('button[aria-label="Toggle node detail mode"]');
 
-    expect(runSpy).toHaveBeenCalledTimes(1);
-    expect(addSpy).toHaveBeenCalledTimes(1);
+    expect(runSpy).toHaveBeenCalledTimes(readOnly ? 0 : 1);
+    expect(addSpy).toHaveBeenCalledTimes(readOnly ? 0 : 1);
+    expect(root.querySelector<HTMLButtonElement>('[aria-label="Run Studio graph"]')?.disabled).toBe(readOnly);
+    expect(root.querySelector<HTMLButtonElement>('[aria-label="Add node"]')?.disabled).toBe(readOnly);
+    if (readOnly) {
+      workspace.viewportEl!.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+      workspace.viewportEl!.dispatchEvent(createPointerDown("mouse"));
+      expect(options.onCreateTextNodeAtPosition).not.toHaveBeenCalled();
+      expect(options.graphInteraction.startMarqueeSelection).not.toHaveBeenCalled();
+      workspace.viewportEl!.dispatchEvent(createPointerDown("touch"));
+      expect(options.graphInteraction.startCanvasPan).toHaveBeenCalledTimes(1);
+      // Access changes replace the workspace so no formerly disabled card keeps stale controls.
+      expect(workspace.refresh({ ...options, readOnly: false })).toBe(false);
+    }
     expect(zoomOutSpy).toHaveBeenCalledTimes(1);
     expect(zoomInSpy).toHaveBeenCalledTimes(1);
     expect(zoomResetSpy).toHaveBeenCalledTimes(1);

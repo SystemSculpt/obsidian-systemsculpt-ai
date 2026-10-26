@@ -28,15 +28,17 @@ export class AgentConversationSessionBinding<
   public constructor(
     initialSession: TSession,
     private readonly listener: (session: TSession, snapshot: TSnapshot) => void,
+    private readonly release: (session: TSession) => Promise<void> = (session) => session.detach(),
   ) {
     this.attach(initialSession);
   }
 
-  public replace(createSession: () => TSession): Promise<TSession> {
+  public replace(createSession: () => TSession | null): Promise<TSession | null> {
     return this.enqueue(async () => {
       await this.detachActive();
       const next = createSession();
-      this.attach(next);
+      // A navigation superseded during detach must not acquire presentation.
+      if (next) this.attach(next);
       return next;
     });
   }
@@ -80,7 +82,7 @@ export class AgentConversationSessionBinding<
     if (binding) {
       this.unsubscribe();
       this.active = null;
-      this.detachBarrier = (async () => { await binding.session.detach(); })();
+      this.detachBarrier = (async () => { await this.release(binding.session); })();
     }
     return this.detachBarrier;
   }

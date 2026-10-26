@@ -1,6 +1,4 @@
 export const MANAGED_CAPABILITY_CONTRACT = "managed-capabilities-v2" as const;
-/** Maximum reference images supported by the current managed image client contract. */
-export const MANAGED_IMAGE_INPUT_MAX_COUNT = 4;
 export const MANAGED_IMAGE_OUTPUT_MAX_BYTES = 30 * 1024 * 1024;
 export const MANAGED_ADMISSION_CONTRACT = "admission-v1" as const;
 
@@ -11,24 +9,24 @@ export type ManagedCapabilityAlias =
   | "systemsculpt/documents"
   | "systemsculpt/images";
 export type ManagedRequestContractId = "chat_turn" | "text_generation" | "embeddings";
-export type ManagedMode = "stream" | "request" | "job";
-export type ManagedAvailability = "available" | "unavailable";
+type ManagedMode = "stream" | "request" | "job";
+type ManagedAvailability = "available" | "unavailable";
 export type ManagedServerOutcome = "allowed" | "license_required" | "license_rejected" | "temporarily_unavailable" | "rate_limited";
 export type ManagedAdmissionOutcome = ManagedServerOutcome | "capability_unavailable";
 
-export type JsonContractValue = string | number | boolean | null | readonly JsonContractValue[] | { readonly [key: string]: JsonContractValue };
+type JsonContractValue = string | number | boolean | null | readonly JsonContractValue[] | { readonly [key: string]: JsonContractValue };
 
-export interface ManagedPurposeContract { readonly presence: "forbidden" | "required"; readonly values: readonly string[]; }
-export interface ManagedWireRequestContract {
+interface ManagedPurposeContract { readonly presence: "forbidden" | "required"; readonly values: readonly string[]; }
+interface ManagedWireRequestContract {
   readonly method: string;
   readonly path: string;
   readonly required_headers: readonly string[];
   readonly body: Readonly<{ [key: string]: JsonContractValue }>;
   readonly definitions?: Readonly<{ [key: string]: JsonContractValue }>;
 }
-export interface ManagedWireResponseContract { readonly [key: string]: JsonContractValue; }
-export interface ManagedWireErrorContract { readonly [key: string]: JsonContractValue; }
-export interface ManagedNestedRequestContract {
+interface ManagedWireResponseContract { readonly [key: string]: JsonContractValue; }
+interface ManagedWireErrorContract { readonly [key: string]: JsonContractValue; }
+interface ManagedNestedRequestContract {
   readonly capability: ManagedRequestContractId;
   readonly header: "x-systemsculpt-capability";
   readonly header_value: ManagedRequestContractId;
@@ -39,12 +37,12 @@ export interface ManagedNestedRequestContract {
   readonly response?: ManagedWireResponseContract;
   readonly errors?: ManagedWireErrorContract;
 }
-export interface ManagedEmbeddingGenerationDescriptor {
+interface ManagedEmbeddingGenerationDescriptor {
   readonly id: string;
   readonly index_schema_version: number;
   readonly index_namespace: string;
 }
-export interface ManagedCapabilityDescriptor {
+interface ManagedCapabilityDescriptor {
   readonly alias: ManagedCapabilityAlias;
   readonly endpoint: string;
   readonly mode: ManagedMode;
@@ -65,25 +63,12 @@ export interface ManagedCapabilityCatalogContract {
   cache_ttl_seconds: number;
   capabilities: ManagedCapabilityDescriptor[];
 }
-export interface ManagedAdmissionContractResponse {
-  status: number; code: ManagedServerOutcome; message: string;
-  reasons?: string[]; retryable?: boolean; grace_eligible?: boolean;
-}
-export interface ManagedAdmissionContract {
-  contract_version: typeof MANAGED_ADMISSION_CONTRACT;
-  negotiation_header: { name: "x-systemsculpt-admission-contract"; value: typeof MANAGED_ADMISSION_CONTRACT };
-  responses: Record<ManagedServerOutcome, ManagedAdmissionContractResponse>;
-  required_response_body_fields: string[];
-  required_response_headers: string[];
-  conditional_response_headers: Record<string, ManagedServerOutcome[]>;
-  forbidden_response_fields: string[];
-}
 export interface ManagedOperation { alias: ManagedCapabilityAlias; requestContract?: ManagedRequestContractId; }
 export interface ManagedLease { outcome: ManagedAdmissionOutcome; descriptor?: ManagedCapabilityDescriptor; requestContract?: ManagedNestedRequestContract; diagnostics?: ManagedResponseDiagnostics; }
-export interface ManagedResponseDiagnostics {
+interface ManagedResponseDiagnostics {
   status: number; requestId: string | null; contentType: string | null;
   rateLimitLimit: string | null; rateLimitRemaining: string | null; rateLimitReset: string | null;
-  retryAfter: string | null; errorText: string;
+  retryAfterMs: number | undefined; errorText: string;
 }
 export interface ManagedTransportResult { response: Response; diagnostics: ManagedResponseDiagnostics; }
 export interface ManagedTransportOperation {
@@ -107,7 +92,7 @@ export type ManagedImageOutputMetadata = Readonly<{
   height: number | null;
 }>;
 export type ManagedImageOutputBytes = Readonly<{ metadata: ManagedImageOutputMetadata; bytes: ArrayBuffer }>;
-export type ManagedMediaDownloadTiming = Readonly<{
+type ManagedMediaDownloadTiming = Readonly<{
   download_started_at: string;
   download_completed_offset_ms: number;
 }>;
@@ -122,7 +107,7 @@ export type ManagedVideoOutputMetadata = Readonly<{
   height: number | null;
   duration_seconds: number | null;
 }>;
-export type ManagedVideoOutputBytes = Readonly<{ metadata: ManagedVideoOutputMetadata; bytes: ArrayBuffer }>;
+type ManagedVideoOutputBytes = Readonly<{ metadata: ManagedVideoOutputMetadata; bytes: ArrayBuffer }>;
 export type ManagedDeliveredVideoOutputBytes = ManagedVideoOutputBytes & Readonly<{ delivery: ManagedMediaDownloadTiming }>;
 export type ManagedMediaUsage = Readonly<{ raw_usd: number; cost_source: string; estimated: boolean }>;
 export type ManagedJobStatus = "uploading" | "queued" | "processing" | "succeeded" | "completed" | "failed" | "expired";

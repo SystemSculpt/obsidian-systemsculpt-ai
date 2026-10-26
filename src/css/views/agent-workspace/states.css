@@ -1,37 +1,7 @@
 /**
- * Agent workspace state overlays: empty state, jump affordance, follow-up
- * queue, and run banners.
+ * Agent workspace state overlays: jump affordance and run banners.
+ * Empty states live in shell.css; queued follow-ups in composer.css.
  */
-
-.systemsculpt-agent-empty {
-  position: absolute;
-  inset: 0;
-  z-index: var(--ss-z-raised);
-  display: grid;
-  place-content: center;
-  gap: var(--ss-space-2);
-  min-height: var(--ss-agent-empty-height);
-  color: var(--ss-ink-muted);
-  pointer-events: none;
-  text-align: center;
-}
-
-.systemsculpt-agent-empty strong {
-  color: var(--ss-ink);
-  font-size: var(--ss-text-xl);
-}
-
-.systemsculpt-agent-plan-offer {
-  display: grid;
-  justify-items: center;
-  gap: var(--ss-space-2);
-  max-width: 36ch;
-  margin: var(--ss-space-2) auto 0;
-}
-
-.systemsculpt-agent-plan-offer .ss-button {
-  pointer-events: auto;
-}
 
 .systemsculpt-agent-jump {
   position: absolute;
@@ -54,35 +24,6 @@
   display: none;
 }
 
-.systemsculpt-agent-queue {
-  display: flex;
-  flex-direction: column;
-  gap: var(--ss-space-2);
-  width: min(100%, var(--ss-agent-content-width));
-  margin: 0 auto;
-  padding: 0 var(--ss-space-5) var(--ss-space-2);
-}
-
-.systemsculpt-agent-queue-item {
-  display: flex;
-  align-items: center;
-  gap: var(--ss-space-2);
-  padding: var(--ss-space-2) var(--ss-space-3);
-  border: 1px solid var(--ss-line);
-  border-radius: var(--ss-radius-sm);
-  background: var(--ss-surface-1);
-  color: var(--ss-ink-muted);
-  font-size: var(--ss-text-sm);
-}
-
-.systemsculpt-agent-queue-item span:nth-child(2) {
-  min-width: 0;
-  overflow: hidden;
-  flex: 1 1 auto;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .systemsculpt-agent-banner {
   width: min(100%, var(--ss-agent-content-width));
   margin: var(--ss-space-2) auto 0;
@@ -98,4 +39,223 @@
   border-color: var(--ss-danger-line);
   background: var(--ss-danger-tint);
   color: var(--ss-danger);
+}
+
+.systemsculpt-agent-loading {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-5);
+  width: 100%;
+  padding-block: var(--ss-space-5);
+}
+
+.systemsculpt-agent-loading-bar {
+  position: relative;
+  min-height: 3em;
+  overflow: hidden;
+  border-radius: var(--ss-radius-sm);
+  background: var(--ss-surface-2);
+}
+
+/* Move only a contained highlight, never the message-sized placeholder. */
+.systemsculpt-agent-loading-bar::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: calc(100% / 3);
+  background: linear-gradient(90deg, transparent, var(--ss-surface-1), transparent);
+  animation: ss-shimmer 1.2s linear infinite;
+}
+
+.systemsculpt-agent-loading-bar:nth-of-type(1) {
+  width: 65%;
+  align-self: flex-end;
+  border-radius: var(--ss-radius-lg);
+}
+
+.systemsculpt-agent-conversation.is-loading-chat > .systemsculpt-agent-history,
+.systemsculpt-agent-conversation.is-loading-chat > .systemsculpt-agent-active-run {
+  display: none;
+}
+
+.systemsculpt-agent-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ss-space-2);
+  margin-block: var(--ss-space-3);
+  padding: var(--ss-space-3);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-md);
+  color: var(--ss-ink-muted);
+  background: var(--ss-surface-1);
+  font-size: var(--ss-text-base);
+}
+
+.systemsculpt-agent-notice > span { flex: 1; }
+
+.systemsculpt-agent-error-details pre {
+  max-width: 100%;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Separate in-flow review from transcript end-follow. The inbox keeps its full height
+ * (the transcript yields first) up to 40% of the workspace; longer sources scroll in full. */
+.systemsculpt-agent-phone-handoff-region {
+  flex: 0 0 auto;
+  min-width: 0;
+  min-height: 0;
+  max-height: 40%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.systemsculpt-agent-phone-handoff-region:focus-visible {
+  outline: none;
+  box-shadow: var(--ss-ring);
+}
+
+/* Phone handoffs are review-first, in-flow content inside the workspace surface. */
+.systemsculpt-agent-phone-handoffs {
+  flex: none;
+  width: min(100%, var(--ss-agent-content-width));
+  min-width: 0;
+  margin: var(--ss-space-3) auto;
+  padding-inline: var(--ss-space-4);
+  color: var(--ss-ink);
+}
+
+.systemsculpt-agent-phone-handoffs-heading,
+.systemsculpt-agent-phone-handoff-header,
+.systemsculpt-agent-phone-handoff-details,
+.systemsculpt-agent-phone-handoff-message,
+.systemsculpt-agent-phone-handoff-error {
+  font-size: var(--ss-text-sm);
+  line-height: 1.5;
+}
+
+.systemsculpt-agent-phone-handoffs-heading {
+  padding-bottom: var(--ss-space-2);
+  color: var(--ss-ink-muted);
+}
+
+.systemsculpt-agent-phone-handoff {
+  min-width: 0;
+  padding-block: var(--ss-space-3);
+  border-top: 1px solid var(--ss-line);
+  overflow-wrap: anywhere;
+}
+
+.systemsculpt-agent-phone-handoff-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--ss-space-1) var(--ss-space-3);
+  color: var(--ss-ink-muted);
+}
+
+.systemsculpt-agent-phone-handoff-agent {
+  color: var(--ss-ink);
+  font-weight: var(--ss-weight-medium);
+}
+
+.systemsculpt-agent-phone-handoff-instruction {
+  margin-block: var(--ss-space-2);
+  white-space: pre-wrap;
+  line-height: 1.6;
+  user-select: text;
+}
+
+.systemsculpt-agent-phone-handoff-details > summary {
+  min-height: var(--ss-control-height);
+  padding-block: var(--ss-space-1);
+  color: var(--ss-ink-muted);
+  cursor: pointer;
+}
+
+.systemsculpt-agent-phone-handoff-source {
+  margin: var(--ss-space-2) 0;
+  padding: var(--ss-space-3);
+  border-radius: var(--ss-radius-sm);
+  background: var(--ss-surface-1);
+  color: var(--ss-ink);
+  font-family: inherit;
+  font-size: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.systemsculpt-agent-phone-handoff-unavailable,
+.systemsculpt-agent-phone-handoff-message {
+  color: var(--ss-ink-muted);
+  white-space: pre-wrap;
+}
+
+.systemsculpt-agent-phone-handoff-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ss-space-2);
+  margin-top: var(--ss-space-2);
+}
+
+.systemsculpt-agent-phone-handoff-link {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  min-height: var(--ss-control-height);
+  color: var(--ss-ink);
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+  font-size: var(--ss-text-sm);
+}
+
+.systemsculpt-agent-phone-handoff :is(a, summary):focus-visible {
+  border-radius: var(--ss-radius-sm);
+  outline: none;
+  box-shadow: var(--ss-ring);
+}
+
+.systemsculpt-agent-phone-handoff[data-state="needs_approval"] .systemsculpt-agent-phone-handoff-state {
+  color: var(--ss-warning);
+}
+
+.systemsculpt-agent-phone-handoff[data-state="failed"] :is(.systemsculpt-agent-phone-handoff-state, .systemsculpt-agent-phone-handoff-message),
+.systemsculpt-agent-phone-handoff-error {
+  color: var(--ss-danger);
+}
+
+.systemsculpt-agent-phone-handoff-error {
+  margin-top: var(--ss-space-2);
+}
+
+.systemsculpt-agent-phone-handoff-region[hidden],
+.systemsculpt-agent-phone-handoffs[hidden],
+.systemsculpt-agent-phone-handoff [hidden] {
+  display: none;
+}
+
+@container ss-surface (max-width: 420px) {
+  .systemsculpt-agent-phone-handoff-actions > .ss-button {
+    width: 100%;
+  }
+}
+
+@media (pointer: coarse) {
+  .systemsculpt-agent-phone-handoff :is(summary, a, .ss-button) {
+    min-height: var(--ss-touch-target);
+  }
+}
+
+.is-reduced-motion .systemsculpt-agent-loading-bar::after { animation: none; }
+
+/* The plugin's reduced-motion setting: every spinner in the chat is a static icon (spec 6.3). */
+.systemsculpt-agent-workspace.is-reduced-motion .is-animated svg { animation: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .systemsculpt-agent-loading-bar::after { animation: none; }
 }

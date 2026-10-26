@@ -34,6 +34,11 @@ jest.mock("../settings/SettingsTabRegistry", () => ({
   ]),
 }));
 
+jest.mock("../settings/SettingsCatalog", () => ({
+  ...jest.requireActual("../settings/SettingsCatalog"),
+  getSettingsCatalog: () => [{ id: "test.provider-fallback", tabId: "knowledge", title: "Provider fallback", description: "Choose the backup provider for embeddings." }],
+}));
+
 jest.mock("../core/ui/modals/PromptModal", () => ({
   showPrompt: jest.fn(),
 }));
@@ -65,11 +70,6 @@ const createPluginStub = () => {
     },
     getSettingsManager: jest.fn(() => settingsManager),
     getSettingsManagerInstance: settingsManager,
-    emitter: {
-      on: jest.fn(),
-      off: jest.fn(),
-      emit: jest.fn(),
-    },
     modelService: {
       getModels: jest.fn().mockResolvedValue([]),
       refreshModels: jest.fn(),
@@ -243,7 +243,23 @@ describe("SystemSculptSettingTab native layout", () => {
     ).toBe(false);
   });
 
-  it("restores the customer-facing Audio Processor default", async () => {
+  it.each([
+    ["cancelled", null],
+    ["declined", { confirmed: false }],
+  ])("changes nothing when Restore Recommended Defaults is %s", async (_label, answer) => {
+    const plugin = createPluginStub();
+    (showPrompt as jest.Mock).mockResolvedValue(answer);
+    const tab = new SystemSculptSettingTab(app, plugin);
+    const container = document.body.createDiv();
+
+    tab.renderQuickActionsSection(container);
+    container.querySelector<HTMLButtonElement>('[data-test-id="restore-defaults-btn"]')?.click();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+    expect(plugin.getSettingsManagerInstance.updateSettings).not.toHaveBeenCalled();
+  });
+
+  it("names exactly what Restore Recommended Defaults replaces and changes only those settings", async () => {
     const plugin = createPluginStub();
     (showPrompt as jest.Mock).mockResolvedValue({ confirmed: true });
     const tab = new SystemSculptSettingTab(app, plugin);
@@ -257,12 +273,23 @@ describe("SystemSculptSettingTab native layout", () => {
     restoreButton?.click();
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
 
-    expect(plugin.getSettingsManagerInstance.updateSettings).toHaveBeenCalledWith(
-      expect.objectContaining({
-        audioProcessorOutputPreset: "detailed",
-      }),
-    );
-    expect(mockedNotice).toHaveBeenCalledWith("Recommended defaults restored.", 2500);
+    expect(showPrompt).toHaveBeenCalledWith(app, "Restore Recommended Defaults", expect.objectContaining({
+      description: "Restore the recommended chat text size, audio output, Similar notes, output folders, and debug setting? These settings will replace your current choices. Other settings will stay unchanged.",
+      primaryButton: "Restore Defaults",
+      secondaryButton: "Cancel",
+    }));
+    expect(plugin.getSettingsManagerInstance.updateSettings).toHaveBeenCalledTimes(1);
+    // Chat text size, audio output, Similar notes, two output folders, and debug: nothing else.
+    // The retired saved-chats and attachments settings keep whatever an older version saved.
+    expect(plugin.getSettingsManagerInstance.updateSettings).toHaveBeenCalledWith({
+      chatFontSize: "medium",
+      audioProcessorOutputPreset: "detailed",
+      embeddingsEnabled: false,
+      chatsDirectory: "SystemSculpt/Chats",
+      extractionsDirectory: "SystemSculpt/Extractions",
+      debugMode: false,
+    });
+    expect(mockedNotice).not.toHaveBeenCalled();
   });
 
   it("builds feedback payloads around SystemSculpt access instead of provider choices", () => {
@@ -393,18 +420,27 @@ describe("SystemSculptSettingTab native layout", () => {
     expect(pollInBackground).toHaveBeenCalledTimes(1);
   });
 
-  it("cancels delayed settings indexing when the surface hides", async () => {
+  it("does not index on open, DOM mutation, timers, or hide", async () => {
     jest.useFakeTimers();
     const plugin = createPluginStub();
     const tab = new SystemSculptSettingTab(app, plugin);
     const buildSettingsIndex = jest.spyOn(tab as any, "buildSettingsIndex");
 
     await tab.display();
+    expect(buildSettingsIndex).not.toHaveBeenCalled();
+    tab.containerEl.querySelector(".systemsculpt-tab-content")?.appendChild(document.createElement("div"));
+    await Promise.resolve();
+    jest.advanceTimersByTime(500);
+    expect(buildSettingsIndex).not.toHaveBeenCalled();
+    const input = tab.containerEl.querySelector<HTMLInputElement>("input[type=search]")!;
+    input.value = "account";
+    input.dispatchEvent(new Event("input"));
     expect(buildSettingsIndex).toHaveBeenCalledTimes(1);
-
+    input.value = "account access";
+    input.dispatchEvent(new Event("input"));
+    expect(buildSettingsIndex).toHaveBeenCalledTimes(1);
     tab.hide();
     jest.advanceTimersByTime(500);
-
     expect(buildSettingsIndex).toHaveBeenCalledTimes(1);
   });
 
@@ -478,6 +514,7 @@ describe("SystemSculptSettingTab native layout", () => {
         sections: [
           (parent: HTMLElement) => {
             const setting = parent.createDiv({ cls: "setting-item" });
+            setting.dataset.ssSetting = "test.provider-fallback";
             setting.createDiv({
               cls: "setting-item-name",
               text: "Provider fallback",
@@ -607,6 +644,7 @@ describe("SystemSculptSettingTab native layout", () => {
         sections: [
           (parent: HTMLElement) => {
             const setting = parent.createDiv({ cls: "setting-item" });
+            setting.dataset.ssSetting = "test.provider-fallback";
             setting.createDiv({
               cls: "setting-item-name",
               text: "Provider fallback",

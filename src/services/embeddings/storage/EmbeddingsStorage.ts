@@ -18,14 +18,31 @@ import {
 import { SemanticMatrix } from "../search/SemanticMatrix";
 import { LOCAL_EMPTY_EMBEDDING_NAMESPACE } from "../LocalEmptyEmbeddingMarker";
 import { toError } from "../../../utils/errors";
+import { normalizeVaultRelativePath } from "../../../utils/vaultPathUtils";
 
 const DB_NAME_PREFIX = "SystemSculptEmbeddings";
 /** A search matrix nobody has queried for this long is released. */
 const SEARCH_MATRIX_IDLE_MS = 5 * 60_000;
 const SEARCH_MATRIX_PAGE_SIZE = 512;
+/**
+ * 6.14.0 and earlier never close their connection, so after an in-app update
+ * the unloaded instance keeps version 11 open and a higher version would wait
+ * behind it until Obsidian restarts. Raise this (to 12, deleting the unused
+ * by_mtime and by_contentHash indexes that existing databases still carry)
+ * only in a release after one that ships the closing in initialize() and close().
+ * Anyone updating straight from 6.14.0 then gets the restart message, not a hang.
+ */
 const DB_VERSION = 11;
 const STORE_NAME = 'embeddings';
 const STATE_STORE_NAME = "semantic_state";
+
+/** Another connection keeps an older schema open, so this open cannot upgrade it. */
+export class EmbeddingsStorageBlockedError extends Error {
+  constructor() {
+    super("Restart Obsidian to finish updating the semantic index.");
+    this.name = "EmbeddingsStorageBlockedError";
+  }
+}
 
 export class EmbeddingsStorage {
   public static buildDbName(vaultInstanceId: string): string {
@@ -40,6 +57,13 @@ export class EmbeddingsStorage {
   /** Root records without their vectors: every reader needs only metadata. */
   private cache: Map<string, EmbeddingRootRecord> = new Map();
   private initialized = false;
+  /** Closed for good: the plugin unloaded. */
+  private closed = false;
+  /**
+   * An open still waiting behind another connection. A second open would queue
+   * behind it without its own blocked event, so callers get the error instead.
+   */
+  private blockedOpen = false;
   // Root records only: enough for synchronous freshness and path statistics.
   private pathsSet: Set<string> = new Set();
   /**
@@ -70,8 +94,8 @@ export class EmbeddingsStorage {
   }
 
   private normalizeDirPrefix(dir: string): string {
-    if (!dir) return "";
-    return dir.endsWith("/") ? dir : `${dir}/`;
+    const path = normalizeVaultRelativePath(dir, { trim: false, preserveCharacters: true });
+    return path ? `${path}/` : "";
   }
 
   private parseChunkIdFromId(id: string): number {
@@ -121,13 +145,42 @@ export class EmbeddingsStorage {
    */
   async initialize(): Promise<void> {
     if (this.initialized) return;
+    if (this.closed) throw new Error("Embeddings storage is closed.");
+    if (this.blockedOpen) throw new EmbeddingsStorageBlockedError();
 
     await new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const fail = (error: Error) => {
+        if (settled) return;
+        settled = true;
+        reject(error);
+      };
       const request = indexedDB.open(this.dbName, DB_VERSION);
-      request.onerror = () => reject(toError(request.error, "IndexedDB request failed."));
+      request.onerror = () => {
+        this.blockedOpen = false;
+        fail(toError(request.error, "IndexedDB request failed."));
+      };
+      // Fired only while another connection refuses to close for an upgrade
+      // (a build without the versionchange handler below). It can hold out
+      // until Obsidian restarts, so fail now and let the index status say so.
+      request.onblocked = () => {
+        this.blockedOpen = true;
+        fail(new EmbeddingsStorageBlockedError());
+      };
       request.onsuccess = () => {
-        this.db = request.result;
+        this.blockedOpen = false;
+        const db = request.result;
+        if (this.closed) {
+          db.close();
+          fail(new Error("Embeddings storage is closed."));
+          return;
+        }
+        // Step aside when a newer build (after an in-app update) upgrades or deletes the database.
+        db.onversionchange = () => this.closeConnection();
+        // After a blocked failure this is the late open: the next initialize() finds it ready.
+        this.db = db;
         this.initialized = true;
+        settled = true;
         resolve();
       };
       request.onupgradeneeded = (event) => {
@@ -156,10 +209,8 @@ export class EmbeddingsStorage {
         if (!store.indexNames.contains("by_namespace")) {
           store.createIndex("by_namespace", "metadata.namespace", { unique: false });
         }
-        if (!store.indexNames.contains("by_mtime")) store.createIndex("by_mtime", "metadata.mtime", { unique: false });
-        if (!store.indexNames.contains("by_contentHash")) {
-          store.createIndex("by_contentHash", "metadata.contentHash", { unique: false });
-        }
+        // New databases skip the unused by_mtime and by_contentHash indexes;
+        // existing ones keep them until a later version deletes them (see DB_VERSION).
       };
     });
   }
@@ -173,24 +224,30 @@ export class EmbeddingsStorage {
       const store = transaction.objectStore(STORE_NAME);
       this.cache.clear();
       this.pathsSet.clear();
-      const request = store.openCursor();
+      // v11 already encodes the chunk ordinal in the primary key. Walking
+      // keys avoids deserializing every chunk's Float32Array without a schema
+      // upgrade (older installed plugins keep their v11 connection open).
+      const request = store.openKeyCursor();
       request.onsuccess = () => {
         const cursor = request.result;
-        if (!cursor) {
-          resolve();
-          return;
-        }
-        const vector = cursor.value as EmbeddingVector;
-        const chunkId = typeof vector.chunkId === "number"
-          ? vector.chunkId
-          : this.parseChunkIdFromId(vector.id);
-        if (chunkId === 0) {
-          this.cacheRoot(vector);
-          if (vector.path) this.pathsSet.add(vector.path);
+        if (!cursor) return;
+        if (typeof cursor.primaryKey === "string" && this.parseChunkIdFromId(cursor.primaryKey) === 0) {
+          const rootRequest = store.get(cursor.primaryKey);
+          rootRequest.onsuccess = () => {
+            const vector = rootRequest.result as EmbeddingVector | undefined;
+            if (vector && (vector.chunkId ?? this.parseChunkIdFromId(vector.id)) === 0) {
+              this.cacheRoot(vector);
+              if (vector.path) this.pathsSet.add(vector.path);
+            }
+          };
+          rootRequest.onerror = () => reject(toError(rootRequest.error, "IndexedDB request failed."));
         }
         cursor.continue();
       };
       request.onerror = () => reject(toError(request.error, "IndexedDB request failed."));
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(toError(transaction.error, "IndexedDB transaction failed."));
+      transaction.onabort = () => reject(toError(transaction.error, "IndexedDB root loading aborted."));
     });
   }
 
@@ -797,10 +854,25 @@ export class EmbeddingsStorage {
     });
   }
 
+  /** Close for good on plugin unload. An open still pending closes as soon as it succeeds. */
+  close(): void {
+    this.closed = true;
+    this.closeConnection();
+  }
+
+  private closeConnection(): void {
+    this.db?.close();
+    this.db = null;
+    this.initialized = false;
+    this.releaseSearchMatrices();
+  }
+
   /**
    * Reset the database
    */
   async reset(): Promise<void> {
+    // The delete would wait silently behind the blocked open.
+    if (this.blockedOpen) throw new EmbeddingsStorageBlockedError();
     if (this.db) {
       this.db.close();
       this.db = null;

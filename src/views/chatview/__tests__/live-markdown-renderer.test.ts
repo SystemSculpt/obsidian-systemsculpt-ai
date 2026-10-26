@@ -8,6 +8,7 @@ import {
   reconcileLiveMarkdownDom,
   stableMarkdownBoundary,
 } from "../LiveMarkdownRenderer";
+import { enhanceMarkdownCodeBlocks } from "../MarkdownCodeBlocks";
 
 type Deferred = Readonly<{
   promise: Promise<void>;
@@ -94,6 +95,51 @@ describe("LiveMarkdownRenderer", () => {
   afterEach(() => {
     jest.useRealTimers();
     document.body.empty();
+  });
+
+  it("suppresses in-flight commits and hidden snapshots, then renders the newest text on show", async () => {
+    const gate = deferred();
+    const target = document.body.createDiv();
+    const render = jest.fn(async (markdown: string, staging: HTMLElement) => {
+      await gate.promise;
+      renderParagraph(markdown, staging);
+    });
+    const live = new LiveMarkdownRenderer({ render });
+    live.load();
+    live.stream(target, "Started before hide");
+    const pending = live.flush(target);
+    live.setVisible(false);
+    await pending;
+    live.stream(target, "Intermediate hidden text");
+    await live.settle(target, "Final hidden text");
+    gate.resolve();
+    await jest.advanceTimersByTimeAsync(1000);
+    expect(target.textContent).toBe("");
+    expect(render).toHaveBeenCalledTimes(1);
+    live.setVisible(true);
+    await live.flush(target);
+    expect(target.textContent).toBe("rendered:Final hidden text");
+    expect(render).toHaveBeenCalledTimes(2);
+    live.unload();
+  });
+
+  it("cancels the throttled render in its original window after a pop-out migration", async () => {
+    const target = document.body.createDiv();
+    const render = jest.fn(async (markdown: string, staging: HTMLElement) => renderParagraph(markdown, staging));
+    const live = new LiveMarkdownRenderer({ render, throttleMs: 100 });
+    live.load();
+    await live.settle(target, "Visible");
+    live.stream(target, "Queued");
+    const clear = jest.spyOn(window, "clearTimeout");
+    const frame = document.body.createEl("iframe");
+    frame.contentDocument!.body.appendChild(target);
+    live.setVisible(false);
+    expect(clear).toHaveBeenCalled();
+    await jest.advanceTimersByTimeAsync(1000);
+    expect(render).toHaveBeenCalledTimes(1);
+    expect(target.textContent).toBe("rendered:Visible");
+    live.unload();
+    clear.mockRestore();
   });
 
   it("keeps raw Markdown hidden until detached parsing commits", async () => {
@@ -1041,6 +1087,38 @@ describe("LiveMarkdownRenderer", () => {
 
     live.unload();
     expect(cleanups[1]).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a long code block expanded and focused through stream replacement and settlement", async () => {
+    const target = document.body.createDiv();
+    const live = new LiveMarkdownRenderer({
+      render: async (markdown, staging) => {
+        staging.createEl("pre").createEl("code", { text: markdown, cls: "language-ts" });
+        enhanceMarkdownCodeBlocks(staging, { onCopyFeedback: jest.fn() });
+      },
+    });
+    live.load();
+    const source = Array.from({ length: 31 }, (_, index) => `const n${index} = ${index};`).join("\n");
+    live.stream(target, source);
+    await live.flush(target);
+    const control = target.querySelector<HTMLButtonElement>('[data-testid="chat.code.show-all"]')!;
+    control.click();
+    control.focus();
+    const expanded = `${source}\nconst last = true;`;
+    live.stream(target, expanded);
+    await live.flush(target);
+    expect(target.querySelector("pre")?.classList.contains("is-code-expanded")).toBe(true);
+    const replacement = target.querySelector<HTMLButtonElement>('[data-testid="chat.code.show-all"]')!;
+    expect(replacement).not.toBe(control);
+    expect(replacement.getAttribute("aria-expanded")).toBe("true");
+    expect(replacement.textContent).toBe("Show less");
+    expect(document.activeElement).toBe(replacement);
+    await live.settle(target, expanded);
+    expect(target.querySelector("pre")?.classList.contains("is-code-expanded")).toBe(true);
+    replacement.click();
+    expect(replacement.textContent).toBe("Show all 32 lines");
+    expect(target.querySelector("pre")?.classList.contains("is-code-expanded")).toBe(false);
+    live.unload();
   });
 
   it("refreshes linked callout behavior while preserving reader state", async () => {

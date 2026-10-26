@@ -1,12 +1,14 @@
 import { Notice, TFile } from "obsidian";
 import type SystemSculptPlugin from "../main";
 import { OperationProgressPanel } from "../core/ui/progress/OperationProgressPanel";
+import { registerRunTeardown } from "../core/plugin/lifecycle/RunTeardown";
 import {
   DocumentProcessingProgressEvent,
   DocumentProcessingStage,
 } from "../types/documentProcessing";
 import { formatFileSize } from "../utils/FileValidator";
 import { tryCopyToClipboard } from "../utils/clipboard";
+import { flashButtonResult } from "../core/ui/notifications";
 import { isCreditsRequiredError } from "../utils/errors";
 
 type TimelineStep = "queued" | "uploading" | "processing" | "contextualizing" | "ready";
@@ -50,18 +52,19 @@ const STAGE_ICON: Partial<Record<DocumentProcessingStage | "complete" | "error",
   error: "x-circle",
 };
 
-export interface DocumentProcessingSuccessPayload {
+interface DocumentProcessingSuccessPayload {
   extractionPath: string;
   durationMs: number;
   file: TFile;
   openOutput: () => Promise<void> | void;
 }
 
-export interface DocumentProcessingFailurePayload {
+interface DocumentProcessingFailurePayload {
   error: unknown;
   file: TFile;
 }
 
+/** @internal Unit-tested directly. */
 export function describeDocumentProcessingFailure(error: unknown): string {
   const code = typeof error === "object" && error !== null && "code" in error
     ? String((error).code)
@@ -91,11 +94,12 @@ export function describeDocumentProcessingFailure(error: unknown): string {
 export interface DocumentProcessingPanelHandle {
   updateProgress(event: DocumentProcessingProgressEvent): void;
   markSuccess(payload: DocumentProcessingSuccessPayload): void;
-  markFailure(payload: DocumentProcessingFailurePayload): void;
+  /** Returns false when the panel was already hidden, so the caller can say it elsewhere. */
+  markFailure(payload: DocumentProcessingFailurePayload): boolean;
   close(): void;
 }
 
-export interface DocumentProcessingPanelOptions {
+interface DocumentProcessingPanelOptions {
   plugin: SystemSculptPlugin;
   file: TFile;
   onCancel?: () => void;
@@ -109,6 +113,7 @@ class DocumentProcessingPanel implements DocumentProcessingPanelHandle {
   private readonly plugin: SystemSculptPlugin;
   private readonly onCancel?: () => void;
   private readonly panel: OperationProgressPanel;
+  private readonly releaseUnload: () => void;
   private destroyed = false;
 
   constructor(options: DocumentProcessingPanelOptions) {
@@ -127,7 +132,13 @@ class DocumentProcessingPanel implements DocumentProcessingPanelHandle {
       metaIcon: "file",
       dismissLabel: "Hide conversion progress",
       steps: TIMELINE_ORDER.map((step) => ({ id: step, label: STEP_LABEL[step] })),
+      // Hide, Close, the header's dismiss and the success auto-close all end here.
+      onClose: () => {
+        this.destroyed = true;
+        this.releaseUnload();
+      },
     });
+    this.releaseUnload = registerRunTeardown(this.plugin, () => this.close());
 
     this.panel.setActions([
       {
@@ -213,9 +224,9 @@ class DocumentProcessingPanel implements DocumentProcessingPanelHandle {
     this.panel.closeAfter(6000);
   }
 
-  markFailure(payload: DocumentProcessingFailurePayload): void {
+  markFailure(payload: DocumentProcessingFailurePayload): boolean {
     if (this.destroyed) {
-      return;
+      return false;
     }
 
     const message = describeDocumentProcessingFailure(payload.error);
@@ -246,18 +257,10 @@ class DocumentProcessingPanel implements DocumentProcessingPanelHandle {
       {
         label: "Copy error",
         testId: "document.progress.copy-error",
-        onClick: () => {
+        onClick: (button) => {
           void tryCopyToClipboard(message, this.panel.element)
-            .then((copied) => {
-              new Notice(
-                copied ? "Error copied to clipboard" : "Unable to copy error (clipboard unavailable).",
-                copied ? 2500 : 4000,
-              );
-            })
-            .catch((error: unknown) => {
-              console.error(error);
-            })
-            .finally(() => this.close());
+            .catch(() => false)
+            .then((copied) => flashButtonResult(button, copied ? "Copied" : "Couldn't copy"));
         },
       },
       {
@@ -267,6 +270,7 @@ class DocumentProcessingPanel implements DocumentProcessingPanelHandle {
         onClick: () => this.close(),
       },
     ]);
+    return true;
   }
 
   close(): void {
@@ -274,18 +278,12 @@ class DocumentProcessingPanel implements DocumentProcessingPanelHandle {
       return;
     }
 
-    this.destroyed = true;
     this.panel.close();
   }
-
-
 }
 
-export const launchDocumentProcessingPanel: DocumentProcessingPanelLauncher = (options) => {
-  const panel = new DocumentProcessingPanel(options);
-  options.plugin.register(() => panel.close());
-  return panel;
-};
+export const launchDocumentProcessingPanel: DocumentProcessingPanelLauncher = (options) =>
+  new DocumentProcessingPanel(options);
 
 function clampPercentage(value: number): number {
   if (!Number.isFinite(value)) {

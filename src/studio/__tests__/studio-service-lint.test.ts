@@ -172,7 +172,7 @@ describe("StudioService lintProjectText", () => {
       continueOnError: false,
       disabled: false,
     });
-    project.graph.groups.push({
+    (project.graph.groups ??= []).push({
       id: "group_missing_member",
       name: "Missing member",
       nodeIds: ["node_missing"],

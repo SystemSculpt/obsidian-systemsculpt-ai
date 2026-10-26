@@ -1,7 +1,7 @@
 import type SystemSculptPlugin from "../main";
 import { LogLevel } from "./errorHandling";
 import { isAgentLifecyclePhase, isThinAgentIncidentId } from "./ThinAgentLifecycleSchema";
-import { projectLifecycleMetadata, type SupportDiagnosticEvent } from "./SupportDiagnosticEvent";
+import { lifecycleSupportSnapshot, projectLifecycleMetadata, type SupportDiagnosticEvent } from "./SupportDiagnosticEvent";
 
 export type PluginLogLevel = "info" | "warn" | "error" | "debug";
 
@@ -120,12 +120,12 @@ export class PluginLogger {
   private readonly plugin: SystemSculptPlugin;
   private readonly buffer: PluginLogEntry[] = [];
   private readonly pendingFlush: PluginLogEntry[] = [];
-  /** Entries that were persistable when captured; only these may reach the log file. */
-  private readonly persistableEntries = new WeakSet<PluginLogEntry>();
+  /** Capture-time bytes, reused for flushing and trimming without cloning log details. */
+  private readonly persistedEntries = new WeakMap<PluginLogEntry, string>();
   private flushTimer: number | null = null;
   private readonly maxEntries = 600;
   private readonly flushIntervalMs = 1500;
-  private logFileName = "systemsculpt.log";
+  private readonly logFileName: string = "systemsculpt.log";
   private readonly maxLogFileBytes = 1_000_000; // 1 MB cap per log file
   private activeFlush: Promise<void> | null = null;
   private preUnloadFlush: Promise<void> | null = null;
@@ -150,11 +150,7 @@ export class PluginLogger {
       source: "AgentLifecycle",
       metadata: projection.persisted,
     });
-    return entry ? Object.freeze({
-      timestamp: entry.timestamp,
-      severity: "info",
-      ...projection.fields,
-    }) : null;
+    return entry ? lifecycleSupportSnapshot(projection.metadata, entry.timestamp) : null;
   }
 
   warn(message: string, context?: PluginLogContext): void {
@@ -188,12 +184,6 @@ export class PluginLogger {
       .map(projectSupportDiagnosticEvent)
       .filter((entry): entry is SupportDiagnosticEvent => entry !== null)
       .slice(-boundedLimit);
-  }
-
-  setLogFileName(fileName: string): void {
-    if (fileName && fileName !== this.logFileName) {
-      this.logFileName = fileName;
-    }
   }
 
   private write(
@@ -230,7 +220,7 @@ export class PluginLogger {
     }
 
     if (this.shouldPersist(level, context)) {
-      this.persistableEntries.add(entry);
+      this.persistedEntries.set(entry, serializeEntry(entry));
       this.pendingFlush.push(entry);
       this.ensureFlushScheduled();
     }
@@ -284,12 +274,12 @@ export class PluginLogger {
 
   /**
    * Lifecycle info bypasses the log level so support snapshots and incident
-   * correlation always see it in the in-memory ring. Writing it to disk on
-   * every run is diagnostics recording, so it follows that toggle (#337).
+   * correlation always see it in the in-memory ring. Disk recording still
+   * respects the selected log level, even with diagnostics recording enabled.
    */
   private shouldPersist(level: PluginLogLevel, context?: PluginLogContext): boolean {
     const settings = this.plugin.settings;
-    if (settings?.debugMode || settings?.showDiagnostics === true) {
+    if (settings?.debugMode) {
       return true;
     }
     if (context?.source === "AgentLifecycle" && level === "info") {
@@ -391,7 +381,7 @@ export class PluginLogger {
       entries = this.pendingFlush.splice(0, this.pendingFlush.length);
       if (entries.length === 0) return;
 
-      const payload = entries.map((entry) => JSON.stringify(entry)).join("\n") + "\n";
+      const payload = entries.map((entry) => this.persistedEntries.get(entry)).join("\n") + "\n";
       const result = await storage.appendToFile("diagnostics", this.logFileName, payload);
       if (result?.success === false) {
         throw new Error("Diagnostics storage rejected the log batch.");
@@ -442,9 +432,9 @@ export class PluginLogger {
       // Filter on the capture-time decision: re-evaluating the current
       // settings would write entries captured while recording was off.
       const recent = this.buffer
-        .filter((entry) => this.persistableEntries.has(entry))
+        .map((entry) => this.persistedEntries.get(entry))
+        .filter((entry): entry is string => entry !== undefined)
         .slice(-200)
-        .map((entry) => JSON.stringify(entry))
         .join("\n");
       await adapter.write(path, `${recent}\n`);
     } catch {
@@ -469,6 +459,28 @@ export class PluginLogger {
   }
 }
 
+function serializeEntry(entry: PluginLogEntry): string {
+  try {
+    return JSON.stringify(entry);
+  } catch {
+    // A circular detail, bigint or throwing toJSON must not poison the batch.
+    return JSON.stringify({
+      ...entry,
+      context: entry.context ? {
+        source: entry.context.source,
+        method: entry.context.method,
+        command: entry.context.command,
+        metadata: { note: "details_unserializable" },
+      } : undefined,
+      error: entry.error ? {
+        name: typeof entry.error.name === "string" ? entry.error.name : undefined,
+        message: typeof entry.error.message === "string" ? entry.error.message : "details_unserializable",
+        stack: typeof entry.error.stack === "string" ? entry.error.stack : undefined,
+      } : undefined,
+    });
+  }
+}
+
 function sanitizeContext(context: PluginLogContext): PluginLogContext {
   const safeContext: PluginLogContext = {};
   if (context.source) safeContext.source = context.source;
@@ -476,7 +488,7 @@ function sanitizeContext(context: PluginLogContext): PluginLogContext {
   if (context.command) safeContext.command = context.command;
   if (context.metadata) {
     try {
-      safeContext.metadata = JSON.parse(JSON.stringify(context.metadata));
+      safeContext.metadata = { ...context.metadata };
     } catch {
       safeContext.metadata = { note: "metadata_unserializable" };
     }
@@ -682,7 +694,7 @@ function serializeError(error: unknown) {
   }
   if (typeof error === "object") {
     try {
-      return JSON.parse(JSON.stringify(error));
+      return { ...error };
     } catch {
       return { message: String(error) };
     }

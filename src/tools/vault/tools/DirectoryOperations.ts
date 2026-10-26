@@ -545,7 +545,8 @@ export class DirectoryOperations {
     const ok = results.filter(r => r.success).length;
     const failed = results.length - ok;
     try {
-      if (ok > 0) new Notice(`Moved ${ok} item${ok === 1 ? '' : 's'}${failed ? ` (${failed} failed)` : ''}.`);
+      // The tool result lists each item; a notice is only for a partial move.
+      if (ok > 0 && failed > 0) new Notice(`Moved ${ok} item${ok === 1 ? '' : 's'} (${failed} failed).`);
     } catch {
       // Notices are optional in headless hosts.
     }
@@ -580,11 +581,6 @@ export class DirectoryOperations {
         error: error instanceof Error ? error.message : String(error),
       };
     });
-
-    const successfulCount = results.filter(r => r.success).length;
-    if (successfulCount > 0) {
-      new Notice(`Moved ${successfulCount} item(s) to trash.`);
-    }
 
     return { results };
   }

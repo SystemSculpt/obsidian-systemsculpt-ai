@@ -3,7 +3,7 @@ import type { ManagedTransportResult } from "../../../managed/ManagedTypes";
 import {
   MANAGED_EMBEDDINGS_INDEX_CONTRACT,
   MANAGED_EMBEDDINGS_INDEX_VECTOR_ENCODING,
-  type ManagedEmbeddingsError,
+  ManagedEmbeddingsError,
   ManagedEmbeddingsIndexAdapter,
 } from "../ManagedEmbeddingsIndexAdapter";
 
@@ -58,12 +58,22 @@ function payload(
   };
 }
 
+async function indexError(indexing: Promise<unknown>): Promise<ManagedEmbeddingsError> {
+  try {
+    await indexing;
+  } catch (caught) {
+    if (caught instanceof ManagedEmbeddingsError) return caught;
+    throw caught;
+  }
+  throw new Error("Expected managed indexing to fail.");
+}
+
 function transport(
   body: unknown,
   options: {
     status?: number;
     headers?: Record<string, string | null>;
-    raw?: Uint8Array;
+    raw?: Uint8Array<ArrayBuffer>;
   } = {},
 ): ManagedTransportResult {
   const raw = options.raw ?? UTF8.encode(JSON.stringify(body));
@@ -91,7 +101,7 @@ function transport(
       rateLimitLimit: null,
       rateLimitRemaining: null,
       rateLimitReset: null,
-      retryAfter: null,
+      retryAfterMs: undefined,
       errorText: "",
     },
   };
@@ -388,9 +398,9 @@ describe("ManagedEmbeddingsIndexAdapter", () => {
     const body = { private_markdown: "do not expose this vault text" };
     const adapter = adapterWith(jest.fn(async () => transport(body, { status })));
 
-    const error = await adapter.index({
+    const error = await indexError(adapter.index({
       prepare: () => ({ markdown: MARKDOWN }),
-    }).catch((caught) => caught as ManagedEmbeddingsError);
+    }));
 
     expect(error).toMatchObject({ code, status, requestId: "request-1" });
     expect(error.message).not.toContain("vault text");
@@ -446,9 +456,9 @@ describe("ManagedEmbeddingsIndexAdapter", () => {
       },
     }, { status: 429 })));
 
-    const error = await adapter.index({
+    const error = await indexError(adapter.index({
       prepare: () => ({ markdown: MARKDOWN }),
-    }).catch((caught) => caught as ManagedEmbeddingsError);
+    }));
 
     expect(error.message).toBe("Managed embedding index request failed.");
     expect(JSON.stringify(error)).not.toContain(privateCanary);
@@ -465,9 +475,9 @@ describe("ManagedEmbeddingsIndexAdapter", () => {
       raw,
     })));
 
-    const error = await adapter.index({
+    const error = await indexError(adapter.index({
       prepare: () => ({ markdown: MARKDOWN }),
-    }).catch((caught) => caught as ManagedEmbeddingsError);
+    }));
 
     expect(error.message).toBe("Managed embedding index request failed.");
     expect(JSON.stringify(error)).not.toContain(privateCanary);
@@ -535,9 +545,9 @@ describe("ManagedEmbeddingsIndexAdapter", () => {
     });
     const adapter = adapterWith(request);
 
-    const error = await adapter.index({
+    const error = await indexError(adapter.index({
       prepare: () => ({ markdown: MARKDOWN }),
-    }).catch((caught) => caught as ManagedEmbeddingsError);
+    }));
 
     expect(request).toHaveBeenCalledTimes(1);
     expect(error).toMatchObject({ code: "temporarily_unavailable", status: 0 });

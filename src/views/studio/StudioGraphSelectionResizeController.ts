@@ -25,6 +25,7 @@ import {
 } from "./canvas/StudioGraphSelectionTransform";
 import { getStudioOwnerWindow } from "./StudioDomContext";
 
+/** @internal Tests type their fixtures with this. */
 export type StudioGraphSelectionResizePatchEntry = StudioSelectionResizePatchEntry;
 
 /**

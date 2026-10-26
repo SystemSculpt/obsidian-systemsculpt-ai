@@ -388,7 +388,7 @@ describe("DocumentContextManager", () => {
         expect(result).toBe(true);
         expect(mockContextManager.pinFile).toHaveBeenCalledWith("[[test/document.md]]");
         expect(mockContextManager.triggerContextChange).toHaveBeenCalled();
-        expect(mockedNotice).toHaveBeenCalledWith("Pinned document for every message", 3000);
+        expect(mockedNotice).not.toHaveBeenCalled();
       });
 
       it("returns false when file already in context", async () => {
@@ -399,7 +399,7 @@ describe("DocumentContextManager", () => {
 
         expect(result).toBe(false);
         expect(mockContextManager.pinFile).not.toHaveBeenCalled();
-        expect(mockedNotice).toHaveBeenCalledWith("document is already pinned for every message", 3000);
+        expect(mockedNotice).not.toHaveBeenCalled();
       });
 
       it("does not save changes when saveChanges is false", async () => {
@@ -408,7 +408,7 @@ describe("DocumentContextManager", () => {
         await manager.pinVaultFile(file, mockContextManager, { saveChanges: false });
 
         expect(mockContextManager.triggerContextChange).not.toHaveBeenCalled();
-        expect(mockedNotice).toHaveBeenCalledWith("Pinned document for every message", 3000);
+        expect(mockedNotice).not.toHaveBeenCalled();
       });
     });
 
@@ -486,7 +486,7 @@ describe("DocumentContextManager", () => {
         expect(result).toBe(true);
         expect(mockProcessDocument).toHaveBeenCalled();
         expect(mockContextManager.pinFile).toHaveBeenCalledWith("[[Extractions/doc/doc.md]]");
-        expect(mockedNotice).toHaveBeenCalledWith("Pinned doc for every message", 3000);
+        expect(mockedNotice).not.toHaveBeenCalled();
       });
 
       it("passes a pin's cancel signal to document processing, and stops a batch once cancelled (#420)", async () => {
@@ -530,7 +530,7 @@ describe("DocumentContextManager", () => {
         expect(mockContextManager.pinFile).toHaveBeenCalledTimes(1);
         expect(mockContextManager.pinFile).toHaveBeenCalledWith("[[before.md]]");
         expect(mockContextManager.triggerContextChange).toHaveBeenCalledTimes(1);
-        expect(mockedNotice).toHaveBeenCalledTimes(1);
+        expect(mockedNotice).not.toHaveBeenCalled();
       });
 
       it("rejects a document context callback after its owning UI cancels", async () => {
@@ -567,7 +567,7 @@ describe("DocumentContextManager", () => {
         expect(result).toBe(true);
         expect(mockProcessDocument).not.toHaveBeenCalled();
         expect(mockContextManager.pinFile).toHaveBeenCalledWith("[[images/diagram.png]]");
-        expect(mockedNotice).toHaveBeenCalledWith("Pinned diagram for every message", 3000);
+        expect(mockedNotice).not.toHaveBeenCalled();
       });
 
       it("handles document processing error", async () => {
@@ -588,7 +588,7 @@ describe("DocumentContextManager", () => {
 
         expect(result).toBe(true);
         expect(mockContextManager.pinFile).toHaveBeenCalledWith("[[Extractions/doc/images-123/image1.png]]");
-        expect(mockedNotice).toHaveBeenCalledWith("Pinned doc for every message", 3000);
+        expect(mockedNotice).not.toHaveBeenCalled();
       });
     });
 
@@ -612,7 +612,7 @@ describe("DocumentContextManager", () => {
           "Extractions/audio/audio - transcript.md",
           expect.stringContaining("Transcribed text"),
         );
-        expect(mockedNotice).toHaveBeenCalledWith("Pinned audio for every message", 3000);
+        expect(mockedNotice).not.toHaveBeenCalled();
       });
 
       it("processes WAV files", async () => {
@@ -624,7 +624,7 @@ describe("DocumentContextManager", () => {
 
         expect(result).toBe(true);
         expect(mockTranscribeFile).toHaveBeenCalled();
-        expect(mockedNotice).toHaveBeenCalledWith("Pinned audio for every message", 3000);
+        expect(mockedNotice).not.toHaveBeenCalled();
       });
 
       it("preserves an existing transcription path and creates a unique sibling", async () => {
@@ -643,7 +643,7 @@ describe("DocumentContextManager", () => {
           "Extractions/audio/audio - transcript (2).md",
           expect.stringContaining("Transcribed text"),
         );
-        expect(mockedNotice).toHaveBeenCalledWith("Pinned audio for every message", 3000);
+        expect(mockedNotice).not.toHaveBeenCalled();
       });
 
       it("handles transcription error", async () => {
@@ -668,7 +668,7 @@ describe("DocumentContextManager", () => {
           expect.any(String),
           "Just the text"
         );
-        expect(mockedNotice).toHaveBeenCalledWith("Pinned audio for every message", 3000);
+        expect(mockedNotice).not.toHaveBeenCalled();
       });
 
       it("reuses an existing committed transcription during local-commit retry", async () => {
@@ -692,7 +692,7 @@ describe("DocumentContextManager", () => {
 
         expect(result).toBe(true);
         expect(mockApp.vault.create).not.toHaveBeenCalled();
-        expect(mockedNotice).toHaveBeenCalledWith("Pinned audio for every message", 3000);
+        expect(mockedNotice).not.toHaveBeenCalled();
       });
     });
   });

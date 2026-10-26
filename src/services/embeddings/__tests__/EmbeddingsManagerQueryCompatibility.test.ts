@@ -4,9 +4,9 @@ import {
   MANAGED_EMBEDDINGS_INDEX_VECTOR_ENCODING,
   type ManagedEmbeddingsIndexQueryResult,
 } from "../gateway/ManagedEmbeddingsIndexAdapter";
-import { buildManagedNamespace } from "../utils/namespace";
+import { managedNamespace } from "./support/managedNamespace";
 
-const committedNamespace = buildManagedNamespace(2, "semantic-v1", 3);
+const committedNamespace = managedNamespace(2, "semantic-v1", 3);
 
 function queryResult(
   generationId: string,
@@ -19,7 +19,7 @@ function queryResult(
     generation: {
       id: generationId,
       indexSchemaVersion: schema,
-      indexNamespace: buildManagedNamespace(vector.length, generationId, schema),
+      indexNamespace: managedNamespace(vector.length, generationId, schema),
       dimensions: vector.length,
     },
     vector,
@@ -29,8 +29,10 @@ function queryResult(
 function harness(result: ManagedEmbeddingsIndexQueryResult) {
   const manager = Object.create(EmbeddingsManager.prototype) as any;
   manager.initialized = true;
+  manager.plugin = { settings: { embeddingsEnabled: false } };
   manager.searchNamespace = committedNamespace;
   manager.queryCache = new Map();
+  manager.pendingQueries = new Map();
   manager.gateway = {
     activeGeneration: result.generation,
     query: jest.fn(async () => result),
@@ -100,6 +102,59 @@ describe("EmbeddingsManager query generation compatibility", () => {
     await expect(manager.searchSimilar("candidate", 5)).resolves.toEqual([]);
     expect(manager.gateway.query).toHaveBeenCalledTimes(2);
     expect(manager.searchIndexedNamespace).toHaveBeenCalledTimes(1);
+  });
+
+  it("shares one managed request between identical searches while it runs", async () => {
+    const result = queryResult("semantic-v1", 4, new Float32Array([1, 0]));
+    const manager = harness(result);
+    let answer!: (value: ManagedEmbeddingsIndexQueryResult) => void;
+    manager.gateway.query.mockImplementationOnce(() => new Promise((resolve) => { answer = resolve; }));
+
+    const first = manager.searchSimilar("older passengers", 5);
+    const second = manager.searchSimilar("older passengers", 5);
+    await Promise.resolve();
+    answer(result);
+
+    await expect(first).resolves.toHaveLength(1);
+    await expect(second).resolves.toHaveLength(1);
+    expect(manager.gateway.query).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the vector of a search cancelled while its request ran", async () => {
+    const result = queryResult("semantic-v1", 4, new Float32Array([1, 0]));
+    const manager = harness(result);
+    let answer!: (value: ManagedEmbeddingsIndexQueryResult) => void;
+    manager.gateway.query.mockImplementationOnce(() => new Promise((resolve) => { answer = resolve; }));
+    const controller = new AbortController();
+
+    const cancelled = manager.searchSimilar("older passengers", 5, controller.signal);
+    await Promise.resolve();
+    controller.abort();
+    await expect(cancelled).resolves.toEqual([]);
+    expect(manager.searchIndexedNamespace).not.toHaveBeenCalled();
+
+    answer(result);
+    await new Promise((resolve) => setImmediate(resolve));
+    await expect(manager.searchSimilar("older passengers", 5)).resolves.toHaveLength(1);
+    expect(manager.gateway.query).toHaveBeenCalledTimes(1);
+  });
+
+  it("asks again after a failed request, even when nobody was still waiting for it", async () => {
+    const result = queryResult("semantic-v1", 4, new Float32Array([1, 0]));
+    const manager = harness(result);
+    let fail!: (error: Error) => void;
+    manager.gateway.query.mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = reject; }));
+    const controller = new AbortController();
+
+    const cancelled = manager.searchSimilar("older passengers", 5, controller.signal);
+    await Promise.resolve();
+    controller.abort();
+    await expect(cancelled).resolves.toEqual([]);
+    fail(new Error("temporarily unavailable"));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    await expect(manager.searchSimilar("older passengers", 5)).resolves.toHaveLength(1);
+    expect(manager.gateway.query).toHaveBeenCalledTimes(2);
   });
 
   it("does not reuse a cached query after the active dimensions change", async () => {

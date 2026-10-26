@@ -1,3 +1,4 @@
+import { isStudioRetiredNodeKind } from "../../../studio/StudioNodeKinds";
 import { Notice } from "obsidian";
 import type {
   ConnectionAutoCreateRequest,
@@ -6,7 +7,12 @@ import type {
 } from "../StudioGraphInteractionTypes";
 import { resolveSnapTarget, type SnapCandidate } from "./LinkSnap";
 import type { PortAnchor, StudioLinkStore } from "./StudioLinkStore";
-import { getStudioOwnerWindow } from "../StudioDomContext";
+import {
+  cancelStudioAnimationFrame,
+  getStudioOwnerDocument,
+  getStudioOwnerWindow,
+  requestStudioAnimationFrame,
+} from "../StudioDomContext";
 
 const SNAP_RADIUS_SCREEN_PX = 36;
 const AUTO_CREATE_HINT_DELAY_MS = 500;
@@ -61,6 +67,7 @@ export class StudioPortInteraction {
   private drag: InternalDrag | null = null;
   private armed: InternalArmed | null = null;
   private armedTeardown: (() => void) | null = null;
+  private viewportEl: HTMLElement | null = null;
   private canvasEl: HTMLElement | null = null;
   private autoCreateHintTimer: number | null = null;
   private autoCreateHintTimerWindow: Window | null = null;
@@ -73,6 +80,11 @@ export class StudioPortInteraction {
     private readonly store: StudioLinkStore,
     private readonly callbacks: PortInteractionCallbacks
   ) {}
+
+  /** The scrolling graph viewport: an armed connection lives and ends inside it. */
+  registerViewport(viewport: HTMLElement): void {
+    this.viewportEl = viewport;
+  }
 
   registerCanvas(canvas: HTMLElement): void {
     this.canvasEl = canvas;
@@ -101,6 +113,12 @@ export class StudioPortInteraction {
     return this.ports.get(portKey(nodeId, direction, portId))?.element ?? null;
   }
 
+  forEachPortElement(
+    visit: (nodeId: string, direction: PortDirection, portId: string, element: HTMLElement) => void
+  ): void {
+    for (const { nodeId, direction, portId, element } of this.ports.values()) visit(nodeId, direction, portId, element);
+  }
+
   clearPortElements(): void {
     this.resetPortVisualState();
     this.ports.clear();
@@ -109,6 +127,7 @@ export class StudioPortInteraction {
   clearRenderBindings(): void {
     this.cancel();
     this.ports.clear();
+    this.viewportEl = null;
     this.canvasEl = null;
   }
 
@@ -428,8 +447,11 @@ export class StudioPortInteraction {
     const candidates: SnapCandidate[] = [];
     const compatible = new Set<string>();
     const incompatible = new Set<string>();
+    const retiredNodeIds = new Set(this.host.getCurrentProject()?.graph.nodes
+      .filter(node => isStudioRetiredNodeKind(node.kind)).map(node => node.id));
     for (const port of this.ports.values()) {
-      if (port.direction !== "in") continue;
+      // Saved anchors still render their edges, but cannot attract a new drag.
+      if (port.direction !== "in" || port.element.matches(":disabled") || retiredNodeIds.has(port.nodeId)) continue;
       const portType = this.host.getPortType(port.nodeId, "in", port.portId) || "";
       const ok = sourceType && portType && this.host.portTypeCompatible(sourceType, portType);
       const key = portKey(port.nodeId, "in", port.portId);
@@ -527,24 +549,27 @@ export class StudioPortInteraction {
       lastClientX: start.x,
       lastClientY: start.y,
     };
-    const armedHost = this.ports.get(key)?.element ?? this.canvasEl;
-    if (!armedHost) {
+    // The preview follows the cursor only over the graph, so a move anywhere
+    // else in Obsidian costs nothing; leaving the graph ends the connection.
+    const surface = this.viewportEl ?? this.canvasEl;
+    if (!surface) {
       this.cancel();
       return;
     }
-    const armedWindow = getStudioOwnerWindow(armedHost);
+    const armedWindow = getStudioOwnerWindow(surface);
+    const armedDocument = getStudioOwnerDocument(surface);
 
+    let moveFrame: number | null = null;
+    const flushArmedMove = () => {
+      moveFrame = null;
+      if (this.armed) this.writeSnapshot(this.armed);
+    };
     const onArmedMove = (event: PointerEvent) => {
       if (!this.armed) return;
       this.armed.lastClientX = event.clientX;
       this.armed.lastClientY = event.clientY;
-      this.writeSnapshot({
-        fromNodeId: this.armed.fromNodeId,
-        fromPortId: this.armed.fromPortId,
-        candidates: this.armed.candidates,
-        lastClientX: event.clientX,
-        lastClientY: event.clientY,
-      });
+      // However many moves a frame brings, the snapshot is measured once.
+      moveFrame ??= requestStudioAnimationFrame(surface, flushArmedMove);
     };
     const onArmedKey = (event: KeyboardEvent) => {
       if (event.key === "Escape" && this.armed) {
@@ -552,11 +577,26 @@ export class StudioPortInteraction {
         this.cancel();
       }
     };
-    armedWindow.addEventListener("pointermove", onArmedMove);
+    const onPressOutside = (event: PointerEvent) => {
+      const target = event.target as Element | null;
+      if (target && surface.contains(target)) return;
+      // This graph's zoom and fit controls float over its viewport, so zooming
+      // to find the target keeps the connection.
+      const controls = target?.closest?.(".ss-studio-graph-workspace-controls");
+      if (controls && controls.parentElement === surface.parentElement) return;
+      this.cancel();
+    };
+    const onWindowBlur = () => this.cancel();
+    surface.addEventListener("pointermove", onArmedMove);
     armedWindow.addEventListener("keydown", onArmedKey);
+    armedWindow.addEventListener("blur", onWindowBlur);
+    armedDocument.addEventListener("pointerdown", onPressOutside, true);
     this.armedTeardown = () => {
-      armedWindow.removeEventListener("pointermove", onArmedMove);
+      if (moveFrame !== null) cancelStudioAnimationFrame(surface, moveFrame);
+      surface.removeEventListener("pointermove", onArmedMove);
       armedWindow.removeEventListener("keydown", onArmedKey);
+      armedWindow.removeEventListener("blur", onWindowBlur);
+      armedDocument.removeEventListener("pointerdown", onPressOutside, true);
     };
 
     this.writeSnapshot({

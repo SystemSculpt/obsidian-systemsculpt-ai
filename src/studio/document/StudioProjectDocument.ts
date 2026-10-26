@@ -15,7 +15,7 @@ import {
   pruneStudioClock, readStudioMergeBlock, recordStudioChanges, studioMergeBlock,
   type StudioDocumentClockState, type StudioHybridClock, type StudioPendingBase,
 } from "./StudioDocumentClock";
-import { writeStudioDocumentAtomically } from "./StudioDocumentAtomicWrite";
+import { studioDocumentFileStamp, writeStudioDocumentAtomically } from "./StudioDocumentAtomicWrite";
 
 type Accepted = {
   /** The file bytes this state was imported from or published as. */
@@ -35,6 +35,10 @@ type Accepted = {
   documentState: boolean;
   /** The import changed the file's content or its merge record, so the file must be rewritten. */
   rewrite: boolean;
+  /** Migration is readable in memory, but its original must be preserved before editing. */
+  readOnlyReason?: string;
+  /** The file's modification time and size once this device published `source` to it directly. */
+  fileStamp?: string;
 };
 const accepted = new WeakMap<object, Map<string, Accepted>>();
 const revisions = new WeakMap<object, Map<string, Map<string, string>>>();
@@ -43,7 +47,7 @@ const tails = new WeakMap<object, Map<string, Promise<unknown>>>();
 const MAX_REVISIONS = 16, MAX_REVISION_CHARS = 4_000_000;
 export type StudioDocumentEdit = {entityId: string; kind?: "set" | "create" | "delete" | "restore"; path?: string[]; value?: unknown; remove?: boolean};
 /** Accepted content and its exact published bytes belong to the same file version. */
-export type StudioDocumentReconciliation = StudioProjectReconciliation & {source: string};
+export type StudioDocumentReconciliation = StudioProjectReconciliation & {source: string; readOnlyReason?: string};
 export type StudioDocumentEditResult = StudioDocumentReconciliation & {revision: string};
 /** The untouched bytes of an older file, kept before Studio first republishes it as plain v2. */
 export type StudioLegacyOriginalCopy = Readonly<{projectPath: string; copyPath: string; retiredNodes: readonly Readonly<{title: string; kind: string}>[]}>;
@@ -51,8 +55,27 @@ const LEGACY_ORIGINAL_SUFFIX = "-v1-original.json";
 const DOCUMENT_STATE_ORIGINAL_SUFFIX = "-document-state-original.json";
 const RESERVED_KEYS = ["__proto__", "constructor", "prototype"];
 class StudioWriteRace extends Error {}
+class StudioOriginalCopyError extends Error {}
 
-/** An agent revision: the SHA-256 of the canonical document text. */
+/**
+ * The project a file's text opens as, older dialects migrated: the gate every import passes.
+ * Throws when Studio can't open it. It reads and writes nothing.
+ */
+export function readStudioProjectFile(raw: string, projectPath: string): {record: Record<string, unknown>; project: StudioProjectV1} {
+  const parsed: unknown = JSON.parse(raw);
+  assertValidStudioProjectAgentDocumentStructure(parsed);
+  // Older dialects migrate before validation: retired v1 node kinds only compile once rewritten.
+  const project = parseAndMigrateStudioProject(raw, {projectPath});
+  // Grants belong to the file's own location; an authored reference cannot select another project's policy.
+  project.permissionsRef = {...project.permissionsRef, policyPath: deriveStudioPolicyPath(projectPath)};
+  validateStudioProjectForAgentEdit(project);
+  return {record: parsed as Record<string, unknown>, project};
+}
+
+/**
+ * An agent revision: the SHA-256 of the canonical document text.
+ * @internal Unit-tested directly.
+ */
 export async function studioDocumentRevision(text: string): Promise<string> {
   return sha256HexFromArrayBuffer(new TextEncoder().encode(text).buffer);
 }
@@ -93,7 +116,7 @@ export class StudioProjectDocument {
     // An entry file and its linked projection publish the same physical document: queue on that path.
     const run = async (): Promise<T> => {
       let key = this.path;
-      try { key = (await resolveStudioEntry(this.adapter, this.path)).path; } catch { /* Missing files queue on their own path. */ }
+      try { key = (await this.entry()).path; } catch { /* Missing files queue on their own path. */ }
       const task = (queues.get(key) || Promise.resolve()).catch(() => undefined).then(async () => {
         for (let attempt = 0; ; attempt++) {
           try { return await operation(); } catch (error) { if (!(error instanceof StudioWriteRace) || attempt >= 7) throw error; }
@@ -126,13 +149,38 @@ export class StudioProjectDocument {
     if (text !== undefined) { texts.delete(revision); texts.set(revision, text); }
     return text;
   }
+  getReadOnlyReason(): string | undefined { return this.cache.get(this.path)?.readOnlyReason; }
+  assertWritable(): void {
+    const reason = this.getReadOnlyReason();
+    if (reason) throw new Error(reason);
+  }
+  /**
+   * The file this document publishes. While it keeps the file stamp of this device's last write it holds
+   * those bytes, so it is not read again; anything else changed it and it is read and merged.
+   */
+  private async entry(): Promise<StudioEntryResolution> {
+    const value = this.cache.get(this.path);
+    if (value?.fileStamp && await studioDocumentFileStamp(this.adapter, this.path) === value.fileStamp) return {path: this.path, raw: value.source};
+    return resolveStudioEntry(this.adapter, this.path);
+  }
   /** Every write replaces the resolved file; an older format first keeps its original bytes. */
-  private async publish(entry: StudioEntryResolution, value: Accepted, next: string): Promise<boolean> {
+  private async publish(entry: StudioEntryResolution, value: Accepted, published: Accepted): Promise<boolean> {
+    const next = published.source;
     if (next !== entry.raw) {
-      if (value.legacy && !await this.keepOriginal(entry, LEGACY_ORIGINAL_SUFFIX)) return false;
-      if (value.documentState && !await this.keepOriginal(entry, DOCUMENT_STATE_ORIGINAL_SUFFIX)) return false;
+      try {
+        if (value.legacy && !await this.keepOriginal(entry, LEGACY_ORIGINAL_SUFFIX)) return false;
+        if (value.documentState && !await this.keepOriginal(entry, DOCUMENT_STATE_ORIGINAL_SUFFIX)) return false;
+      } catch (error) {
+        if (!value.legacy) throw error;
+        value.readOnlyReason = `This project is open read-only because Studio couldn't save an original copy in ${deriveStudioAssetsDir(this.path)}/legacy. The project file is unchanged. Make that folder writable, then choose Try again.`;
+        throw new StudioOriginalCopyError(value.readOnlyReason);
+      }
     }
-    return writeStudioDocumentAtomically(this.adapter, entry.path, entry.raw, next);
+    const written = await writeStudioDocumentAtomically(this.adapter, entry.path, entry.raw, next, entry.raw === value.source ? value.fileStamp : undefined);
+    if (!written) return false;
+    // A linked projection is read through its entry file, whose file stamp is not this write's.
+    published.fileStamp = entry.entryRaw === undefined ? written.fileStamp ?? undefined : undefined;
+    return true;
   }
   /**
    * v1 migration retires node kinds and drops their configuration, so its bytes are copied once per
@@ -199,15 +247,8 @@ export class StudioProjectDocument {
   private async import(raw: string): Promise<Accepted> {
     const previous = this.cache.get(this.path);
     if (previous && previous.source === raw) return previous;
-    const parsed: unknown = JSON.parse(raw);
-    assertValidStudioProjectAgentDocumentStructure(parsed);
-    // Older dialects migrate before validation: retired v1 node kinds only compile once rewritten.
-    const candidate = parseAndMigrateStudioProject(raw, {projectPath: this.path});
-    // Grants belong to the file's own location; an authored reference cannot select another project's policy.
-    candidate.permissionsRef = {...candidate.permissionsRef, policyPath: deriveStudioPolicyPath(this.path)};
-    validateStudioProjectForAgentEdit(candidate);
+    const {record, project: candidate} = readStudioProjectFile(raw, this.path);
     if (previous && previous.project.projectId !== candidate.projectId) throw new Error("The edited file belongs to another Studio project.");
-    const record = parsed as Record<string, unknown>;
     const legacy = String(record.schema ?? "").trim() !== "studio.project.v2";
     const documentState = !legacy && Object.prototype.hasOwnProperty.call(record, "document");
     const block = legacy ? null : readStudioMergeBlock(record.merge);
@@ -264,14 +305,14 @@ export class StudioProjectDocument {
   /** Publish `value` with a fresh merge record, so other devices receive what this device accepted. */
   private async republish(entry: StudioEntryResolution, value: Accepted): Promise<Accepted> {
     const at = this.clock.now();
-    const next: Accepted = {...value, source: await this.bytes(value.project, value.text, value.clock, at), at, legacy: false, documentState: false, rewrite: false};
-    if (!await this.publish(entry, value, next.source)) throw new StudioWriteRace("Studio file changed during reconciliation; the edit remains pending.");
+    const next: Accepted = {...value, source: await this.bytes(value.project, value.text, value.clock, at), at, legacy: false, documentState: false, rewrite: false, readOnlyReason: undefined, fileStamp: undefined};
+    if (!await this.publish(entry, value, next)) throw new StudioWriteRace("Studio file changed during reconciliation; the edit remains pending.");
     this.cache.set(this.path, next);
     return next;
   }
   private async refreshLocked(): Promise<{value: Accepted; conflicts: string[]}> {
     // The file itself is imported, never an older watcher copy of it: a delayed event cannot roll back state.
-    const entry = await resolveStudioEntry(this.adapter, this.path);
+    const entry = await this.entry();
     let value: Accepted;
     try { value = await this.import(entry.raw); }
     catch (error) {
@@ -281,13 +322,19 @@ export class StudioProjectDocument {
     }
     // Older dialects are upgraded at once, and a merge is published so the other writer receives it.
     // Formatting and 6.10 merge state alone are only rewritten by the next edit.
-    if (value.legacy || value.rewrite) value = await this.republish(entry, value);
+    if (value.legacy || value.rewrite) {
+      try { value = await this.republish(entry, value); }
+      catch (error) {
+        // Validation already succeeded. Only a failed original copy may fall back to an in-memory preview.
+        if (!(error instanceof StudioOriginalCopyError)) throw error;
+      }
+    }
     return {value, conflicts: []};
   }
   async refresh(): Promise<StudioDocumentReconciliation> {
     return this.exclusive(async () => {
       const {value, conflicts} = await this.refreshLocked();
-      return {project: cloneStudioProjectSnapshot(value.project), conflicts, source: value.source};
+      return {project: cloneStudioProjectSnapshot(value.project), conflicts, source: value.source, readOnlyReason: value.readOnlyReason};
     });
   }
   /** The file bytes of the current document, as a watcher reports them. */
@@ -308,8 +355,9 @@ export class StudioProjectDocument {
    */
   async save(project: StudioProjectV1, options?: {onBeforeProjectWrite?: (raw: string) => void; baseProject?: StudioProjectV1}): Promise<StudioProjectReconciliation> {
     return this.exclusive(async () => {
-      const entry = await resolveStudioEntry(this.adapter, this.path);
+      const entry = await this.entry();
       const current = await this.import(entry.raw);
+      this.assertWritable();
       const base = options?.baseProject;
       const merged = !base || serializeStudioProject(base) === current.text
         ? {project, conflicts: [] as string[]}
@@ -317,7 +365,7 @@ export class StudioProjectDocument {
       const {project: saved, text} = this.canonical(current.project, merged.project);
       const next = await this.successor(current, saved, text);
       options?.onBeforeProjectWrite?.(next.source);
-      if (!await this.publish(entry, current, next.source)) throw new StudioWriteRace("Another writer changed the Studio file; your edit is still pending and will be rebased on retry.");
+      if (!await this.publish(entry, current, next)) throw new StudioWriteRace("Another writer changed the Studio file; your edit is still pending and will be rebased on retry.");
       this.cache.set(this.path, next);
       return {project: cloneStudioProjectSnapshot(saved), conflicts: merged.conflicts};
     });
@@ -329,8 +377,9 @@ export class StudioProjectDocument {
    */
   async edit(revision: string, edits: StudioDocumentEdit[]): Promise<StudioDocumentEditResult> {
     return this.exclusive(async () => {
-      const entry = await resolveStudioEntry(this.adapter, this.path);
+      const entry = await this.entry();
       const current = await this.import(entry.raw);
+      this.assertWritable();
       const latest = revision === await studioDocumentRevision(current.text);
       const basisText = latest ? current.text : this.revisionText(revision);
       if (basisText === undefined) throw new Error("This Studio revision is no longer available. Read the document again and retry.");
@@ -347,7 +396,7 @@ export class StudioProjectDocument {
       }
       const {project, text} = this.canonical(current.project, content);
       const next = await this.successor(current, project, text);
-      if (!await this.publish(entry, current, next.source)) throw new StudioWriteRace("Studio file changed during the edit; retry with the same revision and edits.");
+      if (!await this.publish(entry, current, next)) throw new StudioWriteRace("Studio file changed during the edit; retry with the same revision and edits.");
       this.cache.set(this.path, next);
       return {project: cloneStudioProjectSnapshot(project), conflicts: [], source: next.source, revision: await this.handOut(text)};
     });

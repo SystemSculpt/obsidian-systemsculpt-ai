@@ -2,7 +2,9 @@ import type { App, Editor } from "obsidian";
 import { TFile } from "obsidian";
 import type SystemSculptPlugin from "../../main";
 import { getHostDeviceType } from "../../platform/hostCapabilities";
-import { sha256HexFromArrayBuffer, sha256HexFromBytesPortable } from "../../utils/sha256";
+import { sha256HexFromBytesPortable } from "../../utils/sha256";
+import { createVaultFileSource } from "../../platform/fileSource";
+import { createManagedFileSource } from "../managed/ManagedFileSource";
 import { DEFAULT_SETTINGS } from "../../types";
 import { MAX_FILE_SIZE, formatFileSize } from "../../utils/FileValidator";
 import { logError } from "../../utils/errorHandling";
@@ -24,7 +26,7 @@ import {
   verifyLocalCommitReceipt,
 } from "./LocalCommitReceipt";
 import type { TranscriptionInsertionValidator } from "./NoteInsertionTarget";
-import { TranscriptionTitleService } from "./TranscriptionTitleService";
+import { toSafeVaultFileName } from "../../utils/vaultFileName";
 
 const MIME_TYPES: Readonly<Record<string, string>> = Object.freeze({
   wav: "audio/wav",
@@ -36,11 +38,10 @@ const MIME_TYPES: Readonly<Record<string, string>> = Object.freeze({
   flac: "audio/flac",
 });
 
-// Obsidian exposes portable binary vault reads as whole ArrayBuffers. These
-// limits bound hashing + multipart-upload peak memory until host streaming is
-// available across both desktop and mobile.
-export const DESKTOP_TRANSCRIPTION_MAX_FILE_SIZE = 128 * 1024 * 1024;
-export const MOBILE_TRANSCRIPTION_MAX_FILE_SIZE = 32 * 1024 * 1024;
+// Both hosts upload slices; only the managed service's input limit applies.
+/** @internal Tests assert against this value. */
+export const DESKTOP_TRANSCRIPTION_MAX_FILE_SIZE = MAX_FILE_SIZE;
+const MOBILE_TRANSCRIPTION_MAX_FILE_SIZE = MAX_FILE_SIZE;
 
 export function getTranscriptionMaxFileSize(): number {
   return getHostDeviceType() === "Mobile"
@@ -234,7 +235,7 @@ export class TranscriptionCoordinator {
     let retryOperationId = operationId;
     let remoteReady = false;
     this.assertTranscribableSize(file);
-    const source = this.createManagedSource(file, controller.signal, sourceIdentity);
+    const createSource = () => this.createManagedSource(file, controller.signal, sourceIdentity);
     const managedContext: ManagedTranscriptionContext = {
       timestamped: context.timestamped,
       language: context.language,
@@ -244,7 +245,7 @@ export class TranscriptionCoordinator {
     };
 
     try {
-      let remote = await this.adapter().transcribe(source, {
+      let remote = await this.adapter().transcribe(createSource(), {
         ...managedContext,
         operationId,
       });
@@ -267,7 +268,7 @@ export class TranscriptionCoordinator {
               await this.acknowledgeCompleted(remote.operationId);
               const replacementOperationId = createOperationId(this.ownerWindow);
               retryOperationId = replacementOperationId;
-              remote = await this.adapter().transcribe(source, {
+              remote = await this.adapter().transcribe(createSource(), {
                 ...managedContext,
                 operationId: replacementOperationId,
               });
@@ -279,7 +280,7 @@ export class TranscriptionCoordinator {
         }
         if (remote.kind === "local_receipt") {
           try {
-            remote = await this.adapter().resume(remote.operationId, source, {
+            remote = await this.adapter().resume(remote.operationId, createSource(), {
               ...managedContext,
               allowPendingLocalReceipt: false,
             });
@@ -290,7 +291,7 @@ export class TranscriptionCoordinator {
             ) {
               const replacementOperationId = createOperationId(this.ownerWindow);
               retryOperationId = replacementOperationId;
-              remote = await this.adapter().transcribe(source, {
+              remote = await this.adapter().transcribe(createSource(), {
                 ...managedContext,
                 operationId: replacementOperationId,
               });
@@ -354,6 +355,7 @@ export class TranscriptionCoordinator {
     this.activeOperationId = operationId;
     let retryOperationId = operationId;
     let remoteReady = false;
+    let recoverExactOutput = false;
     const adoptRemoteOperationId = async (adoptedOperationId: string): Promise<void> => {
       const changed = adoptedOperationId !== retryOperationId;
       retryOperationId = adoptedOperationId;
@@ -374,13 +376,16 @@ export class TranscriptionCoordinator {
       report("preparing", 1, "Preparing audio…");
       const file = this.resolveAudioFile(request.filePath);
       this.assertTranscribableSize(file);
-      const source = this.createManagedSource(file, controller.signal, sourceIdentity);
+      const createSource = () => this.createManagedSource(file, controller.signal, sourceIdentity);
       const managedContext: ManagedTranscriptionContext = {
         timestamped: request.timestamped,
         language: request.language,
         signal: controller.signal,
         maxAudioBytes: getTranscriptionMaxFileSize(),
-        onOperationIdAdopted: adoptRemoteOperationId,
+        onOperationIdAdopted: async (adoptedOperationId) => {
+          recoverExactOutput = true;
+          await adoptRemoteOperationId(adoptedOperationId);
+        },
         onProgress: (progress, message) => {
           report(progress < 72 ? "uploading" : "transcribing", progress, message);
         },
@@ -403,8 +408,9 @@ export class TranscriptionCoordinator {
           throw new TranscriptionResumeRequiredError(request.resumeOperationId, error);
         }
         if (recoveryAvailable) {
+          recoverExactOutput = true;
           try {
-            remote = await this.adapter().resume(request.resumeOperationId, source, managedContext);
+            remote = await this.adapter().resume(request.resumeOperationId, createSource(), managedContext);
           } catch (error) {
             if (
               isAbortError(error)
@@ -417,13 +423,13 @@ export class TranscriptionCoordinator {
           const replacementOperationId = createOperationId(this.ownerWindow);
           retryOperationId = replacementOperationId;
           await request.onOperationIdChange?.(replacementOperationId);
-          remote = await this.adapter().transcribe(source, {
+          remote = await this.adapter().transcribe(createSource(), {
             ...managedContext,
             operationId: replacementOperationId,
           });
         }
       } else {
-        remote = await this.adapter().transcribe(source, {
+        remote = await this.adapter().transcribe(createSource(), {
           ...managedContext,
           operationId,
         });
@@ -448,14 +454,16 @@ export class TranscriptionCoordinator {
             retryOperationId = replacementOperationId;
             await request.onOperationIdChange?.(replacementOperationId);
             await this.acknowledgeCompleted(remote.operationId);
-            remote = await this.adapter().transcribe(source, {
+            recoverExactOutput = false;
+            remote = await this.adapter().transcribe(createSource(), {
               ...managedContext,
               operationId: replacementOperationId,
             });
             recoveryWarning = "The previous transcript was changed or removed, so SystemSculpt preserved that local state and created a fresh transcript.";
           } else if (remote.recoveryPhase === "local_commit_pending") {
+            recoverExactOutput = true;
             try {
-              remote = await this.adapter().resume(remote.operationId, source, {
+              remote = await this.adapter().resume(remote.operationId, createSource(), {
                 ...managedContext,
                 allowPendingLocalReceipt: false,
               });
@@ -467,7 +475,8 @@ export class TranscriptionCoordinator {
                 const replacementOperationId = createOperationId(this.ownerWindow);
                 retryOperationId = replacementOperationId;
                 await request.onOperationIdChange?.(replacementOperationId);
-                remote = await this.adapter().transcribe(source, {
+                recoverExactOutput = false;
+                remote = await this.adapter().transcribe(createSource(), {
                   ...managedContext,
                   operationId: replacementOperationId,
                 });
@@ -504,6 +513,7 @@ export class TranscriptionCoordinator {
           outputPolicy,
           report,
           controller.signal,
+          recoverExactOutput,
         );
         finalText = committed.finalText;
         insertionText = committed.insertionText;
@@ -694,6 +704,7 @@ export class TranscriptionCoordinator {
     outputPolicy: TranscriptionOutputPolicy,
     report: (phase: TranscriptionPhase, progress: number, message: string) => void,
     signal: AbortSignal,
+    recoverExactOutput: boolean,
   ): Promise<Readonly<{
     finalText: string;
     insertionText: string;
@@ -734,11 +745,11 @@ export class TranscriptionCoordinator {
     const planned = await this.planTranscriptionOutput(
       file,
       finalText,
-      processedText,
       timestamped,
       signal,
       remote.operationId,
       outputPolicy.cleanOutput,
+      recoverExactOutput,
     );
     await this.adapter().recordLocalCommitReceipt(remote.operationId, planned.receipt, signal);
     throwIfAborted(signal);
@@ -804,19 +815,28 @@ export class TranscriptionCoordinator {
   private async planTranscriptionOutput(
     file: TFile,
     content: string,
-    titleSourceText: string,
     timestamped: boolean,
     signal: AbortSignal,
     operationId: string,
     cleanOutput: boolean,
+    recoverExactOutput: boolean,
   ): Promise<PlannedTranscriptionOutput> {
     throwIfAborted(signal);
-    const titleService = TranscriptionTitleService.getInstance(this.plugin);
     const folderPath = file.path.split("/").slice(0, -1).join("/");
     const extension = timestamped ? "srt" : "md";
-    const fallbackBasename = timestamped
-      ? file.basename
-      : titleService.buildFallbackBasename(file.basename);
+    const basename = timestamped ? file.basename : toSafeVaultFileName(file.basename, {
+      replacement: "-", fallback: "Audio transcript",
+    });
+    // Keep pre-existing local commits recoverable after the naming change.
+    const legacyBasename = timestamped ? file.basename : `${file.basename} - transcript`;
+    const matchesBasename = (name: string, base: string): boolean => name === base || (
+      name.startsWith(`${base} (`) && /^\([1-9]\d*\)$/u.test(name.slice(base.length + 1))
+    );
+    const ownsName = (name: string): boolean => matchesBasename(name, basename) || (
+      !timestamped && (
+        matchesBasename(name, legacyBasename) || name.startsWith(`${legacyBasename} - `)
+      )
+    );
     // Recovery markers are useful metadata for the rich transcript format, but
     // the clean-output contract must remain literal: only the processed text is
     // written to the note. Clean Markdown and SRT recover by exact content
@@ -828,18 +848,21 @@ export class TranscriptionCoordinator {
     const owned = marker
       ? await this.findCommittedOutput(
         folderPath,
-        fallbackBasename,
+        ownsName,
         extension,
         marker,
         signal,
       )
-      : await this.findExactCommittedOutput(
+      // A fresh operation cannot claim an existing user note/subtitle merely
+      // because its text matches. Only explicit or adapter-adopted recovery may
+      // use this compatibility fallback when no local receipt was returned.
+      : recoverExactOutput ? await this.findExactCommittedOutput(
         folderPath,
-        fallbackBasename,
+        ownsName,
         extension,
         storedContent,
         signal,
-      );
+      ) : null;
     if (owned) {
       return {
         outputPath: owned.path,
@@ -848,10 +871,7 @@ export class TranscriptionCoordinator {
         existing: true,
       };
     }
-    const predictedBasename = timestamped
-      ? fallbackBasename
-      : await this.predictOutputBasename(titleService, file.basename, fallbackBasename, titleSourceText);
-    const outputPath = this.findAvailableOutputPath(folderPath, predictedBasename, extension);
+    const outputPath = this.findAvailableOutputPath(folderPath, basename, extension);
     return {
       outputPath,
       storedContent,
@@ -862,7 +882,7 @@ export class TranscriptionCoordinator {
 
   private async findCommittedOutput(
     folderPath: string,
-    fallbackBasename: string,
+    ownsName: (basename: string) => boolean,
     extension: string,
     marker: string,
     signal: AbortSignal,
@@ -870,7 +890,7 @@ export class TranscriptionCoordinator {
     const candidates = this.app.vault.getFiles().filter((candidate) => (
       candidate.extension === extension
       && (candidate.parent?.path ?? "") === folderPath
-      && candidate.basename.startsWith(fallbackBasename)
+      && ownsName(candidate.basename)
     ));
     for (const candidate of candidates) {
       throwIfAborted(signal);
@@ -882,7 +902,7 @@ export class TranscriptionCoordinator {
 
   private async findExactCommittedOutput(
     folderPath: string,
-    fallbackBasename: string,
+    ownsName: (basename: string) => boolean,
     extension: string,
     content: string,
     signal: AbortSignal,
@@ -890,7 +910,7 @@ export class TranscriptionCoordinator {
     const candidates = this.app.vault.getFiles().filter((candidate) => (
       candidate.extension === extension
       && (candidate.parent?.path ?? "") === folderPath
-      && candidate.basename.startsWith(fallbackBasename)
+      && ownsName(candidate.basename)
     ));
     for (const candidate of candidates) {
       throwIfAborted(signal);
@@ -904,31 +924,14 @@ export class TranscriptionCoordinator {
     signal: AbortSignal,
     sourceIdentity: string,
   ): ManagedTranscriptionSource {
-    let bytesPromise: Promise<ArrayBuffer> | null = null;
-    const loadBytes = (): Promise<ArrayBuffer> => {
-      bytesPromise ??= this.app.vault.readBinary(file);
-      return bytesPromise;
-    };
-    return {
-      identity: sourceIdentity,
-      fingerprint: async () => {
-        const bytes = await loadBytes();
-        throwIfAborted(signal);
-        return `sha256:${await sha256HexFromArrayBuffer(bytes)}`;
-      },
-      load: async () => {
-        const bytes = await loadBytes();
-        throwIfAborted(signal);
-        return {
-          filename: file.name,
-          contentType: MIME_TYPES[file.extension.toLowerCase()] ?? "application/octet-stream",
-          bytes,
-        };
-      },
-      release: () => {
-        bytesPromise = null;
-      },
-    };
+    return createManagedFileSource(sourceIdentity, () => {
+      throwIfAborted(signal);
+      return {
+        ...createVaultFileSource(this.app, file),
+        filename: file.name,
+        contentType: MIME_TYPES[file.extension.toLowerCase()] ?? "application/octet-stream",
+      };
+    });
   }
 
   private unwrapCommitResult<T>(value: TranscriptionCommitResult<T>): Readonly<{ value: T; receipt?: ManagedLocalCommitReceipt }> {
@@ -956,16 +959,6 @@ export class TranscriptionCoordinator {
       throw new Error("A different file claimed the transcript output path before save completed.");
     }
     await this.app.vault.create(planned.outputPath, planned.storedContent);
-  }
-
-  private async predictOutputBasename(
-    titleService: TranscriptionTitleService,
-    prefix: string,
-    fallbackBasename: string,
-    transcriptText: string,
-  ): Promise<string> {
-    const title = await titleService.tryGenerateTitle(transcriptText);
-    return title ? titleService.buildTitledBasename(prefix, title) : fallbackBasename;
   }
 
   private findAvailableOutputPath(

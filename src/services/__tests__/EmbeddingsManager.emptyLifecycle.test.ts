@@ -1,6 +1,5 @@
 import type { EmbeddingVector } from "../embeddings/types";
 import {
-  ManagedEmbeddingsError,
   type ManagedEmbeddingsIndexAdapter,
   type ManagedEmbeddingsIndexGeneration,
   type ManagedEmbeddingsIndexMetadata,
@@ -83,7 +82,7 @@ import {
   MANAGED_EMBEDDINGS_INDEX_VECTOR_ENCODING,
   ManagedEmbeddingsError,
 } from "../embeddings/gateway/ManagedEmbeddingsIndexAdapter";
-import { buildManagedNamespace } from "../embeddings/utils/namespace";
+import { managedNamespace } from "../embeddings/__tests__/support/managedNamespace";
 import { buildVectorId } from "../embeddings/utils/vectorId";
 
 const managedMetadata: ManagedEmbeddingsIndexMetadata = {
@@ -109,7 +108,7 @@ function nonEmptyIndexResult(markdown: string): ManagedEmbeddingsIndexResult {
     generation: {
       id: "semantic-v1",
       indexSchemaVersion: 3,
-      indexNamespace: buildManagedNamespace(3),
+      indexNamespace: managedNamespace(3),
       dimensions: 3,
     },
     chunks: [{
@@ -181,7 +180,6 @@ function harness(initialContent: string) {
   };
   const plugin = {
     settings,
-    emitter: { emit: jest.fn() },
     getManagedCapabilityGraph: jest.fn(() => ({
       embeddingsIndex: indexAdapter,
     })),
@@ -359,10 +357,10 @@ describe("EmbeddingsManager local empty-note lifecycle", () => {
     const state = harness("Queued work must honor a suspension raised during preparation. ".repeat(4));
     await state.manager.initialize();
     state.plugin.settings.embeddingsEnabled = true;
-    const queue = (state.manager as any).workQueue;
+    const queue = state.manager["workQueue"];
     await queue.enqueueImmediate(state.file.path, "modify", state.file.stat.mtime);
     const complete = queue.complete.bind(queue);
-    jest.spyOn(queue, "complete").mockImplementation(async (items: unknown[]) => {
+    jest.spyOn(queue, "complete").mockImplementation(async (items) => {
       await complete(items);
       (state.manager as any).processingSuspended = true;
       (state.manager as any).fatalSuspensionCode = "capability_unavailable";
@@ -524,7 +522,9 @@ describe("EmbeddingsManager local empty-note lifecycle", () => {
       },
     });
 
-    await expect(state.manager.retryFailedFiles()).resolves.toMatchObject({
+    // The Similar notes view's Start processing path: clear failures, then run.
+    await state.manager.resumeProcessing("prepare");
+    await expect(state.manager.processVault()).resolves.toMatchObject({
       status: "complete",
       processed: 1,
     });
@@ -583,7 +583,7 @@ describe("EmbeddingsManager local empty-note lifecycle", () => {
     releaseResponse?.();
     await processing;
 
-    const storedRoot = mockVectors.get(buildVectorId(buildManagedNamespace(3), state.file.path, 0));
+    const storedRoot = mockVectors.get(buildVectorId(managedNamespace(3), state.file.path, 0));
     expect(storedRoot).toBeUndefined();
     expect(queue.get(state.file.path)).toMatchObject({
       revision: newer.revision,

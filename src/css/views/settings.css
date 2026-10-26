@@ -16,6 +16,16 @@
   margin: 0;
 }
 
+/* Sign-in result under the Account row (SetupTabAccountSection.ts). */
+.ss-account-connect-result {
+  margin-top: var(--ss-space-1);
+  color: var(--ss-ink);
+}
+
+.ss-account-connect-result.is-error {
+  color: var(--ss-warning);
+}
+
 .ss-settings-layout {
   display: flex;
   flex-direction: column;

@@ -82,10 +82,10 @@ describe("StudioService.importFileToProject", () => {
     const service = new StudioService(createPluginStub());
     const projectPath = "SystemSculpt/Studio/Import Test.systemsculpt";
     const loadProject = jest
-      .spyOn((service as any).projectStore, "loadProject")
+      .spyOn(service["projectStore"], "loadProject")
       .mockResolvedValue(projectFixture());
     const putSupportFile = jest
-      .spyOn((service as any).projectStore, "putSupportFile")
+      .spyOn(service["projectStore"], "putSupportFile")
       .mockResolvedValue(undefined);
     const bytes = new TextEncoder().encode("image-bytes").buffer;
 
@@ -117,9 +117,9 @@ describe("StudioService.importFileToProject", () => {
   it("deduplicates repeated filenames by hashing the imported bytes", async () => {
     const service = new StudioService(createPluginStub());
     const projectPath = "SystemSculpt/Studio/Import Test.systemsculpt";
-    jest.spyOn((service as any).projectStore, "loadProject").mockResolvedValue(projectFixture());
+    jest.spyOn(service["projectStore"], "loadProject").mockResolvedValue(projectFixture());
     const putSupportFile = jest
-      .spyOn((service as any).projectStore, "putSupportFile")
+      .spyOn(service["projectStore"], "putSupportFile")
       .mockResolvedValue(undefined);
 
     const firstPath = await service.importFileToProject(projectPath, {

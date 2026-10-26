@@ -26,14 +26,14 @@ const NODE_PURPOSES: Readonly<Record<string, string>> = {
   "studio.audio_extract": "Extract audio from a media asset for downstream transcription or processing.",
   "studio.cli_command": "Run a configured command in an approved filesystem scope on a desktop host.",
   "studio.dataset": "Represent, inspect, and emit structured tabular or record-oriented data.",
-  "studio.image_generation": "Generate or edit images through the managed SystemSculpt API.",
+  "studio.image_generation": "Retired image generation card. Preserve its saved configuration, connections and outputs; never add new instances. It never runs.",
   "studio.input": "Provide a static value or text input to downstream executable nodes.",
   "studio.button": "Reusable explicit button. Set config.label, action (run or focus), and target node ID. Reuses target permissions; graph traversal never presses it.",
   "studio.command_center": "Action panel for explicit run and focus commands targeting existing node IDs. Buttons reuse the target execution and permission path. It is visual-only and never runs from graph traversal.",
   "studio.run_collection": "Live collection of independent native run instances. Connect role JSON outputs to matching source-ID ports; these are observation links and never execute roles. Double-click a run for public activity, messages and controls.",
   "studio.collection": "Display a bounded record collection as a Kanban board, grouped by configured fields. Carries the same JSON downstream; the source owns record changes.",
-  "studio.workflow": "Inspect and explicitly start a revisioned workflow in the existing execution service. Native tasks survive closing Studio. The Run canvas action only inspects this node; Start workflow admits execution.",
-  "studio.codex": "Run a prompt through the installed Codex app-server with the machine login, selected model/thinking/speed (default gpt-6-astra/high/Normal), native approvals and durable Codex history. Working directory is vault-relative by default; dot means the current vault. Set threadId to resume; leave it blank for a new task.",
+  "studio.workflow": "Retired workflow note. Preserve its saved title, configuration and connections; never add new instances. Its ports retain old connections only and never carry data during a run.",
+  "studio.codex": "Run a prompt through the installed Codex app-server with the machine login, selected model/thinking/speed (native Codex model and thinking by default, Normal speed), native approvals and durable Codex history. Working directory is vault-relative by default; dot means the current vault. Set threadId to resume; leave it blank for a new task.",
   "studio.script": "Run an editable JavaScript module with typed ports in an approved Node process. Preferred for new custom actions.",
   "studio.json": "Provide, parse, or normalize JSON content for downstream nodes.",
   "studio.media_ingest": "Reference image, video, audio, or binary media for downstream nodes.",
@@ -49,8 +49,6 @@ const NODE_PURPOSES: Readonly<Record<string, string>> = {
 
 const builtInRegistry = new StudioNodeRegistry();
 registerBuiltInStudioNodes(builtInRegistry);
-
-export const builtInStudioNodeRegistry = builtInRegistry;
 
 /**
  * v2 documents spell kinds without the "studio." namespace and never persist
@@ -218,7 +216,7 @@ Prefer script nodes for custom actions and json nodes for their input data. Put 
 
 ## Directory workspaces
 
-Reusable roles live in \`roles/*.yaml\` with shared instructions in \`prompts/*.md\`. Roles describe objectives, not permissions or singleton agents. Every role can have many native instances. Delegation records parent/child task and thread identities; results return to the originating thread. Workflow cards with \`roleId\` display instances of that role across runs.
+Reusable roles live in \`roles/*.yaml\` with shared instructions in \`prompts/*.md\`. Roles describe objectives, not permissions or singleton agents. Every role can have many native instances. Delegation records parent/child task and thread identities; results return to the originating thread. Saved workflow cards are retired notes: their role IDs and configuration are preserved, but they do not start or observe execution.
 
 An entry is \`{"schema":"studio.entry.v1","id":"existing-project-id","projection":"Name.studio/views/graph.systemsculpt"}\`. Keep its identity and link stable. The linked canvas uses the document format below. In a managed workspace, edit \`studio.json\`, \`workflows/*.yaml\`, \`prompts/*.md\` and source records through the owning companion service. It validates the file set, publishes an immutable definition revision, and updates the view. Running workflows retain their original definition. Canvas layout and user view preferences remain presentation data.
 
@@ -257,7 +255,7 @@ An entry is \`{"schema":"studio.entry.v1","id":"existing-project-id","projection
 - A node is \`{id, kind, title?, parent?, x, y, width?, height?, config?, disabled?, continueOnError?}\`. Omit \`width\`/\`height\` to use the kind's default size; omit \`config\` when empty.
 - \`config\` holds the node's authored content and settings; the node kind reference below lists allowed keys, defaults, and value constraints. Paths are vault-relative unless the field says otherwise.
 - An edge is the string \`"fromNode.outPort -> toNode.inPort"\`. Port types must match unless either side is \`any\`. When a node has exactly one output (or one input) port the port name may be omitted: \`"transcript -> summary.prompt"\`.
-- Edges connect executable data flow only. Visual-only kinds have no executable ports; do not invent port names.
+- Edges connect data flow. Visual-only kinds never execute. Preserve existing retired image connections, which carry recorded outputs, but do not add new connections to retired nodes or invent port names.
 - A group is \`{id, name, color?, nodes, shapes?, outputFor?, outputOffset?}\` framing existing node and shape ids. Membership defines its bounds; a member belongs to at most one group; a group needs at least one member; \`color\` is \`#rgb\` or \`#rrggbb\`.
 - A shape is \`{id, shape, x, y, width, height, label, style?}\` on the same canvas. Shapes are drawings, not nodes: they never run and cannot connect to a node. \`shape\` is one of \`rectangle\` (step), \`ellipse\`, \`diamond\` (decision), \`pill\` (start or end), \`cylinder\` (store), \`note\` (aside), \`hexagon\` (preparation). Sides are whole pixels between 48 and 4000.
 - An arrow is the string \`"fromItem -> toItem"\` between two different existing nodes or shapes; each direction of a pair may appear once. Arrows are drawn border to border and carry no data.
@@ -271,7 +269,7 @@ An entry is \`{"schema":"studio.entry.v1","id":"existing-project-id","projection
 
 In the installed Obsidian runtime, use the public Studio service: \`app.plugins.plugins["systemsculpt-ai"].getStudioService()\`. Call \`runProject(vaultRelativePath)\` for the graph or \`runProjectFromNode(vaultRelativePath, nodeId)\` for a node and its upstream prerequisites. These are the same execution methods used by the Run controls; every open view of that project receives progress, output, and errors automatically. Do not call private view handlers or fabricate run events.
 
-The run methods return a promise for the completed summary. For a long run, start it once and observe \`getActiveRun(path)\` (run ID, scoped node IDs, compact current events) and \`getRecentRuns(path)\` (saved results). \`subscribeRunEvents(listener)\` returns an unsubscribe function for live updates across projects; each update includes its project path. Opening a running project restores its current progress; reopening a finished project restores its saved run outputs, including images that bypass the execution cache. \`getLatestRunEvents(path)\` reads that saved event history without executing anything. A completed event means output files have been published. Re-running an image node requests another generation; inspect existing results before starting again.
+The run methods return a promise for the completed summary. For a long run, start it once and observe \`getActiveRun(path)\` (run ID, scoped node IDs, compact current events) and \`getRecentRuns(path)\` (saved results). \`subscribeRunEvents(listener)\` returns an unsubscribe function for live updates across projects; each update includes its project path. Opening a running project restores its current progress; reopening a finished project restores its saved run outputs, including images that bypass the execution cache. \`getLatestRunEvents(path)\` reads that saved event history without executing anything. A completed event means output files have been published. Image generation is retired: inspect saved image outputs without running the image card. Existing consumers reuse its recorded outputs; use an existing image file if no recorded output is available.
 
 ## Node kinds
 
@@ -287,7 +285,7 @@ export function validateStudioProjectForAgentEdit(project: StudioProjectV1): voi
   // compile when the user actually runs the graph.
   //
   // graph.entryNodeIds is deliberately not validated here. It is derived
-  // data: the canvas recomputes it on every mutation and scopeProjectForRun
+  // data: the canvas recomputes it on every mutation and planStudioRun
   // re-derives real entry points from executable-graph structure, ignoring
   // the persisted list. The visual-only classification also changes across
   // plugin versions (studio.text became executable in 6.2.x), so rejecting

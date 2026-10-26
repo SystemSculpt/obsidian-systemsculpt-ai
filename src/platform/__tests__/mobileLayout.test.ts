@@ -3,22 +3,25 @@
 import { Platform } from "obsidian";
 import {
   isMobileLayout,
+  isTabletLayout,
   resolveMobileLayoutDocument,
 } from "../mobileLayout";
 
-type MutablePlatform = typeof Platform & {
+type MutablePlatform = Omit<typeof Platform, "isDesktopApp" | "isMobile" | "isMobileApp" | "isTablet"> & {
   isDesktopApp?: boolean;
   isMobile?: boolean;
   isMobileApp?: boolean;
+  isTablet?: boolean;
 };
 
 describe("mobile layout host seam", () => {
-  const platform = Platform as MutablePlatform;
+  const platform: MutablePlatform = Platform;
 
   beforeEach(() => {
     platform.isDesktopApp = true;
     delete platform.isMobile;
     delete platform.isMobileApp;
+    delete platform.isTablet;
     document.body.className = "";
   });
 
@@ -26,6 +29,7 @@ describe("mobile layout host seam", () => {
     platform.isDesktopApp = true;
     delete platform.isMobile;
     delete platform.isMobileApp;
+    delete platform.isTablet;
   });
 
   it.each([
@@ -55,5 +59,16 @@ describe("mobile layout host seam", () => {
     expect(resolveMobileLayoutDocument(foreignDocument.body)).toBe(foreignDocument);
     expect(isMobileLayout(foreignDocument.body)).toBe(true);
     expect(isMobileLayout(document.body)).toBe(false);
+  });
+
+  it("recognizes tablets from the platform or the emulated tablet layout", () => {
+    expect(isTabletLayout(document)).toBe(false);
+
+    document.body.classList.add("is-tablet");
+    expect(isTabletLayout(document.body)).toBe(true);
+
+    document.body.className = "";
+    platform.isTablet = true;
+    expect(isTabletLayout(document)).toBe(true);
   });
 });

@@ -4,14 +4,15 @@ import type {
   ChatMessage,
   MultiPartContent,
 } from "../../../types";
-import { sha256HexFromBytesPortable } from "../../../utils/sha256";
+import { sha256HexFromBytes } from "../../../utils/sha256";
 import { replaceControlCharacters } from "../../../utils/characterValidation";
 import {
   DEFAULT_THIN_AGENT_INPUT_LIMITS,
   type ThinAgentInputLimits,
 } from "../../../services/managed/ThinAgentInputLimits";
 import {
-  createImageAttachmentPart,
+  createHashedImageAttachmentPart,
+  hashAttachmentPart,
   createTextAttachmentPart,
   parseAttachedTextContent,
   parseImageDataUrl,
@@ -50,6 +51,12 @@ function isPdfAttachmentFile(file: Pick<File, "name" | "type">): boolean {
   return file.type.split(";", 1)[0].trim().toLowerCase() === "application/pdf" || extensionOf(file.name) === "pdf";
 }
 
+/** Whether a file name has a type the attachment gate accepts (PDF, PNG/JPEG/WebP, text). */
+export function isSupportedChatAttachmentName(name: string): boolean {
+  const extension = extensionOf(name);
+  return extension === "pdf" || extension in IMAGE_MIME_BY_EXTENSION || TEXT_EXTENSIONS.has(extension);
+}
+
 export type ChatMessageAttachment = Readonly<{
   status: "ready";
   id: string;
@@ -76,7 +83,20 @@ export type FailedChatMessageAttachment = Readonly<{
   error: string;
 }>;
 
-export type ChatAttachmentDisplay = ChatMessageAttachment | FailedChatMessageAttachment;
+/** A document still being converted; it becomes ready or failed. */
+export type ProcessingChatMessageAttachment = Readonly<{
+  status: "processing";
+  id: string;
+  name: string;
+  mimeType: string;
+  byteLength: number;
+  kind: "document";
+}>;
+
+export type ChatAttachmentDisplay =
+  | ChatMessageAttachment
+  | FailedChatMessageAttachment
+  | ProcessingChatMessageAttachment;
 
 export type ChatDocumentAttachmentProcessor = Readonly<{
   /**
@@ -132,6 +152,12 @@ function safeFileName(name: string): string {
   return cleaned || "attachment";
 }
 
+/** Vault attachments keep their vault-relative path so the agent can find the note. */
+function safeVaultPath(path: string): string {
+  const cleaned = replaceControlCharacters(path, "", true).trim().replace(/^\/+/, "").slice(0, 1024);
+  return cleaned || "attachment";
+}
+
 function normalizeImageMime(file: Pick<File, "name" | "type">): string | null {
   const declared = file.type.trim().toLowerCase();
   if (declared === "image/jpg") return "image/jpeg";
@@ -144,6 +170,17 @@ function normalizeTextMime(file: Pick<File, "name" | "type">): string | null {
   const supported = declared.startsWith("text/") || TEXT_MIME_TYPES.has(declared) || TEXT_EXTENSIONS.has(extensionOf(file.name));
   if (!supported) return null;
   return declared || "text/plain";
+}
+
+function processingEntry(entry: FailedChatMessageAttachment): ProcessingChatMessageAttachment {
+  return Object.freeze({
+    status: "processing" as const,
+    id: entry.id,
+    name: entry.name,
+    mimeType: entry.mimeType,
+    byteLength: entry.byteLength,
+    kind: entry.kind,
+  });
 }
 
 function issue(code: ChatAttachmentIssueCode, fileName: string, message: string): ChatAttachmentIssue {
@@ -178,7 +215,7 @@ async function readBrowserFile(file: File): Promise<ArrayBuffer> {
  */
 export class ChatMessageAttachmentCollection {
   private readonly entries = new Map<string, ChatAttachmentDisplay>();
-  private readonly retryDocuments = new Map<string, Readonly<{ file: File; bytes: ArrayBuffer; fingerprint: `sha256:${string}` }>>();
+  private readonly retryDocuments = new Map<string, Readonly<{ file: File; name: string; bytes: ArrayBuffer; fingerprint: `sha256:${string}` }>>();
   private readonly completedDocuments = new Map<string, Readonly<{ operationId: string; attachment: ChatMessageAttachment }>>();
   private limits: ThinAgentInputLimits;
   /** Aborts document processing this draft started; replaced after a cancel. */
@@ -191,6 +228,8 @@ export class ChatMessageAttachmentCollection {
     private readonly read: BrowserFileReader = readBrowserFile,
     private readonly documentProcessor?: ChatDocumentAttachmentProcessor,
     limits: ThinAgentInputLimits = DEFAULT_THIN_AGENT_INPUT_LIMITS,
+    /** Called when an entry changes while an ingestion is still running. */
+    private readonly onChange?: () => void,
   ) {
     this.limits = limits;
   }
@@ -273,11 +312,16 @@ export class ChatMessageAttachmentCollection {
         this.entries.set(attachment.id, attachment);
       }
     }
+    // A document whose retry is still running keeps its retained conversion.
+    const retained = (id: string) => {
+      const status = this.entries.get(id)?.status;
+      return status === "failed" || status === "processing";
+    };
     for (const id of this.retryDocuments.keys()) {
-      if (this.entries.get(id)?.status !== "failed") this.retryDocuments.delete(id);
+      if (!retained(id)) this.retryDocuments.delete(id);
     }
     for (const id of this.completedDocuments.keys()) {
-      if (this.entries.get(id)?.status !== "failed") this.completedDocuments.delete(id);
+      if (!retained(id)) this.completedDocuments.delete(id);
     }
   }
 
@@ -304,10 +348,13 @@ export class ChatMessageAttachmentCollection {
     this.documentControllers.set(id, controller);
     const signal = controller.signal;
     const empty = () => Object.freeze({ accepted: Object.freeze([]), issues: Object.freeze([]) });
+    const processing = processingEntry(failed);
+    this.entries.set(id, processing);
+    this.onChange?.();
     try {
       const attachment = this.completedDocuments.get(id)?.attachment
-        ?? await this.preparePdfAttachment(retry.file, retry.bytes, retry.fingerprint, signal);
-      if (this.entries.get(id) !== failed) return empty();
+        ?? await this.preparePdfAttachment(retry.name, retry.bytes, retry.fingerprint, signal);
+      if (this.entries.get(id) !== processing) return empty();
       if (signal.aborted) throw new DOMException("Aborted", "AbortError");
       const validation = this.validateSubmission(userText, [...this.snapshot(), attachment]);
       if (validation.length > 0) throw new Error(validation[0].message);
@@ -316,7 +363,7 @@ export class ChatMessageAttachmentCollection {
       this.completedDocuments.delete(id);
       return Object.freeze({ accepted: Object.freeze([attachment]), issues: Object.freeze([]) });
     } catch (error) {
-      if (this.entries.get(id) !== failed) return empty();
+      if (this.entries.get(id) !== processing) return empty();
       const message = this.documentFailureMessage(failed.name, error, signal, this.completedDocuments.has(id));
       this.entries.set(id, Object.freeze({ ...failed, error: message }));
       return Object.freeze({
@@ -387,16 +434,34 @@ export class ChatMessageAttachmentCollection {
     return Object.freeze(issues);
   }
 
-  public async addFiles(files: readonly File[], userText = ""): Promise<ChatAttachmentIngestionResult> {
+  public addFiles(files: readonly File[], userText = ""): Promise<ChatAttachmentIngestionResult> {
+    return this.ingest(files.map((file) => ({ file, name: safeFileName(file.name) })), userText);
+  }
+
+  /**
+   * Attaches vault files to this one message. They pass the same gate as
+   * uploads; their vault-relative path names the attachment so the agent sees
+   * where the note lives.
+   */
+  public addVaultFiles(
+    files: readonly Readonly<{ path: string; file: File }>[],
+    userText = "",
+  ): Promise<ChatAttachmentIngestionResult> {
+    return this.ingest(files.map(({ path, file }) => ({ file, name: safeVaultPath(path) })), userText);
+  }
+
+  private async ingest(
+    sources: readonly Readonly<{ file: File; name: string }>[],
+    userText: string,
+  ): Promise<ChatAttachmentIngestionResult> {
     const accepted: ChatMessageAttachment[] = [];
     const issues: ChatAttachmentIssue[] = [];
     // One cancel stops every document this call has yet to finish.
     const signal = this.processing.signal;
     const generation = this.generation;
 
-    for (const file of files) {
+    for (const { file, name } of sources) {
       if (signal.aborted || generation !== this.generation) break;
-      const name = safeFileName(file.name);
       const availableBlocks = this.limits.maxContentBlocksPerMessage - (userText.trim() ? 1 : 0);
       if (this.entries.size >= availableBlocks) {
         issues.push(issue("file_limit", name, `You can attach up to ${availableBlocks} files with this message.`));
@@ -407,9 +472,10 @@ export class ChatMessageAttachmentCollection {
         continue;
       }
 
-      const pdf = isPdfAttachmentFile(file);
-      const imageMime = pdf ? null : normalizeImageMime(file);
-      const textMime = imageMime || pdf ? null : normalizeTextMime(file);
+      const typed = { name, type: file.type };
+      const pdf = isPdfAttachmentFile(typed);
+      const imageMime = pdf ? null : normalizeImageMime(typed);
+      const textMime = imageMime || pdf ? null : normalizeTextMime(typed);
       if (!pdf && !imageMime && !textMime) {
         issues.push(issue("unsupported", name, `${name} is not supported. Attach PDF, image, Markdown, text, or source files.`));
         continue;
@@ -450,7 +516,17 @@ export class ChatMessageAttachmentCollection {
         issues.push(issue("empty", name, `${name} is empty.`));
         continue;
       }
-      const hash = sha256HexFromBytesPortable(bytes);
+      let imagePart: MultiPartContent | undefined;
+      let hash: string;
+      try {
+        imagePart = imageMime ? await createHashedImageAttachmentPart(imageMime, bytes) : undefined;
+        hash = imagePart ? (await hashAttachmentPart(imagePart)).sha256 : await sha256HexFromBytes(bytes);
+      } catch {
+        if (signal.aborted || generation !== this.generation) break;
+        issues.push(issue("read_failed", name, `${name} could not be fingerprinted. Try attaching it again.`));
+        continue;
+      }
+      if (signal.aborted || generation !== this.generation) break;
       const kind = pdf ? "document" as const : imageMime ? "image" as const : "text" as const;
       const id = `${kind}-${hash}`;
       if (this.entries.has(id)) {
@@ -465,14 +541,18 @@ export class ChatMessageAttachmentCollection {
           const message = `${name} needs document processing, which is unavailable right now.`;
           const failed = Object.freeze({ status: "failed" as const, id, name, mimeType: "application/pdf", byteLength: bytes.byteLength, kind: "document" as const, error: message });
           this.entries.set(id, failed);
-          this.retryDocuments.set(id, Object.freeze({ file, bytes: buffer, fingerprint }));
+          this.retryDocuments.set(id, Object.freeze({ file, name, bytes: buffer, fingerprint }));
           issues.push(issue("processing_failed", name, message));
           continue;
         }
         const controller = new AbortController();
         this.documentControllers.set(id, controller);
+        this.entries.set(id, Object.freeze({
+          status: "processing" as const, id, name, mimeType: "application/pdf", byteLength: bytes.byteLength, kind: "document" as const,
+        }));
+        this.onChange?.();
         try {
-          attachment = await this.preparePdfAttachment(file, buffer, fingerprint, controller.signal);
+          attachment = await this.preparePdfAttachment(name, buffer, fingerprint, controller.signal);
           if (generation !== this.generation) break;
           if (controller.signal.aborted) throw new DOMException("Aborted", "AbortError");
         } catch (error) {
@@ -480,7 +560,7 @@ export class ChatMessageAttachmentCollection {
           const message = this.documentFailureMessage(name, error, controller.signal, this.completedDocuments.has(id));
           const failed = Object.freeze({ status: "failed" as const, id, name, mimeType: "application/pdf", byteLength: bytes.byteLength, kind: "document" as const, error: message });
           this.entries.set(id, failed);
-          this.retryDocuments.set(id, Object.freeze({ file, bytes: buffer, fingerprint }));
+          this.retryDocuments.set(id, Object.freeze({ file, name, bytes: buffer, fingerprint }));
           issues.push(issue("processing_failed", name, message));
           continue;
         } finally {
@@ -495,14 +575,13 @@ export class ChatMessageAttachmentCollection {
           mimeType,
           byteLength: bytes.byteLength,
           kind,
-          contentPart: kind === "image"
-            ? createImageAttachmentPart(mimeType, bytes)
-            : createTextAttachmentPart(name, mimeType, bytes),
+          contentPart: imagePart ?? createTextAttachmentPart(name, mimeType, bytes),
         });
       }
       const validation = this.validateSubmission(userText, [...this.snapshot(), attachment]);
       if (validation.length > 0) {
         this.completedDocuments.delete(id);
+        if (this.entries.get(id)?.status === "processing") this.entries.delete(id);
         issues.push(validation[0]);
         continue;
       }
@@ -516,14 +595,13 @@ export class ChatMessageAttachmentCollection {
   }
 
   private async preparePdfAttachment(
-    file: File,
+    name: string,
     bytes: ArrayBuffer,
     fingerprint: `sha256:${string}`,
     signal: AbortSignal,
   ): Promise<ChatMessageAttachment> {
     const processor = this.documentProcessor;
     if (!processor) throw new Error("Document processing is unavailable.");
-    const name = safeFileName(file.name);
     if (signal.aborted) throw new DOMException("Aborted", "AbortError");
     const prepared = await processor.prepare({
       name,
@@ -627,12 +705,13 @@ function attachmentFromMetadata(
   });
 }
 
-function fallbackAttachment(part: MultiPartContent, index: number): ChatMessageAttachment | null {
+async function fallbackAttachment(part: MultiPartContent, index: number): Promise<ChatMessageAttachment | null> {
   if (part.type === "image_url") {
     const parsed = parseImageDataUrl(part.image_url.url);
     if (!parsed) return null;
     const { mimeType, bytes } = parsed;
-    const hash = sha256HexFromBytesPortable(bytes);
+    const contentPart = await createHashedImageAttachmentPart(mimeType, bytes);
+    const hash = (await hashAttachmentPart(contentPart)).sha256;
     return Object.freeze({
       status: "ready" as const,
       id: `image-${hash}`,
@@ -640,7 +719,7 @@ function fallbackAttachment(part: MultiPartContent, index: number): ChatMessageA
       mimeType,
       byteLength: bytes.byteLength,
       kind: "image" as const,
-      contentPart: part,
+      contentPart,
     });
   }
   const parsed = parseAttachedTextContent(part.text);
@@ -649,7 +728,7 @@ function fallbackAttachment(part: MultiPartContent, index: number): ChatMessageA
   const kind = parsed.mimeType.toLowerCase() === "application/pdf" ? "document" as const : "text" as const;
   return Object.freeze({
     status: "ready" as const,
-    id: `${kind}-${sha256HexFromBytesPortable(bytes)}`,
+    id: `${kind}-${await sha256HexFromBytes(bytes)}`,
     name: safeFileName(parsed.name),
     mimeType: parsed.mimeType,
     byteLength: bytes.byteLength,
@@ -658,12 +737,27 @@ function fallbackAttachment(part: MultiPartContent, index: number): ChatMessageA
   });
 }
 
+/** Prompt recall needs only text, not image decoding or attachment hashing. */
+export function chatMessageDraftText(message: Readonly<ChatMessage>): string {
+  if (typeof message.content === "string") return message.content;
+  if (!Array.isArray(message.content)) return "";
+  const content = message.content;
+  const attached = new Set((message.attachmentMetadata ?? [])
+    .filter((metadata) => attachmentFromMetadata(metadata, content))
+    .map((metadata) => metadata.contentPartIndex));
+  return content.flatMap((part, index) => {
+    if (attached.has(index) || part.type !== "text") return [];
+    const parsed = parseAttachedTextContent(part.text);
+    return (parsed && !parsed.unavailable) || !part.text.trim() ? [] : [part.text];
+  }).join("\n\n");
+}
+
 /**
  * Rebuilds the editable composer draft from one durable user message. Modern
  * messages retain exact attachment identity; pre-metadata chats get a safe,
  * deterministic best-effort reconstruction from their stored content parts.
  */
-export function restoreChatMessageDraft(message: Readonly<ChatMessage>): RestoredChatMessageDraft {
+export async function restoreChatMessageDraft(message: Readonly<ChatMessage>): Promise<RestoredChatMessageDraft> {
   if (typeof message.content === "string") {
     return Object.freeze({ text: message.content, attachments: Object.freeze([]) });
   }
@@ -682,7 +776,7 @@ export function restoreChatMessageDraft(message: Readonly<ChatMessage>): Restore
   let imageIndex = 0;
   for (let index = 0; index < content.length; index += 1) {
     if (indexedAttachments.has(index)) continue;
-    const attachment = fallbackAttachment(content[index], imageIndex);
+    const attachment = await fallbackAttachment(content[index], imageIndex);
     if (!attachment) continue;
     indexedAttachments.set(index, attachment);
     if (attachment.kind === "image") imageIndex += 1;

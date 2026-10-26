@@ -21,7 +21,6 @@ const makePlugin = (app: App, options: { embeddingsEnabled?: boolean; manager?: 
         respectObsidianExclusions: false,
       },
     },
-    vaultFileCache: undefined,
     embeddingsManager: manager,
     getOrCreateEmbeddingsManager: jest.fn().mockReturnValue(manager),
   } as any;
@@ -44,11 +43,10 @@ describe("SystemSculptSearchEngine semantic mode", () => {
       "notes/cooking.md": "Recipes for delicious meals and cooking tips.",
     };
 
-    app.vault.getFiles.mockReturnValue(files);
-    // @ts-expect-error mock injected for tests
+    jest.spyOn(app.vault, "getFiles").mockReturnValue(files);
     app.vault.cachedRead = jest.fn((file) => Promise.resolve(contents[file.path] ?? ""));
-    app.vault.read.mockImplementation(app.vault.cachedRead);
-    app.vault.getAbstractFileByPath.mockImplementation((p) => files.find((f) => f.path === p) ?? null);
+    jest.spyOn(app.vault, "read").mockImplementation(app.vault.cachedRead);
+    jest.spyOn(app.vault, "getAbstractFileByPath").mockImplementation((p) => files.find((f) => f.path === p) ?? null);
 
     const plugin = makePlugin(app, pluginOptions);
     return { app, files, plugin };
@@ -85,8 +83,28 @@ describe("SystemSculptSearchEngine semantic mode", () => {
       expect(semanticResult?.origin).toBe("semantic");
     });
 
-    it("aborts the semantic query when it times out instead of letting it run on", async () => {
+    it("waits for a slow semantic answer instead of falling back to words", async () => {
       jest.useFakeTimers();
+      const mockManager = createMockManager({
+        searchSimilar: jest.fn().mockImplementation(() => new Promise((resolve) => {
+          setTimeout(() => resolve([
+            { path: "notes/machine-learning.md", score: 0.9, metadata: { title: "Machine Learning" } },
+          ]), 2_500);
+        })),
+      });
+      const { app, plugin } = buildFixture({ manager: mockManager });
+      const engine = new SystemSculptSearchEngine(app as any, plugin);
+
+      const searchPromise = engine.search("test query", { mode: "semantic", limit: 10 });
+      await jest.advanceTimersByTimeAsync(2_500);
+      const res = await searchPromise;
+
+      expect(res.stats.usedEmbeddings).toBe(true);
+      expect(res.results.map((r) => r.path)).toContain("notes/machine-learning.md");
+      jest.useRealTimers();
+    });
+
+    it("aborts the semantic query when the caller cancels instead of letting it run on", async () => {
       let received: AbortSignal | undefined;
       const mockManager = createMockManager({
         searchSimilar: jest.fn().mockImplementation((_query: string, _limit: number, signal: AbortSignal) => {
@@ -96,33 +114,15 @@ describe("SystemSculptSearchEngine semantic mode", () => {
       });
       const { app, plugin } = buildFixture({ manager: mockManager });
       const engine = new SystemSculptSearchEngine(app as any, plugin);
+      const controller = new AbortController();
 
-      const searchPromise = engine.search("test query", { mode: "semantic", limit: 10 });
-      await jest.advanceTimersByTimeAsync(1600);
-      await searchPromise;
-
-      expect(received?.aborted).toBe(true);
-      jest.useRealTimers();
-    });
-
-    it("times out after 1.5s and returns empty array for semantic", async () => {
-      jest.useFakeTimers();
-
-      const mockManager = createMockManager({
-        searchSimilar: jest.fn().mockImplementation(() => new Promise(() => {})),
-      });
-      const { app, plugin } = buildFixture({ manager: mockManager });
-      const engine = new SystemSculptSearchEngine(app as any, plugin);
-
-      const searchPromise = engine.search("test query", { mode: "semantic", limit: 10 });
-
-      await jest.advanceTimersByTimeAsync(1600);
-
+      const searchPromise = engine.search("test query", { mode: "semantic", limit: 10, signal: controller.signal });
+      await new Promise((resolve) => setImmediate(resolve));
+      controller.abort();
       const res = await searchPromise;
 
+      expect(received?.aborted).toBe(true);
       expect(res.stats.usedEmbeddings).toBe(false);
-
-      jest.useRealTimers();
     });
 
     it("handles manager errors gracefully", async () => {
@@ -158,7 +158,7 @@ describe("SystemSculptSearchEngine semantic mode", () => {
   });
 
   describe("smart/hybrid search", () => {
-    it("combines lexical and semantic results using RRF", async () => {
+    it("marks a note found by words and meaning as a blend", async () => {
       const mockManager = createMockManager({
         searchSimilar: jest.fn().mockResolvedValue([
           { path: "notes/deep-learning.md", score: 0.90, metadata: { title: "Deep Learning" } },
@@ -192,6 +192,85 @@ describe("SystemSculptSearchEngine semantic mode", () => {
       expect(blendedResult).toBeDefined();
       expect(blendedResult?.lexScore).toBeDefined();
       expect(blendedResult?.semScore).toBeDefined();
+    });
+
+    it("ranks a weak word match that meaning also finds above notes found by meaning alone", async () => {
+      // Vale Studio, query "older passengers who don't like apps": the meaning
+      // pass scores Timetable page ideas a little higher, but only Commuter
+      // interviews also matches the words.
+      const app = new App();
+      const files = [
+        new TFile({ path: "Research/Commuter interviews.md", stat: { mtime: NOW - 5_000 } }),
+        new TFile({ path: "Research/Timetable page ideas.md", stat: { mtime: NOW - 4_000 } }),
+        new TFile({ path: "Projects/Low Water.md", stat: { mtime: NOW - 3_000 } }),
+      ];
+      const contents: Record<string, string> = {
+        "Research/Commuter interviews.md": "Older regulars buy paper tickets on board, often with cash.",
+        "Research/Timetable page ideas.md": "The next sailing first, big, at the top. Pay on board stays near the top.",
+        "Projects/Low Water.md": "Tide tables for the slipway and the harbour crossing.",
+      };
+      jest.spyOn(app.vault, "getFiles").mockReturnValue(files);
+      app.vault.cachedRead = jest.fn((file) => Promise.resolve(contents[file.path] ?? ""));
+      jest.spyOn(app.vault, "read").mockImplementation(app.vault.cachedRead);
+      jest.spyOn(app.vault, "getAbstractFileByPath").mockImplementation((p) => files.find((f) => f.path === p) ?? null);
+      const mockManager = createMockManager({
+        searchSimilar: jest.fn().mockResolvedValue([
+          { path: "Research/Timetable page ideas.md", score: 0.444, metadata: { title: "Timetable page ideas" } },
+          { path: "Projects/Low Water.md", score: 0.437, metadata: { title: "Low Water" } },
+          { path: "Research/Commuter interviews.md", score: 0.421, metadata: { title: "Commuter interviews" } },
+        ]),
+      });
+      const engine = new SystemSculptSearchEngine(app as any, makePlugin(app, { manager: mockManager }));
+      await engine.startIndexing();
+
+      const res = await engine.search("older passengers who don't like apps", { mode: "smart", limit: 10 });
+
+      const commuter = res.results.find((r) => r.path === "Research/Commuter interviews.md");
+      expect(commuter?.origin).toBe("blend");
+      expect(commuter!.lexScore!).toBeLessThan(0.3);
+      expect(res.results.map((r) => r.path)).toEqual([
+        "Research/Commuter interviews.md",
+        "Research/Timetable page ideas.md",
+        "Projects/Low Water.md",
+      ]);
+    });
+
+    it("never scores a note found both ways below either of its own scores", async () => {
+      const mockManager = createMockManager({
+        searchSimilar: jest.fn().mockResolvedValue([
+          { path: "notes/machine-learning.md", score: 0.6, metadata: { title: "Machine Learning" } },
+          { path: "notes/cooking.md", score: 0.5, metadata: { title: "Cooking" } },
+        ]),
+      });
+      const { app, plugin } = buildFixture({ manager: mockManager });
+      const engine = new SystemSculptSearchEngine(app as any, plugin);
+      await engine.startIndexing();
+
+      const res = await engine.search("machine learning", { mode: "smart", limit: 10 });
+
+      const blended = res.results.find((r) => r.path === "notes/machine-learning.md")!;
+      expect(blended.origin).toBe("blend");
+      expect(blended.score).toBeGreaterThan(blended.lexScore!);
+      expect(blended.score).toBeGreaterThan(blended.semScore!);
+      const semanticOnly = res.results.find((r) => r.path === "notes/cooking.md")!;
+      expect(semanticOnly).toMatchObject({ origin: "semantic", score: 0.5, semScore: 0.5 });
+      expect(res.results[0].path).toBe("notes/machine-learning.md");
+    });
+
+    it("keeps an exact title match first when meaning prefers another note", async () => {
+      const mockManager = createMockManager({
+        searchSimilar: jest.fn().mockResolvedValue([
+          { path: "notes/machine-learning.md", score: 0.62, metadata: { title: "Machine Learning" } },
+          { path: "notes/deep-learning.md", score: 0.2, metadata: { title: "Deep Learning" } },
+        ]),
+      });
+      const { app, plugin } = buildFixture({ manager: mockManager });
+      const engine = new SystemSculptSearchEngine(app as any, plugin);
+      await engine.startIndexing();
+
+      const res = await engine.search("deep-learning", { mode: "smart", limit: 10 });
+
+      expect(res.results[0].path).toBe("notes/deep-learning.md");
     });
 
     it("falls back to lexical-only when semantic returns empty", async () => {
@@ -403,7 +482,6 @@ describe("SystemSculptSearchEngine semantic mode", () => {
       const plugin = {
         app,
         settings: { embeddingsEnabled: true, embeddingsExclusions: {} },
-        vaultFileCache: undefined,
         getOrCreateEmbeddingsManager: jest.fn().mockImplementation(() => {
           throw new Error("Manager initialization failed");
         }),
@@ -428,7 +506,6 @@ describe("SystemSculptSearchEngine semantic mode", () => {
       const plugin: any = {
         app,
         settings: { embeddingsEnabled: true, embeddingsExclusions: {} },
-        vaultFileCache: undefined,
         embeddingsManager: undefined,
         getOrCreateEmbeddingsManager: jest.fn(() => {
           plugin.embeddingsManager = manager;

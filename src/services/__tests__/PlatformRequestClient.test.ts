@@ -8,6 +8,7 @@ import {
   PlatformRequestTimeoutError,
   platformTransferTimeoutMs,
 } from "../PlatformRequestClient";
+import { dispatchManagedJob } from "../managed/ManagedJobObservation";
 
 jest.mock("obsidian", () => ({
   ...jest.requireActual("obsidian"),
@@ -17,6 +18,53 @@ jest.mock("obsidian", () => ({
 describe("PlatformRequestClient", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+  });
+
+  it("retries a native connection failure through the shared dispatch policy", async () => {
+    jest.useFakeTimers();
+    try {
+      const native = requestUrl as jest.Mock;
+      native.mockRejectedValueOnce(new Error("net::ERR_CONNECTION_RESET"))
+        .mockResolvedValueOnce({ status: 200, text: "{}", json: {}, headers: {} });
+      const client = new PlatformRequestClient();
+      const running = dispatchManagedJob({
+        send: () => client.request({ url: "https://api.test/job", method: "POST", body: { job: "same-job" } }),
+        signal: new AbortController().signal,
+      });
+      const finished = expect(running).resolves.toMatchObject({ status: 200 });
+      await jest.advanceTimersByTimeAsync(999);
+      expect(native).toHaveBeenCalledTimes(1);
+      await jest.advanceTimersByTimeAsync(1);
+      await finished;
+      expect(native).toHaveBeenCalledTimes(2);
+      expect(native.mock.calls[1]).toEqual(native.mock.calls[0]);
+      expect(jest.getTimerCount()).toBe(0);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it("preserves native aborts with a readonly name without retrying", async () => {
+    const client = new PlatformRequestClient();
+    const stopped = Object.defineProperty(new Error("Stopped"), "name", { get: () => "AbortError" });
+    (requestUrl as jest.Mock).mockRejectedValueOnce(stopped);
+    const wait = jest.fn().mockResolvedValue(undefined);
+    await expect(dispatchManagedJob({
+      send: () => client.request({ url: "https://api.test/job", method: "POST" }),
+      signal: new AbortController().signal,
+      wait,
+    })).rejects.toBe(stopped);
+    expect(requestUrl).toHaveBeenCalledTimes(1);
+    expect(wait).not.toHaveBeenCalled();
+  });
+
+  it("does not turn a native abort or an HTTP rejection into a connection failure", async () => {
+    const client = new PlatformRequestClient();
+    const stopped = new DOMException("Stopped", "AbortError");
+    (requestUrl as jest.Mock).mockRejectedValueOnce(stopped);
+    await expect(client.request({ url: "https://api.test/job", method: "POST" })).rejects.toMatchObject({ name: "AbortError" });
+    (requestUrl as jest.Mock).mockResolvedValueOnce({ status: 400, text: "Invalid", headers: {} });
+    await expect(client.request({ url: "https://api.test/job", method: "POST" })).resolves.toMatchObject({ status: 400 });
   });
 
   it.each([
@@ -167,7 +215,6 @@ describe("PlatformRequestClient", () => {
       method: "POST",
       body: { ok: true },
       stream: true,
-      preserveResponseHeaders: true,
       allowTransportFallback: false,
       licenseKey: "license",
       streamingProbeUrl: "https://systemsculpt.com/api/plugin/connectivity",
@@ -222,7 +269,6 @@ describe("PlatformRequestClient", () => {
       method: "POST",
       body: { ok: true },
       stream: true,
-      preserveResponseHeaders: true,
       allowTransportFallback: false,
       streamingProbeUrl: "https://systemsculpt.com/api/plugin/connectivity",
     });
@@ -254,7 +300,6 @@ describe("PlatformRequestClient", () => {
       body: { ok: true },
       stream: true,
       licenseKey: "license",
-      preserveResponseHeaders: true,
       allowTransportFallback: false,
       streamingProbeUrl: "https://systemsculpt.com/api/plugin/connectivity",
     });
@@ -292,6 +337,32 @@ describe("PlatformRequestClient", () => {
     expect(requestUrl).not.toHaveBeenCalled();
   });
 
+  it("replays a failed streaming POST through requestUrl only when the caller allows it", async () => {
+    const client = new PlatformRequestClient();
+    const failure = new TypeError("CORS response unavailable");
+    global.fetch = jest.fn().mockRejectedValue(failure) as any;
+    (requestUrl as jest.Mock).mockResolvedValue({
+      status: 200,
+      text: "data: [DONE]\n\n",
+      json: null,
+      headers: {},
+    });
+    const turn = {
+      url: "https://systemsculpt.com/api/plugin/agent/turn",
+      method: "POST",
+      body: { private: true },
+      stream: true,
+    };
+
+    await expect(client.request(turn)).rejects.toBe(failure);
+    expect(requestUrl).not.toHaveBeenCalled();
+
+    await expect(client.request({ ...turn, allowTransportFallback: true }))
+      .resolves.toMatchObject({ status: 200 });
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(requestUrl).toHaveBeenCalledTimes(1);
+  });
+
   it("lets the host derive a validated Content-Length for raw requestUrl uploads", async () => {
     const client = new PlatformRequestClient();
     const fetchMock = jest.fn();
@@ -315,7 +386,6 @@ describe("PlatformRequestClient", () => {
       body,
       bodyEncoding: "raw",
       transport: "requestUrl",
-      preserveResponseHeaders: true,
     });
 
     expect(fetchMock).not.toHaveBeenCalled();
@@ -388,7 +458,6 @@ describe("PlatformRequestClient", () => {
       licenseKey: "license",
       transport: "requestUrl",
       responseEncoding: "arrayBuffer",
-      preserveResponseHeaders: true,
     });
 
     expect(fetchMock).not.toHaveBeenCalled();
@@ -402,6 +471,32 @@ describe("PlatformRequestClient", () => {
     expect(response.headers.get("x-request-id")).toBe("output-1");
     expect(response.headers.get("x-systemsculpt-contract")).toBe("managed-capabilities-v2");
     expect(response.headers.get("x-systemsculpt-image-output-contract")).toBe("managed-image-output-v1");
+  });
+
+  it.each([204, 205, 304].flatMap((status) => [
+    [status, "text"],
+    [status, "arrayBuffer"],
+  ] as const))("returns a native %i response without a body (%s encoding)", async (status, responseEncoding) => {
+    const client = new PlatformRequestClient();
+    (requestUrl as jest.Mock).mockResolvedValue({
+      status,
+      headers: {},
+      arrayBuffer: new ArrayBuffer(0),
+      text: "",
+      json: null,
+    });
+
+    const response = await client.request({
+      url: "https://systemsculpt.com/api/plugin/embeddings/index",
+      method: "DELETE",
+      licenseKey: "license",
+      responseEncoding,
+    });
+
+    expect(requestUrl).toHaveBeenCalledTimes(1);
+    expect(response.status).toBe(status);
+    expect(response.body).toBeNull();
+    await expect(response.text()).resolves.toBe("");
   });
 
   it("rejects an oversized native binary response before reconstructing another body", async () => {
@@ -445,6 +540,13 @@ describe("PlatformRequestClient", () => {
       await jest.advanceTimersByTimeAsync(0);
       return state;
     };
+    const timedOut = (request: Promise<Response>) => request.then(
+      (): never => { throw new Error("Expected the request to time out."); },
+      (error: unknown) => {
+        if (error instanceof PlatformRequestTimeoutError) return error;
+        throw error;
+      },
+    );
 
     beforeEach(() => {
       jest.useFakeTimers({ doNotFake: ["nextTick", "queueMicrotask"] });
@@ -482,13 +584,13 @@ describe("PlatformRequestClient", () => {
     it("scales an upload deadline by its body size and keeps a generous floor", async () => {
       const client = new PlatformRequestClient();
       (requestUrl as jest.Mock).mockImplementation(hang);
-      const upload = (bytes: number) => client.request({
+      const upload = (bytes: number) => timedOut(client.request({
         url: "https://signed.example.com/upload",
         method: "PUT",
         body: new ArrayBuffer(bytes),
         bodyEncoding: "raw",
         transport: "requestUrl",
-      }).catch((error: unknown) => error as PlatformRequestTimeoutError);
+      }));
 
       const small = upload(16);
       const large = upload(8 * 1024 * 1024);
@@ -508,13 +610,13 @@ describe("PlatformRequestClient", () => {
       (requestUrl as jest.Mock).mockImplementation(hang);
       const maxResponseBytes = 30 * 1024 * 1024;
 
-      const download = client.request({
+      const download = timedOut(client.request({
         url: "https://systemsculpt.com/api/plugin/images/generations/jobs/job/outputs/0",
         method: "GET",
         transport: "requestUrl",
         responseEncoding: "arrayBuffer",
         maxResponseBytes,
-      }).catch((error: unknown) => error as PlatformRequestTimeoutError);
+      }));
 
       await jest.advanceTimersByTimeAsync(platformTransferTimeoutMs(maxResponseBytes));
       expect((await download).timeoutMs).toBe(platformTransferTimeoutMs(maxResponseBytes));
@@ -527,12 +629,12 @@ describe("PlatformRequestClient", () => {
         .mockImplementationOnce(hang)
         .mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
 
-      const short = client.request({
+      const short = timedOut(client.request({
         url: "https://systemsculpt.com/api/plugin/auth/poll",
         method: "POST",
         body: {},
         timeoutMs: 5_000,
-      }).catch((error: unknown) => error as PlatformRequestTimeoutError);
+      }));
       const unbounded = client.request({
         url: "https://systemsculpt.com/api/plugin/license/validate",
         method: "GET",
@@ -701,7 +803,6 @@ describe("PlatformRequestClient", () => {
         method: "POST",
         body: {},
         stream: true,
-        preserveResponseHeaders: true,
         signal: controller.signal,
         timeoutMs: 5_000,
       });
@@ -733,7 +834,6 @@ describe("PlatformRequestClient", () => {
         method: "POST",
         body: { ok: true },
         stream: true,
-        preserveResponseHeaders: true,
         allowTransportFallback: false,
         signal: controller.signal,
       });
@@ -742,7 +842,6 @@ describe("PlatformRequestClient", () => {
         method: "POST",
         body: { ok: true },
         stream: true,
-        preserveResponseHeaders: true,
         transport: "requestUrl",
       });
       direct.catch(() => undefined);
