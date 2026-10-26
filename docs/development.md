@@ -1,7 +1,12 @@
 # Plugin development
 
-Work from ~/gits/systemsculpt/plugin with Node 22.18 or newer. Node 22 is the
-local and CI baseline; version managers can select it from .nvmrc.
+The canonical checkout is ~/gits/systemsculpt/plugin, whose watcher deploys
+into a live vault. Do task work in a task-private ordinary clone on a branch
+from current origin/main; leave the canonical checkout and watcher alone and
+never install or run the watcher from a task clone.
+
+Use Node 22.18 or newer. Node 22 is the local and CI baseline; version managers
+can select it from .nvmrc.
 
 ## Setup
 

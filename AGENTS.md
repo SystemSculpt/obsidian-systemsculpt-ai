@@ -60,8 +60,9 @@ kept current.
   saved-chat parsing or managed compatibility/release behavior.
 - [Native agents](docs/dev/native-agents.md) — Read before changing Chat backend
   choice or detection, native Claude Code/Codex execution, models or approval
-  modes, native chat lifetime/history, Studio native tasks, run boards or
-  Command Center orchestration.
+  modes, native chat lifetime/history, Studio native tasks, run boards,
+  Command Center orchestration, Studio persistence/migrations or reuse of
+  existing standalone projects, drafts and history.
 - [Adaptive UI](docs/dev/adaptive-ui.md) — Read before changing any view, modal,
   transient, command, setting, card action, CSS, platform/desktop adapter,
   pop-out behavior, mobile layout or Studio node/capability declaration.
@@ -132,6 +133,10 @@ npm run check:compat
 - Release artifacts are exactly manifest.json, main.js, and styles.css.
 
 ## Local Obsidian loop
+
+The commands below document canonical-checkout sync/watcher setup, not a task
+clone step. For task work, use the verification commands above without syncing
+to a live vault or changing watcher ownership.
 
 systemsculpt-sync.config.json is an ignored machine-local file. List Obsidian
 plugin folders under pluginTargets, then use:
