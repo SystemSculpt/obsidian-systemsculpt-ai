@@ -2,7 +2,8 @@
 
 Repository instructions for desktop/mobile surfaces, host capabilities,
 settings, pop-outs and Studio portability. Read with [the core](../../AGENTS.md).
-Mobile release gates and local QA rules remain in the core.
+Mobile release gates follow below; local QA setup is in
+[Local development](local-development.md).
 
 ## Studio portability
 
@@ -44,3 +45,14 @@ Obsidian 1.13 treats getSettingDefinitions as the complete settings renderer
 and skips display() when it exists. SystemSculpt remains on its full imperative
 renderer until every dynamic control has declarative parity. Never add partial
 definitions: that turns mobile settings into heading-only rows.
+
+## Mobile verification
+
+For mobile-sensitive changes, npm run check:mobile and npm run check:ci are
+the release gates. They validate the exact built main.js, manifest.json, and
+styles.css across narrow-pane, touch, keyboard, accessibility, and Studio
+capability scenarios with desktop adapters unavailable. Simulator, emulator,
+browser-emulation, or physical-device runs may provide supplemental evidence
+when explicitly requested, but they are not release gates and must not replace
+or weaken the deterministic checks. Record the host and artifact hashes when
+manual mobile exploration is performed.
