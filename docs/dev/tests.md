@@ -1,8 +1,28 @@
 # Tests and CI
 
-Repository instructions for verification gates, coverage, CI partitions and
-failure evidence. Read with [the core](../../AGENTS.md), which retains the
-working-loop commands, required pre-push gate and release rules.
+Repository instructions for verification gates, coverage, CI partitions,
+release validation and failure evidence. Read with [the core](../../AGENTS.md),
+which retains the everyday commands and pre-push requirement. Mobile release
+gates also apply in [Adaptive UI](adaptive-ui.md).
+
+## Selecting gates
+
+check is the canonical fast gate: Obsidian lint, community-directory lint, metadata lint, production
+bundle, CSS contracts, cheap architecture policy tests, focused mobile
+interactions, the ChatView critical-risk coverage gate, and an exact built
+bundle smoke in a mobile Obsidian host.
+
+Use broader gates only when the affected seam requires them:
+
+~~~bash
+npm run check:ui
+npm run check:mobile
+npm run test:integration
+npm run test:chatview:critical
+npm run check:plugin
+npm run check:ci
+npm run check:compat
+~~~
 
 ## Gate contents
 
@@ -36,6 +56,20 @@ working-loop commands, required pre-push gate and release rules.
   uncached, since per-file caches cannot see imported type changes.
 - CI is credential-free. It runs check:ci on Ubuntu/Node 22 and check:compat
   across the compatibility matrix. It has no provider or native-device lane.
+
+## Required pre-push and hosted gates
+
+- The installed pre-push hook runs check:ci before a push. Hosted CI remains
+  authoritative and branch protection must require the stable `required` job,
+  which requires every exhaustive and compatibility lane to succeed. A main
+  push may reuse a successful PR/merge-group run only when GitHub job records
+  prove all lanes tested the identical Git tree. Missing proof or API errors
+  run full CI; manual dispatch always runs it. Release publication remains
+  independently triggered by a published release and validates exact tag bytes.
+
+## Release rules
+
+- Release validation records the SHA-256 and size of manifest.json, main.js, and styles.css plus the source revision and build environment identity. The published-release workflow rebuilds the tag, requires exact asset bytes, and attests those published bytes before announcing the release through first-party metadata.
 
 ## Failure evidence
 
