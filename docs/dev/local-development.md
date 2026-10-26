@@ -12,6 +12,9 @@ The commands below document canonical-checkout sync/watcher setup, not a task
 clone step. For task work, use the verification commands above without syncing
 to a live vault or changing watcher ownership.
 
+Here, "verification commands above" refers to the
+[core working loop](../../AGENTS.md#working-loop).
+
 systemsculpt-sync.config.json is an ignored machine-local file. List Obsidian
 plugin folders under pluginTargets, then use:
 

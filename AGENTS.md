@@ -26,7 +26,8 @@ Keep shared rules here and area-specific detail in its topic, with this index
 kept current.
 
 - [Product and architecture](docs/dev/product-and-architecture.md) — Read before
-  changing product behavior/copy, ownership boundaries, vault paths or releases.
+  changing product behavior/copy, module design or refactoring, ownership
+  boundaries, vault paths or releases.
 - [Managed execution](docs/dev/managed-execution.md) — Read before changing any
   hosted AI feature (Chat, audio/transcription, documents, images, embeddings or
   Studio AI), API/protocol negotiation, local vault tools/approvals, reconnect,
@@ -42,6 +43,7 @@ kept current.
 - [Tests and CI](docs/dev/tests.md) — Read before selecting broader gates or
   changing tests, coverage, CI partitioning, replay records or failure evidence.
   The everyday commands, required pre-push gate and release rules stay below.
+  Detailed release validation lives in this topic; the artifact rule stays here.
 - [Local development](docs/dev/local-development.md) — Read before local Obsidian
   QA, canonical-checkout sync or watcher setup; this is not a task-clone step.
 
@@ -60,8 +62,15 @@ npm run check
 npm run test:related -- <changed source files>
 ~~~
 
-The installed pre-push hook requires `check:ci`; hosted CI requires the stable
-`required` job. Gate contents, compatibility and release validation live in
+- The installed pre-push hook runs check:ci before a push. Hosted CI remains
+  authoritative and branch protection must require the stable `required` job,
+  which requires every exhaustive and compatibility lane to succeed. A main
+  push may reuse a successful PR/merge-group run only when GitHub job records
+  prove all lanes tested the identical Git tree. Missing proof or API errors
+  run full CI; manual dispatch always runs it. Release publication remains
+  independently triggered by a published release and validates exact tag bytes.
+
+Gate contents, compatibility and release validation live in
 [Tests and CI](docs/dev/tests.md). Obsidian Community Plugins owns installation
 and rollback; the plugin only detects and announces published releases.
 

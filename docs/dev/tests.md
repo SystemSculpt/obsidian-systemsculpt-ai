@@ -57,16 +57,6 @@ npm run check:compat
 - CI is credential-free. It runs check:ci on Ubuntu/Node 22 and check:compat
   across the compatibility matrix. It has no provider or native-device lane.
 
-## Required pre-push and hosted gates
-
-- The installed pre-push hook runs check:ci before a push. Hosted CI remains
-  authoritative and branch protection must require the stable `required` job,
-  which requires every exhaustive and compatibility lane to succeed. A main
-  push may reuse a successful PR/merge-group run only when GitHub job records
-  prove all lanes tested the identical Git tree. Missing proof or API errors
-  run full CI; manual dispatch always runs it. Release publication remains
-  independently triggered by a published release and validates exact tag bytes.
-
 ## Release rules
 
 - Release validation records the SHA-256 and size of manifest.json, main.js, and styles.css plus the source revision and build environment identity. The published-release workflow rebuilds the tag, requires exact asset bytes, and attests those published bytes before announcing the release through first-party metadata.
