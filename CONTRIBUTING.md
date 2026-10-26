@@ -1,6 +1,6 @@
 # Contributing
 
-Work from `~/gits/systemsculpt/plugin`. The sibling website/API and operator repositories live at `~/gits/systemsculpt/systemsculpt-website` and `~/gits/systemsculpt/systemsculpt-os`; do not copy their implementation into this client.
+The canonical checkout is `~/gits/systemsculpt/plugin`; its watcher deploys into a live vault. Do task work in a task-private ordinary clone on a branch from current `origin/main`, leaving the canonical checkout and watcher alone. Do not install or run the watcher from a task clone. The sibling website/API and operator repositories live at `~/gits/systemsculpt/systemsculpt-website` and `~/gits/systemsculpt/systemsculpt-os`; do not copy their implementation into this client.
 
 ## Put each test at the interface it proves
 
