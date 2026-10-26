@@ -739,7 +739,7 @@ export class AgentChatView extends ItemView {
       reportError: (error) => this.logAgentError(error, "agentSession"),
       onLifecycle: (record) => {
         try {
-          const event = this.plugin.getLogger().lifecycle({ ...record });
+          const event = this.plugin.getLogger().lifecycle(record);
           if (event) this.plugin.getAgentIncidentCoordinator()?.recordLifecycle(event);
         } catch {
           // Incident diagnostics cannot affect a live agent run.

@@ -1,7 +1,7 @@
 import type SystemSculptPlugin from "../main";
 import { LogLevel } from "./errorHandling";
 import { isAgentLifecyclePhase, isThinAgentIncidentId } from "./ThinAgentLifecycleSchema";
-import { projectLifecycleMetadata, type SupportDiagnosticEvent } from "./SupportDiagnosticEvent";
+import { lifecycleSupportSnapshot, projectLifecycleMetadata, type SupportDiagnosticEvent } from "./SupportDiagnosticEvent";
 
 export type PluginLogLevel = "info" | "warn" | "error" | "debug";
 
@@ -150,11 +150,7 @@ export class PluginLogger {
       source: "AgentLifecycle",
       metadata: projection.persisted,
     });
-    return entry ? Object.freeze({
-      timestamp: entry.timestamp,
-      severity: "info",
-      ...projection.fields,
-    }) : null;
+    return entry ? lifecycleSupportSnapshot(projection.metadata, entry.timestamp) : null;
   }
 
   warn(message: string, context?: PluginLogContext): void {

@@ -1,3 +1,9 @@
+import { createHash } from "node:crypto";
+import { AgentLifecycle, type AgentLifecycleInput } from "../../../chat/managed/Lifecycle";
+import { PluginLogger } from "../../../utils/PluginLogger";
+import * as canonicalJson from "../AgentIncidentCanonicalJson";
+import { snapshotSupportDiagnosticEvent } from "../../../utils/SupportDiagnosticEvent";
+import * as lifecycleSchema from "../../../utils/ThinAgentLifecycleSchema";
 import type { ListedFiles, Stat } from "obsidian";
 import {
   AgentIncidentCoordinator,
@@ -17,6 +23,15 @@ import type {
   AgentChatTransportSegmentSummaryEvent,
   AgentRunFailureCaptureEvent,
 } from "../AgentIncidentCapture";
+
+jest.mock("../AgentIncidentCanonicalJson", () => {
+  const actual = jest.requireActual<typeof import("../AgentIncidentCanonicalJson")>("../AgentIncidentCanonicalJson");
+  return { ...actual, canonicalJsonStringify: jest.fn(actual.canonicalJsonStringify) };
+});
+jest.mock("../../../utils/ThinAgentLifecycleSchema", () => {
+  const actual = jest.requireActual<typeof import("../../../utils/ThinAgentLifecycleSchema")>("../../../utils/ThinAgentLifecycleSchema");
+  return { ...actual, isAgentLifecycleCode: jest.fn(actual.isAgentLifecycleCode) };
+});
 
 const BASE_TIME = Date.parse("2026-08-13T18:00:00.000Z");
 const PLUGIN_BUILD_ID = `sha256:${"a".repeat(64)}`;
@@ -374,6 +389,128 @@ function finish(coordinator: AgentIncidentCoordinator, ids: Correlation): void {
 function persistedBytes(adapter: MemoryAdapter, id: string): string | undefined {
   return adapter.files.get(`${AGENT_INCIDENT_STORE_PATH}/${id}.json`)?.data;
 }
+
+describe("lifecycle snapshot pipeline", () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+    jest.useRealTimers();
+  });
+
+  function pipeline() {
+    const harness = realHarness();
+    const logger = new PluginLogger({
+      settings: { logLevel: 1 },
+      isPluginUnloading: () => false,
+    } as unknown as ConstructorParameters<typeof PluginLogger>[0]);
+    const lifecycle = new AgentLifecycle((record) => {
+      const event = logger.lifecycle(record);
+      if (event) harness.coordinator.recordLifecycle(event);
+    });
+    return { ...harness, logger, lifecycle };
+  }
+
+  it("shares frozen support snapshots and never canonicalizes a successful run", async () => {
+    const { recorder, coordinator, logger, lifecycle } = pipeline();
+    const ids = correlation(101);
+    const recorded = jest.spyOn(recorder, "record");
+    const canonical = jest.mocked(canonicalJson.canonicalJsonStringify).mockClear();
+    const logged = jest.spyOn(logger, "lifecycle");
+    const validateCode = jest.mocked(lifecycleSchema.isAgentLifecycleCode).mockClear();
+    lifecycle.record({ code: "run_started", phase: "start", ...ids });
+    const event = logged.mock.results[0].value as SupportDiagnosticEvent;
+    expect(Object.isFrozen(event)).toBe(true);
+    expect(snapshotSupportDiagnosticEvent(event)).toBe(event);
+    expect(recorded).toHaveBeenLastCalledWith(event);
+    expect(recorded.mock.calls[0][0]).toBe(event);
+    lifecycle.record({ code: "run_finished_completed", phase: "response", ...ids });
+    expect(canonical).not.toHaveBeenCalled();
+    expect(validateCode).toHaveBeenCalledTimes(2);
+    const impostor = Object.freeze({
+      ...event,
+      get status(): number { throw new Error("untrusted frozen getter"); },
+    });
+    expect(snapshotSupportDiagnosticEvent(impostor)).toBeNull();
+    expect(recorder.record(impostor)).toBe(false);
+    expect(recorder.finalize(ids)).toBeNull();
+    await coordinator.closeAdmissionAndDrain();
+    await logger.flushBeforeUnload();
+    logger.dispose();
+  });
+
+  // SHA-256 pins the exact real store.save bytes from pre-change main 36ea21cb,
+  // not a newly approved serialization. Dense/mixed cases pin both eviction
+  // counters and their arrival order, including byte pressure that later eases.
+  it.each([
+    ["sparse", 500, () => false, "a2f49dc1e5cdb70e97107b305d408327f327dec144e6d764d7a6745043e33951"],
+    ["dense", 256, () => true, "aa5d0c4ccf08be48be0868625b8700b89ca274531e798e25e57fe2aeaee81a1c"],
+    ["dense overflow", 257, () => true, "ca92ef6c390a2465780ff780b6403dd9050e3faf13b49d0331e5287f04e11eff"],
+    ["count then bytes", 500, (index: number) => index >= 300 && index < 460, "02ffead4d4d564b010c6bbb8904956460e8fd0375c2fbcf6e5f2fd9c2c6674be"],
+    ["bytes then count", 700, (index: number) => index < 200, "a957a73cd8bda0fd90e4d4c0f91b91d2e2ef775b2b0d6cbf34cfde754752676d"],
+  ] as const)("saves byte-identical baseline reports: %s", async (_name, count, dense, expectedHash) => {
+    jest.useFakeTimers({ doNotFake: ["performance"] });
+    jest.setSystemTime(BASE_TIME);
+    const { adapter, coordinator, logger, lifecycle } = pipeline();
+    const ids = correlation(101);
+    await coordinator.initialize();
+    coordinator.recordTransport(transport(ids));
+    for (let index = 0; index < count; index += 1) {
+      jest.setSystemTime(BASE_TIME + index * 17);
+      const terminal = index === count - 1;
+      const extra: Partial<AgentLifecycleInput> = dense(index) ? {
+        clientInstanceId: `client_${"8".repeat(32)}`,
+        pluginBuildId: PLUGIN_BUILD_ID,
+        runId: ids.runId,
+        serverRunId: ids.runId,
+        toolName: "multi_edit",
+        toolCallId: `call_${"9".repeat(96)}`,
+        incidentId: ids.incidentId,
+        failureCode: "response_capacity_unavailable",
+        latencyTraceId: "7".repeat(32),
+        commandKind: "client_tool_result",
+        commandSegmentOrdinal: 1,
+        toolExecutionOrdinal: 1,
+        toolOutcome: "outcome_unknown",
+        toolFailureClass: "outcome_unknown",
+        toolItemCount: 10_000,
+        toolCompletedItemCount: 5_000,
+        toolFailedItemCount: 5_000,
+        historySyncKind: "authoritative_prefix",
+        historySyncOrdinal: index + 1,
+        responseDeliveryMode: "request_url_buffered",
+        clientMonotonicOffsetMs: index === 0 ? -0 : index * 17.125,
+        serverTimingAppMs: 604_800_000,
+        serverTimingAuthMs: index % 2 ? 0 : 12.345,
+        creditsRefreshReason: "billing_failure",
+        creditsRefreshSequence: index + 1,
+        creditsRefreshTransport: "request_url",
+        creditsRefreshElapsedMs: 604_800_000,
+        creditsRefreshServerAuthMs: 12.345,
+        creditsRefreshServerRateLimitMs: 0,
+        creditsRefreshServerBalanceStoreMs: 604_800_000,
+        creditsRefreshServerTotalMs: 604_800_000,
+        status: 503,
+        retryable: true,
+      } : {};
+      expect(lifecycle.record({
+        code: index === 0 ? "run_started" : terminal ? "run_finished_failed" : "phase_working",
+        phase: index === 0 ? "start" : "response",
+        conversationId: ids.conversationId,
+        requestId: ids.requestId,
+        ...extra,
+        ...(terminal ? { incidentId: ids.incidentId, failureCode: "response_capacity_unavailable" } : {}),
+      })).not.toBeNull();
+    }
+    const receipt = coordinator.captureFailure(failure(ids), rendering());
+    recordFailureSurface(coordinator, ids);
+    expect(await coordinator.prepareReport(receipt!.reportId)).toBe(true);
+    await coordinator.closeAdmissionAndDrain();
+    await logger.flushBeforeUnload();
+    logger.dispose();
+    const bytes = persistedBytes(adapter, receipt!.reportId)!;
+    expect(adapter.writeCalls).toBe(1);
+    expect(createHash("sha256").update(bytes, "utf8").digest("hex")).toBe(expectedHash);
+  });
+});
 
 function persistedReports(adapter: MemoryAdapter): AgentIncidentReport[] {
   return [...adapter.files.entries()]

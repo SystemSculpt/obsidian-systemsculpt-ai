@@ -45,6 +45,16 @@ mapping, project extensions and directory-prefix boundaries. Native filesystem
 paths (including Studio's desktop picker) must retain their absolute roots and
 must not use a vault-relative normalizer.
 
+`src/utils/SupportDiagnosticEvent.ts` owns the lifecycle scalar inventory and
+immutable snapshot provenance. `AgentLifecycle` normalizes once; the logger
+reuses that metadata rather than validating another copy. Its frozen support
+event passes unchanged through the incident coordinator into the recorder.
+Only a failed report projects retained events into the exported timeline and
+canonicalizes them. During recording, exact scalar-byte arithmetic (no JSON,
+key sorting, or UTF-8 allocation) preserves the existing arrival-order byte and
+event eviction policy and counters. Arbitrary public events, even frozen ones,
+still cross the full admission allowlist; freezing alone is not provenance.
+
 `src/studio/` owns project semantics; `src/views/studio/` owns their presentation.
 Execution edges, diagram arrows, and parent links have distinct meanings even
 when all three are visible on the canvas. The Studio service is the external

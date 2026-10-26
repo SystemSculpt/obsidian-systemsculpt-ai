@@ -141,30 +141,74 @@ const CLOCK_DOMAINS = [
 ] as const;
 
 type LifecycleProjection = Readonly<{
+  metadata: Readonly<Record<string, unknown>>;
   persisted: Record<string, unknown>;
   fields: Omit<SupportDiagnosticEvent, "timestamp" | "severity">;
 }>;
 
+// Provenance, not Object.isFrozen: arbitrary frozen objects can still contain
+// getters or private fields. Only our scalar projections may bypass admission.
+const lifecycleProjections = new WeakMap<object, LifecycleProjection>();
+const supportSnapshots = new WeakSet<object>();
+
+export function isLifecycleSnapshot(event: SupportDiagnosticEvent): boolean {
+  return supportSnapshots.has(event);
+}
+
+export function lifecycleSupportSnapshot(
+  metadata: Readonly<Record<string, unknown>>,
+  timestamp: string,
+): SupportDiagnosticEvent | null {
+  const projection = lifecycleProjections.get(metadata);
+  if (!projection) return null;
+  const event = Object.freeze({ timestamp, severity: "info" as const, ...projection.fields });
+  supportSnapshots.add(event);
+  return event;
+}
+
 /** Read every allowlisted input once, then derive disk and in-memory views. */
-export function projectLifecycleMetadata(input: Record<string, unknown>): LifecycleProjection | null {
+export function projectLifecycleMetadata(
+  input: Record<string, unknown>,
+  stamp?: () => Readonly<{ sequence: number; timestamp: number }>,
+): LifecycleProjection | null {
   try {
+    const existing = lifecycleProjections.get(input);
+    if (existing && !stamp) return existing;
     const code = input.code;
     const phase = input.phase;
     if (!isAgentLifecycleCode(code) || !isAgentLifecyclePhase(phase)) return null;
+    const metadata: Record<string, unknown> = { code, phase };
     const persisted: Record<string, unknown> = { code, phase };
     const fields: Record<string, Scalar> = { code, phase };
     for (const [metadataKey, supportKey, normalize, localOnly] of LIFECYCLE_FIELDS) {
+      if (stamp && (metadataKey === "sequence" || metadataKey === "timestamp")) continue;
       const value = normalize(input[metadataKey]);
       if (value === undefined) continue;
+      metadata[metadataKey] = value;
       if (!localOnly) persisted[metadataKey] = value;
       if (supportKey) fields[supportKey] = value;
     }
     for (const [metadataKey, supportKey, domain, timingKeys] of CLOCK_DOMAINS) {
       if (!timingKeys.some(key => persisted[key] !== undefined)) continue;
+      metadata[metadataKey] = domain;
       persisted[metadataKey] = domain;
       fields[supportKey] = domain;
     }
-    return { persisted, fields: fields as LifecycleProjection["fields"] };
+    if (stamp) {
+      const { sequence, timestamp } = stamp();
+      metadata.sequence = persisted.sequence = fields.sequence = sequence;
+      metadata.timestamp = timestamp;
+      // The lifecycle clock was historically accepted as-is; disk projection
+      // accepts only the same bounded integer timestamps as raw logger callers.
+      if (Number.isSafeInteger(timestamp) && timestamp >= 0) persisted.timestamp = timestamp;
+    }
+    const projection = Object.freeze({
+      metadata: Object.freeze(metadata),
+      persisted: Object.freeze(persisted),
+      fields: Object.freeze(fields) as LifecycleProjection["fields"],
+    });
+    lifecycleProjections.set(projection.metadata, projection);
+    return projection;
   } catch {
     // Hostile getters and revoked proxies cannot affect the product lifecycle.
     return null;
@@ -174,6 +218,7 @@ export function projectLifecycleMetadata(input: Record<string, unknown>): Lifecy
 /** Snapshot public events without reading arbitrary properties or getters twice. */
 export function snapshotSupportDiagnosticEvent(event: SupportDiagnosticEvent): SupportDiagnosticEvent | null {
   try {
+    if (supportSnapshots.has(event)) return event;
     const snapshot: Record<string, unknown> = {};
     for (const key of ["timestamp", "severity", "code", "phase", "origin", "cause"] as const) {
       snapshot[key] = event[key];
