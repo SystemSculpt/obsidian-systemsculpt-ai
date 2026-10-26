@@ -1,8 +1,24 @@
 # SystemSculpt AI for Obsidian
 
-SystemSculpt brings an agent workspace, semantic vault search, transcription, and visual workflows into Obsidian. Hosted features use your SystemSculpt account. Desktop chat and Studio text generation can also use your installed, signed-in Codex or Claude Code.
+Use your own Claude Code or Codex on desktop, or SystemSculpt's hosted AI, to work with your Obsidian vault. Chat with your notes, search and edit files, transcribe audio into Markdown, find related notes, and build visual workflows. Hosted features run on desktop and mobile; your own desktop agents need no SystemSculpt account or plan. See the approval modes below for when changes ask for confirmation.
 
-Free to install. Paid Monthly and Yearly plans are available for SystemSculpt in Obsidian. [Compare plans and current usage terms](https://systemsculpt.com/pricing?utm_source=obsidian&utm_medium=plugin_readme&utm_campaign=pricing_discovery_oct2026) before you start. Your own on-machine Codex and Claude Code remain available without a SystemSculpt plan.
+**Free to start.** Install the plugin, create or sign in to a free SystemSculpt account from inside Obsidian, and get 500 one-time starter credits for hosted AI, no card needed, while available. When you want more, [Monthly is $9/month and Yearly is $90/year](https://systemsculpt.com/pricing?utm_source=obsidian&utm_medium=plugin_readme&utm_campaign=readme_free_start_nov2026); both include a monthly credit allowance.
+
+![An example of SystemSculpt asking before a note edit in Ask mode and showing the exact change](https://raw.githubusercontent.com/SystemSculpt/obsidian-systemsculpt-ai/main/docs/images/readme-chat-approval.png)
+
+![The finished action items next to the chat summary](https://raw.githubusercontent.com/SystemSculpt/obsidian-systemsculpt-ai/main/docs/images/readme-chat-result.png)
+
+## Start in two minutes
+
+1. Install and enable SystemSculpt AI from Obsidian Community Plugins.
+2. For hosted AI, open **Settings → SystemSculpt AI → Account** and choose **Sign up** or **Sign in**. Complete the account connection in your browser and claim the 500 one-time starter credits, no card needed, while available. For your own desktop Claude Code or Codex, skip the SystemSculpt account step and use your installed, signed-in agent.
+3. Run **Open SystemSculpt Chat** from the command palette, choose your backend from the run line below the message box, and ask about your vault.
+
+Already have a plan? Sign in from the same Account settings, or paste and activate your license key there.
+
+## Coming from 5.x
+
+SystemSculpt 6 no longer supports your own API keys, custom endpoints, or local models; updating removes previously saved provider keys and routing settings. Your SystemSculpt license and credits carry over. On desktop, you can use your own installed, signed-in Claude Code or Codex without a SystemSculpt account or plan, or use the free one-time hosted starter credits while available.
 
 ## What it does
 
@@ -14,38 +30,37 @@ Free to install. Paid Monthly and Yearly plans are available for SystemSculpt in
 - Find related notes with a portable semantic index.
 - Record or import audio and transcribe it to Markdown or SRT.
 - Process long audio and YouTube videos into transcripts and structured summaries.
-- Build text, image, video, document, media, and vault workflows in Studio.
+- Build text, video, document, media, and vault workflows in Studio.
 
-SystemSculpt runs on desktop and mobile. Studio exposes portable nodes on both; local CLI, dataset-adapter, media-ingest, and FFmpeg nodes require Obsidian Desktop.
+SystemSculpt runs on desktop and mobile. Studio exposes portable nodes on both; local CLI, dataset-adapter, media-ingest, and FFmpeg nodes require Obsidian Desktop. Studio image generation was retired in 6.17; your saved images and projects stay, and video generation still works.
 
 ## Account, payment, and credits
 
-The plugin is free to install. Hosted AI features use a SystemSculpt account; paid plans and credit packs are available. See the plan terms and your account for included usage.
+The plugin is free to install. Hosted AI features use a SystemSculpt account and credits. A free account can claim 500 one-time starter credits for hosted AI, no card needed, while available. Monthly ($9/month) and Yearly ($90/year) plans include a monthly credit allowance, and credit packs add more. Existing Lifetime licenses continue to be honored. See the [plan terms](https://systemsculpt.com/pricing?utm_source=obsidian&utm_medium=plugin_readme&utm_campaign=readme_free_start_nov2026) and your account for included usage.
 
 Account, license, billing, and add-credit controls open first-party pages on [systemsculpt.com](https://systemsculpt.com); payments are handled there by Stripe and never occur inside the plugin. The plugin may show first-party license or credit purchase prompts when access or funds are insufficient, but it never purchases anything automatically.
 
-## Install
-
-1. Install and enable SystemSculpt AI from Obsidian Community Plugins.
-2. Open Settings → SystemSculpt AI → Account.
-3. Sign in or activate a SystemSculpt license key.
-4. Run Open SystemSculpt Chat or open Studio.
+## Updates
 
 SystemSculpt checks its first-party release endpoint in the background. On desktop, a newer release shows a quiet **Update SystemSculpt** status-bar item; the **Check for updates** command reports the result on any device. Neither opens a prompt. Obsidian Community Plugins exclusively owns download, installation, updates, and activation.
 
 ## Privacy, network, and local access
 
-- The plugin connects only to the first-party SystemSculpt API at `https://systemsculpt.com/api/plugin` for account and license validation, credits, release checks, and hosted AI, embeddings, transcription, document, audio, image, and video work.
+- The plugin connects only to the first-party SystemSculpt API at `https://systemsculpt.com/api/plugin` for account and license validation, credits, release checks, and hosted AI, embeddings, transcription, document, audio, and video work, including image attachments. Production builds reject endpoint overrides.
 - Hosted requests send the prompts, selected notes, files, images, audio, YouTube URLs, conversation context, and local tool results needed for the feature the user invokes. SystemSculpt may process that data server-side through OpenRouter, AssemblyAI, Supadata, and Cloudflare R2 as described in the [privacy policy](https://systemsculpt.com/privacy); the plugin does not connect to those providers directly.
 - The plugin contains no client-side telemetry or third-party advertising. The SystemSculpt service records limited account, usage, billing, and diagnostic metadata for hosted requests as described in the privacy policy.
 - Obsidian stores the license key, settings, caches, and small device-local preferences locally. The plugin can create chats, recordings, attachments, embedding indexes, Studio projects and assets, diagnostics, and redacted settings backups inside the vault in configured directories.
 - Semantic search, file pickers, and vault tools enumerate or read vault files when needed. User-invoked copy, paste, and attachment features access the system clipboard.
 - On Obsidian Desktop, Studio's CLI, dataset-adapter, media-ingest, and FFmpeg nodes can read or write user-selected paths outside the vault and execute user-configured commands. These capabilities run only when the user configures and executes the relevant node and are unavailable on mobile.
 - On Obsidian Desktop, on-machine Codex runs only after you select it for chat or Studio text generation, or use a Studio Codex task card, run board, or command center. The plugin then launches your installed `codex app-server` command as a local child process and exchanges messages with it over standard input and output to list models and run turns. Codex keeps its own login, configuration, and thread history. On-machine Codex is unavailable on mobile.
-- To start Codex, the plugin reads the optional launch settings file `~/.config/systemsculpt/codex.json`, which can set the `binary` to run and the Codex `home` directory. It checks that the Codex home (`~/.codex` by default) exists and passes it to Codex as `CODEX_HOME`. The plugin does not read, copy, or upload files inside the Codex home, including Codex credentials.
+- To start Codex, the plugin reads the optional launch settings file `~/.config/systemsculpt/codex.json`, which can set the `binary` to run and the Codex `home` directory. It checks that the Codex home (`~/.codex` by default) exists and passes it to Codex as `CODEX_HOME`. The plugin does not read, copy, or upload file contents inside the Codex home, including Codex credentials.
 - On Obsidian Desktop, on-machine Claude Code runs only after you select it for chat or Studio text generation. The plugin then launches your installed `claude` command (`claude -p` with JSON input and output) as a local child process in the vault folder and exchanges messages with it over standard input and output. Claude Code keeps its own login, settings, permissions, and session history. On-machine Claude Code is unavailable on mobile.
-- To start Claude Code, the plugin reads the optional launch settings file `~/.config/systemsculpt/claude.json`, which can set the `binary` to run. The plugin does not read, copy, or upload anything under `~/.claude`, including Claude Code credentials.
-- Managed chat offers Ask Approval and Full Access for agent-requested vault mutations. On-machine Codex inherits its native approval, sandbox, and reviewer configuration; the plugin does not copy Codex credentials or override those controls. On-machine Claude Code asks before edits by default; you can choose Accept edits, Plan only, or your own Claude Code settings. Claude Code's permission requests appear as plugin dialogs, and the plugin never turns on Claude Code's permission bypass. License keys are removed from exported diagnostics and settings backups.
+- To start Claude Code, the plugin reads the optional launch settings file `~/.config/systemsculpt/claude.json`, which can set the `binary` to run. The plugin does not read, copy, or upload file contents under `~/.claude`, including Claude Code credentials.
+- Desktop agent detection checks installed agents' sign-in status through their CLI and lists native session filenames and modification times to choose an available backend; it does not read session-file contents or credentials. On-machine agents use their own services and network policies; running them on your machine does not mean offline AI.
+- New hosted chats start in **Auto**: reading, searching, creating files or folders, and editing run without asking; moving, renaming, and deleting require approval. **Ask** requests approval for every vault change; **Full access** allows vault actions without asking. Saved chats keep their selected mode.
+- On-machine Codex uses its native approval and sandbox controls. Desktop chat offers **Auto**, **Ask**, **Read only**, and **Codex settings**. Codex settings and Studio inherit your native approval, sandbox, and reviewer configuration; the plugin does not copy Codex credentials. Plugin-defined modes do not request an unrestricted sandbox or bypass native permissions.
+- New on-machine Claude Code chats default to **Auto**, using Claude Code's native safety checks. You can choose **Ask before edits**, **Accept edits**, **Plan only**, or your own **Claude Code settings**. If Auto is unavailable, the plugin uses Accept edits and shows a notice. Claude Code's permission requests appear inline in chat (and as request dialogs in Studio), and the plugin never turns on Claude Code's permission bypass.
+- License keys are removed from exported diagnostics and settings backups.
 
 ## Documentation
 
@@ -61,30 +76,7 @@ SystemSculpt checks its first-party release endpoint in the background. On deskt
 
 ## Development
 
-~~~bash
-cd ~/gits/systemsculpt/plugin
-npm install
-npm run check
-~~~
-
-Use `npm run test:related -- <changed source files>` for focused verification, `npm run check:plugin` for a larger checkpoint, and `npm run check:ci` for the exhaustive gate. `npm run lint:community` runs the official Obsidian community-directory source checker locally.
-
-Select each non-production API through its named development command:
-
-~~~bash
-npm run build:local-agent
-npm run build:staging
-~~~
-
-The local-agent route is fixed at `http://127.0.0.1:8787/api/plugin`. Production builds reject endpoint overrides and use `https://systemsculpt.com/api/plugin`.
-
-| Directory | Responsibility |
-| --- | --- |
-| `~/gits/systemsculpt/plugin` | This Obsidian client |
-| `~/gits/systemsculpt/systemsculpt-website` | Website and first-party plugin API |
-| `~/gits/systemsculpt/systemsculpt-os` | Growth and operator automation |
-
-See [development.md](docs/development.md), [community-review.md](docs/community-review.md), [CONTRIBUTING.md](CONTRIBUTING.md), and [AGENTS.md](AGENTS.md).
+Building or contributing to the plugin: see [development.md](docs/development.md), [community-review.md](docs/community-review.md), [CONTRIBUTING.md](CONTRIBUTING.md), and [AGENTS.md](AGENTS.md).
 
 ## Release
 
