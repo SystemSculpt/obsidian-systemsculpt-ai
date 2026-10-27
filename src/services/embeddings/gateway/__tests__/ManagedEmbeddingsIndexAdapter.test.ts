@@ -412,6 +412,51 @@ describe("ManagedEmbeddingsIndexAdapter", () => {
     }
   });
 
+  it.each([
+    [429, "rate_limited", undefined, "rate_limited", true],
+    [503, "embeddings_temporarily_unavailable", true, "temporarily_unavailable", true],
+    [409, "operation_in_progress", undefined, "operation_in_progress", true],
+    [503, "settlement_pending", true, "settlement_pending", true],
+    [409, "settlement_pending", false, "settlement_pending", false],
+    [409, "settlement_pending", undefined, "settlement_pending", false],
+    [409, "idempotency_conflict", undefined, "idempotency_conflict", false],
+    [409, "unknown_conflict", undefined, "temporarily_unavailable", false],
+  ] as const)("classifies %s/%s for safe same-operation recovery", async (status, wireCode, retryable, code, canRetry) => {
+    const response = transport({ error: { code: wireCode, message: "Indexing needs attention.", retryable } }, { status });
+    const adapter = adapterWith(jest.fn(async () => ({
+      ...response,
+      diagnostics: { ...response.diagnostics, retryAfterMs: 12_000 },
+    })));
+
+    await expect(adapter.index({ prepare: () => ({ markdown: MARKDOWN }) }))
+      .rejects.toMatchObject({ code, status, retryable: canRetry, retryAfterMs: 12_000 });
+  });
+
+  it("does not retry a settlement with contradictory operator-reconciliation instructions", async () => {
+    const adapter = adapterWith(jest.fn(async () => transport({ error: {
+      code: "settlement_pending", message: "Settlement needs attention.",
+      retryable: true, recovery_action: "operator_reconciliation",
+    } }, { status: 503 })));
+
+    await expect(adapter.index({ prepare: () => ({ markdown: MARKDOWN }) }))
+      .rejects.toMatchObject({ code: "settlement_pending", retryable: false });
+  });
+
+  it("uses the rate-limit reset when a 429 has no Retry-After", async () => {
+    const now = jest.spyOn(Date, "now").mockReturnValue(10_000);
+    try {
+      const response = transport({ error: { code: "rate_limited", message: "Wait." } }, { status: 429 });
+      const adapter = adapterWith(jest.fn(async () => ({
+        ...response,
+        diagnostics: { ...response.diagnostics, rateLimitReset: "25000" },
+      })));
+      await expect(adapter.index({ prepare: () => ({ markdown: MARKDOWN }) }))
+        .rejects.toMatchObject({ retryable: true, retryAfterMs: 15_000 });
+    } finally {
+      now.mockRestore();
+    }
+  });
+
   it("uses a bounded safe managed error message", async () => {
     const adapter = adapterWith(jest.fn(async () => transport({
       error: {

@@ -10,6 +10,14 @@ import { managedNamespace } from "./support/managedNamespace";
 import { buildVectorId } from "../utils/vectorId";
 
 const namespace = managedNamespace(2);
+const activeManagers: EmbeddingsManager[] = [];
+
+afterEach(() => {
+  for (const manager of activeManagers.splice(0)) {
+    (manager as any).clearWorkTimer();
+    (manager as any).lifecycle.clearListeners();
+  }
+});
 
 function root(file: TFile): EmbeddingVector {
   return {
@@ -102,6 +110,7 @@ async function harness(fileCount: number) {
   manager.markPortableIndexChanged = jest.fn();
   manager.flushPortableIndex = jest.fn(async () => undefined);
   manager.markPortableIndexDestructive = jest.fn();
+  activeManagers.push(manager);
   return { files, roots, queue, queueWrites, manager, settings, state };
 }
 

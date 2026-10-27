@@ -185,6 +185,7 @@ export class EmbeddingsManager {
   private readonly workQueue: SemanticWorkQueue;
   private config: EmbeddingsManagerConfig;
   private initializationPromise: Promise<void> | null = null;
+  private metadataController: AbortController | null = null;
   private initialized = false;
   private processingSuspended = false;
   private fatalSuspensionCode: ManagedEmbeddingsErrorCode | null = null;
@@ -198,6 +199,7 @@ export class EmbeddingsManager {
   private workTimerDueAt: number | null = null;
   private lifecycleRefreshTimer: number | null = null;
   private enabledAtLastSync: boolean;
+  private readonly onHostOnline = (): void => this.scheduleQueuedWork();
 
   constructor(
     private readonly app: App,
@@ -244,7 +246,8 @@ export class EmbeddingsManager {
       // vault needs neither a metadata request nor another indexing pass.
       const storedPaths = new Set(this.storage.getDistinctPaths());
       const needsReconciliation = this.eligibleFiles().some((file) => (
-        this.shouldProcessFile(file) || (this.isLocallyEmpty(file) && storedPaths.has(file.path))
+        (!this.workQueue.get(file.path) && this.shouldProcessFile(file))
+        || (this.isLocallyEmpty(file) && storedPaths.has(file.path))
       ));
       if (needsReconciliation) {
         this.requestAutomaticProcessing();
@@ -302,12 +305,22 @@ export class EmbeddingsManager {
       return { status: "aborted", processed: 0, message: "Embeddings processing is paused." };
     }
     try {
-      await this.gateway.getMetadata();
+      await this.gateway.getMetadata(this.metadataSignal());
     } catch (error) {
+      this.gateway.metadata = undefined;
       if (isFatalManagedError(error)) {
         await this.persistFatalSuspension(error);
+      } else if (!(error instanceof ManagedEmbeddingsError && error.code === "request_cancelled")) {
+        await this.processingMutex.runExclusive(async () => {
+          const files = this.eligibleFiles().filter((file) => (
+            !this.isLocallyEmpty(file) && this.shouldProcessVaultFile(file)
+          ));
+          const claims = await this.captureWorkClaims(files, "reconcile");
+          await this.recordBatchFailure(claims, error);
+        });
       }
       this.reportLifecycleFailure(error);
+      this.scheduleQueuedWork();
       throw error;
     }
     if (this.processingSuspended) {
@@ -315,7 +328,8 @@ export class EmbeddingsManager {
     }
     // A file mutation can acquire the mutex while metadata is in flight.
     // Serialize behind it rather than discarding the reconciliation request.
-    return this.processingMutex.runExclusive(async () => {
+    try {
+      return await this.processingMutex.runExclusive(async () => {
       if (this.processingSuspended) {
         return { status: "aborted", processed: 0, message: "Embeddings processing is paused." };
       }
@@ -341,7 +355,7 @@ export class EmbeddingsManager {
         }
         await this.workQueue.complete(emptyClaims.values());
       }
-      const files = eligibleFiles.filter((file) => !this.isLocallyEmpty(file) && this.shouldProcessFile(file));
+      const files = eligibleFiles.filter((file) => !this.isLocallyEmpty(file) && this.shouldProcessVaultFile(file));
       if (files.length === 0) {
         await this.commitSearchNamespaceIfComplete();
         const pruned = await this.pruneSupersededNamespaces();
@@ -430,7 +444,10 @@ export class EmbeddingsManager {
         processed: result.completed,
         partialSuccess: failedCount > 0,
       };
-    });
+      });
+    } finally {
+      this.scheduleQueuedWork();
+    }
   }
 
   async searchSimilar(query: string, limit = 20, signal?: AbortSignal): Promise<SearchResult[]> {
@@ -701,6 +718,7 @@ export class EmbeddingsManager {
   suspendProcessing(): void {
     this.processingSuspended = true;
     this.clearWorkTimer();
+    this.metadataController?.abort();
     this.processor.cancel();
     this.refreshLifecycle({ phase: "paused", currentPath: null });
   }
@@ -710,9 +728,9 @@ export class EmbeddingsManager {
     try {
       await this.workQueue.retryFailures();
       await this.clearFatalSuspension();
-      this.failedFiles.clear();
       this.fatalSuspensionCode = null;
       this.processingSuspended = false;
+      this.hydrateFailuresFromWorkQueue();
       this.refreshLifecycle({ phase: "idle", currentPath: null, lastError: null });
       if (source !== "prepare" && this.plugin.settings.embeddingsEnabled) {
         this.requestAutomaticProcessing();
@@ -738,6 +756,11 @@ export class EmbeddingsManager {
     const wasEnabled = this.enabledAtLastSync;
     this.config = this.buildConfig();
     this.enabledAtLastSync = this.plugin.settings.embeddingsEnabled === true;
+    if (wasEnabled && !this.enabledAtLastSync) {
+      this.clearWorkTimer();
+      this.metadataController?.abort();
+      this.processor.cancel();
+    }
     const exclusionsChanged = JSON.stringify(previous.exclusions) !== JSON.stringify(this.config.exclusions);
     if (exclusionsChanged) {
       this.similarCache.clear();
@@ -807,6 +830,7 @@ export class EmbeddingsManager {
 
   async cleanup(): Promise<void> {
     this.processingSuspended = true;
+    this.metadataController?.abort();
     this.processor.cleanup();
     this.clearWorkTimer();
     this.clearLifecycleRefresh();
@@ -814,6 +838,7 @@ export class EmbeddingsManager {
       try { this.app.vault.offref(ref); } catch { /* Obsidian may already have detached it. */ }
     }
     this.fileWatchers = [];
+    window.removeEventListener?.("online", this.onHostOnline);
     await this.processingMutex.runExclusive(() => this.flushPortableIndex());
     this.portableCheckpoint?.cancel();
     this.queryCache.clear();
@@ -844,6 +869,7 @@ export class EmbeddingsManager {
 
   private setupFileWatchers(): void {
     if (this.fileWatchers.length > 0) return;
+    window.addEventListener?.("online", this.onHostOnline);
     this.fileWatchers.push(this.app.vault.on("create", (file) => {
       if (file instanceof TFile && file.extension === "md") this.requestFileProcessing(file, "create");
     }));
@@ -934,9 +960,9 @@ export class EmbeddingsManager {
   }
 
   private scheduleQueuedWork(minimumDelayMs = 0): void {
-    if (this.automaticRunQueued || this.processingSuspended || !this.plugin.settings.embeddingsEnabled) return;
+    if (this.automaticRunQueued || this.processingSuspended || !this.plugin.settings.embeddingsEnabled || (typeof navigator !== "undefined" && navigator.onLine === false)) return;
     const next = this.workQueue.snapshot()
-      .filter((item) => !item.failure)
+      .filter((item) => !item.failure || item.failure.retryable === true)
       .sort((left, right) => left.readyAt - right.readyAt)[0];
     if (!next) return;
     const now = Date.now();
@@ -944,7 +970,9 @@ export class EmbeddingsManager {
     const delay = Math.max(
       minimumDelayMs,
       contentionBackoff,
-      Math.max(0, Math.min(2_000, next.readyAt - now)),
+      // setTimeout accepts at most a signed 32-bit delay; the durable due time
+      // remains authoritative when a server asks us to wait longer.
+      Math.max(0, Math.min(2_147_483_647, next.readyAt - now)),
     );
     const dueAt = now + delay;
     if (this.workTimer !== null && this.workTimerDueAt !== null && this.workTimerDueAt <= dueAt) return;
@@ -964,7 +992,7 @@ export class EmbeddingsManager {
   }
 
   private async processQueuedWork(): Promise<void> {
-    if (this.processingSuspended || !this.plugin.settings.embeddingsEnabled) return;
+    if (this.processingSuspended || !this.plugin.settings.embeddingsEnabled || (typeof navigator !== "undefined" && navigator.onLine === false)) return;
     if (this.processingMutex.isLocked()) {
       this.scheduleQueuedWork(QUEUED_WORK_MUTEX_BACKOFF_MS);
       return;
@@ -974,6 +1002,7 @@ export class EmbeddingsManager {
       this.scheduleQueuedWork();
       return;
     }
+    let processed = false;
     await this.processingMutex.runExclusive(async () => {
       const completedWithoutEmbedding: SemanticWorkItem[] = [];
       const files: TFile[] = [];
@@ -997,14 +1026,9 @@ export class EmbeddingsManager {
           this.failedFiles.delete(item.path);
           continue;
         }
-        // A modify or create event is evidence of new bytes even when the
-        // mtime did not move, so the processor compares content hashes (and
-        // reuses the stored vectors, with no request, when nothing changed).
-        const eventWithoutNewMtime = item.reason === "modify" || item.reason === "create";
-        if (!this.shouldProcessFile(abstract) && !eventWithoutNewMtime) {
-          completedWithoutEmbedding.push(item);
-          continue;
-        }
+        // Any queued claim can represent new bytes with an unchanged mtime,
+        // including a failed edit restored as "retry". The processor hashes
+        // the source and reuses a matching stored vector without an upload.
         files.push(abstract);
         workClaims.set(item.path, item);
       }
@@ -1013,6 +1037,19 @@ export class EmbeddingsManager {
         if (destructive) this.markPortableIndexDestructive();
         this.refreshLifecycle({ phase: "idle", currentPath: null });
         return;
+      }
+      if (this.processingSuspended || !this.plugin.settings.embeddingsEnabled) return;
+      if (!this.gateway.metadata) {
+        try {
+          await this.gateway.getMetadata(this.metadataSignal());
+        } catch (error) {
+          if (!(error instanceof ManagedEmbeddingsError && error.code === "request_cancelled")) {
+            await this.recordBatchFailure(workClaims, error);
+            if (isFatalManagedError(error)) await this.persistFatalSuspension(error);
+            this.reportLifecycleFailure(error);
+          }
+          return;
+        }
       }
       if (this.processingSuspended || !this.plugin.settings.embeddingsEnabled) return;
 
@@ -1032,6 +1069,7 @@ export class EmbeddingsManager {
         reuseNamespace: this.getIndexingNamespace(),
         concurrency: BULK_INDEX_CONCURRENCY,
       });
+      processed = true;
       const failedPaths = await this.requeueChangedSources(result, workClaims);
       await this.recordFailures(failedPaths, workClaims, result.failedDetails, result.fatalError);
       if (result.fatalError) await this.persistFatalSuspension(result.fatalError);
@@ -1071,11 +1109,18 @@ export class EmbeddingsManager {
     // Indexing a queued edit can discover a new server generation too. Rebuild
     // the remaining corpus only after releasing the queue's processing mutex.
     const namespace = this.gateway.activeGeneration?.indexNamespace;
-    if (namespace && namespace !== this.searchNamespace) {
+    if (processed && namespace && namespace !== this.searchNamespace) {
       this.requestAutomaticProcessing();
     } else {
       this.scheduleQueuedWork();
     }
+  }
+
+  private metadataSignal(): AbortSignal {
+    if (!this.metadataController || this.metadataController.signal.aborted) {
+      this.metadataController = new AbortController();
+    }
+    return this.metadataController.signal;
   }
 
   private async preflightCredits(): Promise<void> {
@@ -1122,6 +1167,26 @@ export class EmbeddingsManager {
     return failed;
   }
 
+  private async recordBatchFailure(
+    claims: ReadonlyMap<string, SemanticWorkItem>,
+    cause: unknown,
+  ): Promise<void> {
+    const error = cause instanceof ManagedEmbeddingsError
+      ? cause
+      : new ManagedEmbeddingsError("local_preparation_failed", "The semantic index could not prepare this request.", 0);
+    const detail: FailedProcessingDetail = {
+      code: error.code,
+      message: error.message,
+      status: error.status,
+      retryable: error.retryable,
+      retryInMs: error.retryAfterMs,
+      requestId: error.requestId ?? undefined,
+    };
+    await this.recordFailures([...claims.keys()], claims, Object.fromEntries(
+      [...claims.keys()].map((path) => [path, detail]),
+    ), isFatalManagedError(error) ? error : null);
+  }
+
   private async recordFailures(
     paths: string[],
     workClaims: ReadonlyMap<string, SemanticWorkItem>,
@@ -1148,6 +1213,8 @@ export class EmbeddingsManager {
         failure: {
           ...error,
           ...(typeof detail?.status === "number" ? { status: detail.status } : {}),
+          ...(typeof detail?.retryable === "boolean" ? { retryable: detail.retryable } : {}),
+          ...(typeof detail?.retryInMs === "number" ? { retryInMs: detail.retryInMs } : {}),
           ...(detail?.requestId ? { requestId: detail.requestId } : {}),
         },
       });
@@ -1172,7 +1239,7 @@ export class EmbeddingsManager {
     for (const file of files) {
       const sourceMtime = this.sourceMtime(file);
       const existing = this.workQueue.get(file.path);
-      if (existing && !existing.failure && existing.sourceMtime === sourceMtime) {
+      if (existing && existing.sourceMtime === sourceMtime) {
         claims.set(file.path, existing);
         continue;
       }
@@ -1371,6 +1438,12 @@ export class EmbeddingsManager {
 
   private async deleteCommittedNamespace(): Promise<void> {
     await this.storage.deleteState(COMMITTED_NAMESPACE_STATE_KEY);
+  }
+
+  private shouldProcessVaultFile(file: TFile): boolean {
+    const item = this.workQueue.get(file.path);
+    if (!item) return this.shouldProcessFile(file);
+    return (!item.failure || item.failure.retryable === true) && item.readyAt <= Date.now();
   }
 
   private shouldProcessFile(file: TFile): boolean {

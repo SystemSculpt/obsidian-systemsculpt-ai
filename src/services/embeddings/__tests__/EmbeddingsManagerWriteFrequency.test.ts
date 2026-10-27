@@ -192,9 +192,9 @@ describe("EmbeddingsManager portable index write frequency (#341)", () => {
 
     await manager.processQueuedWork();
 
-    // The modified note is checked even though its mtime still matches its root;
-    // an up-to-date reconcile claim settles without any work.
-    expect(manager.processor.processFiles.mock.calls[0][0].map((file: TFile) => file.path)).toEqual(["A.md"]);
+    // Both a modify and a reconcile/retry claim may hide same-mtime edits.
+    // The processor can reuse unchanged bytes without uploading them.
+    expect(manager.processor.processFiles.mock.calls[0][0].map((file: TFile) => file.path)).toEqual(["A.md", "B.md"]);
     expect(manager.workQueue.size).toBe(0);
     expect(manager.markPortableIndexChanged).not.toHaveBeenCalled();
   });

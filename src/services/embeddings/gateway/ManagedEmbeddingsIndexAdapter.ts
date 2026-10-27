@@ -12,6 +12,9 @@ export type ManagedEmbeddingsErrorCode =
   | "version_unsupported"
   | "rate_limited"
   | "temporarily_unavailable"
+  | "operation_in_progress"
+  | "settlement_pending"
+  | "idempotency_conflict"
   | "capability_unavailable"
   | "invalid_response"
   | "local_preparation_failed"
@@ -27,6 +30,8 @@ export class ManagedEmbeddingsError extends Error {
     message: string,
     public readonly status: number,
     requestId: string | null = null,
+    public readonly retryable = false,
+    public readonly retryAfterMs?: number,
   ) {
     super(message.slice(0, 256));
     this.name = "ManagedEmbeddingsError";
@@ -75,7 +80,10 @@ const MANAGED_EMBEDDINGS_MAX_ERROR_BYTES = 4 * 1024;
 const MANAGED_EMBEDDINGS_MAX_ERROR_MESSAGE_LENGTH = 256;
 
 type ManagedEmbeddingsErrorPayload = Readonly<{
-  message: string;
+  code: string;
+  message?: string;
+  retryable?: boolean;
+  recoveryAction?: string;
   creditsRemaining?: number;
 }>;
 
@@ -503,18 +511,37 @@ export class ManagedEmbeddingsIndexAdapter {
 
   private async requireSuccess(result: ManagedTransportResult): Promise<void> {
     if (!result.response.ok) {
-      const code = HTTP_CODES[result.response.status] ?? "temporarily_unavailable";
-      const payload = await this.readErrorPayload(result, code);
+      const status = result.response.status;
+      let code = HTTP_CODES[status] ?? "temporarily_unavailable";
+      const payload = await this.readErrorPayload(result);
+      if (status === 409 && payload?.code === "operation_in_progress") code = "operation_in_progress";
+      if ((status === 409 || status === 503) && payload?.code === "settlement_pending") code = "settlement_pending";
+      if (status === 409 && payload?.code === "idempotency_conflict") code = "idempotency_conflict";
+      const matchesCode = payload?.code === code
+        || (code === "payment_required" && payload?.code === "insufficient_credits")
+        || (code === "temporarily_unavailable" && payload?.code === "embeddings_temporarily_unavailable");
+      const retryable = code === "settlement_pending"
+        ? payload?.retryable === true && payload.recoveryAction !== "operator_reconciliation"
+        : code === "operation_in_progress"
+          ? payload?.retryable !== false
+          : status !== 409 && (status === 429 || status >= 500)
+            && !(matchesCode && payload?.retryable === false);
+      const reset = result.diagnostics.rateLimitReset;
+      const resetAt = status === 429 && reset && /^\d+$/u.test(reset) ? Number(reset) : NaN;
+      const retryAfterMs = result.diagnostics.retryAfterMs
+        ?? (Number.isSafeInteger(resetAt) ? Math.max(0, resetAt - Date.now()) : undefined);
       const message = code === "payment_required"
         ? payload?.creditsRemaining === 0
           ? "You have no credits left. Add credits to continue indexing notes."
           : "Not enough credits are available. Add credits to continue indexing notes."
-        : payload?.message ?? "Managed embedding index request failed.";
+        : (matchesCode ? payload?.message : undefined) ?? "Managed embedding index request failed.";
       throw new ManagedEmbeddingsError(
         code,
         message,
-        result.response.status,
+        status,
         result.diagnostics.requestId,
+        retryable,
+        retryAfterMs,
       );
     }
     if (result.response.status !== 200) throw this.invalidResponse(result);
@@ -522,7 +549,6 @@ export class ManagedEmbeddingsIndexAdapter {
 
   private async readErrorPayload(
     result: ManagedTransportResult,
-    expectedCode: ManagedEmbeddingsErrorCode,
   ): Promise<ManagedEmbeddingsErrorPayload | null> {
     const response = result.response;
     const declaredLength = Number(response.headers.get("content-length"));
@@ -566,16 +592,13 @@ export class ManagedEmbeddingsIndexAdapter {
       ) as unknown;
       if (!isRecord(value) || !isRecord(value.error)) return null;
       const error = value.error;
-      if (
-        (
-          error.code !== expectedCode
-          && !(expectedCode === "payment_required" && error.code === "insufficient_credits")
-        )
-        || typeof error.message !== "string"
-        || error.message.length < 1
-        || error.message.length > MANAGED_EMBEDDINGS_MAX_ERROR_MESSAGE_LENGTH
-        || containsControlCharacters(error.message)
-      ) return null;
+      if (typeof error.code !== "string") return null;
+      const message = typeof error.message === "string"
+        && error.message.length >= 1
+        && error.message.length <= MANAGED_EMBEDDINGS_MAX_ERROR_MESSAGE_LENGTH
+        && !containsControlCharacters(error.message)
+        ? error.message
+        : undefined;
       if (
         error.request_id !== undefined
         && (
@@ -595,7 +618,10 @@ export class ManagedEmbeddingsIndexAdapter {
         )
       ) return null;
       return {
-        message: error.message,
+        code: error.code,
+        ...(message ? { message } : {}),
+        ...(typeof error.retryable === "boolean" ? { retryable: error.retryable } : {}),
+        ...(typeof error.recovery_action === "string" ? { recoveryAction: error.recovery_action } : {}),
         ...(typeof error.credits_remaining === "number"
           ? { creditsRemaining: error.credits_remaining }
           : {}),
@@ -611,6 +637,8 @@ export class ManagedEmbeddingsIndexAdapter {
       "temporarily_unavailable",
       "Managed embedding index request failed.",
       0,
+      null,
+      true,
     );
   }
 

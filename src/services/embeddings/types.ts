@@ -86,6 +86,7 @@ export interface FailedProcessingDetail {
   code: string;
   message: string;
   status?: number;
+  retryable?: boolean;
   retryInMs?: number;
   requestId?: string;
   chunkId?: number;

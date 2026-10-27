@@ -83,8 +83,50 @@ describe("SemanticWorkQueue", () => {
     }));
 
     await restarted.retryFailures(1_200);
+    expect(restarted.failureCount).toBe(1);
+    expect(restarted.due(1_200).map((item) => item.path)).toEqual(["Pending.md"]);
+    await restarted.retryFailures(2_200);
     expect(restarted.failureCount).toBe(0);
-    expect(restarted.due(1_200).map((item) => item.path).sort()).toEqual(["Failed.md", "Pending.md"]);
+    expect(restarted.due(2_200).map((item) => item.path).sort()).toEqual(["Failed.md", "Pending.md"]);
+  });
+
+  it("persists retry timing and restores transient work without retrying fenced settlement", async () => {
+    const state = new Map<string, unknown>();
+    const queue = new SemanticWorkQueue(durableStore(state), 0);
+    const transient = (await queue.enqueueImmediate("Transient.md", "modify", 1, 1_000))!;
+    const fenced = (await queue.enqueueImmediate("Fenced.md", "modify", 1, 1_000))!;
+    await queue.failMany([
+      { claim: transient, failure: { code: "rate_limited", message: "Wait.", status: 429, retryable: true, retryInMs: 15_000 } },
+      { claim: fenced, failure: { code: "settlement_pending", message: "Needs reconciliation.", status: 409, retryable: false } },
+    ], 1_000);
+
+    const restarted = new SemanticWorkQueue(durableStore(state), 0);
+    await restarted.restore();
+    expect(restarted.due(15_999)).toEqual([]);
+    expect(restarted.due(16_000).map((item) => item.path)).toEqual(["Transient.md"]);
+    expect(restarted.get("Transient.md")?.failure).toMatchObject({ retryable: true, retryInMs: 15_000 });
+    expect(restarted.get("Fenced.md")?.failure).toMatchObject({ retryable: false });
+
+    const retry = restarted.due(16_000)[0];
+    await restarted.fail(retry, { code: "temporarily_unavailable", message: "Wait.", status: 503, retryable: true }, 16_000);
+    expect(restarted.get("Transient.md")?.attempts).toBe(2);
+    expect(restarted.due(17_999)).toEqual([]);
+    expect(restarted.due(18_000).map((item) => item.path)).toEqual(["Transient.md"]);
+  });
+
+  it("restores transient failures saved by a previous plugin but parks unclassified 409", async () => {
+    const state = new Map<string, unknown>();
+    const old = new SemanticWorkQueue(durableStore(state), 0);
+    const transient = (await old.enqueueImmediate("Transient.md", "modify", 1, 1_000))!;
+    const ambiguous = (await old.enqueueImmediate("Ambiguous.md", "modify", 1, 1_000))!;
+    await old.failMany([
+      { claim: transient, failure: { code: "temporarily_unavailable", message: "Failed.", status: 503 } },
+      { claim: ambiguous, failure: { code: "temporarily_unavailable", message: "Failed.", status: 409 } },
+    ], 1_000);
+    const restarted = new SemanticWorkQueue(durableStore(state), 0);
+    await restarted.restore();
+    expect(restarted.due(2_000).map((item) => item.path)).toEqual(["Transient.md"]);
+    expect(restarted.get("Ambiguous.md")?.failure?.retryable).not.toBe(true);
   });
 
   it("moves queued identity on rename and erases it on delete", async () => {

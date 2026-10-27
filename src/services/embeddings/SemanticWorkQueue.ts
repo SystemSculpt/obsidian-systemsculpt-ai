@@ -1,3 +1,4 @@
+import { managedTransientBackoffMs } from "../managed/ManagedJobObservation";
 import type { FailedProcessingDetail } from "./types";
 
 export type SemanticWorkReason = "create" | "modify" | "rename" | "retry" | "reconcile";
@@ -32,6 +33,22 @@ function clone(item: SemanticWorkItem): SemanticWorkItem {
   return { ...item, failure: item.failure ? { ...item.failure } : null };
 }
 
+function retryAt(now: number, attempts: number, hint?: number): number {
+  const delay = Math.max(
+    managedTransientBackoffMs(attempts),
+    typeof hint === "number" && Number.isFinite(hint) && hint >= 0 ? hint : 0,
+  );
+  return Math.min(Number.MAX_SAFE_INTEGER, now + delay);
+}
+
+/** Older releases lost retryability; 409 cannot be distinguished from a fenced settlement. */
+function isLegacyTransientFailure(failure: FailedProcessingDetail): boolean {
+  return failure.retryable === undefined
+    && ((failure.code === "rate_limited" && failure.status === 429)
+      || (failure.code === "temporarily_unavailable"
+        && (failure.status === 0 || (typeof failure.status === "number" && failure.status >= 500))));
+}
+
 /** Durable, path-keyed work. Repeated file events collapse into one quiet-period item. */
 export class SemanticWorkQueue {
   private readonly items = new Map<string, SemanticWorkItem>();
@@ -57,15 +74,21 @@ export class SemanticWorkQueue {
         ? item.revision
         : this.nextItemRevision;
       this.nextItemRevision = Math.max(this.nextItemRevision, itemRevision + 1);
+      const failure = item.failure ? { ...item.failure } : null;
+      const legacyTransient = Boolean(failure && isLegacyTransientFailure(failure));
+      if (failure && legacyTransient) failure.retryable = true;
+      const attempts = Number.isFinite(item.attempts) ? Math.max(0, item.attempts) : 0;
       this.items.set(item.path, {
         path: item.path,
         revision: itemRevision,
         sourceMtime: Number.isFinite(item.sourceMtime) ? item.sourceMtime : null,
         reason: item.reason || "reconcile",
         requestedAt: Number.isFinite(item.requestedAt) ? item.requestedAt : Date.now(),
-        readyAt: Number.isFinite(item.readyAt) ? item.readyAt : Date.now(),
-        attempts: Number.isFinite(item.attempts) ? Math.max(0, item.attempts) : 0,
-        failure: item.failure ? { ...item.failure } : null,
+        readyAt: legacyTransient && failure
+          ? retryAt(Number.isFinite(failure.failedAt) ? failure.failedAt : Date.now(), attempts, failure.retryInMs)
+          : Number.isFinite(item.readyAt) ? item.readyAt : Date.now(),
+        attempts,
+        failure,
       });
     }
   }
@@ -206,7 +229,7 @@ export class SemanticWorkQueue {
   async retryFailures(now = Date.now()): Promise<void> {
     let changed = false;
     for (const [path, item] of this.items) {
-      if (!item.failure) continue;
+      if (!item.failure || (item.failure.retryable === true && item.readyAt > now)) continue;
       this.items.set(path, { ...item, reason: "retry", readyAt: now, failure: null });
       changed = true;
     }
@@ -215,7 +238,7 @@ export class SemanticWorkQueue {
 
   due(now = Date.now(), limit = 128): SemanticWorkItem[] {
     return [...this.items.values()]
-      .filter((item) => !item.failure && item.readyAt <= now)
+      .filter((item) => (!item.failure || item.failure.retryable === true) && item.readyAt <= now)
       .sort((left, right) => left.readyAt - right.readyAt || left.path.localeCompare(right.path))
       .slice(0, Math.max(1, limit))
       .map(clone);
@@ -282,10 +305,11 @@ export class SemanticWorkQueue {
       || existing.revision !== claim.revision
       || existing.sourceMtime !== claim.sourceMtime
     ) return false;
+    const attempts = existing.attempts + 1;
     this.items.set(claim.path, {
       ...existing,
-      readyAt: Number.MAX_SAFE_INTEGER,
-      attempts: existing.attempts + 1,
+      readyAt: failure.retryable === true ? retryAt(now, attempts, failure.retryInMs) : Number.MAX_SAFE_INTEGER,
+      attempts,
       failure: { ...failure, failedAt: now },
     });
     return true;

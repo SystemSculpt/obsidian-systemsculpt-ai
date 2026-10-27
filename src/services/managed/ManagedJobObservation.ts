@@ -11,6 +11,11 @@ const TRANSIENT_RETRY_MAX_MS = 30_000;
 const OBSERVATION_RETRY_MAX_MS = 5 * 60_000;
 const DISPATCH_MAX_ATTEMPTS = 4;
 
+/** The existing unbounded-observation backoff, shared by durable index recovery. */
+export function managedTransientBackoffMs(failures: number): number {
+  return Math.min(OBSERVATION_RETRY_MAX_MS, TRANSIENT_RETRY_BASE_MS * 2 ** Math.max(0, failures - 1));
+}
+
 /** A status read failed transiently; the observer waits and reads again. */
 type ManagedJobObservationRetry = Readonly<{
   consecutiveFailures: number;
@@ -133,7 +138,6 @@ export async function* observeManagedJob<T>(
   const waitForOnline = options.waitForOnline ?? waitForManagedJobHostOnline;
   let next = options.initial;
   let hasNext = options.initial !== undefined;
-  let transientRetryMs = TRANSIENT_RETRY_BASE_MS;
   let transientFailures = 0;
 
   while (true) {
@@ -143,7 +147,6 @@ export async function* observeManagedJob<T>(
       try {
         next = await options.read();
         throwIfAborted(options.signal);
-        transientRetryMs = TRANSIENT_RETRY_BASE_MS;
         transientFailures = 0;
       } catch (error) {
         throwIfAborted(options.signal);
@@ -152,17 +155,13 @@ export async function* observeManagedJob<T>(
         // network instead of backing off.
         if (isHostOffline()) continue;
         transientFailures += 1;
-        const retryInMs = normalizedPollAfterMs(options.retryAfterMs?.(error), transientRetryMs);
+        const retryInMs = normalizedPollAfterMs(options.retryAfterMs?.(error), managedTransientBackoffMs(transientFailures));
         try {
           options.onRetrying?.({ consecutiveFailures: transientFailures, retryInMs, error });
         } catch {
           // Progress display must never end the observation.
         }
         await wait(retryInMs, options.signal);
-        transientRetryMs = Math.min(
-          OBSERVATION_RETRY_MAX_MS,
-          transientRetryMs * 2,
-        );
         continue;
       }
     }

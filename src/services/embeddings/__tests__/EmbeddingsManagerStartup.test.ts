@@ -1,7 +1,13 @@
+jest.mock("../../../utils/errorLogger", () => ({
+  errorLogger: { debug: jest.fn(), warn: jest.fn(), error: jest.fn() },
+}));
+
 import { createHash } from "node:crypto";
 import type { Mutex } from "async-mutex";
 import { TFile } from "obsidian";
 import { EmbeddingsManager, type EmbeddingsRunResult } from "../EmbeddingsManager";
+import { ManagedEmbeddingsIndexAdapter } from "../gateway/ManagedEmbeddingsIndexAdapter";
+import { HostedTransportAdapter } from "../../managed/adapters/HostedTransportAdapter";
 import { EmbeddingsStorage } from "../storage/EmbeddingsStorage";
 import { SemanticWorkQueue } from "../SemanticWorkQueue";
 import { createLocalEmptyEmbeddingMarkerForRevision } from "../LocalEmptyEmbeddingMarker";
@@ -12,7 +18,6 @@ import {
   MANAGED_EMBEDDINGS_INDEX_CONTRACT,
   MANAGED_EMBEDDINGS_INDEX_VECTOR_ENCODING,
   ManagedEmbeddingsError,
-  type ManagedEmbeddingsIndexAdapter,
 } from "../gateway/ManagedEmbeddingsIndexAdapter";
 
 const NAMESPACE = "systemsculpt:managed:semantic-v1:v3:2";
@@ -37,7 +42,7 @@ function root(note: TFile): EmbeddingVector {
   };
 }
 
-async function harness(files: TFile[], records = files.map(root)) {
+async function harness(files: TFile[], records = files.map(root), override?: ManagedEmbeddingsIndexAdapter) {
   const seed = new EmbeddingsStorage(EmbeddingsStorage.buildDbName(VAULT_ID));
   await seed.initialize();
   await seed.storeVectors(records);
@@ -61,12 +66,12 @@ async function harness(files: TFile[], records = files.map(root)) {
     cachedRead: jest.fn(async (_note: TFile) => "content"),
     on: jest.fn(() => ({})), offref: jest.fn(),
   };
-  const gateway = {
+  const gateway = (override ?? {
     activeGeneration: undefined,
     metadata: undefined,
     getMetadata: jest.fn(async () => undefined),
     query: jest.fn(), index: jest.fn(),
-  } as unknown as jest.Mocked<ManagedEmbeddingsIndexAdapter>;
+  }) as jest.Mocked<ManagedEmbeddingsIndexAdapter>;
   const updateSettings = jest.fn(async () => undefined);
   const plugin = {
     settings,
@@ -74,11 +79,31 @@ async function harness(files: TFile[], records = files.map(root)) {
     getSettingsManager: () => ({ updateSettings }),
   };
   const manager = new EmbeddingsManager({ vault } as never, plugin as never);
-  return { manager, seed, settings, vault, gateway, updateSettings };
+  return { manager, seed, settings, vault, gateway, updateSettings, plugin };
 }
 
 async function nextTask(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+function jsonResponse(body: unknown): Response {
+  const bytes = new TextEncoder().encode(JSON.stringify(body));
+  const hash = createHash("sha256").update(bytes).digest("hex");
+  return new Response(bytes, { status: 200, headers: {
+    "content-type": "application/json", "cache-control": "no-store, max-age=0",
+    "x-request-id": "test-request", "x-systemsculpt-embeddings-index-contract": MANAGED_EMBEDDINGS_INDEX_CONTRACT,
+    "x-systemsculpt-content-sha256": hash, "x-systemsculpt-content-size": String(bytes.byteLength),
+  } });
+}
+
+function waitForSnapshot(manager: EmbeddingsManager, predicate: (snapshot: ReturnType<EmbeddingsManager["getLifecycleSnapshot"]>) => boolean): Promise<void> {
+  return new Promise((resolve) => {
+    const unsubscribe = manager.subscribeLifecycle((snapshot) => {
+      if (!predicate(snapshot)) return;
+      queueMicrotask(() => unsubscribe());
+      resolve();
+    });
+  });
 }
 
 describe("EmbeddingsManager startup work (#343)", () => {
@@ -282,7 +307,9 @@ describe("EmbeddingsManager startup work (#343)", () => {
     if (contention) {
       await mutationReady;
       await nextTask();
-      expect(gateway.getMetadata).not.toHaveBeenCalled();
+      // Queued work now obtains metadata before dispatch; the full-corpus
+      // reconciliation still waits for the contending mutation to finish.
+      expect(gateway.getMetadata).toHaveBeenCalledTimes(1);
       releaseMutation();
     }
     const result = await completed;
@@ -290,10 +317,126 @@ describe("EmbeddingsManager startup work (#343)", () => {
     const alreadyIndexed = discovery === "queued edit" ? 1 : 0;
     expect(result).toMatchObject({ status: "complete", processed: (failOne ? 1 : 2) - alreadyIndexed });
 
-    expect(gateway.getMetadata).toHaveBeenCalledTimes(1);
+    expect(gateway.getMetadata).toHaveBeenCalledTimes(discovery === "queued edit" ? 2 : 1);
     expect(gateway.index).toHaveBeenCalledTimes(2);
     expect(manager.getFileIndexSnapshot("A.md").generation?.namespace).toBe(failOne ? NAMESPACE : NEXT_NAMESPACE);
     await manager.cleanup();
+    seed.close();
+  });
+
+  it("retries the same note after a lost charged response across restart without skipping same-mtime edits", async () => {
+    const notes = [file("A.md"), file("B.md")];
+    const old = notes.map(root);
+    for (const vector of old) vector.metadata.sourceSha256 = createHash("sha256").update("old").digest("hex");
+    const keys: string[] = [];
+    const charges = new Map<string, number>();
+    const results = new Map<string, unknown>();
+    let dropped = false;
+    const request = jest.fn(async (input: { method: string; headers: Record<string, string>; body?: ArrayBuffer }) => {
+      if (input.method === "GET") return jsonResponse({
+        contract: MANAGED_EMBEDDINGS_INDEX_CONTRACT,
+        vector_encoding: MANAGED_EMBEDDINGS_INDEX_VECTOR_ENCODING,
+        generation: { id: "semantic-v1", index_schema_version: 3, index_namespace_template: "systemsculpt:managed:semantic-v1:v3:<dimensions>" },
+        limits: { max_source_bytes: 8 * 1024 * 1024, max_result_bytes: 16 * 1024 * 1024 },
+      });
+      const markdown = new TextDecoder().decode(input.body);
+      const hash = createHash("sha256").update(markdown).digest("hex");
+      const key = input.headers["Idempotency-Key"];
+      keys.push(key);
+      if (!results.has(key)) {
+        charges.set(key, (charges.get(key) ?? 0) + 1);
+        results.set(key, {
+          contract: MANAGED_EMBEDDINGS_INDEX_CONTRACT, source: { content_sha256: hash }, empty: false,
+          vector_encoding: MANAGED_EMBEDDINGS_INDEX_VECTOR_ENCODING,
+          generation: { id: "semantic-v1", index_schema_version: 3, index_namespace: NAMESPACE, dimensions: 2 },
+          chunks: [{ ordinal: 0, text_hash: hash, heading_path: [], excerpt: markdown, length: markdown.length, vector_base64: "AACAPwAAAAA=" }],
+        });
+      }
+      if (markdown === "new A" && !dropped) {
+        dropped = true;
+        throw new TypeError("connection lost after the fake server charged");
+      }
+      return jsonResponse(results.get(key));
+    });
+    const makeGateway = () => new ManagedEmbeddingsIndexAdapter(new HostedTransportAdapter({
+      baseUrl: "https://example.invalid", pluginVersion: "6.18.5", licenseKey: () => "test",
+      requestClient: { request } as never,
+    }));
+    const { manager, seed, vault, plugin } = await harness(notes, old, makeGateway());
+    vault.read.mockImplementation(async (note) => `new ${note.basename}`);
+    vault.cachedRead.mockImplementation(async (note) => `new ${note.basename}`);
+    const queue = new SemanticWorkQueue(seed);
+    await queue.enqueueManyImmediate(notes.map((note) => ({ path: note.path, sourceMtime: 1 })), "retry");
+    const failed = waitForSnapshot(manager, (snapshot) => snapshot.phase === "error" && snapshot.failed === 1);
+
+    await manager.initialize();
+    await failed;
+    expect(manager.getFileIndexSnapshot("B.md").ready).toBe(true);
+    expect(manager.getFileIndexSnapshot("A.md").state).toBe("failed");
+    await manager.cleanup();
+
+    const restarted = new EmbeddingsManager({ vault } as never, {
+      ...plugin, getManagedCapabilityGraph: () => ({ embeddingsIndex: makeGateway() }),
+    } as never);
+    const recovered = waitForSnapshot(restarted, (snapshot) => snapshot.ready && snapshot.phase === "idle" && snapshot.pending === 0);
+    await restarted.initialize();
+    await recovered;
+
+    const aKey = `idx:${createHash("sha256").update("new A").digest("hex")}`;
+    const bKey = `idx:${createHash("sha256").update("new B").digest("hex")}`;
+    expect(keys.filter((key) => key === aKey)).toHaveLength(2);
+    expect(keys.filter((key) => key === bKey)).toHaveLength(1);
+    expect(charges.get(aKey)).toBe(1);
+    expect(charges.get(bKey)).toBe(1);
+    expect(restarted.getFileIndexSnapshot("A.md").ready).toBe(true);
+    await restarted.cleanup();
+    seed.close();
+  });
+
+  it("retries a temporary metadata failure through the durable queue", async () => {
+    const note = file();
+    const { manager, seed, gateway, vault } = await harness([note], []);
+    let firstMetadata!: () => void;
+    const attempted = new Promise<void>((resolve) => { firstMetadata = resolve; });
+    gateway.getMetadata.mockImplementationOnce(async () => {
+      firstMetadata();
+      throw new ManagedEmbeddingsError("temporarily_unavailable", "Try again.", 503, null, true);
+    });
+    gateway.getMetadata.mockResolvedValue(undefined as never);
+    gateway.index.mockImplementation(async ({ prepare }) => {
+      const markdown = prepare().markdown;
+      const hash = createHash("sha256").update(markdown).digest("hex");
+      return {
+        contract: MANAGED_EMBEDDINGS_INDEX_CONTRACT, source: { contentSha256: hash }, empty: false,
+        vectorEncoding: MANAGED_EMBEDDINGS_INDEX_VECTOR_ENCODING,
+        generation: { id: "semantic-v1", indexSchemaVersion: 3, indexNamespace: NAMESPACE, dimensions: 2 },
+        chunks: [{ ordinal: 0, textHash: hash, headingPath: [], excerpt: markdown, length: markdown.length, vector: new Float32Array([1, 0]) }],
+      };
+    });
+    const done = waitForSnapshot(manager, (snapshot) => snapshot.ready && snapshot.phase === "idle" && snapshot.pending === 0);
+    await manager.initialize();
+    await attempted;
+    await done;
+    expect(gateway.getMetadata).toHaveBeenCalledTimes(2);
+    expect(vault.read).toHaveBeenCalledTimes(1);
+    expect(manager.getFileIndexSnapshot(note.path).ready).toBe(true);
+    await manager.cleanup();
+    seed.close();
+  });
+
+  it("aborts a pending metadata request on cleanup without uploading notes", async () => {
+    const { manager, seed, gateway } = await harness([file()], []);
+    let requestStarted!: (signal: AbortSignal) => void;
+    const started = new Promise<AbortSignal>((resolve) => { requestStarted = resolve; });
+    gateway.getMetadata.mockImplementation((signal) => new Promise((_resolve, reject) => {
+      requestStarted(signal!);
+      signal!.addEventListener("abort", () => reject(new ManagedEmbeddingsError("request_cancelled", "Stopped.", 0)));
+    }));
+    await manager.initialize();
+    const signal = await started;
+    await manager.cleanup();
+    expect(signal.aborted).toBe(true);
+    expect(gateway.index).not.toHaveBeenCalled();
     seed.close();
   });
 

@@ -339,6 +339,8 @@ export class EmbeddingsProcessor {
         code: managed.code,
         message: managed.message,
         status: managed.status,
+        retryable: managed.retryable,
+        retryInMs: managed.retryAfterMs,
         requestId: managed.requestId ?? undefined,
       };
     }
