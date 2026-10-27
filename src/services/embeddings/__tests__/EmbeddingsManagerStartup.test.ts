@@ -393,6 +393,101 @@ describe("EmbeddingsManager startup work (#343)", () => {
     seed.close();
   });
 
+  it("retains one durable note and idempotency key through repeated 429s and restart until Retry-After permits recovery", async () => {
+    jest.useFakeTimers({ doNotFake: ["queueMicrotask", "nextTick", "setImmediate"] });
+    const markdown = "Synthetic note awaiting admission.";
+    const hash = createHash("sha256").update(markdown).digest("hex");
+    const key = `idx:${hash}`;
+    const keys: string[] = [];
+    // Exceeds the generic managed-dispatch attempt count: index recovery must
+    // keep the paid work pending rather than abandon it after a few failures.
+    const failures = 6;
+    const request = jest.fn(async (input: { method: string; headers: Record<string, string>; body?: ArrayBuffer }) => {
+      if (input.method === "GET") return jsonResponse({
+        contract: MANAGED_EMBEDDINGS_INDEX_CONTRACT,
+        vector_encoding: MANAGED_EMBEDDINGS_INDEX_VECTOR_ENCODING,
+        generation: { id: "semantic-v1", index_schema_version: 3, index_namespace_template: "systemsculpt:managed:semantic-v1:v3:<dimensions>" },
+        limits: { max_source_bytes: 8 * 1024 * 1024, max_result_bytes: 16 * 1024 * 1024 },
+      });
+      keys.push(input.headers["Idempotency-Key"]);
+      expect(new TextDecoder().decode(input.body)).toBe(markdown);
+      if (keys.length <= failures) return new Response(JSON.stringify({ error: {
+        code: "rate_limited", message: "Indexing is busy. Try again soon.", retryable: true,
+      } }), { status: 429, headers: {
+        "content-type": "application/json", "x-request-id": `test-rate-limit-${keys.length}`,
+        "retry-after": String(20 + keys.length * 10),
+      } });
+      return jsonResponse({
+        contract: MANAGED_EMBEDDINGS_INDEX_CONTRACT, source: { content_sha256: hash }, empty: false,
+        vector_encoding: MANAGED_EMBEDDINGS_INDEX_VECTOR_ENCODING,
+        generation: { id: "semantic-v1", index_schema_version: 3, index_namespace: NAMESPACE, dimensions: 2 },
+        chunks: [{ ordinal: 0, text_hash: hash, heading_path: [], excerpt: markdown, length: markdown.length, vector_base64: "AACAPwAAAAA=" }],
+      });
+    });
+    const makeGateway = () => new ManagedEmbeddingsIndexAdapter(new HostedTransportAdapter({
+      baseUrl: "https://example.invalid", pluginVersion: "6.18.5", licenseKey: () => "test",
+      requestClient: { request } as never,
+    }));
+    const { manager, seed, vault, plugin } = await harness([file()], [], makeGateway());
+    let current = manager;
+    vault.read.mockResolvedValue(markdown);
+    vault.cachedRead.mockResolvedValue(markdown);
+    let claim: { revision: number; requestedAt: number; sourceMtime: number | null } | undefined;
+    try {
+      const firstFailure = waitForSnapshot(current, (snapshot) => snapshot.phase === "error" && snapshot.failed === 1);
+      await current.initialize();
+      await firstFailure;
+      await jest.advanceTimersByTimeAsync(0);
+
+      for (let attempt = 1; attempt <= failures; attempt += 1) {
+        const restored = new SemanticWorkQueue(seed);
+        await restored.restore();
+        const item = restored.get("A.md")!;
+        claim ??= { revision: item.revision, requestedAt: item.requestedAt, sourceMtime: item.sourceMtime };
+        expect(item).toMatchObject({
+          ...claim, path: "A.md", attempts: attempt,
+          failure: { code: "rate_limited", status: 429, retryable: true, retryInMs: (20 + attempt * 10) * 1_000 },
+        });
+        expect(restored.size).toBe(1);
+        expect(current.getLifecycleSnapshot()).toMatchObject({ completed: 0, pending: 1, failed: 1 });
+        expect(await seed.countVectors()).toBe(0);
+        expect(keys).toHaveLength(attempt);
+        expect(keys.every((sent) => sent === key)).toBe(true);
+
+        if (attempt === 3) {
+          await current.cleanup();
+          current = new EmbeddingsManager({ vault } as never, {
+            ...plugin, getManagedCapabilityGraph: () => ({ embeddingsIndex: makeGateway() }),
+          } as never);
+          await current.initialize();
+          await jest.advanceTimersByTimeAsync(0);
+        }
+        const retryInMs = item.readyAt - Date.now();
+        expect(retryInMs).toBe((20 + attempt * 10) * 1_000);
+        await jest.advanceTimersByTimeAsync(retryInMs - 1);
+        expect(keys).toHaveLength(attempt);
+        expect(current.getLifecycleSnapshot()).toMatchObject({ completed: 0, pending: 1, failed: 1 });
+        expect(await seed.countVectors()).toBe(0);
+
+        const next = waitForSnapshot(current, (snapshot) => keys.length === attempt + 1 && (attempt === failures
+          ? snapshot.phase === "idle" && snapshot.completed === 1 && snapshot.pending === 0 && snapshot.failed === 0
+          : snapshot.phase === "error" && snapshot.failed === 1));
+        await jest.advanceTimersByTimeAsync(1);
+        await next;
+        await jest.advanceTimersByTimeAsync(0);
+      }
+
+      expect(keys).toEqual(Array.from({ length: failures + 1 }, () => key));
+      expect(current.getFileIndexSnapshot("A.md")).toMatchObject({ ready: true });
+      expect(await seed.readState("semantic-work-v1")).toBeNull();
+      expect(await seed.countVectors()).toBe(1);
+    } finally {
+      await current.cleanup();
+      seed.close();
+      jest.useRealTimers();
+    }
+  });
+
   it("retries a temporary metadata failure through the durable queue", async () => {
     const note = file();
     const { manager, seed, gateway, vault } = await harness([note], []);

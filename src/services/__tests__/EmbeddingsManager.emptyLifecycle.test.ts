@@ -213,6 +213,19 @@ async function waitFor(predicate: () => boolean, timeoutMs = 2_000): Promise<voi
   throw new Error(`Timed out after ${timeoutMs}ms waiting for embeddings lifecycle state.`);
 }
 
+function waitForLifecycle(
+  manager: EmbeddingsManager,
+  predicate: (snapshot: ReturnType<EmbeddingsManager["getLifecycleSnapshot"]>) => boolean,
+): Promise<void> {
+  return new Promise((resolve) => {
+    const unsubscribe = manager.subscribeLifecycle((snapshot) => {
+      if (!predicate(snapshot)) return;
+      queueMicrotask(() => unsubscribe());
+      resolve();
+    });
+  });
+}
+
 describe("EmbeddingsManager local empty-note lifecycle", () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -619,36 +632,89 @@ describe("EmbeddingsManager local empty-note lifecycle", () => {
     expect(state.manager.getLifecycleSnapshot()).toMatchObject({ phase: "idle", completed: 1, pending: 0 });
   });
 
-  it.each([
-    ["license_required", 401],
-    ["temporarily_unavailable", 503],
-  ] as const)("surfaces startup %s failures and recovers on the next automatic run", async (code, status) => {
+  it("surfaces a startup license rejection and recovers after explicit resume", async () => {
     const state = harness("Enabled semantic indexing must never report a false-ready state.");
     state.plugin.settings.embeddingsEnabled = true;
-    state.getMetadata.mockRejectedValueOnce(new ManagedEmbeddingsError(code, "Managed catalog unavailable.", status));
+    state.getMetadata.mockRejectedValueOnce(new ManagedEmbeddingsError(
+      "license_required", "Managed catalog unavailable.", 401,
+    ));
 
-    await state.manager.initialize();
-    for (let attempt = 0; attempt < 30 && state.manager.getLifecycleSnapshot().phase !== "error"; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    }
+    try {
+      const failed = waitForLifecycle(state.manager, (snapshot) => snapshot.phase === "error");
+      await state.manager.initialize();
+      await failed;
+      // The notification precedes the automatic run's final scheduler cleanup.
+      await new Promise<void>((resolve) => setImmediate(resolve));
 
-    expect(state.manager.getLifecycleSnapshot()).toMatchObject({
-      phase: "error",
-      lastError: { code, message: "Managed catalog unavailable." },
-    });
-    expect(state.index).not.toHaveBeenCalled();
-
-    if (code === "license_required") {
+      expect(state.manager.getLifecycleSnapshot()).toMatchObject({
+        phase: "error",
+        lastError: { code: "license_required", message: "Managed catalog unavailable." },
+      });
       expect(state.manager.isSuspended()).toBe(true);
-      state.manager.resumeProcessing();
-      await waitFor(() => !state.manager.isSuspended());
-    } else {
-      state.manager.syncFromSettings();
-    }
-    await waitFor(() => state.manager.getLifecycleSnapshot().phase === "idle");
+      expect(state.index).not.toHaveBeenCalled();
 
-    expect(state.index).toHaveBeenCalledTimes(1);
-    expect(state.manager.getLifecycleSnapshot()).toMatchObject({ phase: "idle", lastError: null });
+      const recovered = waitForLifecycle(state.manager, (snapshot) => (
+        snapshot.phase === "idle" && snapshot.completed === 1 && snapshot.pending === 0
+      ));
+      await state.manager.resumeProcessing();
+      await recovered;
+
+      expect(state.index).toHaveBeenCalledTimes(1);
+      expect(state.manager.getLifecycleSnapshot()).toMatchObject({ phase: "idle", lastError: null });
+    } finally {
+      await state.manager.cleanup();
+    }
+  });
+
+  it("automatically recovers a retryable startup metadata failure only when its durable retry is due", async () => {
+    jest.useFakeTimers({ doNotFake: ["queueMicrotask", "nextTick", "setImmediate"] });
+    const state = harness("Enabled semantic indexing must never report a false-ready state.");
+    state.plugin.settings.embeddingsEnabled = true;
+    state.getMetadata.mockRejectedValueOnce(new ManagedEmbeddingsError(
+      "temporarily_unavailable", "Managed catalog unavailable.", 503, null, true, 10_000,
+    ));
+
+    try {
+      const failed = waitForLifecycle(state.manager, (snapshot) => snapshot.phase === "error");
+      await state.manager.initialize();
+      await failed;
+      await jest.advanceTimersByTimeAsync(0);
+
+      const queued = state.manager["workQueue"].get(state.file.path);
+      expect(queued).toMatchObject({
+        attempts: 1,
+        failure: { code: "temporarily_unavailable", status: 503, retryable: true, retryInMs: 10_000 },
+      });
+      const retryInMs = queued!.readyAt - Date.now();
+      expect(retryInMs).toBe(10_000);
+      expect(state.manager.isSuspended()).toBe(false);
+      expect(state.manager.getLifecycleSnapshot()).toMatchObject({
+        phase: "error", completed: 0, pending: 1, failed: 1,
+        lastError: { code: "temporarily_unavailable", message: "Managed catalog unavailable." },
+      });
+
+      await jest.advanceTimersByTimeAsync(retryInMs - 1);
+      expect(state.getMetadata).toHaveBeenCalledTimes(1);
+      expect(state.vault.read).not.toHaveBeenCalled();
+      expect(state.index).not.toHaveBeenCalled();
+
+      // Resume/settings callbacks are not recovery evidence: only a completed
+      // index with no outstanding work proves the automatic retry succeeded.
+      const recovered = waitForLifecycle(state.manager, (snapshot) => (
+        snapshot.phase === "idle" && snapshot.completed === 1
+        && snapshot.pending === 0 && snapshot.failed === 0
+      ));
+      await jest.advanceTimersByTimeAsync(1);
+      await recovered;
+
+      expect(state.getMetadata).toHaveBeenCalledTimes(2);
+      expect(state.index).toHaveBeenCalledTimes(1);
+      expect(state.manager["workQueue"].get(state.file.path)).toBeNull();
+      expect(state.manager.getLifecycleSnapshot()).toMatchObject({ phase: "idle", lastError: null });
+    } finally {
+      await state.manager.cleanup();
+      jest.useRealTimers();
+    }
   });
 
   it("embeds a short non-empty note and closes coverage in one run", async () => {
