@@ -114,6 +114,24 @@ describe("SemanticWorkQueue", () => {
     expect(restarted.due(18_000).map((item) => item.path)).toEqual(["Transient.md"]);
   });
 
+  it("limits funding recovery to credit failures without replaying parked operations", async () => {
+    const queue = new SemanticWorkQueue(durableStore(), 0);
+    for (const [path, code] of [
+      ["Credits.md", "payment_required"],
+      ["Settlement.md", "settlement_pending"],
+      ["Conflict.md", "idempotency_conflict"],
+    ] as const) {
+      const claim = (await queue.enqueueImmediate(path, "modify", 1, 1_000))!;
+      await queue.fail(claim, { code, message: "Needs attention.", retryable: false }, 1_000);
+    }
+
+    await queue.retryFailures(2_000, "payment_required");
+
+    expect(queue.due(2_000).map((item) => item.path)).toEqual(["Credits.md"]);
+    expect(queue.get("Settlement.md")?.failure?.code).toBe("settlement_pending");
+    expect(queue.get("Conflict.md")?.failure?.code).toBe("idempotency_conflict");
+  });
+
   it("restores transient failures saved by a previous plugin but parks unclassified 409", async () => {
     const state = new Map<string, unknown>();
     const old = new SemanticWorkQueue(durableStore(state), 0);

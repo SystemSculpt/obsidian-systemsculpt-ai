@@ -245,10 +245,11 @@ export class EmbeddingsManager {
       // Stored root revisions are the local freshness snapshot. An unchanged
       // vault needs neither a metadata request nor another indexing pass.
       const storedPaths = new Set(this.storage.getDistinctPaths());
-      const needsReconciliation = this.eligibleFiles().some((file) => (
-        (!this.workQueue.get(file.path) && this.shouldProcessFile(file))
-        || (this.isLocallyEmpty(file) && storedPaths.has(file.path))
-      ));
+      const needsReconciliation = this.eligibleFiles().some((file) => {
+        const queued = this.workQueue.get(file.path);
+        return (queued ? queued.sourceMtime !== this.sourceMtime(file) : this.shouldProcessFile(file))
+          || (this.isLocallyEmpty(file) && storedPaths.has(file.path));
+      });
       if (needsReconciliation) {
         this.requestAutomaticProcessing();
       } else {
@@ -300,12 +301,13 @@ export class EmbeddingsManager {
   }
 
   async processVault(onProgress?: (progress: ProcessingProgress) => void): Promise<EmbeddingsRunResult> {
+    const signal = this.metadataSignal();
     await this.awaitReady();
-    if (this.processingSuspended) {
+    if (this.processingSuspended || signal.aborted) {
       return { status: "aborted", processed: 0, message: "Embeddings processing is paused." };
     }
     try {
-      await this.gateway.getMetadata(this.metadataSignal());
+      await this.gateway.getMetadata(signal);
     } catch (error) {
       this.gateway.metadata = undefined;
       if (isFatalManagedError(error)) {
@@ -323,14 +325,14 @@ export class EmbeddingsManager {
       this.scheduleQueuedWork();
       throw error;
     }
-    if (this.processingSuspended) {
+    if (this.processingSuspended || signal.aborted) {
       return { status: "aborted", processed: 0, message: "Embeddings processing is paused." };
     }
     // A file mutation can acquire the mutex while metadata is in flight.
     // Serialize behind it rather than discarding the reconciliation request.
     try {
       return await this.processingMutex.runExclusive(async () => {
-      if (this.processingSuspended) {
+      if (this.processingSuspended || signal.aborted) {
         return { status: "aborted", processed: 0, message: "Embeddings processing is paused." };
       }
       const exclusions = this.exclusions();
@@ -366,6 +368,9 @@ export class EmbeddingsManager {
       }
 
       const workClaims = await this.captureWorkClaims(files, "reconcile");
+      if (this.processingSuspended || signal.aborted) {
+        return { status: "aborted", processed: 0, message: "Embeddings processing is paused." };
+      }
       const sourceRevisions = this.buildSourceRevisions(files, workClaims);
       const result = await this.processor.processFiles(files, this.app, (progress) => {
         this.refreshProgress(progress);
@@ -726,7 +731,7 @@ export class EmbeddingsManager {
   async resumeProcessing(source: "explicit" | "funding" | "prepare" = "explicit"): Promise<void> {
     if (source === "funding" && this.fatalSuspensionCode !== "payment_required") return;
     try {
-      await this.workQueue.retryFailures();
+      await this.workQueue.retryFailures(Date.now(), source === "funding" ? "payment_required" : undefined);
       await this.clearFatalSuspension();
       this.fatalSuspensionCode = null;
       this.processingSuspended = false;
@@ -1034,7 +1039,9 @@ export class EmbeddingsManager {
       }
       await this.workQueue.complete(completedWithoutEmbedding);
       if (files.length === 0) {
-        if (destructive) this.markPortableIndexDestructive();
+        await this.commitSearchNamespaceIfComplete();
+        const pruned = await this.pruneSupersededNamespaces();
+        if (destructive || pruned > 0) this.markPortableIndexDestructive();
         this.refreshLifecycle({ phase: "idle", currentPath: null });
         return;
       }
@@ -1443,6 +1450,7 @@ export class EmbeddingsManager {
   private shouldProcessVaultFile(file: TFile): boolean {
     const item = this.workQueue.get(file.path);
     if (!item) return this.shouldProcessFile(file);
+    if (item.sourceMtime !== this.sourceMtime(file)) return true;
     return (!item.failure || item.failure.retryable === true) && item.readyAt <= Date.now();
   }
 

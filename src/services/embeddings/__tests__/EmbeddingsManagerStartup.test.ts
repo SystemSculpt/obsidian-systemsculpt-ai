@@ -535,6 +535,113 @@ describe("EmbeddingsManager startup work (#343)", () => {
     seed.close();
   });
 
+  it("keeps a vault pass cancelled when indexing is disabled while it waits for a mutation", async () => {
+    const note = file();
+    const { manager, seed, gateway, settings } = await harness([note]);
+    await manager.initialize();
+    note.stat.mtime = 2;
+    const { processingMutex } = manager as unknown as { processingMutex: Mutex };
+    const release = await processingMutex.acquire();
+    let metadataReady!: () => void;
+    const ready = new Promise<void>((resolve) => { metadataReady = resolve; });
+    gateway.getMetadata.mockImplementation(async () => {
+      metadataReady();
+      return undefined as never;
+    });
+    const run = manager.processVault();
+    try {
+      await ready;
+      await nextTask();
+      settings.embeddingsEnabled = false;
+      manager.syncFromSettings();
+    } finally {
+      release();
+    }
+
+    await expect(run).resolves.toMatchObject({ status: "aborted", processed: 0 });
+    expect(gateway.index).not.toHaveBeenCalled();
+    await manager.cleanup();
+    seed.close();
+  });
+
+  it.each([false, true])("supersedes a stale startup failure before indexing a changed revision (retryable: %s)", async (retryable) => {
+    const note = file();
+    const { manager, seed, gateway } = await harness([note]);
+    const queue = new SemanticWorkQueue(seed);
+    const claim = (await queue.enqueueImmediate(note.path, "modify", 1))!;
+    await queue.fail(claim, {
+      code: retryable ? "temporarily_unavailable" : "invalid_request",
+      message: "Old revision failed.", status: retryable ? 503 : 413,
+      retryable, retryInMs: 60_000,
+    });
+    note.stat.mtime = 2;
+    gateway.index.mockImplementation(async ({ prepare }) => {
+      const markdown = prepare().markdown;
+      const hash = createHash("sha256").update(markdown).digest("hex");
+      return {
+        contract: MANAGED_EMBEDDINGS_INDEX_CONTRACT, source: { contentSha256: hash }, empty: false,
+        vectorEncoding: MANAGED_EMBEDDINGS_INDEX_VECTOR_ENCODING,
+        generation: { id: "semantic-v1", indexSchemaVersion: 3, indexNamespace: NAMESPACE, dimensions: 2 },
+        chunks: [{ ordinal: 0, textHash: hash, headingPath: [], excerpt: markdown, length: markdown.length, vector: new Float32Array([1, 0]) }],
+      };
+    });
+    const done = waitForSnapshot(manager, (snapshot) => snapshot.ready && snapshot.phase === "idle" && snapshot.pending === 0);
+
+    await manager.initialize();
+    await done;
+
+    expect(gateway.index).toHaveBeenCalledTimes(1);
+    expect(manager.getFileIndexSnapshot(note.path).ready).toBe(true);
+    expect(await seed.readState("semantic-work-v1")).toBeNull();
+    await manager.cleanup();
+    seed.close();
+  });
+
+  it("commits a completed namespace when its last failed note becomes empty", async () => {
+    const notes = [file("A.md"), file("B.md")];
+    const { manager, seed, gateway } = await harness(notes, [root(notes[0]!)]);
+    await seed.deleteState("semantic-committed-namespace-v1");
+    const queue = new SemanticWorkQueue(seed);
+    const claim = (await queue.enqueueImmediate("B.md", "modify", 1))!;
+    await queue.fail(claim, { code: "invalid_request", message: "Invalid source.", retryable: false });
+    await manager.initialize();
+    expect(await seed.readState("semantic-committed-namespace-v1")).toBeNull();
+    notes[1]!.stat.size = 0;
+    notes[1]!.stat.mtime = 2;
+    const internal = manager as unknown as { workQueue: SemanticWorkQueue; processQueuedWork(): Promise<void> };
+    await internal.workQueue.enqueueImmediate("B.md", "modify", 2);
+
+    await internal.processQueuedWork();
+
+    expect(await seed.readState("semantic-committed-namespace-v1")).toMatchObject({ namespace: NAMESPACE });
+    expect(manager.getLifecycleSnapshot()).toMatchObject({ pending: 0, failed: 0 });
+    expect(gateway.index).not.toHaveBeenCalled();
+    await manager.cleanup();
+    seed.close();
+  });
+
+  it("does not replay a parked settlement when credits automatically resume processing", async () => {
+    const { manager, seed, settings } = await harness([file()]);
+    await manager.initialize();
+    const internal = manager as unknown as {
+      workQueue: SemanticWorkQueue; fatalSuspensionCode: string | null; processingSuspended: boolean;
+    };
+    for (const [path, code] of [["A.md", "settlement_pending"], ["B.md", "payment_required"]] as const) {
+      const claim = (await internal.workQueue.enqueueImmediate(path, "modify", 1))!;
+      await internal.workQueue.fail(claim, { code, message: "Needs attention.", retryable: false });
+    }
+    settings.embeddingsEnabled = false;
+    internal.fatalSuspensionCode = "payment_required";
+    internal.processingSuspended = true;
+
+    await manager.resumeProcessing("funding");
+
+    expect(internal.workQueue.get("A.md")?.failure?.code).toBe("settlement_pending");
+    expect(internal.workQueue.get("B.md")?.failure).toBeNull();
+    await manager.cleanup();
+    seed.close();
+  });
+
   it("does not start automatic reconciliation on a generation change while indexing is disabled", async () => {
     const { manager, seed, gateway, settings } = await harness([file()]);
     settings.embeddingsEnabled = false;

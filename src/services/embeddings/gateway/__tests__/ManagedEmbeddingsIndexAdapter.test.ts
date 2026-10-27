@@ -421,6 +421,9 @@ describe("ManagedEmbeddingsIndexAdapter", () => {
     [409, "settlement_pending", undefined, "settlement_pending", false],
     [409, "idempotency_conflict", undefined, "idempotency_conflict", false],
     [409, "unknown_conflict", undefined, "temporarily_unavailable", false],
+    [503, "operation_state_unavailable", false, "temporarily_unavailable", false],
+    [429, "unknown_rate_error", false, "rate_limited", false],
+    [502, "unknown_gateway_error", false, "temporarily_unavailable", false],
   ] as const)("classifies %s/%s for safe same-operation recovery", async (status, wireCode, retryable, code, canRetry) => {
     const response = transport({ error: { code: wireCode, message: "Indexing needs attention.", retryable } }, { status });
     const adapter = adapterWith(jest.fn(async () => ({

@@ -226,10 +226,12 @@ export class SemanticWorkQueue {
     return recorded;
   }
 
-  async retryFailures(now = Date.now()): Promise<void> {
+  async retryFailures(now = Date.now(), onlyCode?: FailedProcessingDetail["code"]): Promise<void> {
     let changed = false;
     for (const [path, item] of this.items) {
-      if (!item.failure || (item.failure.retryable === true && item.readyAt > now)) continue;
+      if (!item.failure
+        || (onlyCode !== undefined && item.failure.code !== onlyCode)
+        || (item.failure.retryable === true && item.readyAt > now)) continue;
       this.items.set(path, { ...item, reason: "retry", readyAt: now, failure: null });
       changed = true;
     }

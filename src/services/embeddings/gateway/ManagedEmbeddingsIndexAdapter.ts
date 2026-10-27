@@ -525,7 +525,7 @@ export class ManagedEmbeddingsIndexAdapter {
         : code === "operation_in_progress"
           ? payload?.retryable !== false
           : status !== 409 && (status === 429 || status >= 500)
-            && !(matchesCode && payload?.retryable === false);
+            && payload?.retryable !== false;
       const reset = result.diagnostics.rateLimitReset;
       const resetAt = status === 429 && reset && /^\d+$/u.test(reset) ? Number(reset) : NaN;
       const retryAfterMs = result.diagnostics.retryAfterMs
