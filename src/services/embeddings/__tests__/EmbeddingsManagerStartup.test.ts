@@ -488,6 +488,107 @@ describe("EmbeddingsManager startup work (#343)", () => {
     }
   });
 
+  it.each(["success", "operation_in_progress", "settlement_pending", "idempotency_conflict", "untyped"])(
+    "resubmits a legacy 409 with the same content identity and honors the %s response across restart",
+    async (response) => {
+      jest.useFakeTimers({ doNotFake: ["queueMicrotask", "nextTick", "setImmediate"] });
+      const markdown = "Synthetic note parked by an older plugin.";
+      const hash = createHash("sha256").update(markdown).digest("hex");
+      const key = `idx:${hash}`;
+      const keys: string[] = [];
+      const request = jest.fn(async (input: { method: string; headers: Record<string, string>; body?: ArrayBuffer }) => {
+        if (input.method === "GET") return jsonResponse({
+          contract: MANAGED_EMBEDDINGS_INDEX_CONTRACT,
+          vector_encoding: MANAGED_EMBEDDINGS_INDEX_VECTOR_ENCODING,
+          generation: { id: "semantic-v1", index_schema_version: 3, index_namespace_template: "systemsculpt:managed:semantic-v1:v3:<dimensions>" },
+          limits: { max_source_bytes: 8 * 1024 * 1024, max_result_bytes: 16 * 1024 * 1024 },
+        });
+        keys.push(input.headers["Idempotency-Key"]);
+        expect(new TextDecoder().decode(input.body)).toBe(markdown);
+        if (keys.length === 1 && response !== "success") return new Response(JSON.stringify({ error: {
+          ...(response === "untyped" ? {} : { code: response }),
+          message: "Synthetic conflict.",
+          ...(response === "settlement_pending" ? { retryable: false, recovery_action: "operator_reconciliation" } : {}),
+        } }), { status: 409, headers: {
+          "content-type": "application/json", "x-request-id": "test-legacy-conflict", "retry-after": "30",
+        } });
+        return jsonResponse({
+          contract: MANAGED_EMBEDDINGS_INDEX_CONTRACT, source: { content_sha256: hash }, empty: false,
+          vector_encoding: MANAGED_EMBEDDINGS_INDEX_VECTOR_ENCODING,
+          generation: { id: "semantic-v1", index_schema_version: 3, index_namespace: NAMESPACE, dimensions: 2 },
+          chunks: [{ ordinal: 0, text_hash: hash, heading_path: [], excerpt: markdown, length: markdown.length, vector_base64: "AACAPwAAAAA=" }],
+        });
+      });
+      const makeGateway = () => new ManagedEmbeddingsIndexAdapter(new HostedTransportAdapter({
+        baseUrl: "https://example.invalid", pluginVersion: "6.18.7", licenseKey: () => "test",
+        requestClient: { request } as never,
+      }));
+      const { manager, seed, vault, plugin } = await harness([file()], [], makeGateway());
+      let current = manager;
+      vault.read.mockResolvedValue(markdown);
+      vault.cachedRead.mockResolvedValue(markdown);
+      const old = new SemanticWorkQueue(seed);
+      const claim = (await old.enqueueImmediate("A.md", "modify", 1, Date.now() - 60_000))!;
+      await old.fail(claim, {
+        code: "temporarily_unavailable", message: "Legacy conflict.", status: 409,
+      }, Date.now() - 60_000);
+      try {
+        const first = waitForSnapshot(current, (snapshot) => response === "success"
+          ? snapshot.phase === "idle" && snapshot.pending === 0 && snapshot.completed === 1
+          : snapshot.phase === "error" && snapshot.failed === 1);
+        await current.initialize();
+        await jest.advanceTimersByTimeAsync(0);
+        await first;
+        expect(keys).toEqual([key]);
+        if (response !== "success") {
+          const stored = await seed.readState<{ items: { revision: number; sourceMtime: number; attempts: number; readyAt: number; failure: unknown }[] }>("semantic-work-v1");
+          expect(stored?.items).toEqual([expect.objectContaining({
+            revision: claim.revision, sourceMtime: 1, attempts: 2,
+            readyAt: response === "operation_in_progress" ? Date.now() + 30_000 : Number.MAX_SAFE_INTEGER,
+            failure: expect.objectContaining({
+              code: response === "untyped" ? "temporarily_unavailable" : response,
+              status: 409, retryable: response === "operation_in_progress",
+            }),
+          })]);
+        }
+
+        await current.cleanup();
+        current = new EmbeddingsManager({ vault } as never, {
+          ...plugin, getManagedCapabilityGraph: () => ({ embeddingsIndex: makeGateway() }),
+        } as never);
+        await current.initialize();
+        await jest.advanceTimersByTimeAsync(29_999);
+        expect(keys).toEqual([key]);
+        if (response === "operation_in_progress") {
+          const recovered = waitForSnapshot(current, (snapshot) => snapshot.phase === "idle"
+            && snapshot.completed === 1 && snapshot.pending === 0 && snapshot.failed === 0);
+          await jest.advanceTimersByTimeAsync(1);
+          await recovered;
+          expect(keys).toEqual([key, key]);
+        } else {
+          await jest.advanceTimersByTimeAsync(60_000);
+          await current.processVault();
+          expect(keys).toEqual([key]);
+        }
+        if (response === "success" || response === "operation_in_progress") {
+          expect(await seed.readState("semantic-work-v1")).toBeNull();
+          expect(current.getFileIndexSnapshot("A.md")).toMatchObject({ ready: true });
+          expect(await seed.countVectors()).toBe(1);
+        } else {
+          const restored = new SemanticWorkQueue(seed);
+          await restored.restore();
+          expect(restored.due(Number.MAX_SAFE_INTEGER)).toEqual([]);
+          expect(restored.get("A.md")?.failure?.retryable).toBe(false);
+          expect(await seed.countVectors()).toBe(0);
+        }
+      } finally {
+        await current.cleanup();
+        seed.close();
+        jest.useRealTimers();
+      }
+    },
+  );
+
   it("retries a temporary metadata failure through the durable queue", async () => {
     const note = file();
     const { manager, seed, gateway, vault } = await harness([note], []);
@@ -564,14 +665,14 @@ describe("EmbeddingsManager startup work (#343)", () => {
     seed.close();
   });
 
-  it.each([false, true])("supersedes a stale startup failure before indexing a changed revision (retryable: %s)", async (retryable) => {
+  it.each([false, true, undefined])("supersedes a stale startup failure before indexing a changed revision (retryable: %s)", async (retryable) => {
     const note = file();
     const { manager, seed, gateway } = await harness([note]);
     const queue = new SemanticWorkQueue(seed);
     const claim = (await queue.enqueueImmediate(note.path, "modify", 1))!;
     await queue.fail(claim, {
-      code: retryable ? "temporarily_unavailable" : "invalid_request",
-      message: "Old revision failed.", status: retryable ? 503 : 413,
+      code: retryable === false ? "invalid_request" : "temporarily_unavailable",
+      message: "Old revision failed.", status: retryable === undefined ? 409 : retryable ? 503 : 413,
       retryable, retryInMs: 60_000,
     });
     note.stat.mtime = 2;

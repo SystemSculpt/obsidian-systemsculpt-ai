@@ -41,12 +41,13 @@ function retryAt(now: number, attempts: number, hint?: number): number {
   return Math.min(Number.MAX_SAFE_INTEGER, now + delay);
 }
 
-/** Older releases lost retryability; 409 cannot be distinguished from a fenced settlement. */
+/** Reprobe legacy failures once; the current adapter records the server's retryability. */
 function isLegacyTransientFailure(failure: FailedProcessingDetail): boolean {
   return failure.retryable === undefined
     && ((failure.code === "rate_limited" && failure.status === 429)
       || (failure.code === "temporarily_unavailable"
-        && (failure.status === 0 || (typeof failure.status === "number" && failure.status >= 500))));
+        && (failure.status === 0 || failure.status === 409
+          || (typeof failure.status === "number" && failure.status >= 500))));
 }
 
 /** Durable, path-keyed work. Repeated file events collapse into one quiet-period item. */

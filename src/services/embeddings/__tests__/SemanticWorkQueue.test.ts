@@ -132,7 +132,7 @@ describe("SemanticWorkQueue", () => {
     expect(queue.get("Conflict.md")?.failure?.code).toBe("idempotency_conflict");
   });
 
-  it("restores transient failures saved by a previous plugin but parks unclassified 409", async () => {
+  it("restores transient failures and untyped 409s saved by a previous plugin", async () => {
     const state = new Map<string, unknown>();
     const old = new SemanticWorkQueue(durableStore(state), 0);
     const transient = (await old.enqueueImmediate("Transient.md", "modify", 1, 1_000))!;
@@ -143,8 +143,20 @@ describe("SemanticWorkQueue", () => {
     ], 1_000);
     const restarted = new SemanticWorkQueue(durableStore(state), 0);
     await restarted.restore();
-    expect(restarted.due(2_000).map((item) => item.path)).toEqual(["Transient.md"]);
-    expect(restarted.get("Ambiguous.md")?.failure?.retryable).not.toBe(true);
+    expect(restarted.due(1_999)).toEqual([]);
+    expect(restarted.due(2_000).map((item) => item.path)).toEqual(["Ambiguous.md", "Transient.md"]);
+    expect(restarted.get("Ambiguous.md")).toMatchObject({
+      revision: ambiguous.revision, sourceMtime: ambiguous.sourceMtime,
+      attempts: 1, failure: { status: 409, retryable: true },
+    });
+
+    await restarted.fail(restarted.get("Ambiguous.md")!, {
+      code: "temporarily_unavailable", message: "Still untyped.", status: 409, retryable: false,
+    }, 2_000);
+    const nextSession = new SemanticWorkQueue(durableStore(state), 0);
+    await nextSession.restore();
+    expect(nextSession.due(Number.MAX_SAFE_INTEGER).map((item) => item.path)).toEqual(["Transient.md"]);
+    expect(nextSession.get("Ambiguous.md")?.failure?.retryable).toBe(false);
   });
 
   it("moves queued identity on rename and erases it on delete", async () => {
