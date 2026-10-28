@@ -95,7 +95,8 @@ those requests in that handoff's chat, just as in an ordinary chat.
 
 The plugin checks for handoffs when Obsidian opens, regains focus and every five
 minutes. A completed result is saved as Markdown in `SystemSculpt/Handoffs/`, then
-its result and vault path are reported to the phone. Closing Obsidian, losing queue
+the result text and vault path are uploaded to SystemSculpt for the phone to
+retrieve, including results produced by Claude Code or Codex. Closing Obsidian, losing queue
 ownership or changing accounts stops local execution. An interrupted handoff is
 not silently run again: its result note records that it started, and its chat
 retains the conversation. Review both before sending the instruction again.

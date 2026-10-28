@@ -73,7 +73,9 @@ continues to inherit your native configuration.
 | **Full access** | Makes every change without asking, including moves and deletes. |
 
 Read, list, find, search, open, and context actions run without approval in every
-hosted mode. Auto also allows write, edit, multi-edit and folder creation without
+hosted mode. Hosted requests and vault-tool results are sent to SystemSculpt for
+server-side AI processing; **Ask** controls vault changes, not whether read
+results leave your machine. Auto also allows write, edit, multi-edit and folder creation without
 asking, but move/rename and trash still require approval. Ask pauses before any
 vault mutation. For a pending request, you can deny, allow once, or allow that
 action until the chat closes. Full access also allows moving files or folders to

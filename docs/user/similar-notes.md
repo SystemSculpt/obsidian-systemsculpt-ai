@@ -1,6 +1,6 @@
 # Similar Notes (Embeddings)
 
-Similar Notes is semantic search for your vault.
+Similar Notes is semantic search for your vault. Enabling embeddings sends the Markdown text of included notes to SystemSculpt for hosted indexing; semantic searches also send query text. SystemSculpt uses its server and model providers to create embeddings, then the plugin stores the returned index locally. It is not an on-device embedding model. See the [privacy policy](https://systemsculpt.com/privacy) for service data handling.
 
 ## Configure
 
