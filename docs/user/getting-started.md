@@ -83,7 +83,9 @@ permission bypass. Model, reasoning, speed and mode changes apply to the next
 native turn. Switching backend opens a new chat and preserves the existing
 conversation and draft. Studio Codex permissions still come from native
 configuration, not the chat mode. Hosted media and Similar Notes still use
-SystemSculpt.
+SystemSculpt. Claude Code and Codex use their configured services and your own
+account for AI requests; prompts and context can leave your machine. Their usage
+is separate from SystemSculpt credits.
 
 See [Studio workspaces and native execution](../studio-workspaces.md) for setup and recovery behavior, and [native Codex discovery](../development.md#native-codex-discovery) for custom executable and home settings.
 

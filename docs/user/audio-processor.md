@@ -29,7 +29,7 @@ Audio uploads in small parts. Once the upload finishes, or a YouTube job is queu
 
 **Stop watching** closes the local progress view. It does not stop the server job. Reopen Audio Processor to check work that is still running.
 
-Completed server results are retained for 7 days. Open Obsidian within that window so SystemSculpt can save the finished notes to your vault.
+Completed jobs awaiting delivery normally remain available for up to 30 days. After the plugin verifies the saved notes and acknowledges delivery, the job remains available for another 7 days; shared output files can remain longer while another job references them. Open Obsidian before the pending result expires so SystemSculpt can save the finished notes to your vault. Server cleanup does not remove notes already saved in your vault.
 
 ## Detailed note output
 

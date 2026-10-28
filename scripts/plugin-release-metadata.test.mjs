@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 
 import {
   assertReleaseDoesNotDowngrade,
@@ -7,6 +8,14 @@ import {
   parsePublishedPluginRelease,
   verifyPublishedPluginRelease,
 } from "./plugin-release-metadata.mjs";
+
+test("public plugin metadata describes configurable approvals, not approval for every edit", () => {
+  const manifest = JSON.parse(readFileSync(new URL("../manifest.json", import.meta.url), "utf8"));
+  const packageMetadata = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+  assert.equal(manifest.description, packageMetadata.description);
+  assert.match(manifest.description, /configurable approval modes/);
+  assert.doesNotMatch(manifest.description, /edits notes with your approval/i);
+});
 
 const release = {
   manifestVersion: "6.6.2",
