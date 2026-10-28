@@ -18,7 +18,7 @@ Already have a plan? Sign in from the same Account settings, or paste and activa
 
 ## Coming from 5.x
 
-SystemSculpt 6 no longer supports your own API keys, custom endpoints, or local models; updating removes previously saved provider keys and routing settings. Your SystemSculpt license and credits carry over. On desktop, you can use your own installed, signed-in Claude Code or Codex without a SystemSculpt account or plan, or use the free one-time hosted starter credits while available.
+SystemSculpt 6's managed backend no longer supports your own API keys, custom endpoints, or local models; updating removes previously saved plugin provider keys and routing settings. Native Claude Code and Codex keep their own configuration. Your SystemSculpt license and credits carry over. On desktop, you can use your own installed, signed-in Claude Code or Codex without a SystemSculpt account or plan, or use the free one-time hosted starter credits while available.
 
 ## What it does
 
