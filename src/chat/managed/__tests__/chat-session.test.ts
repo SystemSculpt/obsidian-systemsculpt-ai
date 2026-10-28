@@ -19,7 +19,7 @@ import {
   presentAgentTool,
   presentAgentToolFailure,
 } from "../../../views/chatview/AgentToolPresentation";
-import { AgentConversationRenderer } from "../../../views/chatview/AgentConversationRenderer";
+import { historicalToolPart as projectReloadedTool } from "../../../views/chatview/ConversationPartPresentation";
 import type {
   AgentConversationSnapshot,
   AgentToolPart,
@@ -93,13 +93,6 @@ function toolCallPart(
     if (part.type === "tool_call" && part.data.id === callId) return part.data;
   }
   return undefined;
-}
-
-function projectReloadedTool(tool: ToolCall): AgentToolPart {
-  const prototype = AgentConversationRenderer.prototype as unknown as {
-    historicalToolPart(input: ToolCall): AgentToolPart;
-  };
-  return prototype.historicalToolPart(tool);
 }
 
 function idle(cursor: number) {
