@@ -174,6 +174,64 @@ describe("LicenseManager", () => {
   });
 
   describe("scheduleDeferredValidation", () => {
+    it("uses idle scheduling at the exact validation boundary and can schedule again after settlement", async () => {
+      const idle = jest.fn((callback: IdleRequestCallback) => {
+        window.setTimeout(() => callback({ didTimeout: false, timeRemaining: () => 10 }), 0);
+        return 1;
+      });
+      const previous = Object.getOwnPropertyDescriptor(window, "requestIdleCallback");
+      Object.defineProperty(window, "requestIdleCallback", { configurable: true, value: idle });
+      try {
+        mockPlugin.settings.licenseValid = true;
+        mockPlugin.settings.lastValidated = Date.now() - 24 * 60 * 60 * 1000;
+        await manager.initializeLicense();
+        expect(idle).toHaveBeenCalledTimes(1);
+        await jest.runAllTimersAsync();
+        expect(mockPlugin.aiService.validateLicenseDetailed).toHaveBeenCalledTimes(1);
+        expect(mockedNotice).not.toHaveBeenCalled();
+
+        await manager.initializeLicense();
+        await jest.runAllTimersAsync();
+        expect(mockPlugin.aiService.validateLicenseDetailed).toHaveBeenCalledTimes(2);
+      } finally {
+        if (previous) Object.defineProperty(window, "requestIdleCallback", previous);
+        else Reflect.deleteProperty(window, "requestIdleCallback");
+      }
+    });
+
+    it("validates an absent timestamp but does not announce lost access during an outage", async () => {
+      mockPlugin.settings.licenseValid = true;
+      delete mockPlugin.settings.lastValidated;
+      mockPlugin.aiService.validateLicenseDetailed.mockRejectedValue(new Error("offline"));
+      await manager.initializeLicense();
+      await jest.runAllTimersAsync();
+      expect(mockPlugin.aiService.validateLicenseDetailed).toHaveBeenCalledTimes(1);
+      expect(mockSettingsManager.updateSettings).not.toHaveBeenCalled();
+      expect(mockedNotice).not.toHaveBeenCalled();
+    });
+
+    it("treats an absent key as signed out without warning a fresh install", async () => {
+      delete mockPlugin.settings.licenseKey;
+      delete mockPlugin.settings.licenseValid;
+      await manager.initializeLicense();
+      expect(mockSettingsManager.updateSettings).toHaveBeenCalledWith({ licenseValid: false });
+      expect(mockPlugin.aiService.validateLicenseDetailed).not.toHaveBeenCalled();
+      expect(mockedNotice).not.toHaveBeenCalled();
+    });
+
+    it("does not warn about a license the user removed while validation was pending", async () => {
+      mockPlugin.settings.licenseValid = true;
+      let finish!: (value: unknown) => void;
+      mockPlugin.aiService.validateLicenseDetailed.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+      await manager.initializeLicense();
+      jest.runOnlyPendingTimers();
+      mockPlugin.settings.licenseKey = "";
+      mockPlugin.settings.licenseValid = false;
+      finish({ outcome: "unavailable", isValid: false });
+      await jest.runAllTimersAsync();
+      expect(mockedNotice).not.toHaveBeenCalled();
+    });
+
     it("does not schedule multiple validations simultaneously", async () => {
       mockPlugin.settings.licenseValid = false;
       mockPlugin.settings.lastValidated = 0;

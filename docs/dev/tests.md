@@ -14,6 +14,11 @@ bundle smoke in a mobile Obsidian host.
 
 Use broader gates only when the affected seam requires them:
 
+`npm run test:billing` is the focused credential-free license, credits,
+checkout, and hosted billing suite. It reports coverage for the direct money
+boundary owners, including settings and modals omitted by the root Jest
+coverage defaults. It does not call live checkout or bill model providers.
+
 ~~~bash
 npm run check:ui
 npm run check:mobile

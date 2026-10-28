@@ -85,6 +85,7 @@
     "sync:local:staging": "node scripts/sync-local-vaults.mjs --target staging",
     "test": "node scripts/jest.mjs --config jest.config.cjs --passWithNoTests",
     "test:strict": "node scripts/jest.mjs --strict-console --config jest.config.cjs --passWithNoTests",
+    "test:billing": "node scripts/jest.mjs --strict-console --config jest.billing.config.cjs --runInBand",
     "test:unit:ci": "node scripts/jest.mjs --strict-console --config jest.unit-ci.config.cjs --runInBand --detectOpenHandles --openHandlesTimeout=1000 --randomize --showSeed",
     "test:chatview:critical": "node scripts/jest.mjs --strict-console --config jest.chatview-critical-risk.config.cjs --detectOpenHandles --openHandlesTimeout=1000 --randomize --showSeed",
     "test:chatview:compat": "node scripts/jest.mjs --strict-console --config jest.chatview-critical-compat.config.cjs --detectOpenHandles --openHandlesTimeout=1000 --randomize --showSeed",

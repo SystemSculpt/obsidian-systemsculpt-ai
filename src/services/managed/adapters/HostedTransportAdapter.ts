@@ -94,6 +94,7 @@ export class HostedTransportAdapter {
           licenseKey,
           signal: shared,
         });
+        this.notifyAuthorizationRejected(response.status, licenseKey);
         if (!response.ok) return null;
         const text = await response.text();
         if (!text || text.length > MAX_PLUGIN_CONFIG_CHARS) return null;
@@ -270,6 +271,7 @@ export class HostedTransportAdapter {
       maxResponseBytes: input.maxResponseBytes,
       signal: input.signal,
     });
+    this.notifyAuthorizationRejected(response.status, input.headers["x-license-key"] || undefined);
     return {
       response,
       diagnostics: {
@@ -283,6 +285,13 @@ export class HostedTransportAdapter {
         errorText: "",
       },
     };
+  }
+
+  private notifyAuthorizationRejected(status: number, licenseKey: string | undefined): void {
+    if ((status !== 401 && status !== 403) || licenseKey !== this.key()) return;
+    for (const listener of [...this.authorizationRejectedListeners]) {
+      try { listener(); } catch { /* A listener must not change the response. */ }
+    }
   }
 
   private async send(operation: ManagedTransportOperation, extra: Record<string, string> = {}, scopedHeaders = false, readErrorBody = true, requestOverrides: Pick<PlatformRequestInput, "transport" | "responseEncoding" | "maxResponseBytes"> = {}): Promise<ManagedTransportResult> {
@@ -299,10 +308,8 @@ export class HostedTransportAdapter {
       ...(operation.timeoutMs !== undefined ? { timeoutMs: operation.timeoutMs } : {}),
       ...requestOverrides,
     });
-    if ((response.status === 401 || response.status === 403) && !operation.path.startsWith(ADMISSION_PATH)) {
-      for (const listener of [...this.authorizationRejectedListeners]) {
-        try { listener(); } catch { /* A listener must not change the response. */ }
-      }
+    if (!operation.path.startsWith(ADMISSION_PATH)) {
+      this.notifyAuthorizationRejected(response.status, licenseKey);
     }
     const errorText = response.ok || !readErrorBody ? "" : (await response.clone().text()).slice(0, 2048);
     return { response, diagnostics: {
