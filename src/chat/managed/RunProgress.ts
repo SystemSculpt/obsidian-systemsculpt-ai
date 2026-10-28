@@ -48,4 +48,3 @@ export function runProgressKey(
     parts.map(partProgressToken),
   ]);
 }
-
