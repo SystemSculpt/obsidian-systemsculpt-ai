@@ -1,12 +1,16 @@
+import { ClientLatency, type ClientToolRenderCode } from "./ClientLatency";
+import { captureFailedRun, boundedIncidentElapsedMs, type IncidentFailureScalars } from "./RunFailureEvidence";
+import { managedError, managedException, wasDefinitelyRejected, responseStatus, incidentFailureMechanism, boundedErrorPayload } from "./ManagedResponseErrors";
+import { runProgressKey } from "./RunProgress";
 import {
   ConversationProjection, freezeSnapshot, initialSnapshot,
   type ProjectionTurn, type RunPresentation, type HistoryProjection,
 } from "./ConversationProjection";
 import {
-  isRecord, isWireMessage, toolCallId, toolInput, toolApproval,
+  isWireMessage, toolInput, toolApproval,
   isAuthoritativeTerminalToolPart, outputAsToolResult,
   safeOutboundVaultToolResult, toJsonValue, terminalError,
-  type WirePart, type WireMessage, type LocalToolCall, type ProjectedTool,
+  type WireMessage, type LocalToolCall, type ProjectedTool,
 } from "./WireConversation";
 import { VaultActionAuthorization, type VaultActionDecision } from "./VaultActionAuthorization";
 import type { AgentChatTransportSegmentSummaryEvent, AgentRunFailureCaptureEvent } from "../../core/diagnostics/AgentIncidentCapture";
@@ -18,10 +22,7 @@ import {
   type AgentIncidentFailureStage,
 } from "../../core/diagnostics/AgentIncidentSchema";
 import { planRequiredError } from "../../utils/errors";
-import {
-  PlatformRequestClient,
-  type PlatformResponseDeliveryMode,
-} from "../../services/PlatformRequestClient";
+import { PlatformRequestClient } from "../../services/PlatformRequestClient";
 import {
   THIN_AGENT_BOOTSTRAP_PATH,
   THIN_AGENT_CONTEXT_PATH,
@@ -66,13 +67,8 @@ import {
   type AgentConnectionState,
   type AgentSessionSnapshot,
 } from "./AuthoritativeSession";
-import {
-  AgentStreamingTransport,
-  type AgentTransportSegmentSummaryEvent,
-  type AgentTransportTimingEvent,
-} from "./StreamingTransport";
+import { AgentStreamingTransport } from "./StreamingTransport";
 import type {
-  AgentCommandKind,
   AgentJsonValue,
   AgentQueueSnapshotEvent,
 } from "./Protocol";
@@ -82,7 +78,6 @@ import {
 } from "./MutationJournal";
 import {
   AgentLifecycle,
-  type AgentLifecycleCode,
   type AgentLifecycleInput,
   type AgentLifecycleRecord,
   type CreditsRefreshReason,
@@ -181,13 +176,6 @@ export type AgentChatSessionOptions = Readonly<{
 const RUN_STALL_GRACE_MS = 240_000;
 const MAX_RESYNCHRONIZATION_DELAY_MS = 120_000;
 const HIDDEN_RESYNCHRONIZATION_DELAY_MS = 60_000;
-const MAX_RETAINED_LATENCY_RUNS = 8;
-const MAX_RETAINED_LATENCY_SEGMENTS_PER_RUN = 512;
-const MAX_TOOL_EXECUTIONS_PER_RUN = 512;
-const MAX_HISTORY_SYNCS_PER_RUN = 2_048;
-const MAX_INCIDENT_CAPTURE_COUNT = 100_000_000;
-const MAX_INCIDENT_CAPTURE_ELAPSED_MS = 7 * 24 * 60 * 60 * 1_000;
-
 type ActiveRun = {
   readonly token: object;
   readonly origin: "submitted" | "recovered";
@@ -223,38 +211,6 @@ type StallRecovery = Readonly<{
   progressKey: string;
 }>;
 
-type ClientLatencyContext = {
-  readonly conversationId: string;
-  readonly requestId: string;
-  readonly startedAtMonotonicMs: number;
-  readonly milestones: Set<AgentLifecycleCode>;
-  readonly segmentMilestones: Set<string>;
-  readonly toolMilestones: Set<string>;
-  readonly segments: Map<number, ClientLatencySegment>;
-  readonly toolExecutionOrdinals: Map<string, number>;
-  nextToolExecutionOrdinal: number;
-  nextHistorySyncOrdinal: number;
-  pendingAssistantProjectionOrdinal: number | null;
-  pendingCommandAck: Readonly<{
-    ordinal: number;
-    commandKind: AgentCommandKind;
-    toolCallId: string | null;
-  }> | null;
-  pendingTerminalOrdinal: number | null;
-  terminalSegmentOrdinal: number | null;
-  lastOffsetMs: number;
-};
-
-type ClientLatencySegment = {
-  readonly ordinal: number;
-  readonly commandKind: AgentCommandKind;
-  readonly toolCallId: string | null;
-  readonly toolExecutionOrdinal: number | null;
-  toolName: string | null;
-  latencyTraceId: string | null;
-  responseDeliveryMode: PlatformResponseDeliveryMode | null;
-};
-
 type PendingToolDelivery = {
   readonly requestId: string;
   readonly call: LocalToolCall;
@@ -281,298 +237,7 @@ type PendingApprovalDelivery = {
   acknowledgementRecorded: boolean;
 };
 
-type ClientToolRenderCode = Extract<AgentLifecycleCode,
-  | "local_tool_terminal_dom_committed"
-  | "local_tool_terminal_paint_opportunity"
-  | "continuation_content_dom_committed"
-  | "continuation_content_paint_opportunity">;
-
-type HistorySyncCorrelation = Readonly<{
-  conversationId?: string;
-  requestId?: string;
-  historySyncKind: HistorySyncKind;
-  historySyncOrdinal?: number;
-}>;
 const MAX_CONTEXT_RESPONSE_BYTES = 16 * 1024;
-
-function wasDefinitelyRejected(error: unknown): boolean {
-  return isRecord(error) && error.serverAdmissionPossible === false;
-}
-
-function managedError(
-  error: unknown,
-  fallbackCode: string,
-  fallbackMessage: string,
-): ManagedAgentError {
-  if (isRecord(error)) {
-    const status = typeof error.status === "number" && Number.isInteger(error.status)
-      ? error.status
-      : undefined;
-    const retryable = typeof error.retryable === "boolean"
-      ? error.retryable
-      : status === undefined || status === 401 || status === 429 || status >= 500;
-    const code = typeof error.code === "string"
-      && /^[a-z][a-z0-9_]{0,63}$/u.test(error.code)
-      ? error.code
-      : fallbackCode;
-    const requestId = typeof error.requestId === "string"
-      && /^incident_[a-f0-9]{32}$/u.test(error.requestId)
-      ? error.requestId
-      : undefined;
-    return {
-      code,
-      message: fallbackMessage,
-      ...(status === undefined ? {} : { status }),
-      ...(requestId ? { requestId } : {}),
-      ...(requestId ? { incidentId: requestId } : {}),
-      retryable,
-    };
-  }
-  return {
-    code: fallbackCode,
-    message: fallbackMessage,
-    retryable: true,
-  };
-}
-
-function managedException(
-  error: unknown,
-  fallbackCode: string,
-  fallbackMessage: string,
-): Error & ManagedAgentError {
-  const details = managedError(error, fallbackCode, fallbackMessage);
-  return Object.assign(new Error(details.message), details);
-}
-
-function partProgressToken(part: WirePart): readonly unknown[] {
-  const approval = isRecord(part.approval) ? part.approval : null;
-  const output = isRecord(part.output) ? part.output : null;
-  return [
-    part.type,
-    typeof part.text === "string" ? part.text.length : null,
-    typeof part.state === "string" ? part.state : null,
-    toolCallId(part),
-    typeof approval?.id === "string" ? approval.id : null,
-    typeof approval?.approved === "boolean" ? approval.approved : null,
-    typeof part.preliminary === "boolean" ? part.preliminary : null,
-    Object.prototype.hasOwnProperty.call(part, "output"),
-    typeof output?.success === "boolean" ? output.success : null,
-    Object.prototype.hasOwnProperty.call(part, "error"),
-  ];
-}
-
-/**
- * Content-free "did the server produce anything new" fingerprint.
- *
- * Run cursors need not advance for accepted assistant replacements. Track the
- * latest assistant's semantic part state as well, so text/reasoning growth and
- * tool approval/result transitions cancel a stalled recovery immediately.
- */
-function runProgressKey(
-  snapshot: AgentSessionSnapshot<WireMessage>,
-): string {
-  const messages = snapshot.messages;
-  let assistant: WireMessage | undefined;
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    if (messages[index]?.role === "assistant") {
-      assistant = messages[index];
-      break;
-    }
-  }
-  const parts = assistant?.parts ?? [];
-  const runState = snapshot.runState;
-  const runId = "run_id" in runState ? runState.run_id : "";
-  return JSON.stringify([
-    runState.state,
-    runState.cursor,
-    runId,
-    messages.length,
-    assistant?.id ?? null,
-    parts.map(partProgressToken),
-  ]);
-}
-
-type IncidentSnapshotCounts = Readonly<{
-  assistantTextPartCount: number;
-  assistantTextStreamingPartCount: number;
-  assistantTextCompletePartCount: number;
-  assistantTextCharacterCount: number;
-  reasoningPartCount: number;
-  reasoningStreamingPartCount: number;
-  reasoningCompletePartCount: number;
-  reasoningCharacterCount: number;
-  assistantOutputPresentBeforeFailure: boolean;
-  assistantOutputRetainedInFailedProjection: boolean;
-  snapshotPartCount: number;
-  truncated: boolean;
-}>;
-
-type IncidentFailureScalars = Readonly<{
-  failureAuthority: "server" | "client";
-  failureStage: AgentIncidentFailureStage;
-  failureMechanism: AgentIncidentFailureMechanism;
-  terminalValidation: "validated" | "unvalidated";
-  terminalSource: AgentRunFailureCaptureEvent["terminalSource"];
-  retryable: boolean;
-  runPhase?: AgentRunPhase;
-  serverRunId?: string;
-  incidentId?: string;
-  failureCode?: string;
-}>;
-
-function addIncidentCount(
-  current: number,
-  addition: number,
-): Readonly<{ value: number; truncated: boolean }> {
-  if (
-    !Number.isSafeInteger(addition)
-    || addition < 0
-    || current > MAX_INCIDENT_CAPTURE_COUNT - addition
-  ) {
-    return { value: MAX_INCIDENT_CAPTURE_COUNT, truncated: true };
-  }
-  return { value: current + addition, truncated: false };
-}
-
-function incidentSnapshotCounts(
-  snapshot: AgentConversationSnapshot,
-): IncidentSnapshotCounts {
-  let assistantTextPartCount = 0;
-  let assistantTextStreamingPartCount = 0;
-  let assistantTextCompletePartCount = 0;
-  let assistantTextCharacterCount = 0;
-  let reasoningPartCount = 0;
-  let reasoningStreamingPartCount = 0;
-  let reasoningCompletePartCount = 0;
-  let reasoningCharacterCount = 0;
-  let assistantOutputPresentBeforeFailure = false;
-  let truncated = snapshot.parts.length > MAX_INCIDENT_CAPTURE_COUNT;
-  for (const part of snapshot.parts) {
-    if (part.kind === "text") {
-      const parts = addIncidentCount(assistantTextPartCount, 1);
-      const streamingParts = part.state === "streaming"
-        ? addIncidentCount(assistantTextStreamingPartCount, 1)
-        : { value: assistantTextStreamingPartCount, truncated: false };
-      const completeParts = part.state === "complete"
-        ? addIncidentCount(assistantTextCompletePartCount, 1)
-        : { value: assistantTextCompletePartCount, truncated: false };
-      const characters = addIncidentCount(
-        assistantTextCharacterCount,
-        part.markdown.length,
-      );
-      assistantTextPartCount = parts.value;
-      assistantTextStreamingPartCount = streamingParts.value;
-      assistantTextCompletePartCount = completeParts.value;
-      assistantTextCharacterCount = characters.value;
-      assistantOutputPresentBeforeFailure = assistantOutputPresentBeforeFailure
-        || (Number.isSafeInteger(part.markdown.length) && part.markdown.length > 0);
-      truncated = truncated
-        || parts.truncated
-        || streamingParts.truncated
-        || completeParts.truncated
-        || characters.truncated;
-    } else if (part.kind === "reasoning") {
-      const parts = addIncidentCount(reasoningPartCount, 1);
-      const streamingParts = part.state === "streaming"
-        ? addIncidentCount(reasoningStreamingPartCount, 1)
-        : { value: reasoningStreamingPartCount, truncated: false };
-      const completeParts = part.state === "complete"
-        ? addIncidentCount(reasoningCompletePartCount, 1)
-        : { value: reasoningCompletePartCount, truncated: false };
-      const characters = addIncidentCount(
-        reasoningCharacterCount,
-        part.summary.length,
-      );
-      reasoningPartCount = parts.value;
-      reasoningStreamingPartCount = streamingParts.value;
-      reasoningCompletePartCount = completeParts.value;
-      reasoningCharacterCount = characters.value;
-      truncated = truncated
-        || parts.truncated
-        || streamingParts.truncated
-        || completeParts.truncated
-        || characters.truncated;
-    }
-  }
-  return {
-    assistantTextPartCount,
-    assistantTextStreamingPartCount,
-    assistantTextCompletePartCount,
-    assistantTextCharacterCount,
-    reasoningPartCount,
-    reasoningStreamingPartCount,
-    reasoningCompletePartCount,
-    reasoningCharacterCount,
-    assistantOutputPresentBeforeFailure,
-    assistantOutputRetainedInFailedProjection:
-      snapshot.status === "failed" && assistantOutputPresentBeforeFailure,
-    snapshotPartCount: Math.min(
-      snapshot.parts.length,
-      MAX_INCIDENT_CAPTURE_COUNT,
-    ),
-    truncated,
-  };
-}
-
-function boundedIncidentPendingCount(
-  value: number,
-): Readonly<{ value: number; truncated: boolean }> {
-  return value > MAX_TOOL_EXECUTIONS_PER_RUN
-    ? { value: MAX_TOOL_EXECUTIONS_PER_RUN, truncated: true }
-    : { value, truncated: false };
-}
-
-function boundedIncidentElapsedMs(
-  value: number | null,
-): Readonly<{ value?: number; truncated: boolean }> {
-  if (value === null || !Number.isFinite(value) || value < 0) {
-    return { truncated: false };
-  }
-  if (value > MAX_INCIDENT_CAPTURE_ELAPSED_MS) {
-    return { value: MAX_INCIDENT_CAPTURE_ELAPSED_MS, truncated: true };
-  }
-  return { value: Math.round(value), truncated: false };
-}
-
-function responseStatus(error: unknown): number | undefined {
-  return isRecord(error) && typeof error.status === "number"
-    ? error.status
-    : undefined;
-}
-
-function incidentFailureMechanism(
-  error: Pick<ManagedAgentError, "status">,
-  fallback: AgentIncidentFailureMechanism,
-): AgentIncidentFailureMechanism {
-  return Number.isInteger(error.status)
-    && error.status !== undefined
-    && error.status >= 400
-    && error.status <= 599
-    ? "http_rejection"
-    : fallback;
-}
-
-function boundedErrorPayload(text: string): Readonly<{
-  message?: string;
-  incidentId?: string;
-}> {
-  if (text.length > 4_096) return {};
-  try {
-    const value = JSON.parse(text) as unknown;
-    if (!isRecord(value)) return {};
-    const nested = isRecord(value.error) ? value.error : {};
-    const rawMessage = nested.message ?? value.message;
-    const rawIncident = nested.incident_id ?? value.incident_id;
-    return {
-      ...(typeof rawMessage === "string" ? { message: rawMessage } : {}),
-      ...(typeof rawIncident === "string" && /^incident_[a-f0-9]{32}$/u.test(rawIncident)
-        ? { incidentId: rawIncident }
-        : {}),
-    };
-  } catch {
-    return {};
-  }
-}
 
 export class AgentChatSession implements ChatSession {
   private readonly requestClient: RequestClient;
@@ -613,7 +278,7 @@ export class AgentChatSession implements ChatSession {
   private recoveryWindow: Window = window;
   private detachRecoveryEnvironment: (() => void) | null = null;
   private stallRecovery: StallRecovery | null = null;
-  private readonly clientLatency = new Map<string, ClientLatencyContext>();
+  private readonly clientLatency: ClientLatency;
 
   public constructor(private readonly options: AgentChatSessionOptions) {
     this.requestClient = options.requestClient ?? new PlatformRequestClient();
@@ -627,6 +292,15 @@ export class AgentChatSession implements ChatSession {
         return typeof performance !== "undefined" ? performance.now() : 0;
       }
     };
+    this.clientLatency = new ClientLatency({
+      monotonicNow: this.monotonicNow,
+      activeRun: () => this.active,
+      toolName: (requestId, callId) => this.active?.requestId === requestId
+        ? this.findCurrentTool(this.active, callId)?.name ?? null
+        : null,
+      recordLifecycle: (input) => this.recordLifecycle(input),
+      onTransportSegmentSummary: (event) => this.options.onTransportSegmentSummary?.(event),
+    });
     this.lifecycle = new AgentLifecycle(
       (record) => this.options.onLifecycle?.(record),
       this.now,
@@ -649,7 +323,7 @@ export class AgentChatSession implements ChatSession {
 
   public recordClientRequestLifecycle(input: AgentLifecycleInput): void {
     const latency = input.requestId && input.clientMonotonicOffsetMs === undefined
-      ? this.clientLatencyFields(input.requestId)
+      ? this.clientLatency.fields(input.requestId)
       : {};
     this.lifecycle.record({ ...input, ...latency });
   }
@@ -659,15 +333,14 @@ export class AgentChatSession implements ChatSession {
     requestId: string,
     observedAtMonotonicMs: number,
   ): void {
-    this.recordClientLatencyMilestone(code, requestId, observedAtMonotonicMs);
+    this.clientLatency.recordMilestone(code, requestId, observedAtMonotonicMs);
   }
 
   public needsClientRenderMilestone(
     code: "response_first_dom_committed" | "response_first_paint_opportunity",
     requestId: string,
   ): boolean {
-    const context = this.clientLatency.get(requestId);
-    return Boolean(context && !context.milestones.has(code));
+    return this.clientLatency.needsRenderMilestone(code, requestId);
   }
 
   public recordClientToolRenderMilestone(
@@ -676,7 +349,7 @@ export class AgentChatSession implements ChatSession {
     toolCallId: string,
     observedAtMonotonicMs: number,
   ): void {
-    this.recordClientToolLatencyMilestone(
+    this.clientLatency.recordToolRenderMilestone(
       code,
       requestId,
       toolCallId,
@@ -689,13 +362,7 @@ export class AgentChatSession implements ChatSession {
     requestId: string,
     toolCallId: string,
   ): boolean {
-    const context = this.clientLatency.get(requestId);
-    const ordinal = context?.toolExecutionOrdinals.get(toolCallId);
-    return Boolean(
-      context
-      && ordinal !== undefined
-      && !context.toolMilestones.has(`${ordinal}:${code}`),
-    );
+    return this.clientLatency.needsToolRenderMilestone(code, requestId, toolCallId);
   }
 
   public async hydrate(
@@ -707,7 +374,7 @@ export class AgentChatSession implements ChatSession {
   ): Promise<void> {
     if (this.conversationId === conversationId && this.session && this.transport) {
       if (submittedLatency) {
-        this.ensureClientLatency({
+        this.clientLatency.ensure({
           conversationId,
           requestId: submittedLatency.requestId,
           startedAtMonotonicMs: submittedLatency.startedAtMonotonicMs,
@@ -720,7 +387,7 @@ export class AgentChatSession implements ChatSession {
         ...(submittedLatency
           ? {
               requestId: submittedLatency.requestId,
-              ...this.clientLatencyFields(submittedLatency.requestId),
+              ...this.clientLatency.fields(submittedLatency.requestId),
             }
           : {}),
       });
@@ -740,7 +407,7 @@ export class AgentChatSession implements ChatSession {
           ...(submittedLatency
             ? {
                 requestId: submittedLatency.requestId,
-                ...this.clientLatencyFields(submittedLatency.requestId),
+                ...this.clientLatency.fields(submittedLatency.requestId),
               }
             : {}),
         });
@@ -754,7 +421,7 @@ export class AgentChatSession implements ChatSession {
           ...(submittedLatency
             ? {
                 requestId: submittedLatency.requestId,
-                ...this.clientLatencyFields(submittedLatency.requestId),
+                ...this.clientLatency.fields(submittedLatency.requestId),
               }
             : {}),
           status: responseStatus(error),
@@ -772,7 +439,7 @@ export class AgentChatSession implements ChatSession {
     }
     this.disconnect();
     if (submittedLatency) {
-      this.ensureClientLatency({
+      this.clientLatency.ensure({
         conversationId,
         requestId: submittedLatency.requestId,
         startedAtMonotonicMs: submittedLatency.startedAtMonotonicMs,
@@ -793,11 +460,11 @@ export class AgentChatSession implements ChatSession {
       requestClient: this.requestClient,
       monotonicNow: this.monotonicNow,
       onTiming: (event) => {
-        if (this.generation === generation) this.handleTransportTiming(event);
+        if (this.generation === generation) this.clientLatency.handleTransportTiming(event);
       },
       onSegmentSummary: (event) => {
         if (this.generation === generation) {
-          this.handleTransportSegmentSummary(conversationId, event);
+          this.clientLatency.handleTransportSegmentSummary(conversationId, event);
         }
       },
     });
@@ -832,7 +499,7 @@ export class AgentChatSession implements ChatSession {
       ...(submittedLatency
         ? {
             requestId: submittedLatency.requestId,
-            ...this.clientLatencyFields(submittedLatency.requestId),
+            ...this.clientLatency.fields(submittedLatency.requestId),
           }
         : {}),
     });
@@ -846,7 +513,7 @@ export class AgentChatSession implements ChatSession {
         ...(submittedLatency
           ? {
               requestId: submittedLatency.requestId,
-              ...this.clientLatencyFields(submittedLatency.requestId),
+              ...this.clientLatency.fields(submittedLatency.requestId),
             }
           : {}),
       });
@@ -860,7 +527,7 @@ export class AgentChatSession implements ChatSession {
         ...(submittedLatency
           ? {
               requestId: submittedLatency.requestId,
-              ...this.clientLatencyFields(submittedLatency.requestId),
+              ...this.clientLatency.fields(submittedLatency.requestId),
             }
           : {}),
         status: responseStatus(error),
@@ -941,7 +608,7 @@ export class AgentChatSession implements ChatSession {
       phase: "response",
       conversationId: input.conversationId,
       requestId: input.turnId,
-      ...this.clientLatencyFields(input.turnId),
+      ...this.clientLatency.fields(input.turnId),
     });
     this.publishActive(active, true);
     let requestDispatchStarted = false;
@@ -955,13 +622,13 @@ export class AgentChatSession implements ChatSession {
         return await active.completion;
       }
       if (input.beforeSend) {
-        const historySync = this.createHistorySyncCorrelation("before_send");
-        this.recordHistorySyncLifecycle("history_sync_started", historySync);
+        const historySync = this.clientLatency.createHistorySyncCorrelation("before_send", this.conversationId);
+        this.clientLatency.recordHistorySync("history_sync_started", historySync);
         try {
           await input.beforeSend();
-          this.recordHistorySyncLifecycle("history_sync_completed", historySync);
+          this.clientLatency.recordHistorySync("history_sync_completed", historySync);
         } catch (error) {
-          this.recordHistorySyncLifecycle("history_sync_failed", historySync);
+          this.clientLatency.recordHistorySync("history_sync_failed", historySync);
           this.reportLocalIssue(error);
         }
       }
@@ -974,7 +641,7 @@ export class AgentChatSession implements ChatSession {
         phase: "response",
         conversationId: input.conversationId,
         requestId: input.turnId,
-        ...this.clientLatencyFields(input.turnId),
+        ...this.clientLatency.fields(input.turnId),
       });
       requestDispatchStarted = true;
       const delivery = await session.submit({
@@ -989,14 +656,14 @@ export class AgentChatSession implements ChatSession {
         phase: "response",
         conversationId: input.conversationId,
         requestId: input.turnId,
-        ...this.clientLatencyFields(input.turnId),
+        ...this.clientLatency.fields(input.turnId),
       });
       if (
         delivery === "sent"
         && !supersededByRecovery
         && this.isIncompleteSubmitBoundary(active, session)
       ) {
-        this.recordClientLatencyMilestone(
+        this.clientLatency.recordMilestone(
           "response_stream_ended_incomplete",
           input.turnId,
           this.monotonicNow(),
@@ -1026,7 +693,7 @@ export class AgentChatSession implements ChatSession {
           conversationId: input.conversationId,
           requestId: input.turnId,
           retryable: normalized.retryable,
-          ...this.clientLatencyFields(input.turnId),
+          ...this.clientLatency.fields(input.turnId),
         });
         this.finishLocalFailure(active, normalized, {
           failureStage: requestDispatchStarted
@@ -1055,7 +722,7 @@ export class AgentChatSession implements ChatSession {
       phase: "start",
       ...(conversationId ? { conversationId } : {}),
       requestId: rootMessageId,
-      ...this.clientLatencyFields(rootMessageId),
+      ...this.clientLatency.fields(rootMessageId),
     });
     try {
       const bootstrap = await this.issueBootstrap();
@@ -1119,7 +786,7 @@ export class AgentChatSession implements ChatSession {
         phase: "start",
         conversationId: bootstrap.conversation_id,
         requestId: rootMessageId,
-        ...this.clientLatencyFields(rootMessageId),
+        ...this.clientLatency.fields(rootMessageId),
       });
       return context;
     } catch (error) {
@@ -1132,7 +799,7 @@ export class AgentChatSession implements ChatSession {
         requestId: rootMessageId,
         status: responseStatus(error),
         retryable: !cancelled,
-        ...this.clientLatencyFields(rootMessageId),
+        ...this.clientLatency.fields(rootMessageId),
       });
       throw error;
     }
@@ -1215,7 +882,7 @@ export class AgentChatSession implements ChatSession {
       requestId: active.requestId,
       toolName: tool.name,
       toolCallId: callId,
-      ...this.clientLatencyFields(active.requestId),
+      ...this.clientLatency.fields(active.requestId),
     });
     const serverRequested = tool.part.state === "approval-requested";
     if (serverRequested) {
@@ -1280,7 +947,7 @@ export class AgentChatSession implements ChatSession {
         conversationId: active.conversationId,
         requestId: active.requestId,
         ...(active.serverRunId ? { serverRunId: active.serverRunId } : {}),
-        ...this.clientLatencyFields(active.requestId),
+        ...this.clientLatency.fields(active.requestId),
       });
       active.resolve({ kind: "cancelled", snapshot });
       this.active = null;
@@ -1364,7 +1031,7 @@ export class AgentChatSession implements ChatSession {
       elapsedMs: null,
     };
     if (input.origin === "submitted") {
-      this.ensureClientLatency({
+      this.clientLatency.ensure({
         conversationId: input.conversationId,
         requestId: input.requestId,
         startedAtMonotonicMs: input.clientStartedAtMonotonicMs,
@@ -1373,57 +1040,10 @@ export class AgentChatSession implements ChatSession {
     return active;
   }
 
-  private retainClientLatency(input: Readonly<{
-    conversationId: string;
-    requestId: string;
-    startedAtMonotonicMs?: number;
-  }>): void {
-    const fallback = this.monotonicNow();
-    const startedAtMonotonicMs = typeof input.startedAtMonotonicMs === "number"
-      && Number.isFinite(input.startedAtMonotonicMs)
-      ? input.startedAtMonotonicMs
-      : fallback;
-    this.clientLatency.delete(input.requestId);
-    this.clientLatency.set(input.requestId, {
-      conversationId: input.conversationId,
-      requestId: input.requestId,
-      startedAtMonotonicMs,
-      milestones: new Set(),
-      segmentMilestones: new Set(),
-      toolMilestones: new Set(),
-      segments: new Map(),
-      toolExecutionOrdinals: new Map(),
-      nextToolExecutionOrdinal: 0,
-      nextHistorySyncOrdinal: 0,
-      pendingAssistantProjectionOrdinal: null,
-      pendingCommandAck: null,
-      pendingTerminalOrdinal: null,
-      terminalSegmentOrdinal: null,
-      lastOffsetMs: 0,
-    });
-    while (this.clientLatency.size > MAX_RETAINED_LATENCY_RUNS) {
-      const oldest = this.clientLatency.keys().next().value;
-      if (!oldest) break;
-      this.clientLatency.delete(oldest);
-    }
-  }
-
-  private ensureClientLatency(input: Readonly<{
-    conversationId: string;
-    requestId: string;
-    startedAtMonotonicMs?: number;
-  }>): void {
-    const existing = this.clientLatency.get(input.requestId);
-    if (existing?.conversationId === input.conversationId) return;
-    this.retainClientLatency(input);
-  }
-
   private updateActiveElapsed(active: ActiveRun): void {
     if (active.terminal) return;
-    const context = this.clientLatency.get(active.requestId);
-    if (!context || context.conversationId !== active.conversationId) return;
-    const elapsedMs = this.monotonicNow() - context.startedAtMonotonicMs;
-    if (!Number.isFinite(elapsedMs)) return;
+    const elapsedMs = this.clientLatency.elapsed(active.conversationId, active.requestId);
+    if (elapsedMs === null || !Number.isFinite(elapsedMs)) return;
     active.elapsedMs = Math.max(0, Math.round(elapsedMs));
   }
 
@@ -1435,364 +1055,6 @@ export class AgentChatSession implements ChatSession {
       restoreTail, now: this.now(),
     });
     void this.reconcileMessages(history, "terminal").catch(() => undefined);
-  }
-
-  private ensureToolExecutionOrdinal(
-    active: ActiveRun,
-    toolCallId: string,
-  ): number | undefined {
-    const context = this.clientLatency.get(active.requestId);
-    if (!context || context.conversationId !== active.conversationId) return undefined;
-    const existing = context.toolExecutionOrdinals.get(toolCallId);
-    if (existing !== undefined) return existing;
-    if (context.nextToolExecutionOrdinal >= MAX_TOOL_EXECUTIONS_PER_RUN) return undefined;
-    const ordinal = ++context.nextToolExecutionOrdinal;
-    context.toolExecutionOrdinals.set(toolCallId, ordinal);
-    return ordinal;
-  }
-
-  private latestToolResultSegmentOrdinal(
-    context: ClientLatencyContext,
-    toolCallId: string,
-    toolExecutionOrdinal: number,
-    requireAssistantProjection = false,
-  ): number | undefined {
-    const segments = [...context.segments.values()]
-      .sort((left, right) => right.ordinal - left.ordinal);
-    return segments.find((segment) =>
-      segment.commandKind === "client_tool_result"
-      && segment.toolCallId === toolCallId
-      && segment.toolExecutionOrdinal === toolExecutionOrdinal
-      && (!requireAssistantProjection || context.segmentMilestones.has(
-        `${segment.ordinal}:response_first_assistant_snapshot_projected`,
-      )))?.ordinal;
-  }
-
-  private recordClientToolLatencyMilestone(
-    code: ClientToolRenderCode,
-    requestId: string,
-    toolCallId: string,
-    observedAtMonotonicMs: number,
-  ): void {
-    const context = this.clientLatency.get(requestId);
-    const toolExecutionOrdinal = context?.toolExecutionOrdinals.get(toolCallId);
-    if (!context || toolExecutionOrdinal === undefined) return;
-    const milestone = `${toolExecutionOrdinal}:${code}`;
-    if (context.toolMilestones.has(milestone)) return;
-    const continuation = code === "continuation_content_dom_committed"
-      || code === "continuation_content_paint_opportunity";
-    const commandSegmentOrdinal = this.latestToolResultSegmentOrdinal(
-      context,
-      toolCallId,
-      toolExecutionOrdinal,
-      continuation,
-    );
-    context.toolMilestones.add(milestone);
-    const active = this.active?.requestId === requestId ? this.active : null;
-    this.recordLifecycle({
-      code,
-      phase: "render",
-      conversationId: context.conversationId,
-      requestId,
-      ...(active?.serverRunId ? { serverRunId: active.serverRunId } : {}),
-      toolExecutionOrdinal,
-      ...this.clientLatencyFields(
-        requestId,
-        observedAtMonotonicMs,
-        commandSegmentOrdinal,
-      ),
-    });
-  }
-
-  private createHistorySyncCorrelation(
-    historySyncKind: HistorySyncKind,
-  ): HistorySyncCorrelation {
-    const active = this.active;
-    const conversationId = active?.conversationId ?? this.conversationId ?? undefined;
-    if (!active) return { ...(conversationId ? { conversationId } : {}), historySyncKind };
-    const context = this.clientLatency.get(active.requestId);
-    if (!context || context.nextHistorySyncOrdinal >= MAX_HISTORY_SYNCS_PER_RUN) {
-      return { conversationId: active.conversationId, historySyncKind };
-    }
-    const historySyncOrdinal = ++context.nextHistorySyncOrdinal;
-    return {
-      conversationId: active.conversationId,
-      requestId: active.requestId,
-      historySyncKind,
-      historySyncOrdinal,
-    };
-  }
-
-  private recordHistorySyncLifecycle(
-    code: Extract<AgentLifecycleCode,
-      "history_sync_started" | "history_sync_completed" | "history_sync_failed">,
-    correlation: HistorySyncCorrelation,
-  ): void {
-    this.recordLifecycle({
-      code,
-      phase: "persistence",
-      ...correlation,
-      ...(correlation.requestId
-        ? this.clientLatencyFields(correlation.requestId)
-        : {}),
-    });
-  }
-
-  private clientLatencyFields(
-    requestId: string,
-    observedAtMonotonicMs = this.monotonicNow(),
-    commandSegmentOrdinal?: number,
-  ): Readonly<{
-    latencyTraceId?: string;
-    commandKind?: AgentCommandKind;
-    commandSegmentOrdinal?: number;
-    toolExecutionOrdinal?: number;
-    responseDeliveryMode?: PlatformResponseDeliveryMode;
-    clientMonotonicOffsetMs?: number;
-  }> {
-    const context = this.clientLatency.get(requestId);
-    if (!context || !Number.isFinite(observedAtMonotonicMs)) return {};
-    // Segment identity is intentionally opt-in. Multiple /turn streams for one
-    // logical request can overlap, so a global "last callback" pointer would
-    // let a late callback relabel DOM, paint, tool, or terminal milestones.
-    const segment = commandSegmentOrdinal === undefined
-      ? undefined
-      : context.segments.get(commandSegmentOrdinal);
-    const offset = Math.max(
-      context.lastOffsetMs,
-      observedAtMonotonicMs - context.startedAtMonotonicMs,
-      0,
-    );
-    context.lastOffsetMs = offset;
-    return {
-      ...(segment?.latencyTraceId
-        ? { latencyTraceId: segment.latencyTraceId }
-        : {}),
-      ...(segment
-        ? {
-            commandKind: segment.commandKind,
-            commandSegmentOrdinal: segment.ordinal,
-          }
-        : {}),
-      ...(typeof segment?.toolExecutionOrdinal === "number"
-        ? { toolExecutionOrdinal: segment.toolExecutionOrdinal }
-        : {}),
-      ...(segment?.responseDeliveryMode
-        ? { responseDeliveryMode: segment.responseDeliveryMode }
-        : {}),
-      clientMonotonicOffsetMs: offset,
-    };
-  }
-
-  private recordClientLatencyMilestone(
-    code: AgentLifecycleCode,
-    requestId: string,
-    observedAtMonotonicMs: number,
-    extra: Readonly<{
-      status?: number;
-      retryable?: boolean;
-      failureCode?: string;
-      serverTimingAppMs?: number;
-      serverTimingAuthMs?: number;
-      responseDeliveryMode?: PlatformResponseDeliveryMode;
-      toolName?: string;
-      toolCallId?: string;
-      toolExecutionOrdinal?: number;
-    }> = {},
-    commandSegmentOrdinal?: number,
-  ): void {
-    const context = this.clientLatency.get(requestId);
-    if (!context) return;
-    const segmentMilestone = commandSegmentOrdinal === undefined
-      ? null
-      : `${commandSegmentOrdinal}:${code}`;
-    const milestones = segmentMilestone === null
-      ? context.milestones
-      : context.segmentMilestones;
-    const milestone = segmentMilestone ?? code;
-    if (milestones.has(milestone)) return;
-    milestones.add(milestone);
-    const active = this.active?.requestId === requestId ? this.active : null;
-    this.recordLifecycle({
-      code,
-      phase: code === "response_first_dom_committed"
-        || code === "response_first_paint_opportunity"
-        || code === "local_tool_terminal_dom_committed"
-        || code === "local_tool_terminal_paint_opportunity"
-        || code === "continuation_content_dom_committed"
-        || code === "continuation_content_paint_opportunity"
-        ? "render"
-        : "response",
-      conversationId: context.conversationId,
-      requestId,
-      ...(active?.serverRunId ? { serverRunId: active.serverRunId } : {}),
-      ...extra,
-      ...this.clientLatencyFields(
-        requestId,
-        observedAtMonotonicMs,
-        commandSegmentOrdinal,
-      ),
-    });
-  }
-
-  private handleTransportTiming(event: AgentTransportTimingEvent): void {
-    const context = this.clientLatency.get(event.requestId);
-    if (!context) return;
-    const active = this.active?.requestId === event.requestId ? this.active : null;
-    // A transport callback may carry an unknown or adversarial call ID. Only
-    // a locally started execution establishes the export ordinal; exact IDs
-    // can join that existing map but can never create a new ordinal here.
-    const toolExecutionOrdinal = event.toolCallId
-      ? context.toolExecutionOrdinals.get(event.toolCallId)
-      : undefined;
-    const existing = context.segments.get(event.commandSegmentOrdinal);
-    if (existing && existing.commandKind !== event.commandKind) return;
-    const segment: ClientLatencySegment = existing ?? {
-      ordinal: event.commandSegmentOrdinal,
-      commandKind: event.commandKind,
-      toolCallId: event.toolCallId ?? null,
-      toolExecutionOrdinal: toolExecutionOrdinal ?? null,
-      toolName: null,
-      latencyTraceId: null,
-      responseDeliveryMode: null,
-    };
-    if (existing && existing.toolCallId !== (event.toolCallId ?? null)) return;
-    if (
-      existing
-      && existing.toolExecutionOrdinal !== (toolExecutionOrdinal ?? null)
-    ) return;
-    if (segment.toolCallId && segment.toolName === null) {
-      segment.toolName = active
-        ? this.findCurrentTool(active, segment.toolCallId)?.name ?? null
-        : null;
-    }
-    if (event.latencyTraceId) segment.latencyTraceId = event.latencyTraceId;
-    if (event.responseDeliveryMode) {
-      segment.responseDeliveryMode = event.responseDeliveryMode;
-    }
-    context.segments.set(segment.ordinal, segment);
-    while (context.segments.size > MAX_RETAINED_LATENCY_SEGMENTS_PER_RUN) {
-      const oldest = context.segments.keys().next().value;
-      if (oldest === undefined) break;
-      context.segments.delete(oldest);
-      for (const code of [
-        "command_segment_dispatch_started",
-        "response_available",
-        "response_first_body_chunk_observed",
-        "response_first_sse_frame_parsed",
-        "response_first_assistant_sse_frame_parsed",
-        "response_first_assistant_snapshot_projected",
-      ] as const) {
-        context.segmentMilestones.delete(`${oldest}:${code}`);
-      }
-    }
-    if (event.milestone === "assistant_sse_frame_delivery_completed") {
-      if (context.pendingAssistantProjectionOrdinal === event.commandSegmentOrdinal) {
-        context.pendingAssistantProjectionOrdinal = null;
-      }
-      return;
-    }
-    if (event.milestone === "command_ack_sse_frame_delivery_completed") {
-      if (context.pendingCommandAck?.ordinal === event.commandSegmentOrdinal) {
-        context.pendingCommandAck = null;
-      }
-      return;
-    }
-    if (event.milestone === "terminal_sse_frame_delivery_completed") {
-      if (context.pendingTerminalOrdinal === event.commandSegmentOrdinal) {
-        context.pendingTerminalOrdinal = null;
-      }
-      return;
-    }
-    if (event.milestone === "command_ack_sse_frame") {
-      context.pendingCommandAck = {
-        ordinal: event.commandSegmentOrdinal,
-        commandKind: event.commandKind,
-        toolCallId: event.toolCallId ?? null,
-      };
-      return;
-    }
-    if (event.milestone === "terminal_sse_frame") {
-      context.pendingTerminalOrdinal = event.commandSegmentOrdinal;
-      return;
-    }
-    if (event.milestone === "first_assistant_sse_frame") {
-      context.pendingAssistantProjectionOrdinal = event.commandSegmentOrdinal;
-    }
-    const code = event.milestone === "command_dispatch_started"
-      ? "command_segment_dispatch_started"
-      : event.milestone === "response_available"
-        ? "response_available"
-        : event.milestone === "first_body_chunk"
-          ? "response_first_body_chunk_observed"
-          : event.milestone === "first_assistant_sse_frame"
-            ? "response_first_assistant_sse_frame_parsed"
-            : "response_first_sse_frame_parsed";
-    this.recordClientLatencyMilestone(
-      code,
-      event.requestId,
-      event.observedAtMonotonicMs,
-      {
-        ...(event.status === undefined ? {} : { status: event.status }),
-        ...(event.serverTimingAppMs === undefined
-          ? {}
-          : { serverTimingAppMs: event.serverTimingAppMs }),
-        ...(event.serverTimingAuthMs === undefined
-          ? {}
-          : { serverTimingAuthMs: event.serverTimingAuthMs }),
-        ...(event.responseDeliveryMode
-          ? { responseDeliveryMode: event.responseDeliveryMode }
-          : {}),
-        ...(segment.toolName ? { toolName: segment.toolName } : {}),
-        ...(event.toolCallId ? { toolCallId: event.toolCallId } : {}),
-        ...(toolExecutionOrdinal === undefined ? {} : { toolExecutionOrdinal }),
-      },
-      event.commandSegmentOrdinal,
-    );
-  }
-
-  private handleTransportSegmentSummary(
-    conversationId: string,
-    event: AgentTransportSegmentSummaryEvent,
-  ): void {
-    try {
-      const requestId = event.requestId;
-      if (
-        !isThinAgentConversationId(conversationId)
-        || !isThinAgentRequestId(requestId)
-      ) return;
-      const context = this.clientLatency.get(requestId);
-      const segment = context?.conversationId === conversationId
-        ? context.segments.get(event.commandSegmentOrdinal)
-        : undefined;
-      const toolExecutionOrdinal = segment?.commandKind === event.commandKind
-        && segment.toolCallId === (event.toolCallId ?? null)
-        ? segment.toolExecutionOrdinal ?? undefined
-        : undefined;
-      const safeEvent: AgentChatTransportSegmentSummaryEvent = Object.freeze({
-        conversationId,
-        requestId,
-        commandKind: event.commandKind,
-        commandSegmentOrdinal: event.commandSegmentOrdinal,
-        ...(segment?.latencyTraceId
-          ? { serverLatencyCorrelationId: segment.latencyTraceId }
-          : {}),
-        ...(toolExecutionOrdinal === undefined
-          ? {}
-          : { toolExecutionOrdinal }),
-        closeReason: event.closeReason,
-        durationMs: event.durationMs,
-        receivedBytes: event.receivedBytes,
-        nonEmptyRawChunkCount: event.nonEmptyRawChunkCount,
-        sseEventCount: event.sseEventCount,
-        acceptedFrameCount: event.acceptedFrameCount,
-        deliveredFrameCount: event.deliveredFrameCount,
-        metricsTruncated: event.metricsTruncated,
-      });
-      this.options.onTransportSegmentSummary?.(safeEvent);
-    } catch {
-      // Incident evidence is observational and cannot affect the run.
-    }
   }
 
   private isIncompleteSubmitBoundary(
@@ -1917,7 +1179,7 @@ export class AgentChatSession implements ChatSession {
       && !active.terminal
       && active.projectionOwner.inspect(active.projection).hasAssistant
     ) {
-      this.recordClientLatencyMilestone(
+      this.clientLatency.recordMilestone(
         "response_first_assistant_snapshot_received",
         active.requestId,
         this.monotonicNow(),
@@ -2003,14 +1265,9 @@ export class AgentChatSession implements ChatSession {
     const session = this.session;
     const active = this.active;
     if (!session || !active || active.requestId !== ack.request_id) return;
-    const latency = this.clientLatency.get(active.requestId);
-    const pendingAck = latency?.pendingCommandAck;
-    const acknowledgedToolCallId = "tool_call_id" in ack ? ack.tool_call_id : null;
-    const commandSegmentOrdinal = pendingAck
-      && pendingAck.commandKind === ack.command_kind
-      && pendingAck.toolCallId === acknowledgedToolCallId
-      ? pendingAck.ordinal
-      : undefined;
+    const commandSegmentOrdinal = this.clientLatency.commandAckSegmentOrdinal(
+      active.requestId, ack.command_kind, "tool_call_id" in ack ? ack.tool_call_id : null,
+    );
     if (ack.command_kind === "cancel") {
       // The acknowledgement confirms delivery, not the final outcome. A stale
       // queued projection can race with an already persisted terminal. Wait
@@ -2038,7 +1295,7 @@ export class AgentChatSession implements ChatSession {
           requestId: active.requestId,
           ...(tool?.name ? { toolName: tool.name } : {}),
           toolCallId: ack.tool_call_id,
-          ...this.clientLatencyFields(
+          ...this.clientLatency.fields(
             active.requestId,
             this.monotonicNow(),
             commandSegmentOrdinal,
@@ -2073,7 +1330,7 @@ export class AgentChatSession implements ChatSession {
           ...(pending.toolExecutionOrdinal === undefined
             ? {}
             : { toolExecutionOrdinal: pending.toolExecutionOrdinal }),
-          ...this.clientLatencyFields(
+          ...this.clientLatency.fields(
             active.requestId,
             this.monotonicNow(),
             commandSegmentOrdinal,
@@ -2392,7 +1649,7 @@ export class AgentChatSession implements ChatSession {
             requestId: active.requestId,
             toolName: tool.name,
             toolCallId: callId,
-            ...this.clientLatencyFields(active.requestId),
+            ...this.clientLatency.fields(active.requestId),
           });
           if (!requiresUserApproval(tool.name, active.approvalPolicy)) {
             this.respondToApproval(active.authorization.state(callId).approvalId!, true, "policy");
@@ -2628,7 +1885,7 @@ export class AgentChatSession implements ChatSession {
       name: tool.name,
       input: tool.input,
     };
-    const toolExecutionOrdinal = this.ensureToolExecutionOrdinal(active, call.callId);
+    const toolExecutionOrdinal = this.clientLatency.ensureToolExecutionOrdinal(active, call.callId);
     active.executingToolIds.add(call.callId);
     this.recordLifecycle({
       code: "local_tool_started",
@@ -2638,7 +1895,7 @@ export class AgentChatSession implements ChatSession {
       toolName: call.name,
       toolCallId: call.callId,
       ...(toolExecutionOrdinal === undefined ? {} : { toolExecutionOrdinal }),
-      ...this.clientLatencyFields(active.requestId),
+      ...this.clientLatency.fields(active.requestId),
     });
     this.publishActive(active, true);
     const task = this.executeLocalTool(active, call, replayOnly)
@@ -2683,7 +1940,7 @@ export class AgentChatSession implements ChatSession {
     call: LocalToolCall,
     replayOnly = false,
   ): Promise<void> {
-    const toolExecutionOrdinal = this.ensureToolExecutionOrdinal(active, call.callId);
+    const toolExecutionOrdinal = this.clientLatency.ensureToolExecutionOrdinal(active, call.callId);
     let result: ToolCallResult;
     let presentationResult: ToolCallResult;
     let delivery: PendingToolDelivery;
@@ -2831,7 +2088,7 @@ export class AgentChatSession implements ChatSession {
         toolCompletedItemCount: toolCounts.completed,
         toolFailedItemCount: toolCounts.failed,
         ...(toolExecutionOrdinal === undefined ? {} : { toolExecutionOrdinal }),
-        ...this.clientLatencyFields(active.requestId),
+        ...this.clientLatency.fields(active.requestId),
       });
       delivery = {
         requestId: active.requestId,
@@ -2868,7 +2125,7 @@ export class AgentChatSession implements ChatSession {
         toolCompletedItemCount: 0,
         toolFailedItemCount: toolRequestedItemCount(call) ?? 0,
         ...(toolExecutionOrdinal === undefined ? {} : { toolExecutionOrdinal }),
-        ...this.clientLatencyFields(active.requestId),
+        ...this.clientLatency.fields(active.requestId),
       });
       delivery = {
         requestId: active.requestId,
@@ -2940,14 +2197,9 @@ export class AgentChatSession implements ChatSession {
       // it is not a clean close for this delivery attempt; the new epoch must
       // inspect authority and, if still waiting, replay the stored result.
       if (this.openEpoch !== attemptedEpoch) return;
-      const latency = this.clientLatency.get(active.requestId);
-      const commandSegmentOrdinal = latency && delivery.toolExecutionOrdinal !== undefined
-        ? this.latestToolResultSegmentOrdinal(
-            latency,
-            delivery.call.callId,
-            delivery.toolExecutionOrdinal,
-          )
-        : undefined;
+      const commandSegmentOrdinal = this.clientLatency.toolResultSegmentOrdinal(
+        active.requestId, delivery.call.callId, delivery.toolExecutionOrdinal,
+      );
       this.recordLifecycle({
         code: delivery.state === "output-available"
           ? "tool_result_command_stream_completed_output_available"
@@ -2960,7 +2212,7 @@ export class AgentChatSession implements ChatSession {
         ...(delivery.toolExecutionOrdinal === undefined
           ? {}
           : { toolExecutionOrdinal: delivery.toolExecutionOrdinal }),
-        ...this.clientLatencyFields(
+        ...this.clientLatency.fields(
           active.requestId,
           this.monotonicNow(),
           commandSegmentOrdinal,
@@ -2978,7 +2230,7 @@ export class AgentChatSession implements ChatSession {
         ...(delivery.toolExecutionOrdinal === undefined
           ? {}
           : { toolExecutionOrdinal: delivery.toolExecutionOrdinal }),
-        ...this.clientLatencyFields(active.requestId),
+        ...this.clientLatency.fields(active.requestId),
       });
       if (
         this.active?.token === active.token
@@ -2995,15 +2247,9 @@ export class AgentChatSession implements ChatSession {
     } catch (error) {
       this.reconcileAcknowledgedContinuations(active);
       if (this.openEpoch === attemptedEpoch) {
-        const latency = this.clientLatency.get(active.requestId);
-        const commandSegmentOrdinal = latency
-          && delivery.toolExecutionOrdinal !== undefined
-          ? this.latestToolResultSegmentOrdinal(
-              latency,
-              delivery.call.callId,
-              delivery.toolExecutionOrdinal,
-            )
-          : undefined;
+        const commandSegmentOrdinal = this.clientLatency.toolResultSegmentOrdinal(
+          active.requestId, delivery.call.callId, delivery.toolExecutionOrdinal,
+        );
         this.recordLifecycle({
           code: "tool_result_command_stream_failed",
           phase: "tool_execution",
@@ -3015,7 +2261,7 @@ export class AgentChatSession implements ChatSession {
           ...(delivery.toolExecutionOrdinal === undefined
             ? {}
             : { toolExecutionOrdinal: delivery.toolExecutionOrdinal }),
-          ...this.clientLatencyFields(
+          ...this.clientLatency.fields(
             active.requestId,
             this.monotonicNow(),
             commandSegmentOrdinal,
@@ -3151,91 +2397,25 @@ export class AgentChatSession implements ChatSession {
     failure: IncidentFailureScalars,
   ): void {
     try {
-      const callback = this.options.onIncidentCapture;
-      if (
-        !callback
-        || !isThinAgentConversationId(active.conversationId)
-        || !isThinAgentRequestId(active.requestId)
-      ) return;
-      const content = incidentSnapshotCounts(snapshot);
-      const executingLocalTools = boundedIncidentPendingCount(
-        active.executingToolIds.size,
-      );
-      const pendingToolDeliveries = boundedIncidentPendingCount(
-        this.pendingDeliveries.size,
-      );
-      const pendingApprovalDeliveries = boundedIncidentPendingCount(
-        this.pendingApprovalDeliveries.size,
-      );
-      const pendingToolTasks = boundedIncidentPendingCount(
-        active.toolTasks.size,
-      );
-      const elapsed = boundedIncidentElapsedMs(active.elapsedMs);
-      const serverRunId = isThinAgentServerRunId(failure.serverRunId)
-        ? failure.serverRunId
-        : undefined;
-      const incidentId = isThinAgentIncidentId(failure.incidentId)
-        ? failure.incidentId
-        : undefined;
-      const failureCode = normalizeAgentIncidentFailureCode(
-        failure.failureCode,
-        failure.failureAuthority,
-      );
-      const capture = Object.freeze({
-        kind: "agent_run_failed",
+      captureFailedRun({
         conversationId: active.conversationId,
         requestId: active.requestId,
-        failureAuthority: failure.failureAuthority,
-        failureStage: failure.failureStage,
-        failureMechanism: failure.failureMechanism,
-        terminalValidation: failure.terminalValidation,
-        terminalSource: failure.terminalSource,
-        hostProcessState: "responsive",
-        chatViewState: "unknown",
-        runOrigin: active.origin,
-        runPhase: failure.runPhase ?? active.phase,
-        connectionState: this.connectionState,
-        ...(elapsed.value === undefined ? {} : { elapsedMs: elapsed.value }),
-        elapsedMsTruncated: elapsed.truncated,
-        ...(serverRunId ? { serverRunId } : {}),
-        ...(incidentId ? { incidentId } : {}),
-        ...(failureCode ? { failureCode } : {}),
-        retryable: failure.retryable,
-        assistantTextPartCount: content.assistantTextPartCount,
-        assistantTextStreamingPartCount: content.assistantTextStreamingPartCount,
-        assistantTextCompletePartCount: content.assistantTextCompletePartCount,
-        assistantTextCharacterCount: content.assistantTextCharacterCount,
-        reasoningPartCount: content.reasoningPartCount,
-        reasoningStreamingPartCount: content.reasoningStreamingPartCount,
-        reasoningCompletePartCount: content.reasoningCompletePartCount,
-        reasoningCharacterCount: content.reasoningCharacterCount,
-        assistantOutputPresentBeforeFailure:
-          content.assistantOutputPresentBeforeFailure,
-        assistantOutputRetainedInFailedProjection:
-          content.assistantOutputRetainedInFailedProjection,
-        snapshotPartCount: content.snapshotPartCount,
-        executingLocalToolCount: executingLocalTools.value,
-        pendingToolDeliveryCount: pendingToolDeliveries.value,
-        pendingApprovalDeliveryCount: pendingApprovalDeliveries.value,
-        pendingToolTaskCount: pendingToolTasks.value,
+        origin: active.origin,
+        phase: active.phase,
+        elapsedMs: active.elapsedMs,
+        executingLocalToolCount: active.executingToolIds.size,
+        pendingToolTaskCount: active.toolTasks.size,
         serverQueued: active.serverQueued,
+      }, snapshot, failure, {
+        connectionState: this.connectionState,
         runStalled: this.runStalled,
         awaitingClientWork: this.awaitingClientWork,
         pendingCancel: this.pendingCancelRequestId === active.requestId,
-        pendingRegenerate: false,
-        countsTruncated: content.truncated
-          || executingLocalTools.truncated
-          || pendingToolDeliveries.truncated
-          || pendingApprovalDeliveries.truncated
-          || pendingToolTasks.truncated,
-      });
-      try {
-        callback(capture);
-      } catch {
-        // The failed lifecycle still records even if capture projection fails.
-      }
+        pendingToolDeliveryCount: this.pendingDeliveries.size,
+        pendingApprovalDeliveryCount: this.pendingApprovalDeliveries.size,
+      }, this.options.onIncidentCapture);
     } catch {
-      // Diagnostics are observational. Capture failure cannot affect a run.
+      // Diagnostics are observational. Reading run facts cannot affect a run.
     }
   }
 
@@ -3264,13 +2444,10 @@ export class AgentChatSession implements ChatSession {
           requestId,
           ...(error.status === undefined ? {} : { status: error.status }),
           retryable: error.retryable === true,
-          ...this.clientLatencyFields(requestId),
+          ...this.clientLatency.fields(requestId),
         });
       }
-      const latency = this.clientLatency.get(requestId);
-      const rawElapsed = latency?.conversationId === conversationId
-        ? this.monotonicNow() - latency.startedAtMonotonicMs
-        : null;
+      const rawElapsed = this.clientLatency.elapsed(conversationId, requestId);
       const elapsed = boundedIncidentElapsedMs(rawElapsed);
       const incidentCandidate = error.incidentId ?? error.requestId;
       const incidentId = isThinAgentIncidentId(incidentCandidate)
@@ -3332,7 +2509,7 @@ export class AgentChatSession implements ChatSession {
         retryable: error.retryable === true,
         ...(incidentId ? { incidentId } : {}),
         ...(failureCode ? { failureCode } : {}),
-        ...this.clientLatencyFields(requestId),
+        ...this.clientLatency.fields(requestId),
       });
     } catch {
       // Preflight diagnostics cannot affect the user-visible failed result.
@@ -3397,12 +2574,7 @@ export class AgentChatSession implements ChatSession {
     active.terminal = terminal;
     active.phase = terminal.outcome === "succeeded" ? "settling" : "complete";
     active.label = terminal.outcome === "succeeded" ? "Finishing" : "";
-    const terminalSegmentOrdinal = this.clientLatency.get(active.requestId)
-      ?.pendingTerminalOrdinal ?? undefined;
-    const latencyContext = this.clientLatency.get(active.requestId);
-    if (latencyContext && terminalSegmentOrdinal !== undefined) {
-      latencyContext.terminalSegmentOrdinal = terminalSegmentOrdinal;
-    }
+    const terminalSegmentOrdinal = this.clientLatency.acceptTerminal(active.requestId);
     this.recordLifecycle({
       code: terminal.outcome === "succeeded"
         ? "response_result_received_succeeded"
@@ -3420,7 +2592,7 @@ export class AgentChatSession implements ChatSession {
             failureCode: terminal.code,
           }
         : {}),
-      ...this.clientLatencyFields(
+      ...this.clientLatency.fields(
         active.requestId,
         this.monotonicNow(),
         terminalSegmentOrdinal,
@@ -3466,7 +2638,7 @@ export class AgentChatSession implements ChatSession {
         conversationId: active.conversationId,
         requestId: active.requestId,
         serverRunId: terminal.run_id,
-        ...this.clientLatencyFields(active.requestId),
+        ...this.clientLatency.fields(active.requestId),
       });
       try {
         await this.options.persistAssistant(durable);
@@ -3476,7 +2648,7 @@ export class AgentChatSession implements ChatSession {
           conversationId: active.conversationId,
           requestId: active.requestId,
           serverRunId: terminal.run_id,
-          ...this.clientLatencyFields(active.requestId),
+          ...this.clientLatency.fields(active.requestId),
         });
       } catch (error) {
         this.recordLifecycle({
@@ -3485,7 +2657,7 @@ export class AgentChatSession implements ChatSession {
           conversationId: active.conversationId,
           requestId: active.requestId,
           serverRunId: terminal.run_id,
-          ...this.clientLatencyFields(active.requestId),
+          ...this.clientLatency.fields(active.requestId),
         });
         this.reportLocalIssue(error);
       }
@@ -3561,10 +2733,10 @@ export class AgentChatSession implements ChatSession {
               : {}),
           }
         : {}),
-      ...this.clientLatencyFields(
+      ...this.clientLatency.fields(
         active.requestId,
         this.monotonicNow(),
-        this.clientLatency.get(active.requestId)?.terminalSegmentOrdinal ?? undefined,
+        this.clientLatency.terminalSegmentOrdinal(active.requestId),
       ),
     });
     const billingFailure = result.kind === "failed" ? result.error : null;
@@ -3693,7 +2865,7 @@ export class AgentChatSession implements ChatSession {
       this.commitSnapshot(this.presentActive(active));
     } else if (this.renderTimer === null) {
       this.scheduleSnapshot(this.presentActive(active));
-    } else if (this.awaitsProjectionMilestone(active)) {
+    } else if (this.clientLatency.awaitsProjection(active.requestId)) {
       this.pendingActivePresentation = null;
       this.dispatchSnapshot(this.presentActive(active));
     } else {
@@ -3701,38 +2873,10 @@ export class AgentChatSession implements ChatSession {
     }
   }
 
-  private awaitsProjectionMilestone(active: ActiveRun): boolean {
-    const latency = this.clientLatency.get(active.requestId);
-    return latency !== undefined && (
-      latency.pendingAssistantProjectionOrdinal !== null
-      || !latency.milestones.has("response_first_content_projected")
-    );
-  }
-
   private presentActive(active: ActiveRun): AgentConversationSnapshot {
     this.updateActiveElapsed(active);
     const snapshot = active.projectionOwner.present(active.projection, this.presentationFacts(active));
-    const latency = this.clientLatency.get(active.requestId);
-    const pendingAssistantProjectionOrdinal =
-      latency?.pendingAssistantProjectionOrdinal ?? null;
-    if (pendingAssistantProjectionOrdinal !== null && snapshot.messages.length > 0) {
-      this.recordClientLatencyMilestone(
-        "response_first_assistant_snapshot_projected",
-        active.requestId,
-        this.monotonicNow(),
-        {},
-        pendingAssistantProjectionOrdinal,
-      );
-      latency!.pendingAssistantProjectionOrdinal = null;
-    }
-    if (snapshot.parts.some((part) =>
-      part.kind === "text" || part.kind === "reasoning" || part.kind === "tool")) {
-      this.recordClientLatencyMilestone(
-        "response_first_content_projected",
-        active.requestId,
-        this.monotonicNow(),
-      );
-    }
+    this.clientLatency.observeProjection(active.requestId, snapshot);
     this.syncRunStallWatchdog(snapshot);
     return snapshot;
   }
@@ -3814,20 +2958,20 @@ export class AgentChatSession implements ChatSession {
     // The cached graph is deeply frozen, so persistence shares it by reference.
     const durable = history.messages as readonly ChatMessage[];
     this.reconciledKey = key;
-    const correlation = this.createHistorySyncCorrelation(historySyncKind);
+    const correlation = this.clientLatency.createHistorySyncCorrelation(historySyncKind, this.conversationId);
     const task = this.pendingReconcile.then(() => {
-      this.recordHistorySyncLifecycle("history_sync_started", correlation);
+      this.clientLatency.recordHistorySync("history_sync_started", correlation);
       return this.options.reconcileHistory!(durable);
     });
     this.pendingReconcile = task.then(
       () => {
-        this.recordHistorySyncLifecycle("history_sync_completed", correlation);
+        this.clientLatency.recordHistorySync("history_sync_completed", correlation);
       },
       (error) => {
         if (this.reconciledKey === key) {
           this.reconciledKey = null;
         }
-        this.recordHistorySyncLifecycle("history_sync_failed", correlation);
+        this.clientLatency.recordHistorySync("history_sync_failed", correlation);
         this.reportLocalIssue(error);
       },
     );

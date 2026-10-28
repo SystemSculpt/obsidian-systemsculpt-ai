@@ -6,17 +6,7 @@ import {
   updateUiAction,
 } from "../../core/ui/surface";
 import type { ChatMessage, MessagePart } from "../../types";
-import type { ToolCall } from "../../types/toolCalls";
-import {
-  isServerExecutedManagedToolCall,
-  readManagedToolCallFunction,
-} from "../../chat/managed/ManagedToolExecution";
 import { contentKeys, sameContentKeys } from "../../utils/immutableJson";
-import { collectSuccessfulToolArtifactPaths, collectToolArtifactPaths } from "../../utils/toolArtifacts";
-import {
-  renderOperationsInlinePreview,
-  renderWriteEditInlineDiff,
-} from "./ToolCallPreview";
 import type {
   AgentArtifact,
   AgentConversationSnapshot,
@@ -42,26 +32,35 @@ import {
 } from "./AgentConversationPresentation";
 import {
   isLocalReportId,
-  normalizeFailedTerminalReceipt,
 } from "./FailedTerminalReceipt";
-import {
-  presentAgentTool,
-  presentAgentToolDetails,
-  presentAgentToolFailure,
-  presentToolLineMeta,
-} from "./AgentToolPresentation";
 import {
   presentChatMessage,
   presentMessageContent,
   type PresentedMessageAttachment,
-  type PresentedMessageContent,
 } from "./ChatMessagePresentation";
 import { InlineMessageEditor, type AgentInlineMessageEdit } from "./InlineMessageEditor";
 import { LiveMarkdownRenderer } from "./LiveMarkdownRenderer";
 import { AgentApprovalCards, type ApprovalAnswer } from "./AgentApprovalCards";
-import { renderNativeToolPreview } from "./NativeToolPresentation";
-import { renderHostedToolPreview } from "./HostedToolPreview";
 import { MessagePartNormalizer } from "./utils/MessagePartNormalizer";
+
+import { presentAgentTool } from "./AgentToolPresentation";
+import { AgentToolRenderer } from "./AgentToolRenderer";
+import {
+  agentPartsEqual,
+  classifyHistoricalTurn,
+  durableFailedReceipt,
+  historicalPartKey,
+  historicalToolPart,
+  isNativeSourcesPart,
+  isOrphanNativeFailure,
+  isVisibleHistoricalPart,
+  partitionHistoricalParts,
+  terminalToolPresentation,
+  toolDisplayFingerprint,
+  toolPartKey,
+  type DurableFailedReceipt,
+  type HistoricalTurnSemantics,
+} from "./ConversationPartPresentation";
 
 export type AgentConversationRendererOptions = Readonly<{
   app: App;
@@ -127,7 +126,6 @@ function button(parent: HTMLElement, testId: string, label: string, icon?: strin
   return element;
 }
 
-const ACTIONABLE_ARTIFACT_TOOLS = new Set(["write", "edit", "multi_edit", "move"]);
 const INCIDENT_RENDER_COUNT_LIMIT = 1_000_000;
 const INCIDENT_RENDER_DURATION_LIMIT_MS = 86_400_000;
 let activityDrawerSequence = 0;
@@ -150,69 +148,6 @@ function boundedIncidentRenderDuration(value: number): number {
   return Math.min(INCIDENT_RENDER_DURATION_LIMIT_MS, Math.max(0, Math.round(value)));
 }
 
-function toolPartKey(callId: string): string {
-  return `tool:${callId}`;
-}
-
-function isNativeSourcesPart(part: MessagePart): boolean {
-  if (part.type !== "content") return false;
-  if (part.id.startsWith("sources:")) return true;
-  const markdown = presentMessageContent(part.data).markdown.trim();
-  const lines = markdown.split(/\r?\n/);
-  return lines.length >= 3
-    && lines[0] === "### Sources"
-    && lines[1] === ""
-    && lines.slice(2).every((line) =>
-      /^- \[(?:\\.|[^\]])+\]\(<https?:\/\/[^<>\s]+>\)$/.test(line));
-}
-
-function historicalPartKey(part: MessagePart): string {
-  return part.type === "tool_call" ? toolPartKey(part.data.id) : part.id;
-}
-
-type HistoricalTurnSemantics = Readonly<{
-  hasVisibleContent: boolean;
-  hasTools: boolean;
-  isToolOnly: boolean;
-  copyText: string;
-}>;
-
-type DurableFailedReceipt = Readonly<{
-  messageId: string;
-  reportId?: string;
-  incidentId?: string;
-  failureCode: string;
-  failureMessage?: string;
-  retryable: boolean;
-  serverRunId?: string;
-}>;
-
-function durableFailedReceipt(message: ChatMessage): DurableFailedReceipt | null {
-  if (message.role !== "assistant") return null;
-  const receipt = normalizeFailedTerminalReceipt(message);
-  if (!receipt) return null;
-  return Object.freeze({
-    messageId: message.message_id,
-    reportId: receipt.terminalReportId ?? receipt.terminalIncidentId,
-    ...(receipt.terminalIncidentId ? { incidentId: receipt.terminalIncidentId } : {}),
-    failureCode: receipt.terminalFailureCode,
-    failureMessage: receipt.terminalFailureMessage,
-    retryable: receipt.terminalRetryable,
-    ...(receipt.terminalServerRunId ? { serverRunId: receipt.terminalServerRunId } : {}),
-  });
-}
-
-/** Plugin 6.18.0 could save a native failure for a message that never reached the agent, under the previous turn. */
-function isOrphanNativeFailure(message: ChatMessage, turnId: string | null): boolean {
-  return durableFailedReceipt(message)?.failureMessage !== undefined && message.message_id !== `${turnId}_assistant`;
-}
-
-type HistoricalPartPartition = Readonly<{
-  workParts: readonly MessagePart[];
-  finalAnswers: readonly MessagePart[];
-  hasActivity: boolean;
-}>;
-
 type HistoricalActivityHydrationState = {
   element: HTMLDetailsElement;
   summary: HTMLElement;
@@ -231,17 +166,6 @@ type HistoricalOverflowHydrationState = {
 };
 
 type HistoricalHydrationStatus = "cold" | "hydrating" | "hydrated" | "disposed";
-
-type ToolApprovalPreviewHydrationState = {
-  container: HTMLElement;
-  preview: HTMLElement;
-  fingerprint: string;
-  toolCall: ToolCall;
-  part: AgentToolPart;
-  lifecycleGeneration: number;
-  toolRenderEpoch: number;
-  hydration: Promise<void> | null;
-};
 
 /*
  * What a rendered history row was built from. Frozen transcript messages
@@ -300,173 +224,6 @@ type HistoricalReplacementInteraction = Readonly<{
   selection: PreservedDomSelection | null;
 }>;
 
-function isVisibleHistoricalPart(part: MessagePart): boolean {
-  if (part.type === "reasoning") return part.data.trim().length > 0;
-  if (part.type === "tool_call") return true;
-  const content = presentMessageContent(part.data);
-  return content.markdown.trim().length > 0 || content.attachments.length > 0;
-}
-
-function partitionHistoricalParts(
-  parts: readonly MessagePart[],
-  finalAnswerPartIds: ReadonlySet<string>,
-): HistoricalPartPartition {
-  const visibleParts = parts.filter(isVisibleHistoricalPart);
-  const workParts = visibleParts.filter((part) => !finalAnswerPartIds.has(part.id));
-  const finalAnswers = visibleParts.filter((part) =>
-    part.type === "content" && finalAnswerPartIds.has(part.id));
-  return {
-    workParts,
-    finalAnswers,
-    hasActivity: workParts.some((part) =>
-      part.type === "reasoning" || part.type === "tool_call"),
-  };
-}
-
-function classifyHistoricalTurn(
-  message: ChatMessage,
-  aggregateContent: PresentedMessageContent,
-  orderedParts: readonly MessagePart[],
-): HistoricalTurnSemantics {
-  const usesOrderedParts = orderedParts.length > 0;
-  const presentedContent = usesOrderedParts
-    ? orderedParts
-      .filter((part) => part.type === "content")
-      .map((part) => presentMessageContent(part.data))
-    : [aggregateContent];
-  const copyText = presentedContent
-    .map((content) => content.markdown)
-    .filter((markdown) => markdown.trim().length > 0)
-    .join("\n\n");
-  const hasVisibleContent = copyText.length > 0
-    || presentedContent.some((content) => content.attachments.length > 0)
-    || orderedParts.some((part) => part.type === "reasoning" && part.data.trim().length > 0);
-  const hasTools = message.role === "assistant"
-    && orderedParts.some((part) => part.type === "tool_call");
-  const isToolOnly = hasTools && !hasVisibleContent;
-  return { hasVisibleContent, hasTools, isToolOnly, copyText };
-}
-
-function toolCallForPart(part: AgentToolPart): ToolCall {
-  return {
-    id: part.callId,
-    messageId: part.messageId,
-    request: {
-      id: part.callId,
-      type: "function",
-      function: {
-        name: part.name,
-        arguments: JSON.stringify(part.input ?? {}),
-      },
-    },
-    state: "executing",
-    timestamp: Date.now(),
-  };
-}
-
-function historicalToolState(tool: ToolCall, success: boolean): AgentToolPart["state"] {
-  if (success) return "succeeded";
-
-  switch (tool.result?.error?.code) {
-    case "USER_DENIED":
-    case "NATIVE_TOOL_DENIED":
-      return "denied";
-    case "TOOL_CANCELLED_BEFORE_START":
-    case "NATIVE_TOOL_CANCELLED":
-      return "cancelled";
-    case "NATIVE_TOOL_OUTCOME_UNKNOWN":
-    case "TOOL_CANCEL_REQUESTED_OUTCOME_UNKNOWN":
-    case "TOOL_OUTCOME_UNKNOWN":
-    case "TOOL_OUTCOME_UNKNOWN_AFTER_RESTART":
-      return "outcome-unknown";
-    default:
-      return tool.state === "failed" || tool.result?.success === false ? "failed" : "running";
-  }
-}
-
-function visibleToolError(part: AgentToolPart): string | null {
-  return part.error ? presentAgentToolFailure(part) : null;
-}
-
-function toolDisplayFingerprint(part: AgentToolPart): string {
-  const presentation = presentAgentTool(part);
-  const approvalInput = (part.location === "vault" || part.native)
-    && part.state === "approval-required"
-    && part.approvalId
-    ? part.input
-    : undefined;
-  const artifacts = ACTIONABLE_ARTIFACT_TOOLS.has(presentation.canonicalName)
-    ? part.output?.artifacts
-    : undefined;
-  return JSON.stringify({
-    location: part.location,
-    state: part.state,
-    presentation,
-    details: presentAgentToolDetails(part),
-    error: visibleToolError(part),
-    approvalId: approvalInput === undefined ? undefined : part.approvalId,
-    approvalInput,
-    approvalDecision: part.approvalDecision,
-    approvalScope: part.approvalScope,
-    native: part.native,
-    artifacts,
-  });
-}
-
-function agentPartsEqual(
-  left: AgentPart | undefined,
-  right: AgentPart,
-  committedToolFingerprint?: string,
-  incomingToolFingerprint?: string,
-): boolean {
-  if (left === right && right.kind !== "tool") return true;
-  if (!left || left.kind !== right.kind || left.id !== right.id || left.order !== right.order) {
-    return false;
-  }
-  switch (right.kind) {
-    case "text":
-      return left.kind === "text"
-        && left.messageId === right.messageId
-        && left.state === right.state
-        && left.markdown === right.markdown;
-    case "reasoning":
-      return left.kind === "reasoning"
-        && left.messageId === right.messageId
-        && left.state === right.state
-        && left.summary === right.summary;
-    case "error":
-      return left.kind === "error"
-        && left.retryable === right.retryable
-        && left.retryMessageId === right.retryMessageId
-        && JSON.stringify(presentAgentError(left.error, left.retryable))
-          === JSON.stringify(presentAgentError(right.error, right.retryable));
-    case "tool":
-      return left.kind === "tool"
-        && left.messageId === right.messageId
-        && left.callId === right.callId
-        && committedToolFingerprint === incomingToolFingerprint;
-  }
-}
-
-function terminalToolPresentation(
-  part: AgentPart,
-  presentation: AgentConversationPresentation,
-): AgentPart {
-  if (
-    part.kind !== "tool"
-    || !["completed", "cancelled", "failed"].includes(presentation.phase)
-    || (part.state !== "approval-required" && !isActiveAgentToolState(part.state))
-  ) {
-    return part;
-  }
-  const state: AgentToolPart["state"] = presentation.phase === "cancelled"
-    ? "cancelled"
-    : presentation.phase === "failed"
-      ? "failed"
-      : "outcome-unknown";
-  return { ...part, state, ...(part.state === "approval-required" ? { approvalDecision: "withdrawn" as const } : {}) };
-}
-
 /** Projects durable messages plus the active normalized agent run into native DOM. */
 let turnHeadingSequence = 0;
 
@@ -509,10 +266,6 @@ export class AgentConversationRenderer extends Component {
   private readonly activePartProgressStates = new WeakMap<HTMLElement, boolean>();
   private readonly activeToolDisplayFingerprints = new Map<string, string>();
   private readonly activeToolErrorSuppression = new Map<string, boolean>();
-  private readonly toolApprovalPreviewHydrationStates = new WeakMap<
-    HTMLElement,
-    ToolApprovalPreviewHydrationState
-  >();
   private toolRenderEpoch = 0;
   private activeTailStatus: HTMLElement | null = null;
   private activeCompletedFold: HTMLDetailsElement | null = null;
@@ -535,6 +288,7 @@ export class AgentConversationRenderer extends Component {
   private readonly incidentDisclosureStates = new Map<HTMLElement, IncidentDisclosureState>();
   private readonly liveMarkdown: LiveMarkdownRenderer;
   private readonly approvals: AgentApprovalCards;
+  private readonly tools: AgentToolRenderer;
   private renderGeneration = 0;
   private lifecycleGeneration = 0;
   private renderingEnabled = true;
@@ -546,7 +300,6 @@ export class AgentConversationRenderer extends Component {
   private incidentMaxRenderDurationMs = 0;
   private incidentHistoricalPartCount = 0;
   private incidentPendingHydrationCount = 0;
-  private readonly toolDetailHydrators = new WeakMap<HTMLElement, () => void>();
   private loadingTimer: number | null = null;
   private loadingTimerWindow: Window | null = null;
   private loadingSkeleton: HTMLElement | null = null;
@@ -599,6 +352,21 @@ export class AgentConversationRenderer extends Component {
       onOpenPath: (path) => this.options.onOpenArtifact({ id: path, title: path, path, kind: "vault_file" }),
     });
     this.addChild(this.approvals);
+    this.tools = new AgentToolRenderer({
+      app: options.app,
+      component: this,
+      approvals: this.approvals,
+      onOpenArtifact: (artifact) => this.options.onOpenArtifact(artifact),
+      renderArtifact: (parent, artifact) => this.renderArtifact(parent, artifact),
+      beginLayoutMutation: (control, target) => this.options.beginLayoutMutation?.(control, target),
+      nextDisclosureId: () => `systemsculpt-tool-details-${++activityDrawerSequence}`,
+      isRenderingEnabled: () => this.renderingEnabled,
+      lifecycleGeneration: () => this.lifecycleGeneration,
+      renderEpoch: () => this.toolRenderEpoch,
+      trackDisclosure: (element, available, open) => this.trackIncidentDisclosure(element, "tool", available, open),
+      updateDisclosure: (element, available, open) => this.updateIncidentDisclosure(element, available, open),
+      untrackDisclosures: (target) => this.untrackIncidentDisclosuresWithin(target),
+    });
   }
 
   /** The mounted live response; settlement transfers it to history and clears this reference. */
@@ -972,7 +740,7 @@ export class AgentConversationRenderer extends Component {
           }
         }
         this.renderTurnChanges(body, turnParts.flatMap((part) => part.type === "tool_call"
-          ? [this.historicalToolPart(part.data)] : []));
+          ? [historicalToolPart(part.data)] : []));
       } else {
         const { content } = presented[0];
         if (inlineEdit) {
@@ -1174,7 +942,7 @@ export class AgentConversationRenderer extends Component {
       return JSON.stringify({ type: part.type, summary: part.data });
     }
     if (part.type === "tool_call") {
-      return toolDisplayFingerprint(this.historicalToolPart(part.data));
+      return toolDisplayFingerprint(historicalToolPart(part.data));
     }
     return JSON.stringify({ type: part.type, content: presentMessageContent(part.data) });
   }
@@ -1209,7 +977,7 @@ export class AgentConversationRenderer extends Component {
       return;
     }
     if (part.type === "tool_call") {
-      const tool = this.historicalToolPart(part.data);
+      const tool = historicalToolPart(part.data);
       const node = parent.createDiv({
         cls: "systemsculpt-agent-part is-tool",
         attr: {
@@ -1218,7 +986,7 @@ export class AgentConversationRenderer extends Component {
           "data-activity-kind": "tool",
         },
       });
-      this.renderTool(node, tool);
+      this.tools.render(node, tool);
       return;
     }
     if (part.type !== "content") return;
@@ -1540,7 +1308,7 @@ export class AgentConversationRenderer extends Component {
         summary: part.data,
       };
     }
-    if (part.type === "tool_call") return this.historicalToolPart(part.data);
+    if (part.type === "tool_call") return historicalToolPart(part.data);
     const content = presentMessageContent(part.data);
     return {
       id: part.id,
@@ -1898,7 +1666,7 @@ export class AgentConversationRenderer extends Component {
           if (insertionParent) insertionParent.appendChild(node);
           else this.insertActiveNode(node);
         }
-        if (part.kind === "tool") void this.startToolApprovalPreviewHydration(node);
+        if (part.kind === "tool") void this.tools.hydrateApprovalPreview(node);
       }
     }
     if (preservedFocusKey) {
@@ -2809,7 +2577,7 @@ export class AgentConversationRenderer extends Component {
       return true;
     }
     if (part.kind === "tool") {
-      return this.renderTool(node, part, suppressToolError, progressActive);
+      return this.tools.render(node, part, suppressToolError, progressActive);
     }
     this.forgetMarkdown(node);
     node.empty();
@@ -3094,448 +2862,6 @@ export class AgentConversationRenderer extends Component {
     if (!details.open || state.revision !== revision) state.dirty = true;
   }
 
-  private renderTool(
-    node: HTMLElement,
-    part: AgentToolPart,
-    suppressToolError = false,
-    progressActive = true,
-  ): boolean {
-    const presentation = presentAgentTool(part);
-    const approvalRequired = (part.location === "vault" || part.native)
-      && part.state === "approval-required"
-      && Boolean(part.approvalId);
-    const existingApproval = node.querySelector<HTMLElement>(
-      ":scope > .systemsculpt-agent-approval",
-    );
-    let retainedNativePreview = !approvalRequired
-      ? node.querySelector<HTMLElement>(
-        ":scope > .systemsculpt-agent-tool > .systemsculpt-agent-tool-support > .systemsculpt-agent-resolved-preview",
-      )
-      : null;
-    const reviewedPreview = existingApproval?.querySelector(".systemsculpt-agent-approval-preview")?.hasChildNodes();
-    if (!approvalRequired && existingApproval && (part.native || reviewedPreview)) {
-      // Keep the exact preview reviewed before execution, not a new diff against
-      // the now-modified vault file. Move only the preview and raw disclosure;
-      // pending actions and answer fields must not survive resolution.
-      retainedNativePreview = createSurfaceElement(node.ownerDocument, "div");
-      retainedNativePreview.className = "systemsculpt-agent-resolved-preview";
-      retainedNativePreview.dataset.approvalFingerprint = existingApproval.dataset.approvalFingerprint;
-      for (const child of existingApproval.querySelectorAll<HTMLElement>(
-        ":scope > .systemsculpt-agent-approval-preview, :scope > .systemsculpt-agent-approval-details",
-      )) retainedNativePreview.appendChild(child);
-      const hydration = this.toolApprovalPreviewHydrationStates.get(node);
-      if (hydration?.container === existingApproval) hydration.container = retainedNativePreview;
-    }
-    const detailRows = presentAgentToolDetails(part);
-    const actionableArtifacts = ACTIONABLE_ARTIFACT_TOOLS.has(presentation.canonicalName)
-      ? part.output?.artifacts ?? []
-      : [];
-    const toolError = part.error && !suppressToolError
-      ? visibleToolError(part) ?? "This action could not be completed."
-      : null;
-    const hasReadablePayload = Boolean(part.native) || part.location === "vault";
-    const isQuestion = part.name === "AskUserQuestion" || part.native?.requestMethod?.endsWith("/requestUserInput");
-    const hasDetail = detailRows.length > 0 || Boolean(toolError) || actionableArtifacts.length > 0
-      || Boolean(retainedNativePreview) || hasReadablePayload;
-    const supportFingerprint = JSON.stringify({
-      input: hasReadablePayload ? part.input : undefined,
-      output: hasReadablePayload && !isQuestion ? part.output : undefined,
-      detailRows,
-      toolError,
-      actionableArtifacts,
-      suppressToolError,
-      retainedNativePreview: Boolean(retainedNativePreview),
-    });
-    const supportNeedsRender = node.dataset.toolSupportFingerprint !== supportFingerprint
-      || !node.querySelector(":scope > .systemsculpt-agent-tool > .systemsculpt-agent-tool-support")
-      || !node.querySelector(
-        ":scope > .systemsculpt-agent-tool > .systemsculpt-agent-tool-header .systemsculpt-agent-tool-state-icon",
-      );
-
-    const stagedSupport = createSurfaceElement(node.ownerDocument, "div");
-    stagedSupport.className = "systemsculpt-agent-tool-support";
-    if (supportNeedsRender && detailRows.length > 0) {
-      const detailsList = stagedSupport.createEl("pre", {
-        cls: "systemsculpt-agent-tool-details",
-        attr: { tabindex: "0" },
-      });
-      for (const detail of detailRows) {
-        const row = detailsList.createSpan({ cls: "systemsculpt-agent-tool-detail" });
-        row.createSpan({ cls: "systemsculpt-agent-tool-detail-label", text: detail.label });
-        row.appendText(": ");
-        row.createSpan({ cls: "systemsculpt-agent-tool-detail-value", text: detail.value });
-      }
-    }
-    if (supportNeedsRender && hasReadablePayload && !retainedNativePreview) {
-      stagedSupport.createDiv({ cls: "systemsculpt-agent-tool-preview" });
-      const raw = stagedSupport.createEl("details", { cls: "systemsculpt-agent-tool-raw" });
-      raw.createEl("summary", { text: "Details" });
-      const rawCode = raw.createEl("pre", { attr: { tabindex: "0" } }).createEl("code");
-      raw.addEventListener("toggle", () => {
-        if (raw.open && !rawCode.hasChildNodes()) {
-          rawCode.setText(JSON.stringify({ input: part.input, ...(!isQuestion && part.output ? { output: part.output.data } : {}) }, null, 2));
-        }
-      });
-    }
-    if (supportNeedsRender && toolError) {
-      stagedSupport.createDiv({
-        cls: "systemsculpt-agent-tool-error",
-        text: toolError,
-        attr: { role: "alert" },
-      });
-    }
-    if (supportNeedsRender) {
-      for (const artifact of actionableArtifacts) {
-        this.renderArtifact(stagedSupport, artifact);
-      }
-    }
-
-    const approvalFingerprint = approvalRequired
-      ? JSON.stringify({
-        approvalId: part.approvalId,
-        canonicalName: presentation.canonicalName,
-        input: part.input,
-        native: part.native,
-      })
-      : null;
-    const reusableApproval = approvalFingerprint
-      && existingApproval?.dataset.approvalFingerprint === approvalFingerprint
-      ? existingApproval
-      : null;
-    const stagedApproval = approvalRequired && !reusableApproval
-      ? this.approvals.create(part, presentation.canonicalName)
-      : null;
-    if (stagedApproval && approvalFingerprint) {
-      stagedApproval.dataset.approvalFingerprint = approvalFingerprint;
-    }
-    node.className = `systemsculpt-agent-part is-tool is-${presentation.displayState}`;
-    node.dataset.agentActivityRow = "";
-    node.dataset.activityKind = "tool";
-    delete node.dataset.toolCount;
-    let shell = node.querySelector<HTMLElement>(":scope > .systemsculpt-agent-tool");
-    let header = shell?.querySelector<HTMLElement>(
-      ":scope > .systemsculpt-agent-tool-header",
-    ) ?? null;
-    let copy = header?.querySelector<HTMLElement>(
-      ":scope > .systemsculpt-agent-tool-copy",
-    ) ?? null;
-    let controls = header?.querySelector<HTMLElement>(
-      ":scope > .systemsculpt-agent-tool-controls",
-    ) ?? null;
-    let disclosureIcon = header?.querySelector<HTMLElement>(
-      ".systemsculpt-agent-tool-disclosure",
-    ) ?? null;
-    let icon = header?.querySelector<HTMLElement>(
-      ":scope > .systemsculpt-agent-tool-icon",
-    ) ?? null;
-    let label = header?.querySelector<HTMLElement>(
-      ".systemsculpt-agent-tool-label",
-    ) ?? null;
-    let summary = header?.querySelector<HTMLElement>(
-      ".systemsculpt-agent-tool-summary",
-    ) ?? null;
-    let stateIcon = header?.querySelector<HTMLElement>(
-      ".systemsculpt-agent-tool-state-icon",
-    ) ?? null;
-    let support = shell?.querySelector<HTMLElement>(
-      ":scope > .systemsculpt-agent-tool-support",
-    ) ?? null;
-    const preservedOpen = shell?.instanceOf(HTMLDetailsElement) === true
-      ? shell.open
-      : false;
-    let rebuiltShell = false;
-    if (
-      !shell
-      || !shell.instanceOf(HTMLDetailsElement)
-      || !header
-      || !copy
-      || !controls
-      || !disclosureIcon
-      || !icon
-      || !label
-      || !summary
-      || !stateIcon
-      || !support
-    ) {
-      this.untrackIncidentDisclosuresWithin(node);
-      node.empty();
-      rebuiltShell = true;
-      shell = node.createEl("details", {
-        cls: "systemsculpt-agent-tool",
-        attr: {
-          "data-agent-part-disclosure": "",
-          "data-activity-kind": "tool",
-        },
-      });
-      header = shell.createEl("summary", {
-        cls: "systemsculpt-agent-tool-header",
-        attr: { role: "button", "aria-expanded": "false", "data-testid": "chat.tool.toggle" },
-      });
-      icon = header.createSpan({ cls: "systemsculpt-agent-tool-icon" });
-      copy = header.createSpan({ cls: "systemsculpt-agent-tool-copy" });
-      label = copy.createEl("strong", {
-        cls: "systemsculpt-agent-tool-label",
-      });
-      summary = copy.createSpan({
-        cls: "systemsculpt-agent-tool-summary",
-      });
-      controls = header.createSpan({ cls: "systemsculpt-agent-tool-controls" });
-      disclosureIcon = controls.createSpan({
-        cls: "systemsculpt-agent-tool-disclosure",
-      });
-      disclosureIcon.setAttribute("aria-hidden", "true");
-      stateIcon = controls.createSpan({ cls: "systemsculpt-agent-tool-state-icon" });
-      stateIcon.setAttribute("aria-hidden", "true");
-      header.dataset.focusKey = "tool-summary";
-      const createdShell = shell as HTMLDetailsElement;
-      header.addEventListener("click", (event) => {
-        if (!createdShell.classList.contains("is-disclosure")) event.preventDefault();
-      });
-      createdShell.addEventListener("toggle", () => {
-        createdShell.querySelector("summary")?.setAttribute("aria-expanded", String(createdShell.open));
-        if (createdShell.open) this.toolDetailHydrators.get(node)?.();
-        this.updateIncidentDisclosure(
-          createdShell,
-          createdShell.classList.contains("is-disclosure"),
-          createdShell.open,
-        );
-      });
-      const supportId = `systemsculpt-tool-details-${++activityDrawerSequence}`;
-      header.setAttribute("aria-controls", supportId);
-      support = shell.createDiv({ cls: "systemsculpt-agent-tool-support", attr: { id: supportId } });
-      createdShell.open = preservedOpen && hasDetail;
-    }
-
-    shell.classList.toggle("is-disclosure", hasDetail);
-    if (!hasDetail && (shell as HTMLDetailsElement).open) {
-      (shell as HTMLDetailsElement).open = false;
-    }
-    this.trackIncidentDisclosure(
-      shell,
-      "tool",
-      hasDetail,
-      hasDetail && (shell as HTMLDetailsElement).open,
-    );
-    if (hasDetail) {
-      if (disclosureIcon.dataset.iconName !== "chevron-down") {
-        setIcon(disclosureIcon, "chevron-down");
-        disclosureIcon.dataset.iconName = "chevron-down";
-      }
-    } else if (disclosureIcon.hasChildNodes()) {
-      disclosureIcon.empty();
-      delete disclosureIcon.dataset.iconName;
-    }
-    const accessibleState = presentation.displayState === "succeeded" ? "Done" : "";
-    header.removeAttribute("aria-label");
-    if (accessibleState) header.setAttribute("aria-description", accessibleState);
-    else header.removeAttribute("aria-description");
-    header.setAttribute("aria-expanded", String((shell as HTMLDetailsElement).open));
-    icon.setAttribute("aria-hidden", "true");
-    icon.classList.toggle("is-animated", progressActive && presentation.icon === "loader-circle");
-    const actionIcon = presentation.icon;
-    if (icon.dataset.iconName !== actionIcon) {
-      setIcon(icon, actionIcon);
-      icon.dataset.iconName = actionIcon;
-    }
-    if (stateIcon.dataset.iconState !== presentation.icon) {
-      setIcon(stateIcon, presentation.icon);
-      stateIcon.dataset.iconState = presentation.icon;
-    }
-    const decision = part.approvalDecision ?? (part.approvalId && !approvalRequired
-      ? part.state === "denied" ? "denied"
-        : part.state === "cancelled" || part.state === "outcome-unknown" ? "withdrawn"
-          : part.state === "approved" || part.state === "running" || part.state === "succeeded" ? "approved" : undefined
-      : undefined);
-    const decisionLabel = decision === "withdrawn" ? "Withdrawn" : decision === "denied" ? "Denied"
-      : part.approvalScope === "session" ? "Approved for this chat" : "Approved";
-    const planDecision = part.name === "ExitPlanMode" && decision;
-    const displayLabel = planDecision
-      ? decision === "denied" ? "Kept planning" : decision === "withdrawn" ? "Plan withdrawn" : "Plan started"
-      : isQuestion && decision ? decision === "denied" ? "Skipped" : "Answered question"
-        : decision ? `${presentation.label} · ${decisionLabel}` : presentation.label;
-    if (label.textContent !== displayLabel) {
-      label.setText(displayLabel);
-      const target = presentation.targetPath;
-      const basename = target?.split("/").pop();
-      const index = basename ? displayLabel.indexOf(basename) : -1;
-      if (target && basename && index >= 0) {
-        label.setText(displayLabel.slice(0, index));
-        const link = label.createEl("a", {
-          text: basename, attr: { href: target, "data-href": target, "data-testid": "chat.tool.open-path" },
-        });
-        link.onclick = (event) => {
-          event.preventDefault(); event.stopPropagation();
-          void this.options.onOpenArtifact({ id: target, path: target, title: basename, kind: "vault_file" });
-        };
-        label.appendText(displayLabel.slice(index + basename.length));
-      }
-    }
-    shell.toggleAttribute("hidden", Boolean(approvalRequired));
-    if (existingApproval && !approvalRequired) (shell as HTMLDetailsElement).open = false;
-    const meta = presentToolLineMeta(presentation);
-    if (meta) {
-      if (summary.textContent !== meta) summary.setText(meta);
-      summary.toggleAttribute("hidden", false);
-    } else {
-      if (summary.textContent) summary.setText("");
-      summary.toggleAttribute("hidden", true);
-    }
-    if (supportNeedsRender || rebuiltShell) {
-      support.replaceChildren(...Array.from(stagedSupport.childNodes));
-      node.dataset.toolSupportFingerprint = supportFingerprint;
-    }
-    if (retainedNativePreview && retainedNativePreview.parentElement !== support) {
-      support.appendChild(retainedNativePreview);
-    }
-    support.toggleAttribute("hidden", !support.hasChildNodes());
-    const previewHost = support.querySelector<HTMLElement>(":scope > .systemsculpt-agent-tool-preview");
-    if (previewHost && !retainedNativePreview) {
-      const currentSupport = support;
-      const currentHeader = header;
-      this.toolDetailHydrators.set(node, () => {
-        if (previewHost.dataset.hydrated === supportFingerprint) return;
-        previewHost.dataset.hydrated = supportFingerprint;
-        const staging = createSurfaceElement(node.ownerDocument, "div");
-        const rendered = part.native
-          ? renderNativeToolPreview(this.options.app, staging, part, this)
-          : Promise.resolve().then(() => renderHostedToolPreview(this.options.app, staging, part, this, {
-            onOpenPath: (path) => this.options.onOpenArtifact({ id: path, path, title: path, kind: "vault_file" }),
-          }));
-        void rendered.then((hasPreview) => {
-          if (!this.renderingEnabled || !node.isConnected || !currentSupport.contains(previewHost)
-            || node.dataset.toolSupportFingerprint !== supportFingerprint) return;
-          const finish = this.options.beginLayoutMutation?.(currentHeader, previewHost);
-          try {
-            if (hasPreview) currentSupport.querySelector(":scope > .systemsculpt-agent-tool-details")?.remove();
-            previewHost.replaceChildren(...Array.from(staging.childNodes));
-          } finally { finish?.(); }
-        }).catch(() => { delete previewHost.dataset.hydrated; });
-      });
-      // A pending card hides the shell and shows its own preview; hydrate once it resolves.
-      if ((shell as HTMLDetailsElement).open && !approvalRequired) this.toolDetailHydrators.get(node)?.();
-    } else {
-      this.toolDetailHydrators.delete(node);
-    }
-    const currentApproval = node.querySelector<HTMLElement>(
-      ":scope > .systemsculpt-agent-approval",
-    );
-    const desiredApproval = reusableApproval ?? stagedApproval;
-    if (desiredApproval) {
-      if (currentApproval && currentApproval !== desiredApproval) {
-        currentApproval.replaceWith(desiredApproval);
-      } else if (desiredApproval.parentElement !== node) {
-        node.appendChild(desiredApproval);
-      }
-    } else {
-      currentApproval?.remove();
-    }
-    if (desiredApproval && approvalFingerprint) {
-      this.prepareToolApprovalPreviewHydration(
-        node,
-        desiredApproval,
-        approvalFingerprint,
-        toolCallForPart(part),
-        part,
-      );
-    } else if (!retainedNativePreview) {
-      this.toolApprovalPreviewHydrationStates.delete(node);
-    }
-    return true;
-  }
-
-  private prepareToolApprovalPreviewHydration(
-    node: HTMLElement,
-    approval: HTMLElement,
-    fingerprint: string,
-    toolCall: ToolCall,
-    part: AgentToolPart,
-  ): void {
-    const existing = this.toolApprovalPreviewHydrationStates.get(node);
-    if (
-      existing
-      && existing.container === approval
-      && existing.fingerprint === fingerprint
-      && existing.lifecycleGeneration === this.lifecycleGeneration
-    ) {
-      return;
-    }
-    const preview = approval.querySelector<HTMLElement>(
-      ":scope > .systemsculpt-agent-approval-preview",
-    );
-    if (!preview) return;
-    this.toolApprovalPreviewHydrationStates.set(node, {
-      container: approval,
-      preview,
-      fingerprint,
-      toolCall,
-      part,
-      lifecycleGeneration: this.lifecycleGeneration,
-      toolRenderEpoch: this.toolRenderEpoch,
-      hydration: null,
-    });
-  }
-
-  private startToolApprovalPreviewHydration(
-    node: HTMLElement,
-  ): Promise<void> | null {
-    const state = this.toolApprovalPreviewHydrationStates.get(node);
-    if (!state) return null;
-    if (state.hydration) return state.hydration;
-    state.hydration = this.hydrateToolApprovalPreview(node, state).catch(() => undefined);
-    return state.hydration;
-  }
-
-  private async hydrateToolApprovalPreview(
-    node: HTMLElement,
-    state: ToolApprovalPreviewHydrationState,
-  ): Promise<void> {
-    const staging = createSurfaceElement(state.preview.ownerDocument, "div");
-    try {
-      const native = await renderNativeToolPreview(this.options.app, staging, state.part, this);
-      if (!native) {
-        const diff = await renderWriteEditInlineDiff(this.options.app, staging, state.toolCall);
-        if (!diff) await renderOperationsInlinePreview(staging, state.toolCall);
-      }
-    } catch {
-      return;
-    }
-    if (!this.isCurrentToolApprovalPreview(node, state)) return;
-    const finishLayoutMutation = this.options.beginLayoutMutation?.(
-      undefined,
-      state.preview,
-    );
-    try {
-      if (!this.isCurrentToolApprovalPreview(node, state)) return;
-      state.preview.replaceChildren(...Array.from(staging.childNodes));
-      if (staging.dataset.changeSize) {
-        const meta = state.container.querySelector<HTMLElement>(".systemsculpt-agent-approval-meta");
-        if (meta && !meta.querySelector(".systemsculpt-agent-change-size")) {
-          if (meta.textContent?.trim()) meta.appendText(" · ");
-          meta.createSpan({ cls: "systemsculpt-agent-change-size", text: staging.dataset.changeSize });
-          meta.removeAttribute("hidden");
-        }
-      }
-      state.preview.toggleAttribute("hidden", !state.preview.hasChildNodes());
-    } finally {
-      finishLayoutMutation?.();
-    }
-  }
-
-  private isCurrentToolApprovalPreview(
-    node: HTMLElement,
-    state: ToolApprovalPreviewHydrationState,
-  ): boolean {
-    return this.renderingEnabled
-      && state.lifecycleGeneration === this.lifecycleGeneration
-      && state.toolRenderEpoch === this.toolRenderEpoch
-      && this.toolApprovalPreviewHydrationStates.get(node) === state
-      && node.isConnected
-      && state.container.isConnected
-      && state.container.dataset.approvalFingerprint === state.fingerprint
-      && state.container.contains(state.preview)
-      && node.contains(state.container);
-  }
-
   private renderTurnChanges(parent: HTMLElement, parts: readonly AgentToolPart[]): void {
     const existing = parent.querySelector<HTMLElement>(":scope > .systemsculpt-agent-turn-changes");
     const changes = presentTurnChanges(parts);
@@ -3576,63 +2902,6 @@ export class AgentConversationRenderer extends Component {
     const copyPath = button(actions, "chat.tool.file.copy-path", "Copy path", "copy");
     copyPath.setAttrs({ "aria-label": "Copy path" });
     copyPath.onclick = () => void this.copyWithFeedback(copyPath, "path", () => this.options.onCopyArtifactPath(artifact));
-  }
-
-  private historicalToolPart(tool: ToolCall): AgentToolPart {
-    const fn = readManagedToolCallFunction(tool);
-    const success = tool.state === "completed" && tool.result?.success === true;
-    let input: unknown = {};
-    let paths: string[] = [];
-    try {
-      input = JSON.parse(fn?.arguments || "{}");
-      if (fn) {
-        paths = success
-          ? collectToolArtifactPaths(fn.name, input as Record<string, unknown>, tool.result?.data)
-          : collectSuccessfulToolArtifactPaths(fn.name, tool.result?.data);
-      }
-    } catch {
-      // Malformed input is already represented by the durable failed tool state.
-      input = fn?.arguments ?? {};
-    }
-    const state = historicalToolState(tool, success);
-    const summary = tool.result?.data && typeof tool.result.data === "object"
-      && typeof (tool.result.data as { summary?: unknown }).summary === "string"
-      ? (tool.result.data as { summary: string }).summary
-      : paths.join(", ");
-    return {
-      id: tool.id,
-      order: tool.timestamp,
-      kind: "tool",
-      messageId: tool.messageId,
-      callId: tool.id,
-      name: fn?.name ?? "unknown_tool",
-      location: isServerExecutedManagedToolCall(tool) ? "server" : "vault",
-      input,
-      state,
-      ...(tool.native ? { native: tool.native } : {}),
-      ...(tool.approvalDecision ? { approvalDecision: tool.approvalDecision } : {}),
-      ...(tool.approvalScope ? { approvalScope: tool.approvalScope } : {}),
-      ...(typeof tool.result?.data !== "undefined" || paths.length ? {
-        output: {
-          ...(summary ? { summary } : {}),
-          data: tool.result?.data,
-          ...(paths.length ? {
-            artifacts: paths.map((path) => ({
-              id: `${tool.id}:artifact:${path}`,
-              kind: "vault_file" as const,
-              title: path.split("/").pop() || path,
-              path,
-            })),
-          } : {}),
-        },
-      } : {}),
-      ...(!success && tool.result?.error ? {
-        error: {
-          code: String(tool.result.error.code || "TOOL_EXECUTION_FAILED"),
-          message: tool.result.error.message || "The tool failed.",
-        },
-      } : {}),
-    };
   }
 
   private renderMessageActions(row: HTMLElement, message: ChatMessage, text: string): void {

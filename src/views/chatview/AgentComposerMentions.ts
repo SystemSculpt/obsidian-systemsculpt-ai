@@ -14,6 +14,7 @@ export type ComposerMentionTrigger = Readonly<{
  * Finds the mention being typed at the caret: `@` at the start or after a
  * space, or `[[` anywhere. `@` queries stop at whitespace; `[[` queries run to
  * the closing brackets, as in Obsidian's own link suggester.
+ * @internal Unit-tested directly.
  */
 export function findComposerMentionTrigger(text: string, caret: number): ComposerMentionTrigger | null {
   const before = text.slice(0, caret);

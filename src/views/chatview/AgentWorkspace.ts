@@ -153,7 +153,7 @@ type SnapshotRenderWaiter = Readonly<{
   reject: (error: unknown) => void;
 }>;
 
-export type AgentWorkspaceIncidentRenderState =
+type AgentWorkspaceIncidentRenderState =
   | "idle"
   | "frame_pending"
   | "queued"

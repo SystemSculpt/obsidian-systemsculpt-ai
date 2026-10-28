@@ -14,7 +14,7 @@ import {
 } from "../../../chat/ChatAttachmentContent";
 
 const CHAT_ATTACHMENT_REF_SCHEMA = "systemsculpt-chat-attachment-v1" as const;
-export const CHAT_ATTACHMENT_STORE_ROOT = ".systemsculpt/chat-attachments";
+const CHAT_ATTACHMENT_STORE_ROOT = ".systemsculpt/chat-attachments";
 const SHA256_HEX = /^[a-f0-9]{64}$/;
 const REFERENCE_IMAGE_PLACEHOLDER = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAF/gL+XyG7WQAAAABJRU5ErkJggg==";
 const ATTACHMENT_ORPHAN_GRACE_MS = 7 * 24 * 60 * 60 * 1000;

@@ -73,7 +73,7 @@ export type RestoredChatMessageDraft = Readonly<{
   attachments: readonly ChatMessageAttachment[];
 }>;
 
-export type FailedChatMessageAttachment = Readonly<{
+type FailedChatMessageAttachment = Readonly<{
   status: "failed";
   id: string;
   name: string;
@@ -84,7 +84,7 @@ export type FailedChatMessageAttachment = Readonly<{
 }>;
 
 /** A document still being converted; it becomes ready or failed. */
-export type ProcessingChatMessageAttachment = Readonly<{
+type ProcessingChatMessageAttachment = Readonly<{
   status: "processing";
   id: string;
   name: string;
@@ -114,7 +114,7 @@ export type ChatDocumentAttachmentProcessor = Readonly<{
   discard: (fingerprint: `sha256:${string}`) => Promise<void>;
 }>;
 
-export type ChatAttachmentIssueCode =
+type ChatAttachmentIssueCode =
   | "content_block_limit"
   | "duplicate"
   | "empty"

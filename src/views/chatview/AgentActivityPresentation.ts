@@ -59,7 +59,7 @@ export function summarizeAgentActivity(parts: readonly AgentPart[]): AgentActivi
   };
 }
 
-export type AgentActivitySequence<T> = Readonly<{
+type AgentActivitySequence<T> = Readonly<{
   kind: "activity";
   items: readonly T[];
 }>;
