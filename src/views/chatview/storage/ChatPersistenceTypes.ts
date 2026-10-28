@@ -12,7 +12,7 @@ export function parseAgentConversationId(value: unknown): string | undefined {
   return /^conversation_[a-f0-9]{32}$/.test(value) ? value : undefined;
 }
 
-export interface ChatContextFileMetadata {
+interface ChatContextFileMetadata {
   path: string;
   type: "source" | "extraction";
 }

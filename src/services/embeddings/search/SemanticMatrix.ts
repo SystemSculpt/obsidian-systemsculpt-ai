@@ -95,10 +95,6 @@ export class SemanticMatrix {
     return this.codes.byteLength + this.scales.byteLength + this.rowSlot.byteLength + this.rowChunk.byteLength;
   }
 
-  hasPath(path: string): boolean {
-    return this.slotByPath.has(path);
-  }
-
   /** Replace every row for one note. Vectors of the wrong length are ignored. */
   upsertPath(path: string, chunks: ReadonlyArray<{ chunkId: number; vector: Float32Array }>): void {
     this.removePath(path);

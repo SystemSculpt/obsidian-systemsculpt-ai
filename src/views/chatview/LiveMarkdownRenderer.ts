@@ -255,6 +255,7 @@ function countOccurrences(line: string, token: string): number {
  * A closing fence may be indented at most three columns past the content of
  * the list item that holds its opening fence, or three spaces outside a list;
  * a deeper fence line, such as one inside a docstring, is code.
+ * @internal Unit-tested directly.
  */
 export function stableMarkdownBoundary(markdown: string, start = 0): number {
   let boundary = start;
@@ -944,6 +945,7 @@ function reconcileRegion(region: DomRegion, staging: HTMLElement): void {
  * Applies a detached Markdown render without remounting stable nodes.
  * Compatible changed blocks are updated in place so text nodes,
  * selection, focus and code controls remain stable during ordinary deltas.
+ * @internal Tests exercise the shared reconciler through this whole-root adapter.
  */
 export function reconcileLiveMarkdownDom(
   target: HTMLElement,

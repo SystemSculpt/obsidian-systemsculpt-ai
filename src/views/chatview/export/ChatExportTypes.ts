@@ -1,7 +1,7 @@
 import { ChatMessage } from '../../../types';
 import type { ChatExportOptions } from '../../../types/chatExport';
 
-export interface ChatExportContextFile {
+interface ChatExportContextFile {
   path: string;
   content?: string;
 }
@@ -25,21 +25,8 @@ export interface ChatExportContext {
   summary: ChatExportSummary;
 }
 
-export interface ChatExportBuildResult {
+export interface ChatExportResult {
   markdown: string;
-}
-
-export interface ChatExportResult extends ChatExportBuildResult {
   options: ChatExportOptions;
   context: ChatExportContext;
-}
-
-export interface ChatExportResolvedOptions {
-  options: ChatExportOptions;
-  context: ChatExportContext;
-}
-
-export interface ChatExportMetadataLine {
-  label: string;
-  value: string;
 }

@@ -1,5 +1,4 @@
 import { isStudioRetiredNodeKind } from "../../../studio/StudioNodeKinds";
-import { Notice } from "obsidian";
 import type {
   ConnectionAutoCreateRequest,
   ConnectionDragState,
@@ -635,7 +634,4 @@ export class StudioPortInteraction {
     this.applyDragClasses(active.compatiblePortKeys, active.incompatiblePortKeys);
   }
 
-  noticeInvalidConnection(message: string): void {
-    new Notice(message);
-  }
 }
