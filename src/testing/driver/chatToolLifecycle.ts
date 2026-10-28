@@ -1,27 +1,27 @@
 import {
-type ActionContext,
-DriverActionError,
-type DriverActionHandlers
+  type ActionContext,
+  DriverActionError,
+  type DriverActionHandlers,
 } from "./actionCore";
 import {
-assertExactSequentialToolPlan,
-assertExactToolPlanCleanClose,
-sameTurnResponseErrorCount,
+  assertExactSequentialToolPlan,
+  assertExactToolPlanCleanClose,
+  sameTurnResponseErrorCount,
 } from "./exactToolPlan";
 import {
-flushToolLifecycleCapture,
-startToolLifecycleCapture,
-toolLifecycleReport,
+  flushToolLifecycleCapture,
+  startToolLifecycleCapture,
+  toolLifecycleReport,
 } from "./toolLifecycleCapture";
 import {
-assertAllToolResultSendsCompleted,
-assertLatestToolSettledAfterContinuation,
-assertNoClientToolsBeforeContinuation,
+  assertAllToolResultSendsCompleted,
+  assertLatestToolSettledAfterContinuation,
+  assertNoClientToolsBeforeContinuation,
 } from "./toolLifecycleContinuation";
 import {
-exactSequentialToolPlanProofs,
-firstCapturedToolCallCount,
-toolLifecycleCaptures
+  exactSequentialToolPlanProofs,
+  firstCapturedToolCallCount,
+  toolLifecycleCaptures,
 } from "./toolLifecycleState";
 
 /** Public driver actions for live chat tool-lifecycle capture and assertions. */

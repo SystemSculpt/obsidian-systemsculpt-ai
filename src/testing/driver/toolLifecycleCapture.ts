@@ -1,32 +1,32 @@
 import { canonicalAgentToolInput } from "../../chat/managed/MutationJournal";
 import {
-type ActionContext,
-activeChatView,
-DriverActionError
+  type ActionContext,
+  activeChatView,
+  DriverActionError,
 } from "./actionCore";
 import { chatContainer } from "./locators";
 import {
-canonicalToolCallId,
-exactSequentialToolPlanProofs,
-ownerWindowNow,
-toolCallCount,
-type ToolContinuationObservation,
-type ToolDomObservation,
-toolIsVisuallySettled,
-type ToolLifecycleCapture,
-toolLifecycleCaptures,
-type ToolLifecycleRecord,
-toolLifecycleState,
-type ToolRegistrationObservation,
-type ToolResponseErrorObservation,
-toolRowIsVisuallyTerminal,
-toolRowSnapshot,
-type ToolSurfaceTransition,
+  canonicalToolCallId,
+  exactSequentialToolPlanProofs,
+  ownerWindowNow,
+  toolCallCount,
+  type ToolContinuationObservation,
+  type ToolDomObservation,
+  toolIsVisuallySettled,
+  type ToolLifecycleCapture,
+  toolLifecycleCaptures,
+  type ToolLifecycleRecord,
+  toolLifecycleState,
+  type ToolRegistrationObservation,
+  type ToolResponseErrorObservation,
+  toolRowIsVisuallyTerminal,
+  toolRowSnapshot,
+  type ToolSurfaceTransition,
 } from "./toolLifecycleState";
 import {
-currentRunSupportEvidence,
-readSupportDiagnostics,
-supportDiagnosticKey,
+  currentRunSupportEvidence,
+  readSupportDiagnostics,
+  supportDiagnosticKey,
 } from "./toolResultDelivery";
 
 /** Live DOM observation, tool identity tracking, and capture reports. */

@@ -1,38 +1,38 @@
 import {
-type ActionContext,
-activeChatView,
-DriverActionError,
-sleep,
-throwIfActionCancelled
+  type ActionContext,
+  activeChatView,
+  DriverActionError,
+  sleep,
+  throwIfActionCancelled,
 } from "./actionCore";
 import { chatContainer } from "./locators";
 import {
-capturedToolRowSnapshot,
-capturedTurnId,
-firstToolRecordObservation,
-flushToolLifecycleCapture,
-toolLifecycleReport,
+  capturedToolRowSnapshot,
+  capturedTurnId,
+  firstToolRecordObservation,
+  flushToolLifecycleCapture,
+  toolLifecycleReport,
 } from "./toolLifecycleCapture";
 import {
-continuationContentMetadata,
-firstCapturedToolCallCount,
-orderedToolLifecycleRecords,
-TOOL_TERMINAL_ICONS,
-type ToolContinuationEntry,
-type ToolContinuationObservation,
-toolIsVisuallySettled,
-type ToolLifecycleCapture,
-toolLifecycleCaptures,
-type ToolLifecycleRecord,
-type ToolLifecycleState,
-type ToolVisualTransition
+  continuationContentMetadata,
+  firstCapturedToolCallCount,
+  orderedToolLifecycleRecords,
+  TOOL_TERMINAL_ICONS,
+  type ToolContinuationEntry,
+  type ToolContinuationObservation,
+  toolIsVisuallySettled,
+  type ToolLifecycleCapture,
+  toolLifecycleCaptures,
+  type ToolLifecycleRecord,
+  type ToolLifecycleState,
+  type ToolVisualTransition,
 } from "./toolLifecycleState";
 import {
-bindToolResultDeliveryScope,
-currentRunSupportEvidence,
-inspectEveryToolResultSendCompletion,
-proveEveryToolResultAcknowledgement,
-resultDeliveryCommandProof,
+  bindToolResultDeliveryScope,
+  currentRunSupportEvidence,
+  inspectEveryToolResultSendCompletion,
+  proveEveryToolResultAcknowledgement,
+  resultDeliveryCommandProof,
 } from "./toolResultDelivery";
 
 /** Assertions that bind captured tool completion to assistant continuation. */
