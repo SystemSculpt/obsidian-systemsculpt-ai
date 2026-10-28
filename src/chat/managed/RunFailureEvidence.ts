@@ -272,4 +272,3 @@ export function captureFailedRun(
     // Diagnostics are observational. Capture failure cannot affect a run.
   }
 }
-
