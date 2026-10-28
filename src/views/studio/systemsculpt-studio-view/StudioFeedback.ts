@@ -90,4 +90,3 @@ export function summarizeMessageForNotice(message: string): string {
   }
   return `${firstLine.slice(0, 217)}...`;
 }
-

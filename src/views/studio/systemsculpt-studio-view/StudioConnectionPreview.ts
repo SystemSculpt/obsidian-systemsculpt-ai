@@ -107,4 +107,3 @@ export function describeConnectionAutoCreate(sourceType: string): ConnectionAuto
     label: template.label,
   };
 }
-
