@@ -1542,10 +1542,13 @@ describe("AgentChatSession", () => {
     const firstRequestId = CAPTURE_REQUEST_ID;
     const secondRequestId = LOCAL_CAPTURE_REQUEST_ID;
     const internals = harness.agent as unknown as {
-      clientLatency: Map<string, Readonly<{
-        conversationId: string;
-        startedAtMonotonicMs: number;
-      }>>;
+      clientLatency: {
+        ensure(input: Readonly<{
+          conversationId: string;
+          requestId: string;
+          startedAtMonotonicMs: number;
+        }>): void;
+      };
       capturePreflightFailure(
         conversationId: string,
         requestId: string,
@@ -1563,7 +1566,8 @@ describe("AgentChatSession", () => {
         prepareFailureAlreadyRecorded?: boolean,
       ): void;
     };
-    internals.clientLatency.set(firstRequestId, {
+    internals.clientLatency.ensure({
+      requestId: firstRequestId,
       conversationId: CONVERSATION_ID,
       startedAtMonotonicMs: 0,
     });
@@ -1578,7 +1582,8 @@ describe("AgentChatSession", () => {
     }, true);
 
     now = 0;
-    internals.clientLatency.set(secondRequestId, {
+    internals.clientLatency.ensure({
+      requestId: secondRequestId,
       conversationId: CONVERSATION_ID,
       startedAtMonotonicMs: 10,
     });
@@ -3070,14 +3075,15 @@ describe("AgentChatSession", () => {
   });
 
   it("omits an invalid retained response clock and keeps the terminal value frozen", async () => {
-    const harness = trackedHarness();
+    let now = -Number.MAX_VALUE;
+    const harness = trackedHarness({ monotonicNow: () => now });
     const server = await harness.open();
     const turnId = "user_non_finite_response_duration";
     const run = harness.agent.start({
       conversationId: CONVERSATION_ID,
       turnId,
       message: userMessage(turnId, "Ignore an invalid response clock"),
-      clientStartedAtMonotonicMs: 900,
+      clientStartedAtMonotonicMs: -Number.MAX_VALUE,
     });
     await waitFor(() => harness.commands(server).some((command) =>
       command.kind === "submit"));
@@ -3091,7 +3097,7 @@ describe("AgentChatSession", () => {
     const internals = harness.agent as any;
     const activeRun = internals.active;
     activeRun.elapsedMs = null;
-    internals.clientLatency.get(turnId).startedAtMonotonicMs = Number.POSITIVE_INFINITY;
+    now = Number.MAX_VALUE;
 
     server.serverMessage(succeededTerminal(turnId, turnId));
     const result = await run;
@@ -3454,9 +3460,11 @@ describe("AgentChatSession", () => {
       command.kind === "submit"));
 
     const internal = harness.agent as unknown as {
-      handleTransportTiming: (event: Readonly<Record<string, unknown>>) => void;
+      clientLatency: {
+        handleTransportTiming: (event: Readonly<Record<string, unknown>>) => void;
+      };
     };
-    internal.handleTransportTiming({
+    internal.clientLatency.handleTransportTiming({
       milestone: "response_available",
       requestId: turnId,
       commandKind: "client_tool_result",
@@ -3466,7 +3474,7 @@ describe("AgentChatSession", () => {
       responseDeliveryMode: "request_url_buffered",
       status: 200,
     });
-    internal.handleTransportTiming({
+    internal.clientLatency.handleTransportTiming({
       milestone: "first_body_chunk",
       requestId: turnId,
       commandKind: "client_tool_result",
@@ -3477,7 +3485,7 @@ describe("AgentChatSession", () => {
     });
     // A callback from the older submit stream arrives after segment 2. It must
     // remain bound to segment 1 and cannot relabel later logical UI milestones.
-    internal.handleTransportTiming({
+    internal.clientLatency.handleTransportTiming({
       milestone: "first_body_chunk",
       requestId: turnId,
       commandKind: "submit",
@@ -3694,10 +3702,12 @@ describe("AgentChatSession", () => {
   it("drops invalid transport summary correlation before the observer", () => {
     const harness = createHarness();
     const internal = harness.agent as unknown as {
-      handleTransportSegmentSummary: (
-        conversationId: string,
-        event: Readonly<Record<string, unknown>>,
-      ) => void;
+      clientLatency: {
+        handleTransportSegmentSummary: (
+          conversationId: string,
+          event: Readonly<Record<string, unknown>>,
+        ) => void;
+      };
     };
     const metrics = {
       commandKind: "client_tool_result",
@@ -3713,14 +3723,14 @@ describe("AgentChatSession", () => {
       metricsTruncated: false,
     } as const;
 
-    internal.handleTransportSegmentSummary(CONVERSATION_ID, {
+    internal.clientLatency.handleTransportSegmentSummary(CONVERSATION_ID, {
       ...metrics,
       requestId: "../../private-request",
     });
     const hostile = Object.defineProperty({ ...metrics }, "requestId", {
       get: () => { throw new Error("hostile request ID getter"); },
     });
-    expect(() => internal.handleTransportSegmentSummary(
+    expect(() => internal.clientLatency.handleTransportSegmentSummary(
       CONVERSATION_ID,
       hostile,
     )).not.toThrow();
@@ -3740,9 +3750,11 @@ describe("AgentChatSession", () => {
       command.kind === "submit"));
 
     const internal = harness.agent as unknown as {
-      handleTransportTiming: (event: Readonly<Record<string, unknown>>) => void;
+      clientLatency: {
+        handleTransportTiming: (event: Readonly<Record<string, unknown>>) => void;
+      };
     };
-    internal.handleTransportTiming({
+    internal.clientLatency.handleTransportTiming({
       milestone: "command_dispatch_started",
       requestId: turnId,
       commandKind: "client_tool_result",
