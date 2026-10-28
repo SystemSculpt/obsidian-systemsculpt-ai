@@ -296,4 +296,3 @@ export function historicalToolPart(tool: ToolCall): AgentToolPart {
     } : {}),
   };
 }
-
