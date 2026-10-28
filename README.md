@@ -2,7 +2,7 @@
 
 Use your own Claude Code or Codex on desktop, or SystemSculpt's hosted AI, to work with your Obsidian vault. Chat with your notes, search and edit files, transcribe audio into Markdown, find related notes, and build visual workflows. Hosted features run on desktop and mobile; your own desktop agents need no SystemSculpt account or plan. See the approval modes below for when changes ask for confirmation.
 
-**Free to start.** Install the plugin, create or sign in to a free SystemSculpt account from inside Obsidian, and get 500 one-time starter credits for hosted AI, no card needed, while available. When you want more, [Monthly is $9/month and Yearly is $90/year](https://systemsculpt.com/pricing?utm_source=obsidian&utm_medium=plugin_readme&utm_campaign=readme_free_start_nov2026); both include a monthly credit allowance.
+**Free to start.** Install the plugin and create or sign in to a free SystemSculpt account from inside Obsidian. Eligible new accounts can claim 500 one-time starter credits for hosted AI, no card needed, while available. When you want more, [Monthly is $9/month and Yearly is $90/year](https://systemsculpt.com/pricing?utm_source=obsidian&utm_medium=plugin_readme&utm_campaign=readme_free_start_nov2026); both include a monthly credit allowance.
 
 ![An example of SystemSculpt asking before a note edit in Ask mode and showing the exact change](https://raw.githubusercontent.com/SystemSculpt/obsidian-systemsculpt-ai/main/docs/images/readme-chat-approval.png)
 
@@ -11,14 +11,14 @@ Use your own Claude Code or Codex on desktop, or SystemSculpt's hosted AI, to wo
 ## Start in two minutes
 
 1. Install and enable SystemSculpt AI from Obsidian Community Plugins.
-2. For hosted AI, open **Settings → SystemSculpt AI → Account** and choose **Sign up** or **Sign in**. Complete the account connection in your browser and claim the 500 one-time starter credits, no card needed, while available. For your own desktop Claude Code or Codex, skip the SystemSculpt account step and use your installed, signed-in agent.
+2. For hosted AI, open **Settings → SystemSculpt AI → Account** and choose **Sign up** or **Sign in**. Complete the account connection in your browser; eligible new accounts can claim 500 one-time starter credits, no card needed, while available. For your own desktop Claude Code or Codex, skip the SystemSculpt account step and use your installed, signed-in agent.
 3. Run **Open SystemSculpt Chat** from the command palette, choose your backend from the run line below the message box, and ask about your vault.
 
 Already have a plan? Sign in from the same Account settings, or paste and activate your license key there.
 
 ## Coming from 5.x
 
-SystemSculpt 6's managed backend no longer supports your own API keys, custom endpoints, or local models; updating removes previously saved plugin provider keys and routing settings. Native Claude Code and Codex keep their own configuration. Your SystemSculpt license and credits carry over. On desktop, you can use your own installed, signed-in Claude Code or Codex without a SystemSculpt account or plan, or use the free one-time hosted starter credits while available.
+SystemSculpt 6's managed backend no longer supports your own API keys, custom endpoints, or local models; updating removes previously saved plugin provider keys and routing settings. Native Claude Code and Codex keep their own configuration. Your SystemSculpt license and credits carry over. On desktop, you can use your own installed, signed-in Claude Code or Codex without a SystemSculpt account or plan, or use the free one-time hosted starter credits if eligible and available.
 
 ## What it does
 
@@ -36,7 +36,7 @@ SystemSculpt runs on desktop and mobile. Studio exposes portable nodes on both; 
 
 ## Account, payment, and credits
 
-The plugin is free to install. Hosted AI features use a SystemSculpt account and credits. A free account can claim 500 one-time starter credits for hosted AI, no card needed, while available. Monthly ($9/month) and Yearly ($90/year) plans include a monthly credit allowance, and credit packs add more. Existing Lifetime licenses continue to be honored. See the [plan terms](https://systemsculpt.com/pricing?utm_source=obsidian&utm_medium=plugin_readme&utm_campaign=readme_free_start_nov2026) and your account for included usage.
+The plugin is free to install. Hosted AI features use a SystemSculpt account and credits. Eligible new accounts can claim 500 one-time starter credits for hosted AI, no card needed, while available. Monthly ($9/month) and Yearly ($90/year) plans include a monthly credit allowance, and credit packs add more. Existing Lifetime licenses continue to be honored. See the [plan terms](https://systemsculpt.com/pricing?utm_source=obsidian&utm_medium=plugin_readme&utm_campaign=readme_free_start_nov2026) and your account for included usage.
 
 Account, license, billing, and add-credit controls open first-party pages on [systemsculpt.com](https://systemsculpt.com); payments are handled there by Stripe and never occur inside the plugin. The plugin may show first-party license or credit purchase prompts when access or funds are insufficient, but it never purchases anything automatically.
 

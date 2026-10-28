@@ -90,7 +90,9 @@ in this chat** when the agent offers a session-scoped grant.
 
 A session approval covers only the scope shown by that action; it is not blanket
 permission. Native agents own the grant, and already-pending requests still need
-their own answer. Closing the live chat ends its native session grants.
+their own answer. Closing a chat view does not necessarily end its native session
+or revoke a grant: an admitted turn can continue in the background. **Stop**
+cancels that turn; the native agent controls grant lifetime.
 
 A new card does not interrupt typing. Use **Approval needed · Review** or
 **⌥/Alt+↑** (also **⌥/Alt+↓**) anywhere in the chat view to focus the first pending
