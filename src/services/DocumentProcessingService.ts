@@ -40,15 +40,6 @@ type ProgressMeta = Partial<
   Pick<DocumentProcessingLogEntry, "filePath" | "fileName" | "durationMs" | "attempt" | "source">
 > & { documentId?: string; metadata?: Record<string, unknown> };
 
-interface ImageMetadata {
-  originalName: string;
-  newName: string;
-  path: string;
-  size: number;
-  documentName: string;
-  timestamp: number;
-}
-
 export interface DocumentProcessingReceipt {
   extractionPath: string;
   imagePaths: string[];
@@ -80,8 +71,6 @@ export interface DocumentProcessingDependencies {
 }
 
 interface PreparedImageEffect {
-  originalName: string;
-  newName: string;
   path: string;
   bytes: ArrayBuffer;
 }
@@ -112,7 +101,6 @@ export class ManagedDocumentLocalEffectError extends Error {
 
 export class DocumentProcessingService {
   private static instance: DocumentProcessingService;
-  private readonly imageMetadataLog: ImageMetadata[] = [];
   private managedAdapter: ManagedDocumentAdapterPort | null;
   private localStaging: ManagedDocumentStagingPort | null;
 
@@ -255,14 +243,6 @@ export class DocumentProcessingService {
       const staged = metadata[index];
       if (staged.kind !== "image") throw new Error("Managed document staging image order changed.");
       await this.commitBinaryEffect(image.path, verified[index], staged, signal);
-      this.recordImageMetadata({
-        originalName: image.originalName,
-        newName: image.newName,
-        path: image.path,
-        size: staged.byteLength,
-        documentName: file.basename,
-        timestamp: Date.now(),
-      });
     }
 
     const markdownIndex = metadata.length - 1;
@@ -324,7 +304,7 @@ export class DocumentProcessingService {
       const relativePath = `${imagesFolder}/${newName}`;
       contentPaths.set(contentHash, { path, relativePath });
       imagePathMap.set(imageName, relativePath);
-      preparedImages.push({ originalName: imageName, newName, path, bytes });
+      preparedImages.push({ path, bytes });
     }
 
     const processed = this.normalizeManagedResult(result);
@@ -546,10 +526,6 @@ export class DocumentProcessingService {
   private base64ToArrayBuffer(value: string): ArrayBuffer {
     const base64 = value.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, "");
     return base64ToBytes(base64).buffer as ArrayBuffer;
-  }
-
-  private recordImageMetadata(metadata: ImageMetadata): void {
-    this.imageMetadataLog.push(metadata);
   }
 
   private sanitizeFilename(filename: string): string {

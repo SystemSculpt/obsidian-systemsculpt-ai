@@ -74,10 +74,6 @@ export class StudioEdgeRenderer {
 
   constructor(private readonly options: StudioEdgeRendererOptions) {}
 
-  getEdgeGroupElement(edgeId: string): SVGGElement | null {
-    return this.groupsByEdgeId.get(edgeId)?.group ?? null;
-  }
-
   render(): void {
     const { layer, store, getCursorAnchorPoint } = this.options;
     const resolvePortAnchorPoint = this.options.createPortAnchorResolver();

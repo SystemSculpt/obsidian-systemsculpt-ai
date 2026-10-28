@@ -89,16 +89,16 @@ export const MODE_CHOICES: Readonly<Record<TextExecutionBackend, readonly Chrome
   ],
 };
 
-export const CLAUDE_AUTO_UNAVAILABLE =
+const CLAUDE_AUTO_UNAVAILABLE =
   "Claude Code's Auto mode isn't available here, so edits are accepted automatically and other actions ask. Update Claude Code to use Auto.";
-export const CODEX_AUTO_UNAVAILABLE =
+const CODEX_AUTO_UNAVAILABLE =
   "Codex's automatic review isn't available in this version, so Codex asks you when it needs approval. Update Codex to use Auto.";
-export const MODE_APPLIES_NEXT = "Applies from your next message.";
-export const SWITCH_STARTS_NEW_CHAT = "Switching starts a new chat. This one stays in your history.";
-export const DETECTING_AGENTS = "Finding Claude Code or Codex…";
-export const EMPTY_TITLE = "What should we work on?";
+const MODE_APPLIES_NEXT = "Applies from your next message.";
+const SWITCH_STARTS_NEW_CHAT = "Switching starts a new chat. This one stays in your history.";
+const DETECTING_AGENTS = "Finding Claude Code or Codex…";
+const EMPTY_TITLE = "What should we work on?";
 /** T-36 free-start copy, read by the Nov 6 experiment: do not edit. */
-export const FREE_START_OFFER = "Create a free account to get 500 starter credits. No card needed. Paid plans start at $9/month.";
+const FREE_START_OFFER = "Create a free account to get 500 starter credits. No card needed. Paid plans start at $9/month.";
 
 const CLAUDE_MODELS: readonly (readonly [string, string, string?])[] = [
   ["", "Default", "Claude Code's choice"],
@@ -122,11 +122,11 @@ export function agentName(backend: TextExecutionBackend): string {
   return isLocalAgentId(backend) ? LOCAL_AGENTS[backend] : "SystemSculpt";
 }
 
-export function effortLabel(effort: string): string {
+function effortLabel(effort: string): string {
   return EFFORT_LABELS[effort] ?? (effort ? effort[0].toUpperCase() + effort.slice(1) : "");
 }
 
-export function formatCredits(value: number): string {
+function formatCredits(value: number): string {
   try {
     return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(value);
   } catch {
@@ -442,6 +442,7 @@ export function modelMenu(state: AgentChromeState): readonly ChromeMenuEntry[] {
 
 export type ChromeStarter = Readonly<{ id: "summarize" | "related" | "checklist"; label: string; prompt: string }>;
 
+/** @internal Unit-tested directly. */
 export function starters(activeNote: AgentChromeState["activeNote"]): readonly ChromeStarter[] {
   if (!activeNote) {
     return [
@@ -464,7 +465,7 @@ export type EmptyStateNote = Readonly<{
   action?: Readonly<{ id: "switch-below" | "back-to-previous"; label: string; after?: string }>;
 }>;
 
-export type EmptyStateHint = Readonly<{
+type EmptyStateHint = Readonly<{
   id: "local-hint" | "claude-signed-out" | "codex-signed-out";
   /** Text before and after the inline Detect again action; `backticks` mark commands. */
   before: string;

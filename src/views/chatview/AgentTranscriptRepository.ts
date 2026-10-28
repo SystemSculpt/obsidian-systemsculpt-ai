@@ -59,6 +59,7 @@ export type AgentTranscriptCommit = Readonly<{
   messageId: string;
 }>;
 
+/** @internal Tests match this error class. */
 export class AgentTranscriptConflictError extends Error {
   constructor(message: string) {
     super(message);

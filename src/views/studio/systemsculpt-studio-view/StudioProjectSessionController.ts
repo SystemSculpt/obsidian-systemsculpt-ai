@@ -128,10 +128,6 @@ export class StudioProjectSessionController {
     return this.projectFileWarning;
   }
 
-  hasPendingLocalProjectSaveWork(): boolean {
-    return this.currentProjectSession?.hasPendingLocalSaveWork() === true;
-  }
-
   markAcceptedProjectSignature(signature: string, options?: { trackExpectedWrite?: boolean }): void {
     this.currentProjectSession?.markAcceptedProjectSignature(signature, options);
   }
@@ -323,10 +319,6 @@ export class StudioProjectSessionController {
     } catch (error) {
       this.host.setError(error);
     }
-  }
-
-  async flushProjectSave(options?: { showNotice?: boolean }): Promise<void> {
-    await this.flushPendingProjectSaveWork({ force: true, showNotice: options?.showNotice });
   }
 
   async flushTextNodeEditorsBeforeProjectTransition(): Promise<void> {

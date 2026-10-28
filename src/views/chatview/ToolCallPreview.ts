@@ -11,14 +11,14 @@ import { generateDiff, DiffResult } from "../../utils/diffUtils";
 import { applyFileEdits } from "../../tools/vault/editApplication";
 import { resolveExistingVaultFile } from "../../tools/vault/folderNotes";
 import { normalizeLineEndings, normalizeVaultPath } from "../../tools/vault/utils";
-import type { FileEdit, FileEditRange, SkippedEdit } from "../../tools/vault/types";
+import type { FileEdit, SkippedEdit } from "../../tools/vault/types";
 
 /**
  * Why a preview shows no diff. Only "identical" means the change is genuinely
  * a no-op; every other value is a reason the edit cannot be applied and must
  * be said out loud before the user approves it.
  */
-export type WriteEditPreviewStatus = "changed" | "identical" | "unmatched" | "missing" | "unavailable";
+type WriteEditPreviewStatus = "changed" | "identical" | "unmatched" | "missing" | "unavailable";
 
 export interface WriteEditPreview {
   path: string;
@@ -33,11 +33,13 @@ export interface WriteEditPreview {
   isNewFile?: boolean;
 }
 
+/** @internal Unit-tested directly. */
 export function isWriteOrEditTool(toolName: string): boolean {
   const { canonicalName } = splitToolName(toolName);
   return canonicalName === "write" || canonicalName === "edit" || canonicalName === "multi_edit";
 }
 
+/** @internal Unit-tested directly. */
 export async function prepareWriteEditPreviews(app: App, toolCall: ToolCall): Promise<WriteEditPreview[]> {
   const fn = getFunctionDataFromToolCall(toolCall);
   if (!fn) return [];
@@ -70,6 +72,7 @@ export async function prepareWriteEditPreviews(app: App, toolCall: ToolCall): Pr
   return previews;
 }
 
+/** @internal Unit-tested directly. */
 export async function prepareWriteEditPreview(app: App, toolCall: ToolCall): Promise<WriteEditPreview | null> {
   const fn = getFunctionDataFromToolCall(toolCall);
   if (!fn) return null;
@@ -202,21 +205,6 @@ export async function prepareNativeWriteEditPreview(app: App, part: AgentToolPar
   return preview;
 }
 
-export type ToolEditOccurrence = "first" | "last" | "all";
-export type ToolEditMode = "exact" | "loose";
-export type ToolEditRange = FileEditRange;
-export type ToolFileEdit = FileEdit;
-
-/**
- * Preview-side application of a tool's edits. Delegates to the executor's
- * applier in non-strict mode so an unmatched edit is reported rather than
- * silently returning the file unchanged.
- */
-export function applyEditsLocally(original: string, edits: ToolFileEdit[]): string {
-  return applyFileEdits(original, edits, false).modifiedContent;
-}
-
-
 /**
  * Render a unified inline diff block under a host element for write/edit tool calls.
  * Returns the created diff container or null if not applicable.
@@ -308,23 +296,12 @@ function renderInlineDiffSummary(container: HTMLElement, previews: readonly Writ
 // Operations (move/trash/create_folders) preview
 // -----------------------------
 
-export type OperationsPreview =
+type OperationsPreview =
   | { type: "move"; items: Array<{ source: string; destination: string }> }
   | { type: "trash"; items: Array<{ path: string }> }
   | { type: "create_folders"; items: Array<{ path: string }> };
 
-export function isMoveTool(toolName: string): boolean {
-  return splitToolName(toolName).canonicalName === "move";
-}
-
-export function isTrashTool(toolName: string): boolean {
-  return splitToolName(toolName).canonicalName === "trash";
-}
-
-export function isCreateFoldersTool(toolName: string): boolean {
-  return splitToolName(toolName).canonicalName === "create_folders";
-}
-
+/** @internal Unit-tested directly. */
 export function prepareOperationsPreview(toolCall: ToolCall): OperationsPreview | null {
   const fn = getFunctionDataFromToolCall(toolCall);
   if (!fn) return null;

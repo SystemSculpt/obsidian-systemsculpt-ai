@@ -25,6 +25,7 @@ export type PresentedAgentError = Readonly<{
 const LOCAL_REPORT_ID = /^report_(?!0{32}$)[a-f0-9]{32}$/;
 const SERVER_INCIDENT_ID = /^incident_(?!0{32}$)[a-f0-9]{32}$/;
 
+/** @internal Unit-tested directly. */
 export function presentAgentErrorMessage(
   _message: string,
   interrupted: boolean,
@@ -117,6 +118,7 @@ export function presentAgentError(
   };
 }
 
+/** @internal Tests type their fixtures with this. */
 export type AgentPresentationPhase =
   | "idle"
   | "submitting"

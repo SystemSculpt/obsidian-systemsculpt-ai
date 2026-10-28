@@ -238,25 +238,4 @@ export class AutomaticBackupService {
         }
     }
 
-    /**
-     * Get the status of the automatic backup system
-     */
-    public getBackupStatus(): {
-        enabled: boolean;
-        lastBackup: number;
-        nextBackup: number;
-        intervalHours: number;
-        retentionDays: number;
-    } {
-        const settings = this.plugin.getSettingsManager().getSettings();
-        const nextBackup = settings.lastAutomaticBackup + (settings.automaticBackupInterval * 60 * 60 * 1000);
-
-        return {
-            enabled: settings.automaticBackupsEnabled,
-            lastBackup: settings.lastAutomaticBackup,
-            nextBackup: nextBackup,
-            intervalHours: settings.automaticBackupInterval,
-            retentionDays: settings.automaticBackupRetentionDays
-        };
-    }
 }
