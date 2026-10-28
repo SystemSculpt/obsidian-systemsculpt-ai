@@ -2,6 +2,7 @@ import { Notice } from "obsidian";
 import { CreditsBalanceModal } from "../CreditsBalanceModal";
 import { JSDOM } from "jsdom";
 import { LICENSE_URL } from "../../types";
+import type { CreditsUsageSnapshot } from "../../services/SystemSculptService";
 
 jest.mock("obsidian", () => ({ ...jest.requireActual("obsidian"), Notice: jest.fn() }));
 
@@ -119,6 +120,18 @@ const spyOnAnchorClicks = () => {
   return { hrefs, spy };
 };
 
+function usageRecord(overrides: Partial<CreditsUsageSnapshot>): CreditsUsageSnapshot {
+  return {
+    id: "usage-1", createdAt: "2026-10-27T12:00:00.000Z", transactionType: "agent_turn",
+    endpoint: null, usageKind: "agent_turn", durationSeconds: 0, totalTokens: 0,
+    inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, pageCount: 0,
+    creditsCharged: 3, includedDelta: -3, addOnDelta: 0, totalDelta: -3,
+    includedBefore: 100, includedAfter: 97, addOnBefore: 0, addOnAfter: 0,
+    totalBefore: 100, totalAfter: 97, fileSizeBytes: null, fileFormat: null,
+    ...overrides,
+  };
+}
+
 const healthyBalance = {
   includedRemaining: 2000,
   addOnRemaining: 500,
@@ -225,6 +238,68 @@ describe("CreditsBalanceModal", () => {
     expect(status.classList.contains("is-error")).toBe(true);
     expect(modal.modalEl.textContent).toContain("2,500 credits");
     expect(Notice).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [null, 3, null],
+    [0, 3, null],
+    [-1, 3, null],
+    [NaN, 3, null],
+    [2.5, 2.5, "You used 2.5 credits for this request."],
+    [100.4, 101, "You used 100 credits; billed 101 because billing rounds up each request."],
+    [0.000123, 1, "You used 0.000123 credits; billed 1 because billing rounds up each request."],
+  ])("renders only valid exact charges without inventing a billing note (%s)", async (exact, charged, note) => {
+    const modal = new CreditsBalanceModal({} as any, {
+      initialBalance: healthyBalance,
+      loadBalance: jest.fn().mockResolvedValue(healthyBalance),
+      loadUsage: jest.fn().mockResolvedValue({
+        items: [usageRecord({ billingCreditsExact: exact, creditsCharged: charged })], nextBefore: null,
+      }),
+      onOpenSetup: jest.fn(),
+    });
+    modal.onOpen();
+    findButtonByText(modal.modalEl, "Usage").click();
+    await flushPromises();
+    const billingNote = modal.modalEl.querySelector(".ss-credits-usage__item-billing-note");
+    expect(billingNote?.textContent ?? null).toBe(note);
+    modal.onClose();
+  });
+
+  it("renders document and generic usage plus one-sided prompt cache charges", async () => {
+    const modal = new CreditsBalanceModal({} as any, {
+      initialBalance: healthyBalance,
+      loadBalance: jest.fn().mockResolvedValue(healthyBalance),
+      loadUsage: jest.fn().mockResolvedValue({ items: [
+        usageRecord({ id: "read", usageKind: "document_processing", pageCount: 2, cacheReadTokens: 12 }),
+        usageRecord({ id: "write", usageKind: "request", cacheWriteTokens: 9 }),
+      ], nextBefore: null }),
+      onOpenSetup: jest.fn(),
+    });
+    modal.onOpen();
+    findButtonByText(modal.modalEl, "Usage").click();
+    await flushPromises();
+    const rows = [...modal.modalEl.querySelectorAll(".ss-credits-usage__item")];
+    expect(rows[0].textContent).toContain("Document processing");
+    expect(rows[0].textContent).toContain("2 pages");
+    expect(rows[0].textContent).toContain("Prompt cache: reused 12 tokens from earlier context.");
+    expect(rows[1].textContent).toContain("Request");
+    expect(rows[1].textContent).toContain("Prompt cache: wrote 9 tokens for future turns.");
+    modal.onClose();
+  });
+
+  it("does not present a missing allowance as zero monthly entitlement", async () => {
+    const balance = { ...healthyBalance, includedPerMonth: 0, cycleStartedAt: "", cycleEndsAt: "invalid" };
+    const modal = new CreditsBalanceModal({} as any, {
+      initialBalance: balance, loadBalance: jest.fn().mockResolvedValue(balance), onOpenSetup: jest.fn(),
+    });
+    modal.onOpen();
+    await flushPromises();
+    expect(modal.modalEl.textContent).toContain("Included monthly allowance unavailable.");
+    expect(modal.modalEl.querySelector<HTMLElement>(".ss-credits-balance__meter-fill")?.style.width).toBe("0%");
+    expect(modal.modalEl.querySelector(".ss-credits-balance__timeline")?.textContent).toContain("Unknown");
+    findButtonByText(modal.modalEl, "Usage").click();
+    expect(modal.modalEl.textContent).toContain("Usage history is unavailable in this build.");
+    modal.onClose();
   });
 
   it("renders credit details and supports buy/setup actions", async () => {

@@ -20,6 +20,26 @@ describe("PlatformRequestClient", () => {
     jest.clearAllMocks();
   });
 
+  it("does not attach an account license to a raw signed upload", async () => {
+    const body = new Uint8Array([1, 2, 3]).buffer;
+    (requestUrl as jest.Mock).mockResolvedValueOnce({ status: 200, text: "", headers: {} });
+
+    await new PlatformRequestClient().request({
+      url: "https://signed.test/object",
+      method: "PUT",
+      transport: "requestUrl",
+      bodyEncoding: "raw",
+      body,
+      licenseKey: "test-account-license",
+      headers: { "content-type": "audio/wav" },
+    });
+
+    expect(requestUrl).toHaveBeenCalledWith(expect.objectContaining({
+      body,
+      headers: { "content-type": "audio/wav" },
+    }));
+  });
+
   it("retries a native connection failure through the shared dispatch policy", async () => {
     jest.useFakeTimers();
     try {

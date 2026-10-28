@@ -458,6 +458,93 @@ describe("Setup tab SystemSculpt-only layout", () => {
     },
   );
 
+  it("retains a first activation key for retry when validation is temporarily unavailable", async () => {
+    const plugin = createPluginStub();
+    plugin.getLicenseManager().validateLicenseKeyDetailed.mockResolvedValue({ outcome: "unavailable", isValid: false });
+    const tab = new SystemSculptSettingTab(app, plugin);
+    tab.refreshAccountSection = jest.fn();
+    const container = document.createElement("div");
+    renderAccountSection(container, tab, false);
+    const input = container.querySelector<HTMLInputElement>('input[type="password"]')!;
+    input.value = " new-license ";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await flushSetupSectionRender();
+    expect(plugin.getSettingsManager().updateSettings.mock.calls).toEqual([
+      [{ licenseKey: "new-license" }], [{ licenseValid: false }],
+    ]);
+    expect(mockedNotice).toHaveBeenCalledWith("License validation is temporarily unavailable. Try again.");
+    expect(input.value).toBe("");
+    expect(tab.refreshAccountSection).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not write or validate a blank activation key", async () => {
+    const plugin = createPluginStub();
+    const tab = new SystemSculptSettingTab(app, plugin);
+    const container = document.createElement("div");
+    renderAccountSection(container, tab, false);
+    const input = container.querySelector<HTMLInputElement>('input[type="password"]')!;
+    input.value = " \t ";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await flushSetupSectionRender();
+    expect(plugin.getSettingsManager().updateSettings).not.toHaveBeenCalled();
+    expect(plugin.getLicenseManager().validateLicenseKeyDetailed).not.toHaveBeenCalled();
+    expect(mockedNotice).toHaveBeenCalledWith("Please enter a license key first.");
+    expect([...container.querySelectorAll("button")].find((button) => button.textContent === "Activate")?.disabled).toBe(false);
+  });
+
+  it("restores the previous key after a failed replacement save without exposing its contents", async () => {
+    const plugin = createPluginStub();
+    plugin.settings.licenseKey = "old-license";
+    plugin.settings.licenseValid = true;
+    plugin.getSettingsManager().updateSettings.mockRejectedValueOnce(new Error("storage unavailable"));
+    const tab = new SystemSculptSettingTab(app, plugin);
+    const container = document.createElement("div");
+    renderAccountSection(container, tab, true);
+    const input = container.querySelector<HTMLInputElement>('input[type="password"]')!;
+    input.value = "replacement-license";
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await flushSetupSectionRender();
+    expect(plugin.getSettingsManager().updateSettings).toHaveBeenLastCalledWith({ licenseKey: "old-license", licenseValid: true });
+    expect(plugin.getLicenseManager().validateLicenseKeyDetailed).not.toHaveBeenCalled();
+    expect(mockedNotice).toHaveBeenCalledWith("Unable to update license. Try again.");
+    expect(input.value).toBe("");
+  });
+
+  it("signs a plan-less account out without starting checkout or validation", async () => {
+    const plugin = createPluginStub();
+    plugin.settings.userEmail = "account@example.com";
+    const tab = new SystemSculptSettingTab(app, plugin);
+    tab.refreshAccountSection = jest.fn();
+    const container = document.createElement("div");
+    renderAccountSection(container, tab, false);
+    [...container.querySelectorAll("button")].find((button) => button.textContent === "Sign out")!.click();
+    await flushSetupSectionRender();
+    expect(plugin.getSettingsManager().updateSettings).toHaveBeenCalledWith({
+      userEmail: "", userName: "", displayName: "", subscriptionStatus: "",
+    });
+    expect(plugin.accountConnectService.cancelPending).toHaveBeenCalledTimes(1);
+    expect(plugin.getLicenseManager().validateLicenseKeyDetailed).not.toHaveBeenCalled();
+    expect(anchorHrefs).toEqual([]);
+  });
+
+  it("clears an annual offer when a credit refresh fails without resuming unfunded work", async () => {
+    const plugin = createPluginStub();
+    plugin.settings.licenseKey = "license-test";
+    plugin.settings.licenseValid = true;
+    const tab = new SystemSculptSettingTab(app, plugin);
+    const container = document.createElement("div");
+    renderAccountSection(container, tab, true);
+    await flushSetupSectionRender();
+    getCreditsBalanceMock.mockRejectedValueOnce(new Error("offline"));
+    [...container.querySelectorAll("button")].find((button) => button.textContent === "Refresh")!.click();
+    await flushSetupSectionRender();
+    expect(container.textContent).toContain("Unable to fetch credits balance. Try again.");
+    const annual = [...container.querySelectorAll("button")].find((button) => button.textContent === "Switch to annual")!;
+    expect(annual.disabled).toBe(true);
+    expect(annual.style.display).toBe("none");
+    expect(plugin.embeddingsManager.resumeProcessing).not.toHaveBeenCalled();
+  });
+
   it("deactivates durably by clearing the stored license and account identity", async () => {
     const plugin = createPluginStub();
     plugin.settings.licenseValid = true;

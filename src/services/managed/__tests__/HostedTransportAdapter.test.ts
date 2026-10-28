@@ -3,6 +3,7 @@ import fixture from "../../../../testing/fixtures/managed/managed-capabilities-v
 import retryFixture from "../../../../testing/fixtures/retry-after.json";
 import { PlatformRequestClient } from "../../PlatformRequestClient";
 import { HostedTransportAdapter } from "../adapters/HostedTransportAdapter";
+import { ManagedAdmission } from "../ManagedAdmission";
 
 jest.mock("obsidian", () => ({ ...jest.requireActual("obsidian"), requestUrl: jest.fn() }));
 jest.mock("../../PlatformRequestClient");
@@ -32,7 +33,7 @@ describe("HostedTransportAdapter", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     (PlatformRequestClient as jest.Mock).mockImplementation(() => ({ request }));
-    request.mockResolvedValue(response());
+    request.mockReset().mockResolvedValue(response());
   });
 
   it("pins GET discovery routes and exact negotiation/plugin headers while omitting a missing license", async () => {
@@ -170,6 +171,77 @@ describe("HostedTransportAdapter", () => {
     request.mockResolvedValueOnce(response(401, { error: "license_required" }));
     await adapter.request({ path: "/api/plugin/images/models", method: "GET" });
     expect(rejected).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([401, 403])("invalidates cached admission after an embeddings index HTTP %s", async (status) => {
+    const adapter = new HostedTransportAdapter({ baseUrl: "https://api.test", pluginVersion: "6", licenseKey: () => "key" });
+    const cachedAdmission = new ManagedAdmission({ transport: adapter, licenseKey: () => "key" });
+    request.mockReset().mockResolvedValueOnce(response(200, admission("allowed")))
+      .mockResolvedValueOnce(response(status, { error: "authorization rejected" }))
+      .mockResolvedValueOnce(response(403, admission("license_rejected", { reason: "revoked" })));
+
+    await expect(cachedAdmission.checkLicense()).resolves.toMatchObject({ outcome: "allowed" });
+    await expect(adapter.getManagedEmbeddingsIndexMetadata()).resolves.toMatchObject({
+      response: { status },
+    });
+    await expect(cachedAdmission.checkLicense()).resolves.toMatchObject({ outcome: "license_rejected" });
+    expect(request.mock.calls.map(([input]) => input.url)).toEqual([
+      "https://api.test/api/plugin/license/validate",
+      "https://api.test/api/plugin/embeddings/index",
+      "https://api.test/api/plugin/license/validate",
+    ]);
+  });
+
+  it.each([401, 403])("invalidates admission after an advisory plugin config HTTP %s", async (status) => {
+    const adapter = new HostedTransportAdapter({ baseUrl: "https://api.test", pluginVersion: "6", licenseKey: () => "key" });
+    const cachedAdmission = new ManagedAdmission({ transport: adapter, licenseKey: () => "key" });
+    request.mockResolvedValueOnce(response(200, admission("allowed")))
+      .mockResolvedValueOnce(response(status, { error: "authorization rejected" }))
+      .mockResolvedValueOnce(response(403, admission("license_rejected", { reason: "revoked" })));
+    await cachedAdmission.checkLicense();
+    await expect(adapter.getPluginConfigCapabilities()).resolves.toBeNull();
+    await expect(cachedAdmission.checkLicense()).resolves.toMatchObject({ outcome: "license_rejected" });
+    expect(request).toHaveBeenCalledTimes(3);
+  });
+
+  it.each(["embeddings", "config", "managed"])("ignores an old account's delayed %s rejection", async (path) => {
+    let licenseKey = "old-key";
+    const adapter = new HostedTransportAdapter({ baseUrl: "https://api.test", pluginVersion: "6", licenseKey: () => licenseKey });
+    const rejected = jest.fn();
+    adapter.onAuthorizationRejected(rejected);
+    let finish!: (value: Response) => void;
+    request.mockReturnValueOnce(new Promise<Response>((resolve) => { finish = resolve; }));
+    const pending = path === "embeddings" ? adapter.getManagedEmbeddingsIndexMetadata()
+      : path === "config" ? adapter.getPluginConfigCapabilities()
+      : adapter.request({ path: "/api/plugin/images/models", method: "GET" });
+    licenseKey = "new-key";
+    finish(response(403, { error: "old account rejected" }));
+    await pending;
+    expect(rejected).not.toHaveBeenCalled();
+  });
+
+  it("does not invalidate a valid license when an embeddings index request needs more credits", async () => {
+    const adapter = new HostedTransportAdapter({ baseUrl: "https://api.test", pluginVersion: "6", licenseKey: () => "key" });
+    const cachedAdmission = new ManagedAdmission({ transport: adapter, licenseKey: () => "key" });
+    request.mockResolvedValueOnce(response(200, admission("allowed")))
+      .mockResolvedValueOnce(response(402, { error: "insufficient_credits" }));
+
+    await cachedAdmission.checkLicense();
+    await adapter.getManagedEmbeddingsIndexMetadata();
+    await expect(cachedAdmission.checkLicense()).resolves.toMatchObject({ outcome: "allowed" });
+    expect(request).toHaveBeenCalledTimes(2);
+  });
+
+  it("notifies other authorization listeners even when one listener throws", async () => {
+    const adapter = new HostedTransportAdapter({ baseUrl: "https://api.test", pluginVersion: "6", licenseKey: () => "key" });
+    adapter.onAuthorizationRejected(() => { throw new Error("listener failed"); });
+    const rejected = jest.fn();
+    adapter.onAuthorizationRejected(rejected);
+    request.mockResolvedValueOnce(response(403, { error: "license_rejected" }));
+
+    await expect(adapter.request({ path: "/api/plugin/images/models", method: "GET" }))
+      .resolves.toMatchObject({ response: { status: 403 } });
+    expect(rejected).toHaveBeenCalledTimes(1);
   });
 
   it("negotiates the plugin-config-v1 capability flags without the managed contract header", async () => {

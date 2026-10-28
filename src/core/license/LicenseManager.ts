@@ -66,10 +66,11 @@ export class LicenseManager {
         ? (callback: () => void) => window.requestIdleCallback(callback)
         : (callback: () => void) => window.setTimeout(callback, 0);
 
+    const licenseKey = this.plugin.settings.licenseKey?.trim();
     this.pendingValidation = new Promise<void>((resolve) => {
       scheduler(() => {
         void this.validateLicenseKeyDetailed().then((result) => {
-          if (hadValidLicense && !result.isValid) {
+          if (hadValidLicense && !result.isValid && licenseKey === this.plugin.settings.licenseKey?.trim()) {
             new Notice(
               "Your SystemSculpt license could not be validated. Open account settings to check your access.",
               7000

@@ -193,6 +193,41 @@ describe("ManagedTextGenerationAdapter", () => {
     expect(request).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    { credits_remaining: -1 },
+    { credits_remaining: 0.5 },
+    { credits_remaining: "0" },
+    { credits_remaining: null },
+    { cycle_ends_at: 42 },
+    { cycle_ends_at: {} },
+  ])("rejects malformed credit metadata without retrying the billed request (%j)", async (fields) => {
+    const { adapter, request } = harness();
+    request.mockResolvedValueOnce({
+      response: jsonResponse({ error: {
+        code: "insufficient_credits", message: "Add credits to continue.",
+        request_id: "textreq_1", retryable: false, ...fields,
+      } }, 402),
+      diagnostics: { requestId: "textreq_1", status: 402, contentType: "application/json" },
+    });
+    await expect(adapter.generate(operation())).rejects.toMatchObject({ code: "invalid_response", retryable: false });
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([{}, { credits_remaining: 0, cycle_ends_at: "2026-11-01T00:00:00.000Z" }])(
+    "preserves payment rejection with optional credit metadata (%j)", async (fields) => {
+      const { adapter, request } = harness();
+      request.mockResolvedValueOnce({
+        response: jsonResponse({ error: {
+          code: "insufficient_credits", message: "Add credits to continue.",
+          request_id: "textreq_1", retryable: false, ...fields,
+        } }, 402),
+        diagnostics: { requestId: "textreq_1", status: 402, contentType: "application/json" },
+      });
+      await expect(adapter.generate(operation())).rejects.toMatchObject({ code: "insufficient_credits", status: 402, retryable: false });
+      expect(request).toHaveBeenCalledTimes(1);
+    },
+  );
+
   it("preserves exact 409 reconciliation disposition without replay", async () => {
     const { adapter, request } = harness();
     request.mockResolvedValueOnce({

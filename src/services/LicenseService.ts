@@ -1,4 +1,5 @@
 import type SystemSculptPlugin from "../main";
+import type { SystemSculptSettings } from "../types";
 import type { ManagedAdmission } from "./managed/ManagedAdmission";
 import type { ManagedLicenseRejectReason } from "./managed/ManagedAdmissionResponse";
 
@@ -17,6 +18,8 @@ type LicenseAdmission = Pick<ManagedAdmission, "checkLicense">;
  * license source of truth and one cache (#386).
  */
 export class LicenseService {
+  private validationSequence = 0;
+
   constructor(
     private readonly plugin: SystemSculptPlugin,
     private readonly admission: () => LicenseAdmission = () => plugin.getManagedCapabilityGraph().admission,
@@ -35,28 +38,32 @@ export class LicenseService {
    * validity.
    */
   public async validateLicenseDetailed(signal?: AbortSignal): Promise<LicenseValidationResult> {
-    if (!this.licenseKey?.trim()) {
+    const sequence = ++this.validationSequence;
+    const licenseKey = this.licenseKey?.trim();
+    if (!licenseKey) {
       if (this.plugin.settings.licenseValid) {
-        await this.plugin.getSettingsManager().updateSettings({ licenseValid: false });
+        if (!await this.applyValidationSettings(licenseKey, sequence, { licenseValid: false })) return this.unavailableResult();
       }
       return { outcome: "rejected", isValid: false, reason: "missing" };
     }
 
     try {
       const admission = await this.admission().checkLicense(signal, { fresh: true });
+      // A result for a replaced or removed key cannot update the current account.
+      if (sequence !== this.validationSequence || licenseKey !== this.licenseKey?.trim()) return this.unavailableResult();
       if (admission.outcome === "allowed") {
-        await this.plugin.getSettingsManager().updateSettings({
+        if (!await this.applyValidationSettings(licenseKey, sequence, {
           licenseValid: true,
           subscriptionStatus: "active",
           lastValidated: Date.now(),
-        });
+        })) return this.unavailableResult();
         return { outcome: "valid", isValid: true };
       }
       // Only the exact negotiated 403/license_rejected envelope may downgrade
       // cached validity. Status codes and HTML error pages alone are not proof
       // that a paid license is invalid.
       if (admission.outcome === "license_rejected" && admission.reason) {
-        await this.plugin.getSettingsManager().updateSettings({ licenseValid: false });
+        if (!await this.applyValidationSettings(licenseKey, sequence, { licenseValid: false })) return this.unavailableResult();
         return { outcome: "rejected", isValid: false, reason: admission.reason };
       }
 
@@ -65,14 +72,14 @@ export class LicenseService {
       // remain the only source of authoritative rejection state.
       const legacyProfile = admission.legacyProfile;
       if (legacyProfile) {
-        await this.plugin.getSettingsManager().updateSettings({
+        if (!await this.applyValidationSettings(licenseKey, sequence, {
           licenseValid: true,
           userEmail: legacyProfile.email,
           userName: legacyProfile.userName,
           displayName: legacyProfile.displayName,
           subscriptionStatus: "active",
           lastValidated: Date.now(),
-        });
+        })) return this.unavailableResult();
         return { outcome: "valid", isValid: true };
       }
 
@@ -80,6 +87,20 @@ export class LicenseService {
     } catch {
       return this.unavailableResult();
     }
+  }
+
+  private async applyValidationSettings(
+    licenseKey: string | undefined,
+    sequence: number,
+    patch: Partial<SystemSculptSettings>,
+  ): Promise<boolean> {
+    let applied = false;
+    await this.plugin.getSettingsManager().updateSettings((current) => {
+      if (sequence !== this.validationSequence || licenseKey !== current.licenseKey?.trim()) return {};
+      applied = true;
+      return patch;
+    });
+    return applied;
   }
 
   private unavailableResult(): LicenseValidationResult {

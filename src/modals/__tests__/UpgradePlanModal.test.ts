@@ -190,7 +190,7 @@ describe("UpgradePlanModal", () => {
     expect(plugin.openSettingsTab).toHaveBeenCalledWith("account");
   });
 
-  it("offers lifetime and monthly purchases to a signed-in account without a plan", () => {
+  it("offers yearly and monthly purchases to a signed-in account without a plan", () => {
     const plugin = createPlugin({ userEmail: "user@example.com" });
     const modal = new UpgradePlanModal(plugin);
     modal.onOpen();
@@ -217,6 +217,45 @@ describe("UpgradePlanModal", () => {
     expect(findButtonByText(modal.modalEl, "I've purchased — Sync license")).toBeTruthy();
     spy.mockRestore();
     modal.onClose();
+  });
+
+  it("opens monthly checkout and starts license sync rather than granting access after purchase", async () => {
+    const { hrefs, spy } = spyOnAnchorClicks();
+    try {
+      const plugin = createPlugin({ userEmail: "user@example.com", licenseKey: "expired-key" });
+      const modal = new UpgradePlanModal(plugin);
+      modal.onOpen();
+      expect(modal.modalEl.textContent).toContain("Your current license isn't active.");
+      findButtonByText(modal.modalEl, "Subscribe monthly").click();
+      const checkout = new URL(hrefs[0]);
+      expect(checkout.origin).toBe("https://systemsculpt.com");
+      expect(checkout.pathname).toBe("/subscribe");
+      expect(checkout.searchParams.get("utm_source")).toBe("obsidian-plugin");
+      expect(checkout.searchParams.get("utm_medium")).toBe("modal");
+      expect(plugin.updateSettings).not.toHaveBeenCalled();
+      findButtonByText(modal.modalEl, "I've purchased — Sync license").click();
+      await flushPromises();
+      expect(plugin.begin).toHaveBeenCalledWith("sign-in", expect.anything());
+      expect(plugin.updateSettings).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it.each([{}, { userEmail: "account@example.com" }])("opens comparison pricing without changing access (%j)", (settings) => {
+    const { hrefs, spy } = spyOnAnchorClicks();
+    try {
+      const plugin = createPlugin(settings);
+      const modal = new UpgradePlanModal(plugin);
+      modal.onOpen();
+      findButtonByText(modal.modalEl, "Compare plans").click();
+      const url = new URL(hrefs[0]);
+      expect(url.origin).toBe("https://systemsculpt.com");
+      expect(url.pathname).toBe("/pricing");
+      expect(plugin.updateSettings).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("switches to the browser handoff with a manual connection-code fallback", async () => {

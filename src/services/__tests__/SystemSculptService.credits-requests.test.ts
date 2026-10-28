@@ -181,6 +181,33 @@ describe("SystemSculptService credits requests", () => {
     },
   );
 
+  it.each(["balance", "usage"] as const)("preserves a payment-required response from %s without changing local credit state", async (kind) => {
+    const { service, plugin } = createService();
+    request.mockResolvedValue(jsonResponse({ error: { code: "payment_required", message: "Add credits to continue." } }, { status: 402 }));
+    await expect(kind === "balance" ? service.getCreditsBalance() : service.getCreditsUsage())
+      .rejects.toMatchObject({ code: ERROR_CODES.INSUFFICIENT_CREDITS, statusCode: 402 });
+    expect(plugin.settings).toEqual({ licenseKey: " license_for_test " });
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores non-string endpoint filters rather than serializing them into billing queries", async () => {
+    const { service } = createService();
+    request.mockResolvedValue(jsonResponse({ items: [] }));
+    await service.getCreditsUsage({ endpoints: [null, 42, "/chat"] as unknown as string[] });
+    expect(new URL(request.mock.calls[0][0].url).searchParams.getAll("endpoint")).toEqual(["/chat"]);
+  });
+
+  it("does not reuse a cached balance after the license is removed", async () => {
+    const { service, plugin } = createService();
+    request.mockResolvedValue(jsonResponse(balancePayload));
+    await service.readCreditsBalance();
+    plugin.settings.licenseKey = "";
+    await expect(service.readCreditsBalance()).rejects.toMatchObject({
+      code: ERROR_CODES.INVALID_LICENSE, statusCode: 401, metadata: { licenseFailure: true },
+    });
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
   it("shares displayed balances, refreshes after purchases and never reuses another account's balance", async () => {
     const { service, plugin } = createService();
     request.mockImplementation(async () => jsonResponse(balancePayload));

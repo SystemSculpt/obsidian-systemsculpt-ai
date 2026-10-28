@@ -99,6 +99,19 @@ describe("ManagedCapabilityCatalog", () => {
     }
   });
 
+  it.each(fixture.capabilities.map((capability, index) => [capability.alias, index] as const))(
+    "requires license authentication and the declared metering for %s",
+    (_alias, index) => {
+      const unauthenticated = structuredClone(fixture);
+      unauthenticated.capabilities[index].auth = "none";
+      expect(() => ManagedCapabilityCatalog.parse(unauthenticated)).toThrow("Malformed descriptor");
+
+      const unmetered = structuredClone(fixture);
+      unmetered.capabilities[index].metering = "unmetered";
+      expect(() => ManagedCapabilityCatalog.parse(unmetered)).toThrow("Malformed descriptor");
+    },
+  );
+
   it.each([undefined, null, false, "300", {}, [], 0, -1, 1, 299, 301, 1.5, Number.NaN, Number.NEGATIVE_INFINITY, Number.POSITIVE_INFINITY])(
     "rejects noncanonical cache_ttl_seconds %p as contract drift",
     (cacheTTL) => {

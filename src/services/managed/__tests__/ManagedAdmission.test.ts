@@ -233,6 +233,47 @@ describe("ManagedAdmission", () => {
     expect(getAdmission).toHaveBeenCalledTimes(2);
   });
 
+  it("does not cache an allowed admission for a different license selected during the read", async () => {
+    let finish!: (value: unknown) => void;
+    getAdmission.mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+    const admission = create();
+    const pending = admission.checkLicense();
+    licenseKey.mockReturnValue("replacement-license");
+    finish({ outcome: "allowed", diagnostics: { status: 200 } });
+    await pending;
+
+    getAdmission.mockResolvedValue({ outcome: "license_rejected", diagnostics: { status: 403 } });
+    await expect(admission.checkLicense()).resolves.toMatchObject({ outcome: "license_rejected" });
+    expect(getAdmission).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not cache a successful response after its caller was cancelled", async () => {
+    let finish!: (value: unknown) => void;
+    getAdmission.mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+    const controller = new AbortController();
+    const admission = create();
+    const pending = admission.checkLicense(controller.signal);
+    controller.abort();
+    finish({ outcome: "allowed", diagnostics: { status: 200 } });
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+
+    await admission.checkLicense();
+    expect(getAdmission).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    { alias: "systemsculpt/unknown" as never },
+    { alias: "systemsculpt/chat" as const, requestContract: "embeddings" as const },
+  ])("does not admit an unsupported capability or request contract: %p", async (operation) => {
+    await expect(create().acquireLease(operation)).resolves.toMatchObject({ outcome: "capability_unavailable" });
+  });
+
+  it("does not admit a capability while the server catalog is unavailable", async () => {
+    getCatalog.mockResolvedValue({ ...catalog, status: "temporarily_unavailable" });
+    await expect(create().acquireLease({ alias: "systemsculpt/chat" }))
+      .resolves.toMatchObject({ outcome: "capability_unavailable" });
+  });
+
   it("never refills the cache from a read that was pending when a 401 or 403 invalidated it", async () => {
     let rejected: (() => void) | null = null;
     let finishStale!: (value: unknown) => void;

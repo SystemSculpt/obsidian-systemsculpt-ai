@@ -161,6 +161,59 @@ describe("CreditsBalanceCache", () => {
     expect(listener.mock.calls).toEqual([[balance(0)]]);
   });
 
+  it("rejects an already-cancelled caller without reading or serving cached money", async () => {
+    const fetch = jest.fn(async () => balance(4));
+    const cache = create(fetch);
+    const controller = new AbortController();
+    controller.abort();
+    await expect(cache.read({ signal: controller.signal })).rejects.toMatchObject({ name: "AbortError" });
+    expect(fetch).not.toHaveBeenCalled();
+    await cache.read();
+    await expect(cache.read({ signal: controller.signal })).rejects.toMatchObject({ name: "AbortError" });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not let an older failure clear a fresh request or an observer break publication", async () => {
+    const old = deferred<CreditsBalanceSnapshot>();
+    const fresh = deferred<CreditsBalanceSnapshot>();
+    const fetch = jest.fn().mockReturnValueOnce(old.promise).mockReturnValueOnce(fresh.promise);
+    const cache = create(fetch);
+    const failed = expect(cache.read()).rejects.toThrow("old request failed");
+    const current = cache.read({ fresh: true });
+    old.reject(new Error("old request failed"));
+    await failed;
+
+    const joined = cache.read();
+    const observer = jest.fn(() => { throw new Error("closed view"); });
+    const healthyObserver = jest.fn();
+    cache.subscribe(observer);
+    cache.subscribe(healthyObserver);
+    fresh.resolve(balance(2));
+    await expect(current).resolves.toEqual(balance(2));
+    await expect(joined).resolves.toEqual(balance(2));
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(healthyObserver).toHaveBeenCalledWith(balance(2));
+    expect(cache.peek()).toEqual(balance(2));
+  });
+
+  it("uses the wall clock and the configured freshness period without changing account identity", async () => {
+    const clock = jest.spyOn(Date, "now").mockReturnValue(1000);
+    try {
+      const fetch = jest.fn(async () => balance(3));
+      const cache = new CreditsBalanceCache({ fetch, licenseKey: () => licenseKey, ttlMs: 100 });
+      await cache.read();
+      licenseKey = " license-a ";
+      clock.mockReturnValue(1099);
+      await cache.read();
+      expect(fetch).toHaveBeenCalledTimes(1);
+      clock.mockReturnValue(1100);
+      await cache.read();
+      expect(fetch).toHaveBeenCalledTimes(2);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
   it("cancels one caller without failing the shared read", async () => {
     const pending = deferred<CreditsBalanceSnapshot>();
     const fetch = jest.fn(() => pending.promise);
