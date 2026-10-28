@@ -10,6 +10,7 @@ import {
 } from "../../../chat/ChatConversation";
 import { AgentWorkspace } from "../AgentWorkspace";
 import { AgentConversationRenderer } from "../AgentConversationRenderer";
+import { historicalToolPart } from "../ConversationPartPresentation";
 import { ChatMarkdownSerializer } from "../storage/ChatMarkdownSerializer";
 import type { ChatMessage } from "../../../types";
 import { deepFreeze } from "../../../utils/immutableJson";
@@ -106,7 +107,7 @@ describe("AgentWorkspace", () => {
     });
     const node = host.createDiv();
 
-    await (renderer as any).renderTool(node, {
+    await (renderer as any).tools.render(node, {
       id: "status-only",
       name: "read",
       state: "running",
@@ -134,7 +135,7 @@ describe("AgentWorkspace", () => {
     const privateFailure = "/Users/private/SecretVault failure sentinel";
     const render = async (overrides: Record<string, unknown>): Promise<HTMLElement> => {
       const node = host.createDiv();
-      await (renderer as any).renderTool(node, {
+      await (renderer as any).tools.render(node, {
         id: `tool-${host.childElementCount}`,
         order: host.childElementCount,
         kind: "tool",
@@ -213,7 +214,7 @@ describe("AgentWorkspace", () => {
     });
     const node = host.createDiv();
 
-    await (renderer as any).renderTool(node, {
+    await (renderer as any).tools.render(node, {
       id: "server-search",
       order: 0,
       kind: "tool",
@@ -233,7 +234,7 @@ describe("AgentWorkspace", () => {
       .not.toBeNull();
 
     node.empty();
-    await (renderer as any).renderTool(node, {
+    await (renderer as any).tools.render(node, {
       id: "server-additive",
       order: 0,
       kind: "tool",
@@ -251,7 +252,7 @@ describe("AgentWorkspace", () => {
       .toBe(false);
 
     node.empty();
-    await (renderer as any).renderTool(node, {
+    await (renderer as any).tools.render(node, {
       id: "server-write-collision",
       order: 0,
       kind: "tool",
@@ -288,7 +289,7 @@ describe("AgentWorkspace", () => {
 
     for (const [index, query] of queries.entries()) {
       const node = host.createDiv();
-      await (renderer as any).renderTool(node, {
+      await (renderer as any).tools.render(node, {
         id: `server-search-${index}`,
         order: index,
         kind: "tool",
@@ -333,7 +334,7 @@ describe("AgentWorkspace", () => {
     renderer.load();
 
     const pathless = host.createDiv();
-    await (renderer as any).renderTool(pathless, {
+    await (renderer as any).tools.render(pathless, {
       id: "pathless-tool",
       order: 0,
       kind: "tool",
@@ -369,7 +370,7 @@ describe("AgentWorkspace", () => {
       title: "Project.md",
       path: "Projects/Project.md",
     };
-    await (renderer as any).renderTool(actionable, {
+    await (renderer as any).tools.render(actionable, {
       id: "path-tool",
       order: 0,
       kind: "tool",
@@ -448,7 +449,7 @@ describe("AgentWorkspace", () => {
       ],
     }])).resolves.toBeUndefined();
 
-    expect((renderer as any).historicalToolPart(flatWebSearch)).toMatchObject({
+    expect(historicalToolPart(flatWebSearch as any)).toMatchObject({
       name: "web_search",
       location: "server",
       state: "succeeded",
@@ -5013,9 +5014,7 @@ describe("AgentWorkspace", () => {
           const node = parent.querySelector<HTMLElement>(".systemsculpt-agent-part.is-tool")!;
           const preview = node.querySelector<HTMLElement>(".systemsculpt-agent-approval-preview")!;
           const rawDetails = node.querySelector<HTMLDetailsElement>(".systemsculpt-agent-approval-details")!;
-          const hydration = (workspace.renderer as unknown as {
-            toolApprovalPreviewHydrationStates: WeakMap<HTMLElement, { hydration: Promise<void> | null }>;
-          }).toolApprovalPreviewHydrationStates.get(node)!.hydration!;
+          const hydration = (workspace.renderer as any).tools.toolApprovalPreviewHydrationStates.get(node)!.hydration!;
           expect(read).toHaveBeenCalledTimes(1);
           if (hydrateBeforeDecision) {
             finishRead("Before\n");

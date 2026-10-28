@@ -52,6 +52,8 @@ const criticalRiskCoverage = [
 	"src/views/chatview/AgentConversationPresentation.ts",
 	"src/views/chatview/AgentTranscriptRepository.ts",
 	"src/views/chatview/AgentConversationRenderer.ts",
+	"src/views/chatview/AgentToolRenderer.ts",
+	"src/views/chatview/ConversationPartPresentation.ts",
 	"src/views/chatview/InlineMessageEditor.ts",
 	"src/views/chatview/LiveMarkdownRenderer.ts",
 	"src/views/chatview/ChatStorageService.ts",
