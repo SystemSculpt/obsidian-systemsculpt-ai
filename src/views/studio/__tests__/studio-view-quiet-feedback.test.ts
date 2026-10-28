@@ -15,6 +15,11 @@ jest.mock("../../../utils/clipboard", () => ({
   tryCopyToClipboard: jest.fn(),
 }));
 
+jest.mock("../systemsculpt-studio-view/StudioFeedback", () => ({
+  ...jest.requireActual("../systemsculpt-studio-view/StudioFeedback"),
+  logStudioConsoleError: jest.fn(),
+}));
+
 const proto = (SystemSculptStudioView as any).prototype;
 
 function mountedView() {
@@ -25,8 +30,6 @@ function mountedView() {
     root,
     lastError: null as string | null,
     currentProjectPath: "Projects/Flow.systemsculpt",
-    normalizeEscapedNewlines: proto.normalizeEscapedNewlines,
-    logStudioConsoleError: jest.fn(),
   };
 }
 

@@ -13,7 +13,8 @@ import {
 import { composeStudioImageBoardAsset } from "../../../studio/StudioImageBoardRenderer";
 import type { StudioAssetRef, StudioJsonValue, StudioNodeInstance, StudioProjectV1 } from "../../../studio/types";
 import { resolveStudioImageBoardBaseAsset } from "../canvas/image-board/StudioImageBoardImages";
-import { SystemSculptStudioView } from "../SystemSculptStudioView";
+import { StudioImageEditingController } from "../systemsculpt-studio-view/StudioImageEditingController";
+import type { StudioImageBoardEditorHandle } from "../canvas/image-board/StudioImageBoardEditor";
 
 jest.mock("../../../studio/StudioImageBoardRenderer", () => ({
   ...jest.requireActual("../../../studio/StudioImageBoardRenderer"),
@@ -24,7 +25,6 @@ jest.mock("../canvas/image-board/StudioImageBoardImages", () => ({
   resolveStudioImageBoardBaseAsset: jest.fn(),
 }));
 
-const viewPrototype = (SystemSculptStudioView as any).prototype;
 const asset = (name: string): StudioAssetRef => ({
   hash: name.padEnd(64, "0"),
   path: `Studio/assets/${name}.png`,
@@ -65,19 +65,75 @@ function harness(config: Record<string, StudioJsonValue> = {}, outputs: Record<s
     ),
     render: jest.fn(),
   };
-  context.ensureRenderedImageAssetForNode = viewPrototype.ensureRenderedImageAssetForNode;
+  const images = new StudioImageEditingController({
+    app: context.app,
+    containerEl: document.createElement("div"),
+    getProject: () => context.currentProject,
+    getProjectPath: () => context.currentProjectPath,
+    getStudio: () => context.plugin.getStudioService(),
+    presentation: context.runPresentation,
+    commitMutation: context.commitCurrentProjectMutationAsync,
+    selectNodeForEditing: jest.fn(),
+    render: context.render,
+  });
   return {
     node,
     context,
-    picture: (): Promise<StudioAssetRef | null> => context.ensureRenderedImageAssetForNode(node),
+    images,
+    picture: (): Promise<StudioAssetRef | null> => images.ensureRenderedImageAssetForNode(node),
     board: (): StudioImageBoard => readStudioImageBoard(node.config),
   };
 }
 
-describe("SystemSculptStudioView: the picture an image node shows", () => {
+describe("StudioImageEditingController: the picture an image node shows", () => {
   beforeEach(() => {
     jest.mocked(resolveStudioImageBoardBaseAsset).mockReset().mockResolvedValue(SOURCE);
     jest.mocked(composeStudioImageBoardAsset).mockReset().mockResolvedValue(FLATTENED);
+  });
+
+  it("routes input to the mounted editor and ignores an older editor's unmount", async () => {
+    const h = harness();
+    const options = h.images.imageBoardOptions()!;
+    const oldEditor = { handlePaste: jest.fn(() => false), handleKeyDown: jest.fn(() => false) } as unknown as StudioImageBoardEditorHandle;
+    const editor = { handlePaste: jest.fn(() => true), handleKeyDown: jest.fn(() => true), finish: jest.fn(async () => {}) } as unknown as StudioImageBoardEditorHandle;
+    const paste = new Event("paste") as ClipboardEvent;
+    const key = new KeyboardEvent("keydown", { key: "Escape" });
+
+    expect(h.images.handlePaste(paste)).toBe(false);
+    h.images.toggleImageEditForNode(h.node);
+    await Promise.resolve();
+    expect(options.isEditing(h.node.id)).toBe(true);
+    options.onEditorMounted(h.node.id, oldEditor);
+    options.onEditorMounted(h.node.id, editor);
+    options.onEditorUnmounted(h.node.id, oldEditor);
+
+    expect(h.images.handlePaste(paste)).toBe(true);
+    expect(h.images.handleKeyDown(key)).toBe(true);
+    expect(editor.handlePaste).toHaveBeenCalledWith(paste);
+    expect(editor.handleKeyDown).toHaveBeenCalledWith(key);
+    await h.images.finishImageEdit();
+    expect(editor.finish).toHaveBeenCalledTimes(1);
+    expect(options.isEditing(h.node.id)).toBe(false);
+  });
+
+  it("does not start editing a node removed while the prior image was being saved", async () => {
+    const h = harness();
+    const options = h.images.imageBoardOptions()!;
+    h.images.toggleImageEditForNode(h.node);
+    await Promise.resolve();
+    let finish!: () => void;
+    const saved = new Promise<void>((resolve) => { finish = resolve; });
+    options.onEditorMounted(h.node.id, { finish: () => saved } as StudioImageBoardEditorHandle);
+    const next = { ...h.node, id: "next" };
+    h.context.currentProject.graph.nodes.push(next);
+    h.images.toggleImageEditForNode(next);
+    h.context.currentProject.graph.nodes.pop();
+    finish();
+    await saved;
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(h.images.editingNodeId).toBeNull();
   });
 
   it("is the node's own image when nothing was edited, staged if the node never ran", async () => {

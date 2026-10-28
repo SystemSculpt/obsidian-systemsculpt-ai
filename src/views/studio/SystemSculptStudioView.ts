@@ -1,3 +1,19 @@
+import { StudioImageEditingController } from "./systemsculpt-studio-view/StudioImageEditingController";
+import {
+  logStudioConsoleError,
+  normalizeEscapedNewlines,
+  refreshStudioMessages,
+  summarizeMessageForNotice,
+  updateStudioError,
+} from "./systemsculpt-studio-view/StudioFeedback";
+import { applyStudioNodeResizePatch } from "./systemsculpt-studio-view/StudioNodeResize";
+import {
+  buildAutoCreatedNodeTitle,
+  buildSeededPreviewOutputs,
+  describeConnectionAutoCreate,
+  resolveConnectionAutoCreateTemplate,
+  seedAutoCreatedNodeConfig,
+} from "./systemsculpt-studio-view/StudioConnectionPreview";
 import { StudioOutputContainerController } from "./StudioOutputContainerController";
 import { createSurfaceElement } from "../../core/ui/surface/SurfaceDomContext";
 import { StudioVaultNotes, isStudioMarkdownFile } from "./StudioVaultNotes";
@@ -15,7 +31,6 @@ import {
   MarkdownRenderer,
   Notice,
   normalizePath,
-  TFile,
   type ViewStateResult,
   WorkspaceLeaf,
 } from "obsidian";
@@ -29,7 +44,6 @@ import { isMobileLayout } from "../../platform/mobileLayout";
 import { randomId } from "../../studio/utils";
 import {
   STUDIO_DISPLAY_NAME,
-  type StudioAssetRef,
   type StudioJsonValue,
   type StudioNodeDefinition,
   type StudioNodeInstance,
@@ -80,17 +94,6 @@ import { bindStudioVaultEvents } from "./StudioVaultEventBindings";
 import { StudioAssetPreviewController } from "./StudioAssetPreviewController";
 import type { StudioEditingSnapshot } from "../../core/plugin/StudioReloadState";
 import { captureStudioSourceReloadState, restoreStudioSourceReloadState } from "./canvas/StudioNodeSourceBody";
-import type { StudioImageBoardEditorHandle } from "./canvas/image-board/StudioImageBoardEditor";
-import { composeStudioImageBoardAsset } from "../../studio/StudioImageBoardRenderer";
-import { resolveStudioImageBoardBaseAsset } from "./canvas/image-board/StudioImageBoardImages";
-import {
-  normalizeStudioAssetRef,
-  readStudioImageBoard,
-  resolveStudioImageBoardRenderedAsset,
-  studioImageBoardHasEdits,
-  studioImageBoardWithRender,
-  writeStudioImageBoard,
-} from "../../studio/StudioImageBoard";
 import {
   normalizeGraphCoordinate,
   normalizeWorldCoordinate,
@@ -101,27 +104,19 @@ import {
   type StudioNodeDetailMode,
 } from "./canvas/StudioGraphNodeDetailMode";
 import type {
-  StudioGraphNodeImageBoardOptions,
   StudioGraphNodeResizePatch,
 } from "./canvas/StudioGraphNodeCardTypes";
 import { readStudioTextNodeValue } from "./canvas/StudioGraphTextNodeCard";
 import {
-  clampStudioNodeDimension,
-  isStudioFillTextNode,
-  resolveStudioGraphNodeWidth,
   STUDIO_GRAPH_FILL_TEXT_DEFAULT_HEIGHT,
   STUDIO_GRAPH_FILL_TEXT_DEFAULT_WIDTH,
-  STUDIO_GRAPH_TEXT_NODE_MAX_FONT_SIZE,
-  STUDIO_GRAPH_TEXT_NODE_MIN_FONT_SIZE,
   STUDIO_TEXT_NODE_FILL_LAYOUT,
   STUDIO_TEXT_NODE_LAYOUT_KEY,
-  STUDIO_TEXT_NODE_WIDTH_MODE_KEY,
 } from "../../studio/StudioNodeGeometry";
 import { computeStudioNewNodePosition } from "./canvas/StudioGraphNodePlacement";
 import { StudioGraphInteractionEngine } from "./StudioGraphInteractionEngine";
 import {
   STUDIO_GRAPH_DEFAULT_ZOOM,
-  type ConnectionAutoCreateDescriptor,
   type ConnectionAutoCreateRequest,
   type StudioGraphZoomChangeContext,
   type StudioGraphZoomMode,
@@ -132,6 +127,7 @@ import { StudioRunPresentationState } from "./StudioRunPresentationState";
 import { StudioActivityController } from "./activity/StudioActivityController";
 import {
   buildNodeInsertMenuItems,
+  cloneJsonValue,
   cloneConfigDefaults,
   definitionKey,
   prettifyNodeKind,
@@ -143,8 +139,7 @@ import {
   getStudioOwnerWindow,
   requestStudioAnimationFrame,
 } from "./StudioDomContext";
-import { tryCopyImageBytesToClipboard, tryCopyImageFileToClipboard, tryCopyToClipboard } from "../../utils/clipboard";
-import { resolveNodeMediaPreview } from "./canvas/StudioGraphMediaPreview";
+import { tryCopyToClipboard } from "../../utils/clipboard";
 import { isAbsoluteFilesystemPath, resolveAbsoluteVaultPath } from "../../utils/vaultPathUtils";
 import { resolveStudioViewTitle } from "./studio-view-title";
 import {
@@ -182,39 +177,11 @@ import {
 } from "./systemsculpt-studio-view/StudioProjectSessionController";
 import { SYSTEMSCULPT_STUDIO_VIEW_TYPE } from "../../core/plugin/viewTypes";
 import { applyPluginSurface } from "../../core/ui/surface";
-import { createStudioAction } from "./StudioAction";
 import { bindSurfaceActivity } from "../../core/ui/surface/SurfaceActivity";
 import { observeLeafVisibility } from "../../core/ui/surface/LeafVisibility";
 import { StudioPresentation } from "./StudioPresentation";
 const GROUP_DISCONNECT_OFFSET_X = 36;
 const STUDIO_GRAPH_SELECTION_FIT_PADDING_PX = 25;
-function updateStudioMessage(root: HTMLElement, className: string, text: string | null): void {
-  const existing = root.querySelector<HTMLElement>(`:scope > .${className}`);
-  if (!text) {
-    existing?.remove();
-    return;
-  }
-  const element = existing ?? root.createDiv({ cls: className });
-  element.setText(text);
-  if (!existing) root.prepend(element);
-}
-
-/** The view's one error line; announced when it appears or changes. */
-function updateStudioError(root: HTMLElement, error: string | null): void {
-  updateStudioMessage(root, "ss-studio-error", error);
-  root.querySelector(":scope > .ss-studio-error")?.setAttribute("role", "alert");
-}
-
-function refreshStudioMessages(root: HTMLElement, error: string | null, warning: string | null, recovery?: { reason: string; retrying: boolean; retry: () => void }): void {
-  updateStudioMessage(root, "ss-studio-warning", recovery?.reason ?? warning);
-  if (recovery) {
-    const notice = root.querySelector<HTMLElement>(":scope > .ss-studio-warning")!;
-    notice.setAttribute("role", "status");
-    createStudioAction(notice, { label: "Try again", testId: "studio.migration.retry", disabled: recovery.retrying, onSelect: recovery.retry });
-  }
-  updateStudioError(root, error);
-}
-
 type SystemSculptStudioViewState = StudioProjectScopedViewState;
 
 type StudioRunGraphOptions = {
@@ -257,9 +224,7 @@ export class SystemSculptStudioView extends ItemView {
     positionsChanged: () => this.graphInteraction.notifyNodePositionsChanged(),
   });
   private readonly textEdits = new StudioTextEditSessions();
-  /** The one image node being edited in place, and the editor its card mounted for it. */
-  private imageEditNodeId: string | null = null;
-  private imageEditor: StudioImageBoardEditorHandle | null = null;
+  private readonly imageEditing: StudioImageEditingController;
   private graphWorkspace: StudioGraphWorkspaceRenderResult | null = null;
   /** Armed diagram tool from the tools row; "select" is the normal pointer. */
   private activeCanvasTool: StudioCanvasTool = "select";
@@ -324,6 +289,21 @@ export class SystemSculptStudioView extends ItemView {
     private readonly plugin: SystemSculptPlugin
   ) {
     super(leaf);
+    this.imageEditing = new StudioImageEditingController({
+      app: this.app,
+      containerEl: this.containerEl,
+      getProject: () => this.currentProject,
+      getProjectPath: () => this.currentProjectPath,
+      getStudio: () => this.plugin.getStudioService(),
+      presentation: this.runPresentation,
+      commitMutation: (reason, mutator, options) => this.commitCurrentProjectMutationAsync(reason, mutator, options),
+      selectNodeForEditing: (nodeId) => {
+        // Canvas drawing tools would otherwise claim the drags meant for the image.
+        this.selectCanvasTool("select");
+        this.graphInteraction.selectOnlyNode(nodeId);
+      },
+      render: () => this.render(),
+    });
     this.vaultNotes = new StudioVaultNotes(this.app.vault, this.runPresentation);
     this.assetPreviews = new StudioAssetPreviewController(this.app, () => this.scheduleRender(), async (path) => {
       const projectPath = this.currentProjectPath;
@@ -347,7 +327,7 @@ export class SystemSculptStudioView extends ItemView {
       onGraphZoomChanged: (zoom, context) => this.handleGraphZoomChanged(zoom, context),
       getPortType: (nodeId, direction, portId) => this.getPortType(nodeId, direction, portId),
       portTypeCompatible: (sourceType, targetType) => this.portTypeCompatible(sourceType, targetType),
-      describeConnectionAutoCreate: (sourceType) => this.describeConnectionAutoCreate(sourceType),
+      describeConnectionAutoCreate: (sourceType) => describeConnectionAutoCreate(sourceType),
       onConnectionAutoCreateRequested: (request) => this.handleConnectionAutoCreateRequested(request),
       getSelectedShapeIds: () => this.shapeController.getSelectedShapeIds(),
       clearDiagramSelection: () => this.shapeController.clearSelectionInPlace(),
@@ -407,8 +387,8 @@ export class SystemSculptStudioView extends ItemView {
     });
     this.clipboardAndDropController = new StudioClipboardAndDropController(this.app, {
       ownsEventTarget: (target) => this.isActiveStudioView() && this.ownsKeyboardTarget(target),
-      interceptPaste: (event) => this.imageEditor?.handlePaste(event) === true,
-      copyNodeImage: (nodeId) => this.copyNodePictureToClipboard(nodeId),
+      interceptPaste: (event) => this.imageEditing.handlePaste(event),
+      copyNodeImage: (nodeId) => this.imageEditing.copyNodePictureToClipboard(nodeId),
       isBusy: () => this.busy,
       isEditableTarget: (target) => this.isEditableKeyboardTarget(target),
       getCurrentProject: () => this.currentProject,
@@ -640,7 +620,7 @@ export class SystemSculptStudioView extends ItemView {
   private clearProjectEditorState(): void {
     this.shapeController.clearSelection();
     this.textEdits.clear();
-    this.imageEditNodeId = null;
+    this.imageEditing.clearEditingNode();
   }
 
   private applyHistorySnapshot(snapshot: StudioGraphHistorySnapshot): StudioGraphHistorySnapshot | null {
@@ -821,7 +801,7 @@ export class SystemSculptStudioView extends ItemView {
       return false;
     }
     // An image being edited in place takes its keys before the canvas does.
-    if (this.imageEditor?.handleKeyDown(event)) {
+    if (this.imageEditing.handleKeyDown(event)) {
       return true;
     }
     const normalizedKey = String(event.key || "").toLowerCase();
@@ -1032,17 +1012,17 @@ export class SystemSculptStudioView extends ItemView {
       return;
     }
     const rawMessage = error instanceof Error ? error.message : String(error);
-    const message = this.normalizeEscapedNewlines(rawMessage);
+    const message = normalizeEscapedNewlines(rawMessage);
     this.lastError = message;
     if (error instanceof Error) {
-      this.logStudioConsoleError("[SystemSculpt Studio] Error", {
+      logStudioConsoleError("[SystemSculpt Studio] Error", {
         message,
         name: error.name,
         stack: error.stack || null,
         projectPath: this.currentProjectPath,
       });
     } else {
-      this.logStudioConsoleError("[SystemSculpt Studio] Error", {
+      logStudioConsoleError("[SystemSculpt Studio] Error", {
         message,
         rawError: error,
         projectPath: this.currentProjectPath,
@@ -1051,70 +1031,6 @@ export class SystemSculptStudioView extends ItemView {
     // The error line at the top of the view owns this; no toast on top.
     const mountedRoot = this.contentEl.querySelector<HTMLElement>(":scope > .ss-studio-view");
     if (mountedRoot) updateStudioError(mountedRoot, message);
-  }
-
-  private logStudioConsoleError(label: string, details: Record<string, unknown>): void {
-    console.error(label, details);
-    const serialized = this.serializeStudioConsoleDetails(details);
-    if (serialized) {
-      console.error(`${label} JSON ${serialized}`);
-    }
-  }
-
-  private serializeStudioConsoleDetails(details: Record<string, unknown>): string {
-    const seen = new WeakSet<object>();
-    try {
-      return JSON.stringify(
-        details,
-        (_key, value: unknown) => {
-          if (value instanceof Error) {
-            return {
-              name: value.name,
-              message: value.message,
-              stack: value.stack || null,
-            };
-          }
-          if (typeof value === "bigint") {
-            return value.toString();
-          }
-          if (value && typeof value === "object") {
-            if (seen.has(value)) {
-              return "[Circular]";
-            }
-            seen.add(value);
-          }
-          return value;
-        },
-        2
-      );
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return JSON.stringify({
-        message: "Failed to serialize console details.",
-        serializationError: message,
-      });
-    }
-  }
-
-  private normalizeEscapedNewlines(message: string): string {
-    return String(message || "")
-      .replace(/\\r\\n/g, "\n")
-      .replace(/\\n/g, "\n")
-      .replace(/\\r/g, "\n");
-  }
-
-  private summarizeMessageForNotice(message: string): string {
-    const firstLine = this.normalizeEscapedNewlines(message)
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .find((line) => line.length > 0);
-    if (!firstLine) {
-      return "Unknown error";
-    }
-    if (firstLine.length <= 220) {
-      return firstLine;
-    }
-    return `${firstLine.slice(0, 217)}...`;
   }
 
   /** Activity-only events patch in place; graph changes (outputs, placeholders, lock state) rebuild. */
@@ -1135,10 +1051,10 @@ export class SystemSculptStudioView extends ItemView {
         sourceNodeId: event.nodeId,
         runId: event.runId,
       }) || structural;
-      this.logStudioConsoleError("[SystemSculpt Studio] Node failed", { runId: event.runId, nodeId: event.nodeId, error: event.error, stack: event.errorStack || null, at: event.at, projectPath: this.currentProjectPath });
+      logStudioConsoleError("[SystemSculpt Studio] Node failed", { runId: event.runId, nodeId: event.nodeId, error: event.error, stack: event.errorStack || null, at: event.at, projectPath: this.currentProjectPath });
     } else if (event.type === "run.failed") {
       structural = this.removePendingManagedOutputPlaceholders({ runId: event.runId }) || structural;
-      this.logStudioConsoleError("[SystemSculpt Studio] Run failed", { runId: event.runId, error: event.error, stack: event.errorStack || null, at: event.at, projectPath: this.currentProjectPath });
+      logStudioConsoleError("[SystemSculpt Studio] Run failed", { runId: event.runId, error: event.error, stack: event.errorStack || null, at: event.at, projectPath: this.currentProjectPath });
     } else if (event.type === "run.completed") {
       this.removePendingManagedOutputPlaceholders({ runId: event.runId });
     }
@@ -1578,7 +1494,7 @@ export class SystemSculptStudioView extends ItemView {
           return true;
         }
         const previousSerialized = JSON.stringify(target.config[key] ?? null);
-        const nextValue = this.cloneJsonValue(value);
+        const nextValue = cloneJsonValue(value);
         const nextSerialized = JSON.stringify(nextValue ?? null);
         if (previousSerialized === nextSerialized) {
           return false;
@@ -1653,7 +1569,7 @@ export class SystemSculptStudioView extends ItemView {
           if (!target) {
             continue;
           }
-          if (this.applyNodeResizePatch(target, patch)) {
+          if (applyStudioNodeResizePatch(target, patch)) {
             mutated = true;
           }
         }
@@ -1668,226 +1584,6 @@ export class SystemSculptStudioView extends ItemView {
       return;
     }
     this.graphInteraction.notifyNodePositionsChanged();
-  }
-
-  /** The one geometry-patch application shared by single and group resizes. */
-  private applyNodeResizePatch(
-    target: StudioNodeInstance,
-    patch: StudioGraphNodeResizePatch
-  ): boolean {
-    let mutated = false;
-    if (patch.size && (patch.size.width !== undefined || patch.size.height !== undefined)) {
-      // Geometry is first-class canvas data. Height is optional: text and
-      // aspect-driven media cards persist width only. Any lingering legacy
-      // config geometry is ignored by the resolvers (size wins) and
-      // stripped by the load migration on the next open.
-      const nextWidth =
-        patch.size.width !== undefined
-          ? Math.max(1, Math.round(patch.size.width))
-          : (target.size?.width ?? resolveStudioGraphNodeWidth(target));
-      const nextHeight =
-        patch.size.height !== undefined
-          ? Math.max(1, Math.round(patch.size.height))
-          : target.size?.height;
-      if (target.size?.width !== nextWidth || target.size?.height !== nextHeight) {
-        target.size = {
-          width: nextWidth,
-          ...(nextHeight !== undefined ? { height: nextHeight } : {}),
-        };
-        mutated = true;
-      }
-      // A dragged width ends a text card's auto sizing (tldraw parity).
-      if (target.kind === "studio.text" && !isStudioFillTextNode(target) && patch.size.width !== undefined && target.config[STUDIO_TEXT_NODE_WIDTH_MODE_KEY] !== "fixed") {
-        target.config[STUDIO_TEXT_NODE_WIDTH_MODE_KEY] = "fixed";
-        mutated = true;
-      }
-    }
-    if (patch.position) {
-      const nextX = Math.round(patch.position.x);
-      const nextY = Math.round(patch.position.y);
-      if (target.position.x !== nextX || target.position.y !== nextY) {
-        target.position.x = nextX;
-        target.position.y = nextY;
-        mutated = true;
-      }
-    }
-    if (patch.fontSize !== undefined) {
-      const nextFontSize = clampStudioNodeDimension(
-        patch.fontSize,
-        STUDIO_GRAPH_TEXT_NODE_MIN_FONT_SIZE,
-        STUDIO_GRAPH_TEXT_NODE_MAX_FONT_SIZE
-      );
-      if (target.config.fontSize !== nextFontSize) {
-        target.config.fontSize = nextFontSize;
-        mutated = true;
-      }
-    }
-    return mutated;
-  }
-
-  /** The pencil on an image node toggles editing that image right where it sits. */
-  private toggleImageEditForNode(node: StudioNodeInstance): void {
-    if (node.kind !== "studio.media_ingest" || !this.currentProjectPath) {
-      return;
-    }
-    if (this.imageEditNodeId === node.id) {
-      void this.finishImageEdit();
-      return;
-    }
-    void this.finishImageEdit().then(() => {
-      if (!this.currentProject || !this.findNode(this.currentProject, node.id)) {
-        return;
-      }
-      this.imageEditNodeId = node.id;
-      // Canvas drawing tools would otherwise claim the drags meant for the image.
-      this.selectCanvasTool("select");
-      this.graphInteraction.selectOnlyNode(node.id);
-      this.render();
-    });
-  }
-
-  /** Saves the flattened image and returns the card to its normal state. */
-  private async finishImageEdit(): Promise<void> {
-    const nodeId = this.imageEditNodeId;
-    if (!nodeId) {
-      return;
-    }
-    if (this.imageEditor) {
-      await this.imageEditor.finish();
-    }
-    // Ends the edit that was finished, not one begun while it was saving.
-    this.endImageEdit(nodeId);
-  }
-
-  private endImageEdit(nodeId: string | null): void {
-    if (!nodeId || this.imageEditNodeId !== nodeId) {
-      return;
-    }
-    this.imageEditNodeId = null;
-    this.render();
-  }
-
-  private imageBoardOptions(): StudioGraphNodeImageBoardOptions | undefined {
-    const projectPath = this.currentProjectPath;
-    if (!projectPath) {
-      return undefined;
-    }
-    const studio = this.plugin.getStudioService();
-    return {
-      app: this.app,
-      readAsset: (asset) => studio.readAsset(asset),
-      storeAsset: (bytes, mimeType) => studio.storeAsset(projectPath, bytes, mimeType),
-      isEditing: (nodeId) => this.imageEditNodeId === nodeId,
-      onEditorMounted: (_nodeId, editor) => {
-        this.imageEditor = editor;
-      },
-      onEditorUnmounted: (_nodeId, editor) => {
-        if (this.imageEditor === editor) this.imageEditor = null;
-      },
-      onClose: (nodeId) => this.endImageEdit(nodeId),
-    };
-  }
-
-  /**
-   * The picture an image node shows, as a project asset: its edits flattened
-   * when it has any, otherwise its own image. A node that has not run is
-   * staged from its source, as it is for editing. Null when that picture
-   * cannot be produced; an edited image is never stood in for by its source.
-   */
-  private async ensureRenderedImageAssetForNode(node: StudioNodeInstance): Promise<StudioAssetRef | null> {
-    if (node.kind !== "studio.media_ingest" || !this.currentProjectPath) {
-      return null;
-    }
-    const projectPath = this.currentProjectPath;
-    const studio = this.plugin.getStudioService();
-    const nodeRunState = this.runPresentation.getNodeState(node.id);
-    const sourceAsset = await resolveStudioImageBoardBaseAsset({
-      app: this.app,
-      node,
-      nodeRunState,
-      storeAsset: (bytes, mimeType) => studio.storeAsset(projectPath, bytes, mimeType),
-    }).catch(() => null);
-    const board = readStudioImageBoard(node.config);
-    if (!studioImageBoardHasEdits(board)) {
-      const outputs = (nodeRunState.outputs || {}) as Record<string, unknown>;
-      return sourceAsset ?? normalizeStudioAssetRef(outputs.preview_asset);
-    }
-    if (!sourceAsset) {
-      return null;
-    }
-    const existingRenderedAsset = resolveStudioImageBoardRenderedAsset(node.config, sourceAsset.path);
-    if (existingRenderedAsset) {
-      return existingRenderedAsset;
-    }
-
-    const renderedAsset = await composeStudioImageBoardAsset({
-      baseImage: sourceAsset,
-      board,
-      readAsset: (asset) => studio.readAsset(asset),
-      storeAsset: (bytes, mimeType) => studio.storeAsset(projectPath, bytes, mimeType),
-    });
-    const changed = await this.commitCurrentProjectMutationAsync(
-      "media.editor",
-      async (project) => {
-        const targetNode = this.findNode(project, node.id);
-        if (!targetNode || targetNode.kind !== "studio.media_ingest") {
-          return false;
-        }
-        // The node keeps whatever was done to it meanwhile; the picture is recorded as being of `board`.
-        writeStudioImageBoard(
-          targetNode,
-          studioImageBoardWithRender(readStudioImageBoard(targetNode.config), board, sourceAsset.path, renderedAsset)
-        );
-        return true;
-      },
-      { captureHistory: false }
-    );
-    if (changed) {
-      this.render();
-    }
-    return renderedAsset;
-  }
-
-  private async copyImageForNodeToClipboard(node: StudioNodeInstance): Promise<void> {
-    const asset = await this.ensureRenderedImageAssetForNode(node).catch(() => null);
-    if (!asset) {
-      new Notice("Run this image node once before copying the image.");
-      return;
-    }
-    const file = this.app.vault.getAbstractFileByPath(asset.path);
-    if (!(file instanceof TFile)) {
-      new Notice("Unable to copy image to clipboard.");
-      return;
-    }
-    if (!await tryCopyImageFileToClipboard(this.app, file, this.containerEl)) {
-      new Notice("Unable to copy image to clipboard.");
-    }
-  }
-
-  /**
-   * Copying one image card copies the picture as it looks, edits included.
-   * Null when the node is not a picture; resolves to null when the picture
-   * could not be read or copied, so the node itself is copied instead.
-   */
-  private copyNodePictureToClipboard(nodeId: string): Promise<Blob | null> | null {
-    const node = this.currentProject ? this.findNode(this.currentProject, nodeId) : null;
-    if (!node || node.kind !== "studio.media_ingest") {
-      return null;
-    }
-    const outputs = (this.runPresentation.getNodeState(node.id).outputs || null) as Record<string, unknown> | null;
-    if (resolveNodeMediaPreview(node, outputs)?.kind !== "image") {
-      return null;
-    }
-    return (async () => {
-      const asset = await this.ensureRenderedImageAssetForNode(node);
-      const file = asset ? this.app.vault.getAbstractFileByPath(asset.path) : null;
-      if (!asset || !(file instanceof TFile)) {
-        return null;
-      }
-      const bytes = await this.app.vault.readBinary(file);
-      const copied = await tryCopyImageBytesToClipboard(bytes, asset.mimeType, this.containerEl);
-      return copied ? new Blob([bytes], { type: asset.mimeType }) : null;
-    })();
   }
 
   private handleNoteNodeConfigMutated(node: StudioNodeInstance): void {
@@ -2059,7 +1755,7 @@ export class SystemSculptStudioView extends ItemView {
         if (/license_required|license_rejected/i.test(rawRunError)) {
           UpgradePlanModal.openOnce(this.plugin, { feature: "Studio AI" });
         } else {
-          const runErrorSummary = this.summarizeMessageForNotice(rawRunError);
+          const runErrorSummary = summarizeMessageForNotice(rawRunError);
           new Notice(
             fromNodeId
               ? `Studio run from node failed: ${runErrorSummary}. See console for details.`
@@ -2125,126 +1821,12 @@ export class SystemSculptStudioView extends ItemView {
     return definition.outputPorts.find((port) => port.id === portId)?.type || null;
   }
 
-  private resolveConnectionAutoCreateTemplate(sourceType: string): {
-    nodeKind: string;
-    targetPortId: string;
-    label: string;
-  } | null {
-    const normalizedType = String(sourceType || "").trim();
-    if (normalizedType === "text") {
-      return {
-        nodeKind: "studio.text_output",
-        targetPortId: "text",
-        label: "text output preview",
-      };
-    }
-    if (normalizedType === "json" || normalizedType === "any") {
-      return {
-        nodeKind: normalizedType === "json" ? "studio.json" : "studio.value",
-        targetPortId: normalizedType === "json" ? "json" : "value",
-        label: normalizedType === "json" ? "JSON preview" : "value preview",
-      };
-    }
-    if (normalizedType === "number" || normalizedType === "boolean") {
-      return {
-        nodeKind: "studio.value",
-        targetPortId: "value",
-        label: "value preview",
-      };
-    }
-    return null;
-  }
-
-  private cloneJsonValue(value: StudioJsonValue): StudioJsonValue {
-    try {
-      return JSON.parse(JSON.stringify(value)) as StudioJsonValue;
-    } catch {
-      return value;
-    }
-  }
-
-  private normalizeSeededTextValue(value: StudioJsonValue): string {
-    if (typeof value === "string") {
-      return value;
-    }
-    if (typeof value === "number" || typeof value === "boolean") {
-      return String(value);
-    }
-    if (value == null) {
-      return "";
-    }
-    try {
-      return JSON.stringify(value, null, 2);
-    } catch {
-      return String(value);
-    }
-  }
-
-  private buildAutoCreatedNodeTitle(nodeKind: string, fromPortId: string): string {
-    const baseTitle = prettifyNodeKind(nodeKind);
-    const sourcePort = String(fromPortId || "").trim();
-    if (!sourcePort) {
-      return baseTitle;
-    }
-    return `${baseTitle} (${sourcePort})`;
-  }
-
   private resolveSourcePortValue(nodeId: string, portId: string): StudioJsonValue | undefined {
     const outputs = this.runPresentation.getNodeOutput(nodeId);
     if (!outputs || !Object.prototype.hasOwnProperty.call(outputs, portId)) {
       return undefined;
     }
     return outputs[portId];
-  }
-
-  private seedAutoCreatedNodeConfig(
-    node: StudioNodeInstance,
-    nodeKind: string,
-    value: StudioJsonValue
-  ): void {
-    if (nodeKind === "studio.text_output") {
-      node.config.value = this.normalizeSeededTextValue(value);
-      return;
-    }
-    if (nodeKind === "studio.json") {
-      node.config.value = this.cloneJsonValue(value);
-      return;
-    }
-    if (nodeKind === "studio.value") {
-      node.config.__studio_seed_value = this.cloneJsonValue(value);
-    }
-  }
-
-  private buildSeededPreviewOutputs(
-    nodeKind: string,
-    value: StudioJsonValue
-  ): StudioNodeOutputMap | null {
-    if (nodeKind === "studio.text_output") {
-      return {
-        text: this.normalizeSeededTextValue(value),
-      };
-    }
-    if (nodeKind === "studio.json") {
-      return {
-        json: this.cloneJsonValue(value),
-      };
-    }
-    if (nodeKind === "studio.value") {
-      return {
-        value: this.cloneJsonValue(value),
-      };
-    }
-    return null;
-  }
-
-  private describeConnectionAutoCreate(sourceType: string): ConnectionAutoCreateDescriptor | null {
-    const template = this.resolveConnectionAutoCreateTemplate(sourceType);
-    if (!template) {
-      return null;
-    }
-    return {
-      label: template.label,
-    };
   }
 
   private graphPointFromClientPosition(clientX: number, clientY: number): { x: number; y: number } | null {
@@ -2263,7 +1845,7 @@ export class SystemSculptStudioView extends ItemView {
     if (this.busy || !this.currentProject) {
       return false;
     }
-    const template = this.resolveConnectionAutoCreateTemplate(request.sourceType);
+    const template = resolveConnectionAutoCreateTemplate(request.sourceType);
     if (!template) {
       return false;
     }
@@ -2293,7 +1875,7 @@ export class SystemSculptStudioView extends ItemView {
       id: randomId("node"),
       kind: definition.kind,
       version: definition.version,
-      title: this.buildAutoCreatedNodeTitle(template.nodeKind, request.fromPortId),
+      title: buildAutoCreatedNodeTitle(template.nodeKind, request.fromPortId),
       position: this.normalizeNodePosition({
         x: anchor.x + 48,
         y: anchor.y + 10,
@@ -2305,7 +1887,7 @@ export class SystemSculptStudioView extends ItemView {
 
     const sourceValue = this.resolveSourcePortValue(sourceNode.id, request.fromPortId);
     if (typeof sourceValue !== "undefined") {
-      this.seedAutoCreatedNodeConfig(createdNode, template.nodeKind, sourceValue);
+      seedAutoCreatedNodeConfig(createdNode, template.nodeKind, sourceValue);
     }
 
     const createdNodeDefinition = resolveNodeDefinitionPorts(createdNode, definition);
@@ -2331,7 +1913,7 @@ export class SystemSculptStudioView extends ItemView {
     }
 
     if (typeof sourceValue !== "undefined") {
-      const previewOutputs = this.buildSeededPreviewOutputs(template.nodeKind, sourceValue);
+      const previewOutputs = buildSeededPreviewOutputs(template.nodeKind, sourceValue);
       if (previewOutputs) {
         this.runPresentation.primeNodeOutput(createdNode.id, previewOutputs, {
           message: `Preview from ${request.fromPortId}`,
@@ -2955,14 +2537,14 @@ export class SystemSculptStudioView extends ItemView {
   }
 
   private handleGraphViewportPointerDown(event: PointerEvent): void {
-    if (this.imageEditNodeId) {
-      const editingEl = this.graphInteraction.getNodeElement(this.imageEditNodeId);
+    if (this.imageEditing.editingNodeId) {
+      const editingEl = this.graphInteraction.getNodeElement(this.imageEditing.editingNodeId);
       if (editingEl?.contains(event.target as Node | null)) {
         // The image being edited owns every press that lands on its card.
         return;
       }
       // Pressing anywhere else finishes the edit, like clicking away from text.
-      void this.finishImageEdit();
+      void this.imageEditing.finishImageEdit();
     }
     if (this.activeCanvasTool === "arrow" && event.button === 0) {
       if (this.shapeController.startArrowGesture(event)) {
@@ -3154,11 +2736,11 @@ export class SystemSculptStudioView extends ItemView {
       onNodeResize: (nodeId, patch, options) => {
         this.handleNodeResize(nodeId, patch, options);
       },
-      onOpenImageEditor: (node) => this.toggleImageEditForNode(node),
-      imageBoard: this.imageBoardOptions(),
-      isImageNodeEditing: (nodeId) => this.imageEditNodeId === nodeId,
+      onOpenImageEditor: (node) => this.imageEditing.toggleImageEditForNode(node),
+      imageBoard: this.imageEditing.imageBoardOptions(),
+      isImageNodeEditing: (nodeId) => this.imageEditing.editingNodeId === nodeId,
       onCopyNodeImageToClipboard: (node) => {
-        void this.copyImageForNodeToClipboard(node);
+        void this.imageEditing.copyImageForNodeToClipboard(node);
       },
       renderMarkdownPreview: (node, markdown, containerEl, lifetime) => {
         return this.renderNodeMarkdownPreview(node, markdown, containerEl, lifetime);
@@ -3297,9 +2879,9 @@ export class SystemSculptStudioView extends ItemView {
     if (this.closed || this.leafVisible === false) return;
     const reason = this.currentProjectSession?.getReadOnlyReason();
     const recovery = reason ? { reason, retrying: this.retryingMigration, retry: () => { void this.retryMigration(); } } : undefined;
-    if (this.imageEditNodeId && !(this.currentProject && this.findNode(this.currentProject, this.imageEditNodeId))) {
+    if (this.imageEditing.editingNodeId && !(this.currentProject && this.findNode(this.currentProject, this.imageEditing.editingNodeId))) {
       // The edited node is gone, e.g. an undo reached before it existed.
-      this.imageEditNodeId = null;
+      this.imageEditing.clearEditingNode();
     }
     const mountedRoot = this.contentEl.querySelector<HTMLElement>(":scope > .ss-studio-view");
     if (mountedRoot && this.graphWorkspace?.refresh(this.createGraphWorkspaceOptions(mountedRoot))) {
