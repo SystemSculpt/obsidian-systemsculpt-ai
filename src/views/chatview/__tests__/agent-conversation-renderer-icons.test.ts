@@ -12,6 +12,16 @@ import {
   type AgentPresentationPhase,
 } from "../AgentConversationPresentation";
 import { AgentConversationRenderer } from "../AgentConversationRenderer";
+import { historicalToolPart } from "../ConversationPartPresentation";
+
+function toolRendererFor(renderer: AgentConversationRenderer): {
+  render(node: HTMLElement, part: Extract<AgentPart, { kind: "tool" }>): boolean;
+  prepareToolApprovalPreviewHydration(node: HTMLElement, approval: HTMLElement, fingerprint: string, toolCall: object): void;
+  hydrateApprovalPreview(node: HTMLElement): Promise<void> | null;
+  toolApprovalPreviewHydrationStates: WeakMap<HTMLElement, { hydration: Promise<void> | null }>;
+} {
+  return (renderer as unknown as { tools: ReturnType<typeof toolRendererFor> }).tools;
+}
 
 function presentation(
   phase: AgentPresentationPhase,
@@ -3129,9 +3139,7 @@ describe("AgentConversationRenderer tail status", () => {
       ?.getAttribute("aria-label")).toBe("Copy response");
 
     const staticTool = parent.createDiv();
-    await (renderer as unknown as {
-      renderTool(node: HTMLElement, part: AgentPart): Promise<void>;
-    }).renderTool(staticTool, {
+    await toolRendererFor(renderer).render(staticTool, {
       id: "static-server-action",
       order: 0,
       kind: "tool",
@@ -3151,9 +3159,7 @@ describe("AgentConversationRenderer tail status", () => {
     expect(staticHeader.hasAttribute("title")).toBe(false);
 
     const searchTool = parent.createDiv();
-    await (renderer as unknown as {
-      renderTool(node: HTMLElement, part: AgentPart): Promise<void>;
-    }).renderTool(searchTool, {
+    await toolRendererFor(renderer).render(searchTool, {
       id: "search-disclosure",
       order: 0,
       kind: "tool",
@@ -3185,9 +3191,7 @@ describe("AgentConversationRenderer tail status", () => {
     });
     renderer.load();
     const node = parent.createDiv();
-    const renderTool = (renderer as unknown as {
-      renderTool(node: HTMLElement, part: AgentPart): Promise<boolean>;
-    }).renderTool.bind(renderer);
+    const renderTool = toolRendererFor(renderer).render.bind(toolRendererFor(renderer));
     const running: Extract<AgentPart, { kind: "tool" }> = {
       id: "tool-row-grammar",
       order: 0,
@@ -3258,9 +3262,7 @@ describe("AgentConversationRenderer tail status", () => {
     });
     renderer.load();
     const node = parent.createDiv();
-    const renderTool = (renderer as unknown as {
-      renderTool(node: HTMLElement, part: AgentPart): boolean;
-    }).renderTool.bind(renderer);
+    const renderTool = toolRendererFor(renderer).render.bind(toolRendererFor(renderer));
     const approvalTool: Extract<AgentPart, { kind: "tool" }> = {
       id: "tool-lifecycle",
       order: 0,
@@ -3946,17 +3948,7 @@ describe("AgentConversationRenderer tail status", () => {
   });
 
   it("normalizes incomplete durable tool records without exposing unsafe payloads", () => {
-    const parent = document.body.createDiv();
-    const renderer = new AgentConversationRenderer(parent, {
-      app: new App(),
-      sourcePath: () => "SystemSculpt/Chats/chat.md",
-      onApprove: jest.fn(),
-      onOpenArtifact: jest.fn(),
-      onCopyArtifactPath: jest.fn(),
-    });
-    const normalize = (renderer as unknown as {
-      historicalToolPart(tool: ToolCall): Extract<AgentPart, { kind: "tool" }>;
-    }).historicalToolPart.bind(renderer);
+    const normalize = historicalToolPart;
     const base = (id: string): ToolCall => ({
       id,
       messageId: "assistant-durable-tools",
@@ -4817,12 +4809,7 @@ describe("AgentConversationRenderer tail status", () => {
     expect(support.firstElementChild).toBe(supportContent);
     expect(app.vault.read).toHaveBeenCalledTimes(1);
 
-    const hydration = (renderer as unknown as {
-      toolApprovalPreviewHydrationStates: WeakMap<
-        HTMLElement,
-        { hydration: Promise<void> | null }
-      >;
-    }).toolApprovalPreviewHydrationStates.get(toolNode)!.hydration!;
+    const hydration = toolRendererFor(renderer).toolApprovalPreviewHydrationStates.get(toolNode)!.hydration!;
     releasePreview();
     await hydration;
 
@@ -4905,12 +4892,7 @@ describe("AgentConversationRenderer tail status", () => {
     const node = parent.querySelector<HTMLElement>(
       '[data-part-key="tool:call-first-frame-approval"]',
     )!;
-    const hydration = (renderer as unknown as {
-      toolApprovalPreviewHydrationStates: WeakMap<
-        HTMLElement,
-        { hydration: Promise<void> | null }
-      >;
-    }).toolApprovalPreviewHydrationStates.get(node)!.hydration!;
+    const hydration = toolRendererFor(renderer).toolApprovalPreviewHydrationStates.get(node)!.hydration!;
     await hydration;
 
     const preview = node.querySelector<HTMLElement>(
@@ -4980,12 +4962,7 @@ describe("AgentConversationRenderer tail status", () => {
     const stalePreview = staleApproval.querySelector<HTMLElement>(
       ".systemsculpt-agent-approval-preview",
     )!;
-    const staleHydration = (renderer as unknown as {
-      toolApprovalPreviewHydrationStates: WeakMap<
-        HTMLElement,
-        { hydration: Promise<void> | null }
-      >;
-    }).toolApprovalPreviewHydrationStates.get(committed)!.hydration!;
+    const staleHydration = toolRendererFor(renderer).toolApprovalPreviewHydrationStates.get(committed)!.hydration!;
     expect(stalePreview.hidden).toBe(true);
 
     const succeededTool: Extract<AgentPart, { kind: "tool" }> = {
@@ -5072,12 +5049,7 @@ describe("AgentConversationRenderer tail status", () => {
       const preview = node.querySelector<HTMLElement>(
         ".systemsculpt-agent-approval-preview",
       )!;
-      const hydration = (renderer as unknown as {
-        toolApprovalPreviewHydrationStates: WeakMap<
-          HTMLElement,
-          { hydration: Promise<void> | null }
-        >;
-      }).toolApprovalPreviewHydrationStates.get(node)!.hydration!;
+      const hydration = toolRendererFor(renderer).toolApprovalPreviewHydrationStates.get(node)!.hydration!;
 
       if (retirement === "clear") {
         renderer.clearActive();
@@ -5122,19 +5094,7 @@ describe("AgentConversationRenderer tail status", () => {
       onCopyArtifactPath: jest.fn(),
     });
     renderer.load();
-    const internals = renderer as unknown as {
-      prepareToolApprovalPreviewHydration(
-        node: HTMLElement,
-        approval: HTMLElement,
-        fingerprint: string,
-        toolCall: object,
-      ): void;
-      startToolApprovalPreviewHydration(node: HTMLElement): Promise<void> | null;
-      toolApprovalPreviewHydrationStates: WeakMap<
-        HTMLElement,
-        { hydration: Promise<void> | null }
-      >;
-    };
+    const internals = toolRendererFor(renderer);
     const nodeWithoutPreview = parent.createDiv();
     const approvalWithoutPreview = nodeWithoutPreview.createDiv();
     internals.prepareToolApprovalPreviewHydration(
@@ -5143,7 +5103,7 @@ describe("AgentConversationRenderer tail status", () => {
       "missing-preview",
       {},
     );
-    expect(internals.startToolApprovalPreviewHydration(nodeWithoutPreview)).toBeNull();
+    expect(internals.hydrateApprovalPreview(nodeWithoutPreview)).toBeNull();
 
     (app.vault.getAbstractFileByPath as jest.Mock)
       .mockReturnValue(new TFile({ path: "Projects/Plan.md" }));
