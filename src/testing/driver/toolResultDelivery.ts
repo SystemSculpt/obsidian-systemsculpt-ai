@@ -1,14 +1,14 @@
 import type { SupportDiagnosticEvent } from "../../utils/PluginLogger";
 import {
-DriverActionError
+  DriverActionError,
 } from "./actionCore";
 import {
-canonicalToolCallId,
-type ToolContinuationObservation,
-type ToolLifecycleCapture,
-type ToolLifecycleRecord,
-type ToolResultDeliveryEvidence,
-type ToolSupportEvidence,
+  canonicalToolCallId,
+  type ToolContinuationObservation,
+  type ToolLifecycleCapture,
+  type ToolLifecycleRecord,
+  type ToolResultDeliveryEvidence,
+  type ToolSupportEvidence,
 } from "./toolLifecycleState";
 
 /** Content-free diagnostics and command acknowledgement evidence for captured tools. */

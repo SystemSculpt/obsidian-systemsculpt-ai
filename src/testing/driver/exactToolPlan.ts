@@ -1,42 +1,42 @@
 import { canonicalAgentToolInput } from "../../chat/managed/MutationJournal";
 import { FILESYSTEM_LIMITS } from "../../tools/vault/constants";
 import {
-type ActionContext,
-activeChatView,
-DriverActionError,
-sleep,
-throwIfActionCancelled
+  type ActionContext,
+  activeChatView,
+  DriverActionError,
+  sleep,
+  throwIfActionCancelled,
 } from "./actionCore";
 import { chatContainer, isVisible, resolveTarget } from "./locators";
 import {
-flushToolLifecycleCapture,
+  flushToolLifecycleCapture,
 } from "./toolLifecycleCapture";
 import {
-capturedContinuationEntries,
-continuationTimeoutError,
-latestVisualTransitionAt,
-matchingContinuationEntries,
-proveContinuationOrdering,
+  capturedContinuationEntries,
+  continuationTimeoutError,
+  latestVisualTransitionAt,
+  matchingContinuationEntries,
+  proveContinuationOrdering,
 } from "./toolLifecycleContinuation";
 import {
-continuationContentMetadata,
-type ExactSequentialTextPartProof,
-type ExactSequentialToolExpectation,
-exactSequentialToolPlanProofs,
-exactTerminalRowCallCount,
-firstCapturedToolCallCount,
-orderedToolLifecycleRecords,
-toolIsVisuallySettled,
-type ToolLifecycleCapture,
-toolLifecycleCaptures,
-type ToolLifecycleRecord,
-toolLifecycleState
+  continuationContentMetadata,
+  type ExactSequentialTextPartProof,
+  type ExactSequentialToolExpectation,
+  exactSequentialToolPlanProofs,
+  exactTerminalRowCallCount,
+  firstCapturedToolCallCount,
+  orderedToolLifecycleRecords,
+  toolIsVisuallySettled,
+  type ToolLifecycleCapture,
+  toolLifecycleCaptures,
+  type ToolLifecycleRecord,
+  toolLifecycleState,
 } from "./toolLifecycleState";
 import {
-bindToolResultDeliveryScope,
-type BoundToolResultDeliveryScope,
-currentRunSupportEvidence,
-resultDeliveryCommandProof,
+  bindToolResultDeliveryScope,
+  type BoundToolResultDeliveryScope,
+  currentRunSupportEvidence,
+  resultDeliveryCommandProof,
 } from "./toolResultDelivery";
 
 /** Exact sequential tool-plan and post-run clean-close proofs. */
