@@ -13,6 +13,7 @@ function createHarness(editingNodeIds: string[] = ["text_1"]): any {
     textEdits,
     nodeTeardowns: new Map(),
     shapeController: { clearSelection: jest.fn() },
+    imageEditing: { clearEditingNode: jest.fn() },
     render: jest.fn(),
     requestTextNodeEdit: viewPrototype.requestTextNodeEdit,
     clearProjectEditorState: viewPrototype.clearProjectEditorState,
