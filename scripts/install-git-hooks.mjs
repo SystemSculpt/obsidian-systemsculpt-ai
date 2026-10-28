@@ -50,7 +50,7 @@ for (const entry of fs.readdirSync(sourceDir)) {
   // Do not overwrite a user-authored hook
   if (fs.existsSync(dest)) {
     const existing = fs.readFileSync(dest, "utf8");
-    if (!existing.includes(SENTINEL) && !existing.includes(".sample")) {
+    if (!existing.includes(SENTINEL)) {
       console.warn(`[git-hooks] Skipping ${entry} - custom hook already exists`);
       continue;
     }
@@ -64,4 +64,18 @@ for (const entry of fs.readdirSync(sourceDir)) {
     : SENTINEL + "\n" + raw;
   fs.writeFileSync(dest, content, { mode: 0o755 });
   console.log(`[git-hooks] Installed ${entry}`);
+}
+
+// Retire hooks removed from the repository without touching user-authored hooks.
+for (const entry of fs.readdirSync(targetDir)) {
+  const dest = path.join(targetDir, entry);
+  try {
+    if (fs.existsSync(path.join(sourceDir, entry)) || !fs.lstatSync(dest).isFile()) continue;
+    if (!fs.readFileSync(dest, "utf8").includes(SENTINEL)) continue;
+    fs.unlinkSync(dest);
+    console.log(`[git-hooks] Removed obsolete ${entry}`);
+  } catch (error) {
+    // Another installer may have retired it; unreadable custom hooks stay untouched.
+    if (error.code !== "ENOENT" && error.code !== "EACCES") throw error;
+  }
 }

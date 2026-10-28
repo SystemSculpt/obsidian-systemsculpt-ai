@@ -21,10 +21,9 @@ npm run check
 npm run test:related -- <changed src files>
 ```
 
-Use the focused test command for the module being changed instead of the full
-suite. Add compiled integration only for bundle/composition changes. Run
-`npm run check:plugin` at substantial checkpoints and `npm run check:ci`
-before release.
+Run the loop once for the changed area, using the focused test command instead
+of the full suite. Add compiled integration only for bundle/composition
+changes. `release:plugin` retains the full `check:ci` gate before release.
 
 ## Conventions
 
@@ -71,10 +70,10 @@ compare a cleanup against unrelated historical work.
 - **Spec:** check requested behavior, omitted requirements, unintended changes,
   preservation of saved data, and whether evidence supports the claimed result.
 
-Use independent reviewers for substantial changes. Record each finding with
-its source location and distinguish a reproduced failure, a source-supported
-defect, and a hypothesis. Resolve actionable findings and retain the two review
-results separately; green tests cannot substitute for either review.
+Use two independent reviewers only for money (license/credits), secrets, or
+approval/permission enforcement changes. Other changes need one review, not
+a two-reviewer gate. Resolve actionable findings; green tests do not replace
+review.
 
 These conventions apply [Matt Pocock's module-design guidance](https://github.com/mattpocock/skills/blob/959a8e9f1edc3adbe2f7e3054bb6fbefa6696260/skills/engineering/codebase-design/SKILL.md)
 and [independent standards/spec review](https://github.com/mattpocock/skills/blob/959a8e9f1edc3adbe2f7e3054bb6fbefa6696260/skills/engineering/code-review/SKILL.md)

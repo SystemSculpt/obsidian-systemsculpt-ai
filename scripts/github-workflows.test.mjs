@@ -1,5 +1,4 @@
 import test from "node:test";
-import { spawnSync } from "node:child_process";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -23,10 +22,9 @@ const releaseMetadataWorkflow = parse(releaseMetadataSource);
 
 test("hosted workflows separate secret-free CI from release publication", () => {
   assert.deepEqual(workflowNames, ["ci.yml", "publish-release-metadata.yml"]);
-  assert.deepEqual(Object.keys(workflow.jobs), ["plan", "plugin", "compatibility", "required"]);
+  assert.deepEqual(Object.keys(workflow.jobs), ["required", "plugin", "compatibility"]);
   assert.deepEqual(Object.keys(workflow.on), [
     "pull_request",
-    "merge_group",
     "push",
     "workflow_dispatch",
   ]);
@@ -118,190 +116,40 @@ test("only a published stable release can update first-party release metadata", 
   assert.doesNotMatch(releaseMetadataSource, /pull_request_target|contents: write|GITHUB_TOKEN/);
 });
 
-test("CI preserves a secret-free exhaustive Linux gate and compatibility matrix", () => {
-  assert.match(ci, /^\s{2}plugin:$/m);
-  assert.match(ci, /^\s{2}compatibility:$/m);
-  assert.match(ci, /^\s{2}required:$/m);
-  assert.equal((ci.match(/runs-on: ubuntu-latest/g) || []).length, 3);
-  assert.doesNotMatch(ci, /secrets\.|pull_request_target|android|\bios\b/i);
-  assert.doesNotMatch(ci, /native|provider|runtime.smoke|hosted/i);
-  assert.match(ci, /^permissions:\n\s+contents: read$/m);
-  assert.match(ci, /^\s{2}merge_group:$/m);
-  assert.match(ci, /os: macos-latest/);
-  assert.match(ci, /os: windows-latest/);
-  assert.match(ci, /node: "22\.18\.0"/);
-  assert.match(ci, /node: "24\.x"/);
-  assert.match(ci, /fail-fast: false/);
-  assert.doesNotMatch(ci, /continue-on-error:\s*true/);
-  assert.equal(workflow.jobs.compatibility.strategy.matrix.include.length, 4);
-  assert.deepEqual(workflow.jobs.required.needs, ["plan", "plugin", "compatibility"]);
-  assert.equal(workflow.jobs.required.if, "${{ always() }}");
-  assert.equal(workflow.jobs.required["runs-on"], "ubuntu-latest");
-  assert.equal(workflow.jobs.required["timeout-minutes"], 2);
-  assert.deepEqual(
-    workflow.jobs.required.steps[0].env,
-    {
-      PLAN_RESULT: "${{ needs.plan.result }}",
-      REUSED_RUN: "${{ needs.plan.outputs.reuse }}",
-      EVENT_NAME: "${{ github.event_name }}",
-      PLUGIN_RESULT: "${{ needs.plugin.result }}",
-      COMPATIBILITY_RESULT: "${{ needs.compatibility.result }}",
-    },
-  );
-  assert.match(workflow.jobs.required.steps[0].run, /PLUGIN_RESULT/);
-  assert.match(workflow.jobs.required.steps[0].run, /COMPATIBILITY_RESULT/);
-  assert.match(workflow.jobs.required.steps[0].run, /failure\|cancelled\|skipped/);
-  assert.match(workflow.jobs.required.steps[0].run, /did not succeed/);
-  assert.equal(
-    workflow.env.SYSTEMSCULPT_TEST_EVIDENCE_DIR,
-    ".cache/ci-evidence/jest-seeds",
-  );
-  const pluginCheckStep = workflow.jobs.plugin.steps.find((step) => step.id === "run_check_ci");
-  const compatibilityCheckStep = workflow.jobs.compatibility.steps.find((step) => step.id === "run_check_compat");
-  const pluginVerifyStep = workflow.jobs.plugin.steps.find((step) => step.name === "Verify structured failure evidence");
-  const compatibilityVerifyStep = workflow.jobs.compatibility.steps.find((step) => step.name === "Verify structured failure evidence");
-  assert.equal(pluginCheckStep?.run, "npm run check:ci");
-  assert.equal(compatibilityCheckStep?.run, "npm run check:compat");
-  assert.equal(pluginCheckStep?.["timeout-minutes"], 13);
-  assert.equal(compatibilityCheckStep?.["timeout-minutes"], 18);
-  assert.ok(pluginCheckStep["timeout-minutes"] < workflow.jobs.plugin["timeout-minutes"]);
-  assert.ok(compatibilityCheckStep["timeout-minutes"] < workflow.jobs.compatibility["timeout-minutes"]);
-  assert.equal(pluginVerifyStep?.if, "${{ failure() && steps.run_check_ci.conclusion == 'failure' }}");
-  assert.equal(compatibilityVerifyStep?.if, "${{ failure() && steps.run_check_compat.conclusion == 'failure' }}");
-  assert.equal(pluginVerifyStep?.id, "verify_plugin_failure_evidence");
-  assert.equal(
-    compatibilityVerifyStep?.id,
-    "verify_compatibility_failure_evidence",
-  );
-  for (const verifyStep of [pluginVerifyStep, compatibilityVerifyStep]) {
-    assert.deepEqual(verifyStep?.env, {
-      SYSTEMSCULPT_EXPECTED_GIT_SHA: "${{ github.sha }}",
-      SYSTEMSCULPT_EXPECTED_RUNNER_ARCH: "${{ runner.arch }}",
-      SYSTEMSCULPT_EXPECTED_RUNNER_OS: "${{ runner.os }}",
-    });
-  }
-  assert.match(pluginVerifyStep?.run || "", /verify-ci-failure-evidence\.mjs --job plugin/);
-  assert.match(compatibilityVerifyStep?.run || "", /verify-ci-failure-evidence\.mjs --job compatibility/);
-  assert.ok(
-    workflow.jobs.plugin.steps.findIndex((step) => step.id === "run_check_ci")
-      < workflow.jobs.plugin.steps.findIndex((step) => step.name === "Verify structured failure evidence"),
-  );
-  assert.ok(
-    workflow.jobs.plugin.steps.findIndex((step) => step.name === "Verify structured failure evidence")
-      < workflow.jobs.plugin.steps.findIndex((step) => step.name === "Upload failure evidence"),
-  );
-  assert.ok(
-    workflow.jobs.compatibility.steps.findIndex((step) => step.id === "run_check_compat")
-      < workflow.jobs.compatibility.steps.findIndex((step) => step.name === "Verify structured failure evidence"),
-  );
-  assert.ok(
-    workflow.jobs.compatibility.steps.findIndex((step) => step.name === "Verify structured failure evidence")
-      < workflow.jobs.compatibility.steps.findIndex((step) => step.name === "Upload failure evidence"),
-  );
-  const pluginUploadStep = workflow.jobs.plugin.steps.find(
-    (step) => step.name === "Upload failure evidence",
-  );
-  const compatibilityUploadStep = workflow.jobs.compatibility.steps.find(
-    (step) => step.name === "Upload failure evidence",
-  );
-  const uploadSteps = [pluginUploadStep, compatibilityUploadStep];
-  assert.equal(uploadSteps.length, 2);
-  const uses = [
-    ...workflow.jobs.plugin.steps,
-    ...workflow.jobs.compatibility.steps,
-  ]
-    .map((step) => step.uses)
-    .filter(Boolean);
-  assert.deepEqual(uses, [
-    "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10",
-    "actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e",
-    "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
-    "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10",
-    "actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e",
-    "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+test("PRs require lint, types, build, changed-area and money tests", () => {
+  const job = workflow.jobs.required;
+  assert.equal(job.if, "${{ github.event_name == 'pull_request' }}");
+  assert.equal(job.needs, undefined);
+  assert.equal(job["runs-on"], "ubuntu-latest");
+  assert.equal(job.steps[0].with["fetch-depth"], 0);
+  assert.deepEqual(job.steps.filter((step) => step.run).map((step) => step.run), [
+    "npm ci --no-audit --no-fund",
+    "npm run check:plugin:fast",
+    "npm run check:types",
+    "npm run test:changed:ci",
   ]);
-  for (const step of uploadSteps) {
-    assert.ok(step);
-    assert.equal(
-      step.uses,
-      "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
-    );
-    assert.equal(step.with["if-no-files-found"], "error");
-    assert.equal(step.with["include-hidden-files"], true);
-    assert.equal(step.with["retention-days"], 14);
-    assert.match(step.with.path, /\.cache\/ci-evidence/);
-    assert.match(step.with.path, /coverage-summary\.json/);
-    assert.match(step.with.path, /main\.js/);
-  }
-  assert.equal(
-    pluginUploadStep.if,
-    "${{ always() && steps.verify_plugin_failure_evidence.conclusion == 'success' }}",
-  );
-  assert.equal(
-    compatibilityUploadStep.if,
-    "${{ always() && steps.verify_compatibility_failure_evidence.conclusion == 'success' }}",
-  );
+  assert.equal(packageJson.scripts["test:changed:ci"], "node scripts/test-changed.mjs");
+  assert.doesNotMatch(ci, /secrets\.|pull_request_target|merge_group|ci-plan|evidence|Validated tree/);
+  assert.deepEqual(workflow.permissions, { contents: "read" });
 });
 
-test("the hosted gate is the exact exhaustive local CI contract", () => {
-  assert.equal(
-    workflow.jobs.plugin.steps.find((step) => step.id === "run_check_ci")?.run,
-    "npm run check:ci",
-  );
-  assert.equal(
-    workflow.jobs.compatibility.steps.find((step) => step.id === "run_check_compat")?.run,
-    "npm run check:compat",
-  );
-  assert.equal(
-    packageJson.scripts["check:ci"],
-    "npm run check:plugin && npm run check:knip && npm run test:mobile:ci && npm run test:chatview:critical "
-      + "&& npm run test:unit:ci && npm run test:embeddings:ci "
-      + "&& npm run test:integration:ci",
-  );
-  assert.equal(
-    packageJson.scripts["check:compat"],
-    "npm run check:plugin:fast -- --skip-lint && npm run test:chatview:compat "
-      + "&& npm run test:local-agent:compat && npm run test:integration:ci",
-  );
-  assert.doesNotMatch(ci, /desktop-baselines/);
-});
-
-test("only proven identical main trees may skip full CI", () => {
+test("main and dispatch run the full suite and four compatibility lanes without aggregation", () => {
   assert.deepEqual(workflow.on.push, { branches: ["main"] });
-  const plan = workflow.jobs.plan;
-  assert.deepEqual(plan.permissions, { contents: "read", actions: "read", "pull-requests": "read" });
-  assert.equal(plan.steps.find((step) => step.id === "plan").run, "node scripts/ci-plan.mjs");
-  for (const name of ["plan", "plugin", "compatibility"]) {
-    assert.equal(workflow.jobs[name].steps[0].with.ref, "${{ github.sha }}");
-  }
   for (const name of ["plugin", "compatibility"]) {
-    assert.equal(workflow.jobs[name].needs, "plan");
-    assert.equal(workflow.jobs[name].if, "${{ needs.plan.outputs.reuse == '' }}");
+    const job = workflow.jobs[name];
+    assert.equal(job.if, "${{ github.event_name != 'pull_request' }}");
+    assert.equal(job.needs, undefined);
+    assert.equal(job.steps[0].with.ref, "${{ github.sha }}");
   }
-  const proof = workflow.jobs.required.steps[1];
-  assert.equal(proof.name, "Validated tree ${{ needs.plan.outputs.tree }}");
-  assert.equal(proof.if, "${{ needs.plan.outputs.reuse == '' }}");
-});
-
-test("required accepts only complete lanes or verified push reuse", { skip: process.platform === "win32" }, () => {
-  // This job runs on Ubuntu; execute its actual shell rather than a JS replica.
-  const script = workflow.jobs.required.steps[0].run;
-  const run = (changes = {}) => spawnSync("bash", ["-c", script], {
-    env: { ...process.env, PLAN_RESULT: "success", REUSED_RUN: "", EVENT_NAME: "pull_request",
-      PLUGIN_RESULT: "success", COMPATIBILITY_RESULT: "success", ...changes },
-    encoding: "utf8",
-  }).status;
-  assert.equal(run(), 0);
-  const reuse = { REUSED_RUN: "405", EVENT_NAME: "push", PLUGIN_RESULT: "skipped", COMPATIBILITY_RESULT: "skipped" };
-  assert.equal(run(reuse), 0);
-  for (const state of ["failure", "cancelled", "skipped", ""]) {
-    assert.notEqual(run({ PLUGIN_RESULT: state }), 0);
-    assert.notEqual(run({ COMPATIBILITY_RESULT: state }), 0);
-    assert.notEqual(run({ ...reuse, PLAN_RESULT: state }), 0);
-  }
-  assert.notEqual(run({ ...reuse, EVENT_NAME: "pull_request" }), 0);
-  assert.notEqual(run({ ...reuse, PLUGIN_RESULT: "failure" }), 0);
-  assert.notEqual(run({ ...reuse, COMPATIBILITY_RESULT: "failure" }), 0);
+  assert.equal(workflow.jobs.plugin.steps.at(-1).run, "npm run check:ci");
+  assert.equal(workflow.jobs.compatibility.steps.at(-1).run, "npm run check:compat");
+  assert.equal(workflow.jobs.compatibility.strategy["fail-fast"], false);
+  assert.deepEqual(workflow.jobs.compatibility.strategy.matrix.include, [
+    { os: "ubuntu-latest", node: "22.18.0" },
+    { os: "ubuntu-latest", node: "24.x" },
+    { os: "macos-latest", node: "22.x" },
+    { os: "windows-latest", node: "22.x" },
+  ]);
 });
 
 test("local and hosted CI select the same Node LTS major", () => {

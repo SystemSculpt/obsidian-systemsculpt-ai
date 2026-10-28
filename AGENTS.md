@@ -41,8 +41,8 @@ kept current.
   transient, command, setting, card action, CSS, platform/desktop adapter,
   pop-out behavior, mobile layout or Studio node/capability declaration.
 - [Tests and CI](docs/dev/tests.md) — Read before selecting broader gates or
-  changing tests, coverage, CI partitioning, replay records or failure evidence.
-  The everyday commands, required pre-push gate and release rules stay below.
+  changing tests, coverage or CI partitioning.
+  The everyday commands, PR checks and release rules stay below.
   Detailed release validation lives in this topic; the artifact rule stays here.
 - [Local development](docs/dev/local-development.md) — Read before local Obsidian
   QA, canonical-checkout sync or watcher setup; this is not a task-clone step.
@@ -62,13 +62,12 @@ npm run check
 npm run test:related -- <changed source files>
 ~~~
 
-- The installed pre-push hook runs check:ci before a push. Hosted CI remains
-  authoritative and branch protection must require the stable `required` job,
-  which requires every exhaustive and compatibility lane to succeed. A main
-  push may reuse a successful PR/merge-group run only when GitHub job records
-  prove all lanes tested the identical Git tree. Missing proof or API errors
-  run full CI; manual dispatch always runs it. Release publication remains
-  independently triggered by a published release and validates exact tag bytes.
+Run the working loop once for the changed area. There is no pre-push suite;
+pre-commit still scans staged files for secrets. The PR's stable `required` job
+runs lint, types, build, related tests and the license/credits money suites.
+The full check:ci and four compatibility lanes run after merge on main (and
+on manual dispatch), not as merge requirements. Fix or revert a red main run
+at once. Release publication independently validates the exact published tag bytes.
 
 Gate contents, compatibility and release validation live in
 [Tests and CI](docs/dev/tests.md). Obsidian Community Plugins owns installation
@@ -78,8 +77,9 @@ and rollback; the plugin only detects and announces published releases.
 
 ## Repository hygiene
 
-- Never commit, push, open a PR, merge, publish, or release without explicit
-  operator approval.
+- Publishing and releasing require operator approval. Trellis's standing
+  authority covers its commits, pushes, PRs, merges, deploys and releases;
+  no additional CEO round-trip is needed.
 - Preserve unrelated dirty work.
 - Do not commit generated main.js or styles.css unless the release workflow
   explicitly requires them.

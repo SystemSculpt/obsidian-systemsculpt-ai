@@ -34,10 +34,9 @@ const childEnvironment = createRepositoryScopedGitEnvironment();
 const FAST_SCRIPT_TESTS = [
   "scripts/check-plugin.test.mjs",
   "scripts/eslint-config.test.mjs",
-  "scripts/verify-ci-failure-evidence.test.mjs",
+  "scripts/test-changed.test.mjs",
   "scripts/git-hooks.test.mjs",
   "scripts/github-workflows.test.mjs",
-  "scripts/ci-plan.test.mjs",
   "scripts/plugin-release-metadata.test.mjs",
   "scripts/lint-css.test.mjs",
   "scripts/ui-architecture.test.mjs",

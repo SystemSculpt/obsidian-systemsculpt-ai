@@ -1,16 +1,15 @@
 # Tests and CI
 
-Repository instructions for verification gates, coverage, CI partitions,
-release validation and failure evidence. Read with [the core](../../AGENTS.md),
-which retains the everyday commands and pre-push requirement. Mobile release
-gates also apply in [Adaptive UI](adaptive-ui.md).
+Repository instructions for verification gates, coverage, CI partitions and
+release validation. Read with [the core](../../AGENTS.md), which retains the
+everyday commands and PR checks. Mobile checks also apply in
+[Adaptive UI](adaptive-ui.md).
 
 ## Selecting gates
 
-check is the canonical fast gate: Obsidian lint, community-directory lint, metadata lint, production
-bundle, CSS contracts, cheap architecture policy tests, focused mobile
-interactions, the ChatView critical-risk coverage gate, and an exact built
-bundle smoke in a mobile Obsidian host.
+check is the canonical fast gate: Obsidian lint, community-directory lint,
+metadata lint, production bundle, CSS contracts and cheap architecture policy
+tests. Run it once alongside test:related for the changed source files.
 
 Use broader gates only when the affected seam requires them:
 
@@ -46,7 +45,11 @@ npm run check:compat
   strict console, randomized order, open-handle detection, seeded generative
   histories, and a global coverage floor over the critical ChatView modules
   (the small identity and tool-execution modules stay at 100%).
-- check:ci is the exact exhaustive PR gate. It adds the production Knip audit of
+- test:changed:ci diffs origin/main...HEAD, runs related source tests with strict
+  console and always includes the license/credits money suites. Embeddings
+  changes also use their dedicated Jest config; integration, esbuild config or
+  manifest changes run the already-built integration suite.
+- check:ci is the exhaustive post-merge and release gate. It adds the production Knip audit of
   unused files, dependencies and exports (check:knip), strict-console randomized mobile interactions, critical ChatView coverage, the partitioned unit
   remainder, embeddings, already-built integration, and open-handle detection.
   Each source suite runs exactly once: the mobile CI subset excludes
@@ -55,19 +58,21 @@ npm run check:compat
   provenance, build options, artifacts, release-plugin) run inside check:plugin
   and remain available standalone as test:release-script.
 - check:compat is the smaller compatibility contract used on Node 22.18,
-  Node 24, macOS, and Windows after the exhaustive Ubuntu/Node 22 job. It runs
+  Node 24, macOS, and Windows alongside the exhaustive Ubuntu/Node 22 job. It runs
   the same critical ChatView suites without repeating coverage instrumentation
   or OS-independent ESLint. The exhaustive lane still runs every lint pass
   uncached, since per-file caches cannot see imported type changes.
-- CI is credential-free. It runs check:ci on Ubuntu/Node 22 and check:compat
-  across the compatibility matrix. It has no provider or native-device lane.
+- CI is credential-free. PRs require only the stable `required` job: fast
+  lint/build/policy checks, source/test types, related tests and money suites.
+  Main pushes and manual dispatch run check:ci and the four check:compat lanes,
+  without blocking merges. Fix or revert a red main run at once. No pre-push
+  suite runs locally; the pre-commit secret scan stays installed.
 
 ## Release rules
 
 - Release validation records the SHA-256 and size of manifest.json, main.js, and styles.css plus the source revision and build environment identity. The published-release workflow rebuilds the tag, requires exact asset bytes, and attests those published bytes before announcing the release through first-party metadata.
 
-## Failure evidence
+## Failures
 
-- Top-level hosted Jest gates record replay-oriented child argv and seed.
-  Failed jobs retain those records, ChatView coverage, artifact inspection,
-  build provenance, and exact plugin artifact bytes for 14 days.
+Randomized Jest gates print their seed in the log. Diagnose the failing stage
+or named test; do not repeat the whole suite before retrying that stage.

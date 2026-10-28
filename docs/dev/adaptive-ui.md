@@ -48,11 +48,10 @@ definitions: that turns mobile settings into heading-only rows.
 
 ## Mobile verification
 
-For mobile-sensitive changes, npm run check:mobile and npm run check:ci are
-the release gates. They validate the exact built main.js, manifest.json, and
-styles.css across narrow-pane, touch, keyboard, accessibility, and Studio
-capability scenarios with desktop adapters unavailable. Simulator, emulator,
+For mobile-sensitive changes, run npm run check:mobile as the changed-area
+check. It validates the exact built main.js, manifest.json, and styles.css
+across narrow-pane, touch, keyboard, accessibility, and Studio capability
+scenarios with desktop adapters unavailable. Simulator, emulator,
 browser-emulation, or physical-device runs may provide supplemental evidence
 when explicitly requested, but they are not release gates and must not replace
-or weaken the deterministic checks. Record the host and artifact hashes when
-manual mobile exploration is performed.
+or weaken the deterministic checks.

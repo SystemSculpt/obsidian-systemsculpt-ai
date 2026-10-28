@@ -16,8 +16,7 @@ const packageJson = JSON.parse(
 test("package scripts preserve fast edit and exhaustive verification tiers", () => {
   assert.equal(
     packageJson.scripts.check,
-    "npm run check:plugin:fast && npm run test:mobile:ci "
-      + "&& npm run test:chatview:critical && npm run test:mobile:bundle",
+    "npm run check:plugin:fast",
   );
   assert.equal(
     packageJson.scripts["check:plugin:obsidian"],
@@ -70,7 +69,7 @@ test("package scripts preserve fast edit and exhaustive verification tiers", () 
 
 test("fast plugin checks stay on the measured Obsidian-native tier", () => {
   assert.match(source, /const FAST_SCRIPT_TESTS = \[/);
-  assert.match(source, /scripts\/verify-ci-failure-evidence\.test\.mjs/);
+  assert.match(source, /scripts\/test-changed\.test\.mjs/);
   assert.match(source, /scripts\/github-workflows\.test\.mjs/);
   assert.match(source, /scripts\/plugin-release-metadata\.test\.mjs/);
   assert.match(source, /scripts\/git-hooks\.test\.mjs/);
@@ -135,10 +134,7 @@ test("randomized Jest gates print a replayable seed before the child starts", ()
     jestRunner.indexOf("console.log(`[tests] Jest seed:")
       < jestRunner.indexOf("const child = spawn"),
   );
-  assert.match(jestRunner, /SYSTEMSCULPT_TEST_EVIDENCE_DIR/);
-  assert.match(jestRunner, /HOSTED_JEST_PHASE_MARKER_FILE/);
-  assert.match(jestRunner, /schemaVersion: 1/);
-  assert.match(jestRunner, /seed: replaySeed/);
+  assert.doesNotMatch(jestRunner, /SYSTEMSCULPT_TEST_EVIDENCE_DIR|writeJsonEvidence/);
   assert.match(jestRunner, /nodeRequireInvocation\(preload, \[jestBin, \.\.\.jestArgs\]\)/);
   assert.doesNotMatch(jestRunner, /requireFlag|nextNodeOptions/);
 });

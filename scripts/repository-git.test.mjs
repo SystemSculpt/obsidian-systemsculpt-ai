@@ -125,61 +125,26 @@ test("development build identity ignores an inherited GIT_DIR outside a reposito
   assert.deepEqual(snapshotRepository(sentinel, env), before);
 });
 
-test("the hook installer and installed pre-push hook ignore inherited repository routing", (t) => {
+test("the hook installer ignores inherited repository routing and retires only its own hooks", (t) => {
   const fixture = tempRoot(t);
   const { sentinel, env, routedEnvironment } = createSentinelRepository(fixture);
   const before = snapshotRepository(sentinel, env);
   const checkout = path.join(fixture.root, "checkout");
   git(["init", "--quiet", checkout], { env });
-  fs.mkdirSync(path.join(checkout, ".git", "hooks"), { recursive: true });
+  const hooks = path.join(checkout, ".git", "hooks");
+  fs.mkdirSync(hooks, { recursive: true });
   fs.mkdirSync(path.join(checkout, "scripts", "git-hooks"), { recursive: true });
   for (const file of ["install-git-hooks.mjs", "platform-portability.mjs", "repository-git.mjs",
-    "git-hooks/pre-commit", "git-hooks/pre-push"]) {
+    "git-hooks/pre-commit"]) {
     fs.copyFileSync(new URL(`./${file}`, import.meta.url), path.join(checkout, "scripts", file));
   }
+  fs.writeFileSync(path.join(hooks, "pre-push"), "#!/bin/sh\n# installed-by: install-git-hooks.mjs\nexit 1\n");
 
   const install = spawnSync(process.execPath, [path.join(checkout, "scripts", "install-git-hooks.mjs")], {
     encoding: "utf8", env: childEnvironment(routedEnvironment),
   });
   assert.equal(install.status, 0, install.stderr);
-  const installed = path.join(checkout, ".git", "hooks", "pre-push");
-  assert.match(fs.readFileSync(installed, "utf8"), /# installed-by: install-git-hooks\.mjs/);
-  assert.deepEqual(snapshotRepository(sentinel, env), before);
-
-  // A stand-in npm records what `npm run check:ci` would inherit.
-  const bin = path.join(fixture.root, "bin");
-  const capture = path.join(fixture.root, "npm-environment.txt");
-  fs.mkdirSync(bin);
-  fs.writeFileSync(path.join(bin, "npm"), "#!/bin/sh\nenv > \"$SS_NPM_CAPTURE\"\npwd >> \"$SS_NPM_CAPTURE\"\n",
-    { mode: 0o755 });
-  const checkoutGitDir = path.join(checkout, ".git");
-  const hook = spawnSync("bash", [installed], {
-    cwd: checkout,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
-    env: childEnvironment({
-      ...createRepositoryScopedGitEnvironment(),
-      ...fixture.isolation,
-      PATH: `${bin}${path.delimiter}${process.env.PATH}`,
-      SS_NPM_CAPTURE: capture,
-      GIT_DIR: checkoutGitDir,
-      GIT_COMMON_DIR: checkoutGitDir,
-      GIT_INDEX_FILE: path.join(checkoutGitDir, "index"),
-      GIT_OBJECT_DIRECTORY: path.join(checkoutGitDir, "objects"),
-      GIT_NAMESPACE: "leaked",
-      GIT_PREFIX: "",
-      GIT_CONFIG_COUNT: "1",
-      GIT_CONFIG_KEY_0: "systemsculpt.leaked",
-      GIT_CONFIG_VALUE_0: "true",
-      GIT_EDITOR: "true",
-    }),
-  });
-  assert.equal(hook.status, 0, `${hook.stdout}\n${hook.stderr}`);
-  const lines = fs.readFileSync(capture, "utf8").trim().split("\n");
-  assert.equal(fs.realpathSync(lines.at(-1)), checkout);
-  const leaked = lines.slice(0, -1).map((line) => line.split("=")[0])
-    .filter((name) => createRepositoryScopedGitEnvironment({ [name]: "" })[name] === undefined);
-  assert.deepEqual(leaked, []);
-  assert.ok(lines.includes("GIT_EDITOR=true"), "non-routing Git settings are preserved");
+  assert.match(fs.readFileSync(path.join(hooks, "pre-commit"), "utf8"), /# installed-by: install-git-hooks\.mjs/);
+  assert.equal(fs.existsSync(path.join(hooks, "pre-push")), false);
   assert.deepEqual(snapshotRepository(sentinel, env), before);
 });

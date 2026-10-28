@@ -1,15 +1,37 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { REPOSITORY_ROUTING_GIT_ENVIRONMENT_VARIABLES } from "./repository-git.mjs";
+import os from "node:os";
+import path from "node:path";
+import { execFileSync, spawnSync } from "node:child_process";
+import { createRepositoryScopedGitEnvironment } from "./repository-git.mjs";
 
-const packageJson = JSON.parse(
-  fs.readFileSync(new URL("../package.json", import.meta.url), "utf8"),
-);
 const installer = fs.readFileSync(new URL("./install-git-hooks.mjs", import.meta.url), "utf8");
 const preCommit = fs.readFileSync(new URL("./git-hooks/pre-commit", import.meta.url), "utf8");
-const prePush = fs.readFileSync(new URL("./git-hooks/pre-push", import.meta.url), "utf8");
 const attributes = fs.readFileSync(new URL("../.gitattributes", import.meta.url), "utf8");
+
+function fixture(t) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "plugin-hooks-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const globalConfig = path.join(root, "gitconfig");
+  fs.writeFileSync(globalConfig, "");
+  const env = { ...createRepositoryScopedGitEnvironment(), GIT_CONFIG_GLOBAL: globalConfig, GIT_CONFIG_NOSYSTEM: "1" };
+  execFileSync("git", ["init", "--quiet", root], { env });
+  fs.mkdirSync(path.join(root, ".git", "hooks"), { recursive: true });
+  const scripts = path.join(root, "scripts");
+  fs.mkdirSync(path.join(scripts, "git-hooks"), { recursive: true });
+  for (const file of ["install-git-hooks.mjs", "platform-portability.mjs", "repository-git.mjs"]) {
+    fs.copyFileSync(new URL(`./${file}`, import.meta.url), path.join(scripts, file));
+  }
+  fs.writeFileSync(path.join(scripts, "git-hooks", "pre-commit"), preCommit);
+  return {
+    root,
+    hooks: path.join(root, ".git", "hooks"),
+    install: () => execFileSync(process.execPath, [path.join(scripts, "install-git-hooks.mjs")], { env }),
+    git: (...args) => execFileSync("git", args, { cwd: root, env }),
+    env,
+  };
+}
 
 test("the hook installer resolves the shared Git hook directory in linked worktrees", () => {
   assert.match(installer, /git", \["rev-parse", "--git-path", "hooks"\]/);
@@ -17,24 +39,30 @@ test("the hook installer resolves the shared Git hook directory in linked worktr
   assert.match(installer, /normalizeLineEndings\(fs\.readFileSync\(src, "utf8"\)\)/);
 });
 
-test("pre-push runs the exact exhaustive hosted gate", () => {
-  assert.match(prePush, /^#!\/usr\/bin\/env bash/);
-  assert.match(prePush, /set -euo pipefail/);
-  assert.match(prePush, /npm run check:ci/);
+test("installation removes obsolete sentinel hooks but preserves custom hooks", (t) => {
+  const repo = fixture(t);
+  fs.writeFileSync(path.join(repo.hooks, "pre-push"), "#!/bin/sh\n# installed-by: install-git-hooks.mjs\nexit 1\n");
+  const custom = "#!/bin/sh\n# adapted from pre-commit.sample\nexit 0\n";
+  fs.writeFileSync(path.join(repo.hooks, "post-commit"), custom);
+  repo.install();
+  assert.equal(fs.existsSync(path.join(repo.hooks, "pre-push")), false);
+  assert.equal(fs.readFileSync(path.join(repo.hooks, "post-commit"), "utf8"), custom);
+  assert.match(fs.readFileSync(path.join(repo.hooks, "pre-commit"), "utf8"), /installed-by/);
+  fs.writeFileSync(path.join(repo.hooks, "pre-push"), custom);
+  repo.install();
+  assert.equal(fs.readFileSync(path.join(repo.hooks, "pre-push"), "utf8"), custom);
 });
 
-test("pre-push clears the same Git repository routing as the script helper before the gate", () => {
-  const unsetLoop = prePush.indexOf('for name in $(compgen -e); do');
-  assert.ok(unsetLoop > prePush.indexOf("git rev-parse --show-toplevel"));
-  assert.ok(unsetLoop < prePush.indexOf("npm run check:ci"));
-  const pattern = /case "\$name" in\n([\s\S]*?)\)\n\s+unset "\$name"/.exec(prePush);
-  assert.ok(pattern, "pre-push must unset routing variables by name");
-  const names = pattern[1].replace(/\\\n/g, "").split("|").map((name) => name.trim());
-  assert.deepEqual(
-    names.filter((name) => !name.endsWith("_*")).sort(),
-    [...REPOSITORY_ROUTING_GIT_ENVIRONMENT_VARIABLES].sort(),
-  );
-  assert.deepEqual(names.filter((name) => name.endsWith("_*")).sort(), ["GIT_CONFIG_KEY_*", "GIT_CONFIG_VALUE_*"]);
+test("installed pre-commit still blocks a staged GitHub token", { skip: process.platform === "win32" }, (t) => {
+  const repo = fixture(t);
+  repo.install();
+  fs.writeFileSync(path.join(repo.root, "credential.txt"), `ghp_${"x".repeat(36)}\n`);
+  repo.git("add", "credential.txt");
+  const result = spawnSync("git", ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-m", "must fail"], {
+    cwd: repo.root, env: repo.env, encoding: "utf8",
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stdout + result.stderr, /BLOCKED: Potential secret/);
 });
 
 test("pre-commit scans staged paths without shell word splitting", () => {
@@ -48,5 +76,5 @@ test("pre-commit scans staged paths without shell word splitting", () => {
 test("repository text and executable hooks are pinned to portable line endings", () => {
   assert.match(attributes, /^\* text=auto eol=lf$/m);
   assert.equal(preCommit.includes("\r"), false);
-  assert.equal(prePush.includes("\r"), false);
+  assert.equal(fs.existsSync(new URL("./git-hooks/pre-push", import.meta.url)), false);
 });

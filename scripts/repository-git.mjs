@@ -6,7 +6,6 @@ import { execFileSync } from "node:child_process";
 // would otherwise operate on the repository that launched it. Only variables
 // that can redirect or reconfigure the target repository are removed;
 // GIT_CEILING_DIRECTORIES stays because it can only narrow discovery.
-// scripts/git-hooks/pre-push unsets the same names before running the gate.
 export const REPOSITORY_ROUTING_GIT_ENVIRONMENT_VARIABLES = Object.freeze([
   "GIT_ALTERNATE_OBJECT_DIRECTORIES",
   "GIT_COMMON_DIR",

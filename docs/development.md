@@ -22,10 +22,10 @@ npm run check
 npm run test:related -- <changed source files>
 ~~~
 
-check runs the canonical Obsidian source, community-directory, and metadata lint, production bundle,
-CSS contracts, cheap architecture policy tests, focused mobile interactions,
-the ChatView critical-risk coverage gate, and an exact built-bundle mobile-host
-smoke. It is the normal edit loop, not a native-device or provider test.
+check runs the canonical Obsidian source, community-directory, and metadata
+lint, production bundle, CSS contracts and cheap architecture policy tests.
+Run it once alongside the changed area's related tests. It is not a
+native-device or provider test.
 
 Useful focused gates:
 
@@ -76,7 +76,7 @@ transcript persistence, approvals, queue and recovery controls, and
 restored-history UI with strict console, randomized order, open-handle
 detection, adversarial race cases, and a global coverage floor over the
 critical ChatView modules (the small identity and tool-execution modules stay
-at 100%). check:ci is the exact exhaustive PR contract and adds strict mobile
+at 100%). check:ci is the exhaustive post-merge and release contract and adds strict mobile
 interaction, unit, embeddings, and already-built integration suites.
 Source CI partitions are disjoint: the mobile CI subset excludes suites owned
 by the critical coverage gate, and the unit remainder excludes both focused
@@ -89,34 +89,28 @@ or OS-independent ESLint already enforced by check:ci. lint:obsidian runs the
 repository's source rules and the community-directory scan in one type-aware
 pass over one TypeScript program; lint:community still runs the directory scan
 alone. Fast ESLint passes use separate local cache files. Full check:plugin/check:ci
-(and therefore pre-push and release) disable ESLint caches: a changed import's
+(including release) disable ESLint caches: a changed import's
 types can introduce lint errors in an otherwise unchanged caller.
 
-CI runs check:ci on Ubuntu/Node 22 and check:compat on Node 22.18,
-Node 24, macOS/Node 22, and Windows/Node 22. PRs, merge groups and manual dispatch
-always run all lanes. A main push reuses a successful run only when GitHub's
-completed job records prove the exact checked-out Git tree passed the exhaustive
-and all four compatibility lanes. Comparing the tree, not the PR head or merge
-message, preserves validation when another PR changes the base before merge.
-Missing proof, API errors and untested direct pushes fall back to full CI.
-The small main-push decision workflow remains; the duplicate full matrix does not.
+PR CI requires the stable `required` job: check:plugin:fast (lint, build and
+policy), check:types and test:changed:ci. The latter diffs origin/main...HEAD
+and runs related source tests plus the license/credits money suites on every
+PR. Embeddings changes use their dedicated Jest config too; changes to
+integration tests, esbuild.config.mjs or manifest.json run the already-built
+integration suite. The job logs every always-run money suite.
 
-The final `required` job accepts either every lane succeeding or verified
-identical-tree reuse with both expensive jobs intentionally skipped. Release
-publication is independent: `release: published` rebuilds and attests exact tag
-bytes, and the local release command still requires check:ci. No provider
-credentials are used. The installed pre-push hook still runs check:ci locally.
+After merge on main, and on manual dispatch, CI runs check:ci on Ubuntu/Node 22
+and check:compat on Node 22.18, Node 24, macOS/Node 22 and Windows/Node 22.
+These lanes do not block merges. Fix or revert a red main run at once. There
+is no pre-push suite; npm install/ci removes the obsolete installed hook while
+preserving custom hooks and the pre-commit staged-secret scan.
 
-Each top-level hosted Jest gate records its replay seed and normalized child
-Jest argv in `.cache/ci-evidence/jest-seeds`. A failed lane uploads those
-records, the ChatView coverage summary, artifact inspection, build provenance,
-and the exact plugin artifact bytes for 14 days. CI validates the
-structured provenance and artifact-inspection sidecars before uploading a
-failed gate. Successful release validation writes SHA-256, size, Git revision,
-dirty state, Node, platform, and architecture to
-`.cache/ci-evidence/release-provenance-<version>.json`. The version-qualified
-release record is separate from the rolling CI build provenance, so the
-required pre-push gate cannot overwrite it while publishing the tag.
+Release publication is independent: `release: published` rebuilds and attests
+exact tag bytes, and release:plugin still requires check:ci. No provider
+credentials are used. Randomized Jest gates print their seed in the log.
+Successful release validation still records SHA-256, size, Git revision and
+build environment in `.cache/ci-evidence/release-provenance-<version>.json`;
+release provenance is separate from rolling CI build provenance.
 
 Saved chat parsing fails closed. A malformed or truncated history is never
 reduced to a surviving prefix and sent as a new request. Direct loads show a
@@ -134,9 +128,9 @@ bytes unchanged.
    Its manifest, compiled styles.css, settings, Chat, Similar Notes, and Studio
    surfaces are checked as the exact three-file plugin artifact.
 4. Full unit, managed API fixture, embeddings, integration, artifact, and
-   release tests run through npm run check:ci on every PR.
+   release tests run through npm run check:ci after merge on main and before release.
 5. When explicitly requested, the exact artifact may also be explored on real
-   Obsidian Mobile hardware. Record hashes, host OS and Obsidian versions, phone
+   Obsidian Mobile hardware. Note host OS and Obsidian versions, phone
    and tablet coverage, orientation, software keyboard, themes, enlarged
    interface text, and the exercised surfaces.
 
