@@ -14,6 +14,7 @@ type KeydownContext = {
   selectCanvasTool: jest.Mock<void, [StudioCanvasTool]>;
   busy: boolean;
   currentProject: unknown;
+  imageEditing: { handleKeyDown: jest.Mock<boolean, [KeyboardEvent]> };
   shapeController: { setSelectedShapeIds: jest.Mock<void, [string[]]>; hasSelection: jest.Mock<boolean, []>; removeSelection: jest.Mock<void, []> };
   graphInteraction: { getSelectedNodeIds: jest.Mock<string[], []>; setSelectedNodeIds: jest.Mock<void, [string[]]> };
   removeNodes: jest.Mock<void, [string[]]>;
@@ -32,6 +33,7 @@ function createContext(overrides?: Partial<KeydownContext>): KeydownContext {
     selectCanvasTool: jest.fn(),
     busy: false,
     currentProject: { graph: { nodes: [{ id: "card" }] }, diagram: { shapes: [{ id: "drawing" }] } },
+    imageEditing: { handleKeyDown: jest.fn((_event: KeyboardEvent) => false) },
     shapeController: { setSelectedShapeIds: jest.fn(), hasSelection: jest.fn(() => false), removeSelection: jest.fn() },
     graphInteraction: { setSelectedNodeIds: jest.fn(), getSelectedNodeIds: jest.fn(() => []) },
     removeNodes: jest.fn(),
@@ -224,6 +226,7 @@ describe("SystemSculptStudioView canvas tool gestures", () => {
     };
     const context = {
       activeCanvasTool: "arrow",
+      imageEditing: { editingNodeId: null },
       shapeController: { startArrowGesture: jest.fn(() => true) },
       isEditableKeyboardTarget: jest.fn((_target: EventTarget | null) => true),
       blurActiveStudioEditableTarget: jest.fn(),
@@ -242,6 +245,7 @@ describe("SystemSculptStudioView canvas tool gestures", () => {
     const event = { button: 0, preventDefault: jest.fn(), stopPropagation: jest.fn() };
     const context = {
       activeCanvasTool: "arrow",
+      imageEditing: { editingNodeId: null },
       shapeController: { startArrowGesture: jest.fn(() => false) },
     };
 

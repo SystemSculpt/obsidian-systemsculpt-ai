@@ -16,6 +16,7 @@ type KeydownContext = {
   redoGraphHistory: jest.Mock<boolean, []>;
   busy: boolean;
   currentProject: unknown;
+  imageEditing: { handleKeyDown: jest.Mock<boolean, [KeyboardEvent]> };
   graphInteraction: {
     getSelectedNodeIds: jest.Mock<string[], []>; setSelectedNodeIds: jest.Mock<void, [string[]]>;
   };
@@ -55,6 +56,7 @@ function createContext(overrides?: Partial<KeydownContext>): KeydownContext {
     redoGraphHistory: jest.fn(() => false),
     busy: false,
     currentProject: { graph: { nodes: [] } },
+    imageEditing: { handleKeyDown: jest.fn((_event: KeyboardEvent) => false) },
     graphInteraction: {
       setSelectedNodeIds: jest.fn(), getSelectedNodeIds: jest.fn(() => []),
     },
