@@ -1,3 +1,8 @@
+import { SavedChatActions } from "./SavedChatActions";
+import { cachedTranscriptRecoverySnapshot, historicalResubmitConsequences, terminalLiveResubmitConsequences } from "./HistoricalReplaySafety";
+import { messageId, plainContent, protocolId } from "./ChatViewIdentity";
+import { readPinnedChatContext } from "./ManagedChatContext";
+import { chatRecoveryEnvironment } from "./ChatRecoveryEnvironment";
 import type { ChatSession } from "../../chat/ChatSession";
 import { getHostOperatingSystem, hasHostCapability } from "../../platform/hostCapabilities";
 import { applyPluginSurface, createUiAction } from "../../core/ui/surface";
@@ -19,7 +24,6 @@ import {
   type CreditsBalanceSnapshot,
 } from "../../services/SystemSculptService";
 import type { RecorderService } from "../../services/RecorderService";
-import { readManagedToolCallFunction } from "../../chat/managed/ManagedToolExecution";
 import type { ChatMessage } from "../../types";
 import type { ChatExportOptions } from "../../types/chatExport";
 import { isMutatingTool, type ToolApprovalPolicy } from "../../utils/toolPolicy";
@@ -29,9 +33,7 @@ import { SYSTEMSCULPT_WEBSITE, withPluginAttribution } from "../../constants/ext
 import { openExternalUrl } from "../../utils/externalUrl";
 import { tryCopyToClipboard } from "../../utils/clipboard";
 import { waitForIdle } from "../../utils/yieldToEventLoop";
-import { getRuntimeCrypto } from "../../utils/runtimeWindow";
 import { chatTitleFromMessage, generateDefaultChatTitle, isGeneratedChatTitle, normalizeChatTitle } from "../../utils/titleUtils";
-import { toSafeVaultFileName } from "../../utils/vaultFileName";
 import {
   ChatStorageService,
   resolveChatsDirectory,
@@ -101,7 +103,6 @@ import { isAgentBillingFailure } from "../../chat/managed/AgentFailurePolicy";
 import type { CreditsRefreshReason } from "../../chat/managed/Lifecycle";
 import { AgentMutationJournal } from "../../chat/managed/MutationJournal";
 import {
-  thinAgentDataUrl,
   toThinAgentUserMessage,
 } from "../../chat/managed/MessageAdapter";
 import {
@@ -110,7 +111,6 @@ import {
   THIN_AGENT_CONTRACT_VERSION,
   type MeasuredThinAgentContext,
   type ThinAgentBootstrapRequest,
-  type ThinAgentContextSource,
 } from "../../services/managed/ThinAgentV1Contract";
 import { AgentQueueStateRepository } from "./AgentQueueStateRepository";
 import {
@@ -246,211 +246,6 @@ type CreditsRefreshOptions = Readonly<{
   requestId?: string;
   serverRunId?: string;
 }>;
-
-function messageId(prefix: string): string {
-  const crypto = getRuntimeCrypto();
-  const uuid = typeof crypto?.randomUUID === "function"
-    ? crypto.randomUUID()
-    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  return `${prefix}-${uuid}`;
-}
-
-function protocolId(prefix: "client" | "conversation"): string {
-  const crypto = getRuntimeCrypto();
-  let hex = "";
-  if (typeof crypto?.getRandomValues === "function") {
-    const bytes = new Uint8Array(16);
-    crypto.getRandomValues(bytes);
-    hex = [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-  } else {
-    hex = `${Date.now().toString(16)}${Math.random().toString(16).slice(2)}`
-      .padEnd(32, "0")
-      .slice(0, 32);
-  }
-  return `${prefix}_${hex}`;
-}
-
-function plainContent(message: ChatMessage): string {
-  if (typeof message.content === "string") return message.content;
-  if (!Array.isArray(message.content)) return "";
-  return message.content
-    .map((part) => part.type === "text" ? part.text : "")
-    .filter(Boolean)
-    .join("\n");
-}
-
-function imageMimeType(extension: string): string {
-  const normalized = extension.toLowerCase();
-  if (normalized === "jpg" || normalized === "jpeg") return "image/jpeg";
-  if (normalized === "webp") return "image/webp";
-  return "image/png";
-}
-
-function historicalReplayToolOccurrences(
-  message: Readonly<ChatMessage>,
-): readonly NonNullable<ChatMessage["tool_calls"]>[number][] {
-  const tools = [...(message.tool_calls ?? [])];
-  for (const part of message.messageParts ?? []) {
-    if (part.type === "tool_call") tools.push(part.data);
-  }
-  return tools;
-}
-
-function cachedTranscriptRecoverySnapshot(
-  messages: readonly Readonly<ChatMessage>[],
-): AgentConversationSnapshot | null {
-  const hasCachedExecutingTool = messages.some((message) =>
-    historicalReplayToolOccurrences(message).some((tool) => tool.state === "executing"));
-  if (!hasCachedExecutingTool) return null;
-  return Object.freeze({
-    runId: null,
-    turnId: null,
-    status: "running",
-    phase: "retrying",
-    statusLabel: "Recovering",
-    messages: Object.freeze([]),
-    parts: Object.freeze([]),
-  });
-}
-
-function historicalReplayToolSignature(
-  tool: NonNullable<ChatMessage["tool_calls"]>[number],
-): string | null {
-  const fn = readManagedToolCallFunction(tool);
-  try {
-    return JSON.stringify({
-      functionName: fn?.name ?? null,
-      functionArguments: fn?.arguments ?? null,
-      state: typeof tool.state === "string" ? tool.state : null,
-      result: tool.result ?? null,
-      executedOn: "executedOn" in tool ? tool.executedOn ?? null : null,
-    });
-  } catch {
-    return null;
-  }
-}
-
-function historicalResubmitConsequences(
-  messages: readonly Readonly<ChatMessage>[],
-  targetIndex: number,
-): Readonly<{ laterMessageCount: number; requiresReplayConfirmation: boolean }> {
-  const laterMessages = messages.slice(targetIndex + 1)
-    .filter((message) => message.role === "user" || message.role === "assistant");
-  const tools: NonNullable<ChatMessage["tool_calls"]>[number][] = [];
-  const seenToolIds = new Set<string>();
-  let hasAmbiguousReplayHistory = false;
-  for (const message of laterMessages) {
-    const messageTools = new Map<string, {
-      tool: NonNullable<ChatMessage["tool_calls"]>[number];
-      signature: string;
-    }>();
-    for (const tool of historicalReplayToolOccurrences(message)) {
-      const toolId = typeof tool.id === "string" ? tool.id.trim() : "";
-      if (!toolId || seenToolIds.has(toolId)) {
-        hasAmbiguousReplayHistory = true;
-        continue;
-      }
-      const signature = historicalReplayToolSignature(tool);
-      if (signature === null) {
-        hasAmbiguousReplayHistory = true;
-        continue;
-      }
-      const existing = messageTools.get(toolId);
-      if (existing) {
-        if (existing.signature !== signature) hasAmbiguousReplayHistory = true;
-        continue;
-      }
-      messageTools.set(toolId, { tool, signature });
-    }
-    for (const [toolId, entry] of messageTools) {
-      if (!toolId || seenToolIds.has(toolId)) {
-        hasAmbiguousReplayHistory = true;
-        continue;
-      }
-      seenToolIds.add(toolId);
-      tools.push(entry.tool);
-    }
-  }
-  const explicitlyDidNotStart = new Set([
-    "USER_DENIED",
-    "TOOL_CANCELLED_BEFORE_START",
-  ]);
-  const requiresReplayConfirmation = hasAmbiguousReplayHistory || tools.some((tool) => {
-    const name = readManagedToolCallFunction(tool)?.name;
-    if (!name) return true;
-    if (!isMutatingTool(name)) return false;
-    const code = tool.result?.error?.code;
-    return !code || !explicitlyDidNotStart.has(String(code));
-  });
-  let laterMessageCount = 0;
-  for (let index = 0; index < laterMessages.length;) {
-    laterMessageCount += 1;
-    if (laterMessages[index].role !== "assistant") {
-      index += 1;
-      continue;
-    }
-    // The renderer presents consecutive assistant protocol records as one
-    // response. Keep edit/resubmit consequences in those same user-visible
-    // units instead of counting reasoning, tool, and answer records
-    // separately.
-    do { index += 1; }
-    while (index < laterMessages.length && laterMessages[index].role === "assistant");
-  }
-  return {
-    laterMessageCount,
-    requiresReplayConfirmation,
-  };
-}
-
-function terminalLiveResubmitConsequences(
-  snapshot: AgentConversationSnapshot | null,
-  targetTurnId: string,
-  laterMessages: readonly Readonly<ChatMessage>[],
-): Readonly<{ laterMessageCount: number; requiresReplayConfirmation: boolean }> {
-  if (
-    !snapshot
-    || snapshot.turnId !== targetTurnId
-    || (
-      snapshot.status !== "completed"
-      && snapshot.status !== "cancelled"
-      && snapshot.status !== "failed"
-    )
-  ) {
-    return { laterMessageCount: 0, requiresReplayConfirmation: false };
-  }
-  const durableMessageIds = new Set(
-    laterMessages.map((message) => message.message_id),
-  );
-  const hasUnpersistedProjection = snapshot.messages.some((message) =>
-    !durableMessageIds.has(message.id));
-  if (!hasUnpersistedProjection && snapshot.messages.length > 0) {
-    return { laterMessageCount: 0, requiresReplayConfirmation: false };
-  }
-  const explicitlyDidNotStart = new Set([
-    "USER_DENIED",
-    "TOOL_CANCELLED_BEFORE_START",
-  ]);
-  const relevantParts = snapshot.parts.filter((part) =>
-    part.kind !== "error" && (
-      snapshot.messages.length === 0
-      || snapshot.messages.some((message) => message.partIds.includes(part.id))
-    ));
-  const requiresReplayConfirmation = relevantParts.some((part) => {
-    if (
-      part.kind !== "tool"
-      || part.location !== "vault"
-      || !isMutatingTool(part.name)
-    ) return false;
-    const code = part.error?.code;
-    if (part.state === "denied") return false;
-    if (code && explicitlyDidNotStart.has(code)) return false;
-    return true;
-  });
-  return {
-    laterMessageCount: relevantParts.length > 0 ? 1 : 0,
-    requiresReplayConfirmation,
-  };
-}
 
 function backendOf(agent: unknown): TextExecutionBackend {
   return agent instanceof LocalAgentChatSession ? agent.agent : "systemsculpt";
@@ -680,29 +475,7 @@ export class AgentChatView extends ItemView {
       return new ClaudeChatSession(app, { persistAssistant: persistNativeAssistant, notice }, () => [], () => claudeOptionsFromSettings(plugin.settings));
     }
     return new AgentChatSession({
-      recoveryEnvironment: {
-        ownerWindow: () => getSurfaceOwnerWindow(this.containerEl),
-        isVisible: () => this.containerEl.isShown(),
-        subscribe: (refresh) => {
-          let observer: IntersectionObserver | null = null;
-          const observe = () => {
-            observer?.disconnect();
-            const owner = this.containerEl.ownerDocument.defaultView;
-            observer = typeof owner?.IntersectionObserver === "function"
-              ? new owner.IntersectionObserver(refresh) : null;
-            observer?.observe(this.containerEl);
-            refresh();
-          };
-          observe();
-          const detachMigration = this.containerEl.onWindowMigrated?.(observe);
-          const leafEvent = this.app.workspace.on("active-leaf-change", refresh);
-          return () => {
-            observer?.disconnect();
-            detachMigration?.();
-            this.app.workspace.offref(leafEvent);
-          };
-        },
-      },
+      recoveryEnvironment: chatRecoveryEnvironment(this.app, this.containerEl),
       baseUrl: this.agentBaseUrl,
       pluginVersion: this.plugin.manifest.version,
       licenseKey: () => this.plugin.settings.licenseKey,
@@ -2157,111 +1930,11 @@ export class AgentChatView extends ItemView {
     return Object.freeze({ ...submission, attachments });
   }
 
-  /**
-   * Reads pinned context and measures every source once, against the limits
-   * known now. Staging re-checks these measurements against the limits the
-   * server negotiates at bootstrap.
-   */
-  private async readThinAgentContextSources(
+  /** Staging re-checks these measurements against the bootstrap limits. */
+  private readThinAgentContextSources(
     pinnedEntries: ReadonlySet<string>,
   ): Promise<MeasuredThinAgentContext> {
-    const sources: ThinAgentContextSource[] = [];
-    const imageMimeTypes = new Set<string>();
-    let largestTextBlockBytes = 0;
-    let textBytes = 0;
-    let largestImageBytes = 0;
-    let imageBytes = 0;
-    let imageCount = 0;
-    for (const entry of pinnedEntries) {
-      if (sources.length >= this.chatInputLimits.maxContentBlocksPerMessage) {
-        throw new Error("Pinned files exceed the per-message source limit.");
-      }
-      if (entry.startsWith("doc:")) {
-        const documentId = entry.slice(4).trim();
-        if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
-          .test(documentId)) {
-          throw new Error("A pinned document reference is invalid.");
-        }
-        if (entry.length > 1_024 || entry.includes("\0")) {
-          throw new Error("A pinned document path is invalid.");
-        }
-        sources.push({
-          kind: "document_ref",
-          path: entry,
-          document_id: documentId,
-        });
-        continue;
-      }
-      const linkPath = entry.replace(/^\[\[(.*?)\]\]$/, "$1").trim();
-      const resolved = this.app.metadataCache.getFirstLinkpathDest(linkPath, "")
-        ?? this.app.vault.getAbstractFileByPath(linkPath)
-        ?? (!linkPath.endsWith(".md")
-          ? this.app.vault.getAbstractFileByPath(`${linkPath}.md`)
-          : null);
-      if (!(resolved instanceof TFile)) {
-        throw new Error(`Pinned file not found: ${linkPath}`);
-      }
-      if (resolved.path.length > 1_024 || resolved.path.includes("\0")) {
-        throw new Error(`${resolved.name} has an invalid context path.`);
-      }
-      if (isVaultImageContextFileExtension(resolved.extension)) {
-        imageCount += 1;
-        if (imageCount > this.chatInputLimits.maxImagesPerTurn) {
-          throw new Error("Pinned files exceed the per-message image count limit.");
-        }
-        const mimeType = imageMimeType(resolved.extension);
-        if (!this.chatInputLimits.imageMimeTypes.includes(mimeType)) {
-          throw new Error(`${resolved.name} is not a supported pinned image type.`);
-        }
-        if (resolved.stat.size > this.chatInputLimits.maxImageBytes) {
-          throw new Error(`${resolved.name} exceeds the pinned image limit.`);
-        }
-        const bytes = new Uint8Array(await this.app.vault.readBinary(resolved));
-        // These sources are sent without being parsed again, so this is the
-        // one place their sizes are measured. Check the bytes actually read,
-        // not only the possibly stale stat.
-        if (bytes.byteLength === 0) {
-          throw new Error(`${resolved.name} is an empty image.`);
-        }
-        if (bytes.byteLength > this.chatInputLimits.maxImageBytes) {
-          throw new Error(`${resolved.name} exceeds the pinned image limit.`);
-        }
-        imageMimeTypes.add(mimeType);
-        largestImageBytes = Math.max(largestImageBytes, bytes.byteLength);
-        imageBytes += bytes.byteLength;
-        if (imageBytes > this.chatInputLimits.maxTotalImageBytes) {
-          throw new Error("Pinned images exceed the total per-message image limit.");
-        }
-        sources.push({
-          kind: "image",
-          path: resolved.path,
-          data_url: thinAgentDataUrl(mimeType, bytes),
-        });
-      } else {
-        const content = await this.app.vault.read(resolved);
-        const byteLength = new TextEncoder().encode(content).byteLength;
-        if (byteLength > this.chatInputLimits.maxTextBytesPerBlock) {
-          throw new Error(`${resolved.name} exceeds the pinned text file limit.`);
-        }
-        largestTextBlockBytes = Math.max(largestTextBlockBytes, byteLength);
-        textBytes += new TextEncoder().encode(resolved.path).byteLength + byteLength;
-        if (textBytes > this.chatInputLimits.maxTotalTextBytes) {
-          throw new Error("Pinned files exceed the total per-message text limit.");
-        }
-        sources.push({ kind: "text", path: resolved.path, content });
-      }
-    }
-    return {
-      sources,
-      measurement: {
-        largestTextBlockBytes,
-        totalTextBytes: textBytes,
-        imageCount,
-        largestImageBytes,
-        totalImageBytes: imageBytes,
-        imageMimeTypes: [...imageMimeTypes],
-      },
-    };
+    return readPinnedChatContext(this.app, pinnedEntries, () => this.chatInputLimits);
   }
 
   /**
@@ -3891,6 +3564,19 @@ export class AgentChatView extends ItemView {
     return this.isRunActive();
   }
 
+  private savedChatActions(): SavedChatActions {
+    return new SavedChatActions({
+      app: this.app,
+      plugin: this.plugin,
+      storage: this.chatStorage,
+      openChats: (chatId) => this.chatViews(chatId).map((view) => ({
+        view,
+        transcript: view.transcript,
+        reset: () => view.startNewChat(false),
+      })),
+    });
+  }
+
   private chatViews(chatId: string): AgentChatView[] {
     return this.app.workspace.getLeavesOfType(CHAT_VIEW_TYPE)
       .map((leaf) => leaf.view)
@@ -3918,60 +3604,16 @@ export class AgentChatView extends ItemView {
     this.workspace?.focus();
   }
 
-  private async toggleFavoriteChat(chatId: string): Promise<void> {
-    const favorites = this.plugin.settings.favoriteChats ?? [];
-    await this.plugin.getSettingsManager().updateSettings({
-      favoriteChats: favorites.includes(chatId)
-        ? favorites.filter((id) => id !== chatId)
-        : [...favorites, chatId],
-    });
+  private toggleFavoriteChat(chatId: string): Promise<void> {
+    return this.savedChatActions().toggleFavorite(chatId);
   }
 
-  /** Rename only the durable title; stale open copies must never rewrite the transcript. */
-  private async renameSavedChat(row: Pick<ChatHistoryRow, "chatId" | "chatPath" | "title">, title: string): Promise<void> {
-    const normalized = normalizeChatTitle(title) || row.title;
-    const open = this.chatViews(row.chatId).map((view) => ({ view, transcript: view.transcript, title: view.chatTitle }));
-    const retained = nativeChatSessions(this.plugin).get(row.chatId)?.transcript;
-    const retainedTitle = retained?.snapshot().title;
-    try {
-      retained?.setTitle(normalized);
-      for (const { view } of open) await view.setTitle(normalized, false);
-      await retained?.idle();
-      // A write already in flight may still carry the previous title.
-      await Promise.all(open.map(({ transcript }) => transcript.idle()));
-      await this.chatStorage.renameChat(row.chatPath, row.chatId, normalized);
-    } catch {
-      if (retainedTitle && retained?.snapshot().title === normalized) retained.setTitle(retainedTitle);
-      for (const { view, title: previousTitle } of open) {
-        if (view.chatId === row.chatId && view.chatTitle === normalized) await view.setTitle(previousTitle, false);
-      }
-      new Notice("This chat couldn't be renamed.", 5000);
-    }
+  private renameSavedChat(row: Pick<ChatHistoryRow, "chatId" | "chatPath" | "title">, title: string): Promise<void> {
+    return this.savedChatActions().rename(row, title);
   }
 
-  private async deleteSavedChat(row: ChatHistoryRow): Promise<boolean> {
-    const { confirmed } = await showConfirm(
-      this.app,
-      `"${row.title}" will be moved to the trash.`,
-      { title: "Delete chat?", primaryButton: "Delete", icon: "trash-2" },
-    );
-    if (!confirmed) return false;
-    try {
-      const open = this.chatViews(row.chatId).map((view) => ({ view, transcript: view.transcript }));
-      // Explicit deletion cancels even a native run with no view attached and
-      // drains its final write before the note is moved to trash.
-      await nativeChatSessions(this.plugin).delete(row.chatId);
-      await Promise.all(open.map(({ view }) => view.startNewChat(false)));
-      await Promise.all(open.map(({ transcript }) => transcript.idle()));
-      const file = this.app.vault.getAbstractFileByPath(row.chatPath);
-      if (!(file instanceof TFile)) return false;
-      await this.app.fileManager.trashFile(file);
-    } catch {
-      new Notice("This chat couldn't be deleted.", 5000);
-      return false;
-    }
-    if (row.favorite) await this.toggleFavoriteChat(row.chatId).catch(() => undefined);
-    return true;
+  private deleteSavedChat(row: ChatHistoryRow): Promise<boolean> {
+    return this.savedChatActions().delete(row);
   }
 
   private async renameFromHeader(title: string): Promise<void> {
@@ -4036,20 +3678,11 @@ export class AgentChatView extends ItemView {
     this.addChatMenuItems(menu);
   }
 
-  private async exportToNote(): Promise<void> {
-    try {
-      const { markdown } = await this.exportChat();
-      const parent = this.app.fileManager.getNewFileParent("").path;
-      const base = toSafeVaultFileName(this.chatTitle, { fallback: "Chat" });
-      let path = normalizePath(`${parent}/${base} (export).md`);
-      for (let copy = 2; this.app.vault.getAbstractFileByPath(path); copy += 1) {
-        path = normalizePath(`${parent}/${base} (export ${copy}).md`);
-      }
-      const file = await this.app.vault.create(path, markdown);
-      await this.app.workspace.getLeaf("tab").openFile(file);
-    } catch {
-      new Notice("This chat couldn't be exported.", 5000);
-    }
+  private exportToNote(): Promise<void> {
+    return this.savedChatActions().exportToNote(
+      () => this.chatTitle,
+      async () => (await this.exportChat()).markdown,
+    );
   }
 
   private async openSavedChatNote(): Promise<void> {
