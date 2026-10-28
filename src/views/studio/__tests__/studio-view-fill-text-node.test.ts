@@ -19,7 +19,6 @@ const REAL_VIEW_METHODS = [
   "commitCurrentProjectMutation",
   "handleNodeResize",
   "handleSelectionResize",
-  "applyNodeResizePatch",
 ] as const;
 
 function createProject(nodes: StudioNodeInstance[]): StudioProjectV1 {

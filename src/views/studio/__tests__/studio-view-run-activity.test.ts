@@ -1,6 +1,11 @@
 import { SystemSculptStudioView } from "../SystemSculptStudioView";
 import type { StudioRunEvent } from "../../../studio/types";
 
+jest.mock("../systemsculpt-studio-view/StudioFeedback", () => ({
+  ...jest.requireActual("../systemsculpt-studio-view/StudioFeedback"),
+  logStudioConsoleError: jest.fn(),
+}));
+
 const handleRunEvent = (SystemSculptStudioView as any).prototype.handleRunEvent as (this: unknown, event: StudioRunEvent) => void;
 
 function context(overrides?: Record<string, unknown>) {
@@ -11,7 +16,6 @@ function context(overrides?: Record<string, unknown>) {
     syncInlineTextOutputToNodeConfig: jest.fn(),
     syncDatasetOutputFieldsToNodeConfig: jest.fn(),
     materializeManagedOutputNodes: jest.fn(),
-    logStudioConsoleError: jest.fn(),
     activity: { refresh: jest.fn() },
     render: jest.fn(),
     scheduleRender: jest.fn(),

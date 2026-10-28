@@ -51,6 +51,14 @@ export function prettifyNodeKind(kind: string): string {
     .join(" ");
 }
 
+export function cloneJsonValue(value: StudioJsonValue): StudioJsonValue {
+  try {
+    return JSON.parse(JSON.stringify(value)) as StudioJsonValue;
+  } catch {
+    return value;
+  }
+}
+
 export function cloneConfigDefaults(
   definition: StudioNodeDefinition
 ): Record<string, StudioJsonValue> {
