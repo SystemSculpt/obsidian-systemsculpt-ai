@@ -6,6 +6,7 @@ import { toSafeVaultFileName } from "../../utils/vaultFileName";
 import { confirmSimilarNotesRebuild } from "../../modals/SimilarNotesRebuildConfirmation";
 import { resolveSurfaceDomContext } from "../ui/surface";
 import type { ChatMessage } from "../../types";
+import { toggleAudioRecorder } from "./ribbons";
 import { CHAT_VIEW_TYPE, SYSTEMSCULPT_STUDIO_VIEW_TYPE } from "./viewTypes";
 import { STUDIO_DISPLAY_NAME, STUDIO_PROJECT_EXTENSION } from "../../studio/types";
 import {
@@ -157,7 +158,7 @@ export class CommandManager {
       id: "toggle-audio-recorder",
       name: "Toggle audio recorder",
       callback: async () => {
-        await this.plugin.getViewManager().ribbonManager.toggleAudioRecorder();
+        await toggleAudioRecorder(this.plugin);
       },
     });
   }

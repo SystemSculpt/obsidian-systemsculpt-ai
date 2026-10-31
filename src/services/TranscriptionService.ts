@@ -36,7 +36,8 @@ export class TranscriptionService {
     return this.instance;
   }
 
-  static clearInstance(): void {
+  static clearInstance(owner?: SystemSculptPlugin): void {
+    if (owner && this.instance?.plugin !== owner) return;
     this.instance?.unload();
     this.instance = null;
   }

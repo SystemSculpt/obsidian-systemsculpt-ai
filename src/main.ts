@@ -588,14 +588,18 @@ export default class SystemSculptPlugin extends Plugin {
       }],
       ["license.initialize", "license validation", () => this.initializeLicense()],
       ["recorder.recover", "recorder recovery", async () => {
-        if (await RecorderService.hasPendingCaptures(this.app, this.settings.pendingRecorderCaptures ?? [])) {
-          if (!this.isUnloading && !this.deferredStartup.signal.aborted) this.ensureRecorderService().recoverPendingCaptures();
+        const fragments = this.settings.pendingRecorderCaptures?.length
+          ? undefined
+          : await RecorderService.findInterruptedCaptureFiles(this.app);
+        if (fragments?.length === 0) return;
+        if (!this.isUnloading && !this.deferredStartup.signal.aborted) {
+          this.ensureRecorderService().recoverPendingCaptures(fragments);
         }
       }],
       ["views.restore", "chat restoration", () => this.viewManager?.restoreChatViews()],
       ["audioProcessor.recover", "audio processor recovery", async () => {
         const { resumeAudioProcessorJobs } = await import("./features/audio-processor/AudioProcessorResume");
-        if (!this.isUnloading) await resumeAudioProcessorJobs(this);
+        if (!this.isUnloading && !this.deferredStartup.signal.aborted) await resumeAudioProcessorJobs(this);
       }],
       ["storage.initialize", "storage", async () => {
         await this.storage?.initialize();
@@ -1269,7 +1273,16 @@ export default class SystemSculptPlugin extends Plugin {
 
     // Services in reverse order of initialization. Recorder cleanup ran before
     // every fallible teardown step above.
-    await safely("transcription service", () => this.transcriptionService?.unload());
+    await safely("transcription service", () => {
+      try {
+        this.transcriptionService?.unload();
+      } finally {
+        // Direct clients share the singleton without using the plugin getter.
+        // An old plugin's delayed teardown must not stop a replacement's work.
+        TranscriptionService.clearInstance(this);
+        this.transcriptionService = undefined;
+      }
+    });
     await safely("resume chat service", () => this.resumeChatService?.cleanup());
     await safely("service singletons", () => {
       SystemSculptService.clearInstance();

@@ -13,7 +13,8 @@ function registerCommands() {
   const plugin = {
     addCommand: jest.fn(),
     settings: {},
-    getLogger: jest.fn(),
+    getLogger: jest.fn(() => ({ debug: jest.fn(), info: jest.fn(), error: jest.fn() })),
+    hasRecorderService: jest.fn(() => false),
     getRecorderService: jest.fn(),
     getViewManager: jest.fn(),
     getPluginUpdateService: jest.fn(),
@@ -74,16 +75,17 @@ describe("CommandManager command surface contract", () => {
     expect(plugin.getResourceMonitor).not.toHaveBeenCalled();
   });
 
-  it("uses the existing ribbon manager's owned recorder action", async () => {
+  it("uses the shared recorder action without initializing any view", async () => {
     const { plugin, command } = registerCommands();
-    const toggleAudioRecorder = jest.fn().mockResolvedValue(undefined);
-    plugin.getViewManager.mockReturnValue({ ribbonManager: { toggleAudioRecorder } });
+    const toggleRecording = jest.fn().mockResolvedValue(undefined);
+    plugin.getRecorderService.mockReturnValue({ toggleRecording });
+    plugin.getViewManager.mockImplementation(() => { throw new Error("Views unavailable"); });
 
     await command("toggle-audio-recorder").callback();
 
-    expect(plugin.getViewManager).toHaveBeenCalledTimes(1);
-    expect(toggleAudioRecorder).toHaveBeenCalledTimes(1);
-    expect(plugin.getRecorderService).not.toHaveBeenCalled();
+    expect(plugin.getViewManager).not.toHaveBeenCalled();
+    expect(toggleRecording).toHaveBeenCalledTimes(1);
+    expect(plugin.getRecorderService).toHaveBeenCalledTimes(1);
   });
 
   it("runs manual update checks through the lazy service only when chosen", () => {

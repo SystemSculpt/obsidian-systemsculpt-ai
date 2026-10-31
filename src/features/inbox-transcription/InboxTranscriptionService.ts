@@ -292,6 +292,7 @@ export class InboxTranscriptionService {
       await this.startBulkProcessing(files);
     } finally {
       this.isProcessingBulk = false;
+      await this.flushPendingFiles();
     }
   }
 

@@ -266,6 +266,26 @@ describe("InboxTranscriptionService through its host interface", () => {
     expect(mockTranscribeFile).toHaveBeenCalledTimes(3);
   });
 
+  it("drains inbox arrivals whose debounce expires during a resumed batch", async () => {
+    const files = await queueBulk(3);
+    const vaultFiles = new Map(files.map(file => [file.path, file]));
+    (app.vault.getAbstractFileByPath as jest.Mock).mockImplementation((path: string) => vaultFiles.get(path) ?? null);
+    confirmation().onDefer();
+    await settle();
+    let finish!: () => void;
+    mockTranscribeFile.mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve; }));
+    const resumed = service.resumeDeferredFiles();
+    await settle();
+    const next = audio("Inbox/during-resume.mp3");
+    emit("create", next);
+    await flushInbox();
+    expect(mockTranscribeFile).toHaveBeenCalledTimes(1);
+    finish();
+    await resumed;
+    expect(mockTranscribeFile.mock.calls.map(([file]) => file)).toEqual([...files, next]);
+    expect(confirmations).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps waiting files untouched while another bulk confirmation is active", async () => {
     const waiting = await queueBulk(3);
     confirmation().onDefer();

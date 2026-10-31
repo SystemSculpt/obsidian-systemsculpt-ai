@@ -91,10 +91,11 @@ export class DiagnosticsFacade {
   public buildDiagnosticsSnapshot(eventLimit: number = 200, resourceLimit: number = 8): string {
     const monitor = this.options.getResourceMonitor();
     let resources: PublicSupportResourceSample[] = [];
-    if (monitor) {
+    const resourceCount = normalizePublicDiagnosticsLimit(resourceLimit, 8, 24);
+    if (monitor && resourceCount > 0) {
       try {
         resources = monitor
-          .getRecentSamples(normalizePublicDiagnosticsLimit(resourceLimit, 8, 24))
+          .getRecentSamples(resourceCount)
           .map(projectPublicSupportResourceSample)
           .filter((sample): sample is PublicSupportResourceSample => sample !== null);
       } catch {

@@ -121,10 +121,15 @@ describe("DiagnosticsFacade support snapshot", () => {
       getResourceMonitor: () => ({ getRecentSamples, isRecording: () => false }),
     });
 
-    diagnostics.buildDiagnosticsSnapshot(eventLimit, resourceLimit);
+    const snapshot = JSON.parse(diagnostics.buildDiagnosticsSnapshot(eventLimit, resourceLimit));
 
     expect(getSupportDiagnostics).toHaveBeenCalledWith(events);
-    expect(getRecentSamples).toHaveBeenCalledWith(resources);
+    if (resources === 0) {
+      expect(getRecentSamples).not.toHaveBeenCalled();
+      expect(snapshot.resources).toEqual([]);
+    } else {
+      expect(getRecentSamples).toHaveBeenCalledWith(resources);
+    }
   });
 
   it("keeps snapshots usable when directory readiness and resource sampling fail", () => {

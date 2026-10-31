@@ -157,11 +157,10 @@ export class RecorderService {
   }
 
   /** Include orphaned crash fragments, even if their settings write never landed. */
-  public static async hasPendingCaptures(app: App, pending: readonly PendingRecorderCapture[]): Promise<boolean> {
-    if (pending.length > 0) return true;
+  public static async findInterruptedCaptureFiles(app: App): Promise<readonly string[]> {
     const adapter = app.vault.adapter;
-    if (!await adapter.exists(RECORDINGS_IN_PROGRESS_DIRECTORY)) return false;
-    return (await adapter.list(RECORDINGS_IN_PROGRESS_DIRECTORY)).files.length > 0;
+    if (!await adapter.exists(RECORDINGS_IN_PROGRESS_DIRECTORY)) return [];
+    return (await adapter.list(RECORDINGS_IN_PROGRESS_DIRECTORY)).files;
   }
 
   public onToggle(callback: (recording: boolean) => void): () => void {
@@ -179,14 +178,14 @@ export class RecorderService {
    * Origins are intentionally not reconstructed: recovered text is saved to a
    * transcript file and reported, never inserted into a guessed note or chat.
    */
-  public recoverPendingCaptures(): void {
+  public recoverPendingCaptures(interruptedFiles?: readonly string[]): void {
     if (this.unloaded || this.pendingRecoveryRunning) return;
     if (!this.interruptedCapturesRecovered) {
       // Once per session: bring audio from a capture that Obsidian quit or
       // crashed during out of hiding. A capture running now is left alone.
       this.interruptedCapturesRecovered = true;
       this.pendingRecoveryRunning = true;
-      void this.recoverInterruptedCaptures()
+      void this.recoverInterruptedCaptures(interruptedFiles)
         .catch((error) => logError("RecorderService", "Could not recover an interrupted recording", error))
         .finally(() => {
           this.pendingRecoveryRunning = false;
@@ -981,7 +980,7 @@ export class RecorderService {
    * transcribed only when automatic transcription is on, as for any
    * recording that stops. A file whose entry was lost is still recovered.
    */
-  private async recoverInterruptedCaptures(): Promise<void> {
+  private async recoverInterruptedCaptures(interruptedFiles?: readonly string[]): Promise<void> {
     const adapter = this.app.vault.adapter;
     const pending = this.plugin.settings.pendingRecorderCaptures ?? [];
     const discarded = pending.filter((capture) => capture.discarded);
@@ -992,23 +991,21 @@ export class RecorderService {
       await this.deleteDiscardedFragment(capture.filePath);
     }
     const orphans: PendingRecorderCapture[] = [];
-    if (await adapter.exists(RECORDINGS_IN_PROGRESS_DIRECTORY)) {
-      for (const filePath of (await adapter.list(RECORDINGS_IN_PROGRESS_DIRECTORY)).files) {
-        if (known.has(filePath)) continue;
-        if (isDiscardedRecordingPath(filePath)) {
-          await adapter.remove(filePath).catch(() => undefined);
-          continue;
-        }
-        orphans.push({
-          filePath,
-          startedAt: 0,
-          durationMs: 0,
-          sizeBytes: 0,
-          stopReason: "interrupted",
-          destination: "note",
-          captureInProgress: true,
-        });
+    for (const filePath of interruptedFiles ?? await RecorderService.findInterruptedCaptureFiles(this.app)) {
+      if (known.has(filePath)) continue;
+      if (isDiscardedRecordingPath(filePath)) {
+        await adapter.remove(filePath).catch(() => undefined);
+        continue;
       }
+      orphans.push({
+        filePath,
+        startedAt: 0,
+        durationMs: 0,
+        sizeBytes: 0,
+        stopReason: "interrupted",
+        destination: "note",
+        captureInProgress: true,
+      });
     }
     for (const capture of [...entries, ...orphans]) {
       if (this.unloaded) return;

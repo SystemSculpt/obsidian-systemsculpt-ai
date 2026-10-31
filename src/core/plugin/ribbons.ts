@@ -5,6 +5,25 @@ type RibbonHandle = HTMLElement;
 
 const AUDIO_PROCESSOR_UNAVAILABLE_NOTICE = "Audio Processor is temporarily unavailable.";
 
+/** Shared recorder action; opening views is not a prerequisite for recording. */
+export async function toggleAudioRecorder(plugin: Pick<SystemSculptPlugin, "hasRecorderService" | "getLogger" | "getRecorderService">): Promise<void> {
+  const alreadyInitialized = plugin.hasRecorderService();
+  const logger = plugin.getLogger();
+  const context = {
+    source: "RibbonManager",
+    method: "toggleAudioRecorder",
+    metadata: { alreadyInitialized },
+  };
+  logger.debug("Toggle audio recorder requested", context);
+  try {
+    await plugin.getRecorderService().toggleRecording();
+    logger.info("Audio recorder toggled", context);
+  } catch (error) {
+    logger.error("Failed to toggle audio recorder", error, context);
+    new Notice("Unable to toggle the audio recorder.", 8000);
+  }
+}
+
 export class RibbonManager {
   private plugin: SystemSculptPlugin;
   private app: App;
@@ -39,7 +58,7 @@ export class RibbonManager {
       "mic",
       "Audio Recorder",
       async () => {
-        await this.toggleAudioRecorder();
+        await toggleAudioRecorder(this.plugin);
       }
     );
 
@@ -150,27 +169,6 @@ export class RibbonManager {
     }).catch(() => {
       new Notice("Unable to open janitor right now.", 5000);
     });
-  }
-
-  /** Shared recorder action for the ribbon and command palette. */
-  public async toggleAudioRecorder(): Promise<void> {
-    const alreadyInitialized = this.plugin.hasRecorderService();
-    const logger = this.plugin.getLogger();
-    const context = {
-      source: "RibbonManager",
-      method: "toggleAudioRecorder",
-      metadata: { alreadyInitialized },
-    };
-    logger.debug("Toggle audio recorder requested", context);
-
-    try {
-      const recorderService = this.plugin.getRecorderService();
-      await recorderService.toggleRecording();
-      logger.info("Audio recorder toggled", context);
-    } catch (error) {
-      logger.error("Failed to toggle audio recorder", error, context);
-      new Notice("Unable to toggle the audio recorder.", 8000);
-    }
   }
 
   /**

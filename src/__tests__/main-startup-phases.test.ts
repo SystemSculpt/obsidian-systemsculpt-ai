@@ -6,6 +6,7 @@ import { DiagnosticsSessionLifecycle } from "../core/diagnostics/DiagnosticsSess
 import { DEFAULT_SETTINGS } from "../types";
 
 const obsidian = require("obsidian");
+jest.mock("../features/audio-processor/AudioProcessorResume", () => ({ resumeAudioProcessorJobs: jest.fn() }));
 
 function makePlugin(app: App = new App()): SystemSculptPlugin {
   return new SystemSculptPlugin(app, {
@@ -124,7 +125,7 @@ describe("SystemSculptPlugin startup phases", () => {
       pendingRecorderCaptures: source === "saved capture" ? [{ filePath: "Recordings/pending.webm" } as any] : [],
     };
     jest.mocked(app.vault.adapter.exists).mockResolvedValue(source === "orphaned fragment");
-    jest.mocked(app.vault.adapter.list).mockResolvedValue({ files: [".systemsculpt/recordings/in-progress/orphan.webm"], folders: [] });
+    jest.mocked(app.vault.adapter.list).mockResolvedValue({ files: [".systemsculpt/recordings-in-progress/orphan.webm"], folders: [] });
     const recoverPendingCaptures = jest.fn();
     const ensure = jest.spyOn(plugin, "ensureRecorderService").mockReturnValue({ recoverPendingCaptures } as any);
     (plugin as any).configureLifecycle();
@@ -133,6 +134,18 @@ describe("SystemSculptPlugin startup phases", () => {
 
     expect(ensure).toHaveBeenCalledTimes(source === "empty vault" ? 0 : 1);
     expect(recoverPendingCaptures).toHaveBeenCalledTimes(source === "empty vault" ? 0 : 1);
+  });
+
+  it("does not start audio recovery if unload begins during its lazy import", async () => {
+    const plugin = makePlugin();
+    const resume = require("../features/audio-processor/AudioProcessorResume").resumeAudioProcessorJobs;
+    resume.mockReset().mockResolvedValue(undefined);
+    (plugin as any).configureLifecycle();
+    const recovery = runTask(plugin, "deferred", "audioProcessor.recover");
+    (plugin as any).deferredStartup.abort();
+    expect((plugin as any).isUnloading).toBe(false);
+    await recovery;
+    expect(resume).not.toHaveBeenCalled();
   });
 
   it("does not create a recorder after unloading during a pending disk check", async () => {

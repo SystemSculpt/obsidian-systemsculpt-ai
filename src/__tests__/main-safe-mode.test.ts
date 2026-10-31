@@ -4,6 +4,7 @@ import { App } from "obsidian";
 import SystemSculptPlugin from "../main";
 import { AudioTranscriptionPanel } from "../modals/AudioTranscriptionPanel";
 import { nativeChatSessions } from "../views/chatview/NativeChatSessions";
+import { TranscriptionService } from "../services/TranscriptionService";
 
 const createTracer = () => ({
   startPhase: jest.fn(() => ({ complete: jest.fn(), fail: jest.fn() })),
@@ -353,6 +354,15 @@ describe("SystemSculptPlugin safe mode + version gate (#212)", () => {
     expect(logger.dispose).toHaveBeenCalledTimes(1);
     expect(order).toEqual(["recorder", "resource-monitor-stop", "flush", "resource-monitor-flush", "dispose"]);
     expect(plugin.isPluginUnloading()).toBe(true);
+  });
+
+  it("unloads transcription created directly by a lazy feature client", async () => {
+    const plugin = makePlugin();
+    const service = TranscriptionService.getInstance(plugin);
+    const unload = jest.spyOn(service, "unload");
+    expect(plugin.transcriptionService).toBeUndefined();
+    await beginUnload(plugin);
+    expect(unload).toHaveBeenCalledTimes(1);
   });
 
   it("disposes owned transcription panels before transcription service unload", async () => {
