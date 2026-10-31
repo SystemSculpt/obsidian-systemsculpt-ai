@@ -55,6 +55,7 @@ import {
 import { PhoneHandoffInbox, type HandoffAgent } from "./features/phone-captures/PhoneHandoffInbox";
 import { detectLocalAgents, isLocalAgentUsable } from "./services/codex/LocalAgentDetection";
 import { localAgentDetectionDirectory } from "./services/codex/CodexExecutionSettings";
+import { disposeCodexSession, startCodexSession } from "./services/codex/CodexAppServer";
 import { SystemSculptSearchEngine } from "./services/search/SystemSculptSearchEngine";
 import { relativeLineNumbersExtension } from "./editor/relative-line-numbers";
 import { studioTextNodeEmptyLines } from "./views/studio/canvas/StudioTextNodeEmptyLines";
@@ -230,6 +231,7 @@ export default class SystemSculptPlugin extends Plugin {
   }
 
   async onload() {
+    startCodexSession();
     const loadStart = performance.now();
     this.initializeAgentIncidentCoordinator();
     // Injected by esbuild `define`; "dev" outside the bundler (tests).
@@ -1261,6 +1263,7 @@ export default class SystemSculptPlugin extends Plugin {
         this.studioService = null;
       }
     });
+    await safely("codex session", () => disposeCodexSession());
     // Commands and the settings tab are removed by Obsidian itself on unload.
     await safely("file context menu", () => {
       this.fileContextMenuService?.stop();

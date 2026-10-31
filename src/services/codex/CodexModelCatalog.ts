@@ -19,7 +19,7 @@ export function readCodexCatalog(cwd: string, signal: AbortSignal, refresh = fal
   let read = pending.get(cwd);
   if (!read) {
     const controller = new AbortController();
-    read = { controller, consumers: 0, promise: loadCodexCatalog(cwd, controller.signal) };
+    read = { controller, consumers: 0, promise: loadCodexCatalog(cwd, controller.signal, refresh) };
     pending.set(cwd, read);
     const current = read;
     void read.promise.finally(() => { if (pending.get(cwd) === current) pending.delete(cwd); }).catch(() => {});
@@ -39,8 +39,8 @@ export function readCodexCatalog(cwd: string, signal: AbortSignal, refresh = fal
   });
 }
 
-async function loadCodexCatalog(cwd: string, signal: AbortSignal): Promise<Catalog> {
-  const connection = await connectCodex(cwd, signal, { error: () => {}, notification: () => {}, request: () => Promise.reject(new Error('Unexpected model-catalog request.')) });
+async function loadCodexCatalog(cwd: string, signal: AbortSignal, refresh: boolean): Promise<Catalog> {
+  const connection = await connectCodex(cwd, signal, { error: () => {}, notification: () => {}, request: () => Promise.reject(new Error('Unexpected model-catalog request.')) }, refresh);
   try {
     const result = await connection.request('config/read', { cwd, includeLayers: false });
     const permissions = describeCodexPermissions(isRecord(result.config) ? result.config : {});
