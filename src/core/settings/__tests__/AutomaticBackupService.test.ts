@@ -11,12 +11,20 @@ jest.mock("obsidian", () => {
 });
 
 const createMockPlugin = () => {
+  const backupMtimes = new Map<string, number>();
   const adapter = {
     exists: jest.fn(async () => true),
-    write: jest.fn(async () => {}),
-    list: jest.fn(async () => ({ files: [], folders: [] })),
-    stat: jest.fn(async () => ({ mtime: Date.now() })),
-    remove: jest.fn(async () => {}),
+    write: jest.fn(async (path: string) => {
+      backupMtimes.set(path, Date.now());
+    }),
+    list: jest.fn(async () => ({ files: [...backupMtimes.keys()], folders: [] })),
+    stat: jest.fn(async (path: string) => {
+      const mtime = backupMtimes.get(path);
+      return mtime === undefined ? null : { mtime };
+    }),
+    remove: jest.fn(async (path: string) => {
+      backupMtimes.delete(path);
+    }),
   };
   const vault = {
     createFolder: jest.fn(async () => {}),
@@ -38,7 +46,6 @@ const createMockPlugin = () => {
         automaticBackupsEnabled: true,
         automaticBackupInterval: 24, // 24 hours
         automaticBackupRetentionDays: 30,
-        lastAutomaticBackup: 0,
       }),
       updateSettings,
     }),
@@ -55,14 +62,16 @@ describe("AutomaticBackupService", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     jest.useFakeTimers();
+    jest.setSystemTime(new Date("2025-01-15T12:00:00Z"));
     setIntervalSpy = jest.spyOn(window, "setInterval");
     clearIntervalSpy = jest.spyOn(window, "clearInterval");
     mockPlugin = createMockPlugin();
     service = new AutomaticBackupService(mockPlugin);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     service.stop();
+    await jest.advanceTimersByTimeAsync(0);
     jest.useRealTimers();
     setIntervalSpy.mockRestore();
     clearIntervalSpy.mockRestore();
@@ -112,6 +121,9 @@ describe("AutomaticBackupService", () => {
       expect(setIntervalSpy).not.toHaveBeenCalled();
       expect(jest.getTimerCount()).toBe(0);
       expect(mockPlugin.app.vault.adapter.write).not.toHaveBeenCalled();
+      expect(mockPlugin.app.vault.adapter.list).not.toHaveBeenCalled();
+      expect(mockPlugin.app.vault.adapter.stat).not.toHaveBeenCalled();
+      expect(mockPlugin._updateSettings).not.toHaveBeenCalled();
     });
 
     it("clears its timer when backups are turned off and arms it again when they are turned on", () => {
@@ -152,16 +164,11 @@ describe("AutomaticBackupService", () => {
     });
 
     it("checks for backup immediately on start", async () => {
-      // With lastAutomaticBackup = 0, backup should be needed
-      const writeSpy = mockPlugin.app.vault.adapter.write;
-
       service.start();
+      await jest.advanceTimersByTimeAsync(0);
 
-      // Allow microtasks to complete (the immediate check is async)
-      await Promise.resolve();
-      await Promise.resolve();
-
-      expect(writeSpy).toHaveBeenCalled();
+      expect(mockPlugin.app.vault.adapter.write).toHaveBeenCalledTimes(1);
+      expect(mockPlugin._updateSettings).not.toHaveBeenCalled();
     });
   });
 
@@ -186,68 +193,120 @@ describe("AutomaticBackupService", () => {
     });
   });
 
-  describe("checkAndCreateBackup (private)", () => {
-    it("skips backup when automatic backups disabled", async () => {
-      mockPlugin.getSettingsManager = () => ({
-        getSettings: () => ({
-          automaticBackupsEnabled: false,
-          automaticBackupInterval: 24,
-          automaticBackupRetentionDays: 30,
-          lastAutomaticBackup: 0,
-        }),
-        updateSettings: jest.fn(),
+  describe("scheduled backups", () => {
+    it("creates a backup when the newest automatic backup mtime reaches the interval", async () => {
+      const older = ".systemsculpt/settings-backups/settings-backup-2025-01-15.json";
+      const newest = ".systemsculpt/settings-backups/settings-backup-2025-01-13.json";
+      const oldest = ".systemsculpt/settings-backups/settings-backup-2025-01-14.json";
+      const now = Date.now();
+      const hour = 60 * 60 * 1000;
+      mockPlugin.app.vault.adapter.list.mockResolvedValue({
+        files: [older, newest, oldest],
+        folders: [],
+      });
+      mockPlugin.app.vault.adapter.stat.mockImplementation(async (path: string) => ({
+        mtime: now - (path === newest ? 23 : 48) * hour,
+      }));
+
+      service.start();
+      await jest.advanceTimersByTimeAsync(0);
+
+      expect(mockPlugin.app.vault.adapter.stat).toHaveBeenCalledWith(older);
+      expect(mockPlugin.app.vault.adapter.stat).toHaveBeenCalledWith(newest);
+      expect(mockPlugin.app.vault.adapter.stat).toHaveBeenCalledWith(oldest);
+      expect(mockPlugin.app.vault.adapter.write).not.toHaveBeenCalled();
+
+      await jest.advanceTimersByTimeAsync(hour);
+
+      expect(mockPlugin.app.vault.adapter.write).toHaveBeenCalledTimes(1);
+      expect(mockPlugin._updateSettings).not.toHaveBeenCalled();
+    });
+
+    it("respects the saved backup mtime after a fresh service starts", async () => {
+      await service.createAutomaticBackup();
+      mockPlugin.app.vault.adapter.write.mockClear();
+      jest.setSystemTime(Date.now() + 23 * 60 * 60 * 1000);
+      service = new AutomaticBackupService(mockPlugin);
+
+      service.start();
+      await jest.advanceTimersByTimeAsync(0);
+
+      expect(mockPlugin.app.vault.adapter.write).not.toHaveBeenCalled();
+      expect(mockPlugin.app.vault.adapter.stat).toHaveBeenCalledWith(
+        ".systemsculpt/settings-backups/settings-backup-2025-01-15.json"
+      );
+
+      await jest.advanceTimersByTimeAsync(60 * 60 * 1000);
+
+      expect(mockPlugin.app.vault.adapter.write).toHaveBeenCalledTimes(1);
+      expect(mockPlugin._updateSettings).not.toHaveBeenCalled();
+    });
+
+    it("does not let latest-save snapshots or other non-automatic backups postpone dated history", async () => {
+      const automatic = ".systemsculpt/settings-backups/settings-backup-2025-01-13.json";
+      const otherBackups = [
+        ".systemsculpt/settings-backups/settings-backup-latest.json",
+        ".systemsculpt/settings-backups/settings-backup-manual-2025-01-15.json",
+        ".systemsculpt/settings-backups/settings-backup-emergency-2025-01-15.json",
+        ".systemsculpt/settings-backups/settings-backup-premigration-v3.json",
+      ];
+      const now = Date.now();
+      mockPlugin.app.vault.adapter.list.mockResolvedValue({
+        files: [automatic, ...otherBackups],
+        folders: [],
+      });
+      mockPlugin.app.vault.adapter.stat.mockImplementation(async (path: string) => ({
+        mtime: path === automatic ? now - 48 * 60 * 60 * 1000 : now,
+      }));
+
+      service.start();
+      await jest.advanceTimersByTimeAsync(0);
+
+      expect(mockPlugin.app.vault.adapter.write).toHaveBeenCalledTimes(1);
+      for (const path of otherBackups) {
+        expect(mockPlugin.app.vault.adapter.stat).not.toHaveBeenCalledWith(path);
+      }
+    });
+
+    it("still considers readable backups when another backup is missing or cannot be statted", async () => {
+      const missing = ".systemsculpt/settings-backups/settings-backup-2025-01-13.json";
+      const unreadable = ".systemsculpt/settings-backups/settings-backup-2025-01-14.json";
+      const recent = ".systemsculpt/settings-backups/settings-backup-2025-01-15.json";
+      const now = Date.now();
+      mockPlugin.app.vault.adapter.list.mockResolvedValue({
+        files: [missing, unreadable, recent],
+        folders: [],
+      });
+      mockPlugin.app.vault.adapter.stat.mockImplementation(async (path: string) => {
+        if (path === missing) return null;
+        if (path === unreadable) throw new Error("Stat failed");
+        return { mtime: now };
       });
 
-      service = new AutomaticBackupService(mockPlugin);
       service.start();
+      await jest.advanceTimersByTimeAsync(0);
 
-      // Allow microtasks to complete
-      await Promise.resolve();
-      await Promise.resolve();
-
+      expect(mockPlugin.app.vault.adapter.stat).toHaveBeenCalledWith(recent);
       expect(mockPlugin.app.vault.adapter.write).not.toHaveBeenCalled();
     });
 
-    it("creates backup when interval has passed", async () => {
-      // lastAutomaticBackup is 0, so backup should be needed
+    it("creates the first backup when the backup directory cannot be listed", async () => {
+      mockPlugin.app.vault.adapter.list.mockRejectedValue(new Error("Directory missing"));
+
       service.start();
+      await jest.advanceTimersByTimeAsync(0);
 
-      // Allow microtasks to complete
-      await Promise.resolve();
-      await Promise.resolve();
-
-      expect(mockPlugin.app.vault.adapter.write).toHaveBeenCalled();
+      expect(mockPlugin.app.vault.adapter.write).toHaveBeenCalledTimes(1);
+      expect(Notice).not.toHaveBeenCalled();
     });
 
-    it("skips backup when interval has not passed", async () => {
-      mockPlugin.getSettingsManager = () => ({
-        getSettings: () => ({
-          automaticBackupsEnabled: true,
-          automaticBackupInterval: 24,
-          automaticBackupRetentionDays: 30,
-          lastAutomaticBackup: Date.now(), // Just backed up
-        }),
-        updateSettings: jest.fn(),
-      });
-
-      service = new AutomaticBackupService(mockPlugin);
-      service.start();
-
-      // Allow microtasks to complete
-      await Promise.resolve();
-      await Promise.resolve();
-
-      expect(mockPlugin.app.vault.adapter.write).not.toHaveBeenCalled();
-    });
-
-    it("handles errors gracefully", async () => {
+    it("handles unreadable settings without arming a timer", () => {
       mockPlugin.getSettingsManager = () => {
         throw new Error("Settings error");
       };
 
-      service = new AutomaticBackupService(mockPlugin);
-
       expect(() => service.start()).not.toThrow();
+      expect(setIntervalSpy).not.toHaveBeenCalled();
     });
   });
 
@@ -278,7 +337,6 @@ describe("AutomaticBackupService", () => {
           automaticBackupsEnabled: true,
           automaticBackupInterval: 24,
           automaticBackupRetentionDays: 30,
-          lastAutomaticBackup: 0,
           licenseKey: "license-secret",
           openAiApiKey: "openai-secret",
           customTranscriptionApiKey: "transcription-secret",
@@ -339,12 +397,12 @@ describe("AutomaticBackupService", () => {
       expect(mockPlugin.storage.writeFile).not.toHaveBeenCalled();
     });
 
-    it("updates lastAutomaticBackup timestamp", async () => {
-      await service.createAutomaticBackup();
+    it("creates a backup without cascading a settings save", async () => {
+      const result = await service.createAutomaticBackup();
 
-      expect(mockPlugin._updateSettings).toHaveBeenCalledWith({
-        lastAutomaticBackup: expect.any(Number),
-      });
+      expect(result).toBe(true);
+      expect(mockPlugin.app.vault.adapter.write).toHaveBeenCalledTimes(1);
+      expect(mockPlugin._updateSettings).not.toHaveBeenCalled();
     });
 
     it("creates backup directory if it does not exist", async () => {
@@ -416,7 +474,7 @@ describe("AutomaticBackupService", () => {
     });
   });
 
-  describe("cleanupOldBackups (private)", () => {
+  describe("backup retention", () => {
     it("cleans up old backups after creating new one", async () => {
       const oldBackupFile =
         ".systemsculpt/settings-backups/settings-backup-2024-01-01.json";
@@ -568,25 +626,42 @@ describe("AutomaticBackupService", () => {
   });
 
   describe("timer behavior", () => {
-    it("calls checkAndCreateBackup periodically", async () => {
+    it("checks hourly without writing another backup before the configured interval", async () => {
       service.start();
-
-      // Allow initial check to complete
-      await Promise.resolve();
-      await Promise.resolve();
-
-      // Clear write calls from initial check
+      await jest.advanceTimersByTimeAsync(0);
+      expect(mockPlugin.app.vault.adapter.write).toHaveBeenCalledTimes(1);
       mockPlugin.app.vault.adapter.write.mockClear();
 
-      // Advance time by 1 hour (use advanceTimersByTime, not async version)
-      jest.advanceTimersByTime(60 * 60 * 1000);
+      await jest.advanceTimersByTimeAsync(23 * 60 * 60 * 1000);
 
-      // Allow the async callback to complete
-      await Promise.resolve();
-      await Promise.resolve();
+      expect(mockPlugin.app.vault.adapter.write).not.toHaveBeenCalled();
 
-      // Should have been called again after 1 hour
-      expect(mockPlugin.app.vault.adapter.write).toHaveBeenCalled();
+      await jest.advanceTimersByTimeAsync(60 * 60 * 1000);
+
+      expect(mockPlugin.app.vault.adapter.write).toHaveBeenCalledTimes(1);
+      expect(mockPlugin._updateSettings).not.toHaveBeenCalled();
+    });
+
+    it("does not read or write backups after the setting is disabled between checks", async () => {
+      let enabled = true;
+      const settings = mockPlugin.getSettingsManager().getSettings();
+      mockPlugin.getSettingsManager = () => ({
+        getSettings: () => ({ ...settings, automaticBackupsEnabled: enabled }),
+        updateSettings: mockPlugin._updateSettings,
+      });
+      service.start();
+      await jest.advanceTimersByTimeAsync(0);
+      mockPlugin.app.vault.adapter.write.mockClear();
+      mockPlugin.app.vault.adapter.list.mockClear();
+      mockPlugin.app.vault.adapter.stat.mockClear();
+      enabled = false;
+
+      await jest.advanceTimersByTimeAsync(24 * 60 * 60 * 1000);
+
+      expect(mockPlugin.app.vault.adapter.write).not.toHaveBeenCalled();
+      expect(mockPlugin.app.vault.adapter.list).not.toHaveBeenCalled();
+      expect(mockPlugin.app.vault.adapter.stat).not.toHaveBeenCalled();
+      expect(mockPlugin._updateSettings).not.toHaveBeenCalled();
     });
 
     it("arms nothing when settings cannot be read", async () => {

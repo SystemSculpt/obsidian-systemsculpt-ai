@@ -102,6 +102,46 @@ describe("SettingsManager managed settings contract", () => {
     expect(backupStart).toHaveBeenCalledTimes(1);
   });
 
+  it("loads and restores v17 data without losing live settings or legacy exclusions", async () => {
+    const live = {
+      licenseKey: "existing-license", licenseValid: true, subscriptionStatus: "lifetime",
+      chatsDirectory: "My chats", recordingsDirectory: "Audio", extractionsDirectory: "Extracted",
+      savedChatsDirectory: "Old saved chats", attachmentsDirectory: "Old attachments",
+      chatFontSize: "large", reduceChatMotion: true,
+      automaticBackupsEnabled: false, automaticBackupInterval: 48, automaticBackupRetentionDays: 90,
+      studioDefaultProjectsFolder: "Projects", studioRunRetentionMaxRuns: 200,
+      workflowEngine: { enabled: true, inboxRoutingEnabled: true, inboxFolder: "Custom inbox", processedNotesFolder: "Done", autoTranscribeInboxNotes: false, skippedFiles: {} },
+      futureSetting: { nested: ["keep"] },
+    };
+    const dead = {
+      enableExperimentalFeatures: true, chatExportPreferences: { lastFolder: "Exports" },
+      suppressLicenseUpgradePrompt: true, skipEmptyNoteWarning: true,
+      studioJsonEditorDefaultMode: "raw", lastAutomaticBackup: 123456,
+    };
+    const plugin = createPlugin({ schemaVersion: 17, ...live, ...dead });
+    const manager = new SettingsManager(plugin);
+    await manager.loadSettings();
+    expect(plugin.saveData).toHaveBeenLastCalledWith(expect.objectContaining(live));
+    for (const key of Object.keys(dead)) expect(manager.settings).not.toHaveProperty(key);
+    await manager.restoreFromExternalSettings({ schemaVersion: 17, ...live, ...dead });
+    expect(manager.settings).toMatchObject(live);
+    for (const key of Object.keys(dead)) expect(manager.settings).not.toHaveProperty(key);
+  });
+
+  it("normalizes current values on updates and direct saves, not just on load", async () => {
+    const plugin = createPlugin();
+    const manager = new SettingsManager(plugin);
+    await manager.loadSettings();
+    await manager.updateSettings({
+      debugMode: "invalid", reduceChatMotion: "invalid", automaticBackupsEnabled: "invalid",
+      automaticBackupInterval: "invalid", studioDefaultProjectsFolder: null,
+    } as any);
+    expect(manager.settings).toMatchObject({ debugMode: false, reduceChatMotion: false, automaticBackupsEnabled: true, automaticBackupInterval: 24, studioDefaultProjectsFolder: "SystemSculpt/Studio" });
+    plugin._internal_settings_systemsculpt_plugin.reduceChatMotion = "invalid";
+    await manager.saveSettings();
+    expect(manager.settings.reduceChatMotion).toBe(false);
+  });
+
   it("uses the current defaults for invalid persisted data", async () => {
     const plugin = createPlugin([]);
     const manager = new SettingsManager(plugin);

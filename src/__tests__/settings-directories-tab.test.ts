@@ -67,8 +67,8 @@ describe("Directories tab managed-only layout", () => {
   });
 
   it.each([
-    [true, "Directories repaired. Restart Obsidian to apply the changes."],
-    [false, "Repair didn’t complete. Check the console for details."],
+    [true, "No directory repair is needed. Output folders are created when files are saved."],
+    [false, "An output path is blocked or inaccessible. Resolve the conflict or choose another directory."],
   ])("shows a repair result (%s) once, inline", async (repaired, expected) => {
     const { container, plugin } = render();
     plugin.repairDirectoryStructure.mockResolvedValue(repaired);

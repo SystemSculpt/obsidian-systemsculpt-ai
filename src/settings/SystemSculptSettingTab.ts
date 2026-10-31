@@ -23,6 +23,7 @@ import {
   type UiTabBinding,
   type UiTabsHandle,
 } from "../core/ui/surface";
+import { DEFAULT_SETTINGS } from "../types";
 import SystemSculptPlugin from "../main";
 import type { ConnectOutcome } from "../services/AccountConnectService";
 import { getHostDeviceType, getHostOperatingSystem } from "../platform/hostCapabilities";
@@ -201,12 +202,12 @@ export class SystemSculptSettingTab extends PluginSettingTab {
         try {
           button.setDisabled(true);
           await this.plugin.getSettingsManager().updateSettings({
-            chatFontSize: "medium",
-            audioProcessorOutputPreset: "detailed",
-            embeddingsEnabled: false,
-            chatsDirectory: "SystemSculpt/Chats",
-            extractionsDirectory: "SystemSculpt/Extractions",
-            debugMode: false,
+            chatFontSize: DEFAULT_SETTINGS.chatFontSize,
+            audioProcessorOutputPreset: DEFAULT_SETTINGS.audioProcessorOutputPreset,
+            embeddingsEnabled: DEFAULT_SETTINGS.embeddingsEnabled,
+            chatsDirectory: DEFAULT_SETTINGS.chatsDirectory,
+            extractionsDirectory: DEFAULT_SETTINGS.extractionsDirectory,
+            debugMode: DEFAULT_SETTINGS.debugMode,
           });
           this.refreshSettings();
         } catch {

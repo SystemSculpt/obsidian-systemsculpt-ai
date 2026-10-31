@@ -84,6 +84,42 @@ describe("deepMergeDefaults", () => {
 });
 
 describe("migrateSettingsToCurrentSchema", () => {
+  it("removes only dead v17 settings while preserving every live and unknown value", () => {
+    const dead = {
+      enableExperimentalFeatures: true,
+      chatExportPreferences: { lastFolder: "Exports" },
+      suppressLicenseUpgradePrompt: true,
+      skipEmptyNoteWarning: true,
+      studioJsonEditorDefaultMode: "raw",
+      lastAutomaticBackup: 123456,
+    };
+    const live = {
+      ...DEFAULT_SETTINGS,
+      schemaVersion: 17,
+      licenseKey: "existing-license",
+      licenseValid: true,
+      subscriptionStatus: "lifetime",
+      chatsDirectory: "My chats",
+      savedChatsDirectory: "Old saved chats",
+      recordingsDirectory: "Audio",
+      attachmentsDirectory: "Old attachments",
+      extractionsDirectory: "Extracted",
+      textExecutionBackend: "claude",
+      claudePermissionMode: "plan",
+      favoriteChats: ["chat-id"],
+      embeddingsExclusions: { folders: ["Personal"], patterns: ["*.private"], ignoreChatHistory: false, respectObsidianExclusions: false },
+      workflowEngine: { ...DEFAULT_SETTINGS.workflowEngine, inboxFolder: "My inbox", skippedFiles: { note: { path: "Inbox/note.md", type: "transcription", skippedAt: "2026-10-01" } } },
+      futureSetting: { nested: ["keep", 42] },
+    };
+    const raw = { ...live, ...dead };
+    const before = JSON.parse(JSON.stringify(raw));
+    const result = migrateSettingsToCurrentSchema(raw, DEFAULT_SETTINGS);
+    expect(result.settings).toEqual({ ...live, schemaVersion: CURRENT_SCHEMA_VERSION });
+    expect(raw).toEqual(before);
+    expect(migrateSettingsToCurrentSchema(result.settings, DEFAULT_SETTINGS).settings).toEqual(result.settings);
+    for (const key of Object.keys(dead)) expect(DEFAULT_SETTINGS).not.toHaveProperty(key);
+  });
+
   it("clears the old Codex default pair once while preserving unrelated settings", () => {
     const raw = { schemaVersion: 16, codexModel: "gpt-6-astra", codexThinkingLevel: "high", codexServiceTier: "priority", codexApprovalMode: "ask" };
     const { settings } = migrateSettingsToCurrentSchema(raw, DEFAULT_SETTINGS);
@@ -229,7 +265,11 @@ describe("migrateSettingsToCurrentSchema", () => {
 
     const result = migrateSettingsToCurrentSchema(raw, DEFAULT_SETTINGS);
 
-    expect(result.appliedSteps).toEqual(["Remove automatic welcome and release-announcement state", "Replace the pinned Codex default model and effort with native inheritance"]);
+    expect(result.appliedSteps).toEqual([
+      "Remove automatic welcome and release-announcement state",
+      "Replace the pinned Codex default model and effort with native inheritance",
+      "Remove dead settings and the derived automatic-backup timestamp",
+    ]);
     for (const key of LEGACY_ANNOUNCEMENT_KEYS_REMOVED_IN_V16) expect(result.settings).not.toHaveProperty(key);
     expect(result.settings.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
     expect(result.settings.licenseKey).toBe("managed-license");
@@ -389,6 +429,7 @@ describe("migrateSettingsToCurrentSchema", () => {
       "Detect unchosen desktop chat backends and default native permissions to Auto",
       "Remove automatic welcome and release-announcement state",
       "Replace the pinned Codex default model and effort with native inheritance",
+      "Remove dead settings and the derived automatic-backup timestamp",
     ]);
     expect(result.settings.audioProcessorOutputPreset).toBe("detailed");
     expect(result.settings.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
@@ -406,6 +447,7 @@ describe("migrateSettingsToCurrentSchema", () => {
       "Detect unchosen desktop chat backends and default native permissions to Auto",
       "Remove automatic welcome and release-announcement state",
       "Replace the pinned Codex default model and effort with native inheritance",
+      "Remove dead settings and the derived automatic-backup timestamp",
     ]);
     expect(result.settings.audioProcessorOutputPreset).toBe("clean_transcript");
     expect(result.settings.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);
@@ -431,6 +473,7 @@ describe("migrateSettingsToCurrentSchema", () => {
       "Detect unchosen desktop chat backends and default native permissions to Auto",
       "Remove automatic welcome and release-announcement state",
       "Replace the pinned Codex default model and effort with native inheritance",
+      "Remove dead settings and the derived automatic-backup timestamp",
     ]);
     expect(result.settings).not.toHaveProperty("embeddingsRebuildPending");
     expect(result.settings.schemaVersion).toBe(CURRENT_SCHEMA_VERSION);

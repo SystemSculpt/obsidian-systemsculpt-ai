@@ -1324,9 +1324,8 @@ export default class SystemSculptPlugin extends Plugin {
     try {
       this.ensureSettingsTab();
 
-      // initializeDirectories owns startup directory creation and reports its
-      // own failure. Primary UI never retries or awaits it: every writer
-      // ensures its directory before use, so a directory problem stays scoped.
+      // Every writer ensures its destination before use. Merely opening
+      // Obsidian must not populate the vault with unused output folders.
       if (!this.directoryManager) {
         this.directoryManager = new DirectoryManager(this.app, this);
       }

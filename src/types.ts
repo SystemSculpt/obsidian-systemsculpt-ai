@@ -1,7 +1,6 @@
 import { LogLevel } from "./utils/errorHandling";
 import type { ToolCall } from "./types/toolCalls";
-import type { ChatExportPreferences } from "./types/chatExport";
-import { createDefaultChatExportOptions } from "./types/chatExport";
+import { DEFAULT_DIRS } from "./core/settings/defaultDirectories";
 import type { WorkflowEngineSettings } from "./types/workflows";
 import { createDefaultWorkflowEngineSettings } from "./types/workflows";
 import { CURRENT_SCHEMA_VERSION } from "./core/settings/migrations/schemaVersion";
@@ -125,7 +124,6 @@ export interface SystemSculptSettings {
 
   licenseKey: string;
   licenseValid: boolean;
-  suppressLicenseUpgradePrompt: boolean;
   userName?: string;
   displayName?: string;
   userEmail?: string;
@@ -195,25 +193,13 @@ export interface SystemSculptSettings {
   /** Skip only the handoff's Run click, never the selected agent's own approvals. */
   phoneHandoffsAutoRun: boolean;
 
-  /**
-   * Skip empty note warning confirmation modal
-   */
-  skipEmptyNoteWarning: boolean;
-
   favoriteChats: string[];
   favoriteStudioSessions: string[];
   /** Starred Studio generation models, per media kind (opaque catalog ids). */
   favoriteImageModels: string[];
   favoriteVideoModels: string[];
 
-  /**
-   * Remembers export preferences for chat exports (toggle selections, folder, etc.)
-   */
-  chatExportPreferences?: ChatExportPreferences;
-
-
   showDiagnostics: boolean;
-  enableExperimentalFeatures: boolean;
   logLevel: LogLevel;
   debugMode: boolean;
   
@@ -236,7 +222,6 @@ export interface SystemSculptSettings {
   studioDefaultProjectsFolder: string;
   studioRunRetentionMaxRuns: number;
   studioRunRetentionMaxArtifactsMb: number;
-  studioJsonEditorDefaultMode?: "composer" | "raw";
 
   /**
    * Managed semantic-index settings.
@@ -262,7 +247,6 @@ export interface SystemSculptSettings {
   automaticBackupsEnabled: boolean; // Whether automatic backups are enabled
   automaticBackupInterval: number; // Backup interval in hours (default 24)
   automaticBackupRetentionDays: number; // How many days to keep automatic backups
-  lastAutomaticBackup: number; // Timestamp of last automatic backup
 
 }
 
@@ -276,10 +260,9 @@ export const DEFAULT_SETTINGS: SystemSculptSettings = {
   embeddingsVectorFormatVersion: 0,
   licenseKey: "",
   licenseValid: false,
-  suppressLicenseUpgradePrompt: false,
-  chatsDirectory: "SystemSculpt/Chats",
+  chatsDirectory: DEFAULT_DIRS.chatsDirectory,
   lastValidated: 0,
-  recordingsDirectory: "SystemSculpt/Recordings",
+  recordingsDirectory: DEFAULT_DIRS.recordingsDirectory,
   pendingRecorderCaptures: [],
   pendingAudioProcessorUploads: [],
   autoTranscribeRecordings: true,
@@ -301,7 +284,7 @@ Please:
   audioProcessorOutputPreset: "detailed",
   autoSubmitAfterTranscription: false,
   transcriptionOutputFormat: "markdown",
-  extractionsDirectory: "SystemSculpt/Extractions",
+  extractionsDirectory: DEFAULT_DIRS.extractionsDirectory,
   workflowEngine: createDefaultWorkflowEngineSettings(),
   phoneCapturesEnabled: true,
   phoneCapturesFolder: "SystemSculpt/Inbox",
@@ -310,32 +293,21 @@ Please:
   phoneCapturesLinked: false,
   phoneHandoffsAutoRun: false,
 
-  skipEmptyNoteWarning: false,
-
   favoriteChats: [],
   favoriteStudioSessions: [],
   favoriteImageModels: [],
   favoriteVideoModels: [],
 
-  chatExportPreferences: {
-    options: createDefaultChatExportOptions(),
-    lastFolder: "",
-    openAfterExport: true,
-    lastFileName: "",
-  },
-
   showDiagnostics: false,
-  enableExperimentalFeatures: false,
   logLevel: LogLevel.WARNING,
   debugMode: false,
   defaultChatTag: "",
   chatFontSize: "medium",
   reduceChatMotion: false,
 
-  studioDefaultProjectsFolder: "SystemSculpt/Studio",
+  studioDefaultProjectsFolder: DEFAULT_DIRS.studioDefaultProjectsFolder,
   studioRunRetentionMaxRuns: 100,
   studioRunRetentionMaxArtifactsMb: 1024,
-  studioJsonEditorDefaultMode: "composer",
 
   /**
    * Embeddings defaults
@@ -355,7 +327,6 @@ Please:
   automaticBackupsEnabled: true, // Enable automatic backups by default
   automaticBackupInterval: 24, // Create backups every 24 hours
   automaticBackupRetentionDays: 30, // Keep backups for 30 days
-  lastAutomaticBackup: 0, // No automatic backup yet
   
 };
 

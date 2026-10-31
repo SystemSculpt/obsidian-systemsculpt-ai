@@ -2,6 +2,7 @@ import type { Editor, WorkspaceLeaf } from "obsidian";
 import { App, normalizePath, Notice, TFile } from "obsidian";
 import type SystemSculptPlugin from "../main";
 import type { PendingRecorderCapture } from "../types";
+import { DEFAULT_DIRS } from "../core/settings/defaultDirectories";
 import { CHAT_VIEW_TYPE } from "../core/plugin/viewTypes";
 import { logDebug, logError, logInfo } from "../utils/errorHandling";
 import { PLAN_REQUIRED_MESSAGE } from "../utils/errors";
@@ -1094,9 +1095,9 @@ export class RecorderService {
 
   private recordingsDirectory(): string {
     const configuredDirectory = this.plugin.settings.recordingsDirectory?.trim()
-      || "SystemSculpt/Recordings";
+      || DEFAULT_DIRS.recordingsDirectory;
     return normalizePath(configuredDirectory).replace(/\/+$/, "")
-      || "SystemSculpt/Recordings";
+      || DEFAULT_DIRS.recordingsDirectory;
   }
 
   private rememberPendingCapture(

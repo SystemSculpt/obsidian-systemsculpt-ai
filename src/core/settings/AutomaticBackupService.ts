@@ -66,7 +66,7 @@ export class AutomaticBackupService {
 
             const now = Date.now();
             const intervalMs = settings.automaticBackupInterval * 60 * 60 * 1000; // Convert hours to milliseconds
-            const lastBackup = settings.lastAutomaticBackup;
+            const lastBackup = await this.getLastAutomaticBackupTime();
 
             // Check if it's time for a backup
             if (now - lastBackup >= intervalMs) {
@@ -75,6 +75,42 @@ export class AutomaticBackupService {
         } catch {
             // Scheduled backups retry at the next interval.
         }
+    }
+
+    /**
+     * Use dated automatic backups as the clock, including after a restart.
+     * The latest-save snapshot changes on every settings save and must not
+     * postpone automatic backup history. Manual and emergency copies do not
+     * count toward the automatic interval either.
+     */
+    private async getLastAutomaticBackupTime(): Promise<number> {
+        const adapter = this.plugin.app.vault.adapter;
+        let lastBackup = 0;
+        try {
+            const files = await adapter.list(".systemsculpt/settings-backups");
+            for (const filePath of files.files.filter(path => this.isAutomaticBackup(path))) {
+                try {
+                    const stats = await adapter.stat(filePath);
+                    if (stats && stats.mtime > lastBackup) {
+                        lastBackup = stats.mtime;
+                    }
+                } catch {
+                    // One missing or unreadable copy must not hide the others.
+                }
+            }
+        } catch {
+            // No dated backup directory means the first backup is due.
+        }
+        return lastBackup;
+    }
+
+    private isAutomaticBackup(filePath: string): boolean {
+        return filePath.includes('settings-backup-')
+            && filePath.endsWith('.json')
+            && !filePath.includes('latest')
+            && !filePath.includes('manual')
+            && !filePath.includes('emergency')
+            && /settings-backup-\d{4}-\d{2}-\d{2}\.json$/.test(filePath);
     }
 
     /**
@@ -103,11 +139,6 @@ export class AutomaticBackupService {
             
             await this.saveBackup(fileName, backupData);
             
-            // Update the last backup timestamp
-            await this.plugin.getSettingsManager().updateSettings({
-                lastAutomaticBackup: Date.now()
-            });
-
             // Clean up old backups
             await this.cleanupOldBackups();
 
@@ -171,14 +202,7 @@ export class AutomaticBackupService {
             const files = await this.plugin.app.vault.adapter.list(backupDir);
             
             // Filter for automatic backup files (date-based pattern)
-            const automaticBackupFiles = files.files.filter(f => 
-                f.includes('settings-backup-') && 
-                f.endsWith('.json') && 
-                !f.includes('latest') && 
-                !f.includes('manual') && 
-                !f.includes('emergency') &&
-                f.match(/settings-backup-\d{4}-\d{2}-\d{2}\.json$/) // Only date-based automatic backups
-            );
+            const automaticBackupFiles = files.files.filter(filePath => this.isAutomaticBackup(filePath));
 
             for (const filePath of automaticBackupFiles) {
                 try {
