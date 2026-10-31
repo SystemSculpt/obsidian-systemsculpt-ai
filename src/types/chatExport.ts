@@ -49,10 +49,3 @@ export function normalizeChatExportOptions(
 ): ChatExportOptions {
   return mergeChatExportOptions(createDefaultChatExportOptions(), overrides);
 }
-
-export interface ChatExportPreferences {
-  options: Partial<ChatExportOptions>;
-  lastFolder?: string;
-  openAfterExport?: boolean;
-  lastFileName?: string;
-}

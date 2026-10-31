@@ -416,7 +416,9 @@ command; use a wrapper for additional launch arguments. `home` must resolve to
 an absolute directory. These preferences stay outside the vault so another
 machine does not inherit its paths. No credentials belong in this file.
 Changes apply to new connections; use Reconnect Codex or reload the plugin to
-refresh the model picker. Existing threads remain owned by their original
+refresh the model picker. Codex threads share one app-server; reconnect or changed
+launch preferences wait for active native work to finish before replacing it.
+Existing threads remain owned by their original
 Codex home. Custom providers reporting `requiresOpenaiAuth: false` can connect
 without a ChatGPT account.
 

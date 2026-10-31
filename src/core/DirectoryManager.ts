@@ -2,7 +2,8 @@ import { App, TFolder } from "obsidian";
 import { normalizeVaultRelativePath } from "../utils/vaultPathUtils";
 import type SystemSculptPlugin from "../main";
 import type { SystemSculptSettings } from "../types";
-import { createVaultFolder, isVaultFolder } from "../utils/vaultFolders";
+import { createVaultFolder } from "../utils/vaultFolders";
+import { DEFAULT_DIRS } from "./settings/defaultDirectories";
 
 // Only folders the plugin writes to. The retired saved-chats and attachments
 // settings are never created, and an existing folder of theirs is left alone.
@@ -17,7 +18,6 @@ type DirectorySettingKey = (typeof DIRECTORY_SETTING_KEYS)[number];
 /** Direct, vault-native ownership of SystemSculpt output directories. */
 export class DirectoryManager {
   private initialized = false;
-  private initializationPromise: Promise<void> | null = null;
 
   constructor(
     private readonly app: App,
@@ -28,20 +28,10 @@ export class DirectoryManager {
     return this.initialized;
   }
 
+  /** Compatibility lifecycle hook; only explicit ensure calls create folders. */
   public initialize(): Promise<void> {
-    if (this.initialized) return Promise.resolve();
-    if (this.initializationPromise) return this.initializationPromise;
-
-    const operation = Promise.all(
-      this.configuredDirectories().map((path) => this.createDirectory(path)),
-    ).then(() => {
-      this.initialized = true;
-    });
-
-    this.initializationPromise = operation.finally(() => {
-      this.initializationPromise = null;
-    });
-    return this.initializationPromise;
+    this.initialized = true;
+    return Promise.resolve();
   }
 
   public async ensureDirectoryByKey(key: DirectorySettingKey): Promise<string> {
@@ -54,47 +44,65 @@ export class DirectoryManager {
     await this.createDirectory(dirPath);
   }
 
-  public async handleDirectorySettingChange(
-    _key: DirectorySettingKey,
-    newPath: string,
-  ): Promise<void> {
-    if (!newPath.trim()) return;
-    await this.createDirectory(newPath);
-  }
-
   public async verifyDirectories(): Promise<{ valid: boolean; issues: string[] }> {
-    // Same test initialization and repair accept, so a folder on disk that the
-    // vault tree has not indexed yet is healthy rather than a false failure.
-    const directories = this.configuredDirectories();
-    const present = await Promise.all(directories.map((path) => isVaultFolder(this.app, path)));
-    const issues = directories
-      .filter((_path, index) => !present[index])
-      .map((path) => `Directory "${path}" does not exist or is not accessible`);
+    const results = await Promise.all(
+      this.configuredDirectories().map((path) => this.directoryIssue(path)),
+    );
+    const issues = results.filter((issue): issue is string => issue !== null);
     return { valid: issues.length === 0, issues };
   }
 
   public async repair(): Promise<boolean> {
     this.initialized = false;
     try {
-      await this.initialize();
-      return true;
+      // Missing outputs need no repair. Never overwrite a conflicting file or
+      // create unused folders; the next writer ensures its own destination.
+      const { valid } = await this.verifyDirectories();
+      this.initialized = valid;
+      return valid;
     } catch {
       return false;
     }
   }
 
+  private async directoryIssue(path: string): Promise<string | null> {
+    const parts = path.split("/");
+    while (parts.length > 0) {
+      const current = parts.join("/");
+      try {
+        const existing = this.app.vault.getAbstractFileByPath(current);
+        if (existing instanceof TFolder) return null;
+        if (existing) return `Directory "${path}" is blocked by a file at "${current}"`;
+
+        if (await this.app.vault.adapter.exists(current)) {
+          const stat = await this.app.vault.adapter.stat(current);
+          if (stat?.type === "folder") return null;
+          if (stat?.type === "file") {
+            return `Directory "${path}" is blocked by a file at "${current}"`;
+          }
+          return `Directory "${path}" is not accessible at "${current}"`;
+        }
+      } catch {
+        return `Directory "${path}" is not accessible at "${current}"`;
+      }
+      // A missing leaf is valid unless an existing ancestor prevents creation.
+      parts.pop();
+    }
+    return null;
+  }
+
   private configuredDirectories(): string[] {
     return [...new Set(
       DIRECTORY_SETTING_KEYS
-        .map((key) => this.plugin.settings[key])
-        .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
-        .map((path) => this.normalizedDirectory(path)),
+        .filter((key) => key !== "extractionsDirectory" || this.plugin.settings[key]?.trim())
+        .map((key) => this.directorySetting(key)),
     )];
   }
 
   private directorySetting(key: DirectorySettingKey): string {
-    const value = this.plugin.settings[key];
-    if (typeof value !== "string" || !value.trim()) {
+    const value = this.plugin.settings[key]?.trim()
+      || (key === "extractionsDirectory" ? "" : DEFAULT_DIRS[key]);
+    if (!value) {
       throw new Error(`No path configured for: ${key}`);
     }
     return this.normalizedDirectory(value);

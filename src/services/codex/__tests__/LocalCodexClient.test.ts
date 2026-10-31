@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { posix, win32 } from 'node:path';
 import { CodexChatTransport, runLocalCodex } from '../LocalCodexClient';
+import { disposeCodexSession, startCodexSession } from '../CodexAppServer';
 import { desktopHost } from '../../../platform/desktopOnly';
 import { windowsNpmHost } from './fixtures/npmNodeShim';
 import { codexOptionsFromSettings } from '../CodexExecutionSettings';
@@ -13,7 +14,11 @@ function host(options: { failLogin?: boolean; requiresOpenaiAuth?: boolean; requ
     stdin: Object.assign(new EventEmitter(), { write: jest.fn() }), kill: jest.fn(),
   });
   child.kill.mockImplementation(() => { queueMicrotask(() => child.emit('close', 0)); return true; });
-  const messages: any[] = [];
+  const messages: any[] = [], written = new EventEmitter();
+  const waitFor = (method: string) => messages.some(message => message.method === method) ? Promise.resolve() : new Promise<void>(resolve => {
+    const check = () => { if (messages.some(message => message.method === method)) { written.off('request', check); resolve(); } };
+    written.on('request', check);
+  });
   let turnNumber = 0, turnId = 'native-turn';
   const send = (value: unknown) => child.stdout.emit('data', JSON.stringify(value) + '\n');
   const finish = () => {
@@ -22,13 +27,13 @@ function host(options: { failLogin?: boolean; requiresOpenaiAuth?: boolean; requ
     send({ method: 'turn/completed', params: { threadId: 'native-thread', turn: { id: turnId, status: 'completed' } } });
   };
   child.stdin.write.mockImplementation((line: string) => {
-    const msg = JSON.parse(line); messages.push(msg);
+    const msg = JSON.parse(line); messages.push(msg); written.emit('request');
     queueMicrotask(() => {
       if (options.malformed) { child.stdout.emit('data', 'invalid-json\n'); return; }
       if (msg.method === 'initialize') send({ id: msg.id, result: {} });
       if (msg.method === 'account/read') send({ id: msg.id, result: { account: options.failLogin ? null : { type: 'chatgpt' }, requiresOpenaiAuth: options.requiresOpenaiAuth ?? true } });
       if (msg.method === 'thread/start' || msg.method === 'thread/resume') send({ id: msg.id, result: { thread: { id: msg.params.ephemeral ? 'ephemeral-config' : 'native-thread' }, approvalPolicy: options.nativePolicy ?? 'never', approvalsReviewer: options.nativeReviewer ?? 'user', sandbox: options.nativeSandbox ?? { type: 'readOnly' }, ...(options.nativeProfile ? { activePermissionProfile: { id: options.nativeProfile } } : {}) } });
-      if (msg.method === 'turn/interrupt') send({ id: msg.id, result: {} });
+      if (msg.method === 'turn/interrupt' || msg.method === 'thread/unsubscribe') send({ id: msg.id, result: {} });
       if (msg.method === 'thread/read') send({ id: msg.id, result: { thread: { id: 'native-thread', turns: options.savedTurn ? [options.savedTurn] : [] } } });
       if (msg.method === 'turn/start') {
         turnId = ++turnNumber === 1 ? 'native-turn' : `native-turn-${turnNumber}`;
@@ -45,12 +50,13 @@ function host(options: { failLogin?: boolean; requiresOpenaiAuth?: boolean; requ
   (desktopHost.path as jest.Mock).mockResolvedValue(posix);
   (desktopHost.os as jest.Mock).mockResolvedValue({ homedir: () => '/home/test', platform: () => 'darwin' });
   (desktopHost.environment as jest.Mock).mockReturnValue({ PATH: '/bin', HOME: '/home/test' });
-  return { child, messages, send, finish };
+  return { child, messages, send, finish, waitFor };
 }
 const callbacks = () => ({ log: jest.fn(), thread: jest.fn(), text: jest.fn(), request: jest.fn(async () => ({ decision: 'decline' })) });
 const input = { prompt: 'hello', workingDirectory: '/workspace' };
-beforeEach(() => jest.clearAllMocks());
-it.each([input, { ...input, ...codexOptionsFromSettings(DEFAULT_SETTINGS) }])('uses native model and effort defaults, streams the answer and closes its transport', async request => {
+beforeEach(() => { jest.clearAllMocks(); startCodexSession(); });
+afterEach(() => disposeCodexSession());
+it.each([input, { ...input, ...codexOptionsFromSettings(DEFAULT_SETTINGS) }])('uses native defaults, streams the answer and detaches its thread without killing the shared transport', async request => {
   const { child, messages } = host(), cb = callbacks();
   await expect(runLocalCodex(request, new AbortController().signal, cb)).resolves.toMatchObject({ threadId: 'native-thread', text: 'hello', status: 'completed' });
   const childProcess = await desktopHost.childProcess();
@@ -61,7 +67,8 @@ it.each([input, { ...input, ...codexOptionsFromSettings(DEFAULT_SETTINGS) }])('u
   expect(messages.find(m => m.method === 'thread/start').params).not.toHaveProperty('config');
   expect(messages.find(m => m.method === 'turn/start').params).not.toHaveProperty('model');
   expect(messages.find(m => m.method === 'turn/start').params).not.toHaveProperty('effort');
-  expect(cb.text).toHaveBeenCalledWith('hello'); expect(child.kill).toHaveBeenCalled();
+  expect(cb.text).toHaveBeenCalledWith('hello'); expect(child.kill).not.toHaveBeenCalled();
+  expect(messages.find(message => message.method === 'thread/unsubscribe').params).toEqual({ threadId: 'native-thread' });
 });
 it.each(['/home/test/.nvm/versions/node/v22.18.0/bin', '/home/test/.volta/bin'])('launches an app-server and its node interpreter from %s with a bare GUI PATH', async folder => {
   const { child } = host(), fs = await desktopHost.fs();
@@ -158,18 +165,24 @@ it('retains exact file diffs for request review and publishes native item activi
 });
 
 describe('chat-owned native transport', () => {
-  it('retains the thread lock and waits for child close before starting a replacement', async () => {
-    const first = host(), transport = new CodexChatTransport();
+  it('retains the thread lock until unsubscribe completes before reconfiguring it', async () => {
+    const native = host(), transport = new CodexChatTransport();
     await transport.run(input, new AbortController().signal, callbacks());
-    first.child.kill.mockImplementation(() => true); // Deliberately delay native stdio closure.
-    const second = host();
+    const write = native.child.stdin.write.getMockImplementation()!;
+    let unsubscribe: number | undefined;
+    native.child.stdin.write.mockImplementation((line: string) => {
+      const message = JSON.parse(line);
+      if (message.method === 'thread/unsubscribe') { unsubscribe = message.id; return true; }
+      return write(line);
+    });
     const replacing = transport.run({ ...input, threadId: 'native-thread', effort: 'medium' }, new AbortController().signal, callbacks());
-    for (let i = 0; i < 20; i++) await Promise.resolve();
-    expect(first.child.kill).toHaveBeenCalled(); expect(second.messages).toHaveLength(0);
+    for (let i = 0; i < 40; i++) await Promise.resolve();
+    expect(unsubscribe).toBeDefined(); expect(native.messages.some(message => message.method === 'thread/resume')).toBe(false);
     await expect(runLocalCodex({ ...input, threadId: 'native-thread' }, new AbortController().signal, callbacks())).rejects.toThrow('already running');
-    first.child.emit('close', 0);
+    native.send({ id: unsubscribe, result: {} });
     try { await expect(replacing).resolves.toMatchObject({ status: 'completed' }); }
-    finally { await transport.close(); }
+    finally { native.child.stdin.write.mockImplementation(write); await transport.close(); }
+    expect(native.child.kill).not.toHaveBeenCalled();
   });
   it('emits exact text tail offsets beyond the Studio rolling buffer', async () => {
     const { messages, send } = host({ wait: true }), transport = new CodexChatTransport(), updates: [string, number][] = [];
@@ -204,16 +217,17 @@ describe('chat-owned native transport', () => {
       expect(messages.filter(message => message.id === 99).map(message => message.result)).toEqual([{ decision: 'acceptForSession' }, { decision: 'decline' }]);
       expect(notice).not.toHaveBeenCalled();
     } finally { await transport.close(); }
-    expect(child.kill).toHaveBeenCalledTimes(1);
+    expect(child.kill).not.toHaveBeenCalled();
+    expect(messages.some(message => message.method === 'thread/unsubscribe')).toBe(true);
   });
-  it.each([{ model: 'gpt-5.4' }, { effort: 'medium' }, { workingDirectory: '/other' }])('restarts and explains reset for changed options (%j)', async change => {
-    const first = host(), notice = jest.fn(), transport = new CodexChatTransport(notice);
+  it.each([{ model: 'gpt-5.4' }, { effort: 'medium' }, { workingDirectory: '/other' }])('reloads only its thread and explains native approval scope for changed options (%j)', async change => {
+    const native = host(), notice = jest.fn(), transport = new CodexChatTransport(notice);
     await transport.run(input, new AbortController().signal, callbacks());
-    const second = host();
     try {
       await transport.run({ ...input, threadId: 'native-thread', ...change }, new AbortController().signal, callbacks());
-      expect(first.child.kill).toHaveBeenCalledTimes(1); expect(second.messages.some(message => message.method === 'thread/resume')).toBe(true);
-      expect(notice).toHaveBeenCalledWith(expect.stringContaining('Previous session approvals no longer apply'));
+      expect(native.child.kill).not.toHaveBeenCalled(); expect(native.messages.some(message => message.method === 'thread/resume')).toBe(true);
+      expect((await desktopHost.childProcess()).spawn).toHaveBeenCalledTimes(1);
+      expect(notice).toHaveBeenCalledWith(expect.stringContaining('Native session approvals may still apply'));
     } finally { await transport.close(); }
   });
   it('invalidates idle child exit, releases its lock and reconnects with a reset notice', async () => {
@@ -247,7 +261,7 @@ describe('chat-owned native transport', () => {
     expect(requestSignal?.aborted).toBe(true); respond({ decision: 'accept' });
     for (let i = 0; i < 10; i++) await Promise.resolve();
     expect(messages.some(message => message.id === 'second-approval')).toBe(false);
-    expect(child.kill).toHaveBeenCalled(); expect(transport.connection).toBeUndefined();
+    expect(child.kill).not.toHaveBeenCalled(); expect(transport.connection).toBeUndefined();
   });
 });
 
@@ -256,13 +270,13 @@ it('fails before thread creation when the machine is signed out', async () => {
   await expect(runLocalCodex(input, new AbortController().signal, callbacks())).rejects.toThrow('codex login');
   expect(messages.filter(m => m.method === 'thread/start').every(m => m.params.ephemeral === true)).toBe(true); expect(child.kill).toHaveBeenCalled();
 });
-it('interrupts the native turn on cancellation and closes the process', async () => {
+it('interrupts only the native turn on cancellation and keeps the shared process available', async () => {
   const { child, messages } = host({ wait: true }), controller = new AbortController();
   const result = runLocalCodex(input, controller.signal, callbacks());
   for (let index = 0; index < 30 && !messages.some(m => m.method === 'turn/start'); index++) await Promise.resolve();
   await new Promise(resolve => window.setTimeout(resolve, 0));
   controller.abort(); await expect(result).rejects.toThrow('canceled');
-  expect(messages.some(m => m.method === 'turn/interrupt')).toBe(true); expect(child.kill).toHaveBeenCalled();
+  expect(messages.some(m => m.method === 'turn/interrupt')).toBe(true); expect(child.kill).not.toHaveBeenCalled();
 });
 it('fails closed on malformed protocol input', async () => {
   host({ malformed: true });
@@ -272,13 +286,14 @@ it('rejects a concurrent resume before changing the active native thread configu
   const first = host({ wait: true }), controller = new AbortController();
   const running = runLocalCodex({ ...input, threadId: 'native-thread' }, controller.signal, callbacks());
   void running.catch(() => {});
-  for (let index = 0; index < 50 && !first.messages.some(message => message.method === 'turn/start'); index++) await Promise.resolve();
+  await first.waitFor('turn/start');
   expect(first.messages.some(message => message.method === 'turn/start')).toBe(true);
   try {
     const second = host({ wait: true });
     await expect(runLocalCodex({ ...input, threadId: 'native-thread' }, new AbortController().signal, callbacks())).rejects.toThrow('already running');
     expect(second.messages.some(message => ['thread/start', 'thread/resume'].includes(message.method))).toBe(false);
   } finally { controller.abort(); await expect(running).rejects.toThrow('canceled'); }
+  await disposeCodexSession(); startCodexSession();
   host();
   await expect(runLocalCodex({ ...input, threadId: 'native-thread' }, new AbortController().signal, callbacks())).resolves.toMatchObject({ status: 'completed' });
 });
@@ -355,6 +370,7 @@ it('resumes interrupted native history once and refuses to duplicate a still-act
   const { messages } = host({ savedTurn: { id: 'saved-turn', status: 'interrupted' } });
   await runLocalCodex({ ...input, threadId: 'native-thread', recoverCompletedTurn: true }, new AbortController().signal, callbacks());
   expect(messages.filter(message => message.method === 'turn/start')).toHaveLength(1);
+  await disposeCodexSession(); startCodexSession();
   const active = host({ savedTurn: { id: 'saved-turn', status: 'inProgress' } });
   await expect(runLocalCodex({ ...input, threadId: 'native-thread', recoverCompletedTurn: true }, new AbortController().signal, callbacks())).rejects.toThrow('still active');
   expect(active.messages.some(message => message.method === 'turn/start')).toBe(false);

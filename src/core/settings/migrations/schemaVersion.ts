@@ -25,5 +25,6 @@
  *  - 15: distinguish chosen chat backends and default native permissions to Auto.
  *  - 16: removed automatic welcome, release-announcement, and post-update toast state.
  *  - 17: inherit native Codex model and effort instead of the old pinned default pair.
+ *  - 18: removed dead settings and the derived automatic-backup timestamp (#394).
  */
-export const CURRENT_SCHEMA_VERSION = 17;
+export const CURRENT_SCHEMA_VERSION = 18;

@@ -31,7 +31,7 @@ let renderedTabs: Set<SystemSculptSettingTab>;
 const render = () => {
   const app = new App();
   const updateSettings = jest.fn().mockResolvedValue(undefined);
-  const handleDirectorySettingChange = jest.fn().mockResolvedValue(undefined);
+  const createFolder = jest.mocked(app.vault.createFolder);
   const plugin = {
     settings: {
       chatsDirectory: "SystemSculpt/Chats",
@@ -43,14 +43,13 @@ const render = () => {
     getSettingsManager: jest.fn(() => ({ updateSettings })),
     checkDirectoryHealth: jest.fn(),
     repairDirectoryStructure: jest.fn().mockResolvedValue(true),
-    directoryManager: { handleDirectorySettingChange },
   };
   const container = document.createElement("div");
   const tab = new SystemSculptSettingTab(app, plugin as never);
   renderedTabs.add(tab);
   displayDirectoriesTabContent(container, tab);
   const inputs = Array.from(container.querySelectorAll<HTMLInputElement>('input[type="text"]'));
-  return { container, tab, inputs, updateSettings, handleDirectorySettingChange, plugin };
+  return { container, tab, inputs, updateSettings, createFolder, plugin };
 };
 
 describe("Directories tab managed-only layout", () => {
@@ -67,8 +66,8 @@ describe("Directories tab managed-only layout", () => {
   });
 
   it.each([
-    [true, "Directories repaired. Restart Obsidian to apply the changes."],
-    [false, "Repair didn’t complete. Check the console for details."],
+    [true, "No directory repair is needed. Output folders are created when files are saved."],
+    [false, "An output path is blocked or inaccessible. Resolve the conflict or choose another directory."],
   ])("shows a repair result (%s) once, inline", async (repaired, expected) => {
     const { container, plugin } = render();
     plugin.repairDirectoryStructure.mockResolvedValue(repaired);
@@ -107,39 +106,39 @@ describe("Directories tab managed-only layout", () => {
   });
 
   it.each(directoryKeys)("commits %s only on blur, never intermediate paths", async (key) => {
-    const { inputs, updateSettings, handleDirectorySettingChange } = render();
+    const { inputs, updateSettings, createFolder } = render();
     const input = inputs[directoryKeys.indexOf(key)];
     typeValue(input, "New");
     typeValue(input, "New/Final");
     jest.advanceTimersByTime(1000);
     expect(updateSettings).not.toHaveBeenCalled();
-    expect(handleDirectorySettingChange).not.toHaveBeenCalled();
+    expect(createFolder).not.toHaveBeenCalled();
 
     input.dispatchEvent(new Event("blur"));
     await Promise.resolve();
     expect(updateSettings.mock.calls).toEqual([[{ [key]: "New/Final" }]]);
-    expect(handleDirectorySettingChange.mock.calls).toEqual([[key, "New/Final"]]);
+    expect(createFolder).not.toHaveBeenCalled();
     input.dispatchEvent(new Event("blur"));
     expect(updateSettings).toHaveBeenCalledTimes(1);
   });
 
   it("keeps typed directory drafts independent until each field blurs", async () => {
-    const { inputs, updateSettings, handleDirectorySettingChange } = render();
+    const { inputs, updateSettings, createFolder } = render();
     typeValue(inputs[0], "New/Chats");
     typeValue(inputs[1], "New/Recordings");
     inputs[1].dispatchEvent(new Event("blur"));
     await Promise.resolve();
 
     expect(updateSettings.mock.calls).toEqual([[{ recordingsDirectory: "New/Recordings" }]]);
-    expect(handleDirectorySettingChange.mock.calls).toEqual([["recordingsDirectory", "New/Recordings"]]);
+    expect(createFolder).not.toHaveBeenCalled();
     inputs[0].dispatchEvent(new Event("blur"));
     await Promise.resolve();
     expect(updateSettings).toHaveBeenNthCalledWith(2, { chatsDirectory: "New/Chats" });
-    expect(handleDirectorySettingChange).toHaveBeenNthCalledWith(2, "chatsDirectory", "New/Chats");
+    expect(createFolder).not.toHaveBeenCalled();
   });
 
   it.each(directoryKeys)("commits the chosen %s once, including the suggester's following blur", async (key) => {
-    const { inputs, updateSettings, handleDirectorySettingChange } = render();
+    const { inputs, updateSettings, createFolder } = render();
     const index = directoryKeys.indexOf(key);
     const input = inputs[index];
     typeValue(input, "Work/Pro");
@@ -151,11 +150,11 @@ describe("Directories tab managed-only layout", () => {
 
     expect(input.value).toBe("Work/Projects");
     expect(updateSettings.mock.calls).toEqual([[{ [key]: "Work/Projects" }]]);
-    expect(handleDirectorySettingChange.mock.calls).toEqual([[key, "Work/Projects"]]);
+    expect(createFolder).not.toHaveBeenCalled();
   });
 
   it.each(["hide", "rerender"])("flushes all directory drafts on %s without blur or timer saves", async (boundary) => {
-    const { container, tab, inputs, updateSettings, handleDirectorySettingChange } = render();
+    const { container, tab, inputs, updateSettings, createFolder } = render();
     inputs.forEach((input, index) => {
       typeValue(input, "Work/Partial");
       typeValue(input, `Work/Final-${index}`);
@@ -171,9 +170,7 @@ describe("Directories tab managed-only layout", () => {
     expect(updateSettings.mock.calls).toEqual(directoryKeys.map((key, index) => [
       { [key]: `Work/Final-${index}` },
     ]));
-    expect(handleDirectorySettingChange.mock.calls).toEqual(directoryKeys.map((key, index) => [
-      key, `Work/Final-${index}`,
-    ]));
+    expect(createFolder).not.toHaveBeenCalled();
     expect(jest.getTimerCount()).toBe(0);
 
     inputs.forEach((input, index) => {
@@ -184,12 +181,12 @@ describe("Directories tab managed-only layout", () => {
     jest.runOnlyPendingTimers();
     await Promise.resolve();
     expect(updateSettings).toHaveBeenCalledTimes(directoryKeys.length);
-    expect(handleDirectorySettingChange).toHaveBeenCalledTimes(directoryKeys.length);
+    expect(createFolder).not.toHaveBeenCalled();
     expect(jest.getTimerCount()).toBe(0);
   });
 
   it("preserves validation while flushing directory drafts on hide", async () => {
-    const { tab, inputs, updateSettings, handleDirectorySettingChange } = render();
+    const { tab, inputs, updateSettings, createFolder } = render();
     typeValue(inputs[0], "../outside");
     typeValue(inputs[1], "Work/Recordings");
 
@@ -198,18 +195,18 @@ describe("Directories tab managed-only layout", () => {
 
     expect(Notice).toHaveBeenCalledWith("Use a vault-relative path without '..' or a leading slash.");
     expect(updateSettings.mock.calls).toEqual([[{ recordingsDirectory: "Work/Recordings" }]]);
-    expect(handleDirectorySettingChange.mock.calls).toEqual([["recordingsDirectory", "Work/Recordings"]]);
+    expect(createFolder).not.toHaveBeenCalled();
   });
 
   it("retries the final directory on blur after a failed save without creating it prematurely", async () => {
-    const { inputs, updateSettings, handleDirectorySettingChange } = render();
+    const { inputs, updateSettings, createFolder } = render();
     updateSettings.mockRejectedValueOnce(new Error("Disk unavailable"));
     typeValue(inputs[0], "Work/Chats");
     inputs[0].dispatchEvent(new Event("blur"));
     await jest.advanceTimersByTimeAsync(0);
 
     expect(Notice).toHaveBeenCalledWith("Couldn’t save that directory.");
-    expect(handleDirectorySettingChange).not.toHaveBeenCalled();
+    expect(createFolder).not.toHaveBeenCalled();
     inputs[0].dispatchEvent(new Event("blur"));
     await jest.advanceTimersByTimeAsync(0);
 
@@ -217,22 +214,22 @@ describe("Directories tab managed-only layout", () => {
       [{ chatsDirectory: "Work/Chats" }],
       [{ chatsDirectory: "Work/Chats" }],
     ]);
-    expect(handleDirectorySettingChange.mock.calls).toEqual([["chatsDirectory", "Work/Chats"]]);
+    expect(createFolder).not.toHaveBeenCalled();
   });
 
   it("validates on commit rather than interrupting typing, and permits clearing a directory", async () => {
-    const { inputs, updateSettings, handleDirectorySettingChange } = render();
+    const { inputs, updateSettings, createFolder } = render();
     typeValue(inputs[0], "../outside");
     expect(Notice).not.toHaveBeenCalled();
     inputs[0].dispatchEvent(new Event("blur"));
     expect(Notice).toHaveBeenCalledWith("Use a vault-relative path without '..' or a leading slash.");
     expect(updateSettings).not.toHaveBeenCalled();
-    expect(handleDirectorySettingChange).not.toHaveBeenCalled();
+    expect(createFolder).not.toHaveBeenCalled();
 
     typeValue(inputs[0], "");
     inputs[0].dispatchEvent(new Event("blur"));
     await Promise.resolve();
     expect(updateSettings).toHaveBeenCalledWith({ chatsDirectory: "" });
-    expect(handleDirectorySettingChange).toHaveBeenCalledWith("chatsDirectory", "");
+    expect(createFolder).not.toHaveBeenCalled();
   });
 });
