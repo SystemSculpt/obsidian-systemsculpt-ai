@@ -571,12 +571,12 @@ describe.each(["desktop", "mobile"])("a new user's first run in the built bundle
   it("creates only the folders and backup copies it uses in a fresh vault", async () => {
     const exists = (vaultPath: string): Promise<boolean> => plugin.app.vault.adapter.exists(vaultPath);
     for (const unused of [
+      "SystemSculpt", "SystemSculpt/Chats", "SystemSculpt/Recordings", "SystemSculpt/Extractions",
       "SystemSculpt/Saved Chats", "SystemSculpt/Attachments",
       ".systemsculpt/settings", ".systemsculpt/cache", ".systemsculpt/temp",
     ]) {
       await expect(exists(unused)).resolves.toBe(false);
     }
-    await expect(exists("SystemSculpt/Chats")).resolves.toBe(true);
     // The first automatic backup and the copy of the last save, one file each.
     const backups = [...files.keys()].filter((name) => name.startsWith(".systemsculpt/settings")).sort();
     expect(backups).toEqual([
@@ -703,10 +703,9 @@ describe.each(["desktop", "mobile"])("a new user's first run in the built bundle
     await expectComposerUsable();
   });
 
-  describe.each([false, true])("automatic plan prompt suppression: %s", (suppressLicenseUpgradePrompt) => {
+  describe("rejected license recovery", () => {
     it("403 license_rejected: offers the plan step, and syncing the license answers", async () => {
       await signUpFromChat();
-      await plugin.getSettingsManager().updateSettings({ suppressLicenseUpgradePrompt });
       const browserOpens = openedUrls.length;
       rejectLicense();
       await send(QUESTION);
@@ -725,7 +724,7 @@ describe.each(["desktop", "mobile"])("a new user's first run in the built bundle
       await jest.advanceTimersByTimeAsync(1_000);
       await send(QUESTION);
       expectAnswered(QUESTION);
-      expect(plugin.settings.suppressLicenseUpgradePrompt).toBe(suppressLicenseUpgradePrompt);
+      expect(plugin.settings).not.toHaveProperty("suppressLicenseUpgradePrompt");
     });
   });
 

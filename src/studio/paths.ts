@@ -1,8 +1,9 @@
+import { DEFAULT_DIRS } from "../core/settings/defaultDirectories";
 import { normalizeVaultRelativePath } from "../utils/vaultPathUtils";
 import { toSafeVaultFileName } from "../utils/vaultFileName";
 import { STUDIO_PROJECT_EXTENSION } from "./types";
 
-export const DEFAULT_STUDIO_PROJECTS_DIR = "SystemSculpt/Studio" as const;
+export const DEFAULT_STUDIO_PROJECTS_DIR = DEFAULT_DIRS.studioDefaultProjectsFolder;
 const DEFAULT_STUDIO_PROJECT_NAME = "Untitled Studio Project" as const;
 
 export function sanitizeStudioProjectName(name: string): string {

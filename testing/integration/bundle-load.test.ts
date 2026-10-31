@@ -57,7 +57,7 @@ describe("built bundle (main.js)", () => {
     // Settings migration ran: loadData returned null, so defaults applied.
     expect(plugin.settings).toBeDefined();
     expect(typeof plugin.settings).toBe("object");
-    expect(plugin.settings.schemaVersion).toBe(17);
+    expect(plugin.settings.schemaVersion).toBe(18);
     expect(plugin.settings.codexModel).toBe("");
     expect(plugin.settings.codexThinkingLevel).toBe("");
     expect(plugin.settings).not.toHaveProperty("accountOnboardingShown");
@@ -125,7 +125,6 @@ describe("built bundle (main.js)", () => {
       const settings = plugin.getSettingsManager();
       await settings.updateSettings({ defaultChatTag: "notes" });
       await settings.updateSettings({ lastValidated: Date.now() });
-      await settings.updateSettings({ lastAutomaticBackup: Date.now() });
       expect(syncFromSettings).not.toHaveBeenCalled();
       expect(app.workspace.updateOptions).not.toHaveBeenCalled();
       await settings.updateSettings({ embeddingsEnabled: true });

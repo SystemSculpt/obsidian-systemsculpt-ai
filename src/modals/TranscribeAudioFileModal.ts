@@ -1,6 +1,7 @@
 import { Notice, TFile, normalizePath } from "obsidian";
 import { AudioSourcePicker, type AudioSourceSelection } from "../components/AudioSourcePicker";
 import { normalizeFileExtension } from "../constants/fileTypes";
+import { DEFAULT_DIRS } from "../core/settings/defaultDirectories";
 import { StandardModal } from "../core/ui/modals/standard/StandardModal";
 import {
   createUiAction,
@@ -23,7 +24,7 @@ import { launchAudioTranscriptionPanel } from "./AudioTranscriptionPanel";
 
 type TranscriptionOutputFormat = "markdown" | "srt";
 
-const DEFAULT_RECORDINGS_DIRECTORY = "SystemSculpt/Recordings";
+const DEFAULT_RECORDINGS_DIRECTORY = DEFAULT_DIRS.recordingsDirectory;
 // A bounded copy window, not an additional input-size limit.
 const DEVICE_IMPORT_SLICE_BYTES = 4 * 1024 * 1024;
 // Preserve the pre-streaming limits only for legacy whole-buffer device imports.

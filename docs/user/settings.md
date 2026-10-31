@@ -106,7 +106,9 @@ retains the conversation. Review both before sending the instruction again.
 Chat tags and Studio text fields save after a short typing pause, or immediately
 when you leave the field or close settings. Workspace directory paths save when
 you leave the field, choose a folder, or close settings, rather than saving each
-partial path. Toggles and selections still apply immediately.
+partial path. Toggles and selections still apply immediately. Output folders are
+created only when a feature saves a file there, not on startup or when you change
+a directory setting. Existing folders and files are never removed by this cleanup.
 
 Unchanged values do not rewrite settings or backups. Changes refresh only the
 features that use them; editing a chat tag does not restart vault indexing or

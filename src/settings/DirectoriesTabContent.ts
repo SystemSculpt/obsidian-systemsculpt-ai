@@ -1,3 +1,4 @@
+import { DEFAULT_DIRS } from "../core/settings/defaultDirectories";
 import { Notice } from "obsidian";
 import { createCatalogSetting } from "./SettingsCatalog";
 import { SystemSculptSettingTab } from "./SystemSculptSettingTab";
@@ -15,24 +16,6 @@ function validateDirectory(path: string): boolean {
     return (
         !path.includes("..") && !path.startsWith("/") && !path.startsWith("\\")
     );
-}
-
-async function handleDirectoryChange(
-    tabInstance: SystemSculptSettingTab,
-    value: string,
-    settingKey: keyof typeof DIRECTORY_SETTING_IDS,
-) {
-    const { plugin } = tabInstance;
-    const saved = await plugin.getSettingsManager().updateSettings({ [settingKey]: value });
-    if (saved === false) return false;
-
-    if (plugin.directoryManager) {
-        try {
-            await plugin.directoryManager.handleDirectorySettingChange(settingKey, value);
-        } catch {
-            new Notice("Couldn’t create that directory.");
-        }
-    }
 }
 
 function createDirectorySetting(
@@ -54,7 +37,7 @@ function createDirectorySetting(
                     new Notice("Use a vault-relative path without '..' or a leading slash.");
                     return;
                 }
-                return handleDirectoryChange(tabInstance, value, settingKey);
+                return plugin.getSettingsManager().updateSettings({ [settingKey]: value });
             }, { commitOn: "blur", errorMessage: "Couldn’t save that directory." });
 
             attachFolderSuggester(
@@ -84,7 +67,7 @@ export function displayDirectoriesTabContent(containerEl: HTMLElement, tabInstan
         tabInstance,
         bindTextSetting,
         "chatsDirectory",
-        "Path relative to vault root (empty = SystemSculpt/Chats)"
+        `Path relative to vault root (empty = ${DEFAULT_DIRS.chatsDirectory})`
     );
 
     createDirectorySetting(
@@ -92,7 +75,7 @@ export function displayDirectoriesTabContent(containerEl: HTMLElement, tabInstan
         tabInstance,
         bindTextSetting,
         "recordingsDirectory",
-        "Path relative to vault root (empty = SystemSculpt/Recordings)"
+        `Path relative to vault root (empty = ${DEFAULT_DIRS.recordingsDirectory})`
     );
 
     createDirectorySetting(
@@ -145,8 +128,8 @@ export function displayDirectoriesTabContent(containerEl: HTMLElement, tabInstan
           try {
             const success = await plugin.repairDirectoryStructure();
             setStatus(success
-              ? "Directories repaired. Restart Obsidian to apply the changes."
-              : "Repair didn’t complete. Check the console for details.");
+              ? "No directory repair is needed. Output folders are created when files are saved."
+              : "An output path is blocked or inaccessible. Resolve the conflict or choose another directory.");
           } catch (error: unknown) {
             setStatus(`Repair failed: ${error instanceof Error ? error.message : String(error)}`);
           }

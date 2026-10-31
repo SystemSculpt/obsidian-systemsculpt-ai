@@ -1,4 +1,5 @@
 import { App, TFile, stringifyYaml } from "obsidian";
+import { DEFAULT_DIRS } from "../../core/settings/defaultDirectories";
 import { ChatMessage } from "../../types";
 import {
   ChatAttachmentVaultStore,
@@ -80,7 +81,7 @@ export class SavedChatCorruptedError extends Error {
   }
 }
 
-const DEFAULT_CHATS_DIRECTORY = "SystemSculpt/Chats";
+const DEFAULT_CHATS_DIRECTORY = DEFAULT_DIRS.chatsDirectory;
 
 /**
  * The configured chats folder without trailing slashes. An empty setting

@@ -221,102 +221,6 @@ export class SettingsManager {
     return run;
   }
 
-  // Migrate settings to ensure all fields are properly initialized
-  private migrateSettings(settingsToMigrate: unknown): SystemSculptSettings {
-    // Settings migration - silent process
-    // Deep merge with defaults to ensure nested objects are properly initialized
-    const sourceSettings: Record<string, unknown> = settingsToMigrate
-      && typeof settingsToMigrate === "object"
-      && !Array.isArray(settingsToMigrate)
-      ? { ...settingsToMigrate as Record<string, unknown> }
-      : {};
-    const migratedSettings = {
-      ...DEFAULT_SETTINGS,
-      ...sourceSettings,
-    };
-    const generateVaultInstanceId = (): string => {
-      if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-        return crypto.randomUUID();
-      }
-      return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
-        const r = (Math.random() * 16) | 0;
-        const v = c === "x" ? r : (r & 0x3) | 0x8;
-        return v.toString(16);
-      });
-    };
-
-    if (typeof migratedSettings.vaultInstanceId !== "string" || migratedSettings.vaultInstanceId.trim().length === 0) {
-      migratedSettings.vaultInstanceId = generateVaultInstanceId();
-    }
-    if (typeof migratedSettings.thinAgentClientId !== "string"
-      || !/^client_[a-f0-9]{32}$/.test(migratedSettings.thinAgentClientId)) {
-      const vaultHex = String(migratedSettings.vaultInstanceId)
-        .toLowerCase()
-        .replace(/[^a-f0-9]/g, "");
-      const randomHex = generateVaultInstanceId()
-        .toLowerCase()
-        .replace(/[^a-f0-9]/g, "")
-        .padEnd(32, "0")
-        .slice(0, 32);
-      migratedSettings.thinAgentClientId = `client_${
-        /^[a-f0-9]{32}$/.test(vaultHex) ? vaultHex : randomHex
-      }`;
-    }
-
-    if (typeof migratedSettings.embeddingsVectorFormatVersion !== "number" || !Number.isFinite(migratedSettings.embeddingsVectorFormatVersion)) {
-      migratedSettings.embeddingsVectorFormatVersion = DEFAULT_SETTINGS.embeddingsVectorFormatVersion;
-    }
-
-    // Legacy/dead keys are pruned by the versioned migrator's v0→v1 step
-    // (SettingsMigrator.LEGACY_KEYS_REMOVED_IN_V1) — no ad-hoc deletes here.
-
-    
-    if (typeof migratedSettings.debugMode !== "boolean") {
-      migratedSettings.debugMode = DEFAULT_SETTINGS.debugMode;
-    }
-
-    if (typeof migratedSettings.logLevel !== "number") {
-      migratedSettings.logLevel = DEFAULT_SETTINGS.logLevel;
-    } else if (!migratedSettings.debugMode && migratedSettings.logLevel > LogLevel.WARNING) {
-      migratedSettings.logLevel = LogLevel.WARNING;
-    }
-
-    
-    // Ensure automatic backup settings are properly initialized (migration for existing users)
-    if (typeof migratedSettings.automaticBackupsEnabled !== 'boolean') {
-      migratedSettings.automaticBackupsEnabled = DEFAULT_SETTINGS.automaticBackupsEnabled;
-    }
-    if (typeof migratedSettings.automaticBackupInterval !== 'number') {
-      migratedSettings.automaticBackupInterval = DEFAULT_SETTINGS.automaticBackupInterval;
-    }
-    if (typeof migratedSettings.automaticBackupRetentionDays !== 'number') {
-      migratedSettings.automaticBackupRetentionDays = DEFAULT_SETTINGS.automaticBackupRetentionDays;
-    }
-    if (typeof migratedSettings.lastAutomaticBackup !== 'number') {
-      migratedSettings.lastAutomaticBackup = DEFAULT_SETTINGS.lastAutomaticBackup;
-    }
-    
-    // This is a new opt-in, not a rename of the legacy OS-preference default.
-    if (typeof migratedSettings.reduceChatMotion !== "boolean") {
-      migratedSettings.reduceChatMotion = DEFAULT_SETTINGS.reduceChatMotion;
-    }
-
-    if (typeof migratedSettings.studioDefaultProjectsFolder !== "string" || !migratedSettings.studioDefaultProjectsFolder.trim()) {
-      migratedSettings.studioDefaultProjectsFolder = DEFAULT_SETTINGS.studioDefaultProjectsFolder;
-    }
-
-    if (typeof migratedSettings.studioRunRetentionMaxRuns !== "number" || !Number.isFinite(migratedSettings.studioRunRetentionMaxRuns)) {
-      migratedSettings.studioRunRetentionMaxRuns = DEFAULT_SETTINGS.studioRunRetentionMaxRuns;
-    }
-
-    if (typeof migratedSettings.studioRunRetentionMaxArtifactsMb !== "number" || !Number.isFinite(migratedSettings.studioRunRetentionMaxArtifactsMb)) {
-      migratedSettings.studioRunRetentionMaxArtifactsMb = DEFAULT_SETTINGS.studioRunRetentionMaxArtifactsMb;
-    }
-
-    
-    return migratedSettings;
-  }
-
   /**
    * Load settings from Obsidian's data storage
    * Implements robust error handling to prevent settings loss
@@ -406,7 +310,7 @@ export class SettingsManager {
     this.settings.lastValidated = 0;
     this.plugin._internal_settings_systemsculpt_plugin = { ...this.settings };
     this.isInitialized = true;
-    await this.saveSettingsNow();
+    await this.persistSettingsNow();
 
     this.plugin.app.workspace.trigger("systemsculpt:settings-loaded", this.settings);
 
@@ -460,6 +364,7 @@ export class SettingsManager {
    */
   private async migrateValidateWithRollback(
     raw: Record<string, unknown>,
+    normalize: (settings: Record<string, unknown>) => SystemSculptSettings = settings => this.validateSettings(settings),
   ): Promise<SystemSculptSettings> {
     const fromVersion = readSchemaVersion(raw);
     try {
@@ -472,7 +377,7 @@ export class SettingsManager {
       if (!result.future && result.fromVersion < CURRENT_SCHEMA_VERSION && this.hasMeaningfulData(raw)) {
         await this.writePreMigrationBackup(raw, fromVersion);
       }
-      const migrated = this.validateSettings(this.migrateSettings(result.settings));
+      const migrated = normalize(result.settings);
       if (!result.future) {
         this.seedLegacyRecorderPreference(legacyRecorderPreference, migrated);
       }
@@ -483,7 +388,7 @@ export class SettingsManager {
         // Safe fallback = pre-versioning behavior (defaults + raw, normalized).
         // The user's original data is preserved both here (raw wins) and in the
         // pre-migration backup written above.
-        return this.validateSettings(this.migrateSettings({ ...DEFAULT_SETTINGS, ...raw }));
+        return normalize(raw);
       } catch {
         // Last resort: pure defaults. Data is safe in the pre-migration backup.
         return { ...DEFAULT_SETTINGS };
@@ -573,10 +478,62 @@ export class SettingsManager {
    * @param settings The settings object to validate
    * @returns The validated settings object
    */
-  private validateSettings(settings: SystemSculptSettings): SystemSculptSettings {
-    // Create a copy to avoid modifying the original
-    const validatedSettings = { ...settings };
+  private validateSettings(settings: Record<string, unknown> | SystemSculptSettings): SystemSculptSettings {
     const defaultSettings = DEFAULT_SETTINGS;
+    const validatedSettings = { ...defaultSettings, ...settings };
+    const generateVaultInstanceId = (): string => {
+      if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+        return crypto.randomUUID();
+      }
+      return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+        const r = (Math.random() * 16) | 0;
+        const v = c === "x" ? r : (r & 0x3) | 0x8;
+        return v.toString(16);
+      });
+    };
+
+    if (typeof validatedSettings.vaultInstanceId !== "string" || !validatedSettings.vaultInstanceId.trim()) {
+      validatedSettings.vaultInstanceId = generateVaultInstanceId();
+    }
+    if (typeof validatedSettings.thinAgentClientId !== "string"
+      || !/^client_[a-f0-9]{32}$/.test(validatedSettings.thinAgentClientId)) {
+      const vaultHex = validatedSettings.vaultInstanceId.toLowerCase().replace(/[^a-f0-9]/g, "");
+      const randomHex = generateVaultInstanceId().toLowerCase().replace(/[^a-f0-9]/g, "").padEnd(32, "0").slice(0, 32);
+      validatedSettings.thinAgentClientId = `client_${/^[a-f0-9]{32}$/.test(vaultHex) ? vaultHex : randomHex}`;
+    }
+
+    if (typeof validatedSettings.embeddingsVectorFormatVersion !== "number" || !Number.isFinite(validatedSettings.embeddingsVectorFormatVersion)) {
+      validatedSettings.embeddingsVectorFormatVersion = defaultSettings.embeddingsVectorFormatVersion;
+    }
+    if (typeof validatedSettings.debugMode !== "boolean") {
+      validatedSettings.debugMode = defaultSettings.debugMode;
+    }
+    if (typeof validatedSettings.logLevel !== "number") {
+      validatedSettings.logLevel = defaultSettings.logLevel;
+    } else if (!validatedSettings.debugMode && validatedSettings.logLevel > LogLevel.WARNING) {
+      validatedSettings.logLevel = LogLevel.WARNING;
+    }
+    if (typeof validatedSettings.automaticBackupsEnabled !== "boolean") {
+      validatedSettings.automaticBackupsEnabled = defaultSettings.automaticBackupsEnabled;
+    }
+    if (typeof validatedSettings.automaticBackupInterval !== "number") {
+      validatedSettings.automaticBackupInterval = defaultSettings.automaticBackupInterval;
+    }
+    if (typeof validatedSettings.automaticBackupRetentionDays !== "number") {
+      validatedSettings.automaticBackupRetentionDays = defaultSettings.automaticBackupRetentionDays;
+    }
+    if (typeof validatedSettings.reduceChatMotion !== "boolean") {
+      validatedSettings.reduceChatMotion = defaultSettings.reduceChatMotion;
+    }
+    if (typeof validatedSettings.studioDefaultProjectsFolder !== "string" || !validatedSettings.studioDefaultProjectsFolder.trim()) {
+      validatedSettings.studioDefaultProjectsFolder = defaultSettings.studioDefaultProjectsFolder;
+    }
+    if (typeof validatedSettings.studioRunRetentionMaxRuns !== "number" || !Number.isFinite(validatedSettings.studioRunRetentionMaxRuns)) {
+      validatedSettings.studioRunRetentionMaxRuns = defaultSettings.studioRunRetentionMaxRuns;
+    }
+    if (typeof validatedSettings.studioRunRetentionMaxArtifactsMb !== "number" || !Number.isFinite(validatedSettings.studioRunRetentionMaxArtifactsMb)) {
+      validatedSettings.studioRunRetentionMaxArtifactsMb = defaultSettings.studioRunRetentionMaxArtifactsMb;
+    }
 
     // Validate directories - these are critical for proper functioning
     // Using a simpler approach to avoid TypeScript errors
@@ -760,11 +717,6 @@ export class SettingsManager {
       validatedSettings.transcriptionOutputFormat = defaultSettings.transcriptionOutputFormat;
     }
 
-    if (typeof validatedSettings.skipEmptyNoteWarning !== 'boolean') {
-      validatedSettings.skipEmptyNoteWarning = defaultSettings.skipEmptyNoteWarning;
-    }
-
-
     // Legacy/dead keys are pruned by the versioned migrator (v0→v1) on load,
     // not re-deleted on every validate pass.
 
@@ -778,13 +730,6 @@ export class SettingsManager {
 
     if (typeof validatedSettings.defaultChatTag !== "string") {
       validatedSettings.defaultChatTag = defaultSettings.defaultChatTag;
-    }
-
-    if (
-      validatedSettings.studioJsonEditorDefaultMode !== "composer" &&
-      validatedSettings.studioJsonEditorDefaultMode !== "raw"
-    ) {
-      validatedSettings.studioJsonEditorDefaultMode = defaultSettings.studioJsonEditorDefaultMode;
     }
 
     if (!Array.isArray(validatedSettings.favoriteChats)) {
@@ -892,18 +837,24 @@ export class SettingsManager {
    * This ensures settings are properly saved with fallback options
    */
   async saveSettings(): Promise<void> {
-    await this.enqueuePersistence(() => this.saveSettingsNow());
+    await this.enqueuePersistence(async () => {
+      if (!this.isInitialized) return;
+      try {
+        this.settings = this.validateSettings(this.plugin._internal_settings_systemsculpt_plugin);
+        this.plugin._internal_settings_systemsculpt_plugin = { ...this.settings };
+        await this.persistSettingsNow();
+      } catch (error) {
+        this.surfaceSaveFailure(error);
+      }
+    });
   }
 
-  private async saveSettingsNow(): Promise<boolean> {
+  private async persistSettingsNow(): Promise<boolean> {
     if (!this.isInitialized) {
       return false;
     }
 
     try {
-      // Re-validate before persisting so stale legacy keys do not survive direct internal mutations.
-      this.settings = this.validateSettings({ ...this.plugin._internal_settings_systemsculpt_plugin });
-      this.plugin._internal_settings_systemsculpt_plugin = { ...this.settings };
       const nextSettings = snapshotSettings(this.settings);
       const oldSettings = this.notifiedSettings;
       const keys = new Set([...Object.keys(oldSettings), ...Object.keys(nextSettings)] as (keyof SystemSculptSettings)[]);
@@ -956,28 +907,37 @@ export class SettingsManager {
     if (!this.isInitialized) {
       await this.loadSettingsNow(); // Ensure settings are loaded before update
     }
-    const backupsWereEnabled = this.settings.automaticBackupsEnabled;
     const newSettings = typeof update === "function" ? update(this.settings) : update;
+    return this.persistUpdatedSettingsNow(this.validateSettings(this.mergeSettingsUpdate(newSettings)));
+  }
+
+  private mergeSettingsUpdate(newSettings: Partial<SystemSculptSettings>): SystemSculptSettings {
     // Merge new settings into the manager's internal copy
     const updatedSettings = { ...this.settings, ...newSettings };
     if (newSettings.textExecutionBackend !== undefined && newSettings.textExecutionBackendExplicit === undefined) {
       updatedSettings.textExecutionBackendExplicit = true;
     }
-    if (updatedSettings.licenseKey?.trim() !== this.settings.licenseKey?.trim()) {
+    const nextLicenseKey = typeof updatedSettings.licenseKey === "string"
+      ? updatedSettings.licenseKey : DEFAULT_SETTINGS.licenseKey;
+    if (nextLicenseKey.trim() !== this.settings.licenseKey.trim()) {
       updatedSettings.phoneCapturesLinked = false;
     }
     // The chats-folder list only grows. Chats stay in the folder they were
     // created in and attachment cleanup scans every listed folder, so neither
     // a concurrent append nor a restored backup may drop an entry.
-    if (Array.isArray(newSettings.knownChatsDirectories)) {
-      updatedSettings.knownChatsDirectories = [
-        ...(this.settings.knownChatsDirectories ?? []),
-        ...newSettings.knownChatsDirectories,
-      ];
-    }
-    
-    // Validate the merged settings before persistence.
-    this.settings = this.validateSettings(updatedSettings);
+    const incomingDirectories = Array.isArray(newSettings.knownChatsDirectories)
+      ? newSettings.knownChatsDirectories
+      : [typeof updatedSettings.chatsDirectory === "string" ? updatedSettings.chatsDirectory : DEFAULT_SETTINGS.chatsDirectory];
+    updatedSettings.knownChatsDirectories = [
+      ...(this.settings.knownChatsDirectories ?? []),
+      ...incomingDirectories,
+    ];
+    return updatedSettings;
+  }
+
+  private async persistUpdatedSettingsNow(settings: SystemSculptSettings): Promise<boolean> {
+    const backupsWereEnabled = this.settings.automaticBackupsEnabled;
+    this.settings = settings;
 
     // Synchronize the plugin's internal settings representation BEFORE persisting.
     // This ensures that saveSettings() – which relies on `_internal_settings_systemsculpt_plugin`
@@ -986,7 +946,7 @@ export class SettingsManager {
 
     // Persist, update plugin._settings, and dispatch the event. This already
     // runs inside the persistence queue, so call the unqueued variant.
-    const saved = await this.saveSettingsNow();
+    const saved = await this.persistSettingsNow();
     // The toggle, a restored backup or an import can switch backups; the
     // hourly check runs only while they are on.
     if (this.settings.automaticBackupsEnabled !== backupsWereEnabled) {
@@ -998,13 +958,19 @@ export class SettingsManager {
   /**
    * Apply externally-sourced settings (a restored backup or an import) by first
    * running them through the SAME versioned migrator the load path uses, then
-   * persisting via updateSettings. Without this, restoring an OLD backup would
+   * persisting via the same update merge/save boundary. Without this, restoring
+   * an OLD backup would
    * write a stale schema back to disk and could resurrect the lost-settings /
    * dead-plugin class this versioning exists to prevent (#212).
    */
   async restoreFromExternalSettings(raw: unknown): Promise<void> {
-    const migrated = await this.migrateValidateWithRollback(this.asSettingsRecord(raw));
-    await this.updateSettings({ ...migrated, lastValidated: 0 });
+    await this.enqueuePersistence(async () => {
+      if (!this.isInitialized) await this.loadSettingsNow();
+      const restored = await this.migrateValidateWithRollback(this.asSettingsRecord(raw), migrated => (
+        this.validateSettings(this.mergeSettingsUpdate({ ...migrated, lastValidated: 0 }))
+      ));
+      await this.persistUpdatedSettingsNow(restored);
+    });
   }
 
   /**

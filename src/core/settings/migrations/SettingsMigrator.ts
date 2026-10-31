@@ -381,6 +381,20 @@ const SETTINGS_MIGRATIONS: readonly SettingsMigrationStep[] = [
       ? { ...settings, codexModel: "", codexThinkingLevel: "" }
       : { ...settings },
   },
+  {
+    to: 18,
+    describe: "Remove dead settings and the derived automatic-backup timestamp",
+    // subscriptionStatus is now used by account chrome. Retired directory
+    // paths still exclude existing content from search and must also survive.
+    migrate: removeKeys([
+      "enableExperimentalFeatures",
+      "chatExportPreferences",
+      "suppressLicenseUpgradePrompt",
+      "skipEmptyNoteWarning",
+      "studioJsonEditorDefaultMode",
+      "lastAutomaticBackup",
+    ]),
+  },
 ];
 
 /** Read a non-negative integer schema version from raw data; 0 if absent/garbage. */
