@@ -80,13 +80,18 @@ describe("built bundle (main.js)", () => {
     const commandIds = plugin._commands.map((command: { id: string }) => command.id);
     expect(new Set(commandIds).size).toBe(commandIds.length);
 
-    // Recovery coordination initializes at startup so saved mobile captures
-    // can be reoffered, while microphone capture itself remains dormant.
-    expect(plugin.recorderService).toMatchObject({
-      state: "idle",
-      session: null,
-      captureTask: null,
-    });
+    // A blank vault needs no account, hosted AI, microphone UI or transcription
+    // service. Recovery admits a recorder only for pending settings or disk fragments.
+    expect(plugin.recorderService).toBeNull();
+    expect(plugin.accountConnectService).toBeNull();
+    expect(plugin._aiService).toBeUndefined();
+    expect(plugin.transcriptionService).toBeUndefined();
+    expect(commandIds).not.toContain("reload-obsidian");
+    expect(commandIds).not.toContain("find-similar-current-note");
+    expect(commandIds).toContain("check-for-updates");
+    expect(commandIds).toContain("systemsculpt-copy-resource-report");
+    expect(plugin._settingTabs).toHaveLength(1);
+    expect(jest.mocked(plugin.app.workspace.on).mock.calls.filter((call: unknown[]) => call[0] === "file-menu")).toHaveLength(1);
     expectProductionStartupIdentity(startupIdentity, manifest.version);
 
     plugin.unload();

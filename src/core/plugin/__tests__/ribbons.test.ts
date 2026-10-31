@@ -1,7 +1,9 @@
 /** @jest-environment jsdom */
 
-import { App, Plugin } from "obsidian";
+import { App, Notice, Plugin } from "obsidian";
 import { RibbonManager } from "../ribbons";
+
+jest.mock("obsidian", () => ({ ...jest.requireActual("obsidian"), Notice: jest.fn() }));
 
 const audioProcessorOpenMock = jest.fn();
 const audioProcessorModalMock = jest.fn().mockImplementation(() => ({
@@ -36,6 +38,10 @@ const createPlugin = () => {
     description: "",
   }) as any;
   plugin.settings = { selectedModelId: "model", licenseKey: "skss-test" };
+  const logger = { debug: jest.fn(), info: jest.fn(), error: jest.fn() };
+  plugin.getLogger = jest.fn(() => logger);
+  plugin.hasRecorderService = jest.fn(() => false);
+  plugin.getRecorderService = jest.fn(() => ({ toggleRecording: jest.fn().mockResolvedValue(undefined) }));
   plugin.getViewManager = jest.fn(() => ({
     activateEmbeddingsView: jest.fn().mockResolvedValue(undefined),
   }));
@@ -99,6 +105,51 @@ describe("RibbonManager", () => {
     await flushAsyncWork();
 
     expect(getRibbonElements(plugin)).toHaveLength(7);
+  });
+
+  it("keeps the recorder lazy until the ribbon invokes the shared action", async () => {
+    const { app, plugin } = createPlugin();
+    const manager = new RibbonManager(plugin, app);
+    const toggleRecording = jest.fn().mockResolvedValue(undefined);
+    plugin.getRecorderService.mockReturnValue({ toggleRecording });
+    manager.initialize();
+    expect(plugin.getRecorderService).not.toHaveBeenCalled();
+    const recorderRibbon = getRibbonElements(plugin).find(
+      (ribbon) => ribbon.getAttribute("aria-label") === "Audio Recorder",
+    );
+
+    (recorderRibbon as HTMLElement & { callback: () => void }).callback();
+    await flushAsyncWork();
+
+    expect(plugin.getRecorderService).toHaveBeenCalledTimes(1);
+    expect(toggleRecording).toHaveBeenCalledTimes(1);
+    expect(plugin.getLogger().info).toHaveBeenCalledWith("Audio recorder toggled", expect.objectContaining({
+      source: "RibbonManager",
+      metadata: { alreadyInitialized: false },
+    }));
+    expect(Notice).not.toHaveBeenCalled();
+  });
+
+  it.each(["initialization", "toggle"])("reports recorder %s failures once through the shared action", async (stage) => {
+    const { app, plugin } = createPlugin();
+    const manager = new RibbonManager(plugin, app);
+    const error = new Error("Recorder unavailable");
+    if (stage === "initialization") {
+      plugin.getRecorderService.mockImplementation(() => { throw error; });
+    } else {
+      plugin.getRecorderService.mockReturnValue({ toggleRecording: jest.fn().mockRejectedValue(error) });
+    }
+    manager.initialize();
+    const recorderRibbon = getRibbonElements(plugin).find(
+      (ribbon) => ribbon.getAttribute("aria-label") === "Audio Recorder",
+    );
+
+    (recorderRibbon as HTMLElement & { callback: () => void }).callback();
+    await flushAsyncWork();
+
+    expect(plugin.getLogger().error).toHaveBeenCalledWith("Failed to toggle audio recorder", error, expect.any(Object));
+    expect(Notice).toHaveBeenCalledTimes(1);
+    expect(Notice).toHaveBeenCalledWith("Unable to toggle the audio recorder.", 8000);
   });
 
   it("opens Audio Processor through the native ribbon action", async () => {

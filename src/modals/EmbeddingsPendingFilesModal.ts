@@ -2,6 +2,7 @@ import { App, Notice, TFile } from "obsidian";
 import type SystemSculptPlugin from "../main";
 import { StandardModal } from "../core/ui/modals/standard/StandardModal";
 import { createUiAction, createUiState } from "../core/ui/surface";
+import { cancelSurfaceAnimationFrame, requestSurfaceAnimationFrame } from "../core/ui/surface/SurfaceDomContext";
 import { flashButtonResult } from "../core/ui/notifications";
 import { tryCopyToClipboard } from "../utils/clipboard";
 import type {
@@ -16,6 +17,14 @@ export class EmbeddingsPendingFilesModal extends StandardModal {
   private summaryContainerEl: HTMLElement | null = null;
   private summaryTextEl: HTMLElement | null = null;
   private listEl: HTMLElement | null = null;
+  private listContentEl: HTMLElement | null = null;
+  private rowMeasureEl: HTMLElement | null = null;
+  private renderedRows = new Map<number, HTMLElement>();
+  // Used only until the typography probe has layout (including detached test hosts).
+  private rowHeight = 72;
+  private listHeight = 0;
+  private renderFrame: number | null = null;
+  private listResizeObserver: ResizeObserver | null = null;
   private searchInput: HTMLInputElement | null = null;
   private copyButtons: HTMLButtonElement[] = [];
   private pendingLoad: Promise<void> = Promise.resolve();
@@ -31,6 +40,7 @@ export class EmbeddingsPendingFilesModal extends StandardModal {
     this.allFiles = [];
     this.filteredFiles = [];
     this.copyButtons = [];
+    this.listHeight = 0;
 
     this.setSize("large");
     this.modalEl.addClass("systemsculpt-pending-files-modal");
@@ -58,12 +68,39 @@ export class EmbeddingsPendingFilesModal extends StandardModal {
       this.applyFilter(query);
     });
     this.searchInput.disabled = true;
+    this.registerDomEvent(this.searchInput, "keydown", (event) => {
+      if (event.key === "Tab" && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey && this.filteredFiles.length > 0) {
+        event.preventDefault();
+        this.focusFile(0);
+      }
+    });
 
-    this.listEl = this.contentEl.createDiv({ cls: "ss-modal__list" });
+    // A noninteractive typography probe stays mounted while rows are recycled.
+    this.rowMeasureEl = this.contentEl.createDiv({
+      cls: "ss-pending-files__measure", attr: { "aria-hidden": "true" },
+    });
+    this.listEl = this.contentEl.createDiv({ cls: "ss-modal__list ss-pending-files__list" });
     this.registerDomEvent(this.listEl, "click", (event) => {
       const button = (event.target as HTMLElement | null)?.closest<HTMLButtonElement>("button[data-file-path]");
       if (button && !button.disabled && button.dataset.filePath) void this.openFile(button.dataset.filePath);
     });
+    this.registerDomEvent(this.listEl, "scroll", () => {
+      if (this.renderFrame !== null) return;
+      this.renderFrame = requestSurfaceAnimationFrame(this.modalEl, () => {
+        this.renderFrame = null;
+        this.renderVisibleRows();
+      });
+    });
+    this.registerDomEvent(this.listEl, "keydown", (event) => this.navigateFiles(event));
+    const ownerWindow = this.modalEl.ownerDocument.defaultView;
+    if (ownerWindow?.ResizeObserver) {
+      this.listResizeObserver = new ownerWindow.ResizeObserver(() => {
+        this.updateListGeometry();
+        this.renderVisibleRows();
+      });
+      this.listResizeObserver.observe(this.listEl);
+      this.listResizeObserver.observe(this.rowMeasureEl);
+    }
     createUiState(this.listEl, {
       kind: "loading",
       title: "Collecting pending files",
@@ -74,10 +111,27 @@ export class EmbeddingsPendingFilesModal extends StandardModal {
     }, false, "copy");
     footerCopyButton.disabled = true;
     this.copyButtons.push(footerCopyButton);
+    this.registerDomEvent(footerCopyButton, "keydown", (event) => {
+      if (event.key === "Tab" && event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey && this.filteredFiles.length > 0) {
+        event.preventDefault();
+        this.focusFile(this.filteredFiles.length - 1);
+      }
+    });
 
     this.addActionButton("embeddings.pending.close", "Close", () => this.close(), true);
 
     this.startPendingFilesLoad();
+  }
+
+  onClose(): void {
+    this.listResizeObserver?.disconnect();
+    this.listResizeObserver = null;
+    if (this.renderFrame !== null) cancelSurfaceAnimationFrame(this.modalEl, this.renderFrame);
+    this.renderFrame = null;
+    this.renderedRows.clear();
+    this.listContentEl = null;
+    this.rowMeasureEl = null;
+    super.onClose();
   }
 
   private startPendingFilesLoad(): void {
@@ -116,6 +170,9 @@ export class EmbeddingsPendingFilesModal extends StandardModal {
   private renderList(): void {
     if (!this.listEl) return;
     this.listEl.empty();
+    this.listEl.scrollTop = 0;
+    this.listContentEl = null;
+    this.renderedRows.clear();
 
     if (this.filteredFiles.length === 0) {
       createUiState(this.listEl, {
@@ -128,22 +185,136 @@ export class EmbeddingsPendingFilesModal extends StandardModal {
       return;
     }
 
-    for (const entry of this.filteredFiles) {
-      const itemEl = this.listEl.createEl("button", {
-        cls: "ss-modal__item",
-        attr: { type: "button", "aria-label": `Open ${entry.path}` },
-      });
-      if (entry.reason === 'failed') {
-        itemEl.addClass("ss-modal__item--failed");
+    this.listContentEl = this.listEl.createDiv({
+      cls: "ss-pending-files__content",
+      attr: { role: "list", "aria-label": "Files still needing embeddings" },
+    });
+    this.updateListGeometry();
+    this.renderVisibleRows();
+  }
+
+  private getListHeight(): number {
+    return this.listEl?.clientHeight || this.modalEl.ownerDocument.defaultView?.innerHeight || this.rowHeight;
+  }
+
+  private updateListGeometry(): void {
+    if (!this.listEl || !this.listContentEl) return;
+    // offsetHeight is in layout pixels, unaffected by the modal entrance transform.
+    const height = this.rowMeasureEl?.offsetHeight || this.rowHeight;
+    const count = this.filteredFiles.length;
+    const viewport = this.getListHeight();
+    const oldTop = this.listEl.scrollTop;
+    // Use the previous viewport when it shrinks; growth may already have clamped
+    // scrollTop to the new bottom before ResizeObserver is delivered.
+    const bottomViewport = Math.max(this.listHeight, viewport);
+    const atBottom = oldTop > 0 && oldTop >= count * this.rowHeight - bottomViewport - 1;
+    const anchoredTop = atBottom ? Math.max(0, count * height - viewport) : oldTop / this.rowHeight * height;
+    this.rowHeight = height;
+    this.listHeight = viewport;
+    this.listContentEl.setCssProps({
+      "--ss-pending-list-height": `${count * height}px`,
+      "--ss-pending-row-height": `${height}px`,
+    });
+    this.listEl.scrollTop = anchoredTop;
+  }
+
+  private renderVisibleRows(): void {
+    if (!this.listEl || !this.listContentEl) return;
+    const count = this.filteredFiles.length;
+
+    // Keep one neighbor on each side for smooth scrolling; every result remains reachable.
+    const start = Math.max(0, Math.min(count - 1, Math.floor(this.listEl.scrollTop / this.rowHeight) - 1));
+    const end = Math.min(count, Math.ceil((this.listEl.scrollTop + this.getListHeight()) / this.rowHeight) + 1);
+    const visible = new Set<number>();
+    for (let index = start; index < end; index++) visible.add(index);
+    // Scrolling must not detach the focused action, even when it is off screen.
+    const activeElement = this.modalEl.ownerDocument.activeElement;
+    let focusedIndex: number | undefined;
+    for (const [index, row] of this.renderedRows) {
+      if (activeElement && row.contains(activeElement)) {
+        visible.add(index);
+        focusedIndex = index;
       }
+    }
+    for (const [index, row] of this.renderedRows) {
+      if (!visible.has(index)) {
+        row.remove();
+        this.renderedRows.delete(index);
+      }
+    }
+    for (const index of visible) {
+      let row = this.renderedRows.get(index);
+      if (!row) {
+        const followingRow = Array.from(this.listContentEl.children).find(
+          (child) => Number((child as HTMLElement).dataset.fileIndex) > index,
+        );
+        row = this.createFileRow(index);
+        if (followingRow) this.listContentEl.insertBefore(row, followingRow);
+        this.renderedRows.set(index, row);
+      }
+      row.setCssProps({ "--ss-pending-row-top": `${index * this.rowHeight}px` });
+      row.querySelector<HTMLButtonElement>("button")!.tabIndex = index === (focusedIndex ?? start) ? 0 : -1;
+    }
+  }
 
-      const titleEl = itemEl.createDiv({ cls: "ss-modal__item-title" });
-      titleEl.setText(this.extractFileName(entry.path));
+  private createFileRow(index: number): HTMLElement {
+    const entry = this.filteredFiles[index];
+    const row = this.listContentEl!.createDiv({
+      cls: "ss-pending-files__row",
+      attr: { role: "listitem", "aria-posinset": String(index + 1), "aria-setsize": String(this.filteredFiles.length) },
+    });
+    row.dataset.fileIndex = String(index);
+    const description = this.buildDescription(entry);
+    const button = row.createEl("button", {
+      cls: "ss-modal__item",
+      attr: {
+        type: "button", "data-testid": "embeddings.pending.open-file",
+        "aria-label": `Open ${entry.path}`, "aria-description": description, title: description,
+      },
+    });
+    if (entry.reason === "failed") button.addClass("ss-modal__item--failed");
+    button.createDiv({ cls: "ss-modal__item-title", text: this.extractFileName(entry.path) });
+    button.createDiv({ cls: "ss-modal__item-description", text: description });
+    button.dataset.filePath = entry.path;
+    button.dataset.fileIndex = String(index);
+    return row;
+  }
 
-      const detailEl = itemEl.createDiv({ cls: "ss-modal__item-description" });
-      detailEl.setText(this.buildDescription(entry));
+  private navigateFiles(event: KeyboardEvent): void {
+    const button = (event.target as HTMLElement | null)?.closest<HTMLButtonElement>("button[data-file-index]");
+    if (!button || !this.listEl || event.altKey || event.ctrlKey || event.metaKey) return;
+    const index = Number(button.dataset.fileIndex);
+    const last = this.filteredFiles.length - 1;
+    let next: number;
+    switch (event.key) {
+      case "ArrowDown": next = Math.min(last, index + 1); break;
+      case "ArrowUp": next = Math.max(0, index - 1); break;
+      case "Home": next = 0; break;
+      case "End": next = last; break;
+      case "Tab":
+        if (event.shiftKey ? index === 0 : index === last) return;
+        next = index + (event.shiftKey ? -1 : 1);
+        break;
+      default: return;
+    }
+    event.preventDefault();
+    this.focusFile(next);
+  }
 
-      itemEl.dataset.filePath = entry.path;
+  private focusFile(index: number): void {
+    if (!this.listEl) return;
+    // Refresh before computing a destination, even if a resize callback is pending.
+    this.updateListGeometry();
+    const top = index * this.rowHeight;
+    if (top < this.listEl.scrollTop) this.listEl.scrollTop = top;
+    else if (top + this.rowHeight > this.listEl.scrollTop + this.getListHeight()) {
+      this.listEl.scrollTop = top + this.rowHeight - this.getListHeight();
+    }
+    this.renderVisibleRows();
+    const nextButton = this.renderedRows.get(index)?.querySelector<HTMLButtonElement>("button");
+    if (nextButton) {
+      nextButton.focus({ preventScroll: true });
+      this.renderVisibleRows();
     }
   }
 

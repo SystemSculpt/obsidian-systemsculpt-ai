@@ -3,7 +3,6 @@
   "src/core/ui/modals/PromptModal.ts": 3,
   "src/features/audio-processor/AudioProcessorModal.ts": 1,
   "src/modals/ContextSelectionModal.ts": 1,
-  "src/modals/EmbeddingsPendingFilesModal.ts": 1,
   "src/modals/SystemSculptSearchModal.ts": 1,
   "src/modals/TranscribeAudioFileModal.ts": 1,
   "src/utils/clipboard.ts": 1,

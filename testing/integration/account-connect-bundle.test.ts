@@ -11,7 +11,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { App, requestUrl } from "obsidian";
+import { App, requestUrl, requireApiVersion } from "obsidian";
 import type SystemSculptPlugin from "../../src/main";
 import { hostRequest } from "./host-request";
 import { captureStartupIdentity, expectProductionStartupIdentity } from "./startup-identity-assertions";
@@ -46,6 +46,7 @@ describe("account connection in the built bundle", () => {
   let unexpectedRequests: string[];
   let connectCallback: Parameters<SystemSculptPlugin["registerObsidianProtocolHandler"]>[1] | undefined;
   const request = jest.mocked(requestUrl);
+  const hostVersionCheck = jest.mocked(requireApiVersion).getMockImplementation()!;
   // The shared jsdom Headers shim has get/set but lacks this browser API,
   // which the real PlatformRequestClient uses to normalize host responses.
   const originalHas = Object.getOwnPropertyDescriptor(Headers.prototype, "has");
@@ -122,6 +123,7 @@ describe("account connection in the built bundle", () => {
     jest.clearAllTimers();
     jest.useRealTimers();
     jest.restoreAllMocks();
+    jest.mocked(requireApiVersion).mockImplementation(hostVersionCheck);
     document.body.replaceChildren();
     expect(unexpectedRequests).toEqual([]);
   });
@@ -165,6 +167,39 @@ describe("account connection in the built bundle", () => {
     expect(button("upgrade-plan.yearly").textContent).toContain("Subscribe yearly");
     expect(plugin!.getAccountConnectService().hasPendingRequest()).toBe(false);
   }
+
+  it("resumes a device-local pending sign-in on startup without opening account settings", async () => {
+    plugin!.unload();
+    await jest.advanceTimersByTimeAsync(0);
+    await (plugin as any).unloadPromise;
+    const app = new App();
+    // Device-local storage arrived after this suite's minimum-version host.
+    jest.mocked(requireApiVersion).mockReturnValue(true);
+    const key = "systemsculpt-ai:pending-account-connect-v1";
+    let stored: unknown = { state: "s".repeat(43), verifier: "v".repeat(43), mode: "sign-in", createdAt: Date.now() };
+    (app as any).loadLocalStorage = (name: string) => name === key ? stored : null;
+    (app as any).saveLocalStorage = (name: string, value: unknown) => { if (name === key) stored = value; };
+    const bundle = require(BUNDLE_PATH);
+    const PluginClass = bundle.default ?? bundle;
+    const manifest = JSON.parse(readFileSync(MANIFEST_PATH, "utf8"));
+    plugin = new PluginClass(app, manifest);
+    const identity = captureStartupIdentity();
+    plugin!.load();
+    await jest.advanceTimersByTimeAsync(1_500);
+    expectProductionStartupIdentity(identity, manifest.version);
+    // Neither a settings visit nor a getter call should be needed for recovery.
+    expect((plugin as any).accountConnectService).not.toBeNull();
+    const pollRequests = () => request.mock.calls.filter(([input]) =>
+      (typeof input === "string" ? input : input.url) === POLL_URL);
+    expect(pollRequests()).toHaveLength(0);
+    await jest.advanceTimersByTimeAsync(30_000);
+    expect(pollRequests()).toHaveLength(1);
+    expect(pollRequests()[0][0]).toMatchObject({ url: POLL_URL, method: "POST" });
+    expect(plugin!.getAccountConnectService().hasPendingRequest()).toBe(false);
+    expect(document.querySelectorAll("[role='dialog']")).toHaveLength(0);
+    expect(stored).toBeNull();
+    expect(await plugin!.loadData()).toMatchObject({ userEmail: CONNECTED_ACCOUNT.account.email });
+  });
 
   it("hands off to the browser, waits for polling, and shows the result in place of the handoff", async () => {
     request.mockResolvedValueOnce(hostResponse({ status: "pending" }));

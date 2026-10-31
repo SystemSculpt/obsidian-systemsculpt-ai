@@ -173,11 +173,6 @@ export class PluginUpdateService {
     // A scheduled check can never outlive an unload that skipped stop().
     this.plugin.register(() => this.stop());
     this.prepareStatusBar();
-    this.plugin.addCommand({
-      id: "check-for-updates",
-      name: "Check for updates",
-      callback: () => void this.checkForUpdates({ manual: true }),
-    });
     if (typeof document !== "undefined") {
       document.addEventListener("visibilitychange", this.handleWake);
     }

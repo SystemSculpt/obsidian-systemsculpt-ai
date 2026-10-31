@@ -1815,15 +1815,16 @@ describe("RecorderService", () => {
 
     it("recovers an in-progress file whose entry was lost, under a free name", async () => {
       jest.spyOn(console, "log").mockImplementation(() => undefined);
-      const { files } = vaultWithHiddenFiles({
+      const { files, adapter } = vaultWithHiddenFiles({
         [hiddenPath]: { size: 480_000, ctime: 5_000, mtime: 65_000 },
         [filePath]: { size: 1 },
       });
-
-      RecorderService.getInstance(app, plugin).recoverPendingCaptures();
+      const fragments = await RecorderService.findInterruptedCaptureFiles(app);
+      RecorderService.getInstance(app, plugin).recoverPendingCaptures(fragments);
       await flush();
       await flush();
 
+      expect(adapter.list.mock.calls.filter(([path]: [string]) => path === ".systemsculpt/recordings-in-progress")).toHaveLength(1);
       expect(files.get("SystemSculpt/Recordings/streamed-1.webm")).toMatchObject({ size: 480_000 });
       expect(files.has(hiddenPath)).toBe(false);
     });
