@@ -91,6 +91,7 @@ describe("PluginUpdateService", () => {
     await service.checkForUpdates();
 
     expect(request).toHaveBeenCalledTimes(2);
+    expect(plugin.addCommand).not.toHaveBeenCalled();
     expect(notify).not.toHaveBeenCalled();
     expect(plugin.updateSettings).not.toHaveBeenCalled();
     expect(document.querySelector(".modal")).toBeNull();

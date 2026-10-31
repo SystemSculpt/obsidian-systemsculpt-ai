@@ -91,6 +91,65 @@ describe("SystemSculptPlugin startup phases", () => {
     expect(registeredTaskIds(plugin, "layout")).toContain("updates.start");
   });
 
+  it("traces each critical task once and records a failed command registration once", async () => {
+    const plugin = makePlugin();
+    const tracker = { complete: jest.fn(), fail: jest.fn() };
+    const tracer = { startPhase: jest.fn((_phase: string) => tracker), markMilestone: jest.fn() };
+    jest.spyOn(plugin as any, "getInitializationTracer").mockReturnValue(tracer);
+    jest.spyOn(plugin as any, "initializeSettings").mockResolvedValue(undefined);
+    jest.spyOn(plugin as any, "ensureDirectoryManager").mockReturnValue({ initialize: async () => undefined });
+    jest.spyOn(plugin as any, "initializeBasicUI").mockResolvedValue(undefined);
+    jest.spyOn(plugin as any, "ensureCommandManager").mockImplementation(() => { throw new Error("Command registration failed"); });
+    const fileMenu = jest.spyOn(plugin as any, "setupFileContextMenuService").mockImplementation(() => undefined);
+    jest.spyOn(plugin, "getLogger").mockReturnValue({ warn: jest.fn() } as any);
+    (plugin as any).configureLifecycle();
+
+    await (plugin as any).lifecycleCoordinator.runPhase("critical");
+
+    expect(tracer.startPhase.mock.calls.map(([phase]) => phase)).toEqual([
+      "lifecycle.critical.settings.load", "lifecycle.critical.directories.initialize",
+      "lifecycle.critical.ui.basic.initialize", "lifecycle.critical.commands.register",
+      "lifecycle.critical.fileContextMenu.start",
+    ]);
+    expect((plugin as any).failures).toEqual(["command registration"]);
+    expect(tracker.fail).toHaveBeenCalledTimes(1);
+    expect(fileMenu).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["saved capture", "orphaned fragment", "empty vault"])("admits recorder recovery only for pending work: %s", async (source) => {
+    const app = new App();
+    const plugin = makePlugin(app);
+    plugin._internal_settings_systemsculpt_plugin = {
+      ...DEFAULT_SETTINGS,
+      pendingRecorderCaptures: source === "saved capture" ? [{ filePath: "Recordings/pending.webm" } as any] : [],
+    };
+    jest.mocked(app.vault.adapter.exists).mockResolvedValue(source === "orphaned fragment");
+    jest.mocked(app.vault.adapter.list).mockResolvedValue({ files: [".systemsculpt/recordings/in-progress/orphan.webm"], folders: [] });
+    const recoverPendingCaptures = jest.fn();
+    const ensure = jest.spyOn(plugin, "ensureRecorderService").mockReturnValue({ recoverPendingCaptures } as any);
+    (plugin as any).configureLifecycle();
+
+    await runTask(plugin, "deferred", "recorder.recover");
+
+    expect(ensure).toHaveBeenCalledTimes(source === "empty vault" ? 0 : 1);
+    expect(recoverPendingCaptures).toHaveBeenCalledTimes(source === "empty vault" ? 0 : 1);
+  });
+
+  it("does not create a recorder after unloading during a pending disk check", async () => {
+    const app = new App();
+    const plugin = makePlugin(app);
+    const exists = deferred<boolean>();
+    jest.mocked(app.vault.adapter.exists).mockReturnValue(exists.promise);
+    jest.mocked(app.vault.adapter.list).mockResolvedValue({ files: ["orphan.webm"], folders: [] });
+    const ensure = jest.spyOn(plugin, "ensureRecorderService");
+    (plugin as any).configureLifecycle();
+    const recovery = runTask(plugin, "deferred", "recorder.recover");
+    (plugin as any).isUnloading = true;
+    exists.resolve(true);
+    await recovery;
+    expect(ensure).not.toHaveBeenCalled();
+  });
+
   it("warns about retired credential files and hides the notice on unload", async () => {
     const app = new App();
     const plugin = makePlugin(app);

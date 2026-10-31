@@ -59,16 +59,10 @@ export class InboxTranscriptionService {
         void this.handleFileEvent(file);
       })
     );
+  }
 
-    this.plugin.addCommand({
-      id: "resume-inbox-transcription",
-      name: "Resume inbox transcription",
-      checkCallback: (checking: boolean) => {
-        if (this.disposed || this.isProcessingBulk || this.deferredFiles.size === 0) return false;
-        if (!checking) void this.resumeDeferredFiles();
-        return true;
-      },
-    });
+  canResumeDeferredFiles(): boolean {
+    return !this.disposed && !this.isProcessingBulk && this.deferredFiles.size > 0;
   }
 
   destroy(): void {
@@ -282,7 +276,8 @@ export class InboxTranscriptionService {
    * Sends the files Not now left waiting, as the user asked. Files since
    * deleted, moved out of the inbox, or already skipped are left alone.
    */
-  private async resumeDeferredFiles(): Promise<void> {
+  async resumeDeferredFiles(): Promise<void> {
+    if (!this.canResumeDeferredFiles()) return;
     const settings = this.getWorkflowSettings();
     const files: PendingFileEvent[] = [];
     for (const [path, file] of this.deferredFiles) {

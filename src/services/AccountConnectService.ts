@@ -146,6 +146,15 @@ export class AccountConnectService {
     this.restorePending();
   }
 
+  /** Inspect device-local recovery without starting a service or polling. */
+  public static hasStoredPendingRequest(app: SystemSculptPlugin["app"]): boolean {
+    try {
+      return requireApiVersion("1.8.7") && app.loadLocalStorage?.(PENDING_CONNECT_STORAGE_KEY) != null;
+    } catch {
+      return false;
+    }
+  }
+
   public hasPendingRequest(): boolean {
     return this.activePending() !== null;
   }

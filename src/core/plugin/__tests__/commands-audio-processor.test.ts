@@ -57,7 +57,7 @@ describe("CommandManager Audio Processor commands", () => {
     availabilityMock.mockResolvedValue(true);
   });
 
-  it("registers both source entry points and resumes server-owned jobs", async () => {
+  it("registers both source entry points without starting server-owned job recovery", async () => {
     const addCommand = jest.fn();
     const plugin = { addCommand, settings: { licenseKey: "skss-test" } } as any;
     const app = new App();
@@ -76,7 +76,7 @@ describe("CommandManager Audio Processor commands", () => {
       "save-audio-summary",
       "save-audio-transcript",
     ]);
-    expect(resumeMock).toHaveBeenCalledWith(plugin);
+    expect(resumeMock).not.toHaveBeenCalled();
 
     await commands[0].callback();
     expect(availabilityMock).toHaveBeenNthCalledWith(1, plugin);
@@ -195,7 +195,7 @@ describe("CommandManager Audio Processor commands", () => {
     expect(availabilityMock).toHaveBeenNthCalledWith(2, plugin);
     expect(modalCtorMock).not.toHaveBeenCalled();
     expect(openMock).not.toHaveBeenCalled();
-    expect(resumeMock).toHaveBeenCalledTimes(1);
+    expect(resumeMock).not.toHaveBeenCalled();
     expect(Notice).toHaveBeenCalledTimes(2);
     expect(Notice).toHaveBeenCalledWith("Audio Processor is temporarily unavailable.", 6000);
   });

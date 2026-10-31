@@ -48,18 +48,6 @@ describe("InboxTranscriptionService through its host interface", () => {
     };
   }
 
-  /** The palette's view of Resume inbox transcription: shown, and run when chosen. */
-  function resumeCommand() {
-    const command = plugin.addCommand.mock.calls
-      .map(([registered]) => registered)
-      .find((registered) => registered.id === "resume-inbox-transcription");
-    expect(command).toMatchObject({ name: "Resume inbox transcription" });
-    return {
-      available: () => command.checkCallback(true) === true,
-      run: () => command.checkCallback(false),
-    };
-  }
-
   function emit(event: "create" | "rename", file: TFile, oldPath = "Elsewhere/audio.mp3") {
     const registration = (app.vault.on as jest.Mock).mock.calls.find(([name]) => name === event);
     expect(registration).toBeDefined();
@@ -107,9 +95,10 @@ describe("InboxTranscriptionService through its host interface", () => {
     jest.useRealTimers();
   });
 
-  it("registers both vault event subscriptions with the plugin lifetime", () => {
+  it("registers both vault event subscriptions without registering commands", () => {
     expect((app.vault.on as jest.Mock).mock.calls.map(([name]) => name)).toEqual(["create", "rename"]);
     expect(plugin.registerEvent).toHaveBeenCalledTimes(2);
+    expect(plugin.addCommand).not.toHaveBeenCalled();
   });
 
   it.each(["wav", "m4a", "mp4", "mp3", "webm", "ogg", "flac"])("transcribes created .%s inbox audio after debouncing", async extension => {
@@ -238,7 +227,7 @@ describe("InboxTranscriptionService through its host interface", () => {
 
   it("Not now or closing uploads nothing, records no skip, and does not reopen the dialog", async () => {
     const files = await queueBulk(3);
-    expect(resumeCommand().available()).toBe(false);
+    expect(service.canResumeDeferredFiles()).toBe(false);
     confirmation().onDefer();
     await settle();
 
@@ -246,7 +235,7 @@ describe("InboxTranscriptionService through its host interface", () => {
     expect(plugin.settings.workflowEngine.skippedFiles).toEqual({});
     expect(plugin.saveSettings).not.toHaveBeenCalled();
     expect(Notice).not.toHaveBeenCalled();
-    expect(resumeCommand().available()).toBe(true);
+    expect(service.canResumeDeferredFiles()).toBe(true);
 
     // The next arrival is handled on its own; the waiting files do not reopen the dialog.
     const next = audio("Inbox/next.mp3");
@@ -264,17 +253,52 @@ describe("InboxTranscriptionService through its host interface", () => {
     confirmation().onDefer();
     await settle();
 
-    resumeCommand().run();
+    void service.resumeDeferredFiles();
     await jest.advanceTimersByTimeAsync(1000);
 
     expect(confirmations).toHaveBeenCalledTimes(1);
     expect(mockTranscribeFile.mock.calls.map(([file]) => file)).toEqual(files);
     expect(app.vault.create).toHaveBeenCalledTimes(3);
     expect(widget().markComplete).toHaveBeenCalledTimes(1);
-    expect(resumeCommand().available()).toBe(false);
-    resumeCommand().run();
+    expect(service.canResumeDeferredFiles()).toBe(false);
+    void service.resumeDeferredFiles();
     await jest.advanceTimersByTimeAsync(1000);
     expect(mockTranscribeFile).toHaveBeenCalledTimes(3);
+  });
+
+  it("keeps waiting files untouched while another bulk confirmation is active", async () => {
+    const waiting = await queueBulk(3);
+    confirmation().onDefer();
+    await settle();
+    expect(service.canResumeDeferredFiles()).toBe(true);
+
+    const arriving = [4, 5, 6].map((index) => audio(`Inbox/${index}.mp3`));
+    const files = [...waiting, ...arriving];
+    const vaultFiles = new Map(files.map((file) => [file.path, file]));
+    (app.vault.getAbstractFileByPath as jest.Mock).mockImplementation((path: string) => vaultFiles.get(path) ?? null);
+    arriving.forEach((file) => emit("create", file));
+    await flushInbox();
+    expect(service.canResumeDeferredFiles()).toBe(false);
+    await service.resumeDeferredFiles();
+    expect(mockTranscribeFile).not.toHaveBeenCalled();
+
+    confirmation().onDefer();
+    await settle();
+    void service.resumeDeferredFiles();
+    await jest.advanceTimersByTimeAsync(1000);
+    expect(mockTranscribeFile.mock.calls.map(([file]) => file)).toEqual(files);
+  });
+
+  it("cannot resume deferred work after destruction", async () => {
+    await queueBulk(3);
+    confirmation().onDefer();
+    await settle();
+    expect(service.canResumeDeferredFiles()).toBe(true);
+
+    service.destroy();
+    expect(service.canResumeDeferredFiles()).toBe(false);
+    await service.resumeDeferredFiles();
+    expect(mockTranscribeFile).not.toHaveBeenCalled();
   });
 
   it("Resume leaves waiting files alone once they are deleted, moved, or already skipped", async () => {
@@ -292,7 +316,7 @@ describe("InboxTranscriptionService through its host interface", () => {
     await settle();
     vaultFiles.delete(files[0].path);
 
-    resumeCommand().run();
+    void service.resumeDeferredFiles();
     await jest.advanceTimersByTimeAsync(1000);
 
     expect(mockTranscribeFile.mock.calls.map(([file]) => file)).toEqual([files[3]]);

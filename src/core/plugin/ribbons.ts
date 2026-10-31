@@ -152,11 +152,23 @@ export class RibbonManager {
     });
   }
 
-  private async toggleAudioRecorder() {
+  /** Shared recorder action for the ribbon and command palette. */
+  public async toggleAudioRecorder(): Promise<void> {
+    const alreadyInitialized = this.plugin.hasRecorderService();
+    const logger = this.plugin.getLogger();
+    const context = {
+      source: "RibbonManager",
+      method: "toggleAudioRecorder",
+      metadata: { alreadyInitialized },
+    };
+    logger.debug("Toggle audio recorder requested", context);
+
     try {
       const recorderService = this.plugin.getRecorderService();
       await recorderService.toggleRecording();
-    } catch {
+      logger.info("Audio recorder toggled", context);
+    } catch (error) {
+      logger.error("Failed to toggle audio recorder", error, context);
       new Notice("Unable to toggle the audio recorder.", 8000);
     }
   }

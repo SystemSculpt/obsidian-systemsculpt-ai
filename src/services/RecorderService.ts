@@ -156,6 +156,14 @@ export class RecorderService {
     return RecorderService.instance;
   }
 
+  /** Include orphaned crash fragments, even if their settings write never landed. */
+  public static async hasPendingCaptures(app: App, pending: readonly PendingRecorderCapture[]): Promise<boolean> {
+    if (pending.length > 0) return true;
+    const adapter = app.vault.adapter;
+    if (!await adapter.exists(RECORDINGS_IN_PROGRESS_DIRECTORY)) return false;
+    return (await adapter.list(RECORDINGS_IN_PROGRESS_DIRECTORY)).files.length > 0;
+  }
+
   public onToggle(callback: (recording: boolean) => void): () => void {
     this.recordingListeners.add(callback);
     return () => this.recordingListeners.delete(callback);

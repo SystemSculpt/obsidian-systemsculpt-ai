@@ -2,8 +2,8 @@
 
 Source of truth:
 
-- `src/core/plugin/commands.ts`
-- `src/main.ts` (additional diagnostics/search commands)
+- `src/core/plugin/commands.ts` (normal command registrations)
+- `src/main.ts` (safe-mode load diagnostics only)
 
 `Mod` means `Cmd` on macOS and `Ctrl` on Windows/Linux.
 
@@ -19,7 +19,6 @@ Source of truth:
 | Sign in |  | `sign-in` | Opens browser sign-in and Account settings |
 | View plans / buy credits |  | `view-plans` | Opens the plan comparison page |
 | Check for updates |  | `check-for-updates` | Reports whether a newer SystemSculpt release is available; **Open plugin updates** opens Obsidian's plugin page |
-| Reload Obsidian |  | `reload-obsidian` | Reloads app window |
 | Copy Vault-Relative File Path |  | `copy-current-file-path` | Copies the focused note or Studio file's path relative to the vault (a notice appears only if copying fails); assign a shortcut in Obsidian Hotkeys |
 
 ## Chat and writing
@@ -80,7 +79,6 @@ closing history restores your draft.
 | --- | --- | --- | --- |
 | Open SystemSculpt Search | `Mod+K` | `open-systemsculpt-search` | Searches notes, canvases, and Studio projects; an empty query shows recently modified files |
 | Open Similar Notes Panel |  | `open-embeddings-view` | Opens embeddings/similar-notes view |
-| Find Similar Notes (Current Note) |  | `find-similar-current-note` | Added in `src/main.ts`; requires active note |
 | Rebuild SystemSculpt embeddings |  | `rebuild-embeddings-current-model` | Replaces the Similar notes index and processes eligible notes again, after one confirmation |
 | Show Embeddings Database Statistics (Debug) |  | `embeddings-database-stats` | Visible only when embeddings are enabled |
 

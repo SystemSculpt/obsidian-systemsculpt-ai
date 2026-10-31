@@ -9,7 +9,7 @@ public operations and behavioral tests before following private helpers.
 
 | Behavior | Start here | Ownership |
 |---|---|---|
-| Plugin startup and disposal | `src/main.ts`, `src/core/plugin/` | Composes capabilities and Obsidian commands/views; delegates their state and policies. |
+| Plugin startup and disposal | `src/main.ts`, `src/core/plugin/` | Composes capabilities and Obsidian commands/views; `LifecycleCoordinator` owns task tracing and failure recording. Services start on use, except recovery for saved work and configured automation. |
 | Chat execution | `src/chat/ChatSession.ts`, `src/chat/managed/ChatSession.ts` | Shared session contract and managed conversation synchronization, local tools, approvals, and replay safety. |
 | Managed conversation projection | `src/chat/managed/ConversationProjection.ts` | Optimistic display, interrupted responses, exact local-result overlays, and live/durable message conversion. |
 | Chat presentation | `src/views/chatview/AgentChatView.ts`, `AgentConversationRenderer.ts` | Composer, conversation projection, interaction, rendering, and view lifecycle. |
@@ -30,9 +30,9 @@ public operations and behavioral tests before following private helpers.
 | Choosing audio | `src/components/AudioSourcePicker.ts` | The vault audio list, device dropzone, keyboard navigation and selected-audio preview shared by Transcribe audio and Audio Processor. Each modal keeps only its output options and submit. |
 | Inbox automation | `src/features/inbox-transcription/InboxTranscriptionService.ts` | Vault event admission, batching, user confirmation, and cancellation for automatic transcription. |
 | Search and Similar notes | `src/services/search/`, `src/services/embeddings/` | Vault indexing/search and managed semantic index integration. |
-| Account and settings | `src/core/settings/`, `src/settings/`, `src/services/AccountConnectService.ts` | Settings persistence/migration, settings presentation, and account connection respectively. |
+| Account and settings | `src/core/settings/`, `src/settings/`, `src/services/AccountConnectService.ts` | Settings persistence/migration, pending settings navigation/focus, settings presentation, and account connection. Connection starts on use or for a saved pending sign-in. |
 | Credential hygiene | `src/core/security/` | Keeps plain-text credential files that retired features left in the plugin folder out of Git, and tells the user how to clean them up. |
-| Diagnostics | `src/core/diagnostics/` | Content-free incident capture, bounded persistence, session startup, rotation, and teardown. |
+| Diagnostics | `src/core/diagnostics/` | Content-free incident capture, bounded persistence, session startup, rotation, and teardown. `DiagnosticsFacade` owns the public support projection and explicit local export. |
 | Shared data primitives | `src/utils/vaultPathUtils.ts`, `vaultFileName.ts`, `sha256.ts`, `base64.ts` | Vault-relative path normalization, generated filename sanitation, content hashing and byte encoding. These are independent of Studio and presentation. |
 | Desktop and window behavior | `src/platform/`, `src/core/ui/surface/` | Host capabilities, desktop adapters, mobile host chrome, owner-window DOM, and shared surface interaction. |
 
