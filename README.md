@@ -66,19 +66,20 @@ SystemSculpt checks its first-party release endpoint in the background. On deskt
 
 ## Documentation
 
-- [Getting started](docs/user/getting-started.md)
-- [Agent tools and approvals](docs/user/agent-mode.md)
-- [Settings](docs/user/settings.md)
-- [Commands](docs/user/commands.md)
-- [Studio workspaces, on-machine Codex and Claude Code](docs/studio-workspaces.md)
-- [Similar Notes](docs/user/similar-notes.md)
-- [Audio and transcription](docs/user/audio-transcription.md)
-- [Audio Processor](docs/user/audio-processor.md)
-- [Troubleshooting](docs/user/troubleshooting.md)
+- [Agent skill for Claude Code, Codex and other file-capable agents](https://github.com/SystemSculpt/obsidian-systemsculpt-ai/blob/main/SKILL.md)
+- [Getting started](https://github.com/SystemSculpt/obsidian-systemsculpt-ai/blob/main/docs/user/getting-started.md)
+- [Agent tools and approvals](https://github.com/SystemSculpt/obsidian-systemsculpt-ai/blob/main/docs/user/agent-mode.md)
+- [Settings](https://github.com/SystemSculpt/obsidian-systemsculpt-ai/blob/main/docs/user/settings.md)
+- [Commands](https://github.com/SystemSculpt/obsidian-systemsculpt-ai/blob/main/docs/user/commands.md)
+- [Studio workspaces, on-machine Codex and Claude Code](https://github.com/SystemSculpt/obsidian-systemsculpt-ai/blob/main/docs/studio-workspaces.md)
+- [Similar Notes](https://github.com/SystemSculpt/obsidian-systemsculpt-ai/blob/main/docs/user/similar-notes.md)
+- [Audio and transcription](https://github.com/SystemSculpt/obsidian-systemsculpt-ai/blob/main/docs/user/audio-transcription.md)
+- [Audio Processor](https://github.com/SystemSculpt/obsidian-systemsculpt-ai/blob/main/docs/user/audio-processor.md)
+- [Troubleshooting](https://github.com/SystemSculpt/obsidian-systemsculpt-ai/blob/main/docs/user/troubleshooting.md)
 
 ## Development
 
-Building or contributing to the plugin: see [development.md](docs/development.md), [community-review.md](docs/community-review.md), [CONTRIBUTING.md](CONTRIBUTING.md), and [AGENTS.md](AGENTS.md).
+Building or contributing to the plugin: see [development.md](https://github.com/SystemSculpt/obsidian-systemsculpt-ai/blob/main/docs/development.md), [community-review.md](https://github.com/SystemSculpt/obsidian-systemsculpt-ai/blob/main/docs/community-review.md), [CONTRIBUTING.md](https://github.com/SystemSculpt/obsidian-systemsculpt-ai/blob/main/CONTRIBUTING.md), and [AGENTS.md](https://github.com/SystemSculpt/obsidian-systemsculpt-ai/blob/main/AGENTS.md).
 
 ## Release
 
