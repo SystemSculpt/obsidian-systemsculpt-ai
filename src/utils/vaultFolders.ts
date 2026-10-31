@@ -22,6 +22,7 @@ export async function createVaultFolder(app: App, path: string): Promise<void> {
 /**
  * Whether a folder exists at the path, from the vault tree or, when the tree
  * cannot resolve it (see createVaultFolder), from the adapter.
+ * @internal Unit-tested directly.
  */
 export async function isVaultFolder(app: App, path: string): Promise<boolean> {
   try {

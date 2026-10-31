@@ -26,6 +26,7 @@ const DEFAULT_CHAT_EXPORT_OPTIONS: ChatExportOptions = {
   includeImages: true,
 };
 
+/** @internal Unit-tested directly. */
 export function createDefaultChatExportOptions(): ChatExportOptions {
   return { ...DEFAULT_CHAT_EXPORT_OPTIONS };
 }
