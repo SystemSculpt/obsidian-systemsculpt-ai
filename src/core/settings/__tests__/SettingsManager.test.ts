@@ -385,6 +385,43 @@ describe("SettingsManager managed settings contract", () => {
     });
   });
 
+  it.each([42, null, { malformed: true }])("restores live settings even when the imported license value is %p", async (licenseKey) => {
+    const plugin = createPlugin({ schemaVersion: CURRENT_SCHEMA_VERSION, futureSetting: { keep: true } });
+    const manager = new SettingsManager(plugin);
+    await manager.loadSettings();
+
+    await manager.restoreFromExternalSettings({
+      schemaVersion: 17, licenseKey, chatFontSize: "large", recordingsDirectory: "My audio",
+      extractionsDirectory: "My extractions", enableExperimentalFeatures: true,
+      importedUnknownSetting: { alsoKeep: true },
+    });
+
+    expect(plugin.saveData).toHaveBeenLastCalledWith(expect.objectContaining({
+      schemaVersion: CURRENT_SCHEMA_VERSION, licenseKey: "", chatFontSize: "large",
+      recordingsDirectory: "My audio", extractionsDirectory: "My extractions",
+      futureSetting: { keep: true }, importedUnknownSetting: { alsoKeep: true },
+    }));
+    expect(manager.settings).not.toHaveProperty("enableExperimentalFeatures");
+  });
+
+  it.each([null, undefined, "not-an-array"])("retains known chat folders when an imported list is %p", async (knownChatsDirectories) => {
+    const plugin = createPlugin({
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      knownChatsDirectories: ["Archive/Chats", "Work/Chats"],
+    });
+    const manager = new SettingsManager(plugin);
+    await manager.loadSettings();
+
+    await manager.restoreFromExternalSettings({
+      schemaVersion: CURRENT_SCHEMA_VERSION, chatsDirectory: "Restored/Chats", knownChatsDirectories,
+    });
+
+    expect(manager.settings.knownChatsDirectories).toEqual(["Archive/Chats", "Work/Chats", "Restored/Chats"]);
+    expect(plugin.saveData).toHaveBeenLastCalledWith(expect.objectContaining({
+      knownChatsDirectories: ["Archive/Chats", "Work/Chats", "Restored/Chats"],
+    }));
+  });
+
   it("removes retired recorder settings and synced microphone preferences", async () => {
     const plugin = createPlugin({
       schemaVersion: 8,

@@ -64,12 +64,15 @@ export class AutomaticBackupService {
                 return;
             }
 
-            const now = Date.now();
-            const intervalMs = settings.automaticBackupInterval * 60 * 60 * 1000; // Convert hours to milliseconds
+            const timer = this.backupTimer;
             const lastBackup = await this.getLastAutomaticBackupTime();
 
-            // Check if it's time for a backup
-            if (now - lastBackup >= intervalMs) {
+            // A settings toggle or teardown may have happened during the scan.
+            const current = this.plugin.getSettingsManager().getSettings();
+            if (timer === null || this.backupTimer !== timer || this.plugin.isPluginUnloading?.() === true
+                || !current.automaticBackupsEnabled) return;
+            const intervalMs = current.automaticBackupInterval * 60 * 60 * 1000;
+            if (Date.now() - lastBackup >= intervalMs) {
                 await this.createAutomaticBackup();
             }
         } catch {
@@ -85,21 +88,27 @@ export class AutomaticBackupService {
      */
     private async getLastAutomaticBackupTime(): Promise<number> {
         const adapter = this.plugin.app.vault.adapter;
-        let lastBackup = 0;
-        try {
-            const files = await adapter.list(".systemsculpt/settings-backups");
-            for (const filePath of files.files.filter(path => this.isAutomaticBackup(path))) {
-                try {
-                    const stats = await adapter.stat(filePath);
-                    if (stats && stats.mtime > lastBackup) {
-                        lastBackup = stats.mtime;
-                    }
-                } catch {
-                    // One missing or unreadable copy must not hide the others.
-                }
+        const backupDir = ".systemsculpt/settings-backups";
+        if (!await adapter.exists(backupDir)) return 0;
+        // Enumeration errors are not proof of absence. Let the scheduled check
+        // retry later rather than overwrite a recent dated snapshot.
+        const files = await adapter.list(backupDir);
+        const times = await Promise.all(files.files.filter(path => this.isAutomaticBackup(path)).map(async path => {
+            try {
+                const stats = await adapter.stat(path);
+                // Synced files can carry another device's incorrect clock.
+                return stats && Number.isFinite(stats.mtime) && stats.mtime <= Date.now()
+                    ? stats.mtime : 0;
+            } catch {
+                return null;
             }
-        } catch {
-            // No dated backup directory means the first backup is due.
+        }));
+        let lastBackup = 0;
+        for (const time of times) {
+            // An unknown age is not proof that overwriting today's snapshot is
+            // safe. Missing files return null from stat and map to zero above.
+            if (time === null) throw new Error("Cannot determine automatic backup age");
+            lastBackup = Math.max(lastBackup, time);
         }
         return lastBackup;
     }

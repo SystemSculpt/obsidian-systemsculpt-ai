@@ -18,24 +18,6 @@ function validateDirectory(path: string): boolean {
     );
 }
 
-async function handleDirectoryChange(
-    tabInstance: SystemSculptSettingTab,
-    value: string,
-    settingKey: keyof typeof DIRECTORY_SETTING_IDS,
-) {
-    const { plugin } = tabInstance;
-    const saved = await plugin.getSettingsManager().updateSettings({ [settingKey]: value });
-    if (saved === false) return false;
-
-    if (plugin.directoryManager) {
-        try {
-            await plugin.directoryManager.handleDirectorySettingChange(settingKey, value);
-        } catch {
-            new Notice("Couldn’t create that directory.");
-        }
-    }
-}
-
 function createDirectorySetting(
     containerEl: HTMLElement,
     tabInstance: SystemSculptSettingTab,
@@ -55,7 +37,7 @@ function createDirectorySetting(
                     new Notice("Use a vault-relative path without '..' or a leading slash.");
                     return;
                 }
-                return handleDirectoryChange(tabInstance, value, settingKey);
+                return plugin.getSettingsManager().updateSettings({ [settingKey]: value });
             }, { commitOn: "blur", errorMessage: "Couldn’t save that directory." });
 
             attachFolderSuggester(

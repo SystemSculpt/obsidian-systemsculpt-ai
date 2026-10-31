@@ -51,9 +51,7 @@ describe("DirectoryManager", () => {
   it.each(directorySettingKeys)("defers %s setting changes until a writer ensures the current path", async (key) => {
     await manager.initialize();
     for (const value of ["", "  ", "Unused/Output", "  Current//Output/ "]) {
-      // The settings manager persists the value before notifying DirectoryManager.
       plugin.settings[key] = value;
-      await manager.handleDirectorySettingChange(key, value);
     }
 
     expect(app.vault.createFolder).not.toHaveBeenCalled();
@@ -194,6 +192,26 @@ describe("DirectoryManager", () => {
     expect(app.vault.adapter.stat).not.toHaveBeenCalled();
   });
 
+  it.each(["chatsDirectory", "recordingsDirectory"] as const)("checks and ensures the effective default for a cleared %s", async (key) => {
+    plugin.settings[key] = "  ";
+    plugin.settings.extractionsDirectory = "";
+    const fallback = key === "chatsDirectory" ? "SystemSculpt/Chats" : "SystemSculpt/Recordings";
+    (app.vault.getAbstractFileByPath as jest.Mock).mockImplementation((path: string) => (
+      path === fallback ? new TFile({ path, extension: "" }) : null
+    ));
+
+    await expect(manager.verifyDirectories()).resolves.toEqual({
+      valid: false,
+      issues: [`Directory "${fallback}" is blocked by a file at "${fallback}"`],
+    });
+    await expect(manager.repair()).resolves.toBe(false);
+    expect(app.vault.createFolder).not.toHaveBeenCalled();
+
+    (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(null);
+    await expect(manager.ensureDirectoryByKey(key)).resolves.toBe(fallback);
+    expect(app.vault.createFolder).toHaveBeenCalledWith(fallback);
+  });
+
   it("accepts missing outputs underneath existing folders", async () => {
     (app.vault.getAbstractFileByPath as jest.Mock).mockImplementation((path: string) => (
       path === "SystemSculpt" ? new TFolder({ path }) : null
@@ -264,7 +282,7 @@ describe("DirectoryManager", () => {
   });
 
   it.each(["exists failure", "stat failure", "missing stat"])("does not mistake %s for a valid missing directory", async (failure) => {
-    plugin.settings.recordingsDirectory = "";
+    plugin.settings.recordingsDirectory = plugin.settings.chatsDirectory;
     plugin.settings.extractionsDirectory = "";
     if (failure === "exists failure") {
       (app.vault.adapter.exists as jest.Mock).mockRejectedValue(new Error("permission denied"));

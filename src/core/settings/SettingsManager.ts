@@ -364,6 +364,7 @@ export class SettingsManager {
    */
   private async migrateValidateWithRollback(
     raw: Record<string, unknown>,
+    normalize: (settings: Record<string, unknown>) => SystemSculptSettings = settings => this.validateSettings(settings),
   ): Promise<SystemSculptSettings> {
     const fromVersion = readSchemaVersion(raw);
     try {
@@ -376,7 +377,7 @@ export class SettingsManager {
       if (!result.future && result.fromVersion < CURRENT_SCHEMA_VERSION && this.hasMeaningfulData(raw)) {
         await this.writePreMigrationBackup(raw, fromVersion);
       }
-      const migrated = this.validateSettings(result.settings);
+      const migrated = normalize(result.settings);
       if (!result.future) {
         this.seedLegacyRecorderPreference(legacyRecorderPreference, migrated);
       }
@@ -387,7 +388,7 @@ export class SettingsManager {
         // Safe fallback = pre-versioning behavior (defaults + raw, normalized).
         // The user's original data is preserved both here (raw wins) and in the
         // pre-migration backup written above.
-        return this.validateSettings(raw);
+        return normalize(raw);
       } catch {
         // Last resort: pure defaults. Data is safe in the pre-migration backup.
         return { ...DEFAULT_SETTINGS };
@@ -906,28 +907,37 @@ export class SettingsManager {
     if (!this.isInitialized) {
       await this.loadSettingsNow(); // Ensure settings are loaded before update
     }
-    const backupsWereEnabled = this.settings.automaticBackupsEnabled;
     const newSettings = typeof update === "function" ? update(this.settings) : update;
+    return this.persistUpdatedSettingsNow(this.validateSettings(this.mergeSettingsUpdate(newSettings)));
+  }
+
+  private mergeSettingsUpdate(newSettings: Partial<SystemSculptSettings>): SystemSculptSettings {
     // Merge new settings into the manager's internal copy
     const updatedSettings = { ...this.settings, ...newSettings };
     if (newSettings.textExecutionBackend !== undefined && newSettings.textExecutionBackendExplicit === undefined) {
       updatedSettings.textExecutionBackendExplicit = true;
     }
-    if (updatedSettings.licenseKey?.trim() !== this.settings.licenseKey?.trim()) {
+    const nextLicenseKey = typeof updatedSettings.licenseKey === "string"
+      ? updatedSettings.licenseKey : DEFAULT_SETTINGS.licenseKey;
+    if (nextLicenseKey.trim() !== this.settings.licenseKey.trim()) {
       updatedSettings.phoneCapturesLinked = false;
     }
     // The chats-folder list only grows. Chats stay in the folder they were
     // created in and attachment cleanup scans every listed folder, so neither
     // a concurrent append nor a restored backup may drop an entry.
-    if (Array.isArray(newSettings.knownChatsDirectories)) {
-      updatedSettings.knownChatsDirectories = [
-        ...(this.settings.knownChatsDirectories ?? []),
-        ...newSettings.knownChatsDirectories,
-      ];
-    }
-    
-    // Validate the merged settings before persistence.
-    this.settings = this.validateSettings(updatedSettings);
+    const incomingDirectories = Array.isArray(newSettings.knownChatsDirectories)
+      ? newSettings.knownChatsDirectories
+      : [typeof updatedSettings.chatsDirectory === "string" ? updatedSettings.chatsDirectory : DEFAULT_SETTINGS.chatsDirectory];
+    updatedSettings.knownChatsDirectories = [
+      ...(this.settings.knownChatsDirectories ?? []),
+      ...incomingDirectories,
+    ];
+    return updatedSettings;
+  }
+
+  private async persistUpdatedSettingsNow(settings: SystemSculptSettings): Promise<boolean> {
+    const backupsWereEnabled = this.settings.automaticBackupsEnabled;
+    this.settings = settings;
 
     // Synchronize the plugin's internal settings representation BEFORE persisting.
     // This ensures that saveSettings() – which relies on `_internal_settings_systemsculpt_plugin`
@@ -948,13 +958,19 @@ export class SettingsManager {
   /**
    * Apply externally-sourced settings (a restored backup or an import) by first
    * running them through the SAME versioned migrator the load path uses, then
-   * persisting via updateSettings. Without this, restoring an OLD backup would
+   * persisting via the same update merge/save boundary. Without this, restoring
+   * an OLD backup would
    * write a stale schema back to disk and could resurrect the lost-settings /
    * dead-plugin class this versioning exists to prevent (#212).
    */
   async restoreFromExternalSettings(raw: unknown): Promise<void> {
-    const migrated = await this.migrateValidateWithRollback(this.asSettingsRecord(raw));
-    await this.updateSettings({ ...migrated, lastValidated: 0 });
+    await this.enqueuePersistence(async () => {
+      if (!this.isInitialized) await this.loadSettingsNow();
+      const restored = await this.migrateValidateWithRollback(this.asSettingsRecord(raw), migrated => (
+        this.validateSettings(this.mergeSettingsUpdate({ ...migrated, lastValidated: 0 }))
+      ));
+      await this.persistUpdatedSettingsNow(restored);
+    });
   }
 
   /**

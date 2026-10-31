@@ -290,14 +290,63 @@ describe("AutomaticBackupService", () => {
       expect(mockPlugin.app.vault.adapter.write).not.toHaveBeenCalled();
     });
 
-    it("creates the first backup when the backup directory cannot be listed", async () => {
-      mockPlugin.app.vault.adapter.list.mockRejectedValue(new Error("Directory missing"));
+    it("creates the first backup only when the backup directory is confirmed absent", async () => {
+      mockPlugin.app.vault.adapter.exists.mockResolvedValue(false);
 
       service.start();
       await jest.advanceTimersByTimeAsync(0);
 
       expect(mockPlugin.app.vault.adapter.write).toHaveBeenCalledTimes(1);
       expect(Notice).not.toHaveBeenCalled();
+    });
+
+    it.each(["exists", "list", "stat"])("defers the backup when directory %s fails rather than overwriting a recent snapshot", async (operation) => {
+      await service.createAutomaticBackup();
+      mockPlugin.app.vault.adapter.write.mockClear();
+      mockPlugin.app.vault.adapter[operation].mockRejectedValueOnce(new Error("Temporary I/O error"));
+
+      service.start();
+      await jest.advanceTimersByTimeAsync(0);
+      expect(mockPlugin.app.vault.adapter.write).not.toHaveBeenCalled();
+
+      await jest.advanceTimersByTimeAsync(60 * 60 * 1000);
+      expect(mockPlugin.app.vault.adapter.write).not.toHaveBeenCalled();
+      expect(Notice).not.toHaveBeenCalled();
+    });
+
+    it("ignores a future backup mtime rather than suspending automatic history", async () => {
+      mockPlugin.app.vault.adapter.list.mockResolvedValue({
+        files: [".systemsculpt/settings-backups/settings-backup-2025-03-15.json"], folders: [],
+      });
+      mockPlugin.app.vault.adapter.stat.mockResolvedValue({ mtime: Date.now() + 60 * 24 * 60 * 60 * 1000 });
+
+      service.start();
+      await jest.advanceTimersByTimeAsync(0);
+
+      expect(mockPlugin.app.vault.adapter.write).toHaveBeenCalledTimes(1);
+    });
+
+    it.each(["disabled", "stopped", "unloading"])("does not write or prune after being %s while a scan is pending", async (transition) => {
+      let resolveScan!: (files: { files: string[]; folders: string[] }) => void;
+      mockPlugin.app.vault.adapter.list.mockImplementationOnce(() => new Promise(resolve => { resolveScan = resolve; }));
+      service.start();
+      await jest.advanceTimersByTimeAsync(0);
+
+      if (transition === "disabled") {
+        const settings = mockPlugin.getSettingsManager().getSettings();
+        mockPlugin.getSettingsManager = () => ({ getSettings: () => ({ ...settings, automaticBackupsEnabled: false }) });
+        service.start();
+      } else if (transition === "stopped") {
+        service.stop();
+      } else {
+        mockPlugin.isPluginUnloading = () => true;
+      }
+      resolveScan({ files: [], folders: [] });
+      await jest.advanceTimersByTimeAsync(0);
+
+      expect(mockPlugin.app.vault.adapter.write).not.toHaveBeenCalled();
+      expect(mockPlugin.app.vault.adapter.remove).not.toHaveBeenCalled();
+      expect(mockPlugin.storage.deleteFile).not.toHaveBeenCalled();
     });
 
     it("handles unreadable settings without arming a timer", () => {

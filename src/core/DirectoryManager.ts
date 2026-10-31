@@ -3,6 +3,7 @@ import { normalizeVaultRelativePath } from "../utils/vaultPathUtils";
 import type SystemSculptPlugin from "../main";
 import type { SystemSculptSettings } from "../types";
 import { createVaultFolder } from "../utils/vaultFolders";
+import { DEFAULT_DIRS } from "./settings/defaultDirectories";
 
 // Only folders the plugin writes to. The retired saved-chats and attachments
 // settings are never created, and an existing folder of theirs is left alone.
@@ -41,14 +42,6 @@ export class DirectoryManager {
 
   public async ensureDirectoryByPath(dirPath: string): Promise<void> {
     await this.createDirectory(dirPath);
-  }
-
-  /** Settings persistence owns the new value; no output is being written yet. */
-  public handleDirectorySettingChange(
-    _key: DirectorySettingKey,
-    _newPath: string,
-  ): Promise<void> {
-    return Promise.resolve();
   }
 
   public async verifyDirectories(): Promise<{ valid: boolean; issues: string[] }> {
@@ -101,15 +94,15 @@ export class DirectoryManager {
   private configuredDirectories(): string[] {
     return [...new Set(
       DIRECTORY_SETTING_KEYS
-        .map((key) => this.plugin.settings[key])
-        .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
-        .map((path) => this.normalizedDirectory(path)),
+        .filter((key) => key !== "extractionsDirectory" || this.plugin.settings[key]?.trim())
+        .map((key) => this.directorySetting(key)),
     )];
   }
 
   private directorySetting(key: DirectorySettingKey): string {
-    const value = this.plugin.settings[key];
-    if (typeof value !== "string" || !value.trim()) {
+    const value = this.plugin.settings[key]?.trim()
+      || (key === "extractionsDirectory" ? "" : DEFAULT_DIRS[key]);
+    if (!value) {
       throw new Error(`No path configured for: ${key}`);
     }
     return this.normalizedDirectory(value);
