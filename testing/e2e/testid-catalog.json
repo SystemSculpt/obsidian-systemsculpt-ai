@@ -130,6 +130,7 @@
     "embeddings.pending-files",
     "embeddings.pending.close",
     "embeddings.pending.copy-paths",
+    "embeddings.pending.open-file",
     "embeddings.pending.retry",
     "embeddings.pending.search",
     "embeddings.refresh",

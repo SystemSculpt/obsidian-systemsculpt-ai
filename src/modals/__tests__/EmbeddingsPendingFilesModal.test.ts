@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import { App, Notice, TFile } from "obsidian";
+import { App, Notice, requestUrl, TFile } from "obsidian";
 import { EmbeddingsPendingFilesModal } from "../EmbeddingsPendingFilesModal";
 import { PendingEmbeddingFile } from "../../services/embeddings/EmbeddingsManager";
 
@@ -75,9 +75,15 @@ describe("EmbeddingsPendingFilesModal", () => {
   let plugin: any;
   let modal: EmbeddingsPendingFilesModal;
   let mockManager: any;
+  let originalClipboard: PropertyDescriptor | undefined;
+  const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 
   beforeEach(() => {
     jest.clearAllMocks();
+    originalClipboard = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText: jest.fn().mockResolvedValue(undefined) }, configurable: true, writable: true,
+    });
     mockManager = createMockManager();
     plugin = createMockPlugin(mockManager);
     modal = new EmbeddingsPendingFilesModal(plugin.app, plugin);
@@ -86,6 +92,14 @@ describe("EmbeddingsPendingFilesModal", () => {
       hostOnOpen();
       return (modal as any).pendingLoad;
     };
+  });
+
+  afterEach(() => {
+    modal.onClose();
+    modal.modalEl.remove();
+    if (originalClipboard) Object.defineProperty(navigator, "clipboard", originalClipboard);
+    else Reflect.deleteProperty(navigator, "clipboard");
+    jest.restoreAllMocks();
   });
 
   describe("initialization", () => {
@@ -217,12 +231,13 @@ describe("EmbeddingsPendingFilesModal", () => {
     });
   });
 
-  it("keeps one list listener through 30 whole-list filter passes", async () => {
-    const pending = Array.from({ length: 250 }, (_, index) => ({
+  it("virtualizes every filter pass without network calls, vault scans or new row listeners", async () => {
+    const pending = Array.from({ length: 10_000 }, (_, index) => ({
       path: `notes/file-${index}.md`, reason: "missing" as const, lastModified: NOW,
     }));
     mockManager.listPendingFiles.mockResolvedValue(pending);
     const addListener = jest.spyOn(EventTarget.prototype, "addEventListener");
+    const fetch = jest.spyOn(globalThis, "fetch");
     await modal.onOpen();
     const list = modal.modalEl.querySelector<HTMLElement>(".ss-modal__list")!;
     const search = modal.modalEl.querySelector<HTMLInputElement>('input[type="search"]')!;
@@ -231,23 +246,206 @@ describe("EmbeddingsPendingFilesModal", () => {
     for (let pass = 0; pass < 30; pass++) {
       search.value = pass % 2 === 0 ? "notes" : "file";
       search.dispatchEvent(new Event("input", { bubbles: true }));
-      expect(list.querySelectorAll(".ss-modal__item")).toHaveLength(250);
+      expect(list.querySelectorAll(".ss-modal__item").length).toBeLessThan(30);
+      expect(modal.modalEl.textContent).toContain("10000 files still need embeddings");
     }
     const registrations = addListener.mock.calls.filter((_, index) => {
       const target = addListener.mock.contexts[index] as HTMLElement;
       return target === list || target.matches?.(".ss-modal__item");
     });
     addListener.mockRestore();
-    expect(registrations.map(([type]) => type)).toEqual(["click"]);
+    expect(registrations.map(([type]) => type).sort()).toEqual(["click", "keydown", "scroll"]);
+    expect(mockManager.listPendingFiles).toHaveBeenCalledTimes(1);
+    for (const method of ["getMarkdownFiles", "getFiles", "getAllLoadedFiles", "read", "cachedRead"]) {
+      expect(plugin.app.vault[method]).not.toHaveBeenCalled();
+    }
+    expect(requestUrl).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+    fetch.mockRestore();
 
     detachedButton.click();
     expect(plugin.app.workspace.getLeaf().openFile).not.toHaveBeenCalled();
-    list.querySelectorAll<HTMLElement>(".ss-modal__item-description")[249]!.click();
+    list.querySelector<HTMLElement>(".ss-modal__item-description")!.click();
     expect(plugin.app.workspace.getLeaf().openFile).toHaveBeenCalledWith(
-      expect.objectContaining({ path: "notes/file-249.md" }),
+      expect.objectContaining({ path: "notes/file-0.md" }),
     );
     await Promise.resolve();
     modal.onClose();
+  });
+
+  describe("virtual list navigation", () => {
+    beforeEach(() => {
+      mockManager.listPendingFiles.mockResolvedValue(Array.from({ length: 10_000 }, (_, index) => ({
+        path: `notes/file-${index}.md`, reason: "missing" as const, lastModified: NOW,
+      })));
+    });
+
+    it("reaches the last result by scrolling and resets the range when filtering", async () => {
+      await modal.onOpen();
+      const list = modal.modalEl.querySelector<HTMLElement>(".ss-modal__list")!;
+      Object.defineProperty(list, "clientHeight", { value: 216 });
+      list.scrollTop = 9_999 * 72;
+      list.dispatchEvent(new Event("scroll"));
+      await nextFrame();
+      const last = list.querySelector<HTMLButtonElement>('[data-file-path="notes/file-9999.md"]')!;
+      expect(last).not.toBeNull();
+      expect(last.parentElement?.getAttribute("aria-posinset")).toBe("10000");
+      expect(last.parentElement?.getAttribute("aria-setsize")).toBe("10000");
+      list.scrollTop = 10 * 72;
+      list.dispatchEvent(new Event("scroll"));
+      await nextFrame();
+      list.scrollTop = 8 * 72;
+      list.dispatchEvent(new Event("scroll"));
+      await nextFrame();
+      const indices = Array.from(list.querySelectorAll<HTMLElement>('[role="listitem"]'), (row) => Number(row.dataset.fileIndex));
+      expect(indices).toEqual([...indices].sort((a, b) => a - b));
+      expect(list.querySelectorAll("button").length).toBeLessThan(10);
+
+      const search = modal.modalEl.querySelector<HTMLInputElement>('input[type="search"]')!;
+      search.value = "file-9999.md";
+      search.dispatchEvent(new Event("input", { bubbles: true }));
+      expect(list.scrollTop).toBe(0);
+      expect(list.querySelectorAll("button")).toHaveLength(1);
+      expect(list.querySelector('[role="listitem"]')?.getAttribute("aria-setsize")).toBe("1");
+      list.querySelector<HTMLButtonElement>("button")!.click();
+      expect(plugin.app.workspace.getLeaf().openFile).toHaveBeenCalledWith(
+        expect.objectContaining({ path: "notes/file-9999.md" }),
+      );
+    });
+
+    it("preserves focus on scroll and navigates beyond mounted rows with Tab and arrow keys", async () => {
+      document.body.append(modal.modalEl);
+      await modal.onOpen();
+      const list = modal.modalEl.querySelector<HTMLElement>(".ss-modal__list")!;
+      Object.defineProperty(list, "clientHeight", { value: 216 });
+      const first = list.querySelector<HTMLButtonElement>("button")!;
+      first.focus();
+      list.scrollTop = 9_999 * 72;
+      list.dispatchEvent(new Event("scroll"));
+      await nextFrame();
+      expect(document.activeElement).toBe(first);
+      expect(first.isConnected).toBe(true);
+      first.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+      expect((document.activeElement as HTMLElement).dataset.filePath).toBe("notes/file-1.md");
+      for (let index = 2; index <= 20; index++) {
+        document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }));
+        expect((document.activeElement as HTMLElement).dataset.filePath).toBe(`notes/file-${index}.md`);
+      }
+      document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: "End", bubbles: true }));
+      expect((document.activeElement as HTMLElement).dataset.filePath).toBe("notes/file-9999.md");
+      const leaveList = new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
+      document.activeElement!.dispatchEvent(leaveList);
+      expect(leaveList.defaultPrevented).toBe(false);
+      expect(list.querySelectorAll('button[tabindex="0"]')).toHaveLength(1);
+      document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: "Home", bubbles: true }));
+      expect((document.activeElement as HTMLElement).dataset.filePath).toBe("notes/file-0.md");
+      const leaveBackwards = new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true, cancelable: true });
+      document.activeElement!.dispatchEvent(leaveBackwards);
+      expect(leaveBackwards.defaultPrevented).toBe(false);
+      modal.onClose();
+      modal.modalEl.remove();
+    });
+
+    it("enters the full list in either direction from the surrounding controls", async () => {
+      document.body.append(modal.modalEl);
+      await modal.onOpen();
+      const footerCopy = modal.modalEl.querySelectorAll<HTMLButtonElement>('[data-testid="embeddings.pending.copy-paths"]')[1]!;
+      footerCopy.focus();
+      footerCopy.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true }));
+      expect((document.activeElement as HTMLElement).dataset.filePath).toBe("notes/file-9999.md");
+      document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+      expect((document.activeElement as HTMLElement).dataset.filePath).toBe("notes/file-9998.md");
+      const search = modal.modalEl.querySelector<HTMLInputElement>('input[type="search"]')!;
+      search.focus();
+      search.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
+      expect((document.activeElement as HTMLElement).dataset.filePath).toBe("notes/file-0.md");
+    });
+
+    it("coalesces scroll paints and cancels a queued paint on close", async () => {
+      await modal.onOpen();
+      const frame = jest.spyOn(window, "requestAnimationFrame").mockReturnValue(42);
+      const cancel = jest.spyOn(window, "cancelAnimationFrame");
+      const list = modal.modalEl.querySelector<HTMLElement>(".ss-modal__list")!;
+      list.dispatchEvent(new Event("scroll"));
+      list.dispatchEvent(new Event("scroll"));
+      expect(frame).toHaveBeenCalledTimes(1);
+      modal.onClose();
+      expect(cancel).toHaveBeenCalledWith(42);
+    });
+
+    it("copies the entire filtered snapshot, not just mounted rows", async () => {
+      await modal.onOpen();
+      const copy = modal.modalEl.querySelector<HTMLButtonElement>('[data-testid="embeddings.pending.copy-paths"]')!;
+      copy.click();
+      await Promise.resolve();
+      const paths = jest.mocked(navigator.clipboard.writeText).mock.calls[0]![0].split("\n");
+      expect(paths).toHaveLength(10_000);
+      expect(paths[9_999]).toBe("notes/file-9999.md");
+    });
+
+    it("tracks typography-probe resizing in layout pixels and preserves the logical scroll anchor", async () => {
+      const original = Object.getOwnPropertyDescriptor(window, "ResizeObserver");
+      let resize!: ResizeObserverCallback;
+      const disconnect = jest.fn();
+      const observe = jest.fn();
+      Object.defineProperty(window, "ResizeObserver", {
+        configurable: true,
+        value: jest.fn((callback: ResizeObserverCallback) => {
+          resize = callback;
+          return { observe, disconnect };
+        }),
+      });
+      let height = 96;
+      const layoutHeight = jest.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(function (this: HTMLElement) {
+        return this.matches(".ss-pending-files__measure") ? height : 0;
+      });
+      // Transforms affect these bounds, but must never affect scroll geometry.
+      const bounds = jest.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({ height: 69.84 } as DOMRect);
+      try {
+        document.body.append(modal.modalEl);
+        await modal.onOpen();
+        const list = modal.modalEl.querySelector<HTMLElement>(".ss-modal__list")!;
+        const content = list.querySelector<HTMLElement>(".ss-pending-files__content")!;
+        let viewport = 360;
+        Object.defineProperty(list, "clientHeight", { get: () => viewport });
+        resize([], {} as ResizeObserver);
+        expect(observe).toHaveBeenCalledWith(list);
+        expect(observe).toHaveBeenCalledWith(modal.modalEl.querySelector(".ss-pending-files__measure"));
+        expect(content.style.getPropertyValue("--ss-pending-list-height")).toBe("960000px");
+        list.scrollTop = 5_000 * height + height / 2;
+        height = 120;
+        resize([], {} as ResizeObserver);
+        expect(list.scrollTop).toBe(5_000 * height + height / 2);
+        expect(list.querySelector('[data-file-path="notes/file-5000.md"]')).not.toBeNull();
+        list.scrollTop = 10_000 * height - list.clientHeight;
+        height = 144;
+        viewport = 216; // Shrinks in the same delivery as the typography change.
+        resize([], {} as ResizeObserver);
+        expect(list.scrollTop).toBe(10_000 * height - list.clientHeight);
+        expect(list.querySelector('[data-file-path="notes/file-9999.md"]')).not.toBeNull();
+        viewport = 360;
+        list.scrollTop = 10_000 * height - viewport; // Browser clamps after viewport growth.
+        height = 156;
+        resize([], {} as ResizeObserver);
+        expect(list.scrollTop).toBe(10_000 * height - viewport);
+
+        const search = modal.modalEl.querySelector<HTMLInputElement>('input[type="search"]')!;
+        search.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
+        height = 168; // No observer delivery yet: keyboard navigation must refresh first.
+        document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: "End", bubbles: true }));
+        expect((document.activeElement as HTMLElement).dataset.filePath).toBe("notes/file-9999.md");
+        expect(content.style.getPropertyValue("--ss-pending-list-height")).toBe("1680000px");
+        modal.onClose();
+        expect(disconnect).toHaveBeenCalledTimes(1);
+        resize([], {} as ResizeObserver);
+        expect(list.querySelectorAll("button").length).toBeLessThan(10);
+      } finally {
+        layoutHeight.mockRestore();
+        bounds.mockRestore();
+        if (original) Object.defineProperty(window, "ResizeObserver", original);
+        else Reflect.deleteProperty(window, "ResizeObserver");
+      }
+    });
   });
 
   describe("empty states", () => {
@@ -346,15 +544,6 @@ describe("EmbeddingsPendingFilesModal", () => {
   });
 
   describe("copy functionality", () => {
-    beforeEach(() => {
-      Object.defineProperty(navigator, "clipboard", {
-        value: {
-          writeText: jest.fn().mockResolvedValue(undefined),
-        },
-        writable: true,
-      });
-    });
-
     it("copies all paths when no filter active and says so on the button", async () => {
       await modal.onOpen();
       const button = (modal as any).copyButtons[0] as HTMLButtonElement;

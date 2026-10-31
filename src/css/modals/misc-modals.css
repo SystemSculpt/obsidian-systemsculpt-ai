@@ -1,5 +1,52 @@
 /** Native settings modals and lightweight progress surfaces. */
 
+/* The pending-files list keeps the full scroll range without mounting every note. */
+.ss-modal__list.ss-pending-files__list {
+  display: block;
+  padding: 0;
+  overflow-anchor: none;
+}
+
+.ss-pending-files__content {
+  --ss-pending-list-height: 0px;
+  --ss-pending-row-height: 72px;
+  position: relative;
+  height: var(--ss-pending-list-height);
+}
+
+/* Include both interface-text lines, their line height, padding, border and gap.
+ * The probe's layout height is not affected by ancestor entrance transforms. */
+.ss-pending-files__measure {
+  position: absolute;
+  visibility: hidden;
+  pointer-events: none;
+  height: calc((var(--ss-text-base) + var(--ss-text-sm)) * var(--ss-leading-base) + var(--ss-space-2) * 2 + 3px);
+  min-height: var(--ss-touch-target);
+}
+
+.ss-pending-files__row {
+  --ss-pending-row-top: 0px;
+  position: absolute;
+  top: var(--ss-pending-row-top);
+  width: 100%;
+  height: var(--ss-pending-row-height);
+}
+
+.ss-pending-files__row > .ss-modal__item {
+  height: 100%;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: 0;
+}
+
+.ss-pending-files__row .ss-modal__item-title,
+.ss-pending-files__row .ss-modal__item-description {
+  flex-shrink: 0;
+  line-height: var(--ss-leading-base);
+}
+
+
 /* ------------------------------------------------------------------ *
  * Settings backup restore. Manual-backup form + focused backup choices.
  * ------------------------------------------------------------------ */
