@@ -27,6 +27,16 @@ Michael's 2026-09-05 direction revives this plugin as the SystemSculpt product s
   never read file contents or credentials. Chat states what runs where in one run
   line under the composer (backend, mode, model or hosted credits), each part a
   one-click menu; **Detect again** lives in its backend menu on desktop.
+- Codex catalog reads, native chats and Studio runs share one app-server for the
+  plugin session. Each caller owns its own native threads, event stream and approval
+  requests; stopping one turn never stops another caller's work. Completed standalone
+  runs unsubscribe their threads. After 60 seconds with no catalog read or active turn
+  (including a turn waiting on a tool), the process closes; plugin unload also drains
+  it. Retained chats then resume their native thread with a reconnect notice, without
+  replaying prior approval answers. Codex owns session-scoped grants: unsubscribing
+  detaches a caller but does not promise to clear native grants before native unload.
+  Reconnect and changed launch preferences drain active callers before starting a
+  replacement process; new connections never silently use the previous launch configuration.
 - Native chat turns belong to the plugin, not a view. Switching history, starting
   New chat, or closing a view leaves an admitted Claude Code or Codex turn running
   and saves its answer to the original Markdown transcript. Reopening attaches to

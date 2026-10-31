@@ -5,6 +5,7 @@ import { App } from 'obsidian';
 import { desktopHost } from '../../../platform/desktopOnly';
 import { ClaudeChatSession } from '../../../services/claude/ClaudeChatSession';
 import { CodexChatSession } from '../../../services/codex/CodexChatSession';
+import { disposeCodexSession, startCodexSession } from '../../../services/codex/CodexAppServer';
 import { AgentConversationRenderer } from '../AgentConversationRenderer';
 import { presentAgentConversation } from '../AgentConversationPresentation';
 
@@ -50,6 +51,7 @@ function nativeHost(agent: string, code: string, partial: boolean, options: { st
       if (message.method === 'initialize') send({ id: message.id, result: {} });
       if (message.method === 'account/read') send({ id: message.id, result: { account: { type: 'chatgpt' }, requiresOpenaiAuth: true } });
       if (message.method === 'thread/start') send({ id: message.id, result: { thread: { id: 'native-thread' } } });
+      if (message.method === 'turn/interrupt' || message.method === 'thread/unsubscribe') send({ id: message.id, result: {} });
       if (message.method === 'turn/start') {
         send({ id: message.id, result: { turn: { id: 'native-turn' } } });
         if (partial) send({ method: 'item/completed', params: { threadId: 'native-thread', turnId: 'native-turn', item: { id: 'reply', type: 'agentMessage', text: PARTIAL } } });
@@ -67,8 +69,8 @@ function nativeHost(agent: string, code: string, partial: boolean, options: { st
 
 const input = { conversationId: 'conversation', turnId: 'turn', message: { id: 'turn', role: 'user' as const, parts: [{ type: 'text' as const, text: 'Check my notes' }] } };
 let uuid: jest.SpyInstance;
-beforeEach(() => { jest.clearAllMocks(); uuid = jest.spyOn(window.crypto, 'randomUUID').mockReturnValue(SESSION); });
-afterEach(() => { uuid.mockRestore(); document.body.empty(); });
+beforeEach(() => { jest.clearAllMocks(); startCodexSession(); uuid = jest.spyOn(window.crypto, 'randomUUID').mockReturnValue(SESSION); });
+afterEach(async () => { await disposeCodexSession(); uuid.mockRestore(); document.body.empty(); });
 
 it.each(cases.flatMap(native => [false, true].map(partial => ({ ...native, partial }))))(
   'shows $code as a limit with the hosted action, preserving only real work (partial: $partial)',

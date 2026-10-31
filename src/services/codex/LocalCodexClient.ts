@@ -25,7 +25,7 @@ type CodexLiveConnection = {
 };
 const codexConnectionKey = (input: CodexRequest) => JSON.stringify([input.workingDirectory, resolveCodexOptions(input), 'approvalMode' in input ? input.approvalMode : undefined, input.dynamicTools]);
 
-/** Keep the loaded native thread (and its native approval scopes) alive only while this chat is attached. */
+/** Retain a loaded native thread while this chat is attached; Codex owns its approval scopes. */
 export class CodexChatTransport {
   connection?: CodexLiveConnection;
   closing: Promise<void> = Promise.resolve();
@@ -39,7 +39,7 @@ export class CodexChatTransport {
       await this.closing;
       if (signal.aborted) throw new Error('Codex run canceled.');
       if (this.connection && (this.connection.key !== codexConnectionKey(input) || this.connection.threadId !== input.threadId)) await this.close();
-      if (!this.connection && this.used) this.notice?.('Codex started a new native session. Previous session approvals no longer apply.');
+      if (!this.connection && this.used) this.notice?.('Codex reconnected to its native thread. Native session approvals may still apply.');
       this.used = true;
       return await runLocalCodex(input, signal, callbacks, this);
     } finally { this.running = false; }
@@ -47,7 +47,7 @@ export class CodexChatTransport {
   async close(): Promise<void> { const connection = this.connection; this.connection = undefined; if (connection) this.closing = connection.close(); await this.closing; }
 }
 
-/** A single native turn by default; chat may explicitly retain the native app-server. */
+/** A single native thread by default; chat may explicitly retain its loaded thread. */
 export async function runLocalCodex(input: CodexRequest, signal: AbortSignal, callbacks: CodexCallbacks, owner?: CodexChatTransport): Promise<CodexResult> {
   if (!input.prompt.trim() || input.prompt.length > 256_000) throw new Error('A Codex prompt must contain 1–256,000 characters.');
   if (signal.aborted) throw new Error('Codex run canceled.');
@@ -185,13 +185,14 @@ export async function runLocalCodex(input: CodexRequest, signal: AbortSignal, ca
           void completion.catch(() => {});
           signal.addEventListener('abort', abort, { once: true });
           let succeeded = false;
-          try { const result = await startTurn(); succeeded = true; return result; }
+          try { const result = await startTurn(); succeeded = true; connection!.idle?.(); return result; }
           finally { signal.removeEventListener('abort', abort); active = false; if (!succeeded) { connection!.close(); await connection!.closed; } }
         },
       };
       owner.connection = liveConnection;
     }
     const result = await startTurn();
+    connection.idle?.();
     retained = Boolean(owner && !closed);
     return result;
   } finally {
