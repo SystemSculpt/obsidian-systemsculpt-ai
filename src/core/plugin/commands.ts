@@ -6,6 +6,7 @@ import { toSafeVaultFileName } from "../../utils/vaultFileName";
 import { confirmSimilarNotesRebuild } from "../../modals/SimilarNotesRebuildConfirmation";
 import { resolveSurfaceDomContext } from "../ui/surface";
 import type { ChatMessage } from "../../types";
+import { toggleAudioRecorder } from "./ribbons";
 import { CHAT_VIEW_TYPE, SYSTEMSCULPT_STUDIO_VIEW_TYPE } from "./viewTypes";
 import { STUDIO_DISPLAY_NAME, STUDIO_PROJECT_EXTENSION } from "../../studio/types";
 import {
@@ -91,7 +92,7 @@ export class CommandManager {
     this.registerTranscribeAudioFile();
     this.registerAudioProcessorCommands();
     this.registerOpenSystemSculptSearch();
-    this.registerReloadObsidian();
+    this.registerCheckForUpdates();
     this.registerOpenSettings();
     this.registerAccountCommands();
     this.registerOpenCreditsBalance();
@@ -102,6 +103,40 @@ export class CommandManager {
     this.registerEmbeddingsDatabaseCommands();
     this.registerSystemSculptStudioCommands();
     this.registerSavePhoneCaptures();
+    this.registerResumeInboxTranscription();
+    this.registerResourceReport();
+  }
+
+  private registerResumeInboxTranscription(): void {
+    this.plugin.addCommand({
+      id: "resume-inbox-transcription",
+      name: "Resume inbox transcription",
+      checkCallback: (checking: boolean) => {
+        const service = this.plugin.getInboxTranscriptionService();
+        if (!service?.canResumeDeferredFiles()) return false;
+        if (!checking) void service.resumeDeferredFiles();
+        return true;
+      },
+    });
+  }
+
+  private registerResourceReport(): void {
+    this.plugin.addCommand({
+      id: "systemsculpt-copy-resource-report",
+      name: "Copy resource usage report",
+      callback: async () => {
+        const monitor = this.plugin.getResourceMonitor();
+        if (!monitor) {
+          new Notice("Resource monitor is still starting up.");
+          return;
+        }
+        await monitor.captureManualSample("command");
+        const { summary, path } = await monitor.exportSummaryReport();
+        if (!await tryCopyToClipboard(summary)) {
+          new Notice(path ? `Resource report saved to ${path}.` : "Unable to copy the report. See .systemsculpt/diagnostics.", 5000);
+        }
+      },
+    });
   }
 
   private registerSavePhoneCaptures() {
@@ -123,39 +158,7 @@ export class CommandManager {
       id: "toggle-audio-recorder",
       name: "Toggle audio recorder",
       callback: async () => {
-        const alreadyInitialized = this.plugin.hasRecorderService();
-        const logger = this.plugin.getLogger();
-
-        logger.debug("Toggle audio recorder command received", {
-          source: "CommandManager",
-          method: "toggleAudioRecorder",
-          metadata: {
-            alreadyInitialized
-          }
-        });
-
-        try {
-          const recorderService = this.plugin.getRecorderService();
-          await recorderService.toggleRecording();
-
-          logger.info("Audio recorder toggled", {
-            source: "CommandManager",
-            method: "toggleAudioRecorder",
-            metadata: {
-              alreadyInitialized
-            }
-          });
-        } catch (error) {
-          logger.error("Failed to toggle audio recorder", error, {
-            source: "CommandManager",
-            method: "toggleAudioRecorder",
-            metadata: {
-              alreadyInitialized
-            }
-          });
-
-          new Notice("Unable to toggle the audio recorder.", 8000);
-        }
+        await toggleAudioRecorder(this.plugin);
       },
     });
   }
@@ -266,10 +269,6 @@ export class CommandManager {
   }
 
   private registerAudioProcessorCommands() {
-    void import("../../features/audio-processor")
-      .then(({ resumeAudioProcessorJobs }) => resumeAudioProcessorJobs(this.plugin))
-      .catch(() => undefined);
-
     this.plugin.addCommand({
       id: "open-audio-processor",
       name: "Open audio processor",
@@ -370,13 +369,11 @@ export class CommandManager {
     });
   }
 
-  private registerReloadObsidian() {
+  private registerCheckForUpdates(): void {
     this.plugin.addCommand({
-      id: "reload-obsidian",
-      name: "Reload Obsidian",
-      callback: () => {
-        resolveSurfaceDomContext().window.location.reload();
-      },
+      id: "check-for-updates",
+      name: "Check for updates",
+      callback: () => void this.plugin.getPluginUpdateService().checkForUpdates({ manual: true }),
     });
   }
 

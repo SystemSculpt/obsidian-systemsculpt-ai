@@ -133,6 +133,23 @@ describe("TranscriptionService", () => {
     await Promise.all([firstTask.promise, secondTask.promise]);
   });
 
+  it("clears a lazy direct-client singleton only for its owning plugin", async () => {
+    const plugin = { app: {} } as any;
+    const pending = deferred<typeof completedResult>();
+    mockStart.mockReturnValueOnce(pending.promise);
+    const service = TranscriptionService.getInstance(plugin);
+    const task = service.start({ filePath: "pending.webm", destination: "note" });
+    TranscriptionService.clearInstance(plugin);
+    expect(mockInstances[0].abort).toHaveBeenCalledTimes(1);
+    expect(TranscriptionService.getInstance(plugin)).not.toBe(service);
+    const replacement = { app: {} } as any;
+    const current = TranscriptionService.getInstance(replacement);
+    TranscriptionService.clearInstance(plugin);
+    expect(TranscriptionService.getInstance(replacement)).toBe(current);
+    pending.resolve(completedResult);
+    await task.promise;
+  });
+
   it("aborts every active coordinator on plugin unload", async () => {
     const first = deferred<typeof completedResult>();
     const second = deferred<typeof completedResult>();

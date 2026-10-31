@@ -118,6 +118,21 @@ describe("LifecycleCoordinator", () => {
       expect(completed).toEqual(["done"]);
     });
 
+    it("does not admit later tasks after plugin unload begins", async () => {
+      let stopped = false;
+      const later = jest.fn();
+      coordinator = new LifecycleCoordinator({
+        tracer: mockTracer,
+        logger: mockLogger,
+        shouldStop: () => stopped,
+      });
+      coordinator.registerTask("deferred", { id: "first", run: async () => { stopped = true; } });
+      coordinator.registerTask("deferred", { id: "later", run: later });
+      await coordinator.runPhase("deferred");
+      expect(later).not.toHaveBeenCalled();
+      expect(mockTracer.startPhase).toHaveBeenCalledTimes(1);
+    });
+
     it("does nothing when phase has no tasks", async () => {
       await expect(coordinator.runPhase("bootstrap")).resolves.not.toThrow();
     });

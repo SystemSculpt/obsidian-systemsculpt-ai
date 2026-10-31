@@ -54,6 +54,7 @@ interface LifecycleCoordinatorOptions {
   tracer: InitializationTracer;
   logger: PluginLogger;
   onTaskFailure?: (event: LifecycleFailureEvent) => void;
+  shouldStop?: () => boolean;
 }
 
 export class LifecycleCoordinator {
@@ -71,6 +72,7 @@ export class LifecycleCoordinator {
   async runPhase(phase: LifecyclePhase): Promise<void> {
     const tasks = this.phases.get(phase) ?? [];
     for (const task of tasks) {
+      if (this.options.shouldStop?.()) return;
       const taskId = task.id;
       const optional = task.optional ?? false;
       const phaseDefaults = PHASE_DIAGNOSTIC_DEFAULTS[phase] ?? PHASE_DIAGNOSTIC_DEFAULTS.bootstrap;
