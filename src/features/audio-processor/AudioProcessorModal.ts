@@ -1,6 +1,7 @@
 import { Notice } from "obsidian";
 import type SystemSculptPlugin from "../../main";
 import { AudioSourcePicker, type AudioSourceSelection } from "../../components/AudioSourcePicker";
+import { SYSTEMSCULPT_LEGAL_URLS } from "../../constants/externalServices";
 import { StandardModal } from "../../core/ui/modals/standard/StandardModal";
 import {
   createUiAction,
@@ -187,12 +188,30 @@ export class AudioProcessorModal extends StandardModal {
       cls: "ss-audio-processor__youtube-status",
       attr: { id: `${inputId}-status` },
     });
+    this.renderYouTubeLegalLine(field);
     this.registerDomEvent(this.youtubeInputEl, "input", () => {
       this.youtubeUrl = this.youtubeInputEl?.value ?? "";
       this.renderYouTubeStatus();
       this.syncProcessButton();
     });
     this.renderYouTubeStatus();
+  }
+
+  /** YouTube API Services Developer Policies III.A.1-2: shown before use. */
+  private renderYouTubeLegalLine(container: HTMLElement): void {
+    const line = container.createDiv({
+      cls: "ss-audio-processor__field-hint ss-audio-processor__youtube-legal",
+      text: "Uses YouTube API Services · ",
+    });
+    const createLink = (text: string, href: string): void => {
+      line.createEl("a", {
+        text,
+        attr: { href, target: "_blank", rel: "noopener noreferrer" },
+      });
+    };
+    createLink("YouTube Terms", SYSTEMSCULPT_LEGAL_URLS.YOUTUBE_TERMS);
+    line.append(" · ");
+    createLink("Privacy", SYSTEMSCULPT_LEGAL_URLS.PRIVACY_DATA_COLLECTED);
   }
 
   private renderOutputPreset(container: HTMLElement): void {

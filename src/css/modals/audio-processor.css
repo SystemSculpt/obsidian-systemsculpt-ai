@@ -115,6 +115,16 @@
   font-size: var(--ss-text-xs);
 }
 
+.ss-audio-processor__youtube-legal a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.ss-audio-processor__youtube-legal a:hover {
+  color: var(--ss-ink);
+}
+
 @container ss-surface (max-width: 560px) {
   .ss-audio-processor__output-options {
     grid-template-columns: 1fr;
