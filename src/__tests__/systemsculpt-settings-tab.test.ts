@@ -138,6 +138,23 @@ describe("SystemSculptSettingTab native layout", () => {
     expect("getSettingDefinitions" in SystemSculptSettingTab.prototype).toBe(false);
   });
 
+  it("does not shadow host SettingTab methods that Obsidian 1.14 calls", () => {
+    // Obsidian 1.14 opens a tab with tab.renderTab(), which calls display()
+    // only when it is not overridden. Shadowing it rendered a blank page (#579).
+    const hostMethods = [
+      "renderTab",
+      "update",
+      "getControlBinding",
+      "getControlValue",
+      "setControlValue",
+      "refreshDomState",
+      "getElementForDefinition",
+      "getDefinitionForElement",
+    ];
+    const own = Object.getOwnPropertyNames(SystemSculptSettingTab.prototype);
+    expect(own.filter((name) => hostMethods.includes(name))).toEqual([]);
+  });
+
   it("does not inject legacy style tag", async () => {
     await renderTab();
     expect(document.getElementById("systemsculpt-settings-styles")).toBeNull();
