@@ -65,6 +65,7 @@
   grid-template-rows: auto auto;
   align-items: center;
   justify-content: start;
+  height: auto;
   min-height: 72px;
   padding: var(--ss-space-2) var(--ss-space-3);
   text-align: left;
@@ -85,6 +86,7 @@
   color: var(--ss-ink-muted);
   font-size: var(--ss-text-xs);
   line-height: var(--ss-leading-base);
+  white-space: normal;
 }
 
 .ss-audio-processor__section-title,
