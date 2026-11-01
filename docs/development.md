@@ -76,7 +76,7 @@ transcript persistence, approvals, queue and recovery controls, and
 restored-history UI with strict console, randomized order, open-handle
 detection, adversarial race cases, and a global coverage floor over the
 critical ChatView modules (the small identity and tool-execution modules stay
-at 100%). check:ci is the exhaustive post-merge and release contract and adds strict mobile
+at 100%). check:ci is the exhaustive post-merge contract and adds strict mobile
 interaction, unit, embeddings, and already-built integration suites.
 Source CI partitions are disjoint: the mobile CI subset excludes suites owned
 by the critical coverage gate, and the unit remainder excludes both focused
@@ -106,7 +106,8 @@ is no pre-push suite; npm install/ci removes the obsolete installed hook while
 preserving custom hooks and the pre-commit staged-secret scan.
 
 Release publication is independent: `release: published` rebuilds and attests
-exact tag bytes, and release:plugin still requires check:ci. No provider
+exact tag bytes. release:plugin does not rerun check:ci: the tagged main
+commit already ran it post-merge. No provider
 credentials are used. Randomized Jest gates print their seed in the log.
 Successful release validation still records SHA-256, size, Git revision and
 build environment in `.cache/ci-evidence/release-provenance-<version>.json`;
@@ -128,7 +129,7 @@ bytes unchanged.
    Its manifest, compiled styles.css, settings, Chat, Similar Notes, and Studio
    surfaces are checked as the exact three-file plugin artifact.
 4. Full unit, managed API fixture, embeddings, integration, artifact, and
-   release tests run through npm run check:ci after merge on main and before release.
+   release tests run through npm run check:ci after merge on main.
 5. When explicitly requested, the exact artifact may also be explored on real
    Obsidian Mobile hardware. Note host OS and Obsidian versions, phone
    and tablet coverage, orientation, software keyboard, themes, enlarged
@@ -328,8 +329,8 @@ Do not run either two-phase journey concurrently.
 npm run release:plugin
 ~~~
 
-The release command first requires the complete check:ci contract. It then
-verifies version consistency, rebuilds the production artifact, and validates
+The release command does not rerun check:ci (main CI already ran it on the
+tagged commit; fix or revert a red main first). It verifies version consistency, rebuilds the production artifact, and validates
 exactly manifest.json, main.js, and styles.css. It rejects local API bases,
 retired client AI runtimes, provider SDKs, and inline source maps. Publishing
 still requires explicit operator approval. The command only succeeds from a

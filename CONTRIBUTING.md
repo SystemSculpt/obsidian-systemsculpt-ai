@@ -23,7 +23,8 @@ npm run test:related -- <changed src files>
 
 Run the loop once for the changed area, using the focused test command instead
 of the full suite. Add compiled integration only for bundle/composition
-changes. `release:plugin` retains the full `check:ci` gate before release.
+changes. `release:plugin` builds and validates the artifact without rerunning
+`check:ci`; main CI already ran it on the tagged commit.
 
 ## Conventions
 
