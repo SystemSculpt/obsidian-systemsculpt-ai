@@ -295,7 +295,7 @@ export class SystemSculptSettingTab extends PluginSettingTab {
     if (anchor && config?.anchor) anchor.dataset.ssTitle = config.anchor.title;
   }
 
-  private renderTab(tabId: string): void {
+  private renderSettingsPanel(tabId: string): void {
     this.syncPhoneCaptureVisibility();
     const panel = this.contentContainerEl?.querySelector<HTMLElement>(`[data-tab="${tabId}"]`);
     const config = this.tabConfigs.find((tab) => tab.id === tabId);
@@ -451,7 +451,7 @@ export class SystemSculptSettingTab extends PluginSettingTab {
       },
     });
 
-    this.renderTab(this.activeTabId);
+    this.renderSettingsPanel(this.activeTabId);
 
     this.searchResultsContainerEl = layout.createDiv({
       cls: "ss-settings-search-results",
@@ -522,13 +522,13 @@ export class SystemSculptSettingTab extends PluginSettingTab {
    */
   private activateTab(tabId: string) {
     this.tabsHandle?.activate(tabId);
-    this.renderTab(tabId);
+    this.renderSettingsPanel(tabId);
   }
 
   private handleTabChange(tabId: string): void {
     if (!this.contentContainerEl) return;
     this.activeTabId = tabId;
-    this.renderTab(tabId);
+    this.renderSettingsPanel(tabId);
     this.searchIndexDirty = true;
   }
 
