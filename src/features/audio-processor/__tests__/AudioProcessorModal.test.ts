@@ -105,6 +105,29 @@ describe("AudioProcessorModal", () => {
     expect(modal.modalEl.textContent).toContain("YouTube video ready");
   });
 
+  it("links the YouTube Terms and SystemSculpt Privacy under the YouTube link field", () => {
+    const modal = new AudioProcessorModal(createPlugin(), { initialTab: "youtube" });
+    document.body.appendChild(modal.modalEl);
+    modal.onOpen();
+
+    const line = modal.modalEl.querySelector<HTMLElement>(
+      ".ss-audio-processor__youtube-field .ss-audio-processor__youtube-legal",
+    );
+    expect(line?.textContent).toBe("Uses YouTube API Services · YouTube Terms · Privacy");
+
+    const links = Array.from(line!.querySelectorAll<HTMLAnchorElement>("a"));
+    expect(links.map((link) => link.getAttribute("href"))).toEqual([
+      "https://www.youtube.com/t/terms",
+      "https://systemsculpt.com/privacy#data-collected",
+    ]);
+    for (const link of links) {
+      expect(link.target).toBe("_blank");
+      expect(link.rel).toBe("noopener noreferrer");
+    }
+
+    modal.onClose();
+  });
+
   it("shares one preset selector across Audio and YouTube and passes the one-job choice", async () => {
     const process = jest.fn(() => new Promise(() => undefined));
     const modal = new AudioProcessorModal(

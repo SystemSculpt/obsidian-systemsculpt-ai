@@ -28,4 +28,6 @@ export const SYSTEMSCULPT_WEBSITE = {
 export const SYSTEMSCULPT_LEGAL_URLS = {
   TERMS: "https://systemsculpt.com/terms",
   PRIVACY: "https://systemsculpt.com/privacy",
+  PRIVACY_DATA_COLLECTED: "https://systemsculpt.com/privacy#data-collected",
+  YOUTUBE_TERMS: "https://www.youtube.com/t/terms",
 } as const;
