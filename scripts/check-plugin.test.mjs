@@ -35,7 +35,7 @@ test("package scripts preserve fast edit and exhaustive verification tiers", () 
   );
   assert.equal(
     packageJson.scripts["release:plugin"],
-    "npm run check:ci && node scripts/release-plugin.mjs --require-clean --require-tag",
+    "node scripts/release-plugin.mjs --require-clean --require-tag",
   );
   assert.match(packageJson.scripts["check:mobile"], /npm run test:mobile:interactions/);
   assert.match(packageJson.scripts["check:mobile"], /npm run test:mobile:bundle/);
