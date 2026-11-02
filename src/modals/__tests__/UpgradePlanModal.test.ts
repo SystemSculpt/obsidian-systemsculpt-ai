@@ -461,6 +461,7 @@ describe("UpgradePlanModal", () => {
     const plugin = createPlugin();
     const showAccountConnectOutcome = jest.fn(() => true);
     plugin.settingsTab = { showAccountConnectOutcome };
+    jest.spyOn(document, "hasFocus").mockReturnValue(true);
 
     const modal = UpgradePlanModal.openOnce(plugin);
     presentAccountConnectOutcome(plugin, outcome);
@@ -479,8 +480,35 @@ describe("UpgradePlanModal", () => {
     expect(Notice).toHaveBeenNthCalledWith(1,
       "The sign-in session expired. Start sign-in again from SystemSculpt settings.", 10_000);
     expect(Notice).toHaveBeenNthCalledWith(2,
-      "Signed in as user@example.test. Your account has no active plan yet. Choose a plan to enable SystemSculpt AI features.", 6_000);
+      "Signed in to SystemSculpt as user@example.test. Your account has no active plan yet. Choose a plan to enable SystemSculpt AI features.", 6_000);
     expect(document.querySelector(".ss-upgrade-plan-modal")).toBeNull();
+    jest.restoreAllMocks();
+  });
+
+  it("keeps the result notice up while the person is away from Obsidian, then times it from their return", () => {
+    jest.useFakeTimers();
+    const hasFocus = jest.spyOn(document, "hasFocus").mockReturnValue(false);
+    const setTimeoutSpy = jest.spyOn(window, "setTimeout").mockImplementation(((callback: () => void, ms: number) =>
+      setTimeout(callback, ms)) as never);
+    const hide = jest.fn();
+    (Notice as unknown as jest.Mock).mockImplementationOnce(() => ({ hide }));
+    try {
+      presentAccountConnectOutcome(createPlugin(), { kind: "signed-in", name: null, email: "user@example.test", licenseValid: true });
+      expect(Notice).toHaveBeenCalledWith("Signed in to SystemSculpt as user@example.test.", 0);
+
+      jest.advanceTimersByTime(60_000);
+      expect(hide).not.toHaveBeenCalled();
+
+      window.dispatchEvent(new window.Event("focus"));
+      jest.advanceTimersByTime(5_999);
+      expect(hide).not.toHaveBeenCalled();
+      jest.advanceTimersByTime(1);
+      expect(hide).toHaveBeenCalledTimes(1);
+    } finally {
+      setTimeoutSpy.mockRestore();
+      hasFocus.mockRestore();
+      jest.useRealTimers();
+    }
   });
 
   it("opens at most one instance at a time via openOnce", () => {

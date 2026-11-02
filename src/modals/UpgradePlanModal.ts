@@ -4,6 +4,7 @@ import { getSurfaceOwnerWindow } from "../core/ui/surface";
 import { SYSTEMSCULPT_WEBSITE, withPluginAttribution } from "../constants/externalServices";
 import { PLAN_REQUIRED_MESSAGE } from "../utils/errors";
 import { openExternalUrl } from "../utils/externalUrl";
+import { getRuntimeWindow } from "../utils/runtimeWindow";
 import {
   CONNECT_ERROR_COPY,
   LICENSE_CONFIRMING_COPY,
@@ -42,7 +43,24 @@ export function requireActivePlan(plugin: SystemSculptPlugin, feature: string): 
 export function presentAccountConnectOutcome(plugin: SystemSculptPlugin, outcome: ConnectOutcome): void {
   if (UpgradePlanModal.showConnectOutcome(outcome)) return;
   if (plugin.settingsTab?.showAccountConnectOutcome(outcome)) return;
-  new Notice(connectOutcomeMessage(outcome), outcome.kind === "error" ? 10_000 : 6_000);
+  showConnectNotice(connectOutcomeMessage(outcome), outcome.kind === "error" ? 10_000 : 6_000);
+}
+
+/**
+ * Polling usually finishes a sign-in while the person is still in the browser,
+ * where a timed notice would expire unseen. Away from Obsidian, the notice
+ * stays until they come back and only then starts its normal time on screen.
+ */
+function showConnectNotice(message: string, durationMs: number): void {
+  const ownerWindow = getRuntimeWindow();
+  if (ownerWindow.document.hasFocus()) {
+    new Notice(message, durationMs);
+    return;
+  }
+  const notice = new Notice(message, 0);
+  ownerWindow.addEventListener("focus", () => {
+    ownerWindow.setTimeout(() => notice.hide(), durationMs);
+  }, { once: true });
 }
 
 /**
