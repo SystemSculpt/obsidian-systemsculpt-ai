@@ -85,8 +85,14 @@ describe("licenseUtils", () => {
       const status = checkPremiumUserStatus(settings);
 
       expect(status.greeting).toBeDefined();
-      expect(status.greeting).toContain("John");
-      expect(status.greeting).toContain("Premium");
+      expect(status.greeting).toBe("Welcome, John. SystemSculpt Pro is active.");
+    });
+
+    it("greets a premium user with no known name without a placeholder", () => {
+      const settings = createMockSettings({ licenseValid: true });
+      const status = checkPremiumUserStatus(settings);
+
+      expect(status.greeting).toBe("SystemSculpt Pro is active.");
     });
 
     it("provides special greeting for family members", () => {
