@@ -323,6 +323,42 @@ describe("Setup tab SystemSculpt-only layout", () => {
     expect(container.textContent).not.toContain("Remaining: 6,030 credits");
   });
 
+  it.each([
+    [false, "Welcome, ada@example.com. Free starter plan: 480 credits left.", "Available: 480 starter credits."],
+    [true, "Welcome, ada@example.com. SystemSculpt Pro is active.", "Included 1,200/2,000"],
+  ])("names the real plan on the Account row (paid %s)", async (paid, statusLine, creditsLine) => {
+    getCreditsBalanceMock.mockResolvedValueOnce({
+      totalRemaining: paid ? 2500 : 480,
+      includedRemaining: paid ? 1200 : 0,
+      includedPerMonth: paid ? 2000 : 0,
+      includedCreditsEntitled: paid,
+      addOnRemaining: paid ? 1300 : 480,
+      usageClass: "customer",
+      cycleStartedAt: "2026-07-01T00:00:00.000Z",
+      cycleEndsAt: "2026-08-01T00:00:00.000Z",
+      purchaseUrl: null,
+      billingCycle: paid ? "monthly" : "unknown",
+      annualUpgradeOffer: null,
+    });
+    const plugin = createPluginStub();
+    plugin.settings.licenseValid = true;
+    plugin.settings.licenseKey = "skss-plan";
+    plugin.settings.userEmail = "ada@example.com";
+    const tab = new SystemSculptSettingTab(app, plugin);
+    const container = document.createElement("div");
+
+    renderAccountSection(container, tab, true);
+    expect(container.textContent).not.toContain("Pro is active");
+    await flushSetupSectionRender();
+
+    expect(container.textContent).toContain(statusLine);
+    expect(container.textContent).toContain(creditsLine);
+    if (!paid) {
+      expect(container.textContent).not.toContain("Pro");
+      expect(container.textContent).not.toContain("Resets");
+    }
+  });
+
   it("presents master auth as Internal QA without customer billing actions", async () => {
     getCreditsBalanceMock.mockResolvedValueOnce({
       totalRemaining: 0,
