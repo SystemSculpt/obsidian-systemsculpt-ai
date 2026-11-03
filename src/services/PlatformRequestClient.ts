@@ -1,5 +1,6 @@
 import { requestUrl } from "obsidian";
 import { toError } from "../utils/errors";
+import { withClientIdentityHeaders } from "./api/clientIdentity";
 
 export type PlatformTransport = "fetch" | "requestUrl";
 
@@ -244,14 +245,14 @@ export class PlatformRequestClient {
       const directFetch = await this.probeStreamingFetch(input.streamingProbeUrl, input.signal);
       if (!directFetch) transport = "requestUrl";
     }
-    const headers: Record<string, string> = rawBody
+    const headers: Record<string, string> = withClientIdentityHeaders(input.url, rawBody
       ? this.rawRequestHeaders(input.headers, input.body as ArrayBuffer | undefined)
       : {
           "Content-Type": "application/json",
           Accept: input.stream ? "text/event-stream" : "application/json",
           ...(input.licenseKey ? { "x-license-key": input.licenseKey } : {}),
           ...(input.headers || {}),
-        };
+        });
     const body = typeof input.body === "undefined"
       ? undefined
       : rawBody

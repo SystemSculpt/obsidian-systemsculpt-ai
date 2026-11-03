@@ -7,6 +7,7 @@
  * SystemSculpt AI Plugin for Obsidian
  */
 import { Plugin, Notice, apiVersion, requireApiVersion } from "obsidian";
+import { setClientPluginVersion } from "./services/api/clientIdentity";
 import { checkObsidianCompatibility, MINIMUM_OBSIDIAN_VERSION } from "./core/plugin/lifecycle/ObsidianCompat";
 import { SystemSculptSettings, DEFAULT_SETTINGS, LogLevel, LICENSE_URL } from "./types";
 import { SystemSculptService, type CreditsBalanceSnapshot } from "./services/SystemSculptService";
@@ -231,6 +232,7 @@ export default class SystemSculptPlugin extends Plugin {
   }
 
   async onload() {
+    setClientPluginVersion(this.manifest.version);
     startCodexSession();
     const loadStart = performance.now();
     this.initializeAgentIncidentCoordinator();
