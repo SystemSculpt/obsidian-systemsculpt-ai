@@ -519,7 +519,7 @@ describe.each(["desktop", "mobile"])("a new user's first run in the built bundle
     const poll = server.requests.find(({ path }) => path === "/api/plugin/auth/poll");
     expect(createHash("sha256").update(poll!.body.verifier).digest("base64url"))
       .toBe(connect.searchParams.get("challenge"));
-    expect(document.querySelector(".ss-upgrade-plan-modal")?.textContent).toContain("You're signed in");
+    expect(document.querySelector(".ss-upgrade-plan-modal")?.textContent).toContain("You're in");
     control("upgrade-plan.done").click();
     await jest.advanceTimersByTimeAsync(1_000);
     expect(document.querySelectorAll("[role='dialog']")).toHaveLength(0);
@@ -719,7 +719,7 @@ describe.each(["desktop", "mobile"])("a new user's first run in the built bundle
       control("upgrade-plan.sync").click();
       await jest.advanceTimersByTimeAsync(3_500);
       expect(openedUrls).toHaveLength(browserOpens + 1);
-      expect(document.querySelector(".ss-upgrade-plan-modal")?.textContent).toContain("You're signed in");
+      expect(document.querySelector(".ss-upgrade-plan-modal")?.textContent).toContain("You're in");
       control("upgrade-plan.done").click();
       await jest.advanceTimersByTimeAsync(1_000);
       await send(QUESTION);
