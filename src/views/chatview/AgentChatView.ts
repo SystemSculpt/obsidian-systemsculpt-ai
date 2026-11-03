@@ -686,6 +686,10 @@ export class AgentChatView extends ItemView {
       onRename: (title) => this.renameFromHeader(title),
       buildMoreMenu: (menu) => this.addChatMenuItems(menu),
       showPlanOffer: this.shouldOfferPlan(),
+      onCreditsOffer: () => openExternalUrl(
+        withPluginAttribution(SYSTEMSCULPT_WEBSITE.MONTHLY_LOW_CREDITS, "chat"),
+        this.containerEl.ownerDocument.defaultView ?? undefined,
+      ).then(() => undefined),
       onViewPlans: (error) => {
         if (isPlanAccessError(error)) {
           UpgradePlanModal.openOnce(this.plugin, { feature: "Chat" });

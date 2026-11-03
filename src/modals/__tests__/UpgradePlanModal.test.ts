@@ -212,7 +212,7 @@ describe("UpgradePlanModal", () => {
     findButtonByText(modal.modalEl, "Subscribe yearly").click();
 
     expect(hrefs).toEqual([
-      "https://systemsculpt.com/checkout?resourceId=2b96b063-3ed9-4e5a-972c-6910fb611ab8&utm_source=obsidian-plugin&utm_medium=modal&utm_campaign=upgrade",
+      "https://systemsculpt.com/checkout?resourceId=2b96b063-3ed9-4e5a-972c-6910fb611ab8&ref=plugin_modal_annual&utm_source=obsidian-plugin&utm_medium=modal&utm_campaign=upgrade",
     ]);
     expect(modal.modalEl.textContent).toContain("Finish your purchase in the browser");
     expect(findButtonByText(modal.modalEl, "I've purchased — Sync license")).toBeTruthy();
@@ -231,6 +231,7 @@ describe("UpgradePlanModal", () => {
       const checkout = new URL(hrefs[0]);
       expect(checkout.origin).toBe("https://systemsculpt.com");
       expect(checkout.pathname).toBe("/subscribe");
+      expect(checkout.searchParams.get("ref")).toBe("plugin_modal_monthly");
       expect(checkout.searchParams.get("utm_source")).toBe("obsidian-plugin");
       expect(checkout.searchParams.get("utm_medium")).toBe("modal");
       expect(plugin.updateSettings).not.toHaveBeenCalled();
