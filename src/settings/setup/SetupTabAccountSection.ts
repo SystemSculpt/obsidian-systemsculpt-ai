@@ -3,7 +3,7 @@ import { createCatalogSetting } from "../SettingsCatalog";
 import { hasHostCapability } from "../../platform/hostCapabilities";
 import { SystemSculptService } from "../../services/SystemSculptService";
 import { SYSTEMSCULPT_LEGAL_URLS, SYSTEMSCULPT_WEBSITE, withPluginAttribution } from "../../constants/externalServices";
-import { checkPremiumUserStatus } from "../../utils/licenseUtils";
+import { activeAccountLine, checkPremiumUserStatus, isStarterBalance } from "../../utils/licenseUtils";
 import { SystemSculptSettingTab } from "../SystemSculptSettingTab";
 import { getSurfaceOwnerWindow } from "../../core/ui/surface/SurfaceDomContext";
 import { UpgradePlanModal } from "../../modals/UpgradePlanModal";
@@ -11,6 +11,7 @@ import { CONNECT_ERROR_COPY, LICENSE_CONFIRMING_COPY, signedInLine } from "../..
 import type { ConnectOutcome } from "../../services/AccountConnectService";
 import { openExternalUrl } from "../../utils/externalUrl";
 import type { LicenseValidationResult } from "../../services/LicenseService";
+import type { CreditsBalanceSnapshot } from "../../services/SystemSculptService";
 
 export function renderAccountSection(
   root: HTMLElement,
@@ -65,14 +66,28 @@ export function renderAccountSection(
     }
   };
 
-  const accountDesc = isProActive
-    ? userStatus.greeting || "Pro features enabled."
-    : signedInWithoutPlan
-      ? `Signed in as ${signedInEmail}. No active plan yet — choose a plan to enable AI features.`
-      : "Activate your license to turn on SystemSculpt chat, search, transcription, and workspace services.";
-  const statusSetting = createCatalogSetting(root, "account.status")
-    .setDesc(`${accountDesc}${hasHostCapability("local-cli", root) ? " Claude Code and Codex chat on desktop need no license." : ""}${pendingSignIn ? " Waiting for browser sign-in…" : ""}`);
-  renderConnectOutcome(statusSetting.descEl, tabInstance.accountConnectOutcome);
+  const formatCredits = (value: number): string => {
+    try {
+      return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(value);
+    } catch {
+      return String(value);
+    }
+  };
+
+  const statusSetting = createCatalogSetting(root, "account.status");
+  // An active key's plan is known only from the balance, read below.
+  const renderStatus = (balance: CreditsBalanceSnapshot | null): void => {
+    const accountDesc = isProActive
+      ? hasSavedLicense
+        ? activeAccountLine(plugin.settings, balance, formatCredits)
+        : userStatus.greeting || "Pro features enabled."
+      : signedInWithoutPlan
+        ? `Signed in as ${signedInEmail}. No active plan yet — choose a plan to enable AI features.`
+        : "Activate your license to turn on SystemSculpt chat, search, transcription, and workspace services.";
+    statusSetting.setDesc(`${accountDesc}${hasHostCapability("local-cli", root) ? " Claude Code and Codex chat on desktop need no license." : ""}${pendingSignIn ? " Waiting for browser sign-in…" : ""}`);
+    renderConnectOutcome(statusSetting.descEl, tabInstance.accountConnectOutcome);
+  };
+  renderStatus(null);
 
   if (isProActive) {
     statusSetting.addButton((button) => {
@@ -290,14 +305,6 @@ export function renderAccountSection(
     const creditsSetting = createCatalogSetting(root, "account.credits").setDesc("Fetching credits balance…");
     const aiService = SystemSculptService.getInstance(plugin);
 
-    const formatCredits = (value: number): string => {
-      try {
-        return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(value);
-      } catch {
-        return String(value);
-      }
-    };
-
     const formatDate = (iso: string): string => {
       if (!iso) return "unknown";
       const date = new Date(iso);
@@ -348,6 +355,7 @@ export function renderAccountSection(
         ) {
           void Promise.resolve(plugin.embeddingsManager.resumeProcessing("funding")).catch(() => undefined);
         }
+        renderStatus(balance);
         internalQa = balance.usageClass === "master_auth";
         if (internalQa) {
           purchaseUrl = null;
@@ -383,6 +391,17 @@ export function renderAccountSection(
           : "";
         const heldInFlight = balance.heldInFlight ?? 0;
         const availableUnreserved = balance.availableUnreserved ?? balance.totalRemaining;
+        if (isStarterBalance(balance)) {
+          // Starter credits are a one-time grant: no monthly allowance or reset.
+          creditsSetting.setDesc(
+            `Available: ${formatCredits(availableUnreserved)} starter credits.${
+              heldInFlight > 0 ? ` Held in current requests: ${formatCredits(heldInFlight)} credits.` : ""
+            }`
+          );
+          refreshAnnualUpgradeButton?.();
+          refreshBuyCreditsButton?.();
+          return;
+        }
         creditsSetting.setDesc(
           `Available: ${formatCredits(availableUnreserved)} credits. Held in current requests: ${formatCredits(
             heldInFlight
