@@ -17,6 +17,8 @@ export function withPluginAttribution(href: string, surface: string): string {
 export const SYSTEMSCULPT_WEBSITE = {
   BASE_URL: "https://systemsculpt.com",
   YEARLY: "https://systemsculpt.com/checkout?resourceId=2b96b063-3ed9-4e5a-972c-6910fb611ab8",
+  /** Monthly checkout from the low-credits offer; `ref` is in the website's checkout-view catalog. */
+  MONTHLY_LOW_CREDITS: "https://systemsculpt.com/checkout?resourceId=0db55c50-daa0-4e46-bf8d-f3f6cf47d729&ref=plugin_low_credits",
   SUBSCRIBE: "https://systemsculpt.com/subscribe",
   DOCS: "https://systemsculpt.com/obsidian-ai-plugin-docs",
   BILLING: "https://systemsculpt.com/dashboard/billing",

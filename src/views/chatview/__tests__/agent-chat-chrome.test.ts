@@ -3,6 +3,7 @@ import {
   chromeAccount,
   modeMenu,
   modelMenu,
+  presentCreditsOffer,
   presentEmptyState,
   presentRunLine,
   type AgentChromeState,
@@ -398,5 +399,35 @@ describe("chromeAccount", () => {
     expect(chromeAccount({ licenseKey: "key" }, credits({ includedCreditsEntitled: false, totalRemaining: 300 }))).toBe("signed-in");
     expect(chromeAccount({ licenseKey: "key" }, credits({ includedCreditsEntitled: true }))).toBe("paid");
     expect(chromeAccount({ licenseKey: "key", subscriptionStatus: "lifetime" }, null)).toBe("paid");
+  });
+});
+
+describe("presentCreditsOffer", () => {
+  const starter = (left: number) => credits({
+    includedCreditsEntitled: false,
+    includedRemaining: 0,
+    includedPerMonth: 0,
+    addOnRemaining: left,
+    totalRemaining: left,
+    availableUnreserved: left,
+  });
+  const hosted = { backend: "systemsculpt" as const, account: "signed-in" as const };
+  const link = "$9 a month for 10,000 credits every month";
+
+  it("offers Monthly to a hosted starter under 100 credits and at 0", () => {
+    expect(presentCreditsOffer(state({ ...hosted, credits: starter(99) })))
+      .toEqual({ lead: "Running low on credits.", link });
+    expect(presentCreditsOffer(state({ ...hosted, account: "no-plan", credits: starter(0) })))
+      .toEqual({ lead: "Out of credits.", link });
+    expect(presentCreditsOffer(state({ ...hosted, credits: { ...starter(120), availableUnreserved: 0 } })))
+      .toEqual({ lead: "Out of credits.", link });
+  });
+
+  it("stays hidden at 100 or more, on paid plans, internal QA and local agents", () => {
+    expect(presentCreditsOffer(state({ ...hosted, credits: starter(100) }))).toBeNull();
+    expect(presentCreditsOffer(state({ ...hosted, account: "paid", credits: credits({ includedCreditsEntitled: true, availableUnreserved: 10 }) }))).toBeNull();
+    expect(presentCreditsOffer(state({ ...hosted, credits: { ...starter(10), usageClass: "master_auth" } }))).toBeNull();
+    expect(presentCreditsOffer(state({ backend: "claude", account: "signed-in", credits: starter(10) }))).toBeNull();
+    expect(presentCreditsOffer(state({ ...hosted, credits: null }))).toBeNull();
   });
 });
