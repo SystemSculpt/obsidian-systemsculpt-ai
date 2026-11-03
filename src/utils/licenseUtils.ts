@@ -40,13 +40,13 @@ export function isStarterBalance(balance: CreditsBalanceSnapshot | null | undefi
 }
 
 /** Under this many available credits, a starter account is told it is running low (T-4520). */
-export const LOW_CREDITS_OFFER_THRESHOLD = 100;
+const LOW_CREDITS_OFFER_THRESHOLD = 100;
 /**
  * Under this many, half the 500-credit starter grant is used and the Monthly
  * offer shows (T-4652): 7 of 9 starter accounts that used hosted AI stopped
  * between 120 and 485 credits, so a 100-credit trigger never reached them.
  */
-export const STARTER_OFFER_THRESHOLD = 250;
+const STARTER_OFFER_THRESHOLD = 250;
 export const MONTHLY_OFFER_LINE = "$9 a month for 10,000 credits every month";
 
 function starterAvailable(balance: CreditsBalanceSnapshot | null | undefined): number | null {
@@ -60,7 +60,7 @@ function starterAvailable(balance: CreditsBalanceSnapshot | null | undefined): n
  * to spend, "low" under 100 credits (a hosted turn costs about 22), "half"
  * under 250, else null.
  */
-export function starterCreditsOffer(balance: CreditsBalanceSnapshot | null | undefined): "low" | "out" | "half" | null {
+function starterCreditsOffer(balance: CreditsBalanceSnapshot | null | undefined): "low" | "out" | "half" | null {
   const available = starterAvailable(balance);
   if (available === null) return null;
   if (available <= 0) return "out";
