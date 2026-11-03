@@ -133,6 +133,7 @@ function createPlugin(settings: Record<string, unknown> = {}) {
     getAccountConnectService: () => ({ begin, reopen, submitManualCode, pollInBackground, hasPendingRequest }),
     getSettingsManager: () => ({ updateSettings }),
     openNewChat: jest.fn(),
+    startHostedChat: jest.fn().mockResolvedValue(undefined),
     openSettingsTab: jest.fn(),
     begin,
     reopen,
@@ -367,23 +368,40 @@ describe("UpgradePlanModal", () => {
     })).toBe(true);
 
     expect(document.querySelectorAll(".ss-upgrade-plan-modal")).toHaveLength(1);
-    expect(modal.modalEl.textContent).toContain("You're signed in");
+    expect(modal.modalEl.textContent).toContain("You're in");
     expect(modal.modalEl.textContent).toContain("Signed in as user@example.test.");
-    expect(modal.modalEl.textContent).not.toContain("Welcome");
+    expect(modal.modalEl.textContent).not.toContain("credits ready");
     expect(modal.modalEl.textContent).not.toContain("license is being confirmed");
-    expect(Array.from(modal["footerEl"].querySelectorAll("button")).map((button) => button.textContent)).toEqual(["Done"]);
+    expect(Array.from(modal["footerEl"].querySelectorAll("button")).map((button) => button.textContent))
+      .toEqual(["Start a chat", "Done"]);
     findButtonByText(modal.modalEl, "Done").click();
     modal.onClose();
     expect(plugin.pollInBackground).not.toHaveBeenCalled();
-    expect(plugin.openNewChat).not.toHaveBeenCalled();
+    expect(plugin.startHostedChat).not.toHaveBeenCalled();
+  });
+
+  it("goes from a starter sign-in straight to a hosted chat", () => {
+    const plugin = createPlugin();
+    const modal = UpgradePlanModal.openOnce(plugin);
+    UpgradePlanModal.showConnectOutcome({
+      kind: "signed-in", name: null, email: "user@example.test", licenseValid: true, starterCredits: 500,
+    });
+    expect(modal.modalEl.textContent).toContain("You're in");
+    expect(modal.modalEl.textContent).toContain("500 credits ready.");
+    expect(modal.modalEl.textContent).not.toContain("Signed in as");
+    findButtonByText(modal.modalEl, "Start a chat").click();
+    expect(plugin.startHostedChat).toHaveBeenCalledTimes(1);
+    expect(document.querySelector(".ss-upgrade-plan-modal")).toBeNull();
   });
 
   it("keeps account and license validation apart in the signed-in result", async () => {
     const plugin = createPlugin();
     const modal = UpgradePlanModal.openOnce(plugin);
     UpgradePlanModal.showConnectOutcome({ kind: "signed-in", name: null, email: null, licenseValid: false });
+    expect(modal.modalEl.textContent).toContain("You're signed in");
     expect(modal.modalEl.textContent).toContain("Signed in to SystemSculpt.");
     expect(modal.modalEl.textContent).toContain("Your license is being confirmed.");
+    expect(Array.from(modal["footerEl"].querySelectorAll("button")).map((button) => button.textContent)).toEqual(["Done"]);
     modal.onClose();
   });
 
@@ -482,6 +500,21 @@ describe("UpgradePlanModal", () => {
     expect(Notice).toHaveBeenNthCalledWith(2,
       "Signed in as user@example.test. Your account has no active plan yet. Choose a plan to enable SystemSculpt AI features.", 6_000);
     expect(document.querySelector(".ss-upgrade-plan-modal")).toBeNull();
+  });
+
+  it("offers Start a chat in the notice when no account surface is open", () => {
+    const plugin = createPlugin();
+    plugin.settingsTab = { showAccountConnectOutcome: jest.fn(() => false) };
+    (Notice as unknown as jest.Mock).mockImplementationOnce(() => ({ hide: jest.fn() }));
+    presentAccountConnectOutcome(plugin, {
+      kind: "signed-in", name: null, email: "user@example.test", licenseValid: true, starterCredits: 500,
+    });
+    const fragment = (Notice as unknown as jest.Mock).mock.calls[0][0] as DocumentFragment;
+    expect(fragment.textContent).toContain("Signed in. 500 credits ready.");
+    const action = fragment.querySelector<HTMLButtonElement>('[data-testid="notice.action"]');
+    expect(action?.textContent).toBe("Start a chat");
+    action?.click();
+    expect(plugin.startHostedChat).toHaveBeenCalledTimes(1);
   });
 
   it("opens at most one instance at a time via openOnce", () => {

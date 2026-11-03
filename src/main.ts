@@ -1449,6 +1449,15 @@ export default class SystemSculptPlugin extends Plugin {
     await this.getViewManager().openChat();
   }
 
+  /**
+   * After sign-in: closes settings and shows a chat on SystemSculpt hosted AI
+   * with its composer focused. The saved default backend stays as it is.
+   */
+  public async startHostedChat(): Promise<void> {
+    (this.app as typeof this.app & { setting?: { close?: () => void } }).setting?.close?.();
+    await this.getViewManager().startHostedChat();
+  }
+
   public async openCreditsBalanceModal(options?: {
     initialBalance?: CreditsBalanceSnapshot | null;
     onBalanceUpdated?: (balance: CreditsBalanceSnapshot | null) => void | Promise<void>;

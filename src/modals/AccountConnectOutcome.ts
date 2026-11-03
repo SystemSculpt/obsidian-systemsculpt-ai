@@ -31,11 +31,24 @@ export function signedInLine(email: string | null): string {
   return email ? `Signed in as ${email}.` : "Signed in to SystemSculpt.";
 }
 
+export const START_CHAT_LABEL = "Start a chat";
+
+/** "500 credits ready." for a starter account whose balance is known; null otherwise. */
+export function creditsReadyLine(outcome: ConnectOutcome): string | null {
+  if (outcome.kind !== "signed-in" || !outcome.licenseValid || !outcome.starterCredits) return null;
+  return `${outcome.starterCredits.toLocaleString("en-US")} credits ready.`;
+}
+
+/** A valid sign-in can go straight to a first hosted chat. */
+export function canStartHostedChat(outcome: ConnectOutcome): boolean {
+  return outcome.kind === "signed-in" && outcome.licenseValid;
+}
+
 /** The complete result in one message, for when no account surface is open. */
 export function connectOutcomeMessage(outcome: ConnectOutcome): string {
   if (outcome.kind === "error") return CONNECT_ERROR_COPY[outcome.reason];
   if (outcome.kind === "no-license") return `${signedInLine(outcome.email)} ${NO_PLAN_COPY}`;
-  return outcome.licenseValid
-    ? signedInLine(outcome.email)
-    : `${signedInLine(outcome.email)} ${LICENSE_CONFIRMING_COPY}`;
+  if (!outcome.licenseValid) return `${signedInLine(outcome.email)} ${LICENSE_CONFIRMING_COPY}`;
+  const credits = creditsReadyLine(outcome);
+  return credits ? `Signed in. ${credits}` : signedInLine(outcome.email);
 }

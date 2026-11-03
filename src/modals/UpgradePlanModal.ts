@@ -8,9 +8,13 @@ import {
   CONNECT_ERROR_COPY,
   LICENSE_CONFIRMING_COPY,
   RETRYABLE_CONNECT_REASONS,
+  START_CHAT_LABEL,
+  canStartHostedChat,
   connectOutcomeMessage,
+  creditsReadyLine,
   signedInLine,
 } from "./AccountConnectOutcome";
+import { showActionNotice } from "../core/ui/notifications";
 import type SystemSculptPlugin from "../main";
 import type { AccountConnectMode, ConnectOutcome } from "../services/AccountConnectService";
 
@@ -42,6 +46,13 @@ export function requireActivePlan(plugin: SystemSculptPlugin, feature: string): 
 export function presentAccountConnectOutcome(plugin: SystemSculptPlugin, outcome: ConnectOutcome): void {
   if (UpgradePlanModal.showConnectOutcome(outcome)) return;
   if (plugin.settingsTab?.showAccountConnectOutcome(outcome)) return;
+  if (canStartHostedChat(outcome)) {
+    showActionNotice(
+      connectOutcomeMessage(outcome),
+      { label: START_CHAT_LABEL, onSelect: () => void plugin.startHostedChat() },
+    );
+    return;
+  }
   new Notice(connectOutcomeMessage(outcome), outcome.kind === "error" ? 10_000 : 6_000);
 }
 
@@ -140,10 +151,20 @@ export class UpgradePlanModal extends StandardModal {
       return;
     }
     this.resetSections();
+    if (outcome.kind === "signed-in" && canStartHostedChat(outcome)) {
+      this.addTitle("You're in", creditsReadyLine(outcome) ?? signedInLine(outcome.email));
+      this.renderIcon("check-circle-2", "is-success");
+      this.addActionButton("upgrade-plan.start-chat", START_CHAT_LABEL, () => {
+        this.close();
+        void this.plugin.startHostedChat();
+      }, true, "message-square");
+      this.addActionButton("upgrade-plan.done", "Done", () => this.close());
+      return;
+    }
     if (outcome.kind === "signed-in") {
       this.addTitle("You're signed in", signedInLine(outcome.email));
       this.renderIcon("check-circle-2", "is-success");
-      if (!outcome.licenseValid) this.addDetail(LICENSE_CONFIRMING_COPY);
+      this.addDetail(LICENSE_CONFIRMING_COPY);
       this.addActionButton("upgrade-plan.done", "Done", () => this.close(), true);
       return;
     }

@@ -283,6 +283,7 @@
     "upgrade-plan.reopen",
     "upgrade-plan.retry",
     "upgrade-plan.sign-in",
+    "upgrade-plan.start-chat",
     "upgrade-plan.subscribe",
     "upgrade-plan.sync",
     "upgrade-plan.yearly"
