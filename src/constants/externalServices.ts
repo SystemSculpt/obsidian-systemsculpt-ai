@@ -27,10 +27,11 @@ function pluginPageLink(href: string, place: string): string {
 /** External destinations owned by the plugin UI. */
 export const SYSTEMSCULPT_WEBSITE = {
   BASE_URL: "https://systemsculpt.com",
-  YEARLY: "https://systemsculpt.com/checkout?resourceId=2b96b063-3ed9-4e5a-972c-6910fb611ab8",
+  /** Upgrade modal plan buttons; each `ref` is in the website's checkout-view catalog. */
+  YEARLY: "https://systemsculpt.com/checkout?resourceId=2b96b063-3ed9-4e5a-972c-6910fb611ab8&ref=plugin_modal_annual",
   /** Monthly checkout from the low-credits offer; `ref` is in the website's checkout-view catalog. */
   MONTHLY_LOW_CREDITS: "https://systemsculpt.com/checkout?resourceId=0db55c50-daa0-4e46-bf8d-f3f6cf47d729&ref=plugin_low_credits",
-  SUBSCRIBE: "https://systemsculpt.com/subscribe",
+  SUBSCRIBE: "https://systemsculpt.com/subscribe?ref=plugin_modal_monthly",
   DOCS: pluginPageLink("https://systemsculpt.com/obsidian-ai-plugin-docs", "docs"),
   BILLING: pluginPageLink("https://systemsculpt.com/dashboard/billing", "account"),
   SUPPORT: pluginPageLink("https://systemsculpt.com/contact", "support"),

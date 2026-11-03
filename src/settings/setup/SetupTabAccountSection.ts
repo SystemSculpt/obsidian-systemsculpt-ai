@@ -8,7 +8,7 @@ import {
   checkPremiumUserStatus,
   isStarterBalance,
   MONTHLY_OFFER_LINE,
-  starterCreditsOffer,
+  starterOfferLead,
 } from "../../utils/licenseUtils";
 import { SystemSculptSettingTab } from "../SystemSculptSettingTab";
 import { getSurfaceOwnerWindow } from "../../core/ui/surface/SurfaceDomContext";
@@ -404,12 +404,12 @@ export function renderAccountSection(
               heldInFlight > 0 ? ` Held in current requests: ${formatCredits(heldInFlight)} credits.` : ""
             }`
           );
-          const offer = starterCreditsOffer(balance);
-          if (offer) {
-            // The Monthly offer once starter credits run low or out (T-4520).
+          const lead = starterOfferLead(balance);
+          if (lead) {
+            // The Monthly offer once half the starter credits are used (T-4520, T-4652).
             const line = creditsSetting.descEl.createDiv({
               cls: "ss-account-credits-offer",
-              text: `${offer === "out" ? "Out of credits." : "Running low on credits."} `,
+              text: `${lead} `,
               attr: { "data-testid": "settings.account.credits-offer" },
             });
             const link = line.createEl("a", { text: MONTHLY_OFFER_LINE, href: "#" });

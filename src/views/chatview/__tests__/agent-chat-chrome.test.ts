@@ -414,7 +414,11 @@ describe("presentCreditsOffer", () => {
   const hosted = { backend: "systemsculpt" as const, account: "signed-in" as const };
   const link = "$9 a month for 10,000 credits every month";
 
-  it("offers Monthly to a hosted starter under 100 credits and at 0", () => {
+  it("offers Monthly to a hosted starter under 250 credits and at 0", () => {
+    expect(presentCreditsOffer(state({ ...hosted, credits: starter(249) })))
+      .toEqual({ lead: "249 starter credits left.", link });
+    expect(presentCreditsOffer(state({ ...hosted, credits: starter(100) })))
+      .toEqual({ lead: "100 starter credits left.", link });
     expect(presentCreditsOffer(state({ ...hosted, credits: starter(99) })))
       .toEqual({ lead: "Running low on credits.", link });
     expect(presentCreditsOffer(state({ ...hosted, account: "no-plan", credits: starter(0) })))
@@ -423,8 +427,9 @@ describe("presentCreditsOffer", () => {
       .toEqual({ lead: "Out of credits.", link });
   });
 
-  it("stays hidden at 100 or more, on paid plans, internal QA and local agents", () => {
-    expect(presentCreditsOffer(state({ ...hosted, credits: starter(100) }))).toBeNull();
+  it("stays hidden at 250 or more, on paid plans, internal QA and local agents", () => {
+    expect(presentCreditsOffer(state({ ...hosted, credits: starter(250) }))).toBeNull();
+    expect(presentCreditsOffer(state({ ...hosted, credits: starter(500) }))).toBeNull();
     expect(presentCreditsOffer(state({ ...hosted, account: "paid", credits: credits({ includedCreditsEntitled: true, availableUnreserved: 10 }) }))).toBeNull();
     expect(presentCreditsOffer(state({ ...hosted, credits: { ...starter(10), usageClass: "master_auth" } }))).toBeNull();
     expect(presentCreditsOffer(state({ backend: "claude", account: "signed-in", credits: starter(10) }))).toBeNull();
