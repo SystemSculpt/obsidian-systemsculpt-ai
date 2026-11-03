@@ -31,7 +31,7 @@ import type { AgentArtifact, AgentConversationSnapshot, ManagedAgentError } from
 import { presentAgentConversation } from "./AgentConversationPresentation";
 import type { ApprovalAnswer } from "./AgentApprovalCards";
 import type { AgentToolPart } from "../../chat/ChatConversation";
-import { presentEmptyState, type AgentChromeState } from "./AgentChatChrome";
+import { presentCreditsOffer, presentEmptyState, type AgentChromeState } from "./AgentChatChrome";
 import { AgentEmptyState, type AgentEmptyStateOptions } from "./AgentEmptyState";
 import { AgentRunLine, containMenuEscape, returnFocusAfterMenu, type AgentRunLineOptions } from "./AgentRunLine";
 import { ChatHistoryPanel, type ChatHistoryPanelOptions } from "../history/ChatHistoryPanel";
@@ -90,6 +90,8 @@ export type AgentWorkspaceOptions = Readonly<{
   buildMoreMenu?: (menu: Menu) => void;
   onViewPlans?: (error?: ManagedAgentError) => void | Promise<void>;
   showPlanOffer?: boolean;
+  /** Opens Monthly checkout from the low-credits offer line. */
+  onCreditsOffer?: () => void | Promise<void>;
   onCancelQueued?: (id: string) => void | Promise<void>;
   onRunQueuedNow?: (id: string) => void | Promise<void>;
   runLine?: AgentRunLineOptions;
@@ -212,6 +214,7 @@ export class AgentWorkspace extends Component {
   private showPlanOffer = false;
   private readonly banner: HTMLElement;
   private readonly queueElement: HTMLElement;
+  private readonly creditsOffer: HTMLElement;
   private readonly jumpButton: HTMLButtonElement;
   private readonly scroller: AnchoredScroller;
   private readonly registeredRows = new Map<string, HTMLElement>();
@@ -375,6 +378,12 @@ export class AgentWorkspace extends Component {
     });
     this.queueElement.toggleAttribute("hidden", true);
 
+    this.creditsOffer = this.element.createDiv({
+      cls: "systemsculpt-agent-credits-offer",
+      attr: { "data-testid": "chat.credits-offer" },
+    });
+    this.creditsOffer.toggleAttribute("hidden", true);
+
     this.composer = new AgentComposer(this.element, {
       app: options.app,
       sourcePath: options.sourcePath,
@@ -456,6 +465,24 @@ export class AgentWorkspace extends Component {
     this.chromeKey = key;
     this.runLine.render(state);
     this.emptyState.render(presentEmptyState(state));
+    this.renderCreditsOffer(state);
+  }
+
+  private renderCreditsOffer(state: AgentChromeState): void {
+    const offer = this.options.onCreditsOffer ? presentCreditsOffer(state) : null;
+    this.creditsOffer.empty();
+    this.creditsOffer.toggleAttribute("hidden", !offer);
+    if (!offer) return;
+    this.creditsOffer.createSpan({ text: `${offer.lead} ` });
+    const link = this.creditsOffer.createEl("a", {
+      text: offer.link,
+      href: "#",
+      attr: { "data-testid": "chat.credits-offer.link" },
+    });
+    link.addEventListener("click", (event) => {
+      event.preventDefault();
+      void this.options.onCreditsOffer?.();
+    });
   }
 
   /** The header hides its title on mobile, where Obsidian's own header shows it. */

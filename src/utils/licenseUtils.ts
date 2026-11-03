@@ -39,6 +39,22 @@ export function isStarterBalance(balance: CreditsBalanceSnapshot | null | undefi
   return !!balance && balance.usageClass !== "master_auth" && balance.includedCreditsEntitled === false;
 }
 
+/** Under this many available credits, a starter account sees the Monthly offer (T-4520). */
+export const LOW_CREDITS_OFFER_THRESHOLD = 100;
+export const MONTHLY_OFFER_LINE = "$9 a month for 10,000 credits every month";
+
+/**
+ * When a starter account should see the Monthly offer: "out" with nothing left
+ * to spend, "low" under 100 credits (a hosted turn costs about 22), else null.
+ */
+export function starterCreditsOffer(balance: CreditsBalanceSnapshot | null | undefined): "low" | "out" | null {
+  if (!balance || !isStarterBalance(balance)) return null;
+  const available = Math.min(balance.availableUnreserved ?? balance.totalRemaining, balance.totalRemaining);
+  if (!Number.isFinite(available)) return null;
+  if (available <= 0) return "out";
+  return available < LOW_CREDITS_OFFER_THRESHOLD ? "low" : null;
+}
+
 /**
  * The Account row line for an active license. A valid key alone does not say
  * the plan: starter keys validate too (T-4527), so Pro is claimed only once the

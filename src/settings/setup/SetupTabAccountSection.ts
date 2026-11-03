@@ -3,7 +3,13 @@ import { createCatalogSetting } from "../SettingsCatalog";
 import { hasHostCapability } from "../../platform/hostCapabilities";
 import { SystemSculptService } from "../../services/SystemSculptService";
 import { SYSTEMSCULPT_LEGAL_URLS, SYSTEMSCULPT_WEBSITE, withPluginAttribution } from "../../constants/externalServices";
-import { activeAccountLine, checkPremiumUserStatus, isStarterBalance } from "../../utils/licenseUtils";
+import {
+  activeAccountLine,
+  checkPremiumUserStatus,
+  isStarterBalance,
+  MONTHLY_OFFER_LINE,
+  starterCreditsOffer,
+} from "../../utils/licenseUtils";
 import { SystemSculptSettingTab } from "../SystemSculptSettingTab";
 import { getSurfaceOwnerWindow } from "../../core/ui/surface/SurfaceDomContext";
 import { UpgradePlanModal } from "../../modals/UpgradePlanModal";
@@ -398,6 +404,20 @@ export function renderAccountSection(
               heldInFlight > 0 ? ` Held in current requests: ${formatCredits(heldInFlight)} credits.` : ""
             }`
           );
+          const offer = starterCreditsOffer(balance);
+          if (offer) {
+            // The Monthly offer once starter credits run low or out (T-4520).
+            const line = creditsSetting.descEl.createDiv({
+              cls: "ss-account-credits-offer",
+              text: `${offer === "out" ? "Out of credits." : "Running low on credits."} `,
+              attr: { "data-testid": "settings.account.credits-offer" },
+            });
+            const link = line.createEl("a", { text: MONTHLY_OFFER_LINE, href: "#" });
+            link.addEventListener("click", (event) => {
+              event.preventDefault();
+              void openExternalUrl(withPluginAttribution(SYSTEMSCULPT_WEBSITE.MONTHLY_LOW_CREDITS, "account"), ownerWindow);
+            });
+          }
           refreshAnnualUpgradeButton?.();
           refreshBuyCreditsButton?.();
           return;

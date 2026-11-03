@@ -35,6 +35,21 @@
   font-size: var(--ss-text-sm);
 }
 
+/* One line above the composer: the Monthly offer when starter credits run low (T-4520). */
+.systemsculpt-agent-credits-offer {
+  box-sizing: border-box;
+  /* The composer's width and side padding, so the line starts at its edge. */
+  width: min(100%, var(--ss-agent-content-width));
+  margin: 0 auto;
+  padding: 0 var(--ss-space-5);
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-sm);
+}
+
+.systemsculpt-agent-credits-offer[hidden] {
+  display: none;
+}
+
 .systemsculpt-agent-banner.is-error {
   border-color: var(--ss-danger-line);
   background: var(--ss-danger-tint);
