@@ -426,8 +426,8 @@ describe("Setup tab SystemSculpt-only layout", () => {
       `${button.textContent} ${button.getAttribute("aria-label")} ${button.getAttribute("title")}`.includes("Copy license key")
     )).toBe(false);
     expect(clipboardWrite).not.toHaveBeenCalled();
-    expect(container.querySelector<HTMLAnchorElement>('a[href="https://systemsculpt.com/terms"]')?.textContent).toBe("Terms");
-    expect(container.querySelector<HTMLAnchorElement>('a[href="https://systemsculpt.com/privacy"]')?.textContent).toBe("Privacy");
+    expect(container.querySelector<HTMLAnchorElement>('a[href="https://systemsculpt.com/terms?utm_source=obsidian-plugin&utm_medium=plugin&utm_campaign=evergreen&utm_content=terms"]')?.textContent).toBe("Terms");
+    expect(container.querySelector<HTMLAnchorElement>('a[href="https://systemsculpt.com/privacy?utm_source=obsidian-plugin&utm_medium=plugin&utm_campaign=evergreen&utm_content=privacy"]')?.textContent).toBe("Privacy");
   });
 
   it("replaces a saved license only on an explicit keyboard action", async () => {
