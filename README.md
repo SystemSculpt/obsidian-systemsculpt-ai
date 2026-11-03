@@ -1,12 +1,19 @@
 # SystemSculpt AI for Obsidian
 
-Use your own Claude Code or Codex on desktop, or SystemSculpt's hosted AI, to work with your Obsidian vault. Chat with your notes, search and edit files, transcribe audio into Markdown, find related notes, and build visual workflows. Hosted features run on desktop and mobile; your own desktop agents need no SystemSculpt account or plan. See the approval modes below for when changes ask for confirmation.
+**Put Claude Code, Codex or hosted AI to work on your Obsidian notes.**
 
-**Free to start.** Install the plugin and create or sign in to a free SystemSculpt account from inside Obsidian. Eligible new accounts can claim 500 one-time starter credits for hosted AI, no card needed, while available. When you want more, [Monthly is $9/month and Yearly is $90/year](https://systemsculpt.com/pricing?utm_source=obsidian&utm_medium=plugin_readme&utm_campaign=readme_free_start_nov2026); both include a monthly credit allowance.
+- **Chat with your vault.** Ask about your notes, attach files and images, and let the agent search, create and edit notes. Approval modes decide which changes ask first.
+- **Turn audio into notes.** Record or import audio, or paste a YouTube link, and get a Markdown transcript or a note with a summary and action items.
+- **Find related notes.** Similar Notes shows the notes closest in meaning to the one you are reading.
+
+**Free to start, two ways:**
+
+- **Your own Claude Code or Codex (desktop).** If it is installed and signed in, SystemSculpt can use it for chat. No SystemSculpt account or plan; usage goes to your own Claude Code or Codex account. [Codex guide](https://systemsculpt.com/blog/codex-in-obsidian?utm_source=obsidian&utm_medium=plugin_readme&utm_campaign=readme_top_nov2026&utm_content=agent_route)
+- **Hosted AI (desktop and mobile).** Create a free SystemSculpt account inside Obsidian. Eligible new accounts can claim 500 one-time starter credits for hosted AI, no card needed, while available. Hosted AI also runs audio, YouTube and Similar Notes. When you want more, [Monthly is $9/month and Yearly is $90/year](https://systemsculpt.com/pricing?utm_source=obsidian&utm_medium=plugin_readme&utm_campaign=readme_free_start_nov2026); both include a monthly credit allowance.
+
+[Setup guide](https://systemsculpt.com/obsidian-ai-plugin-docs/getting-started?utm_source=obsidian&utm_medium=plugin_readme&utm_campaign=readme_top_nov2026&utm_content=setup) · [See what it does](https://systemsculpt.com/obsidian-ai-plugin?utm_source=obsidian&utm_medium=plugin_readme&utm_campaign=readme_top_nov2026&utm_content=overview)
 
 ![An example of SystemSculpt asking before a note edit in Ask mode and showing the exact change](https://raw.githubusercontent.com/SystemSculpt/obsidian-systemsculpt-ai/main/docs/images/readme-chat-approval.png)
-
-![The finished action items next to the chat summary](https://raw.githubusercontent.com/SystemSculpt/obsidian-systemsculpt-ai/main/docs/images/readme-chat-result.png)
 
 ## Start in two minutes
 
@@ -31,6 +38,8 @@ SystemSculpt 6's managed backend no longer supports your own API keys, custom en
 - Record or import audio and transcribe it to Markdown or SRT.
 - Process long audio and YouTube videos into transcripts and structured summaries.
 - Build text, video, document, media, and vault workflows in Studio.
+
+![The finished action items next to the chat summary](https://raw.githubusercontent.com/SystemSculpt/obsidian-systemsculpt-ai/main/docs/images/readme-chat-result.png)
 
 SystemSculpt runs on desktop and mobile. Studio exposes portable nodes on both; local CLI, dataset-adapter, media-ingest, and FFmpeg nodes require Obsidian Desktop. Studio image generation was retired in 6.17; your saved images and projects stay, and video generation still works.
 
