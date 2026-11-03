@@ -1066,6 +1066,29 @@ export class AgentChatView extends ItemView {
   }
 
   public focusInput(): void { this.workspace?.focus(); }
+
+  /**
+   * Puts this view on SystemSculpt hosted AI and focuses the composer, as the
+   * step right after sign-in. A hosted chat stays as it is; a local-agent chat
+   * gives way to a new hosted chat that keeps the draft. The saved default
+   * backend is not changed.
+   */
+  public async startHostedChat(): Promise<void> {
+    if (backendOf(this.agent) === "systemsculpt" && !this.unavailableBackend) {
+      if (this.workspace?.isHistoryOpen) this.workspace.hideHistory(false);
+      void this.refreshCreditsBalance({ requireFresh: true, reason: "view_open" });
+      this.focusInput();
+      return;
+    }
+    const previousChatId = this.messageCount > 0 ? this.chatId : "";
+    if (this.workspace?.isHistoryOpen) this.workspace.hideHistory(false);
+    await this.startNewChat(true, undefined, undefined, {
+      backend: "systemsculpt",
+      carry: { pinned: [...this.contextManager.getPinnedFiles()] },
+      ...(previousChatId ? { switchedFrom: previousChatId } : {}),
+    });
+    this.workspace?.announce(`Started a new chat with ${agentName("systemsculpt")}`);
+  }
   public getInputText(): string { return this.workspace?.getInputText() || ""; }
   public setInputText(value: string | object, options?: { focus?: boolean }): void {
     this.workspace?.setInputText(typeof value === "string" ? value : JSON.stringify(value, null, 2), options);

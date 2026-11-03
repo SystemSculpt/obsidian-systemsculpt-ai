@@ -7,7 +7,14 @@ import { checkPremiumUserStatus } from "../../utils/licenseUtils";
 import { SystemSculptSettingTab } from "../SystemSculptSettingTab";
 import { getSurfaceOwnerWindow } from "../../core/ui/surface/SurfaceDomContext";
 import { UpgradePlanModal } from "../../modals/UpgradePlanModal";
-import { CONNECT_ERROR_COPY, LICENSE_CONFIRMING_COPY, signedInLine } from "../../modals/AccountConnectOutcome";
+import {
+  CONNECT_ERROR_COPY,
+  LICENSE_CONFIRMING_COPY,
+  START_CHAT_LABEL,
+  canStartHostedChat,
+  creditsReadyLine,
+  signedInLine,
+} from "../../modals/AccountConnectOutcome";
 import type { ConnectOutcome } from "../../services/AccountConnectService";
 import { openExternalUrl } from "../../utils/externalUrl";
 import type { LicenseValidationResult } from "../../services/LicenseService";
@@ -73,6 +80,15 @@ export function renderAccountSection(
   const statusSetting = createCatalogSetting(root, "account.status")
     .setDesc(`${accountDesc}${hasHostCapability("local-cli", root) ? " Claude Code and Codex chat on desktop need no license." : ""}${pendingSignIn ? " Waiting for browser sign-in…" : ""}`);
   renderConnectOutcome(statusSetting.descEl, tabInstance.accountConnectOutcome);
+  if (tabInstance.accountConnectOutcome && canStartHostedChat(tabInstance.accountConnectOutcome)) {
+    statusSetting.addButton((button) => {
+      button
+        .setButtonText(START_CHAT_LABEL)
+        .setCta()
+        .onClick(() => void plugin.startHostedChat());
+      button.buttonEl.setAttribute("data-testid", "settings.account.start-chat");
+    });
+  }
 
   if (isProActive) {
     statusSetting.addButton((button) => {
@@ -482,7 +498,7 @@ function renderConnectOutcome(descEl: HTMLElement, outcome: ConnectOutcome | nul
   const text = outcome.kind === "error"
     ? CONNECT_ERROR_COPY[outcome.reason]
     : outcome.licenseValid
-      ? signedInLine(outcome.email)
+      ? [signedInLine(outcome.email), creditsReadyLine(outcome)].filter(Boolean).join(" ")
       : `${signedInLine(outcome.email)} ${LICENSE_CONFIRMING_COPY}`;
   descEl.createDiv({
     cls: `ss-account-connect-result${outcome.kind === "error" ? " is-error" : ""}`,

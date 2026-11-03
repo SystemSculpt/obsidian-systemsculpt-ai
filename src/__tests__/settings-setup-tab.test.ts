@@ -200,6 +200,29 @@ describe("Setup tab SystemSculpt-only layout", () => {
     expect(results[0].getAttribute("role")).toBe("status");
   });
 
+  it("offers Start a chat with the starter credits after a valid sign-in, and not while the license confirms", () => {
+    const plugin = createPluginStub();
+    plugin.startHostedChat = jest.fn().mockResolvedValue(undefined);
+    const tab = new SystemSculptSettingTab(app, plugin);
+    tab.accountConnectOutcome = {
+      kind: "signed-in", name: null, email: "user@example.test", licenseValid: true, starterCredits: 500,
+    };
+    const container = document.createElement("div");
+    renderAccountSection(container, tab, true);
+
+    expect(container.querySelector('[data-testid="settings.account.connect-result"]')?.textContent)
+      .toBe("Signed in as user@example.test. 500 credits ready.");
+    const start = container.querySelector<HTMLButtonElement>('[data-testid="settings.account.start-chat"]');
+    expect(start?.textContent).toBe("Start a chat");
+    start!.click();
+    expect(plugin.startHostedChat).toHaveBeenCalledTimes(1);
+
+    tab.accountConnectOutcome = { kind: "signed-in", name: null, email: "user@example.test", licenseValid: false };
+    const confirming = document.createElement("div");
+    renderAccountSection(confirming, tab, false);
+    expect(confirming.querySelector('[data-testid="settings.account.start-chat"]')).toBeNull();
+  });
+
   it("adds no result line for a plan-less account, whose Account row already says so", () => {
     const plugin = createPluginStub();
     plugin.settings.userEmail = "user@example.test";

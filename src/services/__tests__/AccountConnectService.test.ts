@@ -194,6 +194,26 @@ describe("AccountConnectService browser sign-in", () => {
     expect(service.hasPendingRequest()).toBe(false);
   });
 
+  it.each([
+    ["a starter account", { includedCreditsEntitled: false, availableUnreserved: 500, totalRemaining: 500 }, 500],
+    ["a paid plan", { includedCreditsEntitled: true, availableUnreserved: 4000, totalRemaining: 4000 }, undefined],
+    ["an internal account", { includedCreditsEntitled: false, usageClass: "master_auth", totalRemaining: 0 }, undefined],
+  ])("reports the credits ready for %s", async (_label, balance, expected) => {
+    const plugin = createPlugin();
+    const readCreditsBalance = jest.fn().mockResolvedValue(balance);
+    plugin.aiService = { readCreditsBalance };
+    const { service, openedUrls } = createService(plugin);
+    request.mockResolvedValue(jsonResponse(200, successPayload));
+    await service.begin("sign-in");
+    const { state } = parseConnectUrl(openedUrls[0]);
+
+    const outcome = await service.handleProtocolCallback({ code: "code-1", state });
+
+    expect(readCreditsBalance).toHaveBeenCalledWith({ fresh: true });
+    expect(outcome).toMatchObject({ kind: "signed-in", licenseValid: true });
+    expect((outcome as { starterCredits?: number }).starterCredits).toBe(expected);
+  });
+
   it("stores the signed-in profile without a license on no_license", async () => {
     const { service, plugin, openedUrls } = createService();
     request.mockResolvedValue(jsonResponse(200, {

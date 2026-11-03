@@ -364,6 +364,26 @@ export class ViewManager {
     }
   }
 
+  /**
+   * Shows a hosted SystemSculpt chat: the chat the person was in (keeping a
+   * typed draft), else an empty chat, else a new tab.
+   */
+  async startHostedChat(): Promise<void> {
+    const { workspace } = this.app;
+    const active = workspace.getActiveViewOfType(AgentChatView);
+    const leaves = workspace.getLeavesOfType(CHAT_VIEW_TYPE);
+    let leaf = active?.leaf
+      ?? leaves.find((candidate) => candidate.view instanceof AgentChatView && candidate.view.messageCount === 0);
+    if (!leaf) {
+      leaf = workspace.getLeaf("tab");
+      await leaf.setViewState({ type: CHAT_VIEW_TYPE, active: true, state: { chatId: "", chatTitle: generateDefaultChatTitle() } });
+    }
+    await leaf.loadIfDeferred();
+    await workspace.revealLeaf(leaf);
+    workspace.setActiveLeaf(leaf, { focus: true });
+    if (leaf.view instanceof AgentChatView) await leaf.view.startHostedChat();
+  }
+
   /** Own a fresh leaf so phone work never replaces a person's current draft. */
   async runPhoneHandoff(execution: HandoffExecution): Promise<string> {
     if (execution.signal.aborted) throw new Error("The handoff was cancelled.");

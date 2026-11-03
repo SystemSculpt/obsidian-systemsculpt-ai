@@ -48,9 +48,19 @@ export type ConnectErrorReason =
  * that started it) owns the user-facing copy for each outcome.
  */
 export type ConnectOutcome =
-  | Readonly<{ kind: "signed-in"; name: string | null; email: string | null; licenseValid: boolean }>
+  | Readonly<{
+    kind: "signed-in";
+    name: string | null;
+    email: string | null;
+    licenseValid: boolean;
+    /** Credits a starter (free) account can spend now; absent for paid plans or an unknown balance. */
+    starterCredits?: number;
+  }>
   | Readonly<{ kind: "no-license"; name: string | null; email: string | null }>
   | Readonly<{ kind: "error"; reason: ConnectErrorReason }>;
+
+/** How long a finished sign-in waits for the credit balance before showing its result without it. */
+const CONNECT_CREDITS_WAIT_MS = 3_000;
 
 /** Pending browser sign-in requests expire after ten minutes. */
 const PENDING_CONNECT_TTL_MS = 10 * 60_000;
@@ -549,12 +559,33 @@ export class AccountConnectService {
     if (!saved) return { kind: "error", reason: "unavailable" };
     await this.plugin.getLicenseManager().validateLicenseKeyDetailed();
     this.refreshSettingsTab();
+    const licenseValid = this.plugin.settings.licenseValid === true;
+    const starterCredits = licenseValid ? await this.readStarterCredits() : null;
     return {
       kind: "signed-in",
       name: account.name,
       email: account.email,
-      licenseValid: this.plugin.settings.licenseValid === true,
+      licenseValid,
+      ...(starterCredits ? { starterCredits } : {}),
     };
+  }
+
+  /**
+   * The spendable balance of a starter account, so the result can say what
+   * is ready. Paid plans, internal accounts and a slow or failed read give null.
+   */
+  private async readStarterCredits(): Promise<number | null> {
+    try {
+      const balance = await this.waitFor(
+        this.plugin.aiService.readCreditsBalance({ fresh: true }).catch(() => null),
+        CONNECT_CREDITS_WAIT_MS,
+      );
+      if (!balance || balance.usageClass === "master_auth" || balance.includedCreditsEntitled !== false) return null;
+      const credits = Math.floor(balance.availableUnreserved ?? balance.totalRemaining);
+      return Number.isFinite(credits) && credits > 0 ? credits : null;
+    } catch {
+      return null;
+    }
   }
 
   private async completeWithoutLicense(account: ExchangeAccount): Promise<ConnectOutcome> {
