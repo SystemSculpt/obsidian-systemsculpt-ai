@@ -34,8 +34,8 @@ export function signedInLine(email: string | null): string {
 /** The complete result in one message, for when no account surface is open. */
 export function connectOutcomeMessage(outcome: ConnectOutcome): string {
   if (outcome.kind === "error") return CONNECT_ERROR_COPY[outcome.reason];
-  if (outcome.kind === "no-license") return `${signedInLine(outcome.email)} ${NO_PLAN_COPY}`;
-  return outcome.licenseValid
-    ? signedInLine(outcome.email)
-    : `${signedInLine(outcome.email)} ${LICENSE_CONFIRMING_COPY}`;
+  // A notice has no surrounding screen to say what this sign-in was for.
+  const signedIn = outcome.email ? `Signed in to SystemSculpt as ${outcome.email}.` : "Signed in to SystemSculpt.";
+  if (outcome.kind === "no-license") return `${signedIn} ${NO_PLAN_COPY}`;
+  return outcome.licenseValid ? signedIn : `${signedIn} ${LICENSE_CONFIRMING_COPY}`;
 }
