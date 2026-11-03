@@ -118,7 +118,7 @@ describe("AudioProcessorModal", () => {
     const links = Array.from(line!.querySelectorAll<HTMLAnchorElement>("a"));
     expect(links.map((link) => link.getAttribute("href"))).toEqual([
       "https://www.youtube.com/t/terms",
-      "https://systemsculpt.com/privacy#data-collected",
+      "https://systemsculpt.com/privacy?utm_source=obsidian-plugin&utm_medium=plugin&utm_campaign=evergreen&utm_content=privacy#data-collected",
     ]);
     for (const link of links) {
       expect(link.target).toBe("_blank");
