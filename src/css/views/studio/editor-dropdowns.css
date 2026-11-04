@@ -50,6 +50,8 @@ button.ss-studio-searchable-select-trigger:hover {
 
 .ss-studio-searchable-select-trigger-label {
   min-width: 0;
+  /* Buttons inherit line-height 1; with overflow hidden that cut descenders. */
+  line-height: 1.4;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
