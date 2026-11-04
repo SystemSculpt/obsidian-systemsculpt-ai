@@ -200,6 +200,8 @@ describe("LiveMarkdownRenderer", () => {
     "| Name | Status |\n| :--- | ---: |\n| Note | Ready |",
     "| Name \\| alias | Status |\n| --- | --- |\n| Note | Ready |",
     "| `Name` | Status |\n| --- | --- |\n| Note | Ready |",
+    "`Name` | Status\n--- | ---\nNote | Ready",
+    "<span>Name</span> | Status\n--- | ---\nNote | Ready",
   ])("recognizes complete table headers without changing their cells: %s", async (table) => {
     const target = document.body.createDiv();
     const render = jest.fn(async (chunk: string, staging: HTMLElement) => renderParagraph(chunk, staging));
@@ -207,6 +209,17 @@ describe("LiveMarkdownRenderer", () => {
     live.load();
     await live.settle(target, `**Result**\n${table}`);
     expect(render.mock.calls[0][0]).toBe(`**Result**\n\n${table}`);
+    live.unload();
+  });
+
+  it("recognizes a table after pipe-containing prose", async () => {
+    const table = "| A | B |\n| --- | --- |\n| x | y |";
+    const target = document.body.createDiv();
+    const render = jest.fn(async (chunk: string, staging: HTMLElement) => renderParagraph(chunk, staging));
+    const live = new LiveMarkdownRenderer({ render });
+    live.load();
+    await live.settle(target, `Summary | Status\n${table}`);
+    expect(render.mock.calls[0][0]).toBe(`Summary | Status\n\n${table}`);
     live.unload();
   });
 

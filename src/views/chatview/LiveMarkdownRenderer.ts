@@ -343,27 +343,37 @@ function markdownWithTableBreaks(markdown: string): string | Promise<string> {
     // Lezer expects LF. Keep offsets aligned without changing rendered bytes.
     const source = markdown.replace(/\r(?=\n)/g, " ");
     const original = commonmarkLanguage.parser.parse(source);
-    const tables = markdownLanguage.parser.parse(source);
     const paragraphAt = (offset: number) => {
       let node = original.resolveInner(offset, 1);
       while (node.parent && node.name !== "Paragraph") {
-        if (node.name === "InlineCode" || node.name === "HTMLTag") return null;
+        if ((node.name === "InlineCode" || node.name === "HTMLTag")
+          && source.slice(node.from, node.to).includes("\n")) return null;
         node = node.parent;
       }
       return node.name === "Paragraph" && node.parent?.name === "Document" ? node : null;
     };
     const parts: string[] = [];
     let start = 0;
-    for (let table = tables.topNode.firstChild; table; table = table.nextSibling) {
-      const previous = table.prevSibling;
-      if (table.name !== "Table" || previous?.name !== "Paragraph") continue;
-      if (!/^[ \t]*\r?\n[ \t]*$/.test(markdown.slice(previous.to, table.from))) continue;
+    let tableParagraphEnd = 0;
+    for (const separator of source.matchAll(/^ {0,3}\|?[ \t]*:?-{3,}[^\n]*$/gm)) {
+      if (separator.index === 0) continue;
+      const lineStart = source.lastIndexOf("\n", separator.index - 2) + 1;
+      if (lineStart < tableParagraphEnd) continue;
+      // Parse only this header and delimiter: an earlier pipe-containing prose
+      // line can prevent Lezer's full-document parser from discovering a table.
+      const candidate = source.slice(lineStart, separator.index + separator[0].length);
+      const table = markdownLanguage.parser.parse(candidate).topNode.firstChild;
+      if (table?.name !== "Table") continue;
       const delimiter = table.getChild("TableDelimiter");
-      const paragraph = paragraphAt(table.from);
-      // GFM may split a multiline code span at a table-looking line. Both the
-      // header and delimiter must belong to the original non-literal paragraph.
-      if (!paragraph || !delimiter || paragraphAt(delimiter.from)?.from !== paragraph.from) continue;
-      const lineStart = markdown.lastIndexOf("\n", table.from - 1) + 1;
+      const paragraph = paragraphAt(lineStart + table.from);
+      // Single-line code/HTML in a cell is formatting, not a literal block.
+      // Reject only literals spanning the header or delimiter's line break.
+      if (!paragraph || !delimiter
+        || paragraphAt(lineStart + delimiter.from)?.from !== paragraph.from) continue;
+      // CommonMark keeps table body rows in the same paragraph. Do not split
+      // those rows into another table when they resemble a header/delimiter.
+      tableParagraphEnd = paragraph.to;
+      if (lineStart <= paragraph.from) continue;
       const newline = markdown.slice(lineStart - 2, lineStart) === "\r\n" ? "\r\n" : "\n";
       parts.push(markdown.slice(start, lineStart), newline);
       start = lineStart;
