@@ -34,7 +34,7 @@ describe("buildNodeInsertMenuItems", () => {
     expect(items.some((item) => item.definition.kind === "studio.terminal")).toBe(false);
   });
 
-  describe.each(["studio.workflow", "studio.image_generation"])("retired %s", kind => {
+  describe.each(["studio.workflow"])("retired %s", kind => {
   it.each([true, false])("keeps saved cards as portable, hidden compatibility notes (desktop: %s)", (isDesktopApp) => {
     platform.isDesktopApp = isDesktopApp;
     const registry = new StudioNodeRegistry();

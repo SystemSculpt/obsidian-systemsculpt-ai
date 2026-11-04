@@ -41,7 +41,7 @@ SystemSculpt 6's managed backend no longer supports your own API keys, custom en
 
 ![The finished action items next to the chat summary](https://raw.githubusercontent.com/SystemSculpt/obsidian-systemsculpt-ai/main/docs/images/readme-chat-result.png)
 
-SystemSculpt runs on desktop and mobile. Studio exposes portable nodes on both; local CLI, dataset-adapter, media-ingest, and FFmpeg nodes require Obsidian Desktop. Studio image generation was retired in 6.17; your saved images and projects stay, and video generation still works.
+SystemSculpt runs on desktop and mobile. Studio exposes portable nodes on both; local CLI, dataset-adapter, media-ingest, and FFmpeg nodes require Obsidian Desktop. Studio image and video generation run on SystemSculpt hosted AI.
 
 ## Account, payment, and credits
 

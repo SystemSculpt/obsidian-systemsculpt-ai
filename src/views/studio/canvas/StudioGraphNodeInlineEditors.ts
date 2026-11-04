@@ -97,7 +97,7 @@ function renderDatasetOutputPreview(options: {
 
 // Only form surfaces reach this renderer; CODE and panel surfaces own their editors.
 const FORM_PRESENTATION: Record<string, { fields: string[]; className?: string }> = {
-  "studio.image_generation": { fields: ["prompt", "model", "count", "aspectRatio", "imageSize", "quality"], className: "image-generation" },
+  "studio.image_generation": { fields: ["prompt", "model", "quality", "aspectRatio", "background", "count"], className: "image-generation" },
   "studio.video_generation": { fields: ["prompt", "model", "durationSeconds", "resolution", "aspectRatio", "generateAudio"], className: "video-generation" },
   "studio.media_ingest": { fields: ["sourcePath"] },
   "studio.audio_extract": { fields: ["ffmpegCommand", "outputFormat", "outputPath", "timeoutMs", "maxOutputBytes"] },

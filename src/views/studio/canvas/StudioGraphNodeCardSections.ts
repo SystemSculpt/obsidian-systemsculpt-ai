@@ -39,7 +39,7 @@ export function renderNodeHeader(options: {
     cls: "ss-studio-node-title-input",
   });
   titleInput.value = node.title;
-  lockStudioControl(interactionLocked, titleInput, node.kind === "studio.image_generation");
+  lockStudioControl(interactionLocked, titleInput);
   titleInput.addEventListener("input", (event) => {
     onNodeTitleInput(node, (event.target as HTMLInputElement).value);
   });
