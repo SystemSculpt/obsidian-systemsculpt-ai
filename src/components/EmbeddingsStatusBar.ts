@@ -137,10 +137,14 @@ export class EmbeddingsStatusBar extends Component {
   }
 
   private setVisibility(visible: boolean): void {
+    // Obsidian's .status-bar-item display rule overrides the hidden attribute.
+    // Use its visibility helpers as well so disabled indexing takes no space.
     this.statusBarEl.toggleAttribute("hidden", !visible);
     if (!visible) {
+      this.statusBarEl.hide();
       this.statusBarEl.setAttribute("aria-hidden", "true");
     } else {
+      this.statusBarEl.show();
       this.statusBarEl.removeAttribute("aria-hidden");
     }
   }
