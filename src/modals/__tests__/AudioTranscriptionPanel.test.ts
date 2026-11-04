@@ -426,13 +426,13 @@ describe("AudioTranscriptionPanel", () => {
     panel.open();
     const paymentRequired = new ManagedJobError(
       "payment_required",
-      "Not enough credits are available. Add credits to continue.",
+      "Not enough credits. Add more to continue.",
       402,
     );
     running.reject(new ManagedTranscriptionRetryError("credits-op", "resume", "processing", paymentRequired));
     await flushPromises();
 
-    expect(document.body.textContent).toContain("Not enough credits are available.");
+    expect(document.body.textContent).toContain("Not enough credits.");
     expect(document.body.textContent).not.toContain("(402)");
     expect(document.querySelector('[data-testid="transcription.progress.retry"]')?.textContent).toBe("Resume");
     document.querySelector<HTMLButtonElement>('[data-testid="transcription.progress.add-credits"]')!.click();
@@ -441,7 +441,7 @@ describe("AudioTranscriptionPanel", () => {
 
   it("offers Add credits on a terminal credits failure but not on other failures", async () => {
     for (const [error, expected] of [
-      [new ManagedJobError("payment_required", "Not enough credits are available. Add credits to continue.", 402), true],
+      [new ManagedJobError("payment_required", "Not enough credits. Add more to continue.", 402), true],
       [new Error("managed job failed"), false],
     ] as const) {
       const failed = deferred<typeof completedResult>();

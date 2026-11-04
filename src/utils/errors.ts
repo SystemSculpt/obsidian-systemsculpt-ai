@@ -104,7 +104,7 @@ export function isPlanAccessError(error: unknown): boolean {
 }
 
 /** Shared wording for a managed request the account cannot currently fund. */
-export const CREDITS_REQUIRED_MESSAGE = "Not enough credits are available. Add credits to continue.";
+export const CREDITS_REQUIRED_MESSAGE = "Not enough credits. Add more to continue.";
 
 const CREDITS_REQUIRED_CODES = new Set<string>([
   ERROR_CODES.INSUFFICIENT_CREDITS,

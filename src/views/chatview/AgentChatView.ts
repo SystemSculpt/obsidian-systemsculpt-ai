@@ -1816,8 +1816,8 @@ export class AgentChatView extends ItemView {
     const outOfCredits = (this.creditsBalance?.totalRemaining ?? 0) <= 0;
     return Object.assign(
       new Error(outOfCredits
-        ? "You have no credits left. Add credits to continue using Chat."
-        : "Not enough credits are available. Add credits to continue using Chat."),
+        ? "Out of credits. Add more to keep chatting."
+        : "Not enough credits. Add more to keep chatting."),
       {
         code: outOfCredits ? "out_of_credits" : "insufficient_credits",
         status: 402,

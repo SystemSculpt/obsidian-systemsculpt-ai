@@ -191,7 +191,7 @@ describe("EmbeddingsProcessor server indexing", () => {
     const state = fixture();
     const failure = new ManagedEmbeddingsError(
       "payment_required",
-      "You have no credits left. Add credits to continue indexing notes.",
+      "Out of credits. Add more to keep indexing.",
       402,
     );
     const preflight = jest.fn().mockRejectedValue(failure);
@@ -220,7 +220,7 @@ describe("EmbeddingsProcessor server indexing", () => {
     const remaining = { path: "Remaining.md", basename: "Remaining", stat: { mtime: 2 } };
     const failure = new ManagedEmbeddingsError(
       "payment_required",
-      "You have no credits left. Add credits to continue indexing notes.",
+      "Out of credits. Add more to keep indexing.",
       402,
       "request-credits-1",
     );

@@ -478,7 +478,7 @@ describe("ManagedEmbeddingsIndexAdapter", () => {
   });
 
   it.each([
-    [0, "You have no credits left. Add credits to continue indexing notes."],
+    [0, "Out of credits. Add more to keep indexing."],
     [5, "Not enough credits. Add more to keep indexing."],
   ])("uses authoritative remaining credits for 402 copy (%s)", async (creditsRemaining, message) => {
     const adapter = adapterWith(jest.fn(async () => transport({
