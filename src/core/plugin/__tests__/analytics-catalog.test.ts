@@ -1,7 +1,7 @@
 import { Platform } from "obsidian";
 import { readFileSync, readdirSync, statSync, existsSync } from "fs";
 import { join, relative } from "path";
-import { clientIdentityHeaders, setClientPluginVersion, withClientIdentityHeaders } from "../../../services/api/clientIdentity";
+import { setClientPluginVersion, withClientIdentityHeaders } from "../../../services/api/clientIdentity";
 import { API_BASE_URL } from "../../../constants/api";
 
 /**
@@ -114,6 +114,6 @@ describe("analytics catalog", () => {
     expect(sent["x-systemsculpt-platform"]).toBe("macos");
     expect(withClientIdentityHeaders("https://storage.example.com/upload", {})).toEqual({});
     expect(withClientIdentityHeaders(`${API_BASE_URL}/x`, { "X-Plugin-Version": "1.0.0" })["x-plugin-version"]).toBeUndefined();
-    expect(Object.keys(clientIdentityHeaders())).toContain("x-obsidian-version");
+    expect(Object.keys(withClientIdentityHeaders(`${API_BASE_URL}/x`, {}))).toContain("x-obsidian-version");
   });
 });

@@ -14,19 +14,19 @@ export function setClientPluginVersion(version: string): void {
   pluginVersion = typeof version === "string" ? version.trim() : "";
 }
 
-export type ClientPlatformTag = "ios" | "android" | "macos" | "windows" | "linux";
+type ClientPlatformTag = "ios" | "android" | "macos" | "windows" | "linux";
 
 const PLATFORM_TAGS: Record<string, ClientPlatformTag> = {
   iOS: "ios", Android: "android", macOS: "macos", Windows: "windows", Linux: "linux",
 };
 
-export function clientPlatformTag(): ClientPlatformTag | null {
+function clientPlatformTag(): ClientPlatformTag | null {
   return PLATFORM_TAGS[getHostOperatingSystem()] ?? null;
 }
 
 const API_ORIGIN = new URL(API_BASE_URL).origin;
 
-export function isSystemSculptApiUrl(url: string): boolean {
+function isSystemSculptApiUrl(url: string): boolean {
   try {
     return new URL(url).origin === API_ORIGIN;
   } catch {
@@ -34,7 +34,7 @@ export function isSystemSculptApiUrl(url: string): boolean {
   }
 }
 
-export function clientIdentityHeaders(): Record<string, string> {
+function clientIdentityHeaders(): Record<string, string> {
   const headers: Record<string, string> = {};
   if (pluginVersion) headers["x-plugin-version"] = pluginVersion;
   const obsidianVersion = typeof apiVersion === "string" ? apiVersion.trim() : "";

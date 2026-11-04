@@ -254,7 +254,7 @@ describe("account connection in the built bundle", () => {
     expect(document.querySelectorAll("[role='dialog']")).toHaveLength(1);
     const errorModal = document.querySelector(".ss-upgrade-plan-modal");
     expect(errorModal?.textContent).toContain("Sign-in didn't finish");
-    expect(errorModal?.textContent).toContain("Sign-in is temporarily unavailable");
+    expect(errorModal?.textContent).toContain("Sign-in is down");
     expect(errorModal?.textContent).not.toContain("Signed in as");
     expect(button("upgrade-plan.retry").textContent).toContain("Start sign-in again");
     expect(plugin!.getAccountConnectService().hasPendingRequest()).toBe(false);
@@ -274,7 +274,7 @@ describe("account connection in the built bundle", () => {
     expect(lateModal).toBe(errorModal);
     expect(document.querySelectorAll("[role='dialog']")).toHaveLength(1);
     expect(lateModal?.textContent).toContain("Sign-in didn't finish");
-    expect(lateModal?.textContent).toContain("Sign-in is temporarily unavailable");
+    expect(lateModal?.textContent).toContain("Sign-in is down");
     expect(lateModal?.textContent).not.toContain("Signed in as");
     expect(await plugin!.loadData()).toEqual(previouslySaved);
     expect(request).toHaveBeenCalledTimes(1);
