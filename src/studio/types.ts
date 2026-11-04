@@ -130,6 +130,7 @@ type StudioNodeConfigSelectPresentation =
   /** A catalog modal with search, sorting, favorites, and per-model detail. */
   | "model_picker_modal";
 export type StudioNodeConfigDynamicOptionsSource =
+  | "image_generation_models"
   | "video_generation_models"
   | "video_generation_durations"
   | "video_generation_resolutions"
@@ -464,6 +465,33 @@ export type StudioVideoGenerationResult = {
   operation: StudioManagedOperationRef;
 };
 
+export type StudioImageGenerationRequest = {
+  runId: string;
+  nodeId: string;
+  projectPath: string;
+  signal: AbortSignal;
+  buildPayload: () => Promise<{
+    /** Server catalog model ID; blank means the server default. */
+    model?: string;
+    prompt: string;
+    count?: number;
+    aspectRatio?: string;
+    quality?: string;
+    background?: string;
+    inputImages?: StudioImageInput[];
+  }>;
+  storeOutput: (bytes: ArrayBuffer, mimeType: string) => Promise<StudioAssetRef>;
+  onProgress?: (progress: StudioVideoGenerationProgress) => void;
+};
+
+export type StudioImageGenerationResult = {
+  images: StudioAssetRef[];
+  /** Model the server ran and the job's cost, for runners and agents. */
+  model: string;
+  usage: { usd: number; estimated: boolean };
+  operation: StudioManagedOperationRef;
+};
+
 export type StudioTranscriptionRequest = {
   runId: string;
   nodeId: string;
@@ -504,6 +532,7 @@ export type StudioCliExecutionResult = {
 export interface StudioApiAdapter {
   generateText(request: StudioTextGenerationRequest): Promise<StudioTextGenerationResult>;
   generateVideo(request: StudioVideoGenerationRequest): Promise<StudioVideoGenerationResult>;
+  generateImage(request: StudioImageGenerationRequest): Promise<StudioImageGenerationResult>;
   transcribeAudio(request: StudioTranscriptionRequest): Promise<StudioTranscriptionResult>;
   beginLocalCommit(operations: readonly StudioManagedOperationRef[], signal?: AbortSignal): Promise<void>;
   completeLocalCommit(operations: readonly StudioManagedOperationRef[], signal?: AbortSignal): Promise<void>;

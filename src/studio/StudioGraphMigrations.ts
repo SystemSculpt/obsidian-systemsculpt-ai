@@ -274,7 +274,6 @@ function migrateImageGenerationNodes(
     for (const key of [
       "modelId", "provider", "providerId", "endpoint", "apiKey", "oauth", "fallback", "price", "pricing",
     ]) delete nextConfig[key];
-    // The card no longer executes: retain its historical image settings verbatim.
 
     if (JSON.stringify(nextConfig) !== JSON.stringify(currentConfig)) {
       changed = true;

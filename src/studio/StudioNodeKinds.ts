@@ -1,4 +1,4 @@
-const RETIRED_NODE_KINDS = new Set<string>(["studio.workflow", "studio.image_generation"]);
+const RETIRED_NODE_KINDS = new Set<string>(["studio.workflow"]);
 const VISUAL_ONLY_NODE_KINDS = new Set<string>(["studio.terminal", "studio.run_collection", "studio.command_center", "studio.button", ...RETIRED_NODE_KINDS]);
 
 export function isStudioRetiredNodeKind(kind: string): boolean {

@@ -1,5 +1,5 @@
 /** @jest-environment jsdom */
-import { retiredImageGenerationNode } from "../../../../studio/nodes/retiredImageGenerationNode";
+import { imageGenerationNode } from "../../../../studio/nodes/imageGenerationNode";
 import { StudioPortInteraction } from "../StudioPortInteraction";
 import { StudioLinkStore } from "../StudioLinkStore";
 import { StudioGraphInteractionEngine } from "../../StudioGraphInteractionEngine";
@@ -273,7 +273,7 @@ function makeConnectionHarness(targetKind: "studio.workflow" | "studio.image_gen
     getCurrentProject: () => project, isBusy: () => false, setError, commitProjectMutation: commit, requestRender: jest.fn(),
     getPortType: (nodeId, direction, portId) => {
       const node = project.graph.nodes.find(entry => entry.id === nodeId);
-      const definition = node?.kind === "studio.workflow" ? workflowNode : node?.kind === "studio.image_generation" ? retiredImageGenerationNode : jsonNode;
+      const definition = node?.kind === "studio.workflow" ? workflowNode : node?.kind === "studio.image_generation" ? imageGenerationNode : jsonNode;
       return (direction === "in" ? definition.inputPorts : definition.outputPorts).find(port => port.id === portId)?.type || null;
     },
     portTypeCompatible: (source, target) => source === target || target === "any",
@@ -285,7 +285,7 @@ function makeConnectionHarness(targetKind: "studio.workflow" | "studio.image_gen
     const card = canvas.createDiv({ cls: "ss-studio-node-card", attr: { "data-node-id": node.id } });
     card.getBoundingClientRect = () => rectOf({ left: node.position.x, top: node.position.y, width: 280, height: 164 });
     engine.registerNodeElement(node.id, card);
-    renderNodePorts({ nodeEl: card, node, definition: node.kind === "studio.workflow" ? workflowNode : node.kind === "studio.image_generation" ? retiredImageGenerationNode : jsonNode, graphInteraction: engine, interactionLocked: false });
+    renderNodePorts({ nodeEl: card, node, definition: node.kind === "studio.workflow" ? workflowNode : node.kind === "studio.image_generation" ? imageGenerationNode : jsonNode, graphInteraction: engine, interactionLocked: false });
     for (const pin of card.querySelectorAll<HTMLButtonElement>(".ss-studio-port-pin")) {
       pin.getBoundingClientRect = () => rectOf({ left: node.position.x, top: node.position.y, width: 12, height: 12 });
     }
@@ -305,10 +305,6 @@ describe("retired node connection enforcement", () => {
     ["disabled workflow card", "studio.workflow", true, "card"],
     ["stale enabled workflow pin", "studio.workflow", false, "pin"],
     ["stale enabled workflow card", "studio.workflow", false, "card"],
-    ["disabled image pin", "studio.image_generation", true, "pin"],
-    ["disabled image card", "studio.image_generation", true, "card"],
-    ["stale enabled image pin", "studio.image_generation", false, "pin"],
-    ["stale enabled image card", "studio.image_generation", false, "card"],
     ["disabled ordinary pin", "studio.json", true, "pin"],
     ["disabled ordinary card", "studio.json", true, "card"],
   ] as const)("excludes %s from incoming drags", (_label, kind, disabled, drop) => {
@@ -336,7 +332,7 @@ describe("retired node connection enforcement", () => {
     }
   });
 
-  describe.each(["studio.workflow", "studio.image_generation"])("retired %s", kind => {
+  describe.each(["studio.workflow"])("retired %s", kind => {
   it.each(["source", "target"])("rejects a retired node %s at commit even when the connection was already armed", endpoint => {
     const h = makeConnectionHarness("studio.json");
     cleanup = () => h.engine.clearRenderBindings();

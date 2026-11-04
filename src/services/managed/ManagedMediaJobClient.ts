@@ -44,7 +44,7 @@ export interface ManagedImageCreateBody {
   model?: string;
   prompt: string;
   input_images?: ManagedUploadedImageInput[];
-  options?: { count?: number; aspect_ratio?: string; image_size?: string; seed?: number };
+  options?: { count?: number; aspect_ratio?: string; image_size?: string; quality?: string; background?: string; seed?: number };
 }
 export interface ManagedVideoCreateBody {
   model: string;
@@ -106,6 +106,8 @@ const VIDEO_EXTENSIONS: Record<string, string> = { "video/mp4": "mp4", "video/we
 const IMAGE_ASPECT_RATIO_PATTERN = /^\d{1,2}(\.\d{1,2})?:\d{1,2}(\.\d{1,2})?$/;
 const VIDEO_ASPECT_RATIO_PATTERN = /^[0-9]{1,2}:[0-9]{1,2}$/;
 const IMAGE_SIZE_PATTERN = /^\d{1,4}(\.\d{1,2})?K?$/i;
+// Quality and background values are model-specific; the server checks membership.
+const IMAGE_OPTION_TOKEN_PATTERN = /^[a-z][a-z0-9_-]{0,23}$/;
 const MEDIA_STATUSES: readonly ManagedMediaJobStatus[] = ["queued", "processing", "succeeded", "failed", "expired"];
 const MEDIA_DELIVERY_MAX_OFFSET_MS = 7 * 24 * 60 * 60 * 1_000;
 const MEDIA_DOWNLOAD_STARTED_AT_HEADER = "x-systemsculpt-download-started-at";
@@ -553,10 +555,12 @@ export class ManagedMediaJobClient {
     }
     if (body.options !== undefined) {
       const o = body.options;
-      if (!o || Object.keys(o).some(k => !["count", "aspect_ratio", "image_size", "seed"].includes(k))) invalid();
+      if (!o || Object.keys(o).some(k => !["count", "aspect_ratio", "image_size", "quality", "background", "seed"].includes(k))) invalid();
       if (o.count !== undefined && (!Number.isInteger(o.count) || o.count < 1 || o.count > 4)) invalid();
       if (o.aspect_ratio !== undefined && (typeof o.aspect_ratio !== "string" || !(o.aspect_ratio === "auto" || o.aspect_ratio === "match_input_image" || IMAGE_ASPECT_RATIO_PATTERN.test(o.aspect_ratio)))) invalid();
       if (o.image_size !== undefined && (typeof o.image_size !== "string" || !IMAGE_SIZE_PATTERN.test(o.image_size))) invalid();
+      if (o.quality !== undefined && (typeof o.quality !== "string" || !IMAGE_OPTION_TOKEN_PATTERN.test(o.quality))) invalid();
+      if (o.background !== undefined && (typeof o.background !== "string" || !IMAGE_OPTION_TOKEN_PATTERN.test(o.background))) invalid();
       if (o.seed !== undefined && (!Number.isInteger(o.seed) || o.seed < 0 || o.seed > 2147483647)) invalid();
     }
   }

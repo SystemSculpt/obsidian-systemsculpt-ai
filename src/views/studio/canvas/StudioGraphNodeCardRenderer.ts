@@ -230,15 +230,11 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     if (node.kind === 'studio.run_collection' && options.agentRuns && options.projectPath) return renderStudioRunCollection(root, { runs: options.agentRuns, presentation: options.presentation, projectId: options.projectId || '', projectPath: options.projectPath, sources: Array.isArray(node.config.sources) ? node.config.sources.filter((value): value is string => typeof value === 'string') : [], compact: false, groupBy: String(node.config.groupBy || 'status'), showCompleted: node.config.showCompleted !== false });
     if (node.kind === 'studio.collection') return renderStudioCollection(root, { node, outputs: nodeRunState.outputs || {}, scope: options.projectId, onChange: change, presentation: options.presentation });
     if (node.kind === 'studio.workflow') return renderStudioWorkflow(root, { node });
-    if (node.kind === 'studio.image_generation') {
-      root.createEl('p', { text: 'Image generation was retired. Saved outputs are preserved.', attr: { role: 'status' } });
-      return renderNodeMediaPreview({ nodeEl: root, node, nodeRunState, resolveAssetPreviewSrc: options.resolveAssetPreviewSrc, onRevealPathInFinder: options.onRevealPathInFinder, onOpenMediaPreview: options.onOpenMediaPreview });
-    }
     root.createDiv({ cls: 'ss-studio-source-empty', text: 'This panel is available once its project is open.' });
   };
 
   if (surface.kind === 'code' || surface.kind === 'panel') {
-    sourceBody = renderStudioNodeSourceBody(nodeEl, { node, definition, scope: options.projectId, locked: node.kind === 'studio.image_generation' || locked, mode: surface.kind === 'panel' ? 'panel' : 'source',
+    sourceBody = renderStudioNodeSourceBody(nodeEl, { node, definition, scope: options.projectId, locked, mode: surface.kind === 'panel' ? 'panel' : 'source',
       onApply: options.onNodeSourceApply, renderPanel: surface.kind === 'panel' ? renderPanel : undefined,
       onViewChange: view => { if (header.sourceToggle) updateUiAction(header.sourceToggle, { selected: view === 'source' }); } });
     teardowns.push(sourceBody.dispose);
