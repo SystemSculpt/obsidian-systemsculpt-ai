@@ -387,7 +387,7 @@
     },
     "chat-review-pending-approval": {
       "events": [],
-      "not_measured": "hosted approvals ride the next api_request:agent_turn; native approvals, including background subagents, stay local with no telemetry"
+      "not_measured": "hosted approvals ride the next api_request:agent_turn; native approvals, including background subagents, make no SystemSculpt API call and emit no plugin telemetry"
     },
     "open-systemsculpt-history": {
       "events": [],

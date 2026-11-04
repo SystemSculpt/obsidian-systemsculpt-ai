@@ -334,6 +334,44 @@ export function stableMarkdownBoundary(markdown: string, start = 0): number {
   return boundary;
 }
 
+/** Obsidian tables cannot interrupt prose. Add a render-only block break. */
+function markdownWithTableBreaks(markdown: string): string | Promise<string> {
+  if (!markdown.includes("|") || !/(?:^|\n) {0,3}\|?[ \t]*:?-{3,}/.test(markdown)) return markdown;
+  // Reuse Studio's bundled language pack, but never evaluate it on plugin load
+  // or for ordinary prose. Its syntax trees own fences, HTML and indentation.
+  return import("@codemirror/lang-markdown").then(({ commonmarkLanguage, markdownLanguage }) => {
+    // Lezer expects LF. Keep offsets aligned without changing rendered bytes.
+    const source = markdown.replace(/\r(?=\n)/g, " ");
+    const original = commonmarkLanguage.parser.parse(source);
+    const tables = markdownLanguage.parser.parse(source);
+    const paragraphAt = (offset: number) => {
+      let node = original.resolveInner(offset, 1);
+      while (node.parent && node.name !== "Paragraph") {
+        if (node.name === "InlineCode" || node.name === "HTMLTag") return null;
+        node = node.parent;
+      }
+      return node.name === "Paragraph" && node.parent?.name === "Document" ? node : null;
+    };
+    const parts: string[] = [];
+    let start = 0;
+    for (let table = tables.topNode.firstChild; table; table = table.nextSibling) {
+      const previous = table.prevSibling;
+      if (table.name !== "Table" || previous?.name !== "Paragraph") continue;
+      if (!/^[ \t]*\r?\n[ \t]*$/.test(markdown.slice(previous.to, table.from))) continue;
+      const delimiter = table.getChild("TableDelimiter");
+      const paragraph = paragraphAt(table.from);
+      // GFM may split a multiline code span at a table-looking line. Both the
+      // header and delimiter must belong to the original non-literal paragraph.
+      if (!paragraph || !delimiter || paragraphAt(delimiter.from)?.from !== paragraph.from) continue;
+      const lineStart = markdown.lastIndexOf("\n", table.from - 1) + 1;
+      const newline = markdown.slice(lineStart - 2, lineStart) === "\r\n" ? "\r\n" : "\n";
+      parts.push(markdown.slice(start, lineStart), newline);
+      start = lineStart;
+    }
+    return parts.length ? parts.join("") + markdown.slice(start) : markdown;
+  });
+}
+
 function regionStart(region: DomRegion): ChildNode | null {
   return region.after ? region.after.nextSibling : region.root.firstChild;
 }
@@ -1222,15 +1260,21 @@ export class LiveMarkdownRenderer extends Component {
       let retainedLease = false;
       try {
         if (settling) {
+          const prepared = markdownWithTableBreaks(markdown.slice(plan.settleStart, plan.tailStart));
+          const presented = typeof prepared === "string" ? prepared : await prepared;
+          if (!isCurrent()) return { status: "stale", retry: true };
           await this.options.render(
-            markdown.slice(plan.settleStart, plan.tailStart),
+            presented,
             settling.staging,
             settling.lease,
           );
           if (!isCurrent()) return { status: "stale", retry: true };
         }
         const tail = markdown.slice(plan.tailStart);
-        await this.options.render(tail, staging, lease);
+        const prepared = markdownWithTableBreaks(tail);
+        const presented = typeof prepared === "string" ? prepared : await prepared;
+        if (!isCurrent()) return { status: "stale", retry: true };
+        await this.options.render(presented, staging, lease);
         if (!isCurrent()) {
           return { status: "stale", retry: true };
         }
