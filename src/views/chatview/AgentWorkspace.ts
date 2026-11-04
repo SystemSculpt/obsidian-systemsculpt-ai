@@ -299,7 +299,7 @@ export class AgentWorkspace extends Component {
     const transcript = this.element.createDiv({ cls: "systemsculpt-agent-transcript" });
     this.viewport = transcript.createDiv({
       cls: "systemsculpt-agent-viewport",
-      attr: { tabindex: "0" },
+      attr: { tabindex: "0", "data-testid": "chat.scroller" },
     });
     this.emptyState = new AgentEmptyState(this.viewport, options.emptyState ?? NO_EMPTY_STATE);
 

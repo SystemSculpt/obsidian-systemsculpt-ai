@@ -314,7 +314,6 @@ export class AgentConversationRenderer extends Component {
     this.element = parent.createDiv({
       cls: "systemsculpt-agent-conversation",
       attr: {
-        "data-testid": "chat.scroller",
         role: "log",
         "aria-label": "Conversation",
         "aria-live": "off",

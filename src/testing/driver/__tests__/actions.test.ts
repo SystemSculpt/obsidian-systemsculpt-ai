@@ -2,7 +2,9 @@
  * @jest-environment jsdom
  */
 
-import type { App } from "obsidian";
+import { App, type WorkspaceLeaf } from "obsidian";
+
+import { AgentWorkspace } from "../../../views/chatview/AgentWorkspace";
 
 import type { ChatMessage } from "../../../types";
 import type { SupportDiagnosticEvent } from "../../../utils/PluginLogger";
@@ -609,6 +611,72 @@ describe("test driver actions", () => {
     document.body.empty();
     supportToolOrdinals.clear();
   });
+
+  it.each([undefined, "chat.scroller"])(
+    "scrolls the rendered chat viewport with target %s, not its conversation content",
+    async (target) => {
+      const { ctx } = makeContext();
+      const host = document.body.createDiv();
+      const workspace = new AgentWorkspace(host, {
+        app: new App(),
+        sourcePath: () => "SystemSculpt/Chats/scroll-test.md",
+        onSubmit: jest.fn(),
+        onStop: jest.fn(),
+        onAttach: jest.fn(),
+        onRemoveAttachment: jest.fn(),
+        onApprove: jest.fn(),
+        onOpenArtifact: jest.fn(),
+        onCopyArtifactPath: jest.fn(),
+        onNewChat: jest.fn(),
+        onOpenHistory: jest.fn(),
+      });
+      workspace.load();
+      const leaf = { view: { containerEl: host } } as unknown as WorkspaceLeaf;
+      ctx.app.workspace.getLeavesOfType = () => [leaf];
+      ctx.app.workspace.getMostRecentLeaf = () => leaf;
+
+      // Reproduce browser geometry: only the viewport can scroll; the inner
+      // conversation grows with its content and clamps scrollTop to zero.
+      let scrollTop = 73.5;
+      Object.defineProperties(workspace.viewport, {
+        clientHeight: { configurable: true, value: 578 },
+        scrollHeight: { configurable: true, value: 934 },
+        scrollTop: {
+          configurable: true,
+          get: () => scrollTop,
+          set: (value: number) => { scrollTop = Math.max(0, Math.min(356, value)); },
+        },
+      });
+      Object.defineProperties(workspace.renderer.element, {
+        clientHeight: { configurable: true, value: 934 },
+        scrollHeight: { configurable: true, value: 934 },
+        scrollTop: { configurable: true, get: () => 0, set: () => undefined },
+      });
+      const onScroll = jest.fn();
+      workspace.viewport.addEventListener("scroll", onScroll);
+
+      try {
+        for (const [params, expectedTop] of [
+          [{ to: "bottom" }, 356],
+          [{ to: "top" }, 0],
+          [{ deltaY: 120 }, 120],
+          [{ deltaY: -45 }, 75],
+        ] as const) {
+          await expect(runDriverAction(ctx, "scroll", { target, ...params })).resolves.toEqual({
+            scrollTop: expectedTop,
+            scrollHeight: 934,
+          });
+          expect(workspace.viewport.scrollTop).toBe(expectedTop);
+          expect(workspace.renderer.element.scrollTop).toBe(0);
+          expect(onScroll.mock.calls.at(-1)?.[0].target).toBe(workspace.viewport);
+        }
+        expect(host.querySelectorAll('[data-testid="chat.scroller"]')).toHaveLength(1);
+        expect(host.querySelector('[data-testid="chat.scroller"]')).toBe(workspace.viewport);
+      } finally {
+        workspace.unload();
+      }
+    },
+  );
 
   it("requires one exact trimmed text match", async () => {
     const { ctx } = makeContext();
