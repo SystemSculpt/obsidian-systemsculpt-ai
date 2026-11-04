@@ -160,3 +160,9 @@ input.ss-studio-node-inline-config-input,
 .ss-studio-path-browse-button-label {
   white-space: nowrap;
 }
+
+/* Placeholders carry the field's only guidance; faint ink was ~2:1. */
+.ss-studio-node-inline-config-textarea::placeholder,
+input.ss-studio-node-inline-config-input::placeholder {
+  color: color-mix(in srgb, var(--ss-ink-muted) 60%, var(--ss-ink-faint));
+}
