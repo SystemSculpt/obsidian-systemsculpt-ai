@@ -348,7 +348,7 @@ describe("RecorderService", () => {
     expect((service as any).completedCapture.result).not.toHaveProperty("blob");
     expect(mockUiInstances[0].render).toHaveBeenLastCalledWith(expect.objectContaining({
       phase: "saved",
-      status: "Obsidian moved to the background, so recording stopped and the captured audio was saved.",
+      status: "Recording stopped in the background. Audio saved.",
       sourcePath: "SystemSculpt/Recordings/session.webm",
     }));
   });
@@ -555,9 +555,9 @@ describe("RecorderService", () => {
     ["inserted where recording started", { insertedIntoOrigin: true }, []],
     ["saved with a warning", {
       insertedIntoOrigin: false,
-      warning: "The transcript was saved, but the note where transcription started changed or closed, so no text was inserted.",
+      warning: "Transcript saved. The note changed, so nothing was inserted.",
     }, [
-      "Notice: The transcript was saved, but the note where transcription started changed or closed, so no text was inserted. Saved to SystemSculpt/Recordings/first - transcript.md.",
+      "Notice: Transcript saved. The note changed, so nothing was inserted. Saved to SystemSculpt/Recordings/first - transcript.md.",
     ]],
   ])("starts another recording while the previous saved audio keeps transcribing (%s)", async (_label, outcome, finished) => {
     plugin.settings.autoTranscribeRecordings = true;
@@ -619,7 +619,7 @@ describe("RecorderService", () => {
     expect((service as any).state).toBe("recording");
     expect((service as any).transcriptionTasks.size).toBe(0);
     expect(noticeMessages(noticeLog)).toEqual([
-      "Notice: The previous recording is still transcribing. Starting a new recording…",
+      "Notice: Starting a new recording…",
       ...finished,
     ]);
   });
@@ -677,7 +677,7 @@ describe("RecorderService", () => {
     expect((service as any).queuedTranscriptions).toHaveLength(1);
     expect(mockUiInstances[0].render).toHaveBeenLastCalledWith(expect.objectContaining({
       phase: "saved",
-      status: expect.stringContaining("Waiting for the previous transcription"),
+      status: expect.stringContaining("Queued for transcription"),
     }));
 
     first.resolve({
@@ -1008,7 +1008,7 @@ describe("RecorderService", () => {
     expect((service as any).state).toBe("warning");
     expect(mockUiInstances[0].render).toHaveBeenLastCalledWith(expect.objectContaining({
       phase: "warning",
-      status: expect.stringContaining("chat where recording started changed or closed"),
+      status: expect.stringContaining("The chat closed, so nothing was inserted"),
     }));
   });
 
@@ -1394,7 +1394,7 @@ describe("RecorderService", () => {
 
     expect(mockTranscriptionStart).not.toHaveBeenCalled();
     expect(noticeMessages(noticeLog)).toEqual([
-      "Notice: A saved recording is waiting for transcription. Run “transcribe an audio file” to continue.",
+      "Notice: A recording is waiting. Run “transcribe an audio file”.",
     ]);
   });
 

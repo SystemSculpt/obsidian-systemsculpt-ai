@@ -43,7 +43,7 @@ export class BulkTranscriptionConfirmModal extends StandardModal {
 
     this.addTitle(
       "Bulk transcription detected",
-      `Transcribe ${count} audio files with SystemSculpt? Processing stops at the first error. Closing this window leaves the files waiting.`,
+      `Transcribe ${count} audio files? Stops at the first error.`,
     );
 
     this.addActionButton("bulk-transcribe.not-now", "Not now", () => this.close(), false);

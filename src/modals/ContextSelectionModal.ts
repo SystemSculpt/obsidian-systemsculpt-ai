@@ -21,7 +21,7 @@ export type ContextSelectionPurpose = "pin" | "message";
 const PURPOSE_COPY = {
   pin: {
     title: "Pin files for every message",
-    description: "Pinned files are reread for every message. Files SystemSculpt reads while working remain part of this chat, but are not pinned automatically.",
+    description: "Sent with every message.",
     action: "Pin files",
     actionCount: (count: number) => `Pin ${count} file${count === 1 ? "" : "s"}`,
     busy: "Pinning…",
@@ -34,7 +34,7 @@ const PURPOSE_COPY = {
   },
   message: {
     title: "Add notes to this message",
-    description: "These files are sent with this message only. To send a file with every message, pin it instead.",
+    description: "Sent with this message only.",
     action: "Add files",
     actionCount: (count: number) => `Add ${count} file${count === 1 ? "" : "s"}`,
     busy: "Adding…",

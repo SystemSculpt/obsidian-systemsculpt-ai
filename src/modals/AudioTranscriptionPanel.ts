@@ -181,7 +181,7 @@ export class AudioTranscriptionPanel {
           await this.openOutput(result.outputPath);
         } catch {
           if (this.disposed) return;
-          new Notice(`Transcript saved to ${result.outputPath}, but Obsidian could not open it automatically.`, 6000);
+          new Notice(`Transcript saved to ${result.outputPath}. Couldn't open it.`, 6000);
         }
       }
       if (this.disposed) return;

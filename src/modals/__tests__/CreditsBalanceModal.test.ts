@@ -344,7 +344,7 @@ describe("CreditsBalanceModal", () => {
     expect(modal.modalEl.textContent).toContain("Included left");
     expect(modal.modalEl.textContent).toContain("Included remaining this cycle");
     expect(modal.modalEl.textContent).toContain(
-      "Included credits reset each month. Purchased add-on credits never reset or expire.",
+      "Monthly credits reset. Purchased credits never expire.",
     );
 
     const meterFill = modal.modalEl.querySelector(".ss-credits-balance__meter-fill") as HTMLElement | null;

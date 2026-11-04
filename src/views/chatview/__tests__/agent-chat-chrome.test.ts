@@ -286,7 +286,7 @@ describe("empty states (spec 3.1)", () => {
     const empty = presentEmptyState(state({ detection: detection(ready, ready, "claude"), activeNote: note }));
     expect(empty.title).toBe("What should we work on?");
     expect(empty.lead).toBe(
-      "Using Claude Code, the agent you use most on this Mac. It runs on your own install and login. No SystemSculpt account or credits needed.",
+      "Using Claude Code, your most used agent. No credits needed.",
     );
     expect(empty.starters.map((starter) => [starter.label, starter.prompt])).toEqual([
       ["Summarize Plan", "Summarize [[Projects/Plan]]"],
@@ -297,9 +297,9 @@ describe("empty states (spec 3.1)", () => {
 
   it("A: drops the used-most clause when it is the only agent or the person chose it", () => {
     const only = presentEmptyState(state({ detection: detection(ready, missing, "claude") }));
-    expect(only.lead).toBe("Using Claude Code on this Mac. It runs on your own install and login. No SystemSculpt account or credits needed.");
+    expect(only.lead).toBe("Using Claude Code. No credits needed.");
     const chosen = presentEmptyState(state({ chosen: true, detection: detection(ready, ready, "claude") }));
-    expect(chosen.lead).toMatch(/^Using Claude Code on this Mac\./);
+    expect(chosen.lead).toMatch(/^Using Claude Code\. No credits/);
     expect(only.starters.map((starter) => starter.label)).toEqual([
       "Summarize my latest daily note", "Find notes I haven't linked yet", "Plan my week from my notes",
     ]);
@@ -307,7 +307,7 @@ describe("empty states (spec 3.1)", () => {
 
   it("B and C: Codex, with the other ready agent one click away", () => {
     const empty = presentEmptyState(state({ backend: "codex", detection: detection(ready, ready, "codex") }));
-    expect(empty.lead).toMatch(/^Using Codex, the agent you use most on this Mac\./);
+    expect(empty.lead).toMatch(/^Using Codex, your most used agent\./);
     expect(empty.notes).toEqual([{
       id: "also-ready",
       text: "Claude Code is ready too.",
@@ -319,12 +319,12 @@ describe("empty states (spec 3.1)", () => {
     const empty = presentEmptyState(state({ backend: "systemsculpt", detection: detection(missing, missing, "systemsculpt") }));
     expect(empty.lead).toBe("Chat with your vault using SystemSculpt.");
     expect(empty.offer).toEqual({
-      text: "Create a free account to get 500 starter credits. No card needed. Paid plans start at $9/month.",
+      text: "500 free credits. No card needed.",
       actions: ["start-free", "sign-in"],
     });
     expect(empty.hints).toEqual([{
       id: "local-hint",
-      before: "Already use Claude Code or Codex? Install or sign in on this computer, then",
+      before: "Use Claude Code or Codex? Sign in on this computer, then",
       after: ".",
     }]);
     expect(empty.starters).toEqual([]);
@@ -333,18 +333,18 @@ describe("empty states (spec 3.1)", () => {
   it("D2: says how to sign in to an installed agent", () => {
     const empty = presentEmptyState(state({ backend: "systemsculpt", detection: detection(signedOut, signedOut, "systemsculpt") }));
     expect(empty.hints.map((hint) => `${hint.before} Detect again${hint.after}`)).toEqual([
-      "Claude Code is installed but not signed in. Run `claude` in a terminal and type /login, then Detect again.",
-      "Codex is installed but not signed in. Run `codex login` in a terminal, then Detect again.",
+      "Sign in to Claude Code: run `claude`, type /login, then Detect again.",
+      "Sign in to Codex: run `codex login`, then Detect again.",
     ]);
   });
 
   it("E: signed in with credits, or with no plan and no credits", () => {
     const withCredits = presentEmptyState(state({ backend: "systemsculpt", account: "signed-in", credits: credits() }));
-    expect(withCredits.lead).toBe("Ask about your notes or give SystemSculpt a task.");
+    expect(withCredits.lead).toBe("Ask about your notes.");
     expect(withCredits.hints).toEqual([]);
     expect(withCredits.starters).toHaveLength(3);
     const noPlan = presentEmptyState(state({ backend: "systemsculpt", account: "no-plan" }));
-    expect(noPlan.lead).toBe("Create a free account for 500 starter credits, or choose a plan.");
+    expect(noPlan.lead).toBe("Start free with 500 credits, or choose a plan.");
     expect(noPlan.offer?.actions).toEqual(["see-plans"]);
   });
 
@@ -365,7 +365,7 @@ describe("empty states (spec 3.1)", () => {
       prefersLocalAgent: true,
       detection: null,
     }));
-    expect(empty.notes).toEqual([{ id: "mobile", text: "Claude Code and Codex run on desktop. Here, chat uses SystemSculpt." }]);
+    expect(empty.notes).toEqual([{ id: "mobile", text: "Claude Code and Codex are desktop only." }]);
     expect(empty.hints).toEqual([]);
   });
 

@@ -1144,7 +1144,7 @@ export class EmbeddingsManager {
       "payment_required",
       balance.totalRemaining === 0
         ? "You have no credits left. Add credits to continue indexing notes."
-        : "Not enough credits are available. Add credits to continue indexing notes.",
+        : "Not enough credits. Add more to keep indexing.",
       402,
     );
   }

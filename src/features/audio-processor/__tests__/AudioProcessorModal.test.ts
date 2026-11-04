@@ -77,9 +77,9 @@ describe("AudioProcessorModal", () => {
     expect(modal.modalEl.textContent).toContain("Meeting brief");
     expect(modal.modalEl.textContent).toContain("Clean transcript");
     expect(buttonWithText(modal.modalEl, "Meeting brief").textContent)
-      .toContain("plus a linked transcript");
+      .toContain("Decisions, actions and questions.");
     expect(buttonWithText(modal.modalEl, "Clean transcript").textContent)
-      .toContain("without timestamps in the main note");
+      .toContain("no timestamps");
     expect(modal.modalEl.querySelectorAll(
       ".ss-audio-processor__output-option[role='radio']",
     )).toHaveLength(3);
@@ -264,7 +264,7 @@ describe("AudioProcessorModal", () => {
       expect(modal.modalEl.querySelector(".ss-audio-source__file")).toBeNull();
       expect(Array.from(modal.modalEl.querySelectorAll("button"))
         .some((button) => button.textContent === "Vault")).toBe(false);
-      expect(modal.modalEl.textContent).toContain("Large files upload in small parts");
+      expect(modal.modalEl.textContent).toContain("Choose a recording from this device.");
       expect(modal.modalEl.querySelector<HTMLInputElement>(
         ".ss-audio-source__file-input",
       )).toBeTruthy();

@@ -15,11 +15,6 @@ export async function displayChatTabContent(containerEl: HTMLElement, tabInstanc
 
     containerEl.createEl("h3", { text: "Chat settings" });
 
-    containerEl.createEl('p', {
-        text: 'Use this tab for chat preferences and display choices.',
-        cls: 'setting-item-description'
-    });
-
     const execution = containerEl.createDiv();
     const cleanup = mountCodexExecutionControls(execution, plugin, {});
     const unregister = tabInstance.registerRenderCleanup(cleanup);

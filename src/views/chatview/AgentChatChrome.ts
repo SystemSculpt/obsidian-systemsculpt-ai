@@ -91,15 +91,15 @@ export const MODE_CHOICES: Readonly<Record<TextExecutionBackend, readonly Chrome
 };
 
 const CLAUDE_AUTO_UNAVAILABLE =
-  "Claude Code's Auto mode isn't available here, so edits are accepted automatically and other actions ask. Update Claude Code to use Auto.";
+  "Update Claude Code to use Auto. Until then, edits run and other actions ask.";
 const CODEX_AUTO_UNAVAILABLE =
-  "Codex's automatic review isn't available in this version, so Codex asks you when it needs approval. Update Codex to use Auto.";
+  "Update Codex to use Auto. Until then, Codex asks.";
 const MODE_APPLIES_NEXT = "Applies from your next message.";
 const SWITCH_STARTS_NEW_CHAT = "Switching starts a new chat. This one stays in your history.";
 const DETECTING_AGENTS = "Finding Claude Code or Codex…";
 const EMPTY_TITLE = "What should we work on?";
 /** T-36 free-start copy, read by the Nov 6 experiment: do not edit. */
-const FREE_START_OFFER = "Create a free account to get 500 starter credits. No card needed. Paid plans start at $9/month.";
+const FREE_START_OFFER = "500 free credits. No card needed.";
 
 const CLAUDE_MODELS: readonly (readonly [string, string, string?])[] = [
   ["", "Default", "Claude Code's choice"],
@@ -489,14 +489,14 @@ function localHints(state: AgentChromeState): readonly EmptyStateHint[] {
   if (claude?.installed && claude.signedIn === false) {
     hints.push({
       id: "claude-signed-out",
-      before: "Claude Code is installed but not signed in. Run `claude` in a terminal and type /login, then",
+      before: "Sign in to Claude Code: run `claude`, type /login, then",
       after: ".",
     });
   }
   if (codex?.installed && codex.signedIn === false) {
     hints.push({
       id: "codex-signed-out",
-      before: "Codex is installed but not signed in. Run `codex login` in a terminal, then",
+      before: "Sign in to Codex: run `codex login`, then",
       after: ".",
     });
   }
@@ -504,7 +504,7 @@ function localHints(state: AgentChromeState): readonly EmptyStateHint[] {
   if (usable(claude) || usable(codex) || claude?.signedIn === null || codex?.signedIn === null) return [];
   return [{
     id: "local-hint",
-    before: "Already use Claude Code or Codex? Install or sign in on this computer, then",
+    before: "Use Claude Code or Codex? Sign in on this computer, then",
     after: ".",
   }];
 }
@@ -531,8 +531,8 @@ export function presentEmptyState(state: AgentChromeState): EmptyStatePresentati
       && state.detection?.preferred === backend;
     const name = LOCAL_AGENTS[backend];
     const lead = mostUsed
-      ? `Using ${name}, the agent you use most on this ${state.host}. It runs on your own install and login. No SystemSculpt account or credits needed.`
-      : `Using ${name} on this ${state.host}. It runs on your own install and login. No SystemSculpt account or credits needed.`;
+      ? `Using ${name}, your most used agent. No credits needed.`
+      : `Using ${name}. No credits needed.`;
     if (state.localAgents && usable(agents?.[other])) {
       notes.push({
         id: "also-ready",
@@ -544,7 +544,7 @@ export function presentEmptyState(state: AgentChromeState): EmptyStatePresentati
   }
 
   if (!state.localAgents && state.prefersLocalAgent) {
-    notes.push({ id: "mobile", text: "Claude Code and Codex run on desktop. Here, chat uses SystemSculpt." });
+    notes.push({ id: "mobile", text: "Claude Code and Codex are desktop only." });
   }
   if (state.account === "signed-out") {
     return {
@@ -567,7 +567,7 @@ export function presentEmptyState(state: AgentChromeState): EmptyStatePresentati
   }
   return {
     ...empty,
-    lead: "Ask about your notes or give SystemSculpt a task.",
+    lead: "Ask about your notes.",
     notes,
     starters: starters(state.activeNote),
   };

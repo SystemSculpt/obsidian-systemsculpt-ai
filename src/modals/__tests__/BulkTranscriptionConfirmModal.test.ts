@@ -48,7 +48,7 @@ describe("BulkTranscriptionConfirmModal", () => {
     modal.open();
 
     expect(document.body.textContent).toContain(
-      "Transcribe 3 audio files with SystemSculpt? Processing stops at the first error. Closing this window leaves the files waiting.",
+      "Transcribe 3 audio files? Stops at the first error.",
     );
     expect(document.body.textContent).not.toContain("Skip all");
     expect(document.body.textContent).not.toContain("settings > workflow");

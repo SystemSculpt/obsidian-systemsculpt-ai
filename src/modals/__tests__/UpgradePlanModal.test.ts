@@ -168,7 +168,7 @@ describe("UpgradePlanModal", () => {
     modal.onOpen();
 
     expect(modal.modalEl.textContent).toContain("Unlock SystemSculpt AI");
-    expect(modal.modalEl.textContent).toContain("Create a free SystemSculpt account to get 500 starter credits. No card needed.");
+    expect(modal.modalEl.textContent).toContain("Start with 500 free credits. No card needed.");
     expect(findButtonByText(modal.modalEl, "Sign in")).toBeTruthy();
     const start = modal.modalEl.querySelector<HTMLButtonElement>('[data-testid="upgrade-plan.create-account"]')!;
     expect(start.textContent).toContain("Start free");
@@ -197,7 +197,7 @@ describe("UpgradePlanModal", () => {
     modal.onOpen();
 
     expect(modal.modalEl.textContent).toContain("Signed in as user@example.com.");
-    expect(modal.modalEl.textContent).toContain("Create a free account for 500 starter credits, or choose a plan.");
+    expect(modal.modalEl.textContent).toContain("Start free with 500 credits, or choose a plan.");
     expect(findButtonByText(modal.modalEl, "Subscribe yearly")).toBeTruthy();
     expect(findButtonByText(modal.modalEl, "Subscribe monthly")).toBeTruthy();
     modal.onClose();
@@ -226,7 +226,7 @@ describe("UpgradePlanModal", () => {
       const plugin = createPlugin({ userEmail: "user@example.com", licenseKey: "expired-key" });
       const modal = new UpgradePlanModal(plugin);
       modal.onOpen();
-      expect(modal.modalEl.textContent).toContain("Your current license isn't active.");
+      expect(modal.modalEl.textContent).toContain("Your license isn't active.");
       findButtonByText(modal.modalEl, "Subscribe monthly").click();
       const checkout = new URL(hrefs[0]);
       expect(checkout.origin).toBe("https://systemsculpt.com");
@@ -271,7 +271,7 @@ describe("UpgradePlanModal", () => {
     expect(plugin.begin).toHaveBeenCalledWith("sign-in", expect.anything());
     expect(modal.modalEl.textContent).toContain("Continue in your browser");
     expect(modal.modalEl.textContent).toContain("Waiting for you to finish in the browser");
-    expect(modal.modalEl.textContent).toContain("finishes automatically");
+    expect(modal.modalEl.textContent).toContain("Paste the code from your browser");
     const codeInput = modal.modalEl.querySelector<HTMLInputElement>("[data-testid='upgrade-plan.code']");
     expect(codeInput).not.toBeNull();
 
@@ -287,7 +287,7 @@ describe("UpgradePlanModal", () => {
     const modal = UpgradePlanModal.openConnect(plugin, "sign-up", { feature: "Chat" });
     await flushPromises();
     expect(plugin.begin).toHaveBeenCalledWith("sign-up", expect.anything());
-    expect(modal.modalEl.textContent).toContain("Create your free SystemSculpt account.");
+    expect(modal.modalEl.textContent).toContain("Create your free account.");
     // A second press while the handoff is open reuses it.
     expect(UpgradePlanModal.openConnect(plugin, "sign-in")).toBe(modal);
   });
@@ -400,7 +400,7 @@ describe("UpgradePlanModal", () => {
     UpgradePlanModal.showConnectOutcome({ kind: "signed-in", name: null, email: null, licenseValid: false });
     expect(modal.modalEl.textContent).toContain("You're signed in");
     expect(modal.modalEl.textContent).toContain("Signed in to SystemSculpt.");
-    expect(modal.modalEl.textContent).toContain("Your license is being confirmed.");
+    expect(modal.modalEl.textContent).toContain("Confirming your license…");
     expect(Array.from(modal["footerEl"].querySelectorAll("button")).map((button) => button.textContent)).toEqual(["Done"]);
     modal.onClose();
   });
@@ -432,7 +432,7 @@ describe("UpgradePlanModal", () => {
     UpgradePlanModal.showConnectOutcome({ kind: "error", reason: "unavailable" });
 
     expect(modal.modalEl.textContent).toContain("Sign-in didn't finish");
-    expect(modal.modalEl.textContent).toContain("Sign-in is temporarily unavailable. Try again in a moment.");
+    expect(modal.modalEl.textContent).toContain("Sign-in is down. Try again soon.");
     expect(modal.modalEl.textContent).not.toContain("signed in");
     findButtonByText(modal.modalEl, "Start sign-in again").click();
     await flushPromises();
@@ -448,7 +448,7 @@ describe("UpgradePlanModal", () => {
     await flushPromises();
 
     UpgradePlanModal.showConnectOutcome({ kind: "error", reason: "network" });
-    expect(modal.modalEl.textContent).toContain("Could not reach SystemSculpt.");
+    expect(modal.modalEl.textContent).toContain("Can't reach SystemSculpt.");
     findButtonByText(modal.modalEl, "Enter the code again").click();
     expect(modal.modalEl.querySelector("[data-testid='upgrade-plan.code']")).not.toBeNull();
     expect(plugin.begin).toHaveBeenCalledTimes(1);
@@ -496,9 +496,9 @@ describe("UpgradePlanModal", () => {
     presentAccountConnectOutcome(plugin, { kind: "error", reason: "expired" });
     presentAccountConnectOutcome(plugin, { kind: "no-license", name: null, email: "user@example.test" });
     expect(Notice).toHaveBeenNthCalledWith(1,
-      "The sign-in session expired. Start sign-in again from SystemSculpt settings.", 10_000);
+      "Sign-in expired. Try again.", 10_000);
     expect(Notice).toHaveBeenNthCalledWith(2,
-      "Signed in as user@example.test. Your account has no active plan yet. Choose a plan to enable SystemSculpt AI features.", 6_000);
+      "Signed in as user@example.test. No active plan. Choose one to start.", 6_000);
     expect(document.querySelector(".ss-upgrade-plan-modal")).toBeNull();
   });
 

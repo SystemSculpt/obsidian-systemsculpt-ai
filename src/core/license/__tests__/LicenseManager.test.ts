@@ -262,7 +262,7 @@ describe("LicenseManager", () => {
       expect(mockPlugin.aiService.validateLicenseDetailed).toHaveBeenCalled();
       expect(mockSettingsManager.updateSettings).not.toHaveBeenCalled();
       expect(mockedNotice).toHaveBeenCalledWith(
-        "Your SystemSculpt license could not be validated. Open account settings to check your access.",
+        "Couldn't validate your license. Check your account.",
         7000,
       );
     });

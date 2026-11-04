@@ -72,7 +72,7 @@ export class SystemSculptError extends Error {
 
 /** Single source for the "why is this locked" sentence shown across the plugin. */
 export const PLAN_REQUIRED_MESSAGE =
-  "Create a free account for 500 starter credits, or choose a plan.";
+  "Start free with 500 credits, or choose a plan.";
 
 /** Pre-flight error thrown before contacting the server when no plan is active. */
 export function planRequiredError(feature: string): SystemSculptError {

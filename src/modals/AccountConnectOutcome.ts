@@ -2,14 +2,14 @@ import type { ConnectErrorReason, ConnectOutcome } from "../services/AccountConn
 
 /** What each sign-in failure tells the user, wherever the result is shown. */
 export const CONNECT_ERROR_COPY: Record<ConnectErrorReason, string> = {
-  expired: "The sign-in session expired. Start sign-in again from SystemSculpt settings.",
-  "state-mismatch": "The sign-in could not be verified. Start again from SystemSculpt settings.",
-  "missing-code": "No connection code was received. Paste the code shown in your browser into SystemSculpt settings.",
-  network: "Could not reach SystemSculpt. Check your connection, then try the code again from settings.",
-  "invalid-code": "The connection code was invalid or expired. Start sign-in again from SystemSculpt settings.",
-  "rate-limited": "Too many sign-in attempts. Wait a moment, then try again.",
-  unavailable: "Sign-in is temporarily unavailable. Try again in a moment.",
-  unconfirmed: "Your sign-in may have gone through, but Obsidian didn't receive the confirmation. Start sign-in again to finish connecting.",
+  expired: "Sign-in expired. Try again.",
+  "state-mismatch": "Couldn't verify sign-in. Try again.",
+  "missing-code": "No code received. Paste the code from your browser.",
+  network: "Can't reach SystemSculpt. Check your connection.",
+  "invalid-code": "Code invalid or expired. Sign in again.",
+  "rate-limited": "Too many tries. Wait a moment.",
+  unavailable: "Sign-in is down. Try again soon.",
+  unconfirmed: "Sign-in didn't finish. Try again.",
 };
 
 /** Error reasons a fresh browser sign-in can recover from in one tap. */
@@ -22,10 +22,10 @@ export const RETRYABLE_CONNECT_REASONS: ReadonlySet<ConnectErrorReason> = new Se
 ]);
 
 export const LICENSE_CONFIRMING_COPY =
-  "Your license is being confirmed. If AI features stay locked, open SystemSculpt settings and retry validation.";
+  "Confirming your license…";
 
 const NO_PLAN_COPY =
-  "Your account has no active plan yet. Choose a plan to enable SystemSculpt AI features.";
+  "No active plan. Choose one to start.";
 
 export function signedInLine(email: string | null): string {
   return email ? `Signed in as ${email}.` : "Signed in to SystemSculpt.";

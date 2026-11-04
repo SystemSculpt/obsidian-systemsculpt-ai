@@ -2674,12 +2674,12 @@ describe("AgentConversationRenderer tail status", () => {
     expect(parent.querySelector(".systemsculpt-agent-error-heading")?.textContent).toBe("Out of credits");
     const action = parent.querySelector<HTMLButtonElement>('[data-testid="chat.turn.see-plans"]');
     if (showPlanOffer) {
-      expect(parent.textContent).toContain("Monthly is $9 and includes 10,000 credits every month. You can also add a credit pack.");
+      expect(parent.textContent).toContain("$9 a month for 10,000 credits.");
       expect(action?.textContent).toBe("See plans");
       action!.click();
       expect(onViewPlans).toHaveBeenCalledTimes(1);
     } else {
-      expect(parent.textContent).toContain("Add credits to continue using Chat.");
+      expect(parent.textContent).toContain("Add more to keep chatting.");
       expect(action).toBeNull();
     }
     renderer.unload();

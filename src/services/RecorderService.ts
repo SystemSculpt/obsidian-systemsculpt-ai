@@ -212,7 +212,7 @@ export class RecorderService {
     if (!settled.length) return;
     const recoverable = settled.filter((capture) => this.shouldRecoverPendingCapture(capture));
     if (!recoverable.length) {
-      new Notice("A saved recording is waiting for transcription. Run “transcribe an audio file” to continue.", 7000);
+      new Notice("A recording is waiting. Run “transcribe an audio file”.", 7000);
       return;
     }
 
@@ -251,7 +251,7 @@ export class RecorderService {
     }
     if (this.state === "transcribing") {
       this.detachDisplayedTranscription();
-      new Notice("The previous recording is still transcribing. Starting a new recording…", 4500);
+      new Notice("Starting a new recording…", 4500);
     }
     if (this.state === "warning" && this.transcriptionResumeOperationId && this.completedCapture) {
       this.showPreservedTranscriptionRecovery();
@@ -483,7 +483,7 @@ export class RecorderService {
     const status = result.stopReason === "size-limit"
       ? `Recording reached the ${captureLimitLabel(session.captureLimitBytes)} safety limit. The captured audio is saved.`
       : result.stopReason === "background-hidden" || result.stopReason === "background-pagehide"
-        ? "Obsidian moved to the background, so recording stopped and the captured audio was saved."
+        ? "Recording stopped in the background. Audio saved."
         : result.stopReason === "interrupted"
           ? "Microphone capture was interrupted. The captured audio is saved."
           : "Recording saved.";
@@ -697,7 +697,7 @@ export class RecorderService {
         );
         delivered = insertedIntoOrigin;
         if (!insertedIntoOrigin) {
-          const chatWarning = "The transcript was saved, but the chat where recording started changed or closed, so no text was inserted.";
+          const chatWarning = "Transcript saved. The chat closed, so nothing was inserted.";
           warning = warning ? `${warning} ${chatWarning}` : chatWarning;
         }
       }
@@ -822,7 +822,7 @@ export class RecorderService {
       this.state = "saved";
       this.render({
         phase: "saved",
-        status: "Recording saved. Waiting for the previous transcription; you can start another recording.",
+        status: "Recording saved. Queued for transcription.",
         durationMs: capture.result.durationMs,
         microphoneLabel: capture.microphoneLabel,
         sourcePath: filePath,
@@ -1397,7 +1397,7 @@ export class RecorderService {
     const model: RecorderUiModel = {
       phase: "warning",
       status: this.pendingSaveStatus
-        || "Audio is still in memory because it could not be saved. Retry save before closing Obsidian.",
+        || "Audio not saved yet. Retry before closing Obsidian.",
       durationMs: pending.durationMs,
       microphoneLabel: this.microphoneLabel,
       sourcePath: pending.filePath,
@@ -1434,7 +1434,7 @@ export class RecorderService {
       .trim();
     return detail
       ? `Audio is still in memory because it could not be saved: ${detail} Retry save before closing Obsidian.`
-      : "Audio is still in memory because it could not be saved. Retry save before closing Obsidian.";
+      : "Audio not saved yet. Retry before closing Obsidian.";
   }
 
   private async openOutput(): Promise<void> {

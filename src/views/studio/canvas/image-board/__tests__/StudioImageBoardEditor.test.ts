@@ -350,7 +350,7 @@ describe("in-place image editor", () => {
     const { stage, toolbar, button, layers } = await mount();
 
     button("studio.image.tool.redact").click();
-    expect(toolbar.querySelector(".ss-studio-image-board-toolbar__hint")!.textContent).toContain("cannot be recovered");
+    expect(toolbar.querySelector(".ss-studio-image-board-toolbar__hint")!.textContent).toContain("can't be recovered");
     drag(stage, [40, 80], [240, 120]);
 
     expect(layers()[1]).toMatchObject({ kind: "redact", style: "blur" });
@@ -420,7 +420,7 @@ describe("in-place image editor", () => {
 
     expect(key("m")).toBe(true);
     expect(button("studio.image.tool.magnify").getAttribute("aria-pressed")).toBe("true");
-    expect(toolbar.querySelector(".ss-studio-image-board-toolbar__hint")!.textContent).toContain("pops out");
+    expect(toolbar.querySelector(".ss-studio-image-board-toolbar__hint")!.textContent).toContain("enlarge");
 
     // Mark 40×20 px of the 400×200 stage.
     pointer(stage, "pointerdown", 180, 110);

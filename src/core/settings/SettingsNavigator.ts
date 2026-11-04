@@ -87,7 +87,7 @@ export class SettingsNavigator {
       focusPluginTab();
     } catch {
       cancel();
-      new Notice("Open SystemSculpt AI settings to manage your account and plugin preferences.", 6000);
+      new Notice("Open SystemSculpt AI in settings.", 6000);
     }
   }
 

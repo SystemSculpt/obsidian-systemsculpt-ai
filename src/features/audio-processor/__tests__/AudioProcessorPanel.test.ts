@@ -61,7 +61,7 @@ describe("AudioProcessorPanel", () => {
     panel.fail(new DOMException("Stopped", "AbortError"));
 
     expect(document.body.textContent).toContain("Stopped watching audio progress");
-    expect(document.body.textContent).toContain("Processing is continuing on the server");
+    expect(document.body.textContent).toContain("Still processing. Reopen to check.");
     expect(document.body.textContent).not.toContain("Audio processing cancelled");
   });
 
@@ -147,7 +147,7 @@ describe("AudioProcessorPanel", () => {
     panel.update({ stage: "transcribing", progress: 0.5, message: "Transcribing…", serverOwned: true });
     actionButton("Hide").click();
     expect(document.querySelector(".systemsculpt-progress-panel")).toBeNull();
-    expect(notices).toHaveBeenCalledWith(expect.stringContaining("continuing on the server"));
+    expect(notices).toHaveBeenCalledWith(expect.stringContaining("Processing on the server"));
 
     panel.fail(Object.assign(new Error("Insufficient available credits to run this request."), {
       status: 402,
@@ -163,8 +163,8 @@ describe("AudioProcessorPanel", () => {
   });
 
   it.each([
-    [true, "Audio processing is continuing on the server. You can close Obsidian and resume later."],
-    [false, "This audio is still being prepared. Keep Obsidian open until server processing begins."],
+    [true, "Processing on the server. Safe to close Obsidian."],
+    [false, "Preparing audio. Keep Obsidian open."],
   ])("says once, on Hide, whether Obsidian may close (server-owned %s)", (serverOwned, expected) => {
     const plugin = loadedPlugin();
     const notices = jest.spyOn(console, "log").mockImplementation(() => undefined);

@@ -75,7 +75,7 @@ export class CreditsBalanceModal extends StandardModal {
 
     this.addTitle(
       "Credits & Usage",
-      "Track your remaining credits and inspect exactly where credits were spent."
+      "Where your credits went."
     );
 
     const root = this.contentEl.createDiv({ cls: "ss-credits-balance" });
@@ -256,7 +256,7 @@ export class CreditsBalanceModal extends StandardModal {
     meterFill.style.width = `${metrics.remainingPercentForMeter}%`;
     this.summaryEl.createDiv({
       cls: "ss-credits-balance__hint",
-      text: "Included credits reset each month. Purchased add-on credits never reset or expire.",
+      text: "Monthly credits reset. Purchased credits never expire.",
     });
 
     this.createStatCard(
@@ -336,7 +336,7 @@ export class CreditsBalanceModal extends StandardModal {
     this.createStatCard("Customer credits", "Not used");
     this.createStatCard("Provider usage", "Tracked internally");
     this.hintEl.setText(
-      "Provider usage is tracked internally. Customer credits are not used for this test session.",
+      "Internal testing. No credits used.",
     );
     this.hintEl.removeClass("is-warning");
   }
@@ -432,7 +432,7 @@ export class CreditsBalanceModal extends StandardModal {
       );
     }
 
-    this.usageHintEl.setText("Each row shows what was billed. When available, we also show exact usage, rounding, and prompt-cache read/write behavior.");
+    this.usageHintEl.setText("What each request cost.");
     this.usageHintEl.removeClass("is-warning");
     this.updateUsageLoadMoreButton();
   }
@@ -455,7 +455,7 @@ export class CreditsBalanceModal extends StandardModal {
       text: "Refresh to try again",
     });
 
-    this.hintEl.setText("We could not load your latest credits. You can refresh or open account to verify your license.");
+    this.hintEl.setText("Couldn't load credits. Refresh to retry.");
     this.hintEl.removeClass("is-warning");
   }
 

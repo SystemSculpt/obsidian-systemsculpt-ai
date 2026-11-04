@@ -293,7 +293,7 @@ describe("AudioTranscriptionPanel", () => {
     expect([...document.querySelectorAll("button")]
       .some((button) => button.textContent === "Open transcript")).toBe(true);
     expect(mockedNotice).toHaveBeenCalledWith(
-      "Transcript saved to Recordings/test.srt, but Obsidian could not open it automatically.",
+      "Transcript saved to Recordings/test.srt. Couldn't open it.",
       6000,
     );
   });
@@ -342,11 +342,11 @@ describe("AudioTranscriptionPanel", () => {
   it("says a hidden transcription's warning once", async () => {
     const { running } = hideRunningPanel({ openOnComplete: true });
 
-    running.resolve({ ...completedResult, warning: "Transcript cleanup was incomplete, so the raw transcript was saved instead." });
+    running.resolve({ ...completedResult, warning: "Cleanup didn't finish. Saved the raw transcript." });
     await flushPromises();
 
     expect(mockedNotice).toHaveBeenCalledTimes(1);
-    expect(mockedNotice).toHaveBeenCalledWith("Transcript cleanup was incomplete, so the raw transcript was saved instead.", 6000);
+    expect(mockedNotice).toHaveBeenCalledWith("Cleanup didn't finish. Saved the raw transcript.", 6000);
   });
 
   it("says once where a hidden transcript is when it could not be opened", async () => {
@@ -358,7 +358,7 @@ describe("AudioTranscriptionPanel", () => {
 
     expect(mockedNotice).toHaveBeenCalledTimes(1);
     expect(mockedNotice).toHaveBeenCalledWith(
-      "Transcript saved to Recordings/test.srt, but Obsidian could not open it automatically.",
+      "Transcript saved to Recordings/test.srt. Couldn't open it.",
       6000,
     );
   });

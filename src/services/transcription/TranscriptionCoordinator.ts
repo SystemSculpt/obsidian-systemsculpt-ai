@@ -539,7 +539,7 @@ export class TranscriptionCoordinator {
         if (!targetIsCurrent) {
           warning = this.joinWarnings(
             warning,
-            "The transcript was saved, but the note where transcription started changed or closed, so no text was inserted.",
+            "Transcript saved. The note changed, so nothing was inserted.",
           );
         } else {
           try {
@@ -548,7 +548,7 @@ export class TranscriptionCoordinator {
           } catch {
             warning = this.joinWarnings(
               warning,
-              "The transcript was saved, but the note where transcription started could not accept the text.",
+              "Transcript saved. The note couldn't take the text.",
             );
           }
         }
@@ -566,7 +566,7 @@ export class TranscriptionCoordinator {
           sourceDisposition = "cleanup-failed";
           warning = this.joinWarnings(
             warning,
-            "The transcript was saved, but the source audio could not be moved to trash.",
+            "Transcript saved. Couldn't trash the audio.",
           );
         }
       }

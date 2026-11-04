@@ -2539,7 +2539,7 @@ export class AgentConversationRenderer extends Component {
     if (this.activeRoot.querySelector(".systemsculpt-agent-render-fallback")) return;
     this.activeRoot.createDiv({
       cls: "systemsculpt-agent-render-fallback systemsculpt-agent-banner is-error",
-      text: "The response completed, but part of this chat could not be displayed. Reopen the chat to try again.",
+      text: "Part of this chat couldn't display. Reopen it.",
       attr: {
         role: "alert",
         "aria-live": "assertive",

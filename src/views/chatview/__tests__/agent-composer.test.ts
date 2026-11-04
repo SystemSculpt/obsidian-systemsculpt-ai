@@ -633,7 +633,7 @@ describe("AgentComposer", () => {
     const list = query<HTMLElement>(".systemsculpt-agent-composer-attachments")!;
     expect(list.getAttribute("role")).toBe("list");
     expect(list.getAttribute("aria-label")).toBe("Message attachments and pinned files");
-    expect(list.getAttribute("aria-description")).toContain("Pinned files are reread for every message");
+    expect(list.getAttribute("aria-description")).toContain("Pinned files are sent with every message");
     const pinned = query<HTMLElement>(".systemsculpt-agent-attachment.is-pinned")!;
     expect(pinned.getAttribute("role")).toBe("listitem");
     expect(pinned.title).toBe("Projects/Plan.md. Pinned and reread for every message.");

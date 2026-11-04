@@ -52,7 +52,7 @@ describe("Backup settings tab", () => {
     displayBackupTabContent(container, tab);
 
     const text = container.textContent || "";
-    expect(text).toContain("SystemSculpt preferences");
+    expect(text).toContain("Daily backup of settings, without keys.");
     expect(text).not.toContain("prompt preferences");
   });
 

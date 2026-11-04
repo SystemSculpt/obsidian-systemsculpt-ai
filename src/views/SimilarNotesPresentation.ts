@@ -366,7 +366,7 @@ export class SimilarNotesPresentation extends Component {
           icon: "circle-alert",
           title: paymentRequired ? "Not enough credits" : "Couldn’t find similar notes",
           description: paymentRequired
-            ? "Not enough credits are available. Add credits to continue using Similar notes."
+            ? "Not enough credits. Add more to continue."
             : readEmbeddingErrorMessage(
               model.message,
               "Similar notes are unavailable. Try again.",

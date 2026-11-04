@@ -407,7 +407,7 @@ describe("ManagedEmbeddingsIndexAdapter", () => {
     expect(error.message).not.toContain("private_markdown");
     if (status === 402) {
       expect(error.message).toBe(
-        "Not enough credits are available. Add credits to continue indexing notes.",
+        "Not enough credits. Add more to keep indexing.",
       );
     }
   });
@@ -479,7 +479,7 @@ describe("ManagedEmbeddingsIndexAdapter", () => {
 
   it.each([
     [0, "You have no credits left. Add credits to continue indexing notes."],
-    [5, "Not enough credits are available. Add credits to continue indexing notes."],
+    [5, "Not enough credits. Add more to keep indexing."],
   ])("uses authoritative remaining credits for 402 copy (%s)", async (creditsRemaining, message) => {
     const adapter = adapterWith(jest.fn(async () => transport({
       error: {

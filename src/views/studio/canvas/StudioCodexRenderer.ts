@@ -12,7 +12,7 @@ export function renderStudioCodexStop(root: HTMLElement, nodeId: string, project
 
 export function renderStudioCodex(root: HTMLElement, node: StudioNodeInstance, projectId: string, outputs: Record<string, StudioJsonValue>, onChange: (key: string, value: StudioJsonValue) => void): void {
   const key = codexRunKey(projectId, node.id), active = getStudioCodexRun(key);
-  root.createEl('p', { text: active ? 'Codex is running on this machine.' : 'Uses this machine’s Codex login and selected model, thinking level and speed.' });
+  root.createEl('p', { text: active ? 'Codex is running on this machine.' : 'Runs on this machine’s Codex.' });
   if (active) {
 
     if (active.threadId) root.createEl('p', { text: `Thread: ${active.threadId}` });
@@ -22,5 +22,5 @@ export function renderStudioCodex(root: HTMLElement, node: StudioNodeInstance, p
     root.createEl('pre', { text: String(result.text || '').slice(-256_000) });
     root.createEl('p', { text: `Thread: ${String(result.threadId || '')}` });
     if (typeof result.threadId === 'string') createStudioAction(root, { label: 'Use this thread for the next run', testId: `studio.codex.resume.${node.id}`, onSelect: () => onChange('threadId', result.threadId) });
-  } else if (!active) root.createEl('p', { text: 'Edit the task source, then run the card. Results and the Codex thread ID appear here.' });
+  } else if (!active) root.createEl('p', { text: 'Edit the task, then run it.' });
 }

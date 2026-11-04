@@ -72,7 +72,7 @@ export async function displayRecorderTabContent(
             try {
               plugin.getRecorderService().recoverPendingCaptures();
             } catch {
-              new Notice("Automatic transcription is on. Saved pending recordings will retry after Obsidian reloads.", 5000);
+              new Notice("Auto-transcribe on. Waiting recordings retry on reload.", 5000);
             }
           }
         });
@@ -279,9 +279,9 @@ function renderMicrophoneSetting(
     dropdown.setValue(savedMicrophoneId);
     setStatus(
       savedMicrophoneUnavailable
-        ? "The saved microphone is unavailable. Recording will fall back to the default microphone."
+        ? "Saved microphone missing. Using the default."
         : result.labelRefresh === "skipped"
-          ? "Tap Refresh microphone list to reveal named microphones."
+          ? "Refresh to see microphone names."
         : result.devices.length === 0
           ? "No microphones detected."
         : result.labelRefresh === "denied"

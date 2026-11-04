@@ -102,7 +102,7 @@ describe("SimilarNotesPresentation", () => {
 
     expect(root.textContent).toContain("Not enough credits");
     expect(root.textContent).toContain(
-      "Not enough credits are available. Add credits to continue using Similar notes.",
+      "Not enough credits. Add more to continue.",
     );
     expect(root.textContent).not.toContain("Try again");
     const action = root.querySelector<HTMLButtonElement>(

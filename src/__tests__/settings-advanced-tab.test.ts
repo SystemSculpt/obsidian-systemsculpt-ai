@@ -197,7 +197,7 @@ describe("Advanced settings tab", () => {
     const setting = Array.from(container.querySelectorAll(".setting-item"))
       .find((item) => item.querySelector(".setting-item-name")?.textContent === "Record diagnostics");
     const toggle = setting?.querySelector<HTMLInputElement>("input.setting-item-toggle");
-    expect(setting?.querySelector(".setting-item-description")?.textContent).toContain(".systemsculpt/diagnostics");
+    expect(setting?.querySelector(".setting-item-description")?.textContent).toContain("For troubleshooting only.");
     expect(toggle?.checked).toBe(false);
 
     toggle!.checked = true;
@@ -269,7 +269,7 @@ describe("Advanced settings tab", () => {
     button("Open folder").click();
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
     expect(Notice).toHaveBeenCalledWith(
-      "Unable to open diagnostics folder. Locate .systemsculpt/diagnostics manually.",
+      "Couldn't open .systemsculpt/diagnostics.",
       5000,
     );
   });
@@ -292,7 +292,7 @@ describe("Advanced settings tab", () => {
     displayAdvancedTabContent(container, tab);
 
     expect(container.textContent).toContain("Diagnostics folder");
-    expect(container.textContent).toContain(".systemsculpt/diagnostics");
+    expect(container.textContent).toContain("For troubleshooting only.");
     expect(Array.from(container.querySelectorAll("button")))
       .not.toEqual(expect.arrayContaining([
         expect.objectContaining({ textContent: "Open folder" }),
@@ -338,7 +338,7 @@ describe("Advanced settings tab", () => {
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
 
     expect(showPrompt).toHaveBeenCalledWith(app, "Reset to Factory Defaults", {
-      description: "Reset SystemSculpt’s saved settings to defaults and reload Obsidian? Your current settings will be replaced.",
+      description: "Reset all SystemSculpt settings and reload Obsidian?",
       primaryButton: "Reset & Reload",
       secondaryButton: "Cancel",
     });

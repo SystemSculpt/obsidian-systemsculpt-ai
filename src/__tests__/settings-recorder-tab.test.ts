@@ -180,7 +180,7 @@ describe("Recorder settings tab", () => {
     expect(names).not.toContain("Model name");
     expect(names).not.toContain("Post-processing model");
     expect(container.textContent).toContain(
-      "exact note insertion target remains unchanged",
+      "where you started recording",
     );
   });
 
@@ -316,7 +316,7 @@ describe("Recorder settings tab", () => {
     const microphoneSelect = container.querySelector("select") as HTMLSelectElement;
     expect(microphoneSelect.value).toBe("disconnected-usb-mic");
     expect(microphoneSelect.selectedOptions[0]?.text).toBe("Saved microphone (unavailable)");
-    expect(container.textContent).toContain("Recording will fall back to the default microphone");
+    expect(container.textContent).toContain("Saved microphone missing. Using the default.");
   });
 
   it("shows cleanup instructions only when enabled and saves them on change", async () => {
@@ -333,7 +333,7 @@ describe("Recorder settings tab", () => {
 
     expect(container.textContent).toContain("Cleanup instructions");
     expect(container.textContent).toContain(
-      "Cleanup always keeps the original languages, names, and code-switches.",
+      "How to tidy the transcript.",
     );
     const prompt = container.querySelector("textarea") as HTMLTextAreaElement;
     prompt.value = "Keep the wording concise.";
@@ -464,7 +464,7 @@ describe("Recorder settings tab", () => {
       "Default microphone",
     ]);
     expect(container.querySelector(".ss-inline-note")?.textContent).toBe(
-      "Tap Refresh microphone list to reveal named microphones.",
+      "Refresh to see microphone names.",
     );
   });
 
