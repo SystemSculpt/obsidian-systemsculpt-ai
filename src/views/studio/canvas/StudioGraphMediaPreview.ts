@@ -68,7 +68,8 @@ export function resolveNodeMediaPreview(
   node: StudioNodeInstance,
   outputs: Record<string, unknown> | null
 ): StudioNodeMediaPreview | null {
-  if (node.kind === "studio.video_generation") {
+  // Generated media lives in the Outputs group, never inside its producer.
+  if (node.kind === "studio.image_generation" || node.kind === "studio.video_generation") {
     return null;
   }
 

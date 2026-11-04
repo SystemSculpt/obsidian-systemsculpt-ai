@@ -8,6 +8,13 @@
   min-height: 108px;
 }
 
+/* Model names are long; the model spans both columns so the name and its
+   price stay readable. Quality, aspect, background and count pair below. */
+.ss-studio-node-card[data-node-kind="studio.image_generation"]
+  .ss-studio-node-inline-config-field--model {
+  grid-column: 1 / -1;
+}
+
 /* ------------------------------------------------------------------ *
  * Media layout (data-chrome-layout="media") — media nodes whose card
  * IS the media. The card carries the image/video plus its actions:
