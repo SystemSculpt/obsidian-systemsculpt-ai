@@ -16,7 +16,7 @@ import {
 
 const IMAGE_PROMPT_MAX_CHARS = 8_000;
 /** House default quality. A blank model runs the server's default image model. */
-export const DEFAULT_IMAGE_QUALITY = "max";
+const DEFAULT_IMAGE_QUALITY = "max";
 const LOG_PREFIX = "[studio.image_generation]";
 
 const options = (values: readonly string[], labels: Record<string, string> = {}): StudioNodeConfigSelectOption[] =>

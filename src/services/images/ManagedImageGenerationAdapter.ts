@@ -25,14 +25,14 @@ const MODEL_PATTERN = /^(?!.*:\/\/)[A-Za-z0-9][A-Za-z0-9./_:-]{0,159}$/;
 const ASPECT_RATIO_PATTERN = /^(auto|match_input_image|\d{1,2}(\.\d{1,2})?:\d{1,2}(\.\d{1,2})?)$/;
 const OPTION_TOKEN_PATTERN = /^[a-z][a-z0-9_-]{0,23}$/;
 
-export type ManagedImageGenerationInput = Readonly<{
+type ManagedImageGenerationInput = Readonly<{
   mimeType: "image/png" | "image/jpeg" | "image/webp";
   sizeBytes: number;
   sha256: string;
   load: () => Promise<ArrayBuffer>;
 }>;
 
-export type ManagedImageGenerationPayload = Readonly<{
+type ManagedImageGenerationPayload = Readonly<{
   /** Server catalog model ID; omitted means the server's default image model. */
   model?: string;
   prompt: string;
