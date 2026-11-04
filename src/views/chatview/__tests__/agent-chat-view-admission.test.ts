@@ -786,7 +786,7 @@ describe("AgentChatView composer admission", () => {
     expect(harness.agent.start).not.toHaveBeenCalled();
     expect(view.transcript.commitUser).not.toHaveBeenCalled();
     expect(harness.durableMessages).toEqual([]);
-    expect(notice).toHaveBeenCalledWith("Notice: This chat is read-only here because Claude Code isn't available. Start a new chat to continue.");
+    expect(notice).toHaveBeenCalledWith("Notice: Claude Code isn't available. Start a new chat.");
     notice.mockRestore();
     harness.composer.unload();
   });
@@ -796,13 +796,13 @@ describe("AgentChatView composer admission", () => {
       name: "an empty balance",
       totalRemaining: 0,
       heldInFlight: 0,
-      expected: "You have no credits left. Add credits to continue using Chat.",
+      expected: "Out of credits. Add more to keep chatting.",
     },
     {
       name: "a fully held balance",
       totalRemaining: 5,
       heldInFlight: 5,
-      expected: "Not enough credits are available. Add credits to continue using Chat.",
+      expected: "Not enough credits. Add more to keep chatting.",
     },
   ])("rejects $name before attachment or vault-note preparation", async ({
     totalRemaining,
@@ -1323,7 +1323,7 @@ describe("AgentChatView composer admission", () => {
     expect(refreshCreditsBalance).toHaveBeenCalledTimes(1);
     expect(refreshCreditsBalance).toHaveBeenCalledWith({ reason: "billing_failure" });
     expect(setBanner).toHaveBeenCalledWith(
-      "Not enough credits are available. Add credits to continue using Chat.",
+      "Not enough credits. Add more to keep chatting.",
       "error",
     );
   });
@@ -3807,7 +3807,7 @@ describe("AgentChatView controls", () => {
       expect(banner.hasAttribute("hidden")).toBe(true);
       expect(empty.textContent).toContain("Chat with your vault using SystemSculpt.");
       expect(empty.textContent).toContain(
-        "Create a free account to get 500 starter credits. No card needed. Paid plans start at $9/month.",
+        "500 free credits. No card needed.",
       );
       expect(empty.querySelector('[data-testid="chat.empty.start-free"]')?.textContent).toBe("Start free");
       expect(empty.querySelector('[data-testid="chat.empty.sign-in"]')?.textContent).toBe("Sign in");
@@ -3817,13 +3817,13 @@ describe("AgentChatView controls", () => {
       settings.userEmail = "free@user.test";
       await (view as any).startNewChat(false);
       expect(banner.hasAttribute("hidden")).toBe(true);
-      expect(empty.textContent).toContain("Create a free account for 500 starter credits, or choose a plan.");
+      expect(empty.textContent).toContain("Start free with 500 credits, or choose a plan.");
       expect(empty.querySelector('[data-testid="chat.empty.see-plans"]')).not.toBeNull();
 
       settings.licenseKey = "skss-test";
       await (view as any).startNewChat(false);
       expect(banner.hasAttribute("hidden")).toBe(true);
-      expect(empty.textContent).toContain("Ask about your notes or give SystemSculpt a task.");
+      expect(empty.textContent).toContain("Ask about your notes.");
     } finally { Platform.isDesktopApp = previousDesktop; Platform.isMobileApp = previousMobile; }
     workspace.unload();
   });
@@ -4479,7 +4479,7 @@ describe("AgentChatView thin conversation lifecycle", () => {
       "View-only saved chat. Start a new chat to continue.",
     );
     expect(harness.workspace.setBanner).toHaveBeenLastCalledWith(
-      "This older saved chat is view-only. You can read or export it. Start a new chat to continue.",
+      "Older chat, view only. Start a new chat to continue.",
     );
     expect(harness.transcript.commitUser).not.toHaveBeenCalled();
     expect(harness.agent.start).not.toHaveBeenCalled();
@@ -4843,7 +4843,7 @@ describe("AgentChatView thin conversation lifecycle", () => {
       "View-only saved chat. Start a new chat to continue.",
     );
     expect(harness.workspace.setBanner).toHaveBeenLastCalledWith(
-      "This older saved chat is view-only. You can read or export it. Start a new chat to continue.",
+      "Older chat, view only. Start a new chat to continue.",
     );
     expect(harness.agent.hydrate).not.toHaveBeenCalled();
     expect(harness.prepareThinConversation).not.toHaveBeenCalled();
@@ -5099,7 +5099,7 @@ describe("AgentChatView thin conversation lifecycle", () => {
       await jest.runAllTimersAsync();
       await loading;
 
-      expect(parent.textContent).toContain("This saved chat is corrupted and was left unchanged");
+      expect(parent.textContent).toContain("This chat is damaged. Start a new one.");
       expect(workspace.element.classList.contains("is-loading-chat")).toBe(false);
       expect(workspace.renderer.element.classList.contains("is-loading-chat")).toBe(false);
       expect(parent.querySelector('[data-testid="chat.loading"]')).toBeNull();
@@ -5267,7 +5267,7 @@ describe("AgentChatView thin conversation lifecycle", () => {
         null,
       ]);
     expect(harness.workspace.setBanner).toHaveBeenLastCalledWith(
-      "The agent session could not be restored. This cached transcript is shown for reference. Reload the chat to try again.",
+      "Couldn't restore this session. Reload the chat to retry.",
       "error",
     );
     expect(harness.logger.error).toHaveBeenCalledWith(

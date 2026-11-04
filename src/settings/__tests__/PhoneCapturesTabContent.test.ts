@@ -54,7 +54,7 @@ it.each([false, true])("renders the handoff opt-in at its saved value (%s) and c
   const { container, updateSettings } = render(true, autoRun);
   const row = container.querySelector('[data-ss-setting="workspace.run-phone-handoffs"]')!;
   expect(row.querySelector(".setting-item-name")?.textContent).toBe("Run iPhone handoffs without asking");
-  expect(row.querySelector(".setting-item-description")?.textContent).toBe("Skips only the Run button for iPhone handoffs. Agent permissions and approval requests are unchanged.");
+  expect(row.querySelector(".setting-item-description")?.textContent).toBe("Skips the Run button. Approvals still apply.");
   const toggle = row.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
   expect(toggle.checked).toBe(autoRun);
   expect(updateSettings).not.toHaveBeenCalled();

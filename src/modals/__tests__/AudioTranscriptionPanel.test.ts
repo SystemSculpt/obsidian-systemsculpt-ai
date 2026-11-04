@@ -293,7 +293,7 @@ describe("AudioTranscriptionPanel", () => {
     expect([...document.querySelectorAll("button")]
       .some((button) => button.textContent === "Open transcript")).toBe(true);
     expect(mockedNotice).toHaveBeenCalledWith(
-      "Transcript saved to Recordings/test.srt, but Obsidian could not open it automatically.",
+      "Transcript saved to Recordings/test.srt. Couldn't open it.",
       6000,
     );
   });
@@ -342,11 +342,11 @@ describe("AudioTranscriptionPanel", () => {
   it("says a hidden transcription's warning once", async () => {
     const { running } = hideRunningPanel({ openOnComplete: true });
 
-    running.resolve({ ...completedResult, warning: "Transcript cleanup was incomplete, so the raw transcript was saved instead." });
+    running.resolve({ ...completedResult, warning: "Cleanup didn't finish. Saved the raw transcript." });
     await flushPromises();
 
     expect(mockedNotice).toHaveBeenCalledTimes(1);
-    expect(mockedNotice).toHaveBeenCalledWith("Transcript cleanup was incomplete, so the raw transcript was saved instead.", 6000);
+    expect(mockedNotice).toHaveBeenCalledWith("Cleanup didn't finish. Saved the raw transcript.", 6000);
   });
 
   it("says once where a hidden transcript is when it could not be opened", async () => {
@@ -358,7 +358,7 @@ describe("AudioTranscriptionPanel", () => {
 
     expect(mockedNotice).toHaveBeenCalledTimes(1);
     expect(mockedNotice).toHaveBeenCalledWith(
-      "Transcript saved to Recordings/test.srt, but Obsidian could not open it automatically.",
+      "Transcript saved to Recordings/test.srt. Couldn't open it.",
       6000,
     );
   });
@@ -426,13 +426,13 @@ describe("AudioTranscriptionPanel", () => {
     panel.open();
     const paymentRequired = new ManagedJobError(
       "payment_required",
-      "Not enough credits are available. Add credits to continue.",
+      "Not enough credits. Add more to continue.",
       402,
     );
     running.reject(new ManagedTranscriptionRetryError("credits-op", "resume", "processing", paymentRequired));
     await flushPromises();
 
-    expect(document.body.textContent).toContain("Not enough credits are available.");
+    expect(document.body.textContent).toContain("Not enough credits.");
     expect(document.body.textContent).not.toContain("(402)");
     expect(document.querySelector('[data-testid="transcription.progress.retry"]')?.textContent).toBe("Resume");
     document.querySelector<HTMLButtonElement>('[data-testid="transcription.progress.add-credits"]')!.click();
@@ -441,7 +441,7 @@ describe("AudioTranscriptionPanel", () => {
 
   it("offers Add credits on a terminal credits failure but not on other failures", async () => {
     for (const [error, expected] of [
-      [new ManagedJobError("payment_required", "Not enough credits are available. Add credits to continue.", 402), true],
+      [new ManagedJobError("payment_required", "Not enough credits. Add more to continue.", 402), true],
       [new Error("managed job failed"), false],
     ] as const) {
       const failed = deferred<typeof completedResult>();

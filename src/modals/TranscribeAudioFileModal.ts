@@ -73,7 +73,7 @@ export class TranscribeAudioFileModal extends StandardModal {
     this.launchSurfaceOpen = true;
     this.addTitle(
       "Transcribe audio",
-      "Choose audio from your vault or device. The transcript is saved in your vault.",
+      "Choose audio to transcribe.",
     );
 
     this.transcribeButton = this.addActionButton(
@@ -267,7 +267,7 @@ export class TranscribeAudioFileModal extends StandardModal {
       await this.plugin.getSettingsManager().updateSettings(update);
     } catch (error) {
       console.warn("[SystemSculpt] Failed to save transcription format", error);
-      new Notice("This transcription will use your choice, but the default was not saved.", 5000);
+      new Notice("Using your choice. Default not saved.", 5000);
     }
   }
 

@@ -276,8 +276,8 @@ describe("lazy settings with the production registry", () => {
     expect(tab.containerEl.querySelector(".ss-search-result")).toBeNull();
     devices.resolve([]);
     await flush();
-    expect(panel("workflow").querySelector('[data-ss-setting="workflow.microphone"]')?.textContent).toContain("reveal named microphones");
-    search("reveal named microphones");
+    expect(panel("workflow").querySelector('[data-ss-setting="workflow.microphone"]')?.textContent).toContain("see microphone names");
+    search("see microphone names");
     expect(tab.containerEl.querySelector(".ss-search-result")?.textContent).toContain("Microphone");
   });
 

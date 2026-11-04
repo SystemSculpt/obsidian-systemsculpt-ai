@@ -168,11 +168,11 @@ type DeferredRecoveredCompletion = Readonly<{
 }>;
 
 const LEGACY_HISTORY_VIEW_ONLY_BANNER =
-  "This older saved chat is view-only. You can read or export it. Start a new chat to continue.";
+  "Older chat, view only. Start a new chat to continue.";
 const LEGACY_HISTORY_VIEW_ONLY_COMPOSER =
   "View-only saved chat. Start a new chat to continue.";
 const AGENT_SESSION_RESTORE_ERROR =
-  "The agent session could not be restored. This cached transcript is shown for reference. Reload the chat to try again.";
+  "Couldn't restore this session. Reload the chat to retry.";
 /** Longest wait for an idle moment before attachment cleanup runs anyway. */
 const ATTACHMENT_PRUNE_IDLE_TIMEOUT_MS = 30_000;
 const LOCAL_FAILED_RECEIPT_MAX_ATTEMPTS = 3;
@@ -883,7 +883,7 @@ export class AgentChatView extends ItemView {
       } catch (error) {
         if (this.conversationOriginToken !== loadOriginToken) return;
         const message = error instanceof SavedChatCorruptedError
-          ? "This saved chat is corrupted and was left unchanged. Start a new chat to continue."
+          ? "This chat is damaged. Start a new one."
           : "This chat could not be loaded.";
         await this.resetAfterFailedChatLoad(message);
         return;
@@ -1816,8 +1816,8 @@ export class AgentChatView extends ItemView {
     const outOfCredits = (this.creditsBalance?.totalRemaining ?? 0) <= 0;
     return Object.assign(
       new Error(outOfCredits
-        ? "You have no credits left. Add credits to continue using Chat."
-        : "Not enough credits are available. Add credits to continue using Chat."),
+        ? "Out of credits. Add more to keep chatting."
+        : "Not enough credits. Add more to keep chatting."),
       {
         code: outOfCredits ? "out_of_credits" : "insufficient_credits",
         status: 402,
@@ -2832,7 +2832,7 @@ export class AgentChatView extends ItemView {
       }
     } else if (!this.consumeRejectedSubmissionDraft(rejected.submission)) {
       this.workspace?.focus();
-      new Notice("The failed request is back in the composer. Send it again from there or edit it first.", 6000);
+      new Notice("Your message is back in the composer.", 6000);
       return true;
     }
     this.pendingRejectedRetry = null;
@@ -2898,7 +2898,7 @@ export class AgentChatView extends ItemView {
     if (!pending || pending.targetMessageId !== messageIdToResubmit) return false;
     const expectedMessageEditGeneration = this.messageEditGeneration;
     if (this.isSubmissionActive()) {
-      new Notice("Wait for the current response to finish before resubmitting this message.", 5000);
+      new Notice("Wait for the response to finish.", 5000);
       return false;
     }
     if (!text.trim() && pending.attachments.length === 0) return false;
@@ -2960,7 +2960,7 @@ export class AgentChatView extends ItemView {
       },
     );
     if (!operation) {
-      new Notice("Wait for the current response to finish before resubmitting this message.", 5000);
+      new Notice("Wait for the response to finish.", 5000);
       return false;
     }
     let executionStarted = false;
@@ -3961,7 +3961,7 @@ export class AgentChatView extends ItemView {
 
   private blockReadOnlyHistoryAction(): boolean {
     if (this.unavailableBackend) {
-      new Notice(`This chat is read-only here because ${LOCAL_AGENTS[this.unavailableBackend]} isn't available. Start a new chat to continue.`, 6000);
+      new Notice(`${LOCAL_AGENTS[this.unavailableBackend]} isn't available. Start a new chat.`, 6000);
       return true;
     }
     if (!this.legacyHistoryViewOnly) return false;

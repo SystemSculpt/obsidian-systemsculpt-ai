@@ -219,7 +219,7 @@ export class StudioMediaModelPickerModal extends StandardModal {
 
   onOpen(): void {
     super.onOpen();
-    this.addTitle("Video generation models", "Every currently available model with what it accepts and its server-computed price. Select one to use it in this node.");
+    this.addTitle("Video generation models", "Pick a model for this node.");
     this.contentEl.addClass("ss-studio-media-model-picker-modal");
     const searchInput = this.addSearchBar("studio.media-model-picker.search", "Search models, providers, or capabilities", (query) => {
       this.query = query;

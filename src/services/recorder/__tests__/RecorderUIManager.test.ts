@@ -227,7 +227,7 @@ describe("RecorderUIManager state-driven contract", () => {
     const ui = createManager();
     ui.open(actions, {
       phase: "warning",
-      status: "Audio is still in memory because it could not be saved. Retry save before closing Obsidian.",
+      status: "Audio not saved yet. Retry before closing Obsidian.",
       durationMs: 12_000,
       sourcePath: "SystemSculpt/Recordings/recover.m4a",
       canRetrySave: true,

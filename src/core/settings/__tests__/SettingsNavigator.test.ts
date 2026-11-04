@@ -233,7 +233,7 @@ describe("SettingsNavigator.openSettingsTab", () => {
       expect(() => navigator.openSettingsTab("account")).not.toThrow();
 
       expect(navigator.peekPendingSettingsFocusTab()).toBe("account");
-      expect(notice).toHaveBeenCalledWith("Notice: Open SystemSculpt AI settings to manage your account and plugin preferences.");
+      expect(notice).toHaveBeenCalledWith("Notice: Open SystemSculpt AI in settings.");
       expect(trigger).not.toHaveBeenCalled();
       expect(jest.getTimerCount()).toBe(0);
     },

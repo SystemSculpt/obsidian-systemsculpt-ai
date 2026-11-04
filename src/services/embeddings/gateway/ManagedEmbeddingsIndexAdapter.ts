@@ -532,8 +532,8 @@ export class ManagedEmbeddingsIndexAdapter {
         ?? (Number.isSafeInteger(resetAt) ? Math.max(0, resetAt - Date.now()) : undefined);
       const message = code === "payment_required"
         ? payload?.creditsRemaining === 0
-          ? "You have no credits left. Add credits to continue indexing notes."
-          : "Not enough credits are available. Add credits to continue indexing notes."
+          ? "Out of credits. Add more to keep indexing."
+          : "Not enough credits. Add more to keep indexing."
         : (matchesCode ? payload?.message : undefined) ?? "Managed embedding index request failed.";
       throw new ManagedEmbeddingsError(
         code,

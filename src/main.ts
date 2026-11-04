@@ -376,8 +376,7 @@ export default class SystemSculptPlugin extends Plugin {
         minimum: compat.minimumVersion,
       });
       new Notice(
-        `SystemSculpt AI needs Obsidian ${compat.minimumVersion} or newer (you have ${compat.currentVersion}). ` +
-          `Some features may not work until you update Obsidian.`,
+        `SystemSculpt AI needs Obsidian ${compat.minimumVersion} or newer. Please update.`,
         15000
       );
     } catch {

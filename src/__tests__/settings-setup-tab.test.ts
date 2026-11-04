@@ -181,11 +181,11 @@ describe("Setup tab SystemSculpt-only layout", () => {
   });
 
   it.each([
-    [{ kind: "error", reason: "network" }, "Could not reach SystemSculpt. Check your connection, then try the code again from settings."],
+    [{ kind: "error", reason: "network" }, "Can't reach SystemSculpt. Check your connection."],
     [{ kind: "signed-in", name: null, email: "user@example.test", licenseValid: true }, "Signed in as user@example.test."],
     [
       { kind: "signed-in", name: null, email: "user@example.test", licenseValid: false },
-      "Signed in as user@example.test. Your license is being confirmed. If AI features stay locked, open SystemSculpt settings and retry validation.",
+      "Signed in as user@example.test. Confirming your license…",
     ],
   ])("shows the latest sign-in result once under Account: %j", (outcome, text) => {
     const plugin = createPluginStub();
@@ -232,7 +232,7 @@ describe("Setup tab SystemSculpt-only layout", () => {
     renderAccountSection(container, tab, false);
 
     expect(container.querySelector('[data-testid="settings.account.connect-result"]')).toBeNull();
-    expect(container.textContent).toContain("Signed in as user@example.test. No active plan yet");
+    expect(container.textContent).toContain("Signed in as user@example.test. Choose a plan to start.");
   });
 
   it("takes a sign-in result only while Account settings are on screen, and forgets it when settings close", () => {
@@ -407,7 +407,7 @@ describe("Setup tab SystemSculpt-only layout", () => {
 
     expect(container.textContent).toContain("Usage mode");
     expect(container.textContent).toContain("Internal testing");
-    expect(container.textContent).toContain("Provider usage is tracked internally");
+    expect(container.textContent).toContain("Internal testing. No credits used.");
     expect(container.textContent).not.toContain("Remaining: 0 credits");
     expect(plugin.embeddingsManager.resumeProcessing).toHaveBeenCalledTimes(1);
     const buyCreditsButton = Array.from(container.querySelectorAll("button")).find(
@@ -531,7 +531,7 @@ describe("Setup tab SystemSculpt-only layout", () => {
     expect(plugin.getSettingsManager().updateSettings.mock.calls).toEqual([
       [{ licenseKey: "new-license" }], [{ licenseValid: false }],
     ]);
-    expect(mockedNotice).toHaveBeenCalledWith("License validation is temporarily unavailable. Try again.");
+    expect(mockedNotice).toHaveBeenCalledWith("Can't check licenses right now. Try again.");
     expect(input.value).toBe("");
     expect(tab.refreshAccountSection).toHaveBeenCalledTimes(1);
   });
@@ -547,7 +547,7 @@ describe("Setup tab SystemSculpt-only layout", () => {
     await flushSetupSectionRender();
     expect(plugin.getSettingsManager().updateSettings).not.toHaveBeenCalled();
     expect(plugin.getLicenseManager().validateLicenseKeyDetailed).not.toHaveBeenCalled();
-    expect(mockedNotice).toHaveBeenCalledWith("Please enter a license key first.");
+    expect(mockedNotice).toHaveBeenCalledWith("Enter a license key first.");
     expect([...container.querySelectorAll("button")].find((button) => button.textContent === "Activate")?.disabled).toBe(false);
   });
 
@@ -597,7 +597,7 @@ describe("Setup tab SystemSculpt-only layout", () => {
     getCreditsBalanceMock.mockRejectedValueOnce(new Error("offline"));
     [...container.querySelectorAll("button")].find((button) => button.textContent === "Refresh")!.click();
     await flushSetupSectionRender();
-    expect(container.textContent).toContain("Unable to fetch credits balance. Try again.");
+    expect(container.textContent).toContain("Couldn't load credits. Try again.");
     const annual = [...container.querySelectorAll("button")].find((button) => button.textContent === "Switch to annual")!;
     expect(annual.disabled).toBe(true);
     expect(annual.style.display).toBe("none");

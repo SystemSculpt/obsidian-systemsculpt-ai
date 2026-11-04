@@ -265,7 +265,7 @@ describe("ManagedJobClient exact wire contract", () => {
     await expect(client.documents.start("doc-1", "op")).rejects.toMatchObject({
       code: "payment_required",
       status: 402,
-      message: "Not enough credits are available. Add credits to continue.",
+      message: "Not enough credits. Add more to continue.",
       retryable: false,
     });
   });

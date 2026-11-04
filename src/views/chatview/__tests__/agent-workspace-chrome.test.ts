@@ -232,7 +232,7 @@ describe("AgentWorkspace chrome", () => {
     expect(parent.querySelector('[data-testid="chat.composer.approval-mode"]')).toBeNull();
     expect(parent.querySelector('[data-testid="chat.empty"]')?.textContent).toContain("Chat with your vault using SystemSculpt.");
     workspace.setChrome(chrome({ account: "signed-in" }));
-    expect(parent.querySelector('[data-testid="chat.empty"]')?.textContent).toContain("Ask about your notes or give SystemSculpt a task.");
+    expect(parent.querySelector('[data-testid="chat.empty"]')?.textContent).toContain("Ask about your notes.");
     expect(parent.querySelector('[data-testid="chat.run.detail"]')?.textContent).toBe("Credits");
     workspace.unload();
   });

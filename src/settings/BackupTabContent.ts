@@ -95,6 +95,4 @@ ${details}`
         });
     });
   }
-
-  createCatalogSetting(containerEl, "workspace.backup-tips");
 }

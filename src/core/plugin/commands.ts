@@ -517,7 +517,7 @@ export class CommandManager {
         const activeFile = this.resolveTitleTargetFile();
         if (!activeFile) {
           if (!checking) {
-            new Notice(`You need to be within a note, ${STUDIO_DISPLAY_NAME} workflow, or chat view to change the title.`, 5000);
+            new Notice(`Open a note, ${STUDIO_DISPLAY_NAME} project or chat to rename it.`, 5000);
           }
           return false;
         }

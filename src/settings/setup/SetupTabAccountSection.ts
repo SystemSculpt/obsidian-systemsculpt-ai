@@ -51,7 +51,7 @@ export function renderAccountSection(
       tabInstance.accountConnectOutcome = null;
       const opened = await connectService.begin(mode, ownerWindow);
       if (!opened) {
-        new Notice("Couldn't open your browser. Reopen the sign-in page below, then paste the connection code shown there.");
+        new Notice("Couldn't open your browser. Reopen sign-in below.");
       }
     } finally {
       button.setDisabled(false);
@@ -64,11 +64,11 @@ export function renderAccountSection(
     try {
       const result = await plugin.getLicenseManager().validateLicenseKeyDetailed();
       if (result.outcome === "rejected") {
-        new Notice("Invalid license key. Please check and try again.");
+        new Notice("Invalid license key.");
         return result;
       }
       if (result.outcome === "unavailable") {
-        new Notice("License validation is temporarily unavailable. Try again.");
+        new Notice("Can't check licenses right now. Try again.");
         return result;
       }
       tabInstance.refreshAccountSection();
@@ -95,9 +95,9 @@ export function renderAccountSection(
         ? activeAccountLine(plugin.settings, balance, formatCredits)
         : userStatus.greeting || "Pro features enabled."
       : signedInWithoutPlan
-        ? `Signed in as ${signedInEmail}. No active plan yet — choose a plan to enable AI features.`
-        : "Activate your license to turn on SystemSculpt chat, search, transcription, and workspace services.";
-    statusSetting.setDesc(`${accountDesc}${hasHostCapability("local-cli", root) ? " Claude Code and Codex chat on desktop need no license." : ""}${pendingSignIn ? " Waiting for browser sign-in…" : ""}`);
+        ? `Signed in as ${signedInEmail}. Choose a plan to start.`
+        : "Sign in to turn on SystemSculpt.";
+    statusSetting.setDesc(`${accountDesc}${hasHostCapability("local-cli", root) ? " Claude Code and Codex need no license." : ""}${pendingSignIn ? " Waiting for browser sign-in…" : ""}`);
     renderConnectOutcome(statusSetting.descEl, tabInstance.accountConnectOutcome);
   };
   renderStatus(null);
@@ -260,7 +260,7 @@ export function renderAccountSection(
   const licenseSetting = createCatalogSetting(root, "account.license-key")
     .setDesc(
       hasSavedLicense
-        ? "Saved key is hidden. Enter a new key only to replace it."
+        ? "Key saved. Enter a new one to replace it."
         : "Enter a license key to activate SystemSculpt."
     );
 
@@ -296,7 +296,7 @@ export function renderAccountSection(
         button.setDisabled(true);
         button.setButtonText("Working...");
         if (!currentValue) {
-          new Notice("Please enter a license key first.");
+          new Notice("Enter a license key first.");
           return;
         }
 
@@ -385,7 +385,7 @@ export function renderAccountSection(
           creditsSetting
             .setName("Usage mode")
             .setDesc(
-              "Internal testing. Provider usage is tracked internally; customer credits are not used.",
+              "Internal testing. No credits used.",
             );
           refreshAnnualUpgradeButton?.();
           refreshBuyCreditsButton?.();
@@ -453,7 +453,7 @@ export function renderAccountSection(
         annualUpgradeOffer = null;
         refreshAnnualUpgradeButton?.();
         refreshBuyCreditsButton?.();
-        creditsSetting.setDesc("Unable to fetch credits balance. Try again.");
+        creditsSetting.setDesc("Couldn't load credits. Try again.");
       } finally {
         tabInstance.invalidateSearchIndex();
       }
@@ -487,7 +487,7 @@ export function renderAccountSection(
       refreshAnnualUpgradeButton = applyState;
       button.setButtonText("Switch to annual").onClick(() => {
         if (!annualUpgradeOffer?.checkoutUrl) {
-          new Notice("Annual upgrade offer is currently unavailable for this account.");
+          new Notice("Annual upgrade isn't available for this account.");
           return;
         }
         void openExternalUrl(withPluginAttribution(annualUpgradeOffer.checkoutUrl, "account"), ownerWindow);

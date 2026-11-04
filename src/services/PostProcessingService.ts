@@ -65,7 +65,7 @@ export class PostProcessingService {
       if (result.finishReason !== "stop" || !cleanedText) {
         return {
           text,
-          warning: "Transcript cleanup was incomplete, so the raw transcript was saved instead.",
+          warning: "Cleanup didn't finish. Saved the raw transcript.",
         };
       }
       return { text: cleanedText };
@@ -75,7 +75,7 @@ export class PostProcessingService {
       // acknowledged raw transcript without invoking another remote path.
       return {
         text,
-        warning: "Transcript cleanup was unavailable, so the raw transcript was saved instead.",
+        warning: "Cleanup unavailable. Saved the raw transcript.",
       };
     }
   }

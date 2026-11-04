@@ -192,8 +192,8 @@ export class UpgradePlanModal extends StandardModal {
   private renderSignedOut(): void {
     this.addTitle("Unlock SystemSculpt AI", this.featureLine());
     this.renderIcon("sparkles");
-    this.addDetail("Create a free SystemSculpt account to get 500 starter credits. No card needed.");
-    this.addLink("upgrade-plan.pricing", "Compare plans on systemsculpt.com", SYSTEMSCULPT_WEBSITE.LICENSE);
+    this.addDetail("Start with 500 free credits. No card needed.");
+    this.addLink("upgrade-plan.pricing", "Compare plans", SYSTEMSCULPT_WEBSITE.LICENSE);
     this.addLink("upgrade-plan.license-key", "I have a license key", () => {
       this.close();
       this.plugin.openSettingsTab("account");
@@ -211,9 +211,9 @@ export class UpgradePlanModal extends StandardModal {
     }
     this.addDetail(PLAN_REQUIRED_MESSAGE);
     if (hasActivePlan(this.plugin)) {
-      this.addDetail("Your current license isn't active. After renewing or purchasing, sync your license below.");
+      this.addDetail("Your license isn't active. Renew, then sync below.");
     }
-    this.addLink("upgrade-plan.sync", "Already purchased? Sync your license", () => this.beginConnect("sign-in"));
+    this.addLink("upgrade-plan.sync", "Already paid? Sync", () => this.beginConnect("sign-in"));
     this.addActionButton(
       "upgrade-plan.yearly",
       "Subscribe yearly",
@@ -245,7 +245,7 @@ export class UpgradePlanModal extends StandardModal {
     this.addTitle("Finish your purchase in the browser", "Complete checkout, then come back here.");
     this.renderIcon("shopping-cart");
     if (this.signedInEmail()) {
-      this.addDetail("Once you've purchased, sync your license to unlock AI features.");
+      this.addDetail("Then sync your license.");
       this.addActionButton(
         "upgrade-plan.sync",
         "I've purchased — Sync license",
@@ -254,7 +254,7 @@ export class UpgradePlanModal extends StandardModal {
         "refresh-cw",
       );
     } else {
-      this.addDetail("Once you've purchased, sign in here to activate your license.");
+      this.addDetail("Then sign in here.");
       this.addActionButton("upgrade-plan.sign-in", "Sign in", () => this.beginConnect("sign-in"), true, "log-in");
     }
     this.addActionButton("upgrade-plan.back", "Back", () => this.renderMain());
@@ -277,7 +277,7 @@ export class UpgradePlanModal extends StandardModal {
         status.empty();
         status.createDiv({
           cls: "ss-upgrade-plan__status-text",
-          text: "Couldn't open your browser. Reopen the sign-in page, then paste the connection code shown there.",
+          text: "Couldn't open your browser. Reopen sign-in.",
         });
       });
   }
@@ -288,12 +288,12 @@ export class UpgradePlanModal extends StandardModal {
     this.awaitingSignIn = true;
     this.addTitle(
       "Continue in your browser",
-      mode === "sign-up" ? "Create your free SystemSculpt account." : "Sign in to SystemSculpt.",
+      mode === "sign-up" ? "Create your free account." : "Sign in to SystemSculpt.",
     );
     const status = this.contentEl.createDiv({ cls: "ss-upgrade-plan__status" });
     status.createDiv({ cls: "ss-upgrade-plan__spinner", attr: { "aria-hidden": "true" } });
     status.createDiv({ cls: "ss-upgrade-plan__status-text", text: "Waiting for you to finish in the browser…" });
-    this.addDetail("This screen finishes automatically once you're signed in. If nothing happens, paste the connection code shown in your browser:");
+    this.addDetail("Stuck? Paste the code from your browser:");
     const codeInput = this.contentEl.createEl("input", {
       cls: "ss-upgrade-plan__code-input",
       attr: {

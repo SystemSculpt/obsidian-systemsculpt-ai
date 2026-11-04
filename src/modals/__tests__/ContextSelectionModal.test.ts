@@ -53,7 +53,7 @@ describe("ContextSelectionModal", () => {
     expect(modal.modalEl.getAttribute("role")).toBe("dialog");
     expect(modal.modalEl.textContent).toContain("Pin files for every message");
     expect(modal.modalEl.textContent).toContain(
-      "Files SystemSculpt reads while working remain part of this chat, but are not pinned automatically.",
+      "Sent with every message.",
     );
     expect(modal.modalEl.textContent).not.toContain("legacy");
     expect(modal.modalEl.textContent).not.toContain("vector");
@@ -212,7 +212,7 @@ describe("ContextSelectionModal", () => {
     });
 
     expect(modal.modalEl.textContent).toContain("Add notes to this message");
-    expect(modal.modalEl.textContent).toContain("These files are sent with this message only.");
+    expect(modal.modalEl.textContent).toContain("Sent with this message only.");
     expect(modal.modalEl.textContent).not.toContain("Pin files");
     expect(modal.modalEl.textContent).not.toContain("recording");
     expect(modal.modalEl.querySelector('[data-testid="modal.context.filter.audio"]')).toBeNull();
