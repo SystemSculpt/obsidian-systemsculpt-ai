@@ -1,7 +1,7 @@
 import { HostedCatalogCache, type HostedCatalogCacheOptions } from "../managed/HostedCatalogCache";
 import type { HostedTransportAdapter } from "../managed/adapters/HostedTransportAdapter";
 
-export type ManagedImageSizeEstimate = Readonly<{ imageSize: string; estimatedCredits: number }>;
+type ManagedImageSizeEstimate = Readonly<{ imageSize: string; estimatedCredits: number }>;
 
 export type ManagedImageModel = Readonly<{
   id: string;
@@ -119,7 +119,7 @@ function parseModel(raw: unknown, ids: Set<string>, defaultModelId: string): Man
  * entry does not parse is skipped rather than blanking the picker; only a
  * wrong contract or a duplicate identity rejects the catalog.
  */
-export function parseManagedImageModelCatalog(value: unknown): ManagedImageModelCatalogSnapshot {
+function parseManagedImageModelCatalog(value: unknown): ManagedImageModelCatalogSnapshot {
   const body = record(value);
   if (body.contract !== "systemsculpt-media-models-v1" || !Array.isArray(body.models) || body.models.length > 512) {
     throw new Error("The image model catalog is unavailable. Refresh and try again.");
