@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { posix } from 'node:path';
-import { CLAUDE_SIGN_IN_MESSAGE, ClaudeChatTransport, claudeLaunchArgs, claudePermissionResponse, runLocalClaude } from '../LocalClaudeClient';
+import { CLAUDE_SIGN_IN_MESSAGE, ClaudeChatTransport, claudeLaunchArgs, claudePermissionResponse, runLocalClaude, type ClaudePermissionRequest } from '../LocalClaudeClient';
 import { desktopHost } from '../../../platform/desktopOnly';
 import { windowsNpmHost } from '../../codex/__tests__/fixtures/npmNodeShim';
 jest.mock('../../../platform/desktopOnly', () => ({ desktopHost: { childProcess: jest.fn(), fs: jest.fn(), os: jest.fn(), path: jest.fn(), environment: jest.fn() } }));
@@ -40,7 +40,7 @@ function host(options: { config?: unknown; spawnError?: string; script?: Script 
   (desktopHost.environment as jest.Mock).mockReturnValue({ PATH: '/bin', HOME: '/home/test', CLAUDECODE: '1' });
   return { child, messages, send, reply, spawn };
 }
-const callbacks = (allow = true) => ({ session: jest.fn(), log: jest.fn(), text: jest.fn(), permission: jest.fn(async () => allow) });
+const callbacks = (allow = true) => ({ session: jest.fn(), log: jest.fn(), text: jest.fn(), permission: jest.fn(async (_request: ClaudePermissionRequest, _signal: AbortSignal) => allow) });
 const input = { prompt: 'Read note.md', workingDirectory: '/vault' };
 // window.crypto is shared by every test file in a worker, so the stub must not outlive this one.
 let uuid: jest.SpyInstance;
@@ -154,6 +154,7 @@ describe('discovery', () => {
     expect(spawn).toHaveBeenCalledWith('claude', expect.arrayContaining(['-p', '--permission-prompt-tool', 'stdio']), expect.objectContaining({ cwd: '/vault' }));
     const env = (spawn.mock.calls[0] as any[])[2].env;
     expect(env.CLAUDECODE).toBeUndefined(); expect(env.PATH.split(':')).toEqual(expect.arrayContaining(['/bin', '/opt/homebrew/bin', '/home/test/.local/bin']));
+    expect(env).toMatchObject({ CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: '1', CLAUDE_CODE_BG_TASKS_REPORT_RUNNING: '1' });
     expect(messages[0]).toEqual({ type: 'user', message: { role: 'user', content: 'Read note.md' } });
     expect(child.stdin.end).toHaveBeenCalled();
   });
@@ -303,6 +304,119 @@ describe('chat-owned native transport', () => {
     await expect(transport.run(input, new AbortController().signal, callbacks())).rejects.toThrow('Wait for');
     controller.abort(); await expect(running).rejects.toThrow('canceled'); await transport.close();
     expect(child.stdin.end).toHaveBeenCalled(); expect(transport.connection).toBeUndefined();
+  });
+});
+
+describe('background subagent lifetime', () => {
+  it.each(['result-first', 'idle-first'] as const)('keeps resumed subagent permissions and output through native idle (%s)', async order => {
+    let submitted!: () => void;
+    const started = new Promise<void>(resolve => { submitted = resolve; });
+    const { send, messages, child, reply } = host({ script: (_send, msg) => { if (msg.type === 'user') submitted(); } });
+    const transport = new ClaudeChatTransport(), cb = { ...callbacks(), tool: jest.fn() };
+    let answer!: (approved: boolean) => void;
+    cb.permission.mockImplementation(() => new Promise(resolve => { answer = resolve; }));
+    let finished = false;
+    try {
+      const first = transport.run(input, new AbortController().signal, callbacks());
+      await started;
+      send({ type: 'system', subtype: 'session_state_changed', state: 'running', session_id: SESSION });
+      reply('Subagent ready.');
+      send({ type: 'system', subtype: 'session_state_changed', state: 'idle', session_id: SESSION });
+      await first;
+      const running = transport.run({ ...input, prompt: 'Apply rows 1-3', sessionId: SESSION }, new AbortController().signal, cb).then(value => { finished = true; return value; });
+      // Resume writes to the retained process after awaiting its previous close barrier.
+      await Promise.resolve();
+      send({ type: 'system', subtype: 'session_state_changed', state: 'running', session_id: SESSION });
+      send({ type: 'assistant', message: { content: [{ type: 'text', text: 'Still running.' }] } });
+      send({ type: 'result', subtype: 'success', result: 'Still running.', session_id: SESSION });
+      await Promise.resolve(); await Promise.resolve();
+      expect(finished).toBe(false);
+      await expect(transport.run(input, new AbortController().signal, callbacks())).rejects.toThrow('Wait for');
+      send({ type: 'control_request', request_id: 'background-move', request: { subtype: 'can_use_tool', tool_name: 'Bash', tool_use_id: 'move', input: { command: 'mv -n inbox.md sorted.md' } } });
+      send({ type: 'system', subtype: 'session_state_changed', state: 'requires_action', session_id: SESSION });
+      expect(cb.permission).toHaveBeenCalledWith(expect.objectContaining({ toolUseId: 'move' }), expect.any(AbortSignal));
+      expect(cb.permission.mock.calls[0][1].aborted).toBe(false);
+      answer(true); await Promise.resolve();
+      expect(messages.find(message => message.response?.request_id === 'background-move').response.response.behavior).toBe('allow');
+      send({ type: 'system', subtype: 'session_state_changed', state: 'running', session_id: SESSION });
+      send({ type: 'assistant', parent_tool_use_id: 'original-agent-call', message: { content: [{ type: 'tool_use', id: 'write', name: 'Write', input: { file_path: '/vault/done.md', content: 'done' } }] } });
+      send({ type: 'user', parent_tool_use_id: 'original-agent-call', message: { content: [{ type: 'tool_result', tool_use_id: 'write', content: 'written' }] } });
+      send({ type: 'assistant', message: { content: [{ type: 'text', text: 'Rows 1-3 applied.' }] } });
+      const idle = () => send({ type: 'system', subtype: 'session_state_changed', state: 'idle', session_id: SESSION });
+      const result = () => send({ type: 'result', subtype: 'success', result: 'Rows 1-3 applied.', session_id: SESSION });
+      if (order === 'idle-first') { idle(); await Promise.resolve(); expect(finished).toBe(false); result(); }
+      else { result(); await Promise.resolve(); expect(finished).toBe(false); idle(); }
+      await expect(running).resolves.toEqual({ sessionId: SESSION, text: 'Rows 1-3 applied.' });
+      expect(cb.text).toHaveBeenLastCalledWith('\n\nRows 1-3 applied.', 'Still running.'.length);
+      expect(cb.tool).toHaveBeenCalledWith(expect.objectContaining({ id: 'write', state: 'running' }));
+      expect(cb.tool).toHaveBeenLastCalledWith({ id: 'write', state: 'succeeded', output: 'written' });
+      expect(child.stdin.end).not.toHaveBeenCalled();
+      expect(messages.filter(message => message.type === 'user')).toHaveLength(2);
+    } finally { await transport.close(); }
+  });
+
+  it('waits past zero-turn batched notification results even when idle arrives first', async () => {
+    const { child } = host({ script: (send, msg) => {
+      if (msg.type !== 'user') return;
+      send({ type: 'system', subtype: 'session_state_changed', state: 'running', session_id: SESSION });
+      send({ type: 'result', subtype: 'success', result: 'Agents working.', session_id: SESSION });
+      send({ type: 'assistant', message: { content: [{ type: 'text', text: 'Both agents finished.' }] } });
+      send({ type: 'system', subtype: 'session_state_changed', state: 'idle', session_id: SESSION });
+      send({ type: 'result', subtype: 'success', result: '', num_turns: 0, origin: { kind: 'task-notification' }, session_id: SESSION });
+      expect(child.stdin.end).not.toHaveBeenCalled();
+      send({ type: 'result', subtype: 'success', result: 'Both agents finished.', num_turns: 1, origin: { kind: 'task-notification' }, session_id: SESSION });
+    } });
+    await expect(runLocalClaude(input, new AbortController().signal, callbacks())).resolves.toMatchObject({ text: 'Both agents finished.' });
+  });
+
+  it('does not reuse an interim success when a notification turn fails without assistant text', async () => {
+    host({ script: (send, msg) => {
+      if (msg.type !== 'user') return;
+      send({ type: 'system', subtype: 'session_state_changed', state: 'running', session_id: SESSION });
+      send({ type: 'result', subtype: 'success', result: 'Agent working.', session_id: SESSION });
+      send({ type: 'user', origin: { kind: 'task-notification' }, message: { content: 'Agent completed.' } });
+      send({ type: 'system', subtype: 'session_state_changed', state: 'idle', session_id: SESSION });
+      send({ type: 'result', subtype: 'error_during_execution', is_error: true, errors: ['notification failed'], session_id: SESSION });
+    } });
+    await expect(runLocalClaude(input, new AbortController().signal, callbacks())).rejects.toThrow('notification failed');
+  });
+
+  it('keeps Studio alive past the interim result without closing stdin', async () => {
+    const { child } = host({ script: (send, msg) => {
+      if (msg.type !== 'user') return;
+      send({ type: 'system', subtype: 'session_state_changed', state: 'running', session_id: SESSION });
+      send({ type: 'result', subtype: 'success', result: 'Working.', session_id: SESSION });
+      expect(child.stdin.end).not.toHaveBeenCalled();
+      send({ type: 'assistant', message: { content: [{ type: 'text', text: 'Finished.' }] } });
+      send({ type: 'result', subtype: 'success', result: 'Finished.', session_id: SESSION });
+      send({ type: 'system', subtype: 'session_state_changed', state: 'idle', session_id: SESSION });
+    } });
+    await expect(runLocalClaude(input, new AbortController().signal, callbacks())).resolves.toMatchObject({ text: 'Finished.' });
+    expect(child.stdin.end).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['cancel', 'failure', 'close'])('handles %s after an interim result without accepting a stale success', async end => {
+    let submitted!: () => void;
+    const started = new Promise<void>(resolve => { submitted = resolve; });
+    const { send, child } = host({ script: (_send, msg) => { if (msg.type === 'user') submitted(); } });
+    const transport = new ClaudeChatTransport(), controller = new AbortController(), cb = { ...callbacks(), tool: jest.fn() };
+    let permissionSignal: AbortSignal | undefined;
+    cb.permission.mockImplementation((_request, signal) => { permissionSignal = signal; return new Promise(() => {}); });
+    const running = transport.run(input, controller.signal, cb);
+    void running.catch(() => {});
+    await started;
+    send({ type: 'system', subtype: 'session_state_changed', state: 'running', session_id: SESSION });
+    send({ type: 'result', subtype: 'success', result: 'Working.', session_id: SESSION });
+    send({ type: 'control_request', request_id: 'pending', request: { subtype: 'can_use_tool', tool_name: 'Edit', input: {} } });
+    expect(permissionSignal?.aborted).toBe(false);
+    if (end === 'cancel') controller.abort();
+    else if (end === 'failure') send({ type: 'result', subtype: 'error_during_execution', is_error: true, errors: ['subagent failed'], session_id: SESSION });
+    else child.emit('close', 1);
+    await expect(running).rejects.toThrow(end === 'cancel' ? 'canceled' : end === 'failure' ? 'subagent failed' : 'stopped before finishing');
+    expect(permissionSignal?.aborted).toBe(true);
+    send({ type: 'control_request', request_id: 'late', request: { subtype: 'can_use_tool', tool_name: 'Write' } });
+    expect(cb.permission).toHaveBeenCalledTimes(1);
+    await transport.close();
   });
 });
 
