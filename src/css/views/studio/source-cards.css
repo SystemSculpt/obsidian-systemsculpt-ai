@@ -2,7 +2,7 @@
  * cards are chromeless). The surface policy lives in StudioNodeSurface.ts;
  * the source toolbar only appears while a source definition is showing. */
 .ss-studio-surface-card { background: var(--ss-surface-0); overflow: visible; }
-.ss-studio-surface-card .ss-studio-node-header { display: flex; min-height: 36px; padding: var(--ss-space-1) var(--ss-space-2); border-bottom: 1px solid var(--ss-line); gap: 8px; }
+.ss-studio-surface-card .ss-studio-node-header { display: flex; min-height: 36px; padding: var(--ss-space-1) var(--ss-space-3); border-bottom: 1px solid var(--ss-line); gap: 8px; }
 .ss-studio-node-type { flex: 0 0 auto; font: var(--ss-text-xs) var(--ss-font-mono); text-transform: uppercase; letter-spacing: .07em; color: var(--ss-accent); white-space: nowrap; }
 .ss-studio-surface-card .ss-studio-node-title-input { flex: 1 1 auto; font-size: var(--ss-text-sm); font-weight: var(--ss-weight-semibold); height: 24px; padding: 0 4px; }
 .ss-studio-surface-card .ss-studio-node-header button { min-height: 24px; height: 24px; padding: 2px 6px; font-size: var(--ss-text-xs); }

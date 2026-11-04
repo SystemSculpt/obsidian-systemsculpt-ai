@@ -35,8 +35,9 @@ button.ss-studio-searchable-select-trigger:hover {
   flex-shrink: 0;
   margin-left: auto;
   padding: 0 var(--ss-space-1);
+  border: 1px solid var(--ss-line);
   border-radius: var(--ss-radius-full);
-  background-color: var(--ss-surface-1);
+  background-color: var(--ss-surface-2);
   font-size: var(--ss-text-xs);
   color: var(--ss-ink-muted);
   white-space: nowrap;
@@ -136,8 +137,9 @@ button.ss-studio-searchable-select-trigger:hover {
 .ss-studio-searchable-select-item-badge{
   margin-left: auto;
   padding: 0 var(--ss-space-1);
+  border: 1px solid var(--ss-line);
   border-radius: var(--ss-radius-full);
-  background-color: var(--ss-surface-1);
+  background-color: var(--ss-surface-2);
   font-size: var(--ss-text-xs);
   color: var(--ss-ink-muted);
 }

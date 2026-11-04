@@ -103,7 +103,8 @@
   grid-template-columns: minmax(0, 1fr) auto auto auto auto;
   align-items: center;
   gap: var(--ss-space-1);
-  padding: var(--ss-space-2) var(--ss-space-2) var(--ss-space-1);
+  /* Side inset matches the card body so header, ports and fields share one edge. */
+  padding: var(--ss-space-2) var(--ss-space-3) var(--ss-space-1);
 }
 
 .ss-studio-node-title-input {
