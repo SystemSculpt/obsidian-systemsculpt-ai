@@ -6,7 +6,9 @@
   min-width: 0;
 }
 
-.ss-studio-searchable-select-trigger {
+/* Element-qualified: Obsidian's global button rule would otherwise set its
+   own fill and height, so the trigger never matched the inputs beside it. */
+button.ss-studio-searchable-select-trigger {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -21,9 +23,10 @@
   font-size: var(--ss-text-sm);
   cursor: pointer;
   transition: var(--ss-transition-colors);
+  box-shadow: none;
 }
 
-.ss-studio-searchable-select-trigger:hover {
+button.ss-studio-searchable-select-trigger:hover {
   border-color: var(--ss-line-strong);
 }
 
@@ -54,7 +57,7 @@
   display: inline-flex;
   align-items: center;
   flex-shrink: 0;
-  color: var(--ss-ink-faint);
+  color: var(--ss-ink-muted);
   transition: transform var(--ss-dur-fast) var(--ss-ease);
 }
 

@@ -46,5 +46,7 @@ describe("studio.image_generation", () => {
     expect(payload).not.toHaveProperty("background");
     expect(payload).not.toHaveProperty("inputImages");
     expect(payload).toMatchObject({ quality: "max", count: 1, aspectRatio: "16:9" });
+    const auto = await run({ prompt: "", model: "", quality: "", count: 1, aspectRatio: "auto" }, undefined);
+    expect(auto.payload).not.toHaveProperty("aspectRatio");
   });
 });
