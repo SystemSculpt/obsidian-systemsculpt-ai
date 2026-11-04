@@ -156,6 +156,10 @@ async function runClaudeAttempt(input: ClaudeRequest, signal: AbortSignal, callb
   const binary = launch.setting('binary', 'claude');
   // A plugin turn is a top-level session even when Obsidian was opened from a Claude Code terminal.
   const environment = { ...launch.environment }; delete environment.CLAUDECODE;
+  // Native idle includes background agents and their notification turns, but not long-lived shell servers.
+  // A result alone only ends the main agent's current turn, not a resumed subagent's work.
+  environment.CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS = '1';
+  environment.CLAUDE_CODE_BG_TASKS_REPORT_RUNNING = '1';
   // A new session gets its identity up front, so every event can be checked against it.
   const sessionId = input.sessionId || window.crypto.randomUUID();
   if (!input.sessionId) args.push('--session-id', sessionId);
@@ -176,6 +180,8 @@ async function runClaudeAttempt(input: ClaudeRequest, signal: AbortSignal, callb
       // A new identity is saved once Claude Code confirms it, so a launch that never started cannot leave a chat resuming a missing session.
       let saving: Promise<void> | undefined = input.sessionId ? Promise.resolve() : undefined;
       let outcome: { result?: ClaudeResult; error?: Error } | undefined;
+      let nativeState: 'running' | 'requires_action' | 'idle' | undefined;
+      let pendingResult: ClaudeResult | undefined;
       let killTimer: number | undefined, closing = false;
       let release!: () => void;
       const closed = new Promise<void>(resolveClosed => { release = resolveClosed; });
@@ -199,6 +205,10 @@ async function runClaudeAttempt(input: ClaudeRequest, signal: AbortSignal, callb
           // Keep native session grants alive between successful chat turns. Studio still closes below.
           void saving.then(() => resolve(value.result!), error => { outcome = { error }; void closeProcess(); });
         } else void closeProcess();
+      };
+      const finishWhenIdle = () => {
+        // Older CLIs without state events retain the result-only protocol.
+        if (pendingResult && (nativeState === undefined || nativeState === 'idle')) finish({ result: pendingResult });
       };
       const abort = () => {
         write({ type: 'control_request', request_id: `systemsculpt-${++nextRequest}`, request: { subtype: 'interrupt' } });
@@ -251,6 +261,12 @@ async function runClaudeAttempt(input: ClaudeRequest, signal: AbortSignal, callb
             saving.catch(error => finish({ error: error instanceof Error ? error : new Error(String(error)) }));
           }
         }
+        if (event.type === 'system' && event.subtype === 'session_state_changed'
+          && (event.state === 'running' || event.state === 'requires_action' || event.state === 'idle')) {
+          nativeState = event.state;
+          finishWhenIdle();
+          return;
+        }
         if (event.type === 'system' && event.subtype === 'init') {
           initialized = true;
           callbacks.log(`Connected to on-machine Claude Code${typeof event.model === 'string' ? ` · ${event.model}` : ''}`);
@@ -284,6 +300,10 @@ async function runClaudeAttempt(input: ClaudeRequest, signal: AbortSignal, callb
           }
         }
         if (event.parent_tool_use_id) return;
+        // A notification can start another native turn after an interim result. Its idle and result
+        // can arrive in either order; never settle that turn with the previous turn's result.
+        if (event.type === 'assistant' || event.type === 'stream_event'
+          || event.type === 'user' && isRecord(event.origin) && event.origin.kind === 'task-notification') pendingResult = undefined;
         if (event.type === 'stream_event' && isRecord(event.event)) {
           const streamed = event.event;
           if (streamed.type === 'message_start') toolBlocks.clear();
@@ -356,7 +376,16 @@ async function runClaudeAttempt(input: ClaudeRequest, signal: AbortSignal, callb
             finish({ error: auto && !activityStarted && rejectsAutoMode(detail)
               ? new ClaudeAutoUnavailable('Claude Code rejected Auto mode before starting.')
               : new Error(`Claude Code did not finish: ${detail.slice(0, 2000)}`) });
-          } else finish({ result: { sessionId, text: typeof event.result === 'string' ? event.result : text } });
+          } else {
+            // Batched task notifications emit zero-turn placeholders before the result
+            // carrying their shared answer. Even an idle event must not settle on one.
+            if (event.num_turns === 0 && event.result === '' && isRecord(event.origin) && event.origin.kind === 'task-notification') {
+              pendingResult = undefined;
+              return;
+            }
+            pendingResult = { sessionId, text: typeof event.result === 'string' ? event.result : text };
+            finishWhenIdle();
+          }
         }
       };
       child.stdout.on('data', (chunk: string) => {
@@ -383,6 +412,8 @@ async function runClaudeAttempt(input: ClaudeRequest, signal: AbortSignal, callb
             return new Promise<ClaudeResult>((nextResolve, nextReject) => {
               input = nextInput; signal = nextSignal; callbacks = nextCallbacks; resolve = nextResolve; reject = nextReject;
               buffer = ''; stderr = ''; text = ''; partial = ''; textLength = 0; partialLength = 0; signedOut = false; outcome = undefined; settled = false; toolBlocks.clear();
+              pendingResult = undefined;
+              if (nativeState !== undefined) nativeState = 'running';
               signal.addEventListener('abort', abort, { once: true });
               write(nextMessage);
             });

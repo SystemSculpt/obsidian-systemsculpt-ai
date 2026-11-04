@@ -42,6 +42,12 @@ Michael's 2026-09-05 direction revives this plugin as the SystemSculpt product s
   and saves its answer to the original Markdown transcript. Reopening attaches to
   the live session, including pending approvals. Stop, deleting the chat, and
   unloading the plugin cancel the turn; navigation never implies approval.
+- Claude Code's native session state owns completion. A successful `result` can
+  precede background subagent work and its notification-driven replies. Keep the
+  turn, streamed tools and approval cards live until the latest result and native
+  idle both arrive. Request native state events with background-agent tracking;
+  shell servers do not hold the turn open. Older CLIs without state events keep
+  their result-only behavior. Never send a synthetic continuation prompt.
 - New Claude Code chats default to **Auto** (`auto`), using Claude Code's native
   safety checks, not permission bypass. Manual choices are **Ask before edits**
   (`manual`), **Accept edits** (`acceptEdits`), **Plan only** (`plan`), and **Claude

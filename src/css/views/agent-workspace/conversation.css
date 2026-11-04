@@ -189,6 +189,24 @@
   margin-bottom: 0;
 }
 
+.systemsculpt-agent-turn table {
+  border-collapse: collapse;
+  font-size: inherit;
+}
+
+.systemsculpt-agent-turn table :is(th, td) {
+  padding-block: var(--ss-space-1);
+  padding-inline: 0 var(--ss-space-3);
+}
+
+.systemsculpt-agent-turn table :is(th, td):last-child {
+  padding-inline-end: 0;
+}
+
+.systemsculpt-agent-turn table th:not([align]) {
+  text-align: start;
+}
+
 .systemsculpt-agent-message-actions {
   display: flex;
   gap: var(--ss-space-1);

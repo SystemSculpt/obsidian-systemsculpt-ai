@@ -168,6 +168,153 @@ describe("LiveMarkdownRenderer", () => {
     live.unload();
   });
 
+  it("separates a table from prose for both streamed and settled rendering", async () => {
+    const table = "| Name | Status |\n| --- | --- |\n| Note | Ready |";
+    const markdown = `**Result**\n${table}`;
+    const presented = `**Result**\n\n${table}`;
+    const target = document.body.createDiv();
+    const render = jest.fn(async (chunk: string, staging: HTMLElement) => renderParagraph(chunk, staging));
+    const live = new LiveMarkdownRenderer({ render, throttleMs: 0 });
+    live.load();
+
+    live.stream(target, markdown);
+    await live.flush(target);
+    expect(render.mock.calls.map(([chunk]) => chunk)).toEqual([presented]);
+
+    live.stream(target, `${markdown}\n\nAfter`);
+    await live.flush(target);
+    expect(render.mock.calls.slice(1).map(([chunk]) => chunk)).toEqual([
+      `${presented}\n\n`,
+      "After",
+    ]);
+
+    await live.settle(target, `${markdown}\n\nAfter`);
+    expect(render.mock.calls[3][0]).toBe(`${presented}\n\nAfter`);
+    await live.settle(target, `${markdown}\n\nAfter`);
+    expect(render).toHaveBeenCalledTimes(4);
+    live.unload();
+  });
+
+  it.each([
+    "Name | Status\n--- | ---\nNote | Ready",
+    "| Name | Status |\n| :--- | ---: |\n| Note | Ready |",
+    "| Name \\| alias | Status |\n| --- | --- |\n| Note | Ready |",
+    "| `Name` | Status |\n| --- | --- |\n| Note | Ready |",
+    "`Name` | Status\n--- | ---\nNote | Ready",
+    "<span>Name</span> | Status\n--- | ---\nNote | Ready",
+  ])("recognizes complete table headers without changing their cells: %s", async (table) => {
+    const target = document.body.createDiv();
+    const render = jest.fn(async (chunk: string, staging: HTMLElement) => renderParagraph(chunk, staging));
+    const live = new LiveMarkdownRenderer({ render });
+    live.load();
+    await live.settle(target, `**Result**\n${table}`);
+    expect(render.mock.calls[0][0]).toBe(`**Result**\n\n${table}`);
+    live.unload();
+  });
+
+  it("recognizes a table after pipe-containing prose", async () => {
+    const table = "| A | B |\n| --- | --- |\n| x | y |";
+    const target = document.body.createDiv();
+    const render = jest.fn(async (chunk: string, staging: HTMLElement) => renderParagraph(chunk, staging));
+    const live = new LiveMarkdownRenderer({ render });
+    live.load();
+    await live.settle(target, `Summary | Status\n${table}`);
+    expect(render.mock.calls[0][0]).toBe(`Summary | Status\n\n${table}`);
+    live.unload();
+  });
+
+  it.each([
+    ["ordinary prose", "**Result**\nText on the next line"],
+    ["pipe prose", "**Result**\nName | Status\nNote | Ready"],
+    ["incomplete table", "**Result**\n| Name | Status |\n| --- |"],
+    ["mismatched columns", "**Result**\n| Name | Status |\n| --- | --- | --- |"],
+    ["escaped pipe prose", "**Result**\nName \\| Status\n--- | ---"],
+    ["indented code", "**Result**\n\n    **Example**\n    | A | B |\n    | --- | --- |"],
+    ["already separated table", "**Result**\n\n| A | B |\n| --- | --- |\n| x | y |"],
+    ["table-like body rows", "| A | B |\n| --- | --- |\n| x | y |\n| --- | --- |"],
+    ["backtick fence", "```md\n**Example**\n| A | B |\n| --- | --- |\n```"],
+    ["tilde fence", "~~~md\n**Example**\n| A | B |\n| --- | --- |\n~~~"],
+    ["unclosed fence", "```md\n**Example**\n| A | B |\n| --- | --- |"],
+    ["shorter inner fence", "````md\n```\n**Example**\n| A | B |\n| --- | --- |\n````"],
+    ["indented false closing fence", "```md\n    ```\n**Example**\n| A | B |\n| --- | --- |\n```"],
+    ["CRLF backtick fence", "```md\r\n**Example**\r\n| A | B |\r\n| --- | --- |\r\n```"],
+    ["CRLF tilde fence", "~~~md\r\n**Example**\r\n| A | B |\r\n| --- | --- |\r\n~~~"],
+    ["multiline inline code", "`Example\n| A | B |\n| --- | --- |\nend`"],
+    ["inline code crossing the delimiter", "**Example**\n| A `literal | B |\n| --- | --- |\nend`"],
+    ["HTML pre block", "<pre>\n**Example**\n| A | B |\n| --- | --- |\n</pre>"],
+    ["escaped delimiter colon", "**Example**\n| A | B |\n| \\:--- | --- |"],
+    ["escaped delimiter dash", "**Example**\n| A | B |\n| \\---- | --- |"],
+    ["escaped later delimiter cell", "**Example**\n| A | B |\n| --- | \\:--- |"],
+  ])("preserves %s in the rendered Markdown", async (_name, markdown) => {
+    const target = document.body.createDiv();
+    const render = jest.fn(async (chunk: string, staging: HTMLElement) => renderParagraph(chunk, staging));
+    const live = new LiveMarkdownRenderer({ render });
+    live.load();
+    await live.settle(target, markdown);
+    expect(render.mock.calls[0][0]).toBe(markdown);
+    live.unload();
+  });
+
+  it.each([" ", "  ", "   "])("recognizes top-level tables with %j indentation", async (indent) => {
+    const table = `${indent}| A | B |\n${indent}| --- | --- |\n${indent}| x | y |`;
+    const target = document.body.createDiv();
+    const render = jest.fn(async (chunk: string, staging: HTMLElement) => renderParagraph(chunk, staging));
+    const live = new LiveMarkdownRenderer({ render });
+    live.load();
+    await live.settle(target, `**Result**\n${table}`);
+    expect(render.mock.calls[0][0]).toBe(`**Result**\n\n${table}`);
+    live.unload();
+  });
+
+  it.each(["\n", "\r\n"])("recognizes a table after a list-relative closing fence with %j newlines", async (newline) => {
+    const code = "- item\n\n  ```text\n  sample\n    ```".replace(/\n/g, newline);
+    const table = "| A | B |\n| --- | --- |".replace(/\n/g, newline);
+    const target = document.body.createDiv();
+    const render = jest.fn(async (chunk: string, staging: HTMLElement) => renderParagraph(chunk, staging));
+    const live = new LiveMarkdownRenderer({ render });
+    live.load();
+    await live.settle(target, `${code}${newline}${newline}**Result**${newline}${table}`);
+    expect(render.mock.calls[0][0]).toBe(`${code}${newline}${newline}**Result**${newline}${newline}${table}`);
+    live.unload();
+  });
+
+  it("recognizes a table after a closed fence while preserving the code inside", async () => {
+    const example = "**Result**\n| A | B |\n| --- | --- |";
+    const code = `\`\`\`md\n${example}\n\`\`\``;
+    const target = document.body.createDiv();
+    const render = jest.fn(async (chunk: string, staging: HTMLElement) => renderParagraph(chunk, staging));
+    const live = new LiveMarkdownRenderer({ render });
+    live.load();
+    await live.settle(target, `${code}\n\n${example}`);
+    expect(render.mock.calls[0][0]).toBe(`${code}\n\n${example.replace("**Result**\n", "**Result**\n\n")}`);
+    live.unload();
+  });
+
+  it("does not start a host render after unloading during table preparation", async () => {
+    const target = document.body.createDiv();
+    const render = jest.fn(async (chunk: string, staging: HTMLElement) => renderParagraph(chunk, staging));
+    const live = new LiveMarkdownRenderer({ render });
+    live.load();
+    live.stream(target, "**Result**\n| A | B |\n| --- | --- |");
+    const pending = live.flush(target);
+    live.unload();
+    await pending;
+    await jest.advanceTimersByTimeAsync(0);
+    expect(render).not.toHaveBeenCalled();
+    expect(target.childNodes).toHaveLength(0);
+  });
+
+  it("retains the original table Markdown for the raw final fallback", async () => {
+    const markdown = "**Result**\n| Name | Status |\n| --- | --- |\n| Note | Ready |";
+    const target = document.body.createDiv();
+    const render = jest.fn(async () => { throw new Error("Render failed"); });
+    const live = new LiveMarkdownRenderer({ render });
+    live.load();
+    await expect(live.settle(target, markdown)).rejects.toThrow("Render failed");
+    expect(target.textContent).toBe(markdown);
+    live.unload();
+  });
+
   it("brackets a delayed connected DOM commit after detached parsing finishes", async () => {
     const gate = deferred();
     const target = document.body.createDiv();

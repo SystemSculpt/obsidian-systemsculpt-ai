@@ -334,6 +334,54 @@ export function stableMarkdownBoundary(markdown: string, start = 0): number {
   return boundary;
 }
 
+/** Obsidian tables cannot interrupt prose. Add a render-only block break. */
+function markdownWithTableBreaks(markdown: string): string | Promise<string> {
+  if (!markdown.includes("|") || !/(?:^|\n) {0,3}\|?[ \t]*:?-{3,}/.test(markdown)) return markdown;
+  // Reuse Studio's bundled language pack, but never evaluate it on plugin load
+  // or for ordinary prose. Its syntax trees own fences, HTML and indentation.
+  return import("@codemirror/lang-markdown").then(({ commonmarkLanguage, markdownLanguage }) => {
+    // Lezer expects LF. Keep offsets aligned without changing rendered bytes.
+    const source = markdown.replace(/\r(?=\n)/g, " ");
+    const original = commonmarkLanguage.parser.parse(source);
+    const paragraphAt = (offset: number) => {
+      let node = original.resolveInner(offset, 1);
+      while (node.parent && node.name !== "Paragraph") {
+        if ((node.name === "InlineCode" || node.name === "HTMLTag")
+          && source.slice(node.from, node.to).includes("\n")) return null;
+        node = node.parent;
+      }
+      return node.name === "Paragraph" && node.parent?.name === "Document" ? node : null;
+    };
+    const parts: string[] = [];
+    let start = 0;
+    let tableParagraphEnd = 0;
+    for (const separator of source.matchAll(/^ {0,3}\|?[ \t]*:?-{3,}[^\n]*$/gm)) {
+      if (separator.index === 0) continue;
+      const lineStart = source.lastIndexOf("\n", separator.index - 2) + 1;
+      if (lineStart < tableParagraphEnd) continue;
+      // Parse only this header and delimiter: an earlier pipe-containing prose
+      // line can prevent Lezer's full-document parser from discovering a table.
+      const candidate = source.slice(lineStart, separator.index + separator[0].length);
+      const table = markdownLanguage.parser.parse(candidate).topNode.firstChild;
+      if (table?.name !== "Table") continue;
+      const delimiter = table.getChild("TableDelimiter");
+      const paragraph = paragraphAt(lineStart + table.from);
+      // Single-line code/HTML in a cell is formatting, not a literal block.
+      // Reject only literals spanning the header or delimiter's line break.
+      if (!paragraph || !delimiter
+        || paragraphAt(lineStart + delimiter.from)?.from !== paragraph.from) continue;
+      // CommonMark keeps table body rows in the same paragraph. Do not split
+      // those rows into another table when they resemble a header/delimiter.
+      tableParagraphEnd = paragraph.to;
+      if (lineStart <= paragraph.from) continue;
+      const newline = markdown.slice(lineStart - 2, lineStart) === "\r\n" ? "\r\n" : "\n";
+      parts.push(markdown.slice(start, lineStart), newline);
+      start = lineStart;
+    }
+    return parts.length ? parts.join("") + markdown.slice(start) : markdown;
+  });
+}
+
 function regionStart(region: DomRegion): ChildNode | null {
   return region.after ? region.after.nextSibling : region.root.firstChild;
 }
@@ -1222,15 +1270,21 @@ export class LiveMarkdownRenderer extends Component {
       let retainedLease = false;
       try {
         if (settling) {
+          const prepared = markdownWithTableBreaks(markdown.slice(plan.settleStart, plan.tailStart));
+          const presented = typeof prepared === "string" ? prepared : await prepared;
+          if (!isCurrent()) return { status: "stale", retry: true };
           await this.options.render(
-            markdown.slice(plan.settleStart, plan.tailStart),
+            presented,
             settling.staging,
             settling.lease,
           );
           if (!isCurrent()) return { status: "stale", retry: true };
         }
         const tail = markdown.slice(plan.tailStart);
-        await this.options.render(tail, staging, lease);
+        const prepared = markdownWithTableBreaks(tail);
+        const presented = typeof prepared === "string" ? prepared : await prepared;
+        if (!isCurrent()) return { status: "stale", retry: true };
+        await this.options.render(presented, staging, lease);
         if (!isCurrent()) {
           return { status: "stale", retry: true };
         }
