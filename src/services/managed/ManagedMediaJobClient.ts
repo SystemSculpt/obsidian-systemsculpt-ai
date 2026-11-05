@@ -337,9 +337,11 @@ export class ManagedMediaJobClient {
     const item = this.item(kind, { job: root.job, outputs: root.outputs, usage: root.usage });
     if (item.job.id !== jobId) malformed("Managed media status identity changed.");
     this.throwTerminal(kind, item.job, result.response.status, requestId);
-    const pollAfterMs = root.poll_after_ms === undefined
-      ? result.diagnostics.retryAfterMs
-      : root.poll_after_ms as number;
+    const bodyPollAfterMs = root.poll_after_ms as number | undefined;
+    const retryAfterMs = result.diagnostics.retryAfterMs;
+    const pollAfterMs = bodyPollAfterMs === undefined && retryAfterMs === undefined
+      ? undefined
+      : Math.max(bodyPollAfterMs ?? 0, retryAfterMs ?? 0);
     return {
       ...item,
       ...(pollAfterMs === undefined ? {} : { poll_after_ms: pollAfterMs }),

@@ -140,6 +140,13 @@ describe("ManagedMediaJobClient managed-job-protocol-v2 wire contract", () => {
     await expect(client.images.status(JOB_ID)).resolves.toMatchObject({ poll_after_ms: 2_000 });
   });
 
+  it.each(["images", "videos"] as const)("honors the longer body or Retry-After hint for %s", async kind => {
+    for (const [pollAfterMs, retryAfter, expected] of [[2_000, "30", 30_000], [30_000, "2", 30_000], [0, "30", 30_000]] as const) {
+      request.mockResolvedValueOnce(json({ job: mediaJob(), outputs: [], usage: usage(0), poll_after_ms: pollAfterMs }, 200, { "retry-after": retryAfter }));
+      await expect(client[kind].status(JOB_ID)).resolves.toMatchObject({ poll_after_ms: expected });
+    }
+  });
+
   it("returns succeeded status metadata for both media kinds without signed fields", async () => {
     request.mockResolvedValueOnce(json({ job: succeededJob(), outputs: [imageOutput], usage: usage() }));
     const image = await client.images.status(JOB_ID);
