@@ -63,7 +63,7 @@ export type ManagedImageGenerationResult = Readonly<{
 }>;
 
 type ImageStatusResponse = Readonly<{
-  job: Readonly<{ id: string; status: string; model: string }>;
+  job: Readonly<{ id: string; status: string; model: string; created_at?: string; processing_started_at?: string | null }>;
   outputs: readonly ManagedImageOutputMetadata[];
   usage: ManagedMediaUsage;
   poll_after_ms?: number;
@@ -340,11 +340,22 @@ export class ManagedImageGenerationAdapter {
     let record = initialRecord;
     const jobId = record.jobId;
     if (!jobId) throw new Error("Managed image generation recovery record is missing its job ID.");
+    let backoffMs = 2_000;
+    const observationStartedAt = this.nowMs();
     try {
       for await (const status of observeManagedJob<ImageStatusResponse>({
         read: () => this.dependencies.jobs.status(jobId, signal),
         signal,
-        pollAfterMs: value => value.poll_after_ms,
+        pollAfterMs: value => {
+          // Read once for the ETA, then space observations across the remaining
+          // estimate. Short/missing hints must not keep a long image job at 2 s.
+          const startedAt = Date.parse(value.job.processing_started_at ?? value.job.created_at ?? "");
+          const elapsedMs = Math.max(0, this.nowMs() - (Number.isFinite(startedAt) ? startedAt : observationStartedAt));
+          const remainingMs = Math.max(0, (value.typical_duration_ms ?? 0) - elapsedMs);
+          const delayMs = Math.max(backoffMs, Math.min(10_000, Math.ceil(remainingMs / 10)), value.poll_after_ms ?? 0);
+          backoffMs = Math.min(10_000, Math.max(delayMs, backoffMs * 2));
+          return delayMs;
+        },
         isRetryableError: isRetryableManagedJobObservationError,
         retryAfterMs: error => (error as Partial<ManagedMediaJobError> | null)?.retryAfterMs,
         wait: this.wait,
