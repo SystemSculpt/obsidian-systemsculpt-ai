@@ -44,6 +44,11 @@
   color: var(--ss-ink-muted);
 }
 
+/* Keep selected labels readable in light themes; the tint still marks selection. */
+.ss-settings-surface .ss-tab-button.is-selected {
+  color: var(--ss-ink);
+}
+
 .systemsculpt-tab-content {
   display: none;
 }
