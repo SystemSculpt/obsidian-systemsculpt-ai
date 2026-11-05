@@ -8,6 +8,15 @@
   },
   "events": [
     {
+      "name": "plugin_feedback.queued",
+      "kind": "server",
+      "description": "Explicit feedback durably queued for support; operational count only, without message text or account identity. No client telemetry or form-open tracking.",
+      "endpoints": ["/feedback"],
+      "where": ["src/services/PluginFeedback.ts"],
+      "owner": "engineer",
+      "added": "2026-11-04"
+    },
+    {
       "name": "api_request",
       "feature": "agent_session",
       "kind": "server",

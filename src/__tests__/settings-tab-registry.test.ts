@@ -23,6 +23,7 @@ describe("SettingsTabRegistry SystemSculpt-only anchors", () => {
       { id: "workspace", label: "Workspace" },
       { id: "studio", label: "Studio" },
       { id: "advanced", label: "Advanced" },
+      { id: "feedback", label: "Send feedback" },
     ]);
 
     const account = configs.find((config) => config.id === "account");
