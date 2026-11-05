@@ -147,6 +147,12 @@ describe("ManagedMediaJobClient managed-job-protocol-v2 wire contract", () => {
     }
   });
 
+  it.each(["Wed, 04 Nov 2026 00:00:00 GMT", "invalid", null])("keeps HTTP Date %s as local observation metadata", async date => {
+    request.mockResolvedValueOnce(json({ job: mediaJob(), outputs: [], usage: usage(0) }, 200, date === null ? {} : { date }));
+    const result = await client.images.status(JOB_ID);
+    expect(result.serverTimeMs).toBe(date === "Wed, 04 Nov 2026 00:00:00 GMT" ? Date.parse(date) : undefined);
+  });
+
   it("returns succeeded status metadata for both media kinds without signed fields", async () => {
     request.mockResolvedValueOnce(json({ job: succeededJob(), outputs: [imageOutput], usage: usage() }));
     const image = await client.images.status(JOB_ID);

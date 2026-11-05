@@ -29,7 +29,7 @@ export type ManagedJobObservationOptions<T> = Readonly<{
   signal: AbortSignal;
   pollAfterMs?: (value: T) => number | undefined;
   isRetryableError?: (error: unknown) => boolean;
-  retryAfterMs?: (error: unknown) => number | undefined;
+  retryAfterMs?: (error: unknown, consecutiveFailures: number) => number | undefined;
   wait?: (milliseconds: number, signal: AbortSignal) => Promise<void>;
   /** Resolves once the host is online; reads never run while it is offline. */
   waitForOnline?: (signal: AbortSignal) => Promise<void>;
@@ -155,7 +155,7 @@ export async function* observeManagedJob<T>(
         // network instead of backing off.
         if (isHostOffline()) continue;
         transientFailures += 1;
-        const retryInMs = normalizedPollAfterMs(options.retryAfterMs?.(error), managedTransientBackoffMs(transientFailures));
+        const retryInMs = normalizedPollAfterMs(options.retryAfterMs?.(error, transientFailures), managedTransientBackoffMs(transientFailures));
         try {
           options.onRetrying?.({ consecutiveFailures: transientFailures, retryInMs, error });
         } catch {
