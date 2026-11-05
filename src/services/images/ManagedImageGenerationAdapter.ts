@@ -10,6 +10,7 @@ import type {
 import {
   dispatchManagedJob,
   isRetryableManagedJobObservationError,
+  managedTransientBackoffMs,
   observeManagedJob,
   waitForManagedJob,
 } from "../managed/ManagedJobObservation";
@@ -68,6 +69,7 @@ type ImageStatusResponse = Readonly<{
   usage: ManagedMediaUsage;
   poll_after_ms?: number;
   typical_duration_ms?: number;
+  serverTimeMs?: number;
 }>;
 
 type ImageJobs = Readonly<{
@@ -341,7 +343,9 @@ export class ManagedImageGenerationAdapter {
     const jobId = record.jobId;
     if (!jobId) throw new Error("Managed image generation recovery record is missing its job ID.");
     let backoffMs = 2_000;
-    const observationStartedAt = this.nowMs();
+    let etaObservedAt = this.elapsedNow();
+    let initialAgeMs = 0;
+    let lastStartedAt: string | undefined;
     try {
       for await (const status of observeManagedJob<ImageStatusResponse>({
         read: () => this.dependencies.jobs.status(jobId, signal),
@@ -349,15 +353,25 @@ export class ManagedImageGenerationAdapter {
         pollAfterMs: value => {
           // Read once for the ETA, then space observations across the remaining
           // estimate. Short/missing hints must not keep a long image job at 2 s.
-          const startedAt = Date.parse(value.job.processing_started_at ?? value.job.created_at ?? "");
-          const elapsedMs = Math.max(0, this.nowMs() - (Number.isFinite(startedAt) ? startedAt : observationStartedAt));
+          const startedAt = value.job.processing_started_at ?? value.job.created_at;
+          const observedAt = this.elapsedNow();
+          if (startedAt !== lastStartedAt) {
+            // Server-relative initial age, then monotonic local elapsed time.
+            // Missing HTTP Date starts the estimate here, not on a skewed clock.
+            const serverStartedAt = Date.parse(startedAt ?? "");
+            initialAgeMs = value.serverTimeMs !== undefined && Number.isFinite(serverStartedAt)
+              ? Math.max(0, value.serverTimeMs - serverStartedAt) : 0;
+            etaObservedAt = observedAt;
+            lastStartedAt = startedAt;
+          }
+          const elapsedMs = initialAgeMs + Math.max(0, observedAt - etaObservedAt);
           const remainingMs = Math.max(0, (value.typical_duration_ms ?? 0) - elapsedMs);
           const delayMs = Math.max(backoffMs, Math.min(10_000, Math.ceil(remainingMs / 10)), value.poll_after_ms ?? 0);
           backoffMs = Math.min(10_000, Math.max(delayMs, backoffMs * 2));
           return delayMs;
         },
         isRetryableError: isRetryableManagedJobObservationError,
-        retryAfterMs: error => (error as Partial<ManagedMediaJobError> | null)?.retryAfterMs,
+        retryAfterMs: (error, failures) => Math.max(backoffMs, managedTransientBackoffMs(failures), (error as Partial<ManagedMediaJobError> | null)?.retryAfterMs ?? 0),
         wait: this.wait,
       })) {
         if (status.job.id !== jobId) throw new Error("Managed image generation status identity changed.");

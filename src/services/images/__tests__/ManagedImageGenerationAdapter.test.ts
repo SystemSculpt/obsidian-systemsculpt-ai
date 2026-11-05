@@ -9,14 +9,15 @@ type Status = Awaited<ReturnType<ManagedImageGenerationDependencies["jobs"]["sta
 
 function snapshot(status = "processing", hints: Partial<Status> = {}): Status {
   return {
-    job: { id: JOB_ID, model: "test/image", status, created_at: new Date(START).toISOString(), processing_started_at: new Date(START).toISOString() },
+    job: { id: JOB_ID, model: "test/image", status, created_at: new Date(START).toISOString(), processing_started_at: status === "queued" ? null : new Date(START).toISOString() },
+    serverTimeMs: START,
     outputs: status === "succeeded" ? [METADATA] : [],
     usage: { raw_usd: 0, cost_source: "not_billed", estimated: false },
     ...hints,
   };
 }
 
-function harness() {
+function harness(wallClockOffsetMs = 0) {
   let now = START;
   let current: ManagedJobRecoveryRecord = {
     schemaVersion: 1, revision: 1, capability: "image_generation", operationId: "image-poll-test",
@@ -46,7 +47,7 @@ function harness() {
   const wait = jest.fn(async (ms: number, _signal: AbortSignal) => { now += ms; });
   const adapter = new ManagedImageGenerationAdapter({
     admission: async () => ({ outcome: "allowed" }), jobs, recovery, prepareInputs: jest.fn(),
-    nowMs: () => now, elapsedNow: () => now - START, wait,
+    nowMs: () => now + wallClockOffsetMs, elapsedNow: () => now - START, wait,
   });
   const generate = (signal?: AbortSignal) => adapter.generate({
     operationId: "image-poll-test", sourceIdentity: "studio:test", buildPayload: () => ({ prompt: "test", count: 1 }), signal,
@@ -116,6 +117,52 @@ describe("ManagedImageGenerationAdapter status polling", () => {
     expect(h.jobs.status).toHaveBeenCalledTimes(1);
     expect(h.wait).not.toHaveBeenCalled();
     expect(h.jobs.downloadOutput).not.toHaveBeenCalled();
+  });
+
+  it.each([undefined, 1_000])("keeps its established cadence through alternating status errors with retry hint %s", async retryAfterMs => {
+    const h = harness();
+    let reads = 0;
+    h.jobs.status.mockImplementation(async () => {
+      if (++reads % 2 === 0) throw new ManagedMediaJobError("temporarily_unavailable", "Busy", retryAfterMs === undefined ? 503 : 429, null, true, null, retryAfterMs);
+      return snapshot(h.elapsed() >= 108_000 ? "succeeded" : "processing", { typical_duration_ms: 108_000 });
+    });
+    await h.generate();
+    expect(h.jobs.status.mock.calls.length).toBeLessThan(15);
+    expect(h.wait.mock.calls.every(([ms]) => ms >= 10_000)).toBe(true);
+    expect(h.jobs.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves exponential retry backoff beyond the normal polling cadence", async () => {
+    const h = harness();
+    h.jobs.status.mockResolvedValueOnce(snapshot("processing", { typical_duration_ms: 108_000 }));
+    for (let failure = 0; failure < 7; failure++) h.jobs.status.mockRejectedValueOnce(new ManagedMediaJobError("temporarily_unavailable", "Busy", 503));
+    h.jobs.status.mockResolvedValueOnce(snapshot("succeeded"));
+    await h.generate();
+    expect(h.wait.mock.calls.map(([ms]) => ms)).toEqual([10_000, 10_000, 10_000, 10_000, 10_000, 16_000, 32_000, 64_000]);
+  });
+
+  it.each([-120_000, 120_000])("keeps server-relative ETA with client clock offset %s", async offsetMs => {
+    const h = harness(offsetMs);
+    h.jobs.status.mockImplementation(async () => snapshot(h.elapsed() >= 120_000 ? "succeeded" : "processing", { typical_duration_ms: 120_000 }));
+    await h.generate();
+    expect(h.jobs.status).toHaveBeenCalledTimes(13);
+    expect(h.wait.mock.calls.every(([ms]) => ms === 10_000)).toBe(true);
+  });
+
+  it("ages an ETA monotonically when the server date is unavailable", async () => {
+    const h = harness(120_000);
+    h.jobs.status.mockImplementation(async () => snapshot(h.elapsed() >= 120_000 ? "succeeded" : "processing", { typical_duration_ms: 120_000, serverTimeMs: undefined }));
+    await h.generate();
+    expect(h.jobs.status).toHaveBeenCalledTimes(13);
+  });
+
+  it("honors a queued ETA with a null processing start before processing begins", async () => {
+    const h = harness();
+    h.jobs.status.mockResolvedValueOnce(snapshot("queued", { typical_duration_ms: 120_000 }))
+      .mockResolvedValueOnce(snapshot("processing", { job: { ...snapshot().job, processing_started_at: new Date(START + 10_000).toISOString() }, serverTimeMs: START + 10_000, typical_duration_ms: 120_000 }))
+      .mockResolvedValueOnce(snapshot("succeeded"));
+    await h.generate();
+    expect(h.wait.mock.calls.map(([ms]) => ms)).toEqual([10_000, 10_000]);
   });
 
   it("cancels during a backoff before another read", async () => {

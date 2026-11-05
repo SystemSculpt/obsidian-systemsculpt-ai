@@ -64,6 +64,8 @@ export interface ManagedMediaStatusResponse<Output> {
   usage: ManagedMediaUsage;
   poll_after_ms?: number;
   typical_duration_ms?: number;
+  /** HTTP Date as observation metadata; never read from the response body. */
+  serverTimeMs?: number;
 }
 export interface ManagedMediaListResponse<Output> {
   items: Array<{ job: ManagedMediaJobSnapshot; outputs: readonly Output[]; usage: ManagedMediaUsage }>;
@@ -342,8 +344,10 @@ export class ManagedMediaJobClient {
     const pollAfterMs = bodyPollAfterMs === undefined && retryAfterMs === undefined
       ? undefined
       : Math.max(bodyPollAfterMs ?? 0, retryAfterMs ?? 0);
+    const serverTimeMs = Date.parse(result.response.headers.get("date") ?? "");
     return {
       ...item,
+      ...(Number.isFinite(serverTimeMs) ? { serverTimeMs } : {}),
       ...(pollAfterMs === undefined ? {} : { poll_after_ms: pollAfterMs }),
       ...(root.typical_duration_ms === undefined ? {} : { typical_duration_ms: root.typical_duration_ms as number }),
     };
