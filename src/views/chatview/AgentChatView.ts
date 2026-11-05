@@ -3695,6 +3695,10 @@ export class AgentChatView extends ItemView {
       .onClick(() => void this.openSavedChatNote()));
     menu.addSeparator();
     menu.addItem((item) => item
+      .setTitle("Send feedback")
+      .setIcon("message-square")
+      .onClick(() => this.plugin.openSettingsTab("feedback")));
+    menu.addItem((item) => item
       .setTitle("SystemSculpt settings")
       .setIcon("settings")
       .onClick(() => this.plugin.openSettingsTab("chat")));

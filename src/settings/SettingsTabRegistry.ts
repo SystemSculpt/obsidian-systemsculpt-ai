@@ -9,6 +9,7 @@ import { displayBackupTabContent } from "./BackupTabContent";
 import { displayEmbeddingsTabContent } from "./EmbeddingsTabContent";
 import { displayImageGenerationTabContent } from "./ImageGenerationTabContent";
 import { displayAdvancedTabContent } from "./AdvancedTabContent";
+import { displayFeedbackTabContent } from "./FeedbackTabContent";
 
 export interface SettingsTabConfig {
   id: string;
@@ -110,6 +111,15 @@ export function buildSettingsTabConfigs(tab: SystemSculptSettingTab): SettingsTa
       anchor: {
         title: "Advanced, Reset, Diagnostics",
         desc: "Reset and diagnostics.",
+      },
+    },
+    {
+      id: "feedback",
+      label: "Send feedback",
+      sections: [(parent) => displayFeedbackTabContent(parent, tab)],
+      anchor: {
+        title: "Send feedback, Support",
+        desc: "Tell us what is working or getting in your way.",
       },
     },
   );

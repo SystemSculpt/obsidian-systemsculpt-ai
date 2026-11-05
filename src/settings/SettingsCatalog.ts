@@ -59,6 +59,11 @@ const SETTINGS_CATALOG = {
     title: "Documentation",
     description: "Guides and support.",
   },
+  "feedback.message": {
+    tabId: "feedback",
+    title: "What should we improve?",
+    description: "Sent to support with your plugin version and account when signed in. No notes or chats attached.",
+  },
   "chat.default-tag": {
     tabId: "chat",
     title: "Default chat tag",

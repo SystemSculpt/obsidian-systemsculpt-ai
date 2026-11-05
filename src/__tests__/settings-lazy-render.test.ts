@@ -309,7 +309,7 @@ describe("lazy settings with the production registry", () => {
   it("renders every searchable catalog target with its shared title", async () => {
     Object.assign(plugin.settings, { postProcessingEnabled: true, embeddingsEnabled: true, phoneCapturesLinked: true });
     tab.display();
-    for (const id of ["account", "workflow", "knowledge", "workspace", "studio", "advanced"]) await open(id);
+    for (const id of ["account", "workflow", "knowledge", "workspace", "studio", "advanced", "feedback"]) await open(id);
     for (const entry of getSettingsCatalog(plugin.settings)) {
       const target = panel(entry.tabId).querySelector(`[data-ss-setting="${entry.id}"]`);
       expect({ id: entry.id, title: target?.querySelector(".setting-item-name")?.textContent }).toEqual({ id: entry.id, title: entry.title });
