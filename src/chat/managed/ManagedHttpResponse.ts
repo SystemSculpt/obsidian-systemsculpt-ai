@@ -62,4 +62,3 @@ export async function responseErrorPayload(response: Response): Promise<Readonly
     return {};
   }
 }
-

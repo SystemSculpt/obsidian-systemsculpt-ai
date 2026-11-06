@@ -1,7 +1,7 @@
 import { connectStudioShapes } from "../StudioShapes";
 import type { StudioNodeInstance, StudioProjectV1 } from "../types";
 import { cleanupStaleManagedOutputPlaceholders, isManagedOutputPlaceholderNode, materializePendingImageOutputPlaceholders, materializePendingVideoOutputPlaceholders, materializeImageOutputsAsMediaNodes, materializeVideoOutputsAsMediaNodes, readManagedPendingMediaKind, removeManagedTextOutputNodes, removePendingManagedOutputNodes } from '../StudioManagedOutputNodes';
-import { MANAGED_OUTPUT_PENDING_KEY, MANAGED_OUTPUT_PENDING_RUN_ID_KEY, MANAGED_MEDIA_OWNER, MANAGED_MEDIA_OWNER_KEY, MANAGED_MEDIA_SLOT_INDEX_KEY, MANAGED_MEDIA_SOURCE_NODE_ID_KEY, MANAGED_TEXT_OWNER, MANAGED_TEXT_OWNER_KEY, MANAGED_TEXT_SOURCE_NODE_ID_KEY } from '../StudioManagedOutputMetadata';
+import { MANAGED_OUTPUT_PENDING_KEY, MANAGED_OUTPUT_PENDING_RUN_ID_KEY, MANAGED_MEDIA_OWNER, MANAGED_MEDIA_OWNER_KEY, MANAGED_MEDIA_SLOT_INDEX_KEY, MANAGED_MEDIA_SOURCE_NODE_ID_KEY, MANAGED_TEXT_OWNER, MANAGED_TEXT_OWNER_KEY, MANAGED_TEXT_SOURCE_NODE_ID_KEY, readManagedMediaSlotIndex } from '../StudioManagedOutputMetadata';
 
 function createProject(
   sourceNode: StudioNodeInstance,
@@ -96,6 +96,34 @@ function addLegacyTextOutput(project: StudioProjectV1, source: StudioNodeInstanc
 }
 
 describe("StudioManagedOutputNodes media outputs", () => {
+  it("rejects imprecise saved slot identities while retaining exact integers", () => {
+    expect(readManagedMediaSlotIndex({ [MANAGED_MEDIA_SLOT_INDEX_KEY]: Number.MAX_SAFE_INTEGER + 1 })).toBeNull();
+    expect(readManagedMediaSlotIndex({ [MANAGED_MEDIA_SLOT_INDEX_KEY]: Number.MAX_SAFE_INTEGER })).toBe(Number.MAX_SAFE_INTEGER);
+  });
+
+  it("allocates distinct exact slots through pending adoption at the integer boundary", () => {
+    const sourceNode = createImageSourceNode();
+    sourceNode.config.count = 2;
+    const project = createProject(sourceNode);
+    let nodeIndex = 0, edgeIndex = 0;
+    const ids = { createNodeId: () => `boundary_${nodeIndex++}`, createEdgeId: () => `boundary_edge_${edgeIndex++}` };
+    materializeImageOutputsAsMediaNodes({ project, sourceNode, outputs: { images: [{ path: "Assets/saved.png" }] }, ...ids });
+    const saved = project.graph.nodes.find(node => node.config.sourcePath === "Assets/saved.png")!;
+    saved.config[MANAGED_MEDIA_SLOT_INDEX_KEY] = Number.MAX_SAFE_INTEGER - 1;
+    materializePendingImageOutputPlaceholders({ project, sourceNode, runId: "boundary-run", ...ids });
+    materializeImageOutputsAsMediaNodes({ project, sourceNode, runId: "boundary-run", outputs: {
+      images: [{ path: "Assets/a.png" }, { path: "Assets/b.png" }, { path: "Assets/c.png" }],
+    }, ...ids });
+    const media = project.graph.nodes.filter(node => node.kind === "studio.media_ingest");
+    const slots = media.map(node => node.config[MANAGED_MEDIA_SLOT_INDEX_KEY]);
+    expect(media).toHaveLength(4);
+    expect(slots.every(Number.isSafeInteger)).toBe(true);
+    expect(new Set(slots).size).toBe(4);
+    expect(saved.config.sourcePath).toBe("Assets/saved.png");
+    expect(media.filter(node => node !== saved).map(node => node.config.sourcePath).sort())
+      .toEqual(["Assets/a.png", "Assets/b.png", "Assets/c.png"]);
+  });
+
   it("creates one managed media-ingest node per image output", () => {
     const sourceNode = createImageSourceNode();
     const project = createProject(sourceNode);

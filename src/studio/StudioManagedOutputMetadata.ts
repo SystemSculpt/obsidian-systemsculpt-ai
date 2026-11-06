@@ -20,5 +20,5 @@ export function isManagedMediaNode(node: StudioNodeInstance): boolean {
 /** Invalid or absent slots have no identity; execution may fall back to the first input. */
 export function readManagedMediaSlotIndex(config: StudioNodeInstance["config"]): number | null {
   const value = Number(config[MANAGED_MEDIA_SLOT_INDEX_KEY]);
-  return Number.isInteger(value) && value >= 0 ? value : null;
+  return Number.isSafeInteger(value) && value >= 0 ? value : null;
 }

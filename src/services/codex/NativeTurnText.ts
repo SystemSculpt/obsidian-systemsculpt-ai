@@ -23,7 +23,9 @@ export class NativeTurnText {
     }
     this.partialCount += delta.length;
     this.partial = (this.partial + delta).slice(-TEXT_LIMIT);
-    this.rolling = (this.rolling + delta).slice(-TEXT_LIMIT);
+    if (this.projection.mode === 'snapshot' && this.projection.snapshot === 'rolling') {
+      this.rolling = (this.rolling + delta).slice(-TEXT_LIMIT);
+    }
     if (this.projection.mode === 'snapshot') this.publish();
   }
 
@@ -34,7 +36,9 @@ export class NativeTurnText {
     this.partialCount = 0;
     this.partial = '';
     this.completed = (this.completed + (this.completed ? '\n\n' : '') + segment).slice(-TEXT_LIMIT);
-    this.rolling = `${this.completed}\n\n`;
+    if (this.projection.mode === 'snapshot' && this.projection.snapshot === 'rolling') {
+      this.rolling = `${this.completed}\n\n`;
+    }
     if (this.projection.mode === 'snapshot') this.emit(this.completed);
   }
 

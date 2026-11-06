@@ -418,16 +418,23 @@ export function arrangeManagedOutputContainers(project: StudioProjectV1, measure
   return moved;
 }
 
-function nextManagedMediaSlotIndex(project: StudioProjectV1, sourceNodeId: string): number {
+function managedMediaSlotAllocator(project: StudioProjectV1, sourceNodeId: string): () => number {
+  const used = new Set<number>();
   let next = 0;
   for (const node of project.graph.nodes) {
     const managed = readManagedMediaSlot(node);
-    if (!managed || managed.sourceNodeId !== sourceNodeId) {
-      continue;
-    }
+    if (!managed || managed.sourceNodeId !== sourceNodeId) continue;
+    used.add(managed.slotIndex);
     next = Math.max(next, managed.slotIndex + 1);
   }
-  return next;
+  return () => {
+    // Keep append ordering unless the next integer cannot retain exact identity.
+    if (!Number.isSafeInteger(next)) next = 0;
+    while (used.has(next)) next += 1;
+    const slot = next++;
+    used.add(slot);
+    return slot;
+  };
 }
 
 export function isManagedOutputPlaceholderNode(node: StudioNodeInstance): boolean {
@@ -583,9 +590,9 @@ function materializePendingMediaOutputPlaceholders(
     };
   }
 
-  let nextSlotIndex = nextManagedMediaSlotIndex(options.project, sourceNodeId);
+  const allocateSlot = managedMediaSlotAllocator(options.project, sourceNodeId);
   for (let outputIndex = existingPendingNodes.length; outputIndex < expectedCount; outputIndex += 1) {
-    const slotIndex = nextSlotIndex++;
+    const slotIndex = allocateSlot();
     const nodeId = options.createNodeId();
     const newNode: StudioNodeInstance = {
       id: nodeId,
@@ -640,7 +647,7 @@ function materializeMediaOutputsAsMediaNodes(
   }
 
   const managedNodesByPath = new Map<string, StudioNodeInstance>();
-  let nextManagedSlotIndex = 0;
+  const allocateSlot = managedMediaSlotAllocator(options.project, sourceNodeId);
   for (const node of options.project.graph.nodes) {
     const managedSourceNodeId = readManagedMediaSourceNodeId(node);
     if (!managedSourceNodeId || managedSourceNodeId !== sourceNodeId) {
@@ -650,10 +657,6 @@ function materializeMediaOutputsAsMediaNodes(
     const sourcePath = String(config.sourcePath || "").trim();
     if (sourcePath && (!options.runId || node.config[MANAGED_OUTPUT_RUN_ID_KEY] === options.runId) && !managedNodesByPath.has(sourcePath)) {
       managedNodesByPath.set(sourcePath, node);
-    }
-    const managed = readManagedMediaSlot(node);
-    if (managed) {
-      nextManagedSlotIndex = Math.max(nextManagedSlotIndex, managed.slotIndex + 1);
     }
   }
   // Index legacy connected cards once, in edge order. Explicit managed metadata
@@ -676,7 +679,7 @@ function materializeMediaOutputsAsMediaNodes(
   let changed = false;
 
   const pending = options.runId ? options.project.graph.nodes.filter(node =>
-    readManagedMediaSourceNodeId(node) === sourceNodeId && readManagedOutputPendingRunId(node) === options.runId)
+    readManagedMediaSlot(node)?.sourceNodeId === sourceNodeId && readManagedOutputPendingRunId(node) === options.runId)
     .sort((a, b) => readManagedMediaSlot(a)!.slotIndex - readManagedMediaSlot(b)!.slotIndex) : [];
 
   for (const sourcePath of outputPaths) {
@@ -690,7 +693,7 @@ function materializeMediaOutputsAsMediaNodes(
     if (existingNode) {
       const existingConfig = asRecord(existingNode.config) || {};
       const existingManaged = readManagedMediaSlot(existingNode);
-      const slotIndex = existingManaged?.slotIndex ?? nextManagedSlotIndex++;
+      const slotIndex = existingManaged?.slotIndex ?? allocateSlot();
       const baseConfig = stripManagedPendingFields(
         existingNode.config
       );
@@ -717,7 +720,7 @@ function materializeMediaOutputsAsMediaNodes(
     }
 
     const nodeId = options.createNodeId();
-    const slotIndex = nextManagedSlotIndex++;
+    const slotIndex = allocateSlot();
     const newNode: StudioNodeInstance = {
       id: nodeId,
       kind: "studio.media_ingest",

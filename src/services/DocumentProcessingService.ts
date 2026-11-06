@@ -447,7 +447,7 @@ export class DocumentProcessingService {
   }
 
   private extractImages(values: ManagedDocumentDownloadResult["images"]): Record<string, string> {
-    const images: Record<string, string> = {};
+    const images = Object.create(null) as Record<string, string>;
     const add = (name: unknown, value: unknown, index: number) => {
       if (typeof value === "string" && value) images[typeof name === "string" && name ? name : `image-${index}.png`] = value;
     };

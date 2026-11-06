@@ -230,6 +230,8 @@ describe("DocumentProcessingService managed local effects", () => {
     ["filename/base64", { filename: "a.png", base64: imageBase64 }, "a.png"],
     ["name/content", { name: "a.png", content: imageBase64 }, "a.png"],
     ["name/data", { name: "a.png", data: `data:image/png;base64,${imageBase64}` }, "a.png"],
+    ["prototype name", { name: "__proto__", data: imageBase64 }, "__proto__"],
+    ["inherited name", { name: "constructor", data: imageBase64 }, "constructor"],
   ] as const)("extracts admitted %s image entries through the public conversion path", async (_label, image, name) => {
     const { app, dependencies, plugin } = harness({ result: { markdown: `![figure](${name})`, images: [image] } });
     const receipt = await new DocumentProcessingService(app, plugin, dependencies)
