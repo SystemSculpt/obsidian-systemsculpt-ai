@@ -1,4 +1,21 @@
-import { TFolder, type App } from "obsidian";
+import { TFile, TFolder, normalizePath, type App } from "obsidian";
+
+/** Create every missing ancestor through the Vault API, without decoding filenames. */
+export async function ensureVaultFolder(app: App, folderPath: string): Promise<void> {
+  const normalized = normalizePath(String(folderPath ?? ""));
+  if (!normalized || normalized === "/" || normalized === ".") return;
+
+  let current = "";
+  for (const segment of normalized.split("/").filter(Boolean)) {
+    current = current ? `${current}/${segment}` : segment;
+    const node = app.vault.getAbstractFileByPath(current);
+    if (node instanceof TFolder) continue;
+    if (node instanceof TFile) {
+      throw new Error(`Cannot create folder "${current}": a file with that name already exists`);
+    }
+    await createVaultFolder(app, current);
+  }
+}
 
 /**
  * Create one vault folder, treating an existing folder as success.

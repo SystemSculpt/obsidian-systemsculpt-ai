@@ -19,6 +19,7 @@ import {
   EmbeddingsProcessor,
   type EmbeddingSourceRevision,
 } from "./processing/EmbeddingsProcessor";
+import { isFatalManagedEmbeddingsCode } from "./ManagedEmbeddingsFailurePolicy";
 import { readEmbeddingErrorMessage } from "./EmbeddingErrorMessage";
 import { toSearchResult } from "./search/VectorSearch";
 import { EmbeddingsStorage, EmbeddingsStorageBlockedError } from "./storage/EmbeddingsStorage";
@@ -117,13 +118,6 @@ type FileState = {
   existingNamespace?: string;
 };
 
-const FATAL_MANAGED_ERROR_CODES = new Set<ManagedEmbeddingsErrorCode>([
-  "payment_required",
-  "license_required",
-  "license_rejected",
-  "version_unsupported",
-  "capability_unavailable",
-]);
 const FATAL_SUSPENSION_STATE_KEY = "semantic-fatal-suspension-v1";
 /**
  * Stored vectors are validated once per vector format, not at every launch:
@@ -150,7 +144,7 @@ type PersistedFatalSuspension = Readonly<{
 
 function isFatalManagedError(error: unknown): error is ManagedEmbeddingsError {
   return error instanceof ManagedEmbeddingsError
-    && FATAL_MANAGED_ERROR_CODES.has(error.code);
+    && isFatalManagedEmbeddingsCode(error.code);
 }
 
 function fatalManagedErrorMessage(code: ManagedEmbeddingsErrorCode): string {
@@ -1891,8 +1885,8 @@ export class EmbeddingsManager {
         error: { code: item.failure.code, message: item.failure.message },
         failedAt: item.failure.failedAt,
       });
-      if (FATAL_MANAGED_ERROR_CODES.has(item.failure.code as ManagedEmbeddingsErrorCode)) {
-        const code = item.failure.code as ManagedEmbeddingsErrorCode;
+      if (isFatalManagedEmbeddingsCode(item.failure.code)) {
+        const code = item.failure.code;
         this.processingSuspended = true;
         if (this.fatalSuspensionCode === null || code !== "payment_required") {
           this.fatalSuspensionCode = code;
@@ -1910,7 +1904,7 @@ export class EmbeddingsManager {
       && !Array.isArray(stored)
       && (stored as { version?: unknown }).version === 1
       && typeof (stored as { code?: unknown }).code === "string"
-      && FATAL_MANAGED_ERROR_CODES.has(
+      && isFatalManagedEmbeddingsCode(
         (stored as { code: ManagedEmbeddingsErrorCode }).code,
       )
     ) {

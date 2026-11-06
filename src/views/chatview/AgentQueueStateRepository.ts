@@ -1,13 +1,10 @@
+import { isChatAttachmentDescriptor } from "./attachments/ChatAttachmentDescriptor";
 import { sha256HexFromBytesPortable } from "../../utils/sha256";
 import { containsControlCharacters } from "../../utils/characterValidation";
 import type { AgentQueuedFollowUp } from "./AgentWorkspace";
 import type { ChatMessageAttachment } from "./attachments/ChatMessageAttachments";
-import {
-  ChatAttachmentVaultStore,
-  chatAttachmentRefKey,
-  isPersistedReadyAttachment,
-  type PersistedReadyAttachment,
-} from "./attachments/ChatAttachmentVaultStore";
+import { chatAttachmentRefKey, isPersistedReadyAttachment, type PersistedReadyAttachment } from "./attachments/ChatAttachmentDescriptor";
+import { ChatAttachmentVaultStore } from "./attachments/ChatAttachmentVaultStore";
 
 const QUEUE_SCHEMA_VERSION = 1 as const;
 const QUEUE_ROOT = ".systemsculpt/chat-queues";
@@ -40,15 +37,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isAttachment(value: unknown): value is ChatMessageAttachment {
-  if (!isRecord(value) || value.status !== "ready") return false;
-  if (!Object.keys(value).every((key) => [
-    "status", "id", "name", "mimeType", "byteLength", "kind", "contentPart", "contentRef",
-  ].includes(key))) return false;
-  if (typeof value.id !== "string" || !value.id.trim()) return false;
-  if (typeof value.name !== "string" || !value.name.trim()) return false;
-  if (typeof value.mimeType !== "string" || !value.mimeType.trim()) return false;
-  if (!Number.isSafeInteger(value.byteLength) || (value.byteLength as number) < 0) return false;
-  if (!["document", "image", "text"].includes(String(value.kind))) return false;
+  if (!isChatAttachmentDescriptor(value, ["status", "contentPart", "contentRef"]) || value.status !== "ready") return false;
   if (!isRecord(value.contentPart) || typeof value.contentPart.type !== "string") return false;
   return true;
 }

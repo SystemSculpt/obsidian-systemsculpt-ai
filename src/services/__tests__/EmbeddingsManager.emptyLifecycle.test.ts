@@ -80,8 +80,8 @@ import { EmbeddingsManager } from "../embeddings/EmbeddingsManager";
 import {
   MANAGED_EMBEDDINGS_INDEX_CONTRACT,
   MANAGED_EMBEDDINGS_INDEX_VECTOR_ENCODING,
-  ManagedEmbeddingsError,
-} from "../embeddings/gateway/ManagedEmbeddingsIndexAdapter";
+} from "../embeddings/gateway/ManagedEmbeddingsIndexContract";
+import { ManagedEmbeddingsError } from "../embeddings/gateway/ManagedEmbeddingsIndexAdapter";
 import { managedNamespace } from "../embeddings/__tests__/support/managedNamespace";
 import { buildVectorId } from "../embeddings/utils/vectorId";
 

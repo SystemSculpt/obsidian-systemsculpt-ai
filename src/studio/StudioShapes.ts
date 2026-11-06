@@ -8,7 +8,8 @@ import type {
   StudioShapeInstance,
   StudioShapeKind,
 } from "./types";
-import { asNumber, asString, ensureArray, isRecord, randomId } from "./utils";
+import { isRecord } from "../utils/jsonRecord";
+import { asNumber, asString, ensureArray, randomId } from "./utils";
 
 /**
  * Behavior for the Studio diagram layer — the tldraw surface that shares a

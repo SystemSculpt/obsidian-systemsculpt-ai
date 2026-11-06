@@ -1,7 +1,7 @@
 import { readStudioCollection, readCollectionField, collectionLink } from "../../../studio/StudioCollection";
 import { describeCollectionAge, readStudioCollectionSource, selectStudioCollectionData } from '../../../studio/StudioCollectionSource';
 import type { StudioJsonValue, StudioNodeInstance, StudioNodeOutputMap } from "../../../studio/types";
-import { isRecord } from "../../../studio/utils";
+import { isRecord } from "../../../utils/jsonRecord";
 import { createStudioAction } from "../StudioAction";
 import { StudioPresentation } from "../StudioPresentation";
 

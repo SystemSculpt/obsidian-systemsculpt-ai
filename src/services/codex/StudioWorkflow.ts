@@ -1,4 +1,4 @@
-import { isRecord } from '../../studio/utils';
+import { isRecord } from '../../utils/jsonRecord';
 import type { DeepReadonly } from '../../studio/StudioProjectSnapshots';
 import type { CodexJson } from './CodexAppServer';
 

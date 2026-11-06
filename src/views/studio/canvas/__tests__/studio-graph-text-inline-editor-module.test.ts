@@ -50,7 +50,7 @@ describe("StudioGraphTextInlineEditor module", () => {
       node: nodeFixture("studio.json"),
       nodeRunState: IDLE_NODE_RUN_STATE,
       interactionLocked: false,
-      onNodeConfigMutated: jest.fn(),
+      onNodeConfigValueChange: jest.fn(),
     });
 
     expect(rendered).toBe(false);
@@ -74,7 +74,7 @@ describe("StudioGraphTextInlineEditor module", () => {
       node,
       nodeRunState,
       interactionLocked: false,
-      onNodeConfigMutated: jest.fn(),
+      onNodeConfigValueChange: (_id: string, key: string, value: StudioNodeInstance["config"][string]) => { node.config[key] = value; },
     });
 
     const textarea = nodeEl.querySelector<HTMLTextAreaElement>(".ss-studio-node-text-editor");
@@ -87,7 +87,7 @@ describe("StudioGraphTextInlineEditor module", () => {
   it("uses config value change callbacks for display mode and text edits", () => {
     const nodeEl = document.createElement("div");
     const node = nodeFixture("studio.text_output", { value: "Hello" });
-    const onNodeConfigMutated = jest.fn();
+
     const onNodeConfigValueChange = jest.fn((nodeId: string, key: string, value: unknown) => {
       expect(nodeId).toBe(node.id);
       node.config[key] = value as never;
@@ -98,8 +98,7 @@ describe("StudioGraphTextInlineEditor module", () => {
       node,
       nodeRunState: IDLE_NODE_RUN_STATE,
       interactionLocked: false,
-      onNodeConfigMutated,
-      onNodeConfigValueChange,
+       onNodeConfigValueChange,
     });
 
     const rawButton = Array.from(
@@ -127,6 +126,6 @@ describe("StudioGraphTextInlineEditor module", () => {
       "Updated via callback",
       expect.objectContaining({ mode: "continuous" })
     );
-    expect(onNodeConfigMutated).not.toHaveBeenCalled();
+
   });
 });

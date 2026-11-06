@@ -534,6 +534,8 @@ test("radio interaction and DOM realm ownership stay behind shared surface seams
   assert.doesNotMatch(studioGroups, /setAttribute\(["']role["'],\s*["']radio(?:group)?["']\)/);
   // Chat settings moved into the chat's run line and More menu (ChatView R4).
   assert.equal(fs.existsSync(path.join(root, "src/modals/StandardChatSettingsModal.ts")), false);
+  assert.equal(fs.existsSync(path.join(root, "src/css/modals/chat-settings.css")), false);
+  assert.doesNotMatch(read("src/css/index.css"), /modals\/chat-settings\.css/);
 
   assert.match(domContext, /export function getSurfaceOwnerWindow/);
   assert.match(domContext, /export function resolveSurfaceDomContext/);

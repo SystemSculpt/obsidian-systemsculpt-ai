@@ -8,7 +8,8 @@ import { resolveAbsoluteVaultPath } from "../../utils/vaultPathUtils";
 import { localAgentChatDirectory } from "../../services/codex/CodexExecutionSettings";
 import { extractPrimaryPathArg, splitToolName } from "../../utils/toolPolicy";
 import { generateDiff, DiffResult } from "../../utils/diffUtils";
-import { applyFileEdits } from "../../tools/vault/editApplication";
+import { applyFileEdits, FileEditApplicationError } from "../../tools/vault/editApplication";
+import { planFileWrite } from "../../tools/vault/fileMutationPlan";
 import { resolveExistingVaultFile } from "../../tools/vault/folderNotes";
 import { normalizeLineEndings, normalizeVaultPath } from "../../tools/vault/utils";
 import type { FileEdit, SkippedEdit } from "../../tools/vault/types";
@@ -81,52 +82,48 @@ export async function prepareWriteEditPreview(app: App, toolCall: ToolCall): Pro
   const path = extractPrimaryPathArg(fn.name, fn.arguments);
   if (!path) return null;
 
+  const { canonicalName: base } = splitToolName(fn.name);
   let oldContent = "";
+  const edits: FileEdit[] = Array.isArray(fn.arguments.edits) ? fn.arguments.edits as FileEdit[] : [];
+  const requestedCount = base === "edit" ? edits.length : 0;
+  const result = (newContent: string, status: WriteEditPreviewStatus, appliedCount = 0, skipped: SkippedEdit[] = [], notice?: string): WriteEditPreview => ({
+    path, oldContent, newContent, diff: generateDiff(oldContent, newContent, 5), status,
+    requestedCount, appliedCount, skipped, ...(notice ? { notice } : {}),
+  });
   const file = resolveExistingVaultFile(app, normalizePath(normalizeVaultPath(path)));
   if (file && file instanceof TFile) {
     try {
-      // The executor edits normalized text, so the preview must diff against the
-      // same normalization or a CRLF file reads as a whole-file rewrite.
-      oldContent = normalizeLineEndings(await app.vault.read(file));
+      const content = await app.vault.read(file);
+      // Edits normalize text; writes/append preserve the existing bytes.
+      oldContent = base === "edit" ? normalizeLineEndings(content) : content;
     } catch {
-      // A missing source file produces an empty-before preview.
+      return result("", "unavailable", 0, [], "The current file could not be read. Review the requested change in Details.");
     }
   }
 
-  let newContent = "";
-  let status: WriteEditPreviewStatus = "changed";
-  let requestedCount = 0;
-  let appliedCount = 0;
-  let skipped: SkippedEdit[] = [];
-  const { canonicalName: base } = splitToolName(fn.name);
   if (base === "write") {
-    const content = String(fn.arguments.content ?? "");
-    const ifExists = String(fn.arguments.ifExists ?? "overwrite");
-    if (file && file instanceof TFile && ifExists === "append") {
-      const appendNewline = fn.arguments.appendNewline === true;
-      newContent = oldContent + (appendNewline && !oldContent.endsWith("\n") ? "\n" : "") + content;
-    } else if (file && file instanceof TFile && ifExists === "skip") {
-      newContent = oldContent;
-    } else {
-      newContent = content;
+    try {
+      const plan = planFileWrite({ path, exists: !!file, currentContent: oldContent,
+        content: String(fn.arguments.content ?? ""), ifExists: String(fn.arguments.ifExists ?? "overwrite"),
+        appendNewline: fn.arguments.appendNewline === true });
+      const newContent = plan.modifiedContent;
+      return { ...result(newContent, newContent === oldContent ? "identical" : "changed"), ...(!file ? { isNewFile: true } : {}) };
+    } catch (error) {
+      return result(oldContent, "unavailable", 0, [], error instanceof Error ? error.message : "The write cannot be applied.");
     }
-  } else if (base === "edit") {
-    const edits: FileEdit[] = Array.isArray(fn.arguments.edits)
-      ? fn.arguments.edits as FileEdit[]
-      : [];
-    requestedCount = edits.length;
-    const applied = applyFileEdits(oldContent, edits, false);
-    newContent = applied.modifiedContent;
-    appliedCount = applied.appliedCount;
-    skipped = applied.skipped;
-    if (!file) status = "missing";
-    else if (appliedCount === 0 && requestedCount > 0) status = "unmatched";
   }
-
-  if (status === "changed" && newContent === oldContent) status = "identical";
-
-  const diff = generateDiff(oldContent ?? "", newContent ?? "", 5);
-  return { path, oldContent, newContent, diff, status, requestedCount, appliedCount, skipped, ...(base === "write" && !file ? { isNewFile: true } : {}) };
+  if (!file) return result(oldContent, "missing");
+  try {
+    const applied = applyFileEdits(oldContent, edits, fn.arguments.strict !== false);
+    const status = applied.appliedCount === 0 && requestedCount > 0 ? "unmatched"
+      : applied.modifiedContent === oldContent ? "identical" : "changed";
+    return result(applied.modifiedContent, status, applied.appliedCount, applied.skipped);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return result(oldContent, "unmatched", 0,
+      [{ index: error instanceof FileEditApplicationError ? error.index : 0, reason }],
+      `The edits cannot be applied as requested: ${reason}`);
+  }
 }
 
 function nativeRecord(value: unknown): Record<string, unknown> {

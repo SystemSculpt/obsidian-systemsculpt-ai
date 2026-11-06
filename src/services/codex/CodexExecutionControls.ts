@@ -6,7 +6,7 @@ import { mountCodexModelControls } from './CodexModelControls';
 import { mountClaudeExecutionControls } from '../claude/ClaudeExecutionControls';
 import { detectLocalAgents, subscribeLocalAgentDetection, type LocalAgentDetection } from './LocalAgentDetection';
 
-const CODEX_MODES = [['auto', 'Auto'], ['ask', 'Ask'], ['read-only', 'Read only'], ['settings', 'Codex settings']] as const;
+import { CODEX_APPROVAL_MODES, CODEX_APPROVAL_LABELS, isCodexApprovalMode } from './CodexApprovalPolicy';
 
 /**
  * Settings defaults for new chats: provider, Codex and Claude Code choices.
@@ -35,7 +35,7 @@ export function mountCodexExecutionControls(parent: HTMLElement, plugin: SystemS
     },
   });
   const mode = root.createEl('label', { cls: 'ss-codex-control', text: 'Permissions' }).createEl('select', { attr: { 'aria-label': 'Codex permissions', 'data-testid': 'codex.execution.permissions' } });
-  for (const [value, text] of CODEX_MODES) mode.createEl('option', { value, text });
+  for (const value of CODEX_APPROVAL_MODES) mode.createEl('option', { value, text: CODEX_APPROVAL_LABELS[value] });
   mode.title = 'Auto reviews requests in the vault workspace. Ask lets you review; Codex settings inherits your own configuration.';
   root.append(permissions);
   const claude = mountClaudeExecutionControls(root, plugin, () => desktop && backend() === 'claude');
@@ -70,7 +70,7 @@ export function mountCodexExecutionControls(parent: HTMLElement, plugin: SystemS
   });
   mode.addEventListener('change', () => {
     const value = mode.value;
-    if (value === 'auto' || value === 'ask' || value === 'read-only' || value === 'settings') {
+    if (isCodexApprovalMode(value)) {
       void plugin.getSettingsManager().updateSettings({ codexApprovalMode: value }).catch(cause => picker.showError(String(cause)));
     }
   });

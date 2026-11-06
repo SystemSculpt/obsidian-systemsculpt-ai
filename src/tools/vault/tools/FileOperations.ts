@@ -29,6 +29,7 @@ import {
 import { assertValidObsidianBasesYaml } from "../../../utils/obsidianBasesYaml";
 import { resolveExistingVaultFile } from "../folderNotes";
 import { applyFileEdits } from "../editApplication";
+import { planFileWrite } from "../fileMutationPlan";
 import {
   assertValidStudioProjectAgentFileMutation,
   isStudioProjectDocumentPath,
@@ -290,15 +291,11 @@ export class FileOperations {
     const file = this.app.vault.getAbstractFileByPath(normalizedPath);
 
     if (file && file instanceof TFile) {
-      if (ifExists === 'skip') {
-        return { path: normalizedPath || path, success: true, ...renamed };
-      }
-      if (ifExists === 'error') {
-        throw new Error(`File already exists: ${normalizedPath || path}`);
-      }
+      const current = ifExists === "append" ? await this.app.vault.read(file) : undefined;
+      const plan = planFileWrite({ path: normalizedPath || path, exists: true, currentContent: current, content, ifExists, appendNewline });
+      if (plan.disposition === "skip") return { path: normalizedPath || path, success: true, ...renamed };
       if (ifExists === 'append') {
-        const current = await this.app.vault.read(file);
-        const newContent = current + (appendNewline && !current.endsWith('\n') ? '\n' : '') + content;
+        const newContent = plan.modifiedContent;
         assertValidStudioProjectAgentFileMutation({
           path: normalizedPath || path,
           content: newContent,
@@ -309,9 +306,9 @@ export class FileOperations {
           assertValidObsidianBasesYaml(normalizedPath || path, newContent);
         }
         if (isStudioProjectDocumentPath(normalizedPath || path)) {
-          await this.writeStudioProjectIfUnchanged(file, current, newContent);
+          await this.writeStudioProjectIfUnchanged(file, current!, newContent);
         } else {
-          await this.writeIfUnchanged(file, current, newContent, EDIT_CONFLICT_MESSAGE);
+          await this.writeIfUnchanged(file, current!, newContent, EDIT_CONFLICT_MESSAGE);
         }
       } else {
         const previousContent = isStudioProjectDocumentPath(normalizedPath || path)
@@ -336,19 +333,11 @@ export class FileOperations {
     } else if (this.shouldUseAdapter(normalizedPath)) {
       const adapter = this.app.vault.adapter;
       const exists = await adapterPathExists(adapter, normalizedPath);
-      if (exists && ifExists === "skip") {
-        return { path: normalizedPath || path, success: true, ...renamed };
-      }
-      if (exists && ifExists === "error") {
-        throw new Error(`File already exists: ${path}`);
-      }
-      let nextContent = content;
-      let previousContent: string | undefined;
-      if (exists && ifExists === "append") {
-        const current = await readAdapterText(adapter, normalizedPath);
-        nextContent = current + (appendNewline && !current.endsWith("\n") ? "\n" : "") + content;
-        previousContent = current;
-      } else if (exists && isStudioProjectDocumentPath(normalizedPath || path)) {
+      let previousContent = exists && ifExists === "append" ? await readAdapterText(adapter, normalizedPath) : undefined;
+      const plan = planFileWrite({ path, exists, currentContent: previousContent, content, ifExists, appendNewline });
+      if (plan.disposition === "skip") return { path: normalizedPath || path, success: true, ...renamed };
+      const nextContent = plan.modifiedContent;
+      if (exists && ifExists !== "append" && isStudioProjectDocumentPath(normalizedPath || path)) {
         previousContent = await readAdapterText(adapter, normalizedPath);
       }
       assertValidStudioProjectAgentFileMutation({

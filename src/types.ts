@@ -1,3 +1,5 @@
+import type { ClaudePermissionMode } from "./services/claude/ClaudeExecutionOptions";
+import type { CodexApprovalMode } from "./services/codex/CodexApprovalPolicy";
 import { LogLevel } from "./utils/errorHandling";
 import type { ToolCall } from "./types/toolCalls";
 import { DEFAULT_DIRS } from "./core/settings/defaultDirectories";
@@ -87,11 +89,11 @@ export interface SystemSculptSettings {
   textExecutionBackend?: "systemsculpt" | "codex" | "claude";
   /** False until a person chooses; new desktop chats use session-local detection. */
   textExecutionBackendExplicit?: boolean;
-  codexApprovalMode?: "auto" | "ask" | "read-only" | "settings";
+  codexApprovalMode?: CodexApprovalMode;
   /** Claude Code model alias; empty uses Claude Code's own default. */
   claudeModel?: string;
   /** Claude Code permission mode for plugin turns; "settings" inherits Claude Code's configuration. */
-  claudePermissionMode?: "auto" | "manual" | "acceptEdits" | "plan" | "settings";
+  claudePermissionMode?: ClaudePermissionMode;
   /**
    * Stable identifier unique to this vault installation.
    * Used to scope local IndexedDB storage per vault (prevents cross-vault collisions).

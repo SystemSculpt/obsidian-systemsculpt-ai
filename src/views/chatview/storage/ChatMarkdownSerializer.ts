@@ -7,7 +7,7 @@ import {
 } from "../../../types";
 import { parseAttachedTextContent } from "../../../chat/ChatAttachmentContent";
 import { base64ToUtf8, utf8ToBase64 } from "../../../utils/base64";
-import { isChatAttachmentContentRef } from "../attachments/ChatAttachmentVaultStore";
+import { isChatAttachmentContentRef, isChatAttachmentMetadata } from "../attachments/ChatAttachmentDescriptor";
 import {
   hasChatIdentityMetadata,
   parseChatFrontmatterYaml,
@@ -610,19 +610,9 @@ export class ChatMarkdownSerializer {
       if (!Array.isArray(parsed) || parsed.length === 0) return { state: "invalid" };
       const indices = new Set<number>();
       const valid = parsed.every((value) => {
-        if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-        const item = value as Record<string, unknown>;
-        if (!Object.keys(item).every((key) => [
-          "id", "name", "mimeType", "byteLength", "kind", "contentPartIndex", "contentRef",
-        ].includes(key))) return false;
-        if (typeof item.id !== "string" || !item.id.trim()) return false;
-        if (typeof item.name !== "string" || !item.name.trim()) return false;
-        if (typeof item.mimeType !== "string" || !item.mimeType.trim()) return false;
-        if (!Number.isSafeInteger(item.byteLength) || (item.byteLength as number) < 0) return false;
-        if (!Number.isSafeInteger(item.contentPartIndex) || (item.contentPartIndex as number) < 0) return false;
-        if (!new Set(["document", "image", "text"]).has(String(item.kind))) return false;
-        if (typeof item.contentRef !== "undefined" && !isChatAttachmentContentRef(item.contentRef)) return false;
-        const partIndex = item.contentPartIndex as number;
+        if (!isChatAttachmentMetadata(value)) return false;
+        const item = value;
+        const partIndex = item.contentPartIndex;
         if (indices.has(partIndex)) return false;
         const part = content?.[partIndex];
         if (part && (item.kind === "image" ? part.type !== "image_url" : part.type !== "text")) return false;

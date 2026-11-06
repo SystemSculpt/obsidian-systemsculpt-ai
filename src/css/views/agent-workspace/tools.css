@@ -519,13 +519,6 @@
   color: var(--ss-ink);
   cursor: pointer;
 }
-.systemsculpt-agent-tool-meta {
-  flex: none;
-  margin-inline-start: auto;
-  color: var(--ss-ink-muted);
-  font-size: var(--ss-text-xs);
-  font-variant-numeric: tabular-nums;
-}
 .systemsculpt-agent-tool-icon.is-animated svg {
   animation: ss-spin 1s linear infinite;
 }

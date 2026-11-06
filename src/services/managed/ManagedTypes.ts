@@ -79,10 +79,16 @@ export interface ManagedTransportOperation {
 }
 
 export type ManagedJobCapability = "transcription" | "document_processing" | "image_generation";
-// Video generation rides the negotiated managed-job-protocol-v2 media path, so
-// widening ManagedJobCapability itself would force edits to the frozen v1
-// descriptor tables. Recovery records track both families.
+// Recovery preserves the original capability identities, including image jobs;
+// video adds an identity for the negotiated managed-job-protocol-v2 media path.
 export type ManagedRecoveryCapability = ManagedJobCapability | "video_generation";
+export interface ManagedUploadedImageInput {
+  type: "uploaded";
+  key: string;
+  mime_type: "image/png" | "image/jpeg" | "image/webp";
+  size_bytes: number;
+  sha256: string;
+}
 export type ManagedImageOutputMetadata = Readonly<{
   index: number;
   mime_type: "image/png" | "image/jpeg" | "image/webp";
@@ -91,7 +97,7 @@ export type ManagedImageOutputMetadata = Readonly<{
   width: number | null;
   height: number | null;
 }>;
-export type ManagedImageOutputBytes = Readonly<{ metadata: ManagedImageOutputMetadata; bytes: ArrayBuffer }>;
+type ManagedImageOutputBytes = Readonly<{ metadata: ManagedImageOutputMetadata; bytes: ArrayBuffer }>;
 type ManagedMediaDownloadTiming = Readonly<{
   download_started_at: string;
   download_completed_offset_ms: number;

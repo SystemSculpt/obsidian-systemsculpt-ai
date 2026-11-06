@@ -18,7 +18,7 @@ import {
   MANAGED_EMBEDDINGS_INDEX_MAX_JSON_BYTES,
   MANAGED_EMBEDDINGS_INDEX_MAX_RESULT_BYTES,
   MANAGED_EMBEDDINGS_INDEX_MAX_SOURCE_BYTES,
-} from "../../embeddings/gateway/ManagedEmbeddingsIndexAdapter";
+} from "../../embeddings/gateway/ManagedEmbeddingsIndexContract";
 
 export interface HostedTransportOptions { baseUrl: string; pluginVersion: string; licenseKey: () => string; requestClient?: PlatformRequestClient; }
 
@@ -151,9 +151,8 @@ export class HostedTransportAdapter {
     });
   }
 
-  // managed-job-protocol-v2 media downloads: same identity-pinned path shape
-  // as the v1 image output companion, plus video outputs with their larger
-  // byte cap.
+  // managed-job-protocol-v2 downloads pin first-party media identity and
+  // enforce the capability-specific byte cap before reading the body.
   managedMediaOutput(path: string, headers: Record<string, string>, signal?: AbortSignal): Promise<ManagedTransportResult> {
     const identity = /^\/api\/plugin\/(images|videos)\/generations\/jobs\/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\/outputs\/[0-3]$/.exec(path);
     if (!identity) return Promise.reject(new Error("Invalid managed media output path."));
@@ -165,17 +164,6 @@ export class HostedTransportAdapter {
         responseEncoding: "arrayBuffer",
         maxResponseBytes: identity[1] === "videos" ? MANAGED_VIDEO_OUTPUT_MAX_BYTES : MANAGED_IMAGE_OUTPUT_MAX_BYTES,
       },
-    );
-  }
-
-  managedImageOutput(path: string, headers: Record<string, string>, signal?: AbortSignal): Promise<ManagedTransportResult> {
-    if (!/^\/api\/plugin\/images\/generations\/jobs\/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\/outputs\/[0-3]$/.test(path)) {
-      return Promise.reject(new Error("Invalid managed image output path."));
-    }
-    return this.send(
-      { path, method: "GET", headers, signal },
-      headers, true, false,
-      { transport: "requestUrl", responseEncoding: "arrayBuffer", maxResponseBytes: MANAGED_IMAGE_OUTPUT_MAX_BYTES },
     );
   }
 

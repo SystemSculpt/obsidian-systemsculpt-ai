@@ -1,3 +1,4 @@
+import { boundedIncidentRenderCount, boundedIncidentRenderDuration, incidentMonotonicNow } from "./RenderIncidentMetrics";
 import { App, Component, MarkdownRenderer, setIcon } from "obsidian";
 import {
   createSurfaceElement,
@@ -126,8 +127,6 @@ function button(parent: HTMLElement, testId: string, label: string, icon?: strin
   return element;
 }
 
-const INCIDENT_RENDER_COUNT_LIMIT = 1_000_000;
-const INCIDENT_RENDER_DURATION_LIMIT_MS = 86_400_000;
 let activityDrawerSequence = 0;
 
 type IncidentDisclosureKind = "activity" | "reasoning" | "tool" | "overflow";
@@ -137,16 +136,6 @@ type IncidentDisclosureState = {
   available: boolean;
   open: boolean;
 };
-
-function boundedIncidentRenderCount(value: number): number {
-  if (!Number.isFinite(value)) return 0;
-  return Math.min(INCIDENT_RENDER_COUNT_LIMIT, Math.max(0, Math.floor(value)));
-}
-
-function boundedIncidentRenderDuration(value: number): number {
-  if (!Number.isFinite(value)) return 0;
-  return Math.min(INCIDENT_RENDER_DURATION_LIMIT_MS, Math.max(0, Math.round(value)));
-}
 
 type HistoricalActivityHydrationState = {
   element: HTMLDetailsElement;
@@ -511,7 +500,7 @@ export class AgentConversationRenderer extends Component {
     this.incidentPendingRenderPassCount = boundedIncidentRenderCount(
       this.incidentPendingRenderPassCount + 1,
     );
-    const startedAt = this.incidentMonotonicNow();
+    const startedAt = incidentMonotonicNow(() => getSurfaceOwnerWindow(this.element));
     try {
       await task();
     } finally {
@@ -521,7 +510,7 @@ export class AgentConversationRenderer extends Component {
           this.incidentPendingRenderPassCount - 1,
         );
         const durationMs = boundedIncidentRenderDuration(
-          this.incidentMonotonicNow() - startedAt,
+          incidentMonotonicNow(() => getSurfaceOwnerWindow(this.element)) - startedAt,
         );
         this.incidentLastRenderDurationMs = durationMs;
         this.incidentMaxRenderDurationMs = Math.max(
@@ -529,21 +518,6 @@ export class AgentConversationRenderer extends Component {
           durationMs,
         );
       }
-    }
-  }
-
-  private incidentMonotonicNow(): number {
-    try {
-      const value = getSurfaceOwnerWindow(this.element).performance?.now?.();
-      if (typeof value === "number" && Number.isFinite(value)) return value;
-    } catch {
-      // Incident measurement must never affect rendering.
-    }
-    try {
-      const value = Date.now();
-      return Number.isFinite(value) ? value : 0;
-    } catch {
-      return 0;
     }
   }
 

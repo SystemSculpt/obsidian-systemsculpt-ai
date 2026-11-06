@@ -154,8 +154,7 @@ describe("Studio collapsed detail rendering", () => {
       nodeRunState: IDLE_NODE_RUN_STATE,
       definition: definitionFixture("studio.text_output"),
       interactionLocked: false,
-      onNodeConfigMutated: jest.fn(),
-      showTextEditor: false,
+      onNodeConfigValueChange: (_id: string, key: string, value: StudioNodeInstance["config"][string]) => { node.config[key] = value; }, showTextEditor: false,
     });
 
     expect(nodeEl.querySelector(".ss-studio-node-text-editor-wrap")).toBeNull();
@@ -174,8 +173,7 @@ describe("Studio collapsed detail rendering", () => {
       nodeRunState: IDLE_NODE_RUN_STATE,
       definition: definitionFixture("studio.text_generation"),
       interactionLocked: false,
-      onNodeConfigMutated: jest.fn(),
-      showSystemPromptField: false,
+      onNodeConfigValueChange: (_id: string, key: string, value: StudioNodeInstance["config"][string]) => { node.config[key] = value; }, showSystemPromptField: false,
     });
 
     expect(nodeEl.querySelector('.ss-studio-node-inline-config-field--systemprompt')).toBeNull();
@@ -192,8 +190,7 @@ describe("Studio collapsed detail rendering", () => {
       nodeRunState: IDLE_NODE_RUN_STATE,
       definition: definitionFixture("studio.input"),
       interactionLocked: false,
-      onNodeConfigMutated: jest.fn(),
-      showFieldHelp: false,
+      onNodeConfigValueChange: (_id: string, key: string, value: StudioNodeInstance["config"][string]) => { node.config[key] = value; }, showFieldHelp: false,
     });
 
     expect(nodeEl.textContent).not.toContain("Helpful description");
@@ -216,8 +213,7 @@ describe("Studio collapsed detail rendering", () => {
       },
       definition: definitionFixture("studio.value"),
       interactionLocked: false,
-      onNodeConfigMutated: jest.fn(),
-      showOutputPreview: false,
+      onNodeConfigValueChange: (_id: string, key: string, value: StudioNodeInstance["config"][string]) => { node.config[key] = value; }, showOutputPreview: false,
     });
 
     expect(nodeEl.querySelector(".ss-studio-node-inline-output-preview")).toBeNull();
@@ -233,8 +229,7 @@ describe("Studio collapsed detail rendering", () => {
       nodeRunState: IDLE_NODE_RUN_STATE,
       definition: definitionFixture("studio.note"),
       interactionLocked: false,
-      onNodeConfigMutated: jest.fn(),
-      nodeDetailMode: "collapsed",
+      onNodeConfigValueChange: (_id: string, key: string, value: StudioNodeInstance["config"][string]) => { node.config[key] = value; }, nodeDetailMode: "collapsed",
     });
 
     const prefaceTextarea = nodeEl.querySelector<HTMLTextAreaElement>('textarea[aria-label="Node Preface"]');

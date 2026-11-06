@@ -1,6 +1,7 @@
 import { Component, Menu, TFile, setIcon, type App } from "obsidian";
 import {
   createUiAction,
+  containMenuEscape,
   updateUiAction,
   type UiActionTone,
 } from "../../core/ui/surface";
@@ -24,7 +25,6 @@ import {
 } from "./attachments/ChatMessageAttachments";
 import { AgentComposerMentionPopover, type ComposerMentionTrigger } from "./AgentComposerMentions";
 import { AgentComposerVault } from "./AgentComposerVault";
-import { containMenuEscape } from "./AgentRunLine";
 import { containsControlCharacters } from "../../utils/characterValidation";
 
 export type AgentComposerAttachment = Readonly<{

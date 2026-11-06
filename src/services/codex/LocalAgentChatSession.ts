@@ -3,7 +3,7 @@ import type { App } from 'obsidian';
 import type { ChatSession, AgentRunInput, AgentRunResult, ApprovalResponseOptions } from '../../chat/ChatSession';
 import type { AgentConversationSnapshot, AgentPart, AgentToolPart } from '../../chat/ChatConversation';
 import { THIN_AGENT_CONTRACT_VERSION, type MeasuredThinAgentContext, type ThinAgentContextSource, type ThinAgentContextResponse } from '../managed/ThinAgentV1Contract';
-import { isRecord } from '../../studio/utils';
+import { isRecord } from '../../utils/jsonRecord';
 import { CodexThreadLocator } from './CodexThreadLocator';
 import { localAgentChatDirectory } from './CodexExecutionSettings';
 import { LOCAL_AGENTS, LocalAgentUsageLimitError, type LocalAgentId } from './LocalAgents';

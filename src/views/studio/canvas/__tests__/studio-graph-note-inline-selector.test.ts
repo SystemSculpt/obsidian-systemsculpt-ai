@@ -86,7 +86,7 @@ describe("StudioGraphNodeInlineEditors note selector", () => {
       nodeRunState: IDLE_NODE_RUN_STATE,
       definition: definitionFixture(),
       interactionLocked: false,
-      onNodeConfigMutated: jest.fn(),
+      onNodeConfigValueChange: (_id: string, key: string, value: StudioNodeInstance["config"][string]) => { node.config[key] = value; },
     });
 
     expect(nodeEl.querySelector(".ss-studio-note-selector-count")?.textContent?.trim()).toBe("0 notes");
@@ -96,7 +96,7 @@ describe("StudioGraphNodeInlineEditors note selector", () => {
   it("adds a note item with sensible defaults", () => {
     const nodeEl = document.createElement("div");
     const node = nodeFixture();
-    const onNodeConfigMutated = jest.fn();
+    const onConfigCommitted = jest.fn();
 
     renderStudioNodeInlineEditor({
       nodeEl,
@@ -104,7 +104,7 @@ describe("StudioGraphNodeInlineEditors note selector", () => {
       nodeRunState: IDLE_NODE_RUN_STATE,
       definition: definitionFixture(),
       interactionLocked: false,
-      onNodeConfigMutated,
+      onNodeConfigValueChange: (_id: string, key: string, value: StudioNodeInstance["config"][string]) => { node.config[key] = value; onConfigCommitted(node); },
     });
 
     const addButton = Array.from(nodeEl.querySelectorAll<HTMLButtonElement>("button")).find(
@@ -119,7 +119,7 @@ describe("StudioGraphNodeInlineEditors note selector", () => {
         enabled: true,
       },
     ]);
-    expect(onNodeConfigMutated).toHaveBeenCalled();
+    expect(onConfigCommitted).toHaveBeenCalled();
   });
 
   it("updates path and include toggle for a note entry", () => {
@@ -132,7 +132,7 @@ describe("StudioGraphNodeInlineEditors note selector", () => {
       nodeRunState: IDLE_NODE_RUN_STATE,
       definition: definitionFixture(),
       interactionLocked: false,
-      onNodeConfigMutated: jest.fn(),
+      onNodeConfigValueChange: (_id: string, key: string, value: StudioNodeInstance["config"][string]) => { node.config[key] = value; },
     });
 
     const addButton = Array.from(nodeEl.querySelectorAll<HTMLButtonElement>("button")).find(
@@ -177,7 +177,7 @@ describe("StudioGraphNodeInlineEditors note selector", () => {
       nodeRunState: IDLE_NODE_RUN_STATE,
       definition: definitionFixture(),
       interactionLocked: false,
-      onNodeConfigMutated: jest.fn(),
+      onNodeConfigValueChange: (_id: string, key: string, value: StudioNodeInstance["config"][string]) => { node.config[key] = value; },
     });
 
     const moveDownButton = nodeEl.querySelector<HTMLButtonElement>('button[aria-label="Move note 1 down"]');
@@ -204,8 +204,7 @@ describe("StudioGraphNodeInlineEditors note selector", () => {
       nodeRunState: IDLE_NODE_RUN_STATE,
       definition: definitionFixture(),
       interactionLocked: false,
-      onNodeConfigMutated: jest.fn(),
-      showTextEditor: false,
+      onNodeConfigValueChange: (_id: string, key: string, value: StudioNodeInstance["config"][string]) => { node.config[key] = value; }, showTextEditor: false,
     });
 
     const pathInput = nodeEl.querySelector<HTMLInputElement>('input[aria-label="Markdown path for note 1"]');

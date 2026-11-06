@@ -1,11 +1,8 @@
+import { resolveKnownChatsDirectories, recordedChatsDirectories } from "./storage/ChatTranscriptLocations";
 import { App, TFile, stringifyYaml } from "obsidian";
-import { DEFAULT_DIRS } from "../../core/settings/defaultDirectories";
 import { ChatMessage } from "../../types";
-import {
-  ChatAttachmentVaultStore,
-  collectChatAttachmentRefKeys,
-  isChatAttachmentContentRef,
-} from "./attachments/ChatAttachmentVaultStore";
+import { isChatAttachmentMetadata, chatAttachmentRefKey } from "./attachments/ChatAttachmentDescriptor";
+import { ChatAttachmentVaultStore, collectChatAttachmentRefKeys } from "./attachments/ChatAttachmentVaultStore";
 import { hasChatIdentityFrontmatter, parseChatFrontmatterYaml, splitChatFrontmatter } from "./storage/ChatFrontmatterIdentity";
 import { ChatMarkdownSerializer } from "./storage/ChatMarkdownSerializer";
 import type {
@@ -81,58 +78,6 @@ export class SavedChatCorruptedError extends Error {
   }
 }
 
-const DEFAULT_CHATS_DIRECTORY = DEFAULT_DIRS.chatsDirectory;
-
-/**
- * The configured chats folder without trailing slashes. An empty setting
- * means the default folder, as the settings field promises.
- */
-export function resolveChatsDirectory(
-  settings: Readonly<{ chatsDirectory?: unknown }>,
-): string {
-  const configured = typeof settings.chatsDirectory === "string"
-    ? settings.chatsDirectory.replace(/\/+$/u, "")
-    : "";
-  return configured || DEFAULT_CHATS_DIRECTORY;
-}
-
-/**
- * Every folder that may hold chat transcripts: the configured one first, then
- * the default and each recorded folder (see `knownChatsDirectories`). Chats
- * stay where they were created when the setting changes, so attachment
- * cleanup and chat lookup must cover all of them.
- */
-export function resolveKnownChatsDirectories(
-  settings: Readonly<{ chatsDirectory?: unknown; knownChatsDirectories?: unknown }>,
-): string[] {
-  return [...new Set([
-    resolveChatsDirectory(settings),
-    ...recordedChatsDirectories(settings),
-  ])];
-}
-
-/** The default folder and every folder recorded in settings, normalized. */
-function recordedChatsDirectories(
-  settings: Readonly<{ knownChatsDirectories?: unknown }>,
-): string[] {
-  const recorded: unknown[] = Array.isArray(settings.knownChatsDirectories)
-    ? settings.knownChatsDirectories
-    : [];
-  return [
-    DEFAULT_CHATS_DIRECTORY,
-    ...recorded.map((chatsDirectory) => resolveChatsDirectory({ chatsDirectory })),
-  ];
-}
-
-/** Folder containment on a path boundary: `Chats-old/x.md` is not in `Chats`. */
-export function isPathInDirectory(path: string, directory: string): boolean {
-  return path === directory || path.startsWith(`${directory}/`);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
 function decodeAttachmentMetadata(value: string): unknown {
   const binary = atob(value);
   const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
@@ -163,25 +108,12 @@ function collectRawAttachmentRefKeys(content: string): ReadonlySet<string> | nul
       if (!Array.isArray(decoded) || decoded.length === 0) return null;
       const positions = new Set<number>();
       for (const value of decoded) {
-        if (!isRecord(value)
-          || !Object.keys(value).every((key) => [
-            "id", "name", "mimeType", "byteLength", "kind", "contentPartIndex", "contentRef",
-          ].includes(key))
-          || typeof value.id !== "string" || !value.id.trim()
-          || typeof value.name !== "string" || !value.name.trim()
-          || typeof value.mimeType !== "string" || !value.mimeType.trim()
-          || !Number.isSafeInteger(value.byteLength) || (value.byteLength as number) < 0
-          || !Number.isSafeInteger(value.contentPartIndex) || (value.contentPartIndex as number) < 0
-          || !["document", "image", "text"].includes(String(value.kind))) return null;
-        const position = value.contentPartIndex as number;
+        if (!isChatAttachmentMetadata(value)) return null;
+        const position = value.contentPartIndex;
         if (positions.has(position)) return null;
         positions.add(position);
         if (typeof value.contentRef === "undefined") continue;
-        if (!isChatAttachmentContentRef(value.contentRef)) return null;
-        if (value.kind === "image"
-          ? value.contentRef.payload !== "image-bytes"
-          : value.contentRef.payload !== "utf8-content-part") return null;
-        references.add(`${value.contentRef.payload}:${value.contentRef.sha256}`);
+        references.add(chatAttachmentRefKey(value.contentRef));
       }
     }
   } catch {

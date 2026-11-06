@@ -1,6 +1,6 @@
 import { parseDocument, stringify } from 'yaml';
 import type { StudioJsonValue, StudioNodeDefinition, StudioNodeInstance, StudioProjectV1 } from './types';
-import { isRecord } from './utils';
+import { isRecord } from '../utils/jsonRecord';
 import { readCollectionField } from './StudioCollection';
 import { validateNodeConfig } from './StudioNodeConfigValidation';
 import { readStudioScript, STUDIO_SCRIPT_TEMPLATE } from './StudioScript';

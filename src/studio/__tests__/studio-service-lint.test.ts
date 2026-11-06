@@ -1,3 +1,4 @@
+import { StudioGraphCompiler } from "../StudioGraphCompiler";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { createEmptyStudioProject, serializeStudioProject } from "../schema";
@@ -60,7 +61,11 @@ describe("StudioService lintProjectText", () => {
       disabled: false,
     });
 
+    const compile = jest.spyOn(StudioGraphCompiler.prototype, "compile");
     const result = service.lintProjectText(serializeStudioProject(project));
+    expect(compile).toHaveBeenCalledTimes(1);
+    expect(compile.mock.calls[0][2]).toEqual({ validation: "document" });
+    compile.mockRestore();
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.project.name).toBe("Lint");

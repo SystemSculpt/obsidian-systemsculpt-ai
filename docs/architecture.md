@@ -25,7 +25,7 @@ public operations and behavioral tests before following private helpers.
 | Studio execution | `src/studio/StudioService.ts`, `StudioRuntime.ts`, `StudioGraphCompiler.ts`, `nodes/` | User-requested scopes, typed dependency plans, immutable run snapshots, execution gates, and node results. |
 | Studio interaction | `src/views/studio/SystemSculptStudioView.ts`, `PendingStudioView.ts`, `canvas/`, `connections/` | Obsidian leaf, canvas cards, visual connections, editors, and pointer/keyboard interaction. The view's code is evaluated when Studio first opens (`ViewManager.loadStudioView`); until then `PendingStudioView` holds a tab Obsidian opens and hands it to the real view. The source editor's language packs load with the first source card. |
 | Studio edit history | `src/views/studio/StudioGraphHistory.ts` | Each view's local edit transactions, rebased onto the shared canvas for undo/redo. Restoration preserves unrelated peer edits and the accepted disk baseline. |
-| Vault operations | `src/tools/FirstPartyToolService.ts`, `src/tools/vault/` | Advertised local actions, validated vault paths, execution, and typed results. |
+| Vault operations | `src/tools/FirstPartyToolService.ts`, `src/tools/vault/` | Advertised local actions, validated vault paths, execution, and typed results. `fileMutationPlan.ts` owns proposed write/edit content shared with approval previews; execution retains authorization, I/O and conflict checks. |
 | Audio Processor | `src/features/audio-processor/AudioProcessorService.ts`, `AudioProcessorDelivery.ts` | Input/job workflow and durable local output delivery respectively. |
 | Choosing audio | `src/components/AudioSourcePicker.ts` | The vault audio list, device dropzone, keyboard navigation and selected-audio preview shared by Transcribe audio and Audio Processor. Each modal keeps only its output options and submit. |
 | Inbox automation | `src/features/inbox-transcription/InboxTranscriptionService.ts` | Vault event admission, batching, user confirmation, and cancellation for automatic transcription. |
@@ -33,7 +33,7 @@ public operations and behavioral tests before following private helpers.
 | Account and settings | `src/core/settings/`, `src/settings/`, `src/services/AccountConnectService.ts` | Settings persistence/migration, pending settings navigation/focus, settings presentation, and account connection. Connection starts on use or for a saved pending sign-in. |
 | Credential hygiene | `src/core/security/` | Keeps plain-text credential files that retired features left in the plugin folder out of Git, and tells the user how to clean them up. |
 | Diagnostics | `src/core/diagnostics/` | Content-free incident capture, bounded persistence, session startup, rotation, and teardown. `DiagnosticsFacade` owns the public support projection and explicit local export. |
-| Shared data primitives | `src/utils/vaultPathUtils.ts`, `vaultFileName.ts`, `sha256.ts`, `base64.ts` | Vault-relative path normalization, generated filename sanitation, content hashing and byte encoding. These are independent of Studio and presentation. |
+| Shared data primitives | `src/utils/vaultPathUtils.ts`, `vaultFolders.ts`, `vaultFileName.ts`, `sha256.ts`, `base64.ts`, `jsonRecord.ts`, `FileValidator.ts` | Vault paths and recursive folder creation, generated filenames, content hashing, byte encoding, record guards and file-size values. These are independent of Studio and presentation; browser file-size prompts belong to `src/core/ui/fileSizeValidation.ts`. |
 | Desktop and window behavior | `src/platform/`, `src/core/ui/surface/` | Host capabilities, desktop adapters, mobile host chrome, owner-window DOM, and shared surface interaction. |
 
 Vault-relative separator and character normalization belongs to `normalizeVaultRelativePath`.
@@ -64,6 +64,21 @@ composition point; its store and session objects own their own invariants.
 session implementation. Native Codex adapts to that contract without importing
 a view. `src/views/chatview/` owns the Obsidian workspace and readable local
 transcripts. Do not add an agent continuation loop to either module.
+
+Shared native text projection lives in `services/codex/NativeTurnText.ts`;
+backend mode definitions and Codex request codecs stay outside transport and
+presentation. Managed bootstrap exchange belongs to `chat/managed/Bootstrap.ts`;
+`ClientContinuationDeliveries.ts` owns transport delivery bookkeeping, never
+agent continuation policy. `storage/ChatTranscriptLocations.ts` owns transcript-folder
+membership, while `attachments/ChatAttachmentDescriptor.ts` owns attachment
+metadata admission. Raw attachment reachability remains a separate fail-closed
+scan. Shared menu dismissal and focus behavior belongs to `core/ui/surface/SurfaceMenu.ts`.
+
+Studio imports share `StudioProjectAdmission.ts`; document admission is distinct
+from run validation and agent-edit envelope protection. Port compatibility lives
+beside port types. `StudioManagedOutputMetadata.ts` owns persisted output identity,
+and `services/codex/StudioAgentRunRecord.ts` owns saved native-run presentation
+bounds. Editors emit transactions rather than mutating shared project state.
 
 ## Interfaces and dependencies
 

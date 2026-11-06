@@ -10,28 +10,16 @@ import {
   resolveStudioGraphNodeMinHeight,
 } from "./StudioNodeGeometry";
 
-/** @internal Tests build saved output nodes with this key. */
-export const MANAGED_MEDIA_OWNER_KEY = "__studio_managed_by";
-/** @internal Tests build saved output nodes with this owner. */
-export const MANAGED_MEDIA_OWNER = "studio.image_generation_output.v1";
-/** @internal Tests build saved output nodes with this key. */
-export const MANAGED_MEDIA_SOURCE_NODE_ID_KEY = "__studio_source_node_id";
-/** @internal Tests build saved output nodes with this key. */
-export const MANAGED_MEDIA_SLOT_INDEX_KEY = "__studio_source_output_index";
-/** @internal Tests build saved output nodes with this key. */
-export const MANAGED_OUTPUT_PENDING_KEY = "__studio_pending";
-/** @internal Tests build saved output nodes with this key. */
-export const MANAGED_OUTPUT_PENDING_RUN_ID_KEY = "__studio_pending_run_id";
+import {
+  MANAGED_MEDIA_OWNER_KEY, MANAGED_MEDIA_OWNER, MANAGED_MEDIA_SOURCE_NODE_ID_KEY,
+  MANAGED_MEDIA_SLOT_INDEX_KEY, MANAGED_OUTPUT_PENDING_KEY, MANAGED_OUTPUT_PENDING_RUN_ID_KEY,
+  MANAGED_TEXT_OWNER_KEY, MANAGED_TEXT_OWNER, MANAGED_TEXT_SOURCE_NODE_ID_KEY,
+  isManagedMediaNode, readManagedMediaSlotIndex,
+} from "./StudioManagedOutputMetadata";
+
 const MANAGED_OUTPUT_RUN_ID_KEY = "__studio_output_run_id";
 const MANAGED_OUTPUT_PENDING_AT_KEY = "__studio_pending_at";
 const MANAGED_OUTPUT_PENDING_MEDIA_KIND_KEY = "__studio_pending_media_kind";
-
-/** @internal Tests build saved output nodes with this key. */
-export const MANAGED_TEXT_OWNER_KEY = "__studio_managed_by";
-/** @internal Tests build saved output nodes with this owner. */
-export const MANAGED_TEXT_OWNER = "studio.text_generation_output.v1";
-/** @internal Tests build saved output nodes with this key. */
-export const MANAGED_TEXT_SOURCE_NODE_ID_KEY = "__studio_source_node_id";
 
 export type StudioManagedMediaKind = "image" | "video";
 type ManagedMediaProfile = Readonly<{ kind: StudioManagedMediaKind; outputsKey: "images" | "videos"; fromPort: "images" | "videos"; titleNoun: string; defaultBaseTitle: string }>;
@@ -106,17 +94,6 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     return null;
   }
   return value as Record<string, unknown>;
-}
-
-function isManagedMediaNode(node: StudioNodeInstance): boolean {
-  if (node.kind !== "studio.media_ingest") {
-    return false;
-  }
-  const config = asRecord(node.config);
-  if (!config) {
-    return false;
-  }
-  return String(config[MANAGED_MEDIA_OWNER_KEY] || "").trim() === MANAGED_MEDIA_OWNER;
 }
 
 function detachManagedMediaOutput(node: StudioNodeInstance): void {
@@ -264,9 +241,8 @@ function readManagedMediaSlot(node: StudioNodeInstance): { sourceNodeId: string;
   if (!sourceNodeId || !config) {
     return null;
   }
-  const slotIndexRaw = Number(config[MANAGED_MEDIA_SLOT_INDEX_KEY]);
-  const slotIndex = Number.isInteger(slotIndexRaw) && slotIndexRaw >= 0 ? slotIndexRaw : -1;
-  if (slotIndex < 0) {
+  const slotIndex = readManagedMediaSlotIndex(config as StudioNodeInstance["config"]);
+  if (slotIndex === null) {
     return null;
   }
 

@@ -1,4 +1,4 @@
-import { isRecord } from '../../studio/utils';
+import { isRecord } from '../../utils/jsonRecord';
 
 /** Presentation only. Never translate this summary back into execution policy. */
 export function describeCodexPermissions(config: Record<string, unknown>): string {

@@ -1,6 +1,6 @@
 import { resolveCodexOptions, type CodexExecutionOptions } from '../services/codex/CodexExecutionSettings';
 import type { StudioNodeInstance } from './types';
-import { isRecord } from './utils';
+import { isRecord } from '../utils/jsonRecord';
 
 export type StudioCommandExecution = { model: string; effort: string };
 export function readStudioCommandExecution(value: unknown): StudioCommandExecution {

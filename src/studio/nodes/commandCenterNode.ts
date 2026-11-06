@@ -1,5 +1,5 @@
 import type { StudioNodeDefinition } from '../types';
-import { isRecord } from '../utils';
+import { isRecord } from '../../utils/jsonRecord';
 export type StudioCommandAction = { id: string; label: string; section: string; kind: 'run' | 'focus'; target: string; description: string };
 export function readStudioCommandActions(value: unknown): StudioCommandAction[] {
   value = isRecord(value) ? value.items : value;

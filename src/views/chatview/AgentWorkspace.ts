@@ -1,7 +1,10 @@
+import { boundedIncidentRenderCount, boundedIncidentRenderDuration, incidentMonotonicNow } from "./RenderIncidentMetrics";
 import { App, Component, Menu, setIcon } from "obsidian";
 import { getHostOperatingSystem } from "../../platform/hostCapabilities";
 import {
   applyPluginSurface,
+  containMenuEscape,
+  returnFocusAfterMenu,
   createUiAction,
   updateUiAction,
 } from "../../core/ui/surface";
@@ -33,7 +36,7 @@ import type { ApprovalAnswer } from "./AgentApprovalCards";
 import type { AgentToolPart } from "../../chat/ChatConversation";
 import { presentCreditsOffer, presentEmptyState, type AgentChromeState } from "./AgentChatChrome";
 import { AgentEmptyState, type AgentEmptyStateOptions } from "./AgentEmptyState";
-import { AgentRunLine, containMenuEscape, returnFocusAfterMenu, type AgentRunLineOptions } from "./AgentRunLine";
+import { AgentRunLine, type AgentRunLineOptions } from "./AgentRunLine";
 import { ChatHistoryPanel, type ChatHistoryPanelOptions } from "../history/ChatHistoryPanel";
 import {
   AgentConversationRenderer,
@@ -176,19 +179,6 @@ export type AgentWorkspaceIncidentRenderingSnapshot = Readonly<{
   renderer: AgentConversationRendererIncidentSnapshot;
   scroller: AnchoredScrollerIncidentSnapshot;
 }>;
-
-const INCIDENT_RENDER_COUNT_LIMIT = 1_000_000;
-const INCIDENT_RENDER_DURATION_LIMIT_MS = 86_400_000;
-
-function boundedIncidentRenderCount(value: number): number {
-  if (!Number.isFinite(value)) return 0;
-  return Math.min(INCIDENT_RENDER_COUNT_LIMIT, Math.max(0, Math.floor(value)));
-}
-
-function boundedIncidentRenderDuration(value: number): number {
-  if (!Number.isFinite(value)) return 0;
-  return Math.min(INCIDENT_RENDER_DURATION_LIMIT_MS, Math.max(0, Math.round(value)));
-}
 
 /** Complete native shell for the managed agent experience inside Obsidian. */
 export class AgentWorkspace extends Component {
@@ -1218,7 +1208,7 @@ export class AgentWorkspace extends Component {
           this.incidentRenderPassCount + 1,
         );
       }
-      const startedAt = this.incidentMonotonicNow();
+      const startedAt = incidentMonotonicNow(() => this.element.ownerDocument.defaultView);
       try {
         await task();
       } finally {
@@ -1228,7 +1218,7 @@ export class AgentWorkspace extends Component {
             this.incidentActiveRenderCount - 1,
           );
           const durationMs = boundedIncidentRenderDuration(
-            this.incidentMonotonicNow() - startedAt,
+            incidentMonotonicNow(() => this.element.ownerDocument.defaultView) - startedAt,
           );
           this.incidentLastRenderDurationMs = durationMs;
           this.incidentMaxRenderDurationMs = Math.max(
@@ -1255,21 +1245,6 @@ export class AgentWorkspace extends Component {
     this.incidentFailureSurfaceDomCommitted = false;
     this.incidentFailureSurfacePaintOpportunityObserved = false;
     this.renderer.resetIncidentRenderMetrics();
-  }
-
-  private incidentMonotonicNow(): number {
-    try {
-      const value = this.element.ownerDocument.defaultView?.performance?.now?.();
-      if (typeof value === "number" && Number.isFinite(value)) return value;
-    } catch {
-      // Incident measurement must never affect rendering.
-    }
-    try {
-      const value = Date.now();
-      return Number.isFinite(value) ? value : 0;
-    } catch {
-      return 0;
-    }
   }
 
   private ensureSnapshotRender(): void {

@@ -1,11 +1,18 @@
-/** @internal Tests assert against this value. */
 export const CODEX_APPROVAL_MODES = ['auto', 'ask', 'read-only', 'settings'] as const;
 export type CodexApprovalMode = typeof CODEX_APPROVAL_MODES[number];
 
+export const CODEX_APPROVAL_LABELS: Readonly<Record<CodexApprovalMode, string>> = {
+  auto: 'Auto', ask: 'Ask', 'read-only': 'Read only', settings: 'Codex settings',
+};
+
+export function isCodexApprovalMode(value: string): value is CodexApprovalMode {
+  return (CODEX_APPROVAL_MODES as readonly string[]).includes(value);
+}
+
 export function resolveCodexApprovalMode(value?: string): CodexApprovalMode {
   const mode = value?.trim() || 'auto';
-  if (!(CODEX_APPROVAL_MODES as readonly string[]).includes(mode)) throw new Error('Invalid Codex approval mode.');
-  return mode as CodexApprovalMode;
+  if (!isCodexApprovalMode(mode)) throw new Error('Invalid Codex approval mode.');
+  return mode;
 }
 
 /** The installed app-server's native policies, not permission bypass. Settings leaves them untouched. */

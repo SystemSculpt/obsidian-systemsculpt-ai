@@ -2,7 +2,8 @@ import { sha256HexFromArrayBuffer } from "../utils/sha256";
 import { deriveStudioNodeCachePath } from "./paths";
 import { StudioProjectStore } from "./StudioProjectStore";
 import type { StudioJsonValue, StudioNodeCacheEntry, StudioNodeCacheSnapshotV1, StudioNodeInputMap, StudioNodeInstance } from "./types";
-import { isRecord, nowIso } from "./utils";
+import { isRecord } from "../utils/jsonRecord";
+import { nowIso } from "./utils";
 
 const NODE_CACHE_SCHEMA = "studio.node-cache.v1" as const;
 const NODE_FINGERPRINT_SALT_BY_KIND: Record<string, string> = { "studio.text_generation": "prompt-bundle-v4", "studio.image_generation": "image-prompt-v3" };

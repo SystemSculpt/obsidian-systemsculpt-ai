@@ -215,7 +215,7 @@ describe("ResumeChatService", () => {
       // slash in the setting still names the same folder.
       plugin.settings = { ...plugin.settings, chatsDirectory: "Archive/Chats/" };
 
-      expect(service.isChatHistoryFile(oldFile)).toBe(false);
+      expect(service.isChatHistoryFile(oldFile)).toBe(true);
       expect(service.isChatHistoryFile(movedFile)).toBe(true);
       app.vault.getAbstractFileByPath.mockClear();
       await expect((service as any).chatStorage.getChatResumeDescriptor("chat-1"))
@@ -766,7 +766,7 @@ describe("ResumeChatService", () => {
       expect(service.isChatHistoryFile(file)).toBe(true);
 
       const oldFile = new TFile({ path: "SystemSculpt/Chats/chat-1.md" });
-      expect(service.isChatHistoryFile(oldFile)).toBe(false);
+      expect(service.isChatHistoryFile(oldFile)).toBe(true);
     });
 
     it("handles files with special characters in name", () => {

@@ -1,7 +1,7 @@
 import { codexRunKey, getStudioCodexRun, stopStudioCodexRun } from '../../../services/codex/StudioCodexRuns';
 import { LOCAL_AGENTS } from '../../../services/codex/LocalAgents';
 import type { StudioJsonValue, StudioNodeInstance } from '../../../studio/types';
-import { isRecord } from '../../../studio/utils';
+import { isRecord } from '../../../utils/jsonRecord';
 import { createStudioAction } from '../StudioAction';
 
 export function renderStudioCodexStop(root: HTMLElement, nodeId: string, projectId: string): void {

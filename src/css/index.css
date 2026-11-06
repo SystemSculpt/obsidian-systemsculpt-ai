@@ -28,7 +28,6 @@
 
 /* Modal system */
 @import 'modals/modal.css';
-@import 'modals/chat-settings.css';
 @import 'modals/janitor.css';
 @import 'modals/credits-balance.css';
 @import 'modals/upgrade-plan.css';

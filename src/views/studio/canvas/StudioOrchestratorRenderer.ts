@@ -1,7 +1,7 @@
 import { Notice } from 'obsidian';
 import { StudioPresentation } from '../StudioPresentation';
 import type { StudioAgentRuns } from '../../../services/codex/StudioAgentRuns';
-import { isActiveAgentRun } from '../../../services/codex/StudioAgentRunStore';
+import { isActiveAgentRun } from '../../../services/codex/StudioAgentRunRecord';
 import { workflowOpen } from '../../../services/codex/StudioWorkflow';
 import { hasHostCapability } from '../../../platform/hostCapabilities';
 import { createStudioAction } from '../StudioAction';

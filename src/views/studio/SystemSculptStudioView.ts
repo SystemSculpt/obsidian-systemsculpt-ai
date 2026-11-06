@@ -1,3 +1,4 @@
+import { areStudioPortTypesCompatible } from "../../studio/types";
 import { StudioImageEditingController } from "./systemsculpt-studio-view/StudioImageEditingController";
 import {
   logStudioConsoleError,
@@ -326,7 +327,7 @@ export class SystemSculptStudioView extends ItemView {
       onSelectionResize: (patches, options) => this.handleSelectionResize(patches, options),
       onGraphZoomChanged: (zoom, context) => this.handleGraphZoomChanged(zoom, context),
       getPortType: (nodeId, direction, portId) => this.getPortType(nodeId, direction, portId),
-      portTypeCompatible: (sourceType, targetType) => this.portTypeCompatible(sourceType, targetType),
+      portTypeCompatible: areStudioPortTypesCompatible,
       describeConnectionAutoCreate: (sourceType) => describeConnectionAutoCreate(sourceType),
       onConnectionAutoCreateRequested: (request) => this.handleConnectionAutoCreateRequested(request),
       getSelectedShapeIds: () => this.shapeController.getSelectedShapeIds(),
@@ -1254,13 +1255,6 @@ export class SystemSculptStudioView extends ItemView {
     return await this.projectSessionController.commitMutationAsync(reason, mutator, options);
   }
 
-  private scheduleSessionPersistFromLegacyMutation(options?: {
-    captureHistory?: boolean;
-    mode?: StudioProjectSessionAutosaveMode;
-  }): void {
-    this.projectSessionController.schedulePersistFromLegacyMutation(options);
-  }
-
   private async flushPendingProjectSaveWork(options?: {
     force?: boolean;
     showNotice?: boolean;
@@ -1456,12 +1450,6 @@ export class SystemSculptStudioView extends ItemView {
     return this.nodeActionContextMenuOverlay;
   }
 
-  private handleNodeConfigMutated(node: StudioNodeInstance): void {
-    if (node.kind === "studio.note") {
-      this.handleNoteNodeConfigMutated(node);
-    }
-    this.scheduleSessionPersistFromLegacyMutation();
-  }
   private handleNodeConfigValueChange(
     nodeId: string,
     key: string,
@@ -1791,13 +1779,6 @@ export class SystemSculptStudioView extends ItemView {
     return resolveNodeDefinitionPorts(node, definition);
   }
 
-  private portTypeCompatible(sourceType: string, targetType: string): boolean {
-    if (sourceType === "any" || targetType === "any") {
-      return true;
-    }
-    return sourceType === targetType;
-  }
-
   private getPortType(nodeId: string, direction: "in" | "out", portId: string): string | null {
     const project = this.currentProject;
     if (!project) {
@@ -1893,7 +1874,7 @@ export class SystemSculptStudioView extends ItemView {
     const createdNodeDefinition = resolveNodeDefinitionPorts(createdNode, definition);
     const targetPortType =
       createdNodeDefinition.inputPorts.find((port) => port.id === template.targetPortId)?.type || null;
-    if (!targetPortType || !this.portTypeCompatible(sourcePortType, targetPortType)) {
+    if (!targetPortType || !areStudioPortTypesCompatible(sourcePortType, targetPortType)) {
       return false;
     }
 
@@ -2729,7 +2710,6 @@ export class SystemSculptStudioView extends ItemView {
         this.commitCurrentProjectMutation("node.config", project => applyStudioNodeSource(project, nodeId, source, expectedSource, node => this.findNodeDefinition(node)), { mode: "discrete" });
         this.render();
       },
-      onNodeConfigMutated: (node) => this.handleNodeConfigMutated(node),
       onNodeConfigValueChange: (nodeId, key, value, options) => {
         this.handleNodeConfigValueChange(nodeId, key, value, options);
       },

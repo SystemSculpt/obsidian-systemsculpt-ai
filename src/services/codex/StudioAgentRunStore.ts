@@ -1,30 +1,13 @@
-import { validStudioWorkflow, workflowOpen, type StudioWorkflow } from './StudioWorkflow';
+import { CODEX_ACTIVITY_KINDS } from './CodexActivity';
+import { AGENT_RUN_STATUSES, AGENT_RUN_MESSAGE_STATUSES, AGENT_RUN_MAX_ACTIVITY, AGENT_RUN_MAX_MESSAGES, AGENT_RUN_MAX_FILE_BYTES, isActiveAgentRun, type StudioAgentRun, type AgentRunStatus } from './StudioAgentRunRecord';
+import { validStudioWorkflow, workflowOpen } from './StudioWorkflow';
 import type { App } from 'obsidian';
 import { deriveStudioAssetsDir } from '../../studio/paths';
-import { isRecord } from '../../studio/utils';
-import type { CodexActivity } from './CodexActivity';
-import type { CodexRequest } from './LocalCodexClient';
-import type { DeepReadonly } from '../../studio/StudioProjectSnapshots';
+import { isRecord } from '../../utils/jsonRecord';
 
-export type AgentRunStatus = 'queued' | 'running' | 'waiting' | 'completed' | 'failed' | 'stopped' | 'interrupted';
-export type AgentRunMessage = { id: string; from: string; to: string; text: string; at: string; status: 'pending' | 'delivered' | 'failed'; error?: string };
-export type StudioAgentRun = {
-  schema: 'studio.agent-run.v1'; id: string; projectId: string; projectPath: string; nodeId: string; title: string;
-  workflow?: StudioWorkflow; workflowId?: string; assignmentId?: string; preparationPending?: boolean;
-  parentRunId?: string; owner: string;
-  /** The executing machine: its hostname, shown to people, and its stable device ID, absent on records saved before machines had one. */
-  machine: string; machineId?: string;
-  status: AgentRunStatus; createdAt: string; updatedAt: string; finishedAt?: string;
-  threadId: string; turnId: string; request: CodexRequest; result: string; error: string; currentActivity: string;
-  activity: CodexActivity[]; messages: AgentRunMessage[]; persistenceError?: string;
-};
-/** Live observation views: only StudioAgentRuns may mutate the retained records. */
-export type StudioAgentRunView = DeepReadonly<StudioAgentRun>;
-export type AgentRunMessageView = DeepReadonly<AgentRunMessage>;
 /** `before` is the page's oldest run ID: pass it back to read the next older page. */
 export type AgentRunPage = { records: StudioAgentRun[]; before: string | null; olderRemaining: number };
 
-export const isActiveAgentRun = (status: AgentRunStatus): boolean => ['queued', 'running', 'waiting'].includes(status);
 /** @internal Unit-tested directly. */
 export const agentRunFolder = (projectPath: string): string => `${deriveStudioAssetsDir(projectPath)}/agent-runs`;
 /**
@@ -66,7 +49,7 @@ const indexEntry = (record: StudioAgentRun): IndexEntry => ({
 });
 const sameEntry = (a: IndexEntry | undefined, b: IndexEntry): boolean => !!a && a.status === b.status && a.day === b.day && a.workflowOpen === b.workflowOpen && a.workflowId === b.workflowId && a.parentRunId === b.parentRunId;
 function readIndexEntry(value: unknown): IndexEntry | null {
-  if (!isRecord(value) || !['queued','running','waiting','completed','failed','stopped','interrupted'].includes(String(value.status)) || typeof value.day !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value.day)
+  if (!isRecord(value) || !(AGENT_RUN_STATUSES as readonly string[]).includes(String(value.status)) || typeof value.day !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value.day)
     || (value.workflowOpen !== undefined && value.workflowOpen !== true) || ['workflowId','parentRunId'].some(key => value[key] !== undefined && typeof value[key] !== 'string')) return null;
   return { status: value.status as AgentRunStatus, day: value.day, ...(value.workflowOpen ? { workflowOpen: true as const } : {}), ...(typeof value.workflowId === 'string' ? { workflowId: value.workflowId } : {}), ...(typeof value.parentRunId === 'string' ? { parentRunId: value.parentRunId } : {}) };
 }
@@ -90,11 +73,11 @@ function liveRunIds(entries: ReadonlyMap<string, IndexEntry>, present: ReadonlyS
 
 function parseRunRecord(raw: string, projectPath: string, projectId: string): StudioAgentRun {
   const record: unknown = JSON.parse(raw);
-  if (!isRecord(record) || record.schema !== 'studio.agent-run.v1' || record.projectId !== projectId || record.projectPath !== projectPath || !/^agent_[0-9]+_[a-f0-9-]+$/.test(String(record.id)) || !isRecord(record.request) || typeof record.request.prompt !== 'string' || typeof record.request.workingDirectory !== 'string' || !Array.isArray(record.activity) || !Array.isArray(record.messages) || !['queued','running','waiting','completed','failed','stopped','interrupted'].includes(String(record.status))) throw new Error('A saved run record is invalid; it was left unchanged.');
+  if (!isRecord(record) || record.schema !== 'studio.agent-run.v1' || record.projectId !== projectId || record.projectPath !== projectPath || !/^agent_[0-9]+_[a-f0-9-]+$/.test(String(record.id)) || !isRecord(record.request) || typeof record.request.prompt !== 'string' || typeof record.request.workingDirectory !== 'string' || !Array.isArray(record.activity) || !Array.isArray(record.messages) || !(AGENT_RUN_STATUSES as readonly string[]).includes(String(record.status))) throw new Error('A saved run record is invalid; it was left unchanged.');
   const stringFields = ['id','projectId','projectPath','nodeId','title','owner','machine','createdAt','updatedAt','threadId','turnId','result','error','currentActivity'];
-  if (stringFields.some(key => typeof record[key] !== 'string') || (record.machineId !== undefined && typeof record.machineId !== 'string') || record.activity.length > 40 || record.messages.length > 100
-    || record.activity.some(item => !isRecord(item) || ['id','kind','title','detail','status','at'].some(key => typeof item[key] !== 'string') || !['command','file','tool','plan','message'].includes(String(item.kind)))
-    || record.messages.some(item => !isRecord(item) || ['id','from','to','text','at','status'].some(key => typeof item[key] !== 'string') || !['pending','delivered','failed'].includes(String(item.status)))) throw new Error('A saved run has invalid presentation fields; it was left unchanged.');
+  if (stringFields.some(key => typeof record[key] !== 'string') || (record.machineId !== undefined && typeof record.machineId !== 'string') || record.activity.length > AGENT_RUN_MAX_ACTIVITY || record.messages.length > AGENT_RUN_MAX_MESSAGES
+    || record.activity.some(item => !isRecord(item) || ['id','kind','title','detail','status','at'].some(key => typeof item[key] !== 'string') || !(CODEX_ACTIVITY_KINDS as readonly string[]).includes(String(item.kind)))
+    || record.messages.some(item => !isRecord(item) || ['id','from','to','text','at','status'].some(key => typeof item[key] !== 'string') || !(AGENT_RUN_MESSAGE_STATUSES as readonly string[]).includes(String(item.status)))) throw new Error('A saved run has invalid presentation fields; it was left unchanged.');
   if ((record.workflow !== undefined && !validStudioWorkflow(record.workflow)) || ['workflowId','assignmentId'].some(key => record[key] !== undefined && typeof record[key] !== 'string')) throw new Error('Saved workflow state is invalid; it was left unchanged.');
   return record as StudioAgentRun;
 }
@@ -129,7 +112,7 @@ export class StudioAgentRunStore {
     for (let offset = 0; offset < paths.length; offset += 4) {
       const batch = await Promise.all(paths.slice(offset, offset + 4).map(async path => {
         const stat = await adapter.stat(path);
-        if (!stat || stat.size > 2_000_000) throw new Error('A saved run record exceeds the supported size.');
+        if (!stat || stat.size > AGENT_RUN_MAX_FILE_BYTES) throw new Error('A saved run record exceeds the supported size.');
         return parseRunRecord(await adapter.read(path), projectPath, projectId);
       }));
       records.push(...batch);
@@ -142,7 +125,7 @@ export class StudioAgentRunStore {
     const adapter = this.app.vault.adapter, path = `${agentRunFolder(projectPath)}/${id}.json`;
     try {
       const stat = await adapter.stat(path);
-      if (!stat || stat.size > 2_000_000) return null;
+      if (!stat || stat.size > AGENT_RUN_MAX_FILE_BYTES) return null;
       const record = parseRunRecord(await adapter.read(path), projectPath, projectId);
       this.noteRecord(projectPath, await this.index(projectPath), record);
       return record;
@@ -150,7 +133,7 @@ export class StudioAgentRunStore {
   }
   write(record: StudioAgentRun): Promise<void> {
     const snapshot = JSON.stringify(record);
-    if (new TextEncoder().encode(snapshot).byteLength > 2_000_000) return Promise.reject(new Error('The run presentation record exceeds 2 MB.'));
+    if (new TextEncoder().encode(snapshot).byteLength > AGENT_RUN_MAX_FILE_BYTES) return Promise.reject(new Error('The run presentation record exceeds 2 MB.'));
     const path = `${agentRunFolder(record.projectPath)}/${record.id}.json`;
     const previous = this.writes.get(path) || Promise.resolve();
     const pending = previous.catch(() => {}).then(async () => {
@@ -259,7 +242,7 @@ export class StudioAgentRunStore {
         await Promise.all(missing.slice(start, start + 4).map(async id => {
           try {
             const path = `${folder}/${id}.json`, stat = await adapter.stat(path);
-            if (!stat || stat.size > 2_000_000) return;
+            if (!stat || stat.size > AGENT_RUN_MAX_FILE_BYTES) return;
             index.entries.set(id, indexEntry(parseRunRecord(await adapter.read(path), projectPath, projectId)));
           } catch { /* Left for the board to report when it reads the record. */ }
         }));

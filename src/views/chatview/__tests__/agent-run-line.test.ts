@@ -1,7 +1,8 @@
 /** @jest-environment jsdom */
+import { returnFocusAfterMenu } from "../../../core/ui/surface";
 
 import { Menu } from "obsidian";
-import { AgentRunLine, returnFocusAfterMenu, type AgentRunLineOptions } from "../AgentRunLine";
+import { AgentRunLine, type AgentRunLineOptions } from "../AgentRunLine";
 import type { AgentChromeState } from "../AgentChatChrome";
 
 const host = { os: "macOS" };

@@ -3,6 +3,7 @@ import {
   createUiAction,
   createUiSearch,
   getSurfaceOwnerWindow,
+  returnFocusAfterMenu,
   SurfaceCombobox,
   updateUiAction,
   type UiSearchHandle,
@@ -10,7 +11,6 @@ import {
 import { isLocalAgentId, type TextExecutionBackend } from "../../services/codex/LocalAgents";
 import { chatHistoryFullTime, chatHistoryGroup, chatHistoryTime } from "./chatHistoryGroups";
 import type { ChatHistoryRow } from "./chatHistoryRows";
-import { returnFocusAfterMenu } from "../chatview/AgentRunLine";
 
 /** Rows rendered at once; "Show more" adds another page. */
 const ROW_PAGE = 50;

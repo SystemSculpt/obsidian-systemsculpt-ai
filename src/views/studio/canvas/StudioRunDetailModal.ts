@@ -1,7 +1,7 @@
 import { Component, MarkdownRenderer, Notice } from 'obsidian';
 import { StandardModal } from '../../../core/ui/modals/standard/StandardModal';
 import type { StudioAgentRuns } from '../../../services/codex/StudioAgentRuns';
-import { isActiveAgentRun, type StudioAgentRun } from '../../../services/codex/StudioAgentRunStore';
+import { isActiveAgentRun, type StudioAgentRun } from '../../../services/codex/StudioAgentRunRecord';
 import { createStudioAction } from '../StudioAction';
 const statusLabels: Record<StudioAgentRun['status'], string> = { queued: 'Queued', running: 'Working', waiting: 'Needs input', completed: 'Done', failed: 'Failed', stopped: 'Stopped', interrupted: 'Interrupted' };
 const shortId = (id: string): string => id.slice(-8);

@@ -92,12 +92,12 @@ async function retainExistingSession(service: StudioService, session: StudioProj
 }
 
 describe("StudioService session-backed mutation commands", () => {
-  it("mutates retained sessions by project path", async () => {
+  it("uses the retained session as the mutation owner", async () => {
     const service = new StudioService(createPluginStub());
     const session = createSession();
     await retainExistingSession(service, session);
 
-    const changed = service.mutateProject(session.getProjectPath(), "node.title", (project) => {
+    const changed = service.getProjectSession(session.getProjectPath())!.mutate("node.title", (project) => {
       project.name = "Renamed from service";
       return true;
     });
@@ -110,12 +110,12 @@ describe("StudioService session-backed mutation commands", () => {
   it("refuses mutations for paths without a retained session", () => {
     const service = new StudioService(createPluginStub());
 
-    const changed = service.mutateProject("Studio/Nowhere.systemsculpt", "node.title", (project) => {
+    const changed = service.getProjectSession("Studio/Nowhere.systemsculpt")?.mutate("node.title", (project) => {
       project.name = "Should never run";
       return true;
     });
 
-    expect(changed).toBe(false);
+    expect(changed).toBeUndefined();
   });
 
   it("returns defensive project snapshots from retained sessions", async () => {

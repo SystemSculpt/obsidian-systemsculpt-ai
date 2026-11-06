@@ -1,25 +1,7 @@
 import { connectStudioShapes } from "../StudioShapes";
 import type { StudioNodeInstance, StudioProjectV1 } from "../types";
-import {
-  cleanupStaleManagedOutputPlaceholders,
-  isManagedOutputPlaceholderNode,
-  MANAGED_OUTPUT_PENDING_KEY,
-  MANAGED_OUTPUT_PENDING_RUN_ID_KEY,
-  MANAGED_MEDIA_OWNER,
-  MANAGED_MEDIA_OWNER_KEY,
-  MANAGED_MEDIA_SLOT_INDEX_KEY,
-  MANAGED_MEDIA_SOURCE_NODE_ID_KEY,
-  MANAGED_TEXT_OWNER,
-  MANAGED_TEXT_OWNER_KEY,
-  MANAGED_TEXT_SOURCE_NODE_ID_KEY,
-  materializePendingImageOutputPlaceholders,
-  materializePendingVideoOutputPlaceholders,
-  materializeImageOutputsAsMediaNodes,
-  materializeVideoOutputsAsMediaNodes,
-  readManagedPendingMediaKind,
-  removeManagedTextOutputNodes,
-  removePendingManagedOutputNodes,
-} from "../StudioManagedOutputNodes";
+import { cleanupStaleManagedOutputPlaceholders, isManagedOutputPlaceholderNode, materializePendingImageOutputPlaceholders, materializePendingVideoOutputPlaceholders, materializeImageOutputsAsMediaNodes, materializeVideoOutputsAsMediaNodes, readManagedPendingMediaKind, removeManagedTextOutputNodes, removePendingManagedOutputNodes } from '../StudioManagedOutputNodes';
+import { MANAGED_OUTPUT_PENDING_KEY, MANAGED_OUTPUT_PENDING_RUN_ID_KEY, MANAGED_MEDIA_OWNER, MANAGED_MEDIA_OWNER_KEY, MANAGED_MEDIA_SLOT_INDEX_KEY, MANAGED_MEDIA_SOURCE_NODE_ID_KEY, MANAGED_TEXT_OWNER, MANAGED_TEXT_OWNER_KEY, MANAGED_TEXT_SOURCE_NODE_ID_KEY } from '../StudioManagedOutputMetadata';
 
 function createProject(
   sourceNode: StudioNodeInstance,

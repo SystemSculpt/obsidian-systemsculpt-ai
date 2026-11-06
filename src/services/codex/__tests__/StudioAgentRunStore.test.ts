@@ -1,10 +1,6 @@
-import {
-  AGENT_RUN_PAGE_SIZE,
-  AGENT_RUN_RETAINED_RECORDS,
-  StudioAgentRunStore,
-  agentRunFolder,
-  type StudioAgentRun,
-} from '../StudioAgentRunStore';
+import { AGENT_RUN_STATUSES, AGENT_RUN_MAX_ACTIVITY, AGENT_RUN_MAX_MESSAGES, AGENT_RUN_MAX_FILE_BYTES } from "../StudioAgentRunRecord";
+import { AGENT_RUN_PAGE_SIZE, AGENT_RUN_RETAINED_RECORDS, StudioAgentRunStore, agentRunFolder } from '../StudioAgentRunStore';
+import { type StudioAgentRun } from '../StudioAgentRunRecord';
 import { createStudioWorkflow } from '../StudioWorkflow';
 
 const projectPath = 'Studio/Board.systemsculpt';
@@ -252,4 +248,37 @@ describe('on-disk retention', () => {
     expect(await closed.store.prune(projectPath, 'project', new Set(), NOW)).toBe(0);
     expect(closed.adapter.remove).not.toHaveBeenCalled();
   });
+});
+
+it.each(AGENT_RUN_STATUSES)("reopens persisted %s status with the exact presentation count bounds", async status => {
+  const run = record(1, { status,
+    activity: Array.from({ length: AGENT_RUN_MAX_ACTIVITY }, (_, i) => ({ id: String(i), kind: "message", title: "Codex", detail: "Public update", status: "completed", at: "now" })),
+    messages: Array.from({ length: AGENT_RUN_MAX_MESSAGES }, (_, i) => ({ id: String(i), from: "owner", to: "run", text: "Handoff", at: "now", status: "delivered" })),
+  });
+  const { store } = fixture([run]);
+  expect(await store.read(projectPath, "project", run.id)).toEqual(run);
+  await store.close();
+});
+
+it.each(["activity", "messages"] as const)("leaves a record over the %s count bound unchanged", async field => {
+  const run = record(1);
+  const { store, files } = fixture([run]);
+  const value = field === "activity"
+    ? Array.from({ length: AGENT_RUN_MAX_ACTIVITY + 1 }, () => ({ id: "a", kind: "message", title: "Codex", detail: "Update", status: "completed", at: "now" }))
+    : Array.from({ length: AGENT_RUN_MAX_MESSAGES + 1 }, () => ({ id: "m", from: "owner", to: "run", text: "Handoff", at: "now", status: "delivered" }));
+  const path = `${folder}/${run.id}.json`, bytes = JSON.stringify({ ...run, [field]: value });
+  files.set(path, bytes);
+  expect(await store.read(projectPath, "project", run.id)).toBeNull();
+  expect(files.get(path)).toBe(bytes);
+  await store.close();
+});
+
+it("enforces the same persisted byte bound before writing and reading", async () => {
+  const run = record(1, { result: "x".repeat(AGENT_RUN_MAX_FILE_BYTES) });
+  const { store, files } = fixture([]);
+  await expect(store.write(run)).rejects.toThrow("exceeds 2 MB");
+  expect(files.has(`${folder}/${run.id}.json`)).toBe(false);
+  files.set(`${folder}/${run.id}.json`, JSON.stringify(run));
+  expect(await store.read(projectPath, "project", run.id)).toBeNull();
+  await store.close();
 });

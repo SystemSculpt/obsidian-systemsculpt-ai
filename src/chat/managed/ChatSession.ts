@@ -1,3 +1,5 @@
+import { ClientContinuationDeliveries, type PendingToolDelivery, type PendingApprovalDelivery } from "./ClientContinuationDeliveries";
+import { requestAgentBootstrap } from "./Bootstrap";
 import { ClientLatency, type ClientToolRenderCode } from "./ClientLatency";
 import { captureFailedRun, boundedIncidentElapsedMs, type IncidentFailureScalars } from "./RunFailureEvidence";
 import { managedError, managedException, wasDefinitelyRejected, responseStatus, incidentFailureMechanism, boundedErrorPayload } from "./ManagedResponseErrors";
@@ -12,7 +14,7 @@ import {
   safeOutboundVaultToolResult, toJsonValue, terminalError,
   type WireMessage, type LocalToolCall, type ProjectedTool,
 } from "./WireConversation";
-import { VaultActionAuthorization, type VaultActionDecision } from "./VaultActionAuthorization";
+import { VaultActionAuthorization } from "./VaultActionAuthorization";
 import type { AgentChatTransportSegmentSummaryEvent, AgentRunFailureCaptureEvent } from "../../core/diagnostics/AgentIncidentCapture";
 import type { ChatSession, AgentRunInput, AgentRunResult } from "../ChatSession";
 export type { AgentRunInput, AgentRunResult } from "../ChatSession";
@@ -24,11 +26,9 @@ import {
 import { planRequiredError } from "../../utils/errors";
 import { PlatformRequestClient } from "../../services/PlatformRequestClient";
 import {
-  THIN_AGENT_BOOTSTRAP_PATH,
   THIN_AGENT_CONTEXT_PATH,
   THIN_AGENT_CONTRACT_VERSION,
   parseThinAgentBootstrapRequest,
-  parseThinAgentBootstrapResponse,
   isThinAgentContextWithinLimits,
   parseThinAgentContextResponse,
   type MeasuredThinAgentContext,
@@ -211,32 +211,6 @@ type StallRecovery = Readonly<{
   progressKey: string;
 }>;
 
-type PendingToolDelivery = {
-  readonly requestId: string;
-  readonly call: LocalToolCall;
-  readonly toolExecutionOrdinal?: number;
-  readonly state: "output-available" | "output-error";
-  readonly output?: AgentJsonValue;
-  readonly errorText?: string;
-  attemptedOpenEpoch: number | null;
-  inFlight: boolean;
-  acknowledged: boolean;
-  acknowledgementRecorded: boolean;
-};
-
-type PendingApprovalDecision = VaultActionDecision & Readonly<{
-  requestId: string;
-  callId: string;
-}>;
-
-type PendingApprovalDelivery = {
-  readonly decision: PendingApprovalDecision;
-  attemptedOpenEpoch: number | null;
-  inFlight: boolean;
-  acknowledged: boolean;
-  acknowledgementRecorded: boolean;
-};
-
 const MAX_CONTEXT_RESPONSE_BYTES = 16 * 1024;
 
 export class AgentChatSession implements ChatSession {
@@ -259,8 +233,7 @@ export class AgentChatSession implements ChatSession {
   private active: ActiveRun | null = null;
   private pendingCancelRequestId: string | null = null;
   private pendingCancelInFlight = false;
-  private readonly pendingDeliveries = new Map<string, PendingToolDelivery>();
-  private readonly pendingApprovalDeliveries = new Map<string, PendingApprovalDelivery>();
+  private readonly continuations = new ClientContinuationDeliveries();
   private readonly lifecycle: AgentLifecycle;
   private renderTimer: number | null = null;
   /** A live run whose presentation is due at the end of the render window. */
@@ -270,7 +243,6 @@ export class AgentChatSession implements ChatSession {
   private reconciledKey: string | null = null;
 
   private generation = 0;
-  private openEpoch = 0;
   private resynchronizationTimer: number | null = null;
   private resynchronizationInFlight = false;
   private resynchronizationAttempt = 0;
@@ -886,18 +858,12 @@ export class AgentChatSession implements ChatSession {
     });
     const serverRequested = tool.part.state === "approval-requested";
     if (serverRequested) {
-      const delivery: PendingApprovalDelivery = {
-        decision: Object.freeze({
+      const delivery = this.continuations.createApproval(Object.freeze({
           ...decision,
           requestId: active.requestId,
           callId,
-        }),
-        attemptedOpenEpoch: null,
-        inFlight: false,
-        acknowledged: false,
-        acknowledgementRecorded: false,
-      };
-      this.pendingApprovalDeliveries.set(callId, delivery);
+        }));
+      this.continuations.approvals.set(callId, delivery);
       this.deliverPendingApproval(active, delivery);
     } else if (approved) {
       this.startLocalTool(active, tool);
@@ -983,8 +949,8 @@ export class AgentChatSession implements ChatSession {
     this.conversationId = null;
     this.projection = new ConversationProjection();
     this.reconciledKey = null;
-    this.pendingDeliveries.clear();
-    this.pendingApprovalDeliveries.clear();
+    this.continuations.results.clear();
+    this.continuations.approvals.clear();
     this.pendingCancelRequestId = null;
     this.pendingCancelInFlight = false;
     this.clientLatency.clear();
@@ -1275,16 +1241,11 @@ export class AgentChatSession implements ChatSession {
       return;
     }
     if (ack.command_kind === "client_tool_approval") {
-      const pending = this.pendingApprovalDeliveries.get(ack.tool_call_id);
-      if (!pending || pending.decision.requestId !== ack.request_id) return;
-      if (
-        !pending.inFlight
-        || pending.attemptedOpenEpoch !== this.openEpoch
-      ) return;
-      pending.acknowledged = true;
+      const receipt = this.continuations.acknowledgeApproval(ack.tool_call_id, ack.request_id);
+      if (!receipt) return;
+      const pending = receipt.delivery;
       active.acknowledgedClientContinuationIds.add(ack.tool_call_id);
-      if (!pending.acknowledgementRecorded) {
-        pending.acknowledgementRecorded = true;
+      if (receipt.first) {
         const tool = this.findCurrentTool(active, ack.tool_call_id);
         this.recordLifecycle({
           code: pending.decision.approved
@@ -1307,17 +1268,12 @@ export class AgentChatSession implements ChatSession {
     }
 
     if (ack.command_kind === "client_tool_result") {
-      const pending = this.pendingDeliveries.get(ack.tool_call_id);
-      if (!pending || pending.requestId !== ack.request_id) return;
-      if (
-        !pending.inFlight
-        || pending.attemptedOpenEpoch !== this.openEpoch
-      ) return;
-      pending.acknowledged = true;
+      const receipt = this.continuations.acknowledgeResult(ack.tool_call_id, ack.request_id);
+      if (!receipt) return;
+      const pending = receipt.delivery;
       active.settledToolIds.add(ack.tool_call_id);
       active.acknowledgedClientContinuationIds.add(ack.tool_call_id);
-      if (!pending.acknowledgementRecorded) {
-        pending.acknowledgementRecorded = true;
+      if (receipt.first) {
         this.recordLifecycle({
           code: pending.state === "output-available"
             ? "tool_result_acknowledged_succeeded"
@@ -1347,7 +1303,7 @@ export class AgentChatSession implements ChatSession {
       // Keep the backoff across a snapshot-only recovery cycle. Authoritative
       // run progress resets it; repeated command failures must not poll rapidly.
       this.clearResynchronization(false);
-      this.openEpoch += 1;
+      this.continuations.opened();
       this.recordLifecycle({
         code: "session_opened",
         phase: "session",
@@ -1579,10 +1535,10 @@ export class AgentChatSession implements ChatSession {
       .filter((tool) => tool.location === "vault");
     const current = tools[tools.length - 1];
     if (!current || active.executingToolIds.has(current.callId)) return false;
-    const result = this.pendingDeliveries.get(current.callId);
+    const result = this.continuations.results.get(current.callId);
     if (result?.requestId === active.requestId
       && (result.inFlight || result.attemptedOpenEpoch !== null)) return true;
-    const approval = this.pendingApprovalDeliveries.get(current.callId);
+    const approval = this.continuations.approvals.get(current.callId);
     if (approval?.decision.requestId === active.requestId
       && (approval.inFlight || approval.attemptedOpenEpoch !== null)) return true;
     return active.acknowledgedClientContinuationIds.has(current.callId)
@@ -1634,7 +1590,7 @@ export class AgentChatSession implements ChatSession {
       if (
         active.settledToolIds.has(callId)
         || active.toolTasks.has(callId)
-        || this.pendingDeliveries.has(callId)
+        || this.continuations.results.has(callId)
       ) continue;
       const approval = toolApproval(tool.part);
       if (approval?.id && !this.registerApprovalId(active, callId, approval.id)) return;
@@ -1721,7 +1677,7 @@ export class AgentChatSession implements ChatSession {
   }
 
   private reconcilePendingApproval(active: ActiveRun, tool: ProjectedTool): boolean {
-    const candidate = this.pendingApprovalDeliveries.get(tool.callId);
+    const candidate = this.continuations.approvals.get(tool.callId);
     const pending = candidate?.decision.requestId === active.requestId
       ? candidate
       : undefined;
@@ -1772,82 +1728,38 @@ export class AgentChatSession implements ChatSession {
     return true;
   }
 
-  private deliverPendingApproval(
-    active: ActiveRun,
-    delivery: PendingApprovalDelivery,
-  ): void {
-    const session = this.session;
-    if (
-      !session
-      || this.active?.token !== active.token
-      || active.terminal
-      || this.connectionState !== "open"
-      || this.pendingApprovalDeliveries.get(delivery.decision.callId) !== delivery
-      || delivery.inFlight
-      || delivery.attemptedOpenEpoch === this.openEpoch
-      || session.current.runState.state !== "waiting_for_client"
-      || session.current.runState.request_id !== delivery.decision.requestId
-    ) return;
-    const tool = this.findCurrentTool(active, delivery.decision.callId);
-    if (!tool || tool.location !== "vault") return;
-    if (!this.reconcilePendingApproval(active, tool)) return;
-    const replayingDurableDenial = delivery.decision.approved === false
-      && (tool.part.state === "output-denied"
-        || (tool.part.state === "approval-responded"
-          && toolApproval(tool.part)?.approved === false));
-    if (this.pendingApprovalDeliveries.get(delivery.decision.callId) !== delivery
-      || (tool.part.state !== "approval-requested" && !replayingDurableDenial)) return;
+  private continuationContext(active: ActiveRun) {
+    return {
+      isActive: () => this.active?.token === active.token && !active.terminal,
+      reconcile: () => this.reconcileAcknowledgedContinuations(active),
+      publish: () => this.publishActive(active, true),
+      markUnsynchronized: () => this.transport?.markUnsynchronized(),
+      reportError: (error: unknown) => this.reportLocalIssue(error),
+    };
+  }
 
-    const attemptedEpoch = this.openEpoch;
-    delivery.attemptedOpenEpoch = attemptedEpoch;
-    delivery.acknowledged = false;
-    delivery.inFlight = true;
-    this.publishActive(active, true);
-    void session.sendToolApproval({
-      request_id: delivery.decision.requestId,
-      tool_call_id: delivery.decision.callId,
-      approved: delivery.decision.approved,
-    }).then(() => {
-      this.reconcileAcknowledgedContinuations(active);
-      // forceReconnect retires an older reader only after the replacement
-      // snapshot lands. Its stale promise resolves intentionally, so only the
-      // same open epoch can treat that resolution as a clean command stream.
-      if (this.openEpoch !== attemptedEpoch) return;
-      if (
-        this.active?.token === active.token
-        && !active.terminal
-        && this.pendingApprovalDeliveries.get(delivery.decision.callId) === delivery
-      ) {
-        // ACK is a delivery milestone, not continuation authority. A clean EOF
-        // is safe only after the matching decision also appears in the
-        // authoritative projection. Otherwise retain the exact decision and
-        // obtain a fresh snapshot before replaying it through bounded backoff.
-        delivery.attemptedOpenEpoch = null;
-        this.transport?.markUnsynchronized();
-      }
-    }).catch((error) => {
-      this.reconcileAcknowledgedContinuations(active);
-      if (
-        this.active?.token === active.token
-        && !active.terminal
-        && this.pendingApprovalDeliveries.get(delivery.decision.callId) === delivery
-      ) {
-        delivery.attemptedOpenEpoch = null;
-        this.reportLocalIssue(error);
-      }
-    }).finally(() => {
-      delivery.inFlight = false;
-      if (this.active?.token === active.token && !active.terminal) {
-        this.publishActive(active, true);
-      }
-      if (
-        this.active?.token === active.token
-        && !active.terminal
-        && this.pendingApprovalDeliveries.get(delivery.decision.callId) === delivery
-        && this.openEpoch !== attemptedEpoch
-      ) {
-        this.deliverPendingApproval(active, delivery);
-      }
+  private deliverPendingApproval(active: ActiveRun, delivery: PendingApprovalDelivery): void {
+    void this.continuations.deliver(delivery, {
+      ...this.continuationContext(active),
+      prepare: () => {
+        const session = this.session;
+        if (!session || this.active?.token !== active.token || active.terminal
+          || this.connectionState !== "open"
+          || session.current.runState.state !== "waiting_for_client"
+          || session.current.runState.request_id !== delivery.decision.requestId) return;
+        const tool = this.findCurrentTool(active, delivery.decision.callId);
+        if (!tool || tool.location !== "vault") return;
+        if (!this.reconcilePendingApproval(active, tool)) return;
+        const replayingDurableDenial = delivery.decision.approved === false
+          && (tool.part.state === "output-denied"
+            || (tool.part.state === "approval-responded" && toolApproval(tool.part)?.approved === false));
+        if (tool.part.state !== "approval-requested" && !replayingDurableDenial) return;
+        return () => session.sendToolApproval({
+          request_id: delivery.decision.requestId,
+          tool_call_id: delivery.decision.callId,
+          approved: delivery.decision.approved,
+        });
+      },
     });
   }
 
@@ -1856,7 +1768,7 @@ export class AgentChatSession implements ChatSession {
       this.connectionState !== "open"
       || this.session?.current.runState.state !== "waiting_for_client"
     ) return;
-    for (const delivery of this.pendingApprovalDeliveries.values()) {
+    for (const delivery of this.continuations.approvals.values()) {
       if (delivery.decision.requestId !== active.requestId) continue;
       this.deliverPendingApproval(active, delivery);
     }
@@ -1868,7 +1780,7 @@ export class AgentChatSession implements ChatSession {
       || active.terminal
       || active.toolTasks.has(tool.callId)
       || active.settledToolIds.has(tool.callId)
-      || this.pendingDeliveries.has(tool.callId)
+      || this.continuations.results.has(tool.callId)
     ) return;
     if (!this.ensureToolIdentity(active, tool)) return;
     const replayOnly = !active.authorization.allows(tool);
@@ -2090,17 +2002,13 @@ export class AgentChatSession implements ChatSession {
         ...(toolExecutionOrdinal === undefined ? {} : { toolExecutionOrdinal }),
         ...this.clientLatency.fields(active.requestId),
       });
-      delivery = {
+      delivery = this.continuations.createResult({
         requestId: active.requestId,
         call,
         ...(toolExecutionOrdinal === undefined ? {} : { toolExecutionOrdinal }),
         state: "output-available",
         output: toJsonValue(result),
-        attemptedOpenEpoch: null,
-        inFlight: false,
-        acknowledged: false,
-        acknowledgementRecorded: false,
-      };
+      });
     } catch {
       if (active.abort.signal.aborted || active.terminal) return;
       presentationResult = {
@@ -2127,17 +2035,13 @@ export class AgentChatSession implements ChatSession {
         ...(toolExecutionOrdinal === undefined ? {} : { toolExecutionOrdinal }),
         ...this.clientLatency.fields(active.requestId),
       });
-      delivery = {
+      delivery = this.continuations.createResult({
         requestId: active.requestId,
         call,
         ...(toolExecutionOrdinal === undefined ? {} : { toolExecutionOrdinal }),
         state: "output-error",
         errorText: "The vault action failed.",
-        attemptedOpenEpoch: null,
-        inFlight: false,
-        acknowledged: false,
-        acknowledgementRecorded: false,
-      };
+      });
     }
     // Local execution is complete before the continuation stream finishes.
     // Keep that truth visible while the server acknowledges the result and
@@ -2148,105 +2052,71 @@ export class AgentChatSession implements ChatSession {
     if (this.active?.token === active.token && !active.terminal) {
       this.publishActive(active, true);
     }
-    this.pendingDeliveries.set(call.callId, delivery);
+    this.continuations.results.set(call.callId, delivery);
     await this.deliverToolResult(active, delivery);
   }
 
-  private async deliverToolResult(
-    active: ActiveRun,
-    delivery: PendingToolDelivery,
-  ): Promise<void> {
-    const session = this.session;
-    if (
-      !session
-      || this.active?.token !== active.token
-      || active.terminal
-      || this.connectionState !== "open"
-      || this.pendingDeliveries.get(delivery.call.callId) !== delivery
-      || delivery.inFlight
-      || delivery.attemptedOpenEpoch === this.openEpoch
-      || session.current.runState.state !== "waiting_for_client"
-      || session.current.runState.request_id !== delivery.requestId
-    ) return;
-    const attemptedEpoch = this.openEpoch;
-    delivery.attemptedOpenEpoch = attemptedEpoch;
-    delivery.acknowledged = false;
-    delivery.inFlight = true;
-    this.publishActive(active, true);
-    try {
-      if (delivery.state === "output-available") {
-        await session.sendToolResult({
+  private async deliverToolResult(active: ActiveRun, delivery: PendingToolDelivery): Promise<void> {
+    return this.continuations.deliver(delivery, {
+      ...this.continuationContext(active),
+      prepare: () => {
+        const session = this.session;
+        if (!session || this.active?.token !== active.token || active.terminal
+          || this.connectionState !== "open"
+          || session.current.runState.state !== "waiting_for_client"
+          || session.current.runState.request_id !== delivery.requestId) return;
+        return () => session.sendToolResult(delivery.state === "output-available" ? {
           request_id: delivery.requestId,
           tool_call_id: delivery.call.callId,
           tool_name: delivery.call.name,
           state: "output-available",
           output: delivery.output ?? null,
-        });
-      } else {
-        await session.sendToolResult({
+        } : {
           request_id: delivery.requestId,
           tool_call_id: delivery.call.callId,
           tool_name: delivery.call.name,
           state: "output-error",
           error_text: delivery.errorText ?? "The vault action failed.",
         });
-      }
-      this.reconcileAcknowledgedContinuations(active);
-      // A newer authoritative synchronization can intentionally retire this
-      // reader after an ACK. That stale command resolves without an error, but
-      // it is not a clean close for this delivery attempt; the new epoch must
-      // inspect authority and, if still waiting, replay the stored result.
-      if (this.openEpoch !== attemptedEpoch) return;
-      const commandSegmentOrdinal = this.clientLatency.toolResultSegmentOrdinal(
-        active.requestId, delivery.call.callId, delivery.toolExecutionOrdinal,
-      );
-      this.recordLifecycle({
-        code: delivery.state === "output-available"
-          ? "tool_result_command_stream_completed_output_available"
-          : "tool_result_command_stream_completed_output_error",
-        phase: "tool_execution",
-        conversationId: active.conversationId,
-        requestId: active.requestId,
-        toolName: delivery.call.name,
-        toolCallId: delivery.call.callId,
-        ...(delivery.toolExecutionOrdinal === undefined
-          ? {}
-          : { toolExecutionOrdinal: delivery.toolExecutionOrdinal }),
-        ...this.clientLatency.fields(
-          active.requestId,
-          this.monotonicNow(),
-          commandSegmentOrdinal,
-        ),
-      });
-      this.recordLifecycle({
-        code: delivery.state === "output-available"
-          ? "tool_result_sent_succeeded"
-          : "tool_result_sent_failed",
-        phase: "tool_execution",
-        conversationId: active.conversationId,
-        requestId: active.requestId,
-        toolName: delivery.call.name,
-        toolCallId: delivery.call.callId,
-        ...(delivery.toolExecutionOrdinal === undefined
-          ? {}
-          : { toolExecutionOrdinal: delivery.toolExecutionOrdinal }),
-        ...this.clientLatency.fields(active.requestId),
-      });
-      if (
-        this.active?.token === active.token
-        && !active.terminal
-        && this.pendingDeliveries.get(delivery.call.callId) === delivery
-      ) {
-        // ACK is a delivery milestone, not continuation authority. A clean EOF
-        // is safe only after the matching tool result also appears in the
-        // authoritative projection. Otherwise retain the exact result and
-        // obtain a fresh snapshot before replaying it through bounded backoff.
-        delivery.attemptedOpenEpoch = null;
-        this.transport?.markUnsynchronized();
-      }
-    } catch (error) {
-      this.reconcileAcknowledgedContinuations(active);
-      if (this.openEpoch === attemptedEpoch) {
+      },
+      streamCompleted: () => {
+        const commandSegmentOrdinal = this.clientLatency.toolResultSegmentOrdinal(
+          active.requestId, delivery.call.callId, delivery.toolExecutionOrdinal,
+        );
+        this.recordLifecycle({
+          code: delivery.state === "output-available"
+            ? "tool_result_command_stream_completed_output_available"
+            : "tool_result_command_stream_completed_output_error",
+          phase: "tool_execution",
+          conversationId: active.conversationId,
+          requestId: active.requestId,
+          toolName: delivery.call.name,
+          toolCallId: delivery.call.callId,
+          ...(delivery.toolExecutionOrdinal === undefined
+            ? {}
+            : { toolExecutionOrdinal: delivery.toolExecutionOrdinal }),
+          ...this.clientLatency.fields(
+            active.requestId,
+            this.monotonicNow(),
+            commandSegmentOrdinal,
+          ),
+        });
+        this.recordLifecycle({
+          code: delivery.state === "output-available"
+            ? "tool_result_sent_succeeded"
+            : "tool_result_sent_failed",
+          phase: "tool_execution",
+          conversationId: active.conversationId,
+          requestId: active.requestId,
+          toolName: delivery.call.name,
+          toolCallId: delivery.call.callId,
+          ...(delivery.toolExecutionOrdinal === undefined
+            ? {}
+            : { toolExecutionOrdinal: delivery.toolExecutionOrdinal }),
+          ...this.clientLatency.fields(active.requestId),
+        });
+      },
+      streamFailed: () => {
         const commandSegmentOrdinal = this.clientLatency.toolResultSegmentOrdinal(
           active.requestId, delivery.call.callId, delivery.toolExecutionOrdinal,
         );
@@ -2267,29 +2137,8 @@ export class AgentChatSession implements ChatSession {
             commandSegmentOrdinal,
           ),
         });
-      }
-      if (
-        this.active?.token === active.token
-        && !active.terminal
-        && this.pendingDeliveries.get(delivery.call.callId) === delivery
-      ) {
-        delivery.attemptedOpenEpoch = null;
-        this.reportLocalIssue(error);
-      }
-    } finally {
-      delivery.inFlight = false;
-      if (this.active?.token === active.token && !active.terminal) {
-        this.publishActive(active, true);
-      }
-      if (
-        this.active?.token === active.token
-        && !active.terminal
-        && this.pendingDeliveries.get(delivery.call.callId) === delivery
-        && this.openEpoch !== attemptedEpoch
-      ) {
-        await this.deliverToolResult(active, delivery);
-      }
-    }
+      },
+    });
   }
 
   private async retryPendingDeliveries(active: ActiveRun): Promise<void> {
@@ -2297,7 +2146,7 @@ export class AgentChatSession implements ChatSession {
       this.connectionState !== "open"
       || this.session?.current.runState.state !== "waiting_for_client"
     ) return;
-    for (const delivery of this.pendingDeliveries.values()) {
+    for (const delivery of this.continuations.results.values()) {
       if (delivery.requestId !== active.requestId) continue;
       await this.deliverToolResult(active, delivery);
     }
@@ -2314,24 +2163,10 @@ export class AgentChatSession implements ChatSession {
 
   private reconcileAcknowledgedContinuations(active: ActiveRun): void {
     if (this.active?.token !== active.token) return;
-    for (const [callId, delivery] of this.pendingDeliveries) {
-      if (
-        delivery.requestId === active.requestId
-        && delivery.acknowledged
-        && this.hasAuthoritativeToolResultProjection(active, delivery)
-      ) {
-        this.pendingDeliveries.delete(callId);
-      }
-    }
-    for (const [callId, delivery] of this.pendingApprovalDeliveries) {
-      if (
-        delivery.decision.requestId === active.requestId
-        && delivery.acknowledged
-        && this.hasAuthoritativeApprovalProjection(active, delivery)
-      ) {
-        this.pendingApprovalDeliveries.delete(callId);
-      }
-    }
+    this.continuations.reconcile(active.requestId, {
+      result: delivery => this.hasAuthoritativeToolResultProjection(active, delivery),
+      approval: delivery => this.hasAuthoritativeApprovalProjection(active, delivery),
+    });
   }
 
   private hasAuthoritativeToolResultProjection(
@@ -2411,8 +2246,8 @@ export class AgentChatSession implements ChatSession {
         runStalled: this.runStalled,
         awaitingClientWork: this.awaitingClientWork,
         pendingCancel: this.pendingCancelRequestId === active.requestId,
-        pendingToolDeliveryCount: this.pendingDeliveries.size,
-        pendingApprovalDeliveryCount: this.pendingApprovalDeliveries.size,
+        pendingToolDeliveryCount: this.continuations.results.size,
+        pendingApprovalDeliveryCount: this.continuations.approvals.size,
       }, this.options.onIncidentCapture);
     } catch {
       // Diagnostics are observational. Reading run facts cannot affect a run.
@@ -2704,8 +2539,8 @@ export class AgentChatSession implements ChatSession {
     this.clearResynchronization();
     this.runStalled = false;
     this.stallRecovery = null;
-    this.pendingDeliveries.clear();
-    this.pendingApprovalDeliveries.clear();
+    this.continuations.results.clear();
+    this.continuations.approvals.clear();
     this.pendingCancelRequestId = null;
     this.pendingCancelInFlight = false;
     this.recordLifecycle({
@@ -3017,32 +2852,13 @@ export class AgentChatSession implements ChatSession {
 
     const licenseKey = this.options.licenseKey().trim();
     if (!licenseKey) throw planRequiredError("Chat");
-    const request = parseThinAgentBootstrapRequest(this.options.bootstrapRequest());
-    const response = await this.requestClient.request({
-      url: new URL(THIN_AGENT_BOOTSTRAP_PATH, this.options.baseUrl).toString(),
-      method: "POST",
-      headers: { "x-plugin-version": this.options.pluginVersion },
-      licenseKey,
-      body: request,
-      allowTransportFallback: true,
-      responseEncoding: "arrayBuffer",
-      maxResponseBytes: 64 * 1024,
-    });
-    if (!response.ok) {
-      const fallback = response.status === 429
-        ? "SystemSculpt is receiving too many requests. Try again shortly."
-        : `SystemSculpt could not start the response (${response.status}).`;
-      throw Object.assign(new Error(fallback), {
-        code: response.status === 429 ? "response_start_rate_limited" : "response_start_failed",
-        status: response.status,
-        retryable: response.status === 401 || response.status === 429 || response.status >= 500,
-      });
-    }
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    const value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) as unknown;
-    const bootstrap = parseThinAgentBootstrapResponse(value, {
-      conversation_id: request.conversation_id,
-    });
+    const bootstrap = await requestAgentBootstrap({
+      baseUrl: this.options.baseUrl,
+      pluginVersion: this.options.pluginVersion,
+      licenseKey: () => licenseKey,
+      bootstrapRequest: this.options.bootstrapRequest,
+      requestClient: this.requestClient,
+    }, "context");
     this.options.updateInputLimits?.(bootstrap.client_input_limits);
     return bootstrap;
   }

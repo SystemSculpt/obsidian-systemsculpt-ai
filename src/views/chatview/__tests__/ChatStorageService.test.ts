@@ -2,12 +2,8 @@
  * @jest-environment jsdom
  */
 import { App, stringifyYaml, TFile } from "obsidian";
-import {
-  ChatStorageService,
-  isPathInDirectory,
-  resolveChatsDirectory,
-  SavedChatCorruptedError,
-} from "../ChatStorageService";
+import { isPathInDirectory, resolveChatsDirectory } from "../storage/ChatTranscriptLocations";
+import { ChatStorageService, SavedChatCorruptedError } from "../ChatStorageService";
 import { ChatMessage, ChatRole } from "../../../types";
 
 // Mock parseYaml and stringifyYaml

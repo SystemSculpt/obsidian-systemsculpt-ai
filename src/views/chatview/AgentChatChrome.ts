@@ -1,3 +1,5 @@
+import { CLAUDE_MODELS, CLAUDE_PERMISSION_LABELS, type ClaudePermissionMode } from "../../services/claude/ClaudeExecutionOptions";
+import { CODEX_APPROVAL_LABELS, type CodexApprovalMode } from "../../services/codex/CodexApprovalPolicy";
 import type { CreditsBalanceSnapshot } from "../../services/SystemSculptService";
 import { codexDefaultLabel, type CodexModel } from "../../services/codex/CodexModelCatalog";
 import { isLocalAgentUsable as usable, type LocalAgentDetection } from "../../services/codex/LocalAgentDetection";
@@ -23,9 +25,6 @@ export type AgentChromeAccount =
   /** An active paid plan; hosted stays the default and local agents go unmentioned. */
   | "paid";
 
-export type ClaudeChromeMode = "auto" | "manual" | "acceptEdits" | "plan" | "settings";
-export type CodexChromeMode = "auto" | "ask" | "read-only" | "settings";
-
 export type AgentChromeState = Readonly<{
   backend: TextExecutionBackend;
   /** On-machine agents can run here (desktop). */
@@ -42,9 +41,9 @@ export type AgentChromeState = Readonly<{
   account: AgentChromeAccount;
   credits: CreditsBalanceSnapshot | null;
   hostedMode: ChatApprovalMode;
-  claude: Readonly<{ mode: ClaudeChromeMode; model: string; autoUnavailable: boolean }>;
+  claude: Readonly<{ mode: ClaudePermissionMode; model: string; autoUnavailable: boolean }>;
   codex: Readonly<{
-    mode: CodexChromeMode;
+    mode: CodexApprovalMode;
     model: string;
     effort: string;
     serviceTier: string;
@@ -71,17 +70,17 @@ export type ChromeModeChoice = Readonly<{
 
 export const MODE_CHOICES: Readonly<Record<TextExecutionBackend, readonly ChromeModeChoice[]>> = {
   claude: [
-    { value: "auto", label: "Auto", icon: "sparkles", description: "Runs safe actions without asking. Claude Code's safety check blocks risky ones." },
-    { value: "manual", label: "Ask before edits", icon: "hand", description: "Asks before every edit and command." },
-    { value: "acceptEdits", label: "Accept edits", icon: "file-pen-line", description: "Edits notes without asking. Asks before commands." },
-    { value: "plan", label: "Plan only", icon: "list-checks", description: "Reads and plans. Changes nothing until you approve the plan." },
-    { value: "settings", label: "Claude Code settings", icon: "settings-2", description: "Uses the permission rules in your Claude Code settings." },
+    { value: "auto", label: CLAUDE_PERMISSION_LABELS.auto, icon: "sparkles", description: "Runs safe actions without asking. Claude Code's safety check blocks risky ones." },
+    { value: "manual", label: CLAUDE_PERMISSION_LABELS.manual, icon: "hand", description: "Asks before every edit and command." },
+    { value: "acceptEdits", label: CLAUDE_PERMISSION_LABELS.acceptEdits, icon: "file-pen-line", description: "Edits notes without asking. Asks before commands." },
+    { value: "plan", label: CLAUDE_PERMISSION_LABELS.plan, icon: "list-checks", description: "Reads and plans. Changes nothing until you approve the plan." },
+    { value: "settings", label: CLAUDE_PERMISSION_LABELS.settings, icon: "settings-2", description: "Uses the permission rules in your Claude Code settings." },
   ],
   codex: [
-    { value: "auto", label: "Auto", icon: "sparkles", description: "Works inside this vault. Codex's reviewer only asks you about unsafe actions." },
-    { value: "ask", label: "Ask", icon: "hand", description: "Works inside this vault. Asks before editing other files or using the internet." },
-    { value: "read-only", label: "Read only", icon: "eye", description: "Reads your vault without changing it." },
-    { value: "settings", label: "Codex settings", icon: "settings-2", description: "Uses your own Codex configuration." },
+    { value: "auto", label: CODEX_APPROVAL_LABELS["auto"], icon: "sparkles", description: "Works inside this vault. Codex's reviewer only asks you about unsafe actions." },
+    { value: "ask", label: CODEX_APPROVAL_LABELS["ask"], icon: "hand", description: "Works inside this vault. Asks before editing other files or using the internet." },
+    { value: "read-only", label: CODEX_APPROVAL_LABELS["read-only"], icon: "eye", description: "Reads your vault without changing it." },
+    { value: "settings", label: CODEX_APPROVAL_LABELS["settings"], icon: "settings-2", description: "Uses your own Codex configuration." },
   ],
   systemsculpt: [
     { value: "auto", label: "Auto", icon: "sparkles", description: "Reads, creates and edits notes without asking. Asks before moving or deleting." },
@@ -100,13 +99,6 @@ const DETECTING_AGENTS = "Finding Claude Code or Codex…";
 const EMPTY_TITLE = "What should we work on?";
 /** T-36 free-start copy, read by the Nov 6 experiment: do not edit. */
 const FREE_START_OFFER = "500 free credits. No card needed.";
-
-const CLAUDE_MODELS: readonly (readonly [string, string, string?])[] = [
-  ["", "Default", "Claude Code's choice"],
-  ["opus", "Opus"],
-  ["sonnet", "Sonnet"],
-  ["haiku", "Haiku"],
-];
 
 const EFFORT_LABELS: Readonly<Record<string, string>> = {
   none: "None",

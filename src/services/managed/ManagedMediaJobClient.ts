@@ -1,6 +1,7 @@
 import { readVerifiedManagedOutput } from "./ManagedOutputBytes";
 import { HostedTransportAdapter } from "./adapters/HostedTransportAdapter";
 import {
+  ManagedUploadedImageInput,
   MANAGED_CAPABILITY_CONTRACT,
   MANAGED_IMAGE_OUTPUT_MAX_BYTES,
   MANAGED_VIDEO_OUTPUT_MAX_BYTES,
@@ -11,14 +12,14 @@ import {
   ManagedDeliveredVideoOutputBytes,
   ManagedVideoOutputMetadata,
 } from "./ManagedTypes";
-import type { ManagedUploadedImageInput } from "./ManagedJobClient";
+import { MANAGED_MEDIA_DELIVERY_MAX_OFFSET_MS as MEDIA_DELIVERY_MAX_OFFSET_MS } from "./ManagedMediaDeliveryTiming";
 
 /**
  * managed-job-protocol-v2 — the negotiated media contract that adds model
  * selection, video generation, and synthesized progress fields
- * (typical_duration_ms). managed-job-protocol-v1 and its client
- * (ManagedJobClient) stay frozen for released artifacts; this sibling client
- * never shares parsing state with it.
+ * (typical_duration_ms). Audio and documents retain their strict
+ * managed-job-protocol-v1 parser in ManagedJobClient; media never shares
+ * parsing state with it.
  * @internal Tests assert against this value.
  */
 export const MANAGED_MEDIA_JOB_PROTOCOL = "managed-job-protocol-v2" as const;
@@ -111,7 +112,6 @@ const IMAGE_SIZE_PATTERN = /^\d{1,4}(\.\d{1,2})?K?$/i;
 // Quality and background values are model-specific; the server checks membership.
 const IMAGE_OPTION_TOKEN_PATTERN = /^[a-z][a-z0-9_-]{0,23}$/;
 const MEDIA_STATUSES: readonly ManagedMediaJobStatus[] = ["queued", "processing", "succeeded", "failed", "expired"];
-const MEDIA_DELIVERY_MAX_OFFSET_MS = 7 * 24 * 60 * 60 * 1_000;
 const MEDIA_DOWNLOAD_STARTED_AT_HEADER = "x-systemsculpt-download-started-at";
 const MEDIA_DOWNLOAD_REQUESTED_AT_HEADER = "x-systemsculpt-download-requested-at";
 const CAPABILITY: Record<ManagedMediaKind, "image_generation" | "video_generation"> = { image: "image_generation", video: "video_generation" };

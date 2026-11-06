@@ -1,8 +1,9 @@
 import type { ChatMessage } from "../../types";
 import type { App } from 'obsidian';
 import { CodexChatTransport } from './LocalCodexClient';
-import { isRecord } from '../../studio/utils';
+import { isRecord } from '../../utils/jsonRecord';
 import { codexToolActivity } from './CodexActivity';
+import { codexClientRequestKind, codexClientResponse } from './CodexClientRequests';
 import type { CodexExecutionOptions } from './CodexExecutionSettings';
 import { LocalAgentChatSession } from './LocalAgentChatSession';
 
@@ -16,17 +17,19 @@ export class CodexChatSession extends LocalAgentChatSession {
       text: events.text,
       activity: (activity, item) => { const update = codexToolActivity(activity, item, turn.workingDirectory); if (update) events.tool(update); },
       request: async (method, params, requestSignal, requestId) => {
-        const permissions = method === 'item/permissions/requestApproval', question = method === 'item/tool/requestUserInput';
-        if (!permissions && !question && !['item/commandExecution/requestApproval', 'item/fileChange/requestApproval'].includes(method)) throw new Error(`Chat does not support the Codex client request ${method}.`);
+        const kind = codexClientRequestKind(method);
+        if (!kind) throw new Error(`Chat does not support the Codex client request ${method}.`);
+        const permissions = kind === 'permissions', question = kind === 'question';
         const change = isRecord(params.change) ? params.change : {};
         const decision = await events.approval({
           callId: String(params.itemId ?? requestId ?? method), name: question ? 'request_user_input' : permissions ? 'request_permissions' : method.split('/')[1],
           input: { ...change, ...params }, state: 'approval-required',
           native: { agent: 'codex', workingDirectory: typeof params.cwd === 'string' ? params.cwd : turn.workingDirectory, requestMethod: method, requestId },
         }, requestSignal, !question);
-        if (question) return { answers: Object.fromEntries(Object.entries(decision.approved ? decision.answers ?? {} : {}).map(([id, answers]) => [id, { answers }])) };
-        if (permissions) return { permissions: decision.approved && isRecord(params.permissions) ? params.permissions : {}, scope: decision.approved && decision.rememberForSession ? 'session' : 'turn' };
-        return { decision: decision.approved ? decision.rememberForSession ? 'acceptForSession' : 'accept' : 'decline' };
+        return codexClientResponse(kind, params, {
+          action: decision.approved ? !question && decision.rememberForSession ? 'acceptForSession' : 'accept' : 'decline',
+          answers: decision.answers,
+        });
       },
     }), () => transport.close());
   }

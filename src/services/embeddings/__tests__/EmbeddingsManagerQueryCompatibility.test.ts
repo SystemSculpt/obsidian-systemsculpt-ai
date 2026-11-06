@@ -2,6 +2,8 @@ import { EmbeddingsManager } from "../EmbeddingsManager";
 import {
   MANAGED_EMBEDDINGS_INDEX_CONTRACT,
   MANAGED_EMBEDDINGS_INDEX_VECTOR_ENCODING,
+} from "../gateway/ManagedEmbeddingsIndexContract";
+import {
   type ManagedEmbeddingsIndexQueryResult,
 } from "../gateway/ManagedEmbeddingsIndexAdapter";
 import { managedNamespace } from "./support/managedNamespace";

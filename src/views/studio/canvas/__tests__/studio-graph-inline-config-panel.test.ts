@@ -55,7 +55,8 @@ describe("renderInlineConfigPanel", () => {
       definition,
       orderedFieldKeys: ["name"],
       interactionLocked: false,
-      onNodeConfigMutated: () => {
+      onNodeConfigValueChange: (_id, key, value) => {
+        node.config[key] = value;
         mutateCalls += 1;
       },
     });
@@ -103,7 +104,8 @@ describe("renderInlineConfigPanel", () => {
       definition,
       orderedFieldKeys: ["enabled", "token"],
       interactionLocked: false,
-      onNodeConfigMutated: () => {
+      onNodeConfigValueChange: (_id, key, value) => {
+        node.config[key] = value;
         mutateCalls += 1;
       },
     });
@@ -147,7 +149,7 @@ describe("renderInlineConfigPanel", () => {
       ],
       { enabled: false }
     );
-    const onNodeConfigMutated = jest.fn();
+
     const onNodeConfigValueChange = jest.fn((nodeId: string, key: string, value: unknown) => {
       expect(nodeId).toBe(node.id);
       node.config[key] = value as never;
@@ -159,8 +161,7 @@ describe("renderInlineConfigPanel", () => {
       definition,
       orderedFieldKeys: ["enabled", "token"],
       interactionLocked: false,
-      onNodeConfigMutated,
-      onNodeConfigValueChange,
+       onNodeConfigValueChange,
     });
 
     expect(rendered).toBe(true);
@@ -181,7 +182,7 @@ describe("renderInlineConfigPanel", () => {
       true,
       expect.objectContaining({ mode: "discrete" })
     );
-    expect(onNodeConfigMutated).not.toHaveBeenCalled();
+
   });
 });
 
@@ -189,7 +190,7 @@ it("edits typed process port arrays without converting them to JSON objects", ()
   const root = document.createElement("div");
   const node = createNode({ kind: "studio.process", config: { outputs: [{ id: "snapshot", type: "json", required: true }] } });
   const onMutation = jest.fn();
-  renderInlineConfigPanel({ nodeEl: root, node, definition: createDefinition([{ key: "outputs", label: "Output ports", type: "port_list", portDirection: "output" }]), orderedFieldKeys: ["outputs"], interactionLocked: false, onNodeConfigMutated: onMutation });
+  renderInlineConfigPanel({ nodeEl: root, node, definition: createDefinition([{ key: "outputs", label: "Output ports", type: "port_list", portDirection: "output" }]), orderedFieldKeys: ["outputs"], interactionLocked: false, onNodeConfigValueChange: (_id: string, key: string, value: StudioNodeInstance["config"][string]) => { node.config[key] = value; onMutation(node); },  });
   const editor = root.querySelector("textarea")!;
   expect(JSON.parse(editor.value)).toEqual(node.config.outputs);
   editor.value = '[{"id":"report","type":"text","required":true}]';
@@ -217,16 +218,16 @@ it.each([
   const node = createNode({ config: { unrelated: "preserved" } });
   const root = document.createElement("div");
   const committed = jest.fn();
-  const mutated = jest.fn();
+  Object.freeze(node.config);
   const definition = createDefinition([{ key: "setting", label: "Setting", type, min: 0, max: 10, options: [{ value: "second", label: "Second" }] }]);
   renderInlineConfigPanel({ nodeEl: root, node, definition, orderedFieldKeys: ["setting"], interactionLocked: false,
-    onNodeConfigMutated: mutated, onNodeConfigValueChange: committed });
+     onNodeConfigValueChange: committed });
   const field = root.querySelector<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("input,textarea,select")!;
   field.value = raw;
   if (field instanceof HTMLInputElement && type === "boolean") field.checked = true;
   field.dispatchEvent(new Event(event, { bubbles: true }));
   expect(committed).toHaveBeenCalledTimes(1);
   expect(committed).toHaveBeenCalledWith(node.id, "setting", expected, { mode });
-  expect(mutated).not.toHaveBeenCalled();
+
   expect(node.config).toEqual({ unrelated: "preserved" });
 });

@@ -545,7 +545,7 @@ export function renderStudioGraphWorkspace(
       ...renderOptions,
       onNodeConfigValueChange: (nodeId, key, value, changeOptions) => {
         const current = typeof value === "string" && nodeId === node.id ? liveNode(nodeId) : undefined;
-        renderOptions.onNodeConfigValueChange?.(nodeId, key, current ? editor.commit(`config:${key}`, value as string, current.config[key]) : value, changeOptions);
+        renderOptions.onNodeConfigValueChange(nodeId, key, current ? editor.commit(`config:${key}`, value as string, current.config[key]) : value, changeOptions);
       },
       onNodeTitleInput: (target, value) => {
         const current = target.id === node.id ? liveNode(target.id) : undefined;

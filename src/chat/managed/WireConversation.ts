@@ -3,7 +3,7 @@ import type { ToolCallResult } from "../../types/toolCalls";
 import type { ManagedAgentError } from "../ChatConversation";
 import { isFirstPartyToolName } from "../../tools/toolNames";
 import { canonicalAgentToolInput } from "./MutationJournal";
-import type { AgentJsonValue } from "./Protocol";
+import { MAX_JSON_DEPTH, type AgentJsonValue } from "./Protocol";
 
 
 export type WirePart = Readonly<Record<string, unknown> & { type: string }>;
@@ -291,7 +291,6 @@ export function safeOutboundVaultToolResult(result: ToolCallResult): ToolCallRes
 // Must not exceed the protocol codec's MAX_JSON_DEPTH: content beyond the
 // protocol bound drops here so a deep result degrades instead of failing the
 // whole client_tool_result command at encode time.
-const TOOL_JSON_MAX_DEPTH = 16;
 const OMITTED_JSON_VALUE = Symbol("systemsculpt-omitted-json-value");
 
 /**
@@ -320,7 +319,7 @@ function jsonSafeClone(
     return Object.is(value, -0) ? 0 : value;
   }
   if (typeof value !== "object") return OMITTED_JSON_VALUE;
-  if (ancestors.has(value) || depth >= TOOL_JSON_MAX_DEPTH) return OMITTED_JSON_VALUE;
+  if (ancestors.has(value) || depth >= MAX_JSON_DEPTH) return OMITTED_JSON_VALUE;
   if (!skipToJson) {
     const toJson = (value as { toJSON?: unknown }).toJSON;
     if (typeof toJson === "function") {

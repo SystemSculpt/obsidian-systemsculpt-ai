@@ -1,5 +1,5 @@
 import type { StudioJsonValue, StudioNodeOutputMap } from './types';
-import { isRecord } from './utils';
+import { isRecord } from '../utils/jsonRecord';
 import { readCollectionField } from './StudioCollection';
 
 export type StudioCollectionSourceState = {

@@ -20,7 +20,7 @@ import {
   STUDIO_DYNAMIC_PORT_ID_SOURCE,
   STUDIO_PROCESS_FIXED_OUTPUT_PORTS
 } from '../types'
-import { isRecord } from '../utils'
+import { isRecord } from '../../utils/jsonRecord';
 import { validateNodeConfig } from '../StudioNodeConfigValidation'
 import { getText, inferMimeTypeFromPath } from './shared'
 
