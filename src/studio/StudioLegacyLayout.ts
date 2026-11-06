@@ -1,4 +1,5 @@
-import { ensureArray, isRecord } from "./utils";
+import { isRecord } from "../utils/jsonRecord";
+import { ensureArray } from "./utils";
 import type { StudioNodeInstance, StudioProjectV1 } from "./types";
 import { resolveStudioGraphNodeWidth, resolveStudioGraphNodeMinHeight } from "./StudioNodeGeometry";
 

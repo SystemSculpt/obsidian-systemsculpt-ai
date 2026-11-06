@@ -1,5 +1,5 @@
 import { desktopHost } from '../../platform/desktopOnly';
-import { isRecord } from '../../studio/utils';
+import { isRecord } from '../../utils/jsonRecord';
 import { readLocalAgentLaunchConfig, type LocalAgentLaunchConfig } from './LocalAgentLaunch';
 
 /** Machine-local launch preferences. Never read or copy Codex credentials. */

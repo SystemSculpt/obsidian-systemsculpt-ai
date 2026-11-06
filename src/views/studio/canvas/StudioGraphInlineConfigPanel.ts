@@ -74,32 +74,6 @@ function resolveSearchableSelectPlaceholder(field: StudioNodeConfigFieldDefiniti
   return raw ? `Select ${raw}` : "Select option";
 }
 
-export function commitInlineConfigValueChange(options: {
-  node: StudioNodeInstance;
-  key: string;
-  value: StudioJsonValue;
-  onNodeConfigMutated: (node: StudioNodeInstance) => void;
-  onNodeConfigValueChange?: (
-    nodeId: string,
-    key: string,
-    value: StudioJsonValue,
-    options?: StudioGraphNodeMutationOptions
-  ) => void;
-  mutationOptions?: StudioGraphNodeMutationOptions;
-}): void {
-  if (options.onNodeConfigValueChange) {
-    options.onNodeConfigValueChange(
-      options.node.id,
-      options.key,
-      options.value,
-      options.mutationOptions
-    );
-    return;
-  }
-  options.node.config[options.key] = options.value;
-  options.onNodeConfigMutated(options.node);
-}
-
 function buildOrderedFieldList(options: {
   definition: StudioNodeDefinition;
   orderedKeys: string[];
@@ -801,8 +775,7 @@ type InlineConfigPanelOptions = {
   definition: StudioNodeDefinition;
   orderedFieldKeys: string[];
   interactionLocked: StudioCardLockState;
-  onNodeConfigMutated: (node: StudioNodeInstance) => void;
-  onNodeConfigValueChange?: (
+  onNodeConfigValueChange: (
     nodeId: string,
     key: string,
     value: StudioJsonValue,
@@ -851,7 +824,6 @@ export function renderInlineConfigPanel(options: InlineConfigPanelOptions): bool
     definition,
     orderedFieldKeys,
     interactionLocked,
-    onNodeConfigMutated,
     onNodeConfigValueChange,
     panelClassName,
     hiddenFieldKeys,
@@ -883,21 +855,6 @@ export function renderInlineConfigPanel(options: InlineConfigPanelOptions): bool
       entry.wrapper.classList.toggle("is-hidden", !isVisible);
     }
   };
-  const handleNodeConfigMutated = (mutatedNode: StudioNodeInstance): void => {
-    refreshVisibilityState();
-    onNodeConfigMutated(mutatedNode);
-  };
-  const handleNodeConfigValueChange = onNodeConfigValueChange
-    ? (
-        nodeId: string,
-        key: string,
-        value: StudioJsonValue,
-        mutationOptions?: StudioGraphNodeMutationOptions
-      ): void => {
-        onNodeConfigValueChange(nodeId, key, value, mutationOptions);
-        refreshVisibilityState();
-      }
-    : undefined;
   let renderedAnyField = false;
 
   for (const field of fields) {
@@ -925,11 +882,10 @@ export function renderInlineConfigPanel(options: InlineConfigPanelOptions): bool
       node, definition, field, fieldEl, interactionLocked,
       pathBrowseOptions, resolveDynamicSelectOptions, openMediaModelPicker,
       compactSingleRow: compactTextareaFieldKeys?.has(field.key) === true,
-      setValue: (value, mutationOptions) => commitInlineConfigValueChange({
-        node, key: field.key, value, mutationOptions,
-        onNodeConfigMutated: handleNodeConfigMutated,
-        onNodeConfigValueChange: handleNodeConfigValueChange,
-      }),
+      setValue: (value, mutationOptions) => {
+        onNodeConfigValueChange(node.id, field.key, value, mutationOptions);
+        refreshVisibilityState();
+      },
     });
     renderedAnyField = true;
   }

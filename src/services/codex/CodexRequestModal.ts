@@ -1,17 +1,17 @@
 import type { App } from 'obsidian';
 import { StandardModal } from '../../core/ui/modals/standard/StandardModal';
-import { isRecord } from '../../studio/utils';
+import { codexClientRequestKind, codexClientResponse } from './CodexClientRequests';
+import { isRecord } from '../../utils/jsonRecord';
 
 export function answerCodexRequest(app: App, method: string, params: Record<string, unknown>, signal: AbortSignal): Promise<unknown> {
-  const permissions = method === 'item/permissions/requestApproval';
-  const approval = permissions || ['item/commandExecution/requestApproval', 'item/fileChange/requestApproval'].includes(method);
-  const question = method === 'item/tool/requestUserInput';
-  if (!approval && !question) return Promise.reject(new Error(`Studio does not support the Codex client request ${method}.`));
+  const kind = codexClientRequestKind(method);
+  if (!kind) return Promise.reject(new Error(`Studio does not support the Codex client request ${method}.`));
+  const approval = kind !== 'question';
   const details = JSON.stringify(params, null, 2);
   if (details.length > 128_000) return Promise.reject(new Error('This native request exceeds the review display limit; it was not approved.'));
-  const decision = (approve: boolean, cancel = false): unknown => permissions
-    ? { permissions: approve && isRecord(params.permissions) ? Object.fromEntries(Object.entries(params.permissions).filter(([, value]) => value !== null)) : {}, scope: 'turn' }
-    : { decision: approve ? 'accept' : cancel ? 'cancel' : 'decline' };
+  const decision = (approve: boolean, cancel = false): unknown => codexClientResponse(kind, params, {
+    action: approve ? 'accept' : cancel ? 'cancel' : 'decline', omitNullPermissions: true,
+  });
   if (signal.aborted) return Promise.resolve(approval ? decision(false, true) : { answers: {} });
   return new Promise(resolve => {
     let answered = false;
@@ -33,7 +33,7 @@ export function answerCodexRequest(app: App, method: string, params: Record<stri
               button.addEventListener('click', () => { input.value = String(option.label); });
             }
           }
-          this.addActionButton('studio.codex.answer', 'Send answer', () => this.finish({ answers: Object.fromEntries(Object.entries(answers).map(([id, input]) => [id, { answers: [input.value] }])) }), true);
+          this.addActionButton('studio.codex.answer', 'Send answer', () => this.finish(codexClientResponse(kind, params, { action: 'accept', answers: Object.fromEntries(Object.entries(answers).map(([id, input]) => [id, [input.value]])) })), true);
         }
       }
       onClose() { signal.removeEventListener('abort', abort); if (!answered) { answered = true; resolve(approval ? decision(false, true) : { answers: {} }); } super.onClose(); }

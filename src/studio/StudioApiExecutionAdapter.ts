@@ -1,7 +1,8 @@
 import { StudioCodexRuns, codexRunKey } from "../services/codex/StudioCodexRuns";
 import { answerCodexRequest } from "../services/codex/CodexRequestModal";
 import { codexOptionsFromSettings, codexVaultDirectory, localTextAgent } from "../services/codex/CodexExecutionSettings";
-import { claudeOptionsFromSettings, runLocalClaude } from "../services/claude/LocalClaudeClient";
+import { runLocalClaude } from "../services/claude/LocalClaudeClient";
+import { claudeOptionsFromSettings } from "../services/claude/ClaudeExecutionOptions";
 import { answerClaudePermission } from "../services/claude/ClaudeRequestModal";
 import type SystemSculptPlugin from "../main";
 import { ManagedJobClient } from "../services/managed/ManagedJobClient";

@@ -1,6 +1,7 @@
-import type { ManagedUploadedImageInput } from "../managed/ManagedJobClient";
+import { managedMediaDeliveryOffset, type ManagedMediaDeliveryClock } from "../managed/ManagedMediaDeliveryTiming";
 import type { ManagedJobRecoveryStore } from "../managed/ManagedJobRecoveryStore";
 import type {
+  ManagedUploadedImageInput,
   ManagedDeliveredImageOutputBytes,
   ManagedImageOutputMetadata,
   ManagedJobRecoveryRecord,
@@ -18,7 +19,6 @@ import type { ManagedImageCreateBody, ManagedMediaJobError } from "../managed/Ma
 import { sha256HexFromBytesPortable } from "../../utils/sha256";
 
 const CAPABILITY = "image_generation" as const;
-const MEDIA_DELIVERY_MAX_OFFSET_MS = 7 * 24 * 60 * 60 * 1_000;
 /** managed-job-protocol-v2 caps image jobs at four references and four outputs. */
 export const MANAGED_IMAGE_INPUT_MAX_COUNT = 4;
 export const MANAGED_IMAGE_OUTPUT_MAX_COUNT = 4;
@@ -204,7 +204,7 @@ export class ManagedImageGenerationAdapter {
   private readonly nowMs: () => number;
   private readonly elapsedNow: () => number;
   private readonly wait: (milliseconds: number, signal: AbortSignal) => Promise<void>;
-  private readonly deliveryClocks = new Map<string, { completedOffsetMs: number; completedAtMs: number }>();
+  private readonly deliveryClocks = new Map<string, ManagedMediaDeliveryClock>();
 
   constructor(private readonly dependencies: ManagedImageGenerationDependencies) {
     this.createRequestId = dependencies.createRequestId ?? defaultRequestId;
@@ -315,11 +315,7 @@ export class ManagedImageGenerationAdapter {
     const delivery = record.mediaDelivery;
     if (!delivery) throw new Error("Managed image delivery timing is unavailable.");
     const clock = this.deliveryClocks.get(record.operationId);
-    const rawOffset = clock
-      ? clock.completedOffsetMs + Math.max(0, this.elapsedNow() - clock.completedAtMs)
-      : this.nowMs() - Date.parse(delivery.downloadStartedAt);
-    const floor = delivery.displayedOffsetMs ?? delivery.downloadCompletedOffsetMs;
-    return Math.min(MEDIA_DELIVERY_MAX_OFFSET_MS, Math.max(floor, Math.round(rawOffset)));
+    return managedMediaDeliveryOffset(delivery, clock, clock ? this.elapsedNow() : this.nowMs());
   }
 
   private beginDispatch(

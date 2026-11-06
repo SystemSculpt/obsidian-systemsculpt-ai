@@ -18,7 +18,8 @@ import {
 } from "../services/transcription/NoteInsertionTarget";
 import { getTranscriptionMaxFileSize } from "../services/transcription/TranscriptionCoordinator";
 import type { SystemSculptSettings } from "../types";
-import { formatFileSize, validateBrowserFileSize } from "../utils/FileValidator";
+import { formatFileSize } from "../utils/FileValidator";
+import { validateBrowserFileSize } from "../core/ui/fileSizeValidation";
 import { toSafeVaultFileName } from "../utils/vaultFileName";
 import { launchAudioTranscriptionPanel } from "./AudioTranscriptionPanel";
 

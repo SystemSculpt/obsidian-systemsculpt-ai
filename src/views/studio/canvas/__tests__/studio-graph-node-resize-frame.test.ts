@@ -113,8 +113,8 @@ describe("mountStudioGraphNodeResizeFrame", () => {
     overrides: Partial<Parameters<typeof mountStudioGraphNodeResizeFrame>[0]> = {}
   ) {
     const nodeEl = document.body.createDiv();
-    const onNodeConfigMutated = jest.fn();
-    const onNodeGeometryMutated = jest.fn();
+    const onCommittedResize = jest.fn();
+    const onContinuousResize = jest.fn();
     const applySize = jest.fn();
     const unmount = mountStudioGraphNodeResizeFrame({
       node,
@@ -123,13 +123,19 @@ describe("mountStudioGraphNodeResizeFrame", () => {
       ariaLabel: "Resize node",
       interactionLocked: false,
       getGraphZoom: () => 1,
-      onNodeConfigMutated,
-      onNodeGeometryMutated,
+      onNodeConfigValueChange: (_id, key, value) => { node.config[key] = value; },
+      onNodeResize: (_id, patch, options) => {
+        if (patch.size) node.size = { ...node.size, ...patch.size } as NonNullable<StudioNodeInstance["size"]>;
+        if (patch.position) node.position = { ...patch.position };
+        if (patch.fontSize !== undefined) node.config.fontSize = patch.fontSize;
+        if (options?.mode === "continuous") onContinuousResize(node);
+        else onCommittedResize(node);
+      },
       applySize,
       readInitialSize: () => ({ width: 300, height: 200 }),
       ...overrides,
     });
-    return { nodeEl, onNodeConfigMutated, onNodeGeometryMutated, applySize, unmount };
+    return { nodeEl, onCommittedResize, onContinuousResize, applySize, unmount };
   }
 
   describe("frame structure", () => {
@@ -225,16 +231,16 @@ describe("mountStudioGraphNodeResizeFrame", () => {
     it.each(["applied", "pending"])("cancels %s resize work on unmount without replaying it over a newer edit", phase => {
       if (phase === "pending") jest.mocked(window.requestAnimationFrame).mockImplementation(() => 42);
       const node = createNode();
-      const { nodeEl, unmount, onNodeConfigMutated, onNodeGeometryMutated } = mountFrame(node);
+      const { nodeEl, unmount, onCommittedResize, onContinuousResize } = mountFrame(node);
       dragZone(nodeEl, "e", { to: { x: 40, y: 0 }, release: false });
       node.size = { width: 900, height: 400 };
-      onNodeGeometryMutated.mockClear();
+      onContinuousResize.mockClear();
 
       unmount();
       window.dispatchEvent(createPointerEvent("pointerup", { pointerId: 7, clientX: 40, clientY: 0 }));
       expect(node.size).toEqual({ width: 900, height: 400 });
-      expect(onNodeConfigMutated).not.toHaveBeenCalled();
-      expect(onNodeGeometryMutated).not.toHaveBeenCalled();
+      expect(onCommittedResize).not.toHaveBeenCalled();
+      expect(onContinuousResize).not.toHaveBeenCalled();
       if (phase === "pending") expect(window.cancelAnimationFrame).toHaveBeenCalledWith(42);
     });
 
@@ -298,7 +304,7 @@ describe("mountStudioGraphNodeResizeFrame", () => {
 
     it("keeps a disabled frame non-interactive", () => {
       const node = createNode("studio.terminal");
-      const { nodeEl, onNodeConfigMutated, onNodeGeometryMutated } = mountFrame(node, {
+      const { nodeEl, onCommittedResize, onContinuousResize } = mountFrame(node, {
         interactionLocked: true,
         readInitialSize: () => ({ width: 640, height: 420 }),
       });
@@ -310,8 +316,8 @@ describe("mountStudioGraphNodeResizeFrame", () => {
       }
 
       dragZone(nodeEl, "se", { to: { x: 120, y: 120 } });
-      expect(onNodeConfigMutated).not.toHaveBeenCalled();
-      expect(onNodeGeometryMutated).not.toHaveBeenCalled();
+      expect(onCommittedResize).not.toHaveBeenCalled();
+      expect(onContinuousResize).not.toHaveBeenCalled();
     });
 
     it("marks the active zone while pointer tracking is live", () => {
@@ -398,9 +404,9 @@ describe("mountStudioGraphNodeResizeFrame", () => {
   });
 
   describe("shared #284 hardening", () => {
-    it("applies zoom-aware deltas on the direct-fallback path and commits config on release", () => {
+    it("applies zoom-aware deltas through the transaction host and commits on release", () => {
       const node = createNode();
-      const { nodeEl, onNodeConfigMutated, onNodeGeometryMutated } = mountFrame(node, {
+      const { nodeEl, onCommittedResize, onContinuousResize } = mountFrame(node, {
         getGraphZoom: () => 2,
         applySize: ({ width, height }) => {
           nodeEl.style.width = `${width}px`;
@@ -419,12 +425,12 @@ describe("mountStudioGraphNodeResizeFrame", () => {
       expect(node.size).toEqual({ width: 320, height: 240 });
       expect(node.config.width).toBeUndefined();
       expect(node.config.height).toBeUndefined();
-      expect(onNodeGeometryMutated).toHaveBeenCalled();
+      expect(onContinuousResize).toHaveBeenCalled();
 
       window.dispatchEvent(
         createPointerEvent("pointerup", { pointerId: 7, clientX: 140, clientY: 180 })
       );
-      expect(onNodeConfigMutated).toHaveBeenCalledTimes(1);
+      expect(onCommittedResize).toHaveBeenCalledTimes(1);
     });
 
     it("clamps resized dimensions to the node bounds", () => {
@@ -453,7 +459,7 @@ describe("mountStudioGraphNodeResizeFrame", () => {
           mutationOrder.push(`callback:${patch.size?.width}x${patch.size?.height}`);
         }
       );
-      const { nodeEl, onNodeConfigMutated, onNodeGeometryMutated } = mountFrame(node, {
+      const { nodeEl, onCommittedResize, onContinuousResize } = mountFrame(node, {
         onNodeResize,
         applySize: ({ width, height }) => {
           mutationOrder.push(`dom:${width}x${height}`);
@@ -483,8 +489,8 @@ describe("mountStudioGraphNodeResizeFrame", () => {
         "callback:340x250",
         "callback:340x250",
       ]);
-      expect(onNodeConfigMutated).not.toHaveBeenCalled();
-      expect(onNodeGeometryMutated).not.toHaveBeenCalled();
+      expect(onCommittedResize).not.toHaveBeenCalled();
+      expect(onContinuousResize).not.toHaveBeenCalled();
     });
 
     it("captures history only on the first mutating frame of a drag", () => {
@@ -805,9 +811,8 @@ describe("mountStudioGraphNodeResizeFrame", () => {
         ariaLabel: "Resize node",
         interactionLocked: false,
         getGraphZoom: () => 1,
-        onNodeConfigMutated: jest.fn(),
+        onNodeConfigValueChange: jest.fn(),
         onNodeResize,
-        onNodeGeometryMutated: jest.fn(),
         applySize: ({ width, height }) => {
           nodeEl.style.width = `${width}px`;
           if (height !== null) {
@@ -837,7 +842,7 @@ describe("mountStudioGraphNodeResizeFrame", () => {
       const node = createNode();
       const showResizeGuides = jest.fn();
       const onResizeGuidesEnd = jest.fn();
-      const { nodeEl, onNodeConfigMutated } = mountFrame(node, {
+      const { nodeEl, onCommittedResize } = mountFrame(node, {
         showResizeGuides,
         onResizeGuidesEnd,
       });
@@ -857,7 +862,7 @@ describe("mountStudioGraphNodeResizeFrame", () => {
         createPointerEvent("pointerup", { pointerId: 7, clientX: 140, clientY: 100 })
       );
       expect(node.size?.width).toBe(340);
-      expect(onNodeConfigMutated).toHaveBeenCalledTimes(1);
+      expect(onCommittedResize).toHaveBeenCalledTimes(1);
       // Release always clears the host's guide lines.
       expect(onResizeGuidesEnd).toHaveBeenCalled();
     });

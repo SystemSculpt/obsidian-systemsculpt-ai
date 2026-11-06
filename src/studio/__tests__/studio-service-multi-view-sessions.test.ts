@@ -132,7 +132,7 @@ describe("StudioService multi-view session ownership", () => {
     const sessionP1 = await service.retainProjectSession("Studio/P1.systemsculpt");
     const sessionP2 = await service.retainProjectSession("Studio/P2.systemsculpt");
 
-    const moved = service.mutateProject("Studio/P1.systemsculpt", "node.position", (project) => {
+    const moved = service.getProjectSession("Studio/P1.systemsculpt")!.mutate("node.position", (project) => {
       const target = project.graph.nodes.find((node) => node.id === "node_p1");
       if (!target) {
         return false;

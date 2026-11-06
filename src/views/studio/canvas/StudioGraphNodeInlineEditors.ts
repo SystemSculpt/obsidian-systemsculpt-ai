@@ -25,8 +25,7 @@ type RenderStudioNodeInlineEditorOptions = {
     toPortId: string;
   }>;
   interactionLocked: StudioCardLockState;
-  onNodeConfigMutated: (node: StudioNodeInstance) => void;
-  onNodeConfigValueChange?: (
+  onNodeConfigValueChange: (
     nodeId: string,
     key: string,
     value: StudioJsonValue,

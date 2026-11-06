@@ -11,8 +11,7 @@ import {
 } from "../StudioImageBoard";
 import { extensionFromPath, getText, inferMimeTypeFromPath, isLikelyAbsolutePath } from "./shared";
 
-const MANAGED_MEDIA_OWNER_KEY = "__studio_managed_by";
-const MANAGED_MEDIA_OWNER = "studio.image_generation_output.v1";
+import { isManagedMediaNode, readManagedMediaSlotIndex } from "../StudioManagedOutputMetadata";
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -31,10 +30,7 @@ function pathFromAssetLike(value: unknown): string {
 
 function resolvePathFromMediaInput(context: StudioNodeExecutionContext): string {
   const mediaInput = context.inputs.media;
-  const sourceIndexRaw = Number(
-    context.node.config.__studio_source_output_index
-  );
-  const sourceIndex = Number.isInteger(sourceIndexRaw) && sourceIndexRaw >= 0 ? sourceIndexRaw : 0;
+  const sourceIndex = readManagedMediaSlotIndex(context.node.config) ?? 0;
 
   if (Array.isArray(mediaInput)) {
     const indexed = pathFromAssetLike(mediaInput[sourceIndex]);
@@ -55,11 +51,6 @@ function resolvePathFromMediaInput(context: StudioNodeExecutionContext): string 
   }
 
   return getText(mediaInput).trim();
-}
-
-function isPinnedGeneratedMediaNode(context: StudioNodeExecutionContext): boolean {
-  const owner = getText(context.node.config[MANAGED_MEDIA_OWNER_KEY]).trim();
-  return owner === MANAGED_MEDIA_OWNER;
 }
 
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tiff", ".avif", ".svg"]);
@@ -151,7 +142,7 @@ export const mediaIngestNode: StudioNodeDefinition = {
     const configuredPath =
       getText(context.node.config.sourcePath).trim() ||
       getText(context.node.config.vaultPath).trim();
-    const sourcePath = isPinnedGeneratedMediaNode(context)
+    const sourcePath = isManagedMediaNode(context.node)
       ? configuredPath || pathFromInput
       : pathFromInput || configuredPath;
     if (!sourcePath) {

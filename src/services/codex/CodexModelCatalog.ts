@@ -1,6 +1,6 @@
 import { connectCodex } from './CodexAppServer';
 import { describeCodexPermissions } from './CodexPermissions';
-import { isRecord } from '../../studio/utils';
+import { isRecord } from '../../utils/jsonRecord';
 export type CodexModel = { model: string; name: string; efforts: string[]; defaultEffort: string; isDefault?: boolean; fastTier?: string };
 export function codexDefaultLabel(models: readonly CodexModel[] | null): string {
   const name = models?.find(model => model.isDefault)?.name;

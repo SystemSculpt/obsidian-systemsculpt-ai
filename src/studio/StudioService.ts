@@ -4,7 +4,7 @@ import type { StudioDocumentEdit, StudioLegacyOriginalCopy } from "./document/St
 import { studioAgentExecution, readStudioCommandExecution } from './StudioCommandExecution';
 import { StudioAgentRuns } from '../services/codex/StudioAgentRuns';
 import { codexOptionsFromSettings } from '../services/codex/CodexExecutionSettings';
-import type { StudioAgentRunView } from '../services/codex/StudioAgentRunStore';
+import type { StudioAgentRunView } from '../services/codex/StudioAgentRunRecord';
 import { Notice, normalizePath } from "obsidian";
 import type SystemSculptPlugin from "../main";
 import { toSafeVaultFileName } from "../utils/vaultFileName";
@@ -23,8 +23,6 @@ import type { StudioObservedRun, StudioRunUpdate } from "./StudioRunObserver";
 import { StudioApiExecutionAdapter } from "./StudioApiExecutionAdapter";
 import {
   StudioProjectSession,
-  type StudioProjectSessionMutateOptions,
-  type StudioProjectSessionMutationReason,
 } from "./StudioProjectSession";
 import { StudioProjectSessionManager } from "./StudioProjectSessionManager";
 import { StudioAgentReferenceFile } from "./StudioAgentReferenceFile";
@@ -47,14 +45,13 @@ import {
   normalizeStudioProjectPath,
   sanitizeStudioProjectName,
 } from "./paths";
-import { parseAndMigrateStudioProject, serializeStudioProject, type StudioProjectParseContext } from "./schema";
+import { serializeStudioProject, type StudioProjectParseContext } from "./schema";
 import { STUDIO_PROJECT_SCHEMA_V2 } from "./types";
 import { sha256HexFromArrayBuffer } from "../utils/sha256";
 import {
   assertStableStudioProjectAgentDocumentFieldsUnchanged,
-  assertValidStudioProjectAgentDocumentStructure,
 } from "./StudioProjectAgentDocumentValidation";
-import { validateStudioProjectForAgentEdit } from "./StudioProjectAgentContract";
+import { admitStudioProjectText } from "./StudioProjectAdmission";
 
 const IMPORTED_FILE_SEGMENT_FALLBACK = "import";
 
@@ -192,32 +189,6 @@ export class StudioService {
 
   getProjectSession(projectPath: string): StudioProjectSession | null {
     return this.projectSessionManager.getSession(projectPath);
-  }
-
-  mutateProject(
-    projectPath: string,
-    reason: StudioProjectSessionMutationReason,
-    mutator: (project: StudioProjectV1) => boolean | void,
-    options?: StudioProjectSessionMutateOptions
-  ): boolean {
-    const session = this.projectSessionManager.getSession(projectPath);
-    if (!session) {
-      return false;
-    }
-    return session.mutate(reason, mutator, options);
-  }
-
-  async mutateProjectAsync(
-    projectPath: string,
-    reason: StudioProjectSessionMutationReason,
-    mutator: (project: StudioProjectV1) => Promise<boolean | void>,
-    options?: StudioProjectSessionMutateOptions
-  ): Promise<boolean> {
-    const session = this.projectSessionManager.getSession(projectPath);
-    if (!session) {
-      return false;
-    }
-    return await session.mutateAsync(reason, mutator, options);
   }
 
   private async buildProjectSession(
@@ -563,13 +534,7 @@ export class StudioService {
   lintProjectText(rawText: string, context?: StudioProjectParseContext): StudioProjectLintResult {
     try {
       const projectText = String(rawText || "");
-      assertValidStudioProjectAgentDocumentStructure(JSON.parse(projectText));
-      const project = parseAndMigrateStudioProject(projectText, context);
-      // Lint gates whether Studio adopts an edited document, so it compiles
-      // in document mode like the persistence gate. Run readiness (required
-      // configs and inputs) is enforced by the runtime when a run starts.
-      this.compiler.compile(project, this.registry, { validation: "document" });
-      validateStudioProjectForAgentEdit(project);
+      const { project } = admitStudioProjectText(projectText, context);
       return {
         ok: true,
         project,

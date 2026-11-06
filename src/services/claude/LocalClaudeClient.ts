@@ -1,11 +1,10 @@
+import { resolveClaudeOptions, type ClaudeExecutionOptions } from './ClaudeExecutionOptions';
+import { NativeTurnText } from '../codex/NativeTurnText';
 import { desktopHost } from '../../platform/desktopOnly';
-import { isRecord } from '../../studio/utils';
+import { isRecord } from '../../utils/jsonRecord';
 import { readLocalAgentLaunchConfig, resolveLocalAgentCommand } from '../codex/LocalAgentLaunch';
 import { LocalAgentUsageLimitError } from '../codex/LocalAgents';
 
-const CLAUDE_PERMISSION_MODES = ['auto', 'manual', 'acceptEdits', 'plan', 'settings'] as const;
-export type ClaudePermissionMode = typeof CLAUDE_PERMISSION_MODES[number];
-export type ClaudeExecutionOptions = { model?: string; permissionMode?: string };
 export type ClaudeRequest = ClaudeExecutionOptions & { prompt: string; workingDirectory: string; sessionId?: string; images?: readonly string[] };
 export type ClaudeResult = { sessionId: string; text: string };
 export type ClaudePermissionRequest = {
@@ -60,15 +59,6 @@ function rejectsAutoMode(message: string): boolean {
     && /invalid|unsupported|not (?:available|supported|allowed|enabled)|unavailable|not eligible|requires|choices|cannot use/i.test(message);
 }
 
-export function resolveClaudeOptions(options: ClaudeExecutionOptions): Required<ClaudeExecutionOptions> & { permissionMode: ClaudePermissionMode } {
-  const model = options.model?.trim() || '';
-  const selected = options.permissionMode?.trim() || 'auto';
-  // "default" was the old CLI spelling of Ask; persisted defaults migrate to Auto.
-  const permissionMode = selected === 'default' ? 'manual' : selected;
-  if (model && !/^[A-Za-z0-9][A-Za-z0-9._:[\]-]{0,99}$/.test(model)) throw new Error('Invalid Claude Code model.');
-  if (!(CLAUDE_PERMISSION_MODES as readonly string[]).includes(permissionMode)) throw new Error('Invalid Claude Code permission mode.');
-  return { model, permissionMode: permissionMode as ClaudePermissionMode };
-}
 
 /**
  * Print mode with JSON streams on both ends; permission prompts come back to the plugin over stdio.
@@ -173,10 +163,10 @@ async function runClaudeAttempt(input: ClaudeRequest, signal: AbortSignal, callb
     return await new Promise<ClaudeResult>((resolve, reject) => {
       const prompts = new Map<string, AbortController>();
       const toolBlocks = new Map<number, { id: string; name: string; inputText: string }>();
-      let buffer = '', stderr = '', settled = false, text = '', partial = '', signedOut = false, nextRequest = 0;
+      let buffer = '', stderr = '', settled = false, signedOut = false, nextRequest = 0;
       let initialized = false, activityStarted = false, pipeFailure = false, fallbackRequestId: string | undefined;
       const auto = resolveClaudeOptions(input).permissionMode === 'auto';
-      let textLength = 0, partialLength = 0;
+      const text = new NativeTurnText({ mode: owner ? 'offsets' : 'snapshot', snapshot: 'joined-segments' }, (...update) => callbacks.text?.(...update));
       // A new identity is saved once Claude Code confirms it, so a launch that never started cannot leave a chat resuming a missing session.
       let saving: Promise<void> | undefined = input.sessionId ? Promise.resolve() : undefined;
       let outcome: { result?: ClaudeResult; error?: Error } | undefined;
@@ -196,7 +186,6 @@ async function runClaudeAttempt(input: ClaudeRequest, signal: AbortSignal, callb
         return closed;
       };
       const write = (value: unknown) => { if (!child.stdin.destroyed && !child.stdin.writableEnded) child.stdin.write(`${JSON.stringify(value)}\n`); };
-      const publish = () => callbacks.text?.([text, partial].filter(Boolean).join('\n\n'));
       const finish = (value: { result?: ClaudeResult; error?: Error }) => {
         if (settled) { if (value.error && owner) void closeProcess(); return; }
         outcome = value; settled = true; signal.removeEventListener('abort', abort);
@@ -308,7 +297,7 @@ async function runClaudeAttempt(input: ClaudeRequest, signal: AbortSignal, callb
           const streamed = event.event;
           if (streamed.type === 'message_start') toolBlocks.clear();
           if (streamed.type === 'content_block_start') {
-            partial = ''; partialLength = 0;
+            text.startSegment();
             if (isRecord(streamed.content_block) && streamed.content_block.type === 'tool_use' && typeof streamed.content_block.id === 'string') {
               const block = streamed.content_block;
               toolBlocks.set(Number(streamed.index), { id: String(block.id), name: String(block.name), inputText: '' });
@@ -329,11 +318,7 @@ async function runClaudeAttempt(input: ClaudeRequest, signal: AbortSignal, callb
             }
           }
           if (streamed.type === 'content_block_delta' && isRecord(streamed.delta) && streamed.delta.type === 'text_delta' && typeof streamed.delta.text === 'string') {
-            const separator = textLength ? '\n\n' : '';
-            if (owner) callbacks.text?.((partialLength ? '' : separator) + streamed.delta.text, textLength + (partialLength ? separator.length + partialLength : 0));
-            partialLength += streamed.delta.text.length;
-            partial = (partial + streamed.delta.text).slice(-256_000);
-            if (!owner) publish();
+            text.append(streamed.delta.text);
           }
           return;
         }
@@ -342,13 +327,11 @@ async function runClaudeAttempt(input: ClaudeRequest, signal: AbortSignal, callb
             const content = Array.isArray(event.message.content) ? event.message.content : [];
             const notice = content.filter(block => isRecord(block) && block.type === 'text' && typeof block.text === 'string').map(block => String(block.text)).join('\n\n');
             // Retract only text matching the native notice, not genuine unfinished output.
+            const partial = text.partialText, partialLength = text.partialLength;
             const noticeLength = partial && notice
               ? partialLength === partial.length && notice.startsWith(partial) ? partialLength : partial.endsWith(notice) ? notice.length : 0
               : 0;
-            if (noticeLength) {
-              partial = partial.slice(0, -noticeLength); partialLength -= noticeLength;
-              if (owner) callbacks.text?.('', textLength + partialLength + (textLength && partialLength ? 2 : 0)); else publish();
-            }
+            if (noticeLength) text.retractPartial(noticeLength);
             finish({ error: new LocalAgentUsageLimitError(notice || 'Claude Code reported a usage or billing limit.') });
             return;
           }
@@ -356,11 +339,7 @@ async function runClaudeAttempt(input: ClaudeRequest, signal: AbortSignal, callb
           for (const block of Array.isArray(event.message.content) ? event.message.content : []) {
             if (!isRecord(block)) continue;
             if (block.type === 'text' && typeof block.text === 'string' && !signedOut) {
-              const segment = (textLength ? '\n\n' : '') + block.text;
-              if (owner) callbacks.text?.(segment, textLength);
-              textLength += segment.length; partialLength = 0;
-              text = (text + (text ? '\n\n' : '') + block.text).slice(-256_000); partial = '';
-              if (!owner) publish();
+              text.complete(block.text);
               callbacks.log(block.text.slice(-8000));
             } else if (block.type === 'tool_use') {
               callbacks.log(`Tool: ${toolSummary(String(block.name), block.input, input.workingDirectory)}`);
@@ -383,7 +362,7 @@ async function runClaudeAttempt(input: ClaudeRequest, signal: AbortSignal, callb
               pendingResult = undefined;
               return;
             }
-            pendingResult = { sessionId, text: typeof event.result === 'string' ? event.result : text };
+            pendingResult = { sessionId, text: typeof event.result === 'string' ? event.result : text.text };
             finishWhenIdle();
           }
         }
@@ -411,7 +390,7 @@ async function runClaudeAttempt(input: ClaudeRequest, signal: AbortSignal, callb
             const nextMessage = userMessage(nextInput.prompt, nextInput.images || []);
             return new Promise<ClaudeResult>((nextResolve, nextReject) => {
               input = nextInput; signal = nextSignal; callbacks = nextCallbacks; resolve = nextResolve; reject = nextReject;
-              buffer = ''; stderr = ''; text = ''; partial = ''; textLength = 0; partialLength = 0; signedOut = false; outcome = undefined; settled = false; toolBlocks.clear();
+              buffer = ''; stderr = ''; text.reset(); signedOut = false; outcome = undefined; settled = false; toolBlocks.clear();
               pendingResult = undefined;
               if (nativeState !== undefined) nativeState = 'running';
               signal.addEventListener('abort', abort, { once: true });
@@ -427,8 +406,4 @@ async function runClaudeAttempt(input: ClaudeRequest, signal: AbortSignal, callb
   } finally {
     if (!retained) activeSessions.delete(sessionId);
   }
-}
-
-export function claudeOptionsFromSettings(settings: { claudeModel?: string; claudePermissionMode?: string }): ReturnType<typeof resolveClaudeOptions> {
-  return resolveClaudeOptions({ model: settings.claudeModel, permissionMode: settings.claudePermissionMode });
 }

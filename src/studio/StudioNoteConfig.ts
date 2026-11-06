@@ -1,6 +1,6 @@
 import { normalizeVaultRelativePath } from "../utils/vaultPathUtils";
 import type { StudioJsonValue } from "./types";
-import { isRecord } from "./utils";
+import { isRecord } from "../utils/jsonRecord";
 
 export type StudioNoteConfigItem = {
   path: string;

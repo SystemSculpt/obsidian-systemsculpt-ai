@@ -26,8 +26,7 @@ function render(kind: string, busy: boolean, config: StudioNodeInstance["config"
       isPendingConnectionSource: () => false, getPendingConnection: () => null,
     } as any,
     findNodeDefinition: () => definition, resolveAssetPreviewSrc: path => `app://vault/${path}`, onRunNode: no, onCopyTextGenerationPromptBundle: no,
-    onToggleTextGenerationOutputLock: no, onRemoveNode: no, onNodeTitleInput: no, onNodeConfigMutated: no,
-    onNodeConfigValueChange: no, onNodeSourceApply: no, onNodeGeometryMutated: no,
+    onToggleTextGenerationOutputLock: no, onRemoveNode: no, onNodeTitleInput: no,  onNodeResize: jest.fn(), onNodeConfigValueChange: no, onNodeSourceApply: no, onNodeGeometryMutated: no,
     takeTextNodeEditorMountState: () => ({ isEditing: false, shouldAutoFocus: false }),
     onRequestTextNodeEdit: no, onStopTextNodeEdit: no, onRevealPathInFinder: no,
   });

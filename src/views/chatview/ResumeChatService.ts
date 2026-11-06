@@ -1,10 +1,7 @@
 import { App, MarkdownView, WorkspaceLeaf, TFile, Notice } from "obsidian";
 import SystemSculptPlugin from "../../main";
-import {
-  ChatStorageService,
-  isPathInDirectory,
-  resolveChatsDirectory,
-} from "./ChatStorageService";
+import { isPathInKnownChatsDirectory, resolveChatsDirectory } from "./storage/ChatTranscriptLocations";
+import { ChatStorageService } from "./ChatStorageService";
 import { openChatResumeDescriptor } from "./ChatResumeUtils";
 import { hasChatIdentityMetadata } from "./storage/ChatFrontmatterIdentity";
 
@@ -162,7 +159,7 @@ export class ResumeChatService {
 
   public isChatHistoryFile(file: TFile): boolean {
     // Check if file is in the chats directory
-    if (!isPathInDirectory(file.path, resolveChatsDirectory(this.plugin.settings))) return false;
+    if (!isPathInKnownChatsDirectory(file.path, this.plugin.settings)) return false;
 
     // Check if it's a markdown file
     if (!file.path.endsWith('.md')) return false;

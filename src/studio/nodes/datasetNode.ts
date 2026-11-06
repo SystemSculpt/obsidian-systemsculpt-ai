@@ -7,7 +7,7 @@ import type {
   StudioNodeOutputMap,
   StudioPortDefinition,
 } from "../types";
-import { isRecord } from "../utils";
+import { isRecord } from "../../utils/jsonRecord";
 import { getText } from "./shared";
 import { toSafeVaultFileName } from "../../utils/vaultFileName";
 

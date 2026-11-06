@@ -1,8 +1,8 @@
 import { parseDocument } from 'yaml';
 import { parser } from '@lezer/javascript';
 import type { StudioJsonValue } from './types';
-import { isStudioDynamicPortId, isStudioPortDataType, STUDIO_PROCESS_FIXED_OUTPUT_PORTS } from './types';
-import { isRecord } from './utils';
+import { isStudioDynamicPortId, isStudioPortDataType, STUDIO_DYNAMIC_PORT_MAX_COUNT, STUDIO_PROCESS_FIXED_OUTPUT_PORTS } from './types';
+import { isRecord } from '../utils/jsonRecord';
 
 const STUDIO_SCRIPT_MAX_BYTES = 256 * 1024;
 export const STUDIO_SCRIPT_TEMPLATE = `/* studio
@@ -20,7 +20,7 @@ const META_KEYS = new Set(['executable', 'workingDirectory', 'inputs', 'outputs'
 
 function ports(value: unknown, direction: 'inputs' | 'outputs'): StudioJsonValue[] {
   if (!isRecord(value)) throw new Error(`Script ${direction} must map port names to types.`);
-  if (Object.keys(value).length > 32) throw new Error('Scripts support at most 32 ports per direction.');
+  if (Object.keys(value).length > STUDIO_DYNAMIC_PORT_MAX_COUNT) throw new Error(`Scripts support at most ${STUDIO_DYNAMIC_PORT_MAX_COUNT} ports per direction.`);
   const reserved = new Set<string>(direction === 'outputs' ? STUDIO_PROCESS_FIXED_OUTPUT_PORTS.map(p => p.id) : []);
   return Object.entries(value).map(([id, declaration]) => {
     const type = typeof declaration === 'string' ? declaration : isRecord(declaration) ? declaration.type : null;

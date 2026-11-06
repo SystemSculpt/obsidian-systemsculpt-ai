@@ -100,7 +100,7 @@ function harness(node: StudioNodeInstance, initial: { previewReady?: boolean } =
     shapeLayer: { selection: { shapeIds: [], arrowIds: [] }, onSelect: no, onMoveSelection: no, onResizeShape: no, onLabelChange: no, onArrowLabelChange: no, onConnectShapes: no, registerLayerHandle: no },
     onZoomIn: no, onZoomOut: no, onZoomReset: no, onZoomOverview: no, onToggleNodeDetailMode: no, onOpenNodeContextMenu: no,
     onCreateTextNodeAtPosition: no, onRunNode: no, onCopyTextGenerationPromptBundle: no, onToggleTextGenerationOutputLock: no,
-    onRemoveNode: no, onNodeTitleInput: no, onNodeConfigMutated: no, onNodeConfigValueChange: no, onNodeGeometryMutated: no,
+    onRemoveNode: no, onNodeTitleInput: no,  onNodeResize: jest.fn(), onNodeConfigValueChange: no, onNodeGeometryMutated: no,
     takeTextNodeEditorMountState: () => ({ isEditing: false, shouldAutoFocus: false }), onRequestTextNodeEdit: no, onStopTextNodeEdit: no, onRevealPathInFinder: no,
     onOpenImageEditor: no,
     isImageNodeEditing: (id) => state.editing && id === "media",

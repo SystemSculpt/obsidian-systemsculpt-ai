@@ -8,7 +8,7 @@ import { readStudioCommandActions } from '../../../studio/nodes/commandCenterNod
 import { hasHostCapability } from '../../../platform/hostCapabilities';
 import type { StudioNodeDefinition, StudioNodeInstance } from '../../../studio/types';
 import type { StudioAgentRuns } from '../../../services/codex/StudioAgentRuns';
-import { isActiveAgentRun } from '../../../services/codex/StudioAgentRunStore';
+import { isActiveAgentRun } from '../../../services/codex/StudioAgentRunRecord';
 import { createStudioAction } from '../StudioAction';
 import { markStudioNodeCardInteractive } from './StudioGraphNodeCardPointer';
 

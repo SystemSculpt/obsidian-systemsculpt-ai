@@ -1,3 +1,4 @@
+import type { ClientContinuationDeliveries } from "../ClientContinuationDeliveries";
 import type { AgentChatTransportSegmentSummaryEvent, AgentRunFailureCaptureEvent } from "../../../core/diagnostics/AgentIncidentCapture";
 import {
   PlatformRequestClient,
@@ -36,6 +37,10 @@ import {
 } from "../ChatSession";
 import { AgentMutationJournal } from "../MutationJournal";
 import { ConversationProjection } from "../ConversationProjection";
+
+function pendingContinuations(agent: AgentChatSession): ClientContinuationDeliveries {
+  return (agent as unknown as { continuations: ClientContinuationDeliveries }).continuations;
+}
 
 const CONVERSATION_ID = `conversation_${"a".repeat(32)}`;
 const CLIENT_ID = `client_${"b".repeat(32)}`;
@@ -1415,8 +1420,7 @@ describe("AgentChatSession", () => {
       parts,
     } as unknown as AgentConversationSnapshot;
     const internals = harness.agent as unknown as {
-      pendingDeliveries: { size: number };
-      pendingApprovalDeliveries: { size: number };
+      continuations: { results: { size: number }; approvals: { size: number } };
       pendingCancelRequestId: string | null;
       runStalled: boolean;
       awaitingClientWork: boolean;
@@ -1437,8 +1441,8 @@ describe("AgentChatSession", () => {
         }>,
       ): void;
     };
-    internals.pendingDeliveries = { size: 513 };
-    internals.pendingApprovalDeliveries = { size: 513 };
+    jest.spyOn(internals.continuations, 'results', 'get').mockReturnValue({ size: 513 });
+    jest.spyOn(internals.continuations, 'approvals', 'get').mockReturnValue({ size: 513 });
     internals.pendingCancelRequestId = requestId;
     internals.runStalled = true;
     internals.awaitingClientWork = true;
@@ -5601,9 +5605,7 @@ describe("AgentChatSession", () => {
       tool_call_id: callId,
       status: "accepted",
     }));
-    await waitFor(() => (harness.agent as unknown as {
-      pendingApprovalDeliveries: ReadonlyMap<string, { acknowledged: boolean }>;
-    }).pendingApprovalDeliveries.get(callId)?.acknowledged === true);
+    await waitFor(() => pendingContinuations(harness.agent).approvals.get(callId)?.acknowledged === true);
 
     // A separate assistant detail can advance without changing the requested
     // approval. The accepted delivery still means the server owns the wait.
@@ -6240,9 +6242,7 @@ describe("AgentChatSession", () => {
       status: "accepted",
     }));
     await tick();
-    await waitFor(() => (harness.agent as unknown as {
-      pendingApprovalDeliveries: ReadonlyMap<string, { acknowledged: boolean }>;
-    }).pendingApprovalDeliveries.get(callId)?.acknowledged === true);
+    await waitFor(() => pendingContinuations(harness.agent).approvals.get(callId)?.acknowledged === true);
     expect(harness.onLifecycle.mock.calls.filter(([record]) =>
       record.code === "approval_acknowledged_approved"
       && record.toolCallId === callId)).toHaveLength(1);
@@ -6330,12 +6330,8 @@ describe("AgentChatSession", () => {
       status: "accepted",
     }));
     await tick();
-    await waitFor(() => (harness.agent as unknown as {
-      pendingDeliveries: ReadonlyMap<string, { acknowledged: boolean }>;
-    }).pendingDeliveries.get(callId)?.acknowledged === true);
-    expect((harness.agent as unknown as {
-      pendingDeliveries: ReadonlyMap<string, unknown>;
-    }).pendingDeliveries.has(callId)).toBe(true);
+    await waitFor(() => pendingContinuations(harness.agent).results.get(callId)?.acknowledged === true);
+    expect(pendingContinuations(harness.agent).results.has(callId)).toBe(true);
     const beforeStreamFailure = harness.onLifecycle.mock.calls
       .map(([record]) => record as Record<string, unknown>)
       .filter((record) => record.requestId === turnId);
@@ -6379,9 +6375,7 @@ describe("AgentChatSession", () => {
       tool_call_id: callId,
       status: "accepted",
     }));
-    await waitFor(() => (harness.agent as unknown as {
-      pendingDeliveries: ReadonlyMap<string, { acknowledged: boolean }>;
-    }).pendingDeliveries.get(callId)?.acknowledged === true);
+    await waitFor(() => pendingContinuations(harness.agent).results.get(callId)?.acknowledged === true);
     expect(harness.onLifecycle.mock.calls.filter(([record]) =>
       record.code === "tool_result_acknowledged_succeeded"
       && record.toolCallId === callId)).toHaveLength(1);
@@ -6448,9 +6442,7 @@ describe("AgentChatSession", () => {
       tool_call_id: callId,
       status: "accepted",
     }));
-    await waitFor(() => (harness.agent as unknown as {
-      pendingDeliveries: ReadonlyMap<string, { acknowledged: boolean }>;
-    }).pendingDeliveries.get(callId)?.acknowledged === true);
+    await waitFor(() => pendingContinuations(harness.agent).results.get(callId)?.acknowledged === true);
     server.endTurn();
 
     await waitFor(() => resynchronizationDelayMs.mock.calls.some(([attempt]) =>
@@ -6515,9 +6507,7 @@ describe("AgentChatSession", () => {
       tool_call_id: callId,
       status: "accepted",
     }));
-    await waitFor(() => (harness.agent as unknown as {
-      pendingDeliveries: ReadonlyMap<string, { acknowledged: boolean }>;
-    }).pendingDeliveries.get(callId)?.acknowledged === true);
+    await waitFor(() => pendingContinuations(harness.agent).results.get(callId)?.acknowledged === true);
     server.endTurn();
 
     await waitFor(() => resynchronizationDelayMs.mock.calls.some(([attempt]) =>
@@ -6637,9 +6627,7 @@ describe("AgentChatSession", () => {
       tool_call_id: callId,
       status: "accepted",
     }));
-    await waitFor(() => (harness.agent as unknown as {
-      pendingDeliveries: ReadonlyMap<string, { acknowledged: boolean }>;
-    }).pendingDeliveries.get(callId)?.acknowledged === true);
+    await waitFor(() => pendingContinuations(harness.agent).results.get(callId)?.acknowledged === true);
     server.snapshotMessages = [user, authoritativeAssistant];
     server.serverMessage(assistantSnapshot(turnId, authoritativeAssistant));
     server.endTurn();
@@ -6651,13 +6639,9 @@ describe("AgentChatSession", () => {
       await waitFor(() => harness.commands(server).filter((command) =>
         command.kind === "client_tool_result"
         && command.tool_call_id === callId).length === expectedDeliveryCount);
-      expect((harness.agent as unknown as {
-        pendingDeliveries: ReadonlyMap<string, { acknowledged: boolean }>;
-      }).pendingDeliveries.get(callId)?.acknowledged).toBe(false);
+      expect(pendingContinuations(harness.agent).results.get(callId)?.acknowledged).toBe(false);
     } else {
-      await waitFor(() => !(harness.agent as unknown as {
-        pendingDeliveries: ReadonlyMap<string, unknown>;
-      }).pendingDeliveries.has(callId));
+      await waitFor(() => !pendingContinuations(harness.agent).results.has(callId));
       const transport = (harness.agent as unknown as {
         transport: { forceReconnect(): Promise<void> } | null;
       }).transport;
@@ -6741,9 +6725,7 @@ describe("AgentChatSession", () => {
     expect(deliveries[1]).toEqual(deliveries[0]);
     expect(harness.executeLocalTool.mock.calls.filter(([call]) =>
       call.callId === callId)).toHaveLength(1);
-    expect((harness.agent as unknown as {
-      pendingDeliveries: ReadonlyMap<string, unknown>;
-    }).pendingDeliveries.has(callId)).toBe(true);
+    expect(pendingContinuations(harness.agent).results.has(callId)).toBe(true);
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(harness.commands(server).filter((command) =>
       command.kind === "client_tool_result"
@@ -6909,9 +6891,7 @@ describe("AgentChatSession", () => {
     expect((harness.agent as unknown as {
       session: { current: { runState: { state: string } } } | null;
     }).session?.current.runState.state).toBe("idle");
-    expect((harness.agent as unknown as {
-      pendingDeliveries: ReadonlyMap<string, { inFlight: boolean }>;
-    }).pendingDeliveries.get(callId)?.inFlight).toBe(true);
+    expect(pendingContinuations(harness.agent).results.get(callId)?.inFlight).toBe(true);
 
     for (let duplicate = 0; duplicate < 2; duplicate += 1) {
       server.serverMessage(event("command_ack", {
@@ -6988,9 +6968,7 @@ describe("AgentChatSession", () => {
     expect((harness.agent as unknown as {
       session: { current: { runState: { state: string } } } | null;
     }).session?.current.runState.state).toBe("idle");
-    expect((harness.agent as unknown as {
-      pendingApprovalDeliveries: ReadonlyMap<string, { inFlight: boolean }>;
-    }).pendingApprovalDeliveries.get(callId)?.inFlight).toBe(true);
+    expect(pendingContinuations(harness.agent).approvals.get(callId)?.inFlight).toBe(true);
 
     for (let duplicate = 0; duplicate < 2; duplicate += 1) {
       server.serverMessage(event("command_ack", {
@@ -7074,9 +7052,7 @@ describe("AgentChatSession", () => {
     await waitFor(() => harness.onLifecycle.mock.calls.some(([record]) =>
       record.code === "tool_result_acknowledged_succeeded"
       && record.toolCallId === callId));
-    expect((harness.agent as unknown as {
-      pendingDeliveries: ReadonlyMap<string, unknown>;
-    }).pendingDeliveries.has(callId)).toBe(false);
+    expect(pendingContinuations(harness.agent).results.has(callId)).toBe(false);
     const transport = (harness.agent as unknown as {
       transport: { forceReconnect(): Promise<void> } | null;
     }).transport;
@@ -7151,9 +7127,7 @@ describe("AgentChatSession", () => {
     await waitFor(() => harness.onLifecycle.mock.calls.some(([record]) =>
       record.code === "approval_acknowledged_denied"
       && record.toolCallId === callId));
-    expect((harness.agent as unknown as {
-      pendingApprovalDeliveries: ReadonlyMap<string, unknown>;
-    }).pendingApprovalDeliveries.has(callId)).toBe(false);
+    expect(pendingContinuations(harness.agent).approvals.has(callId)).toBe(false);
     if (supersede) {
       const transport = (harness.agent as unknown as {
         transport: { forceReconnect(): Promise<void> } | null;

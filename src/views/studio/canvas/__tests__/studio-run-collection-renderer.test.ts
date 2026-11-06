@@ -1,7 +1,7 @@
 /** @jest-environment jsdom */
 import { renderStudioRunCollection } from '../StudioRunCollectionRenderer';
 import { StudioRunDetailModal } from '../StudioRunDetailModal';
-import type { StudioAgentRun } from '../../../../services/codex/StudioAgentRunStore';
+import type { StudioAgentRun } from '../../../../services/codex/StudioAgentRunRecord';
 import { runCollectionPorts } from '../../../../studio/nodes/runCollectionNode';
 import { isStudioVisualOnlyNodeKind } from '../../../../studio/StudioNodeKinds';
 

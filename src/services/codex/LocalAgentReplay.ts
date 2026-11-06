@@ -1,7 +1,7 @@
 import type { ChatMessage, MultiPartContent } from "../../types";
 import { parseAttachedTextContent } from "../../chat/ChatAttachmentContent";
 import { readManagedToolCallFunction } from "../../chat/managed/ManagedToolExecution";
-import { isRecord } from "../../studio/utils";
+import { isRecord } from "../../utils/jsonRecord";
 
 /** Input fields that name what a tool acted on; the first one present wins (a command before its description). */
 const TOOL_TARGET_FIELDS = ["command", "file_path", "notebook_path", "path", "url", "query", "pattern", "description"] as const;

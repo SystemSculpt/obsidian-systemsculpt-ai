@@ -16,6 +16,13 @@ export interface AppliedFileEdits {
   skipped: SkippedEdit[];
 }
 
+/** Strict planning fails atomically but retains the first unmatched edit for presentation. */
+export class FileEditApplicationError extends Error {
+  constructor(public readonly index: number, cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause));
+  }
+}
+
 /**
  * Apply every edit in order. Under `strict` a non-matching edit throws;
  * otherwise it is collected in `skipped` with its reason and the remaining
@@ -35,7 +42,7 @@ export function applyFileEdits(
       modifiedContent = applySingleFileEdit(modifiedContent, edit);
       appliedCount++;
     } catch (e) {
-      if (strict) throw e;
+      if (strict) throw new FileEditApplicationError(index, e);
       skipped.push({
         index,
         reason: e instanceof Error ? e.message : String(e),

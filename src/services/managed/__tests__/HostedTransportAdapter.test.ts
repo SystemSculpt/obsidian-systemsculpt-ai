@@ -340,17 +340,21 @@ describe("HostedTransportAdapter", () => {
     expect(request.mock.calls[0][0].headers).not.toHaveProperty("x-plugin-version");
   });
 
-  it("uses native binary transport for the fixed first-party managed image output route", async () => {
+  it("uses native binary transport for the fixed first-party managed media output routes", async () => {
     const adapter = new HostedTransportAdapter({ baseUrl: "https://api.test", pluginVersion: "6", licenseKey: () => "secret" });
-    const headers = { "x-systemsculpt-image-output-contract": "managed-image-output-v1" };
-    await adapter.managedImageOutput("/api/plugin/images/generations/jobs/123e4567-e89b-42d3-a456-426614174000/outputs/0", headers);
+    const headers = { "x-systemsculpt-job-contract": "managed-job-protocol-v2" };
+    await adapter.managedMediaOutput("/api/plugin/images/generations/jobs/123e4567-e89b-42d3-a456-426614174000/outputs/0", headers);
     expect(request).toHaveBeenCalledWith(expect.objectContaining({
       url: "https://api.test/api/plugin/images/generations/jobs/123e4567-e89b-42d3-a456-426614174000/outputs/0",
       method: "GET", headers: expect.objectContaining(headers), licenseKey: "secret",
       transport: "requestUrl", responseEncoding: "arrayBuffer", maxResponseBytes: 30 * 1024 * 1024,
     }));
-    await expect(adapter.managedImageOutput("https://signed.test/output", headers)).rejects.toThrow("Invalid managed image output path");
-    await expect(adapter.managedImageOutput("/api/plugin/documents/id/download", headers)).rejects.toThrow("Invalid managed image output path");
+    await adapter.managedMediaOutput("/api/plugin/videos/generations/jobs/123e4567-e89b-42d3-a456-426614174000/outputs/0", headers);
+    expect(request).toHaveBeenLastCalledWith(expect.objectContaining({
+      transport: "requestUrl", responseEncoding: "arrayBuffer", maxResponseBytes: 256 * 1024 * 1024,
+    }));
+    await expect(adapter.managedMediaOutput("https://signed.test/output", headers)).rejects.toThrow("Invalid managed media output path");
+    await expect(adapter.managedMediaOutput("/api/plugin/documents/id/download", headers)).rejects.toThrow("Invalid managed media output path");
   });
 
   it("posts managed embedding index bytes once through bounded native transport with only the dedicated contract", async () => {

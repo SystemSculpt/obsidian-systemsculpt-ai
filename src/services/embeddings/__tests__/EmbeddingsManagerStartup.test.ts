@@ -17,6 +17,8 @@ import { installFakeIndexedDb } from "./support/fakeIndexedDb";
 import {
   MANAGED_EMBEDDINGS_INDEX_CONTRACT,
   MANAGED_EMBEDDINGS_INDEX_VECTOR_ENCODING,
+} from "../gateway/ManagedEmbeddingsIndexContract";
+import {
   ManagedEmbeddingsError,
 } from "../gateway/ManagedEmbeddingsIndexAdapter";
 

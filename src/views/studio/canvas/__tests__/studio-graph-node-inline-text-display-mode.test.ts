@@ -65,7 +65,7 @@ describe("StudioGraphNodeInlineEditors text display mode", () => {
       nodeRunState: IDLE_NODE_RUN_STATE,
       definition: definitionFixture("studio.text_output"),
       interactionLocked: false,
-      onNodeConfigMutated: jest.fn(),
+      onNodeConfigValueChange: (_id: string, key: string, value: StudioNodeInstance["config"][string]) => { node.config[key] = value; },
     });
 
     expect(rendered).toBe(true);
@@ -90,7 +90,7 @@ describe("StudioGraphNodeInlineEditors text display mode", () => {
         items: [{ path: "Notes/Campaign.md", enabled: true }],
       },
     });
-    const onNodeConfigMutated = jest.fn();
+    Object.freeze(node.config);
     const onNodeConfigValueChange = jest.fn();
     const nodeRunState: StudioNodeRunDisplayState = {
       status: "succeeded",
@@ -105,8 +105,7 @@ describe("StudioGraphNodeInlineEditors text display mode", () => {
       nodeRunState,
       definition: definitionFixture("studio.note"),
       interactionLocked: false,
-      onNodeConfigMutated,
-      onNodeConfigValueChange,
+       onNodeConfigValueChange,
     });
 
     const textarea = nodeEl.querySelector<HTMLTextAreaElement>(".ss-studio-node-text-editor");
@@ -119,7 +118,7 @@ describe("StudioGraphNodeInlineEditors text display mode", () => {
     expect(buttons).toHaveLength(2);
     expect(node.config.textDisplayMode).toBeUndefined();
     expect(onNodeConfigValueChange).not.toHaveBeenCalled();
-    expect(onNodeConfigMutated).not.toHaveBeenCalled();
+
   });
 
   it("prefixes each note block with its path in the note preview text", () => {
@@ -148,7 +147,7 @@ describe("StudioGraphNodeInlineEditors text display mode", () => {
       nodeRunState,
       definition: definitionFixture("studio.note"),
       interactionLocked: false,
-      onNodeConfigMutated: jest.fn(),
+      onNodeConfigValueChange: (_id: string, key: string, value: StudioNodeInstance["config"][string]) => { node.config[key] = value; },
     });
 
     const textarea = nodeEl.querySelector<HTMLTextAreaElement>(".ss-studio-node-text-editor");
@@ -167,8 +166,7 @@ describe("StudioGraphNodeInlineEditors text display mode", () => {
       nodeRunState: IDLE_NODE_RUN_STATE,
       definition: definitionFixture("studio.text_output"),
       interactionLocked: false,
-      onNodeConfigMutated: jest.fn(),
-      renderMarkdownPreview: jest.fn().mockResolvedValue(undefined),
+      onNodeConfigValueChange: (_id: string, key: string, value: StudioNodeInstance["config"][string]) => { node.config[key] = value; }, renderMarkdownPreview: jest.fn().mockResolvedValue(undefined),
     });
 
     const textarea = nodeEl.querySelector<HTMLTextAreaElement>(".ss-studio-node-text-editor");
@@ -217,8 +215,7 @@ describe("StudioGraphNodeInlineEditors text display mode", () => {
       nodeRunState: IDLE_NODE_RUN_STATE,
       definition: definitionFixture("studio.text_output"),
       interactionLocked: false,
-      onNodeConfigMutated: jest.fn(),
-      renderMarkdownPreview: jest.fn().mockResolvedValue(undefined),
+      onNodeConfigValueChange: (_id: string, key: string, value: StudioNodeInstance["config"][string]) => { node.config[key] = value; }, renderMarkdownPreview: jest.fn().mockResolvedValue(undefined),
     });
 
     const containerWheelSpy = jest.fn();
@@ -246,8 +243,7 @@ describe("StudioGraphNodeInlineEditors text display mode", () => {
       nodeRunState: IDLE_NODE_RUN_STATE,
       definition: definitionFixture("studio.text_generation"),
       interactionLocked: false,
-      onNodeConfigMutated: jest.fn(),
-      renderMarkdownPreview,
+      onNodeConfigValueChange: (_id: string, key: string, value: StudioNodeInstance["config"][string]) => { node.config[key] = value; }, renderMarkdownPreview,
     });
 
     const textarea = nodeEl.querySelector<HTMLTextAreaElement>(".ss-studio-node-text-editor");
@@ -275,7 +271,7 @@ describe("StudioGraphNodeInlineEditors text display mode", () => {
       nodeRunState: IDLE_NODE_RUN_STATE,
       definition: definitionFixture("studio.text_output"),
       interactionLocked: false,
-      onNodeConfigMutated: jest.fn(),
+      onNodeConfigValueChange: (_id: string, key: string, value: StudioNodeInstance["config"][string]) => { node.config[key] = value; },
     });
 
     const rawButton = Array.from(

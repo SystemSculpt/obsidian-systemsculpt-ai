@@ -4,7 +4,8 @@ import { codexNode } from '../../../studio/nodes/codexNode';
 import { runLocalClaude } from '../../claude/LocalClaudeClient';
 jest.mock('../LocalCodexClient', () => ({ runLocalCodex: jest.fn() }));
 jest.mock('../CodexExecutionSettings', () => ({ codexOptionsFromSettings: () => ({ model: 'gpt-6-astra', effort: 'high', serviceTier: 'default' }), codexVaultDirectory: () => '/vault', localTextAgent: (settings: any) => ['codex', 'claude'].includes(settings?.textExecutionBackend) ? settings.textExecutionBackend : null }));
-jest.mock('../../claude/LocalClaudeClient', () => ({ runLocalClaude: jest.fn(), claudeOptionsFromSettings: () => ({ model: '', permissionMode: 'default' }) }));
+jest.mock('../../claude/LocalClaudeClient', () => ({ runLocalClaude: jest.fn() }));
+jest.mock('../../claude/ClaudeExecutionOptions', () => ({ ...jest.requireActual('../../claude/ClaudeExecutionOptions'), claudeOptionsFromSettings: () => ({ model: '', permissionMode: 'default' }) }));
 
 it('routes selected Studio text generation to Codex with no managed request or managed operation receipt', async () => {
   const generateText = jest.fn(() => { throw new Error('Managed text must not run'); });

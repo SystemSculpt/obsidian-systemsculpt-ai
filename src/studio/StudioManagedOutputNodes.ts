@@ -10,28 +10,16 @@ import {
   resolveStudioGraphNodeMinHeight,
 } from "./StudioNodeGeometry";
 
-/** @internal Tests build saved output nodes with this key. */
-export const MANAGED_MEDIA_OWNER_KEY = "__studio_managed_by";
-/** @internal Tests build saved output nodes with this owner. */
-export const MANAGED_MEDIA_OWNER = "studio.image_generation_output.v1";
-/** @internal Tests build saved output nodes with this key. */
-export const MANAGED_MEDIA_SOURCE_NODE_ID_KEY = "__studio_source_node_id";
-/** @internal Tests build saved output nodes with this key. */
-export const MANAGED_MEDIA_SLOT_INDEX_KEY = "__studio_source_output_index";
-/** @internal Tests build saved output nodes with this key. */
-export const MANAGED_OUTPUT_PENDING_KEY = "__studio_pending";
-/** @internal Tests build saved output nodes with this key. */
-export const MANAGED_OUTPUT_PENDING_RUN_ID_KEY = "__studio_pending_run_id";
+import {
+  MANAGED_MEDIA_OWNER_KEY, MANAGED_MEDIA_OWNER, MANAGED_MEDIA_SOURCE_NODE_ID_KEY,
+  MANAGED_MEDIA_SLOT_INDEX_KEY, MANAGED_OUTPUT_PENDING_KEY, MANAGED_OUTPUT_PENDING_RUN_ID_KEY,
+  MANAGED_TEXT_OWNER_KEY, MANAGED_TEXT_OWNER, MANAGED_TEXT_SOURCE_NODE_ID_KEY,
+  isManagedMediaNode, readManagedMediaSlotIndex,
+} from "./StudioManagedOutputMetadata";
+
 const MANAGED_OUTPUT_RUN_ID_KEY = "__studio_output_run_id";
 const MANAGED_OUTPUT_PENDING_AT_KEY = "__studio_pending_at";
 const MANAGED_OUTPUT_PENDING_MEDIA_KIND_KEY = "__studio_pending_media_kind";
-
-/** @internal Tests build saved output nodes with this key. */
-export const MANAGED_TEXT_OWNER_KEY = "__studio_managed_by";
-/** @internal Tests build saved output nodes with this owner. */
-export const MANAGED_TEXT_OWNER = "studio.text_generation_output.v1";
-/** @internal Tests build saved output nodes with this key. */
-export const MANAGED_TEXT_SOURCE_NODE_ID_KEY = "__studio_source_node_id";
 
 export type StudioManagedMediaKind = "image" | "video";
 type ManagedMediaProfile = Readonly<{ kind: StudioManagedMediaKind; outputsKey: "images" | "videos"; fromPort: "images" | "videos"; titleNoun: string; defaultBaseTitle: string }>;
@@ -106,17 +94,6 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     return null;
   }
   return value as Record<string, unknown>;
-}
-
-function isManagedMediaNode(node: StudioNodeInstance): boolean {
-  if (node.kind !== "studio.media_ingest") {
-    return false;
-  }
-  const config = asRecord(node.config);
-  if (!config) {
-    return false;
-  }
-  return String(config[MANAGED_MEDIA_OWNER_KEY] || "").trim() === MANAGED_MEDIA_OWNER;
 }
 
 function detachManagedMediaOutput(node: StudioNodeInstance): void {
@@ -264,9 +241,8 @@ function readManagedMediaSlot(node: StudioNodeInstance): { sourceNodeId: string;
   if (!sourceNodeId || !config) {
     return null;
   }
-  const slotIndexRaw = Number(config[MANAGED_MEDIA_SLOT_INDEX_KEY]);
-  const slotIndex = Number.isInteger(slotIndexRaw) && slotIndexRaw >= 0 ? slotIndexRaw : -1;
-  if (slotIndex < 0) {
+  const slotIndex = readManagedMediaSlotIndex(config as StudioNodeInstance["config"]);
+  if (slotIndex === null) {
     return null;
   }
 
@@ -442,16 +418,23 @@ export function arrangeManagedOutputContainers(project: StudioProjectV1, measure
   return moved;
 }
 
-function nextManagedMediaSlotIndex(project: StudioProjectV1, sourceNodeId: string): number {
+function managedMediaSlotAllocator(project: StudioProjectV1, sourceNodeId: string): () => number {
+  const used = new Set<number>();
   let next = 0;
   for (const node of project.graph.nodes) {
     const managed = readManagedMediaSlot(node);
-    if (!managed || managed.sourceNodeId !== sourceNodeId) {
-      continue;
-    }
+    if (!managed || managed.sourceNodeId !== sourceNodeId) continue;
+    used.add(managed.slotIndex);
     next = Math.max(next, managed.slotIndex + 1);
   }
-  return next;
+  return () => {
+    // Keep append ordering unless the next integer cannot retain exact identity.
+    if (!Number.isSafeInteger(next)) next = 0;
+    while (used.has(next)) next += 1;
+    const slot = next++;
+    used.add(slot);
+    return slot;
+  };
 }
 
 export function isManagedOutputPlaceholderNode(node: StudioNodeInstance): boolean {
@@ -607,9 +590,9 @@ function materializePendingMediaOutputPlaceholders(
     };
   }
 
-  let nextSlotIndex = nextManagedMediaSlotIndex(options.project, sourceNodeId);
+  const allocateSlot = managedMediaSlotAllocator(options.project, sourceNodeId);
   for (let outputIndex = existingPendingNodes.length; outputIndex < expectedCount; outputIndex += 1) {
-    const slotIndex = nextSlotIndex++;
+    const slotIndex = allocateSlot();
     const nodeId = options.createNodeId();
     const newNode: StudioNodeInstance = {
       id: nodeId,
@@ -664,7 +647,7 @@ function materializeMediaOutputsAsMediaNodes(
   }
 
   const managedNodesByPath = new Map<string, StudioNodeInstance>();
-  let nextManagedSlotIndex = 0;
+  const allocateSlot = managedMediaSlotAllocator(options.project, sourceNodeId);
   for (const node of options.project.graph.nodes) {
     const managedSourceNodeId = readManagedMediaSourceNodeId(node);
     if (!managedSourceNodeId || managedSourceNodeId !== sourceNodeId) {
@@ -674,10 +657,6 @@ function materializeMediaOutputsAsMediaNodes(
     const sourcePath = String(config.sourcePath || "").trim();
     if (sourcePath && (!options.runId || node.config[MANAGED_OUTPUT_RUN_ID_KEY] === options.runId) && !managedNodesByPath.has(sourcePath)) {
       managedNodesByPath.set(sourcePath, node);
-    }
-    const managed = readManagedMediaSlot(node);
-    if (managed) {
-      nextManagedSlotIndex = Math.max(nextManagedSlotIndex, managed.slotIndex + 1);
     }
   }
   // Index legacy connected cards once, in edge order. Explicit managed metadata
@@ -700,7 +679,7 @@ function materializeMediaOutputsAsMediaNodes(
   let changed = false;
 
   const pending = options.runId ? options.project.graph.nodes.filter(node =>
-    readManagedMediaSourceNodeId(node) === sourceNodeId && readManagedOutputPendingRunId(node) === options.runId)
+    readManagedMediaSlot(node)?.sourceNodeId === sourceNodeId && readManagedOutputPendingRunId(node) === options.runId)
     .sort((a, b) => readManagedMediaSlot(a)!.slotIndex - readManagedMediaSlot(b)!.slotIndex) : [];
 
   for (const sourcePath of outputPaths) {
@@ -714,7 +693,7 @@ function materializeMediaOutputsAsMediaNodes(
     if (existingNode) {
       const existingConfig = asRecord(existingNode.config) || {};
       const existingManaged = readManagedMediaSlot(existingNode);
-      const slotIndex = existingManaged?.slotIndex ?? nextManagedSlotIndex++;
+      const slotIndex = existingManaged?.slotIndex ?? allocateSlot();
       const baseConfig = stripManagedPendingFields(
         existingNode.config
       );
@@ -741,7 +720,7 @@ function materializeMediaOutputsAsMediaNodes(
     }
 
     const nodeId = options.createNodeId();
-    const slotIndex = nextManagedSlotIndex++;
+    const slotIndex = allocateSlot();
     const newNode: StudioNodeInstance = {
       id: nodeId,
       kind: "studio.media_ingest",

@@ -1,5 +1,5 @@
 import { desktopHost } from '../../platform/desktopOnly';
-import { isRecord } from '../../studio/utils';
+import { isRecord } from '../../utils/jsonRecord';
 import { resolveCodexLaunchOptions } from './CodexLaunch';
 import { resolveLocalAgentCommand } from './LocalAgentLaunch';
 export type CodexJson = Record<string, unknown>;

@@ -1,8 +1,6 @@
 import { App, normalizePath } from "obsidian";
-import {
-  STUDIO_AGENT_DOCS_PATH,
-  renderStudioAgentReferenceMarkdown,
-} from "./StudioProjectAgentContract";
+import { renderStudioAgentReferenceMarkdown } from './StudioProjectAgentContract';
+import { STUDIO_AGENT_DOCS_PATH } from './types';
 
 /**
  * Publishes the generated agent documentation for .systemsculpt files to the

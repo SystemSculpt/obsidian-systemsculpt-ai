@@ -88,9 +88,8 @@ export type RenderTextNodeCardOptions = {
   /** Locks the card while a graph run is in progress. */
   busy: StudioCardLockState;
   graphInteraction: StudioGraphInteractionEngine;
-  onNodeConfigMutated: (node: StudioNodeInstance) => void;
-  onNodeConfigValueChange?: RenderStudioGraphNodeCardOptions["onNodeConfigValueChange"];
-  onNodeResize?: (
+  onNodeConfigValueChange: RenderStudioGraphNodeCardOptions["onNodeConfigValueChange"];
+  onNodeResize: (
     nodeId: string,
     patch: StudioGraphNodeResizePatch,
     options?: StudioGraphNodeMutationOptions
@@ -335,8 +334,7 @@ type MountLiveMarkdownEditorOptions = {
     teardown: () => StudioTextNodeMarkdownEditorSnapshot
   ) => void;
   initialEditorSnapshot?: StudioTextNodeMarkdownEditorSnapshot;
-  onNodeConfigMutated: (node: StudioNodeInstance) => void;
-  onNodeConfigValueChange?: RenderTextNodeCardOptions["onNodeConfigValueChange"];
+  onNodeConfigValueChange: RenderTextNodeCardOptions["onNodeConfigValueChange"];
   onStopTextNodeEdit: (nodeId: string) => void;
   shouldAutoFocus: boolean;
   initialFocusPoint?: StudioTextNodeFocusTarget;
@@ -359,7 +357,6 @@ function mountLiveMarkdownEditor(options: MountLiveMarkdownEditorOptions): boole
     createMarkdownEditor,
     registerEditorTeardown,
     initialEditorSnapshot,
-    onNodeConfigMutated,
     onNodeConfigValueChange,
     onStopTextNodeEdit,
     shouldAutoFocus,
@@ -379,15 +376,10 @@ function mountLiveMarkdownEditor(options: MountLiveMarkdownEditorOptions): boole
   markStudioNodeCardInteractive(hostEl);
 
   const commitValue = (nextValue: string): void => {
-    if (onNodeConfigValueChange) {
-      onNodeConfigValueChange(node.id, "value", nextValue, {
-        mode: "continuous",
-        captureHistory: false,
-      });
-      return;
-    }
-    node.config.value = nextValue;
-    onNodeConfigMutated(node);
+    onNodeConfigValueChange(node.id, "value", nextValue, {
+      mode: "continuous",
+      captureHistory: false,
+    });
   };
 
   let editorHandle: StudioTextNodeMarkdownEditorHandle | null = null;
@@ -467,7 +459,6 @@ export function renderTextNodeCard(options: RenderTextNodeCardOptions): () => vo
     node,
     busy,
     graphInteraction,
-    onNodeConfigMutated,
     onNodeConfigValueChange,
     onNodeResize,
     onNodeGeometryMutated,
@@ -555,7 +546,6 @@ export function renderTextNodeCard(options: RenderTextNodeCardOptions): () => vo
             createMarkdownEditor,
             registerEditorTeardown,
             initialEditorSnapshot,
-            onNodeConfigMutated,
             onNodeConfigValueChange,
             onStopTextNodeEdit,
             shouldAutoFocus,
@@ -603,15 +593,10 @@ export function renderTextNodeCard(options: RenderTextNodeCardOptions): () => vo
     textAreaEl.addEventListener("input", (event) => {
       syncEditorHeight();
       const nextValue = (event.target as HTMLTextAreaElement).value;
-      if (onNodeConfigValueChange) {
-        onNodeConfigValueChange(node.id, "value", nextValue, {
-          mode: "continuous",
-          captureHistory: false,
-        });
-        return;
-      }
-      node.config.value = nextValue;
-      onNodeConfigMutated(node);
+      onNodeConfigValueChange(node.id, "value", nextValue, {
+        mode: "continuous",
+        captureHistory: false,
+      });
     });
     textAreaEl.addEventListener("keydown", (event) => {
       if (
@@ -697,10 +682,8 @@ export function renderTextNodeCard(options: RenderTextNodeCardOptions): () => vo
     showResizeGuides: (moving, edges) =>
       graphInteraction.showNodeResizeGuides(node.id, moving, edges),
     onResizeGuidesEnd: () => graphInteraction.clearAlignmentGuides(),
-    onNodeConfigMutated,
     onNodeConfigValueChange,
     onNodeResize,
-    onNodeGeometryMutated,
     // Text cards persist and render width only — height reflows from content.
     applySize: ({ width }) => {
       // A dragged width ends auto sizing for this card.

@@ -1,5 +1,58 @@
-import { App, TFolder } from "obsidian";
-import { createVaultFolder, isVaultFolder } from "../vaultFolders";
+import { App, TFile, TFolder } from "obsidian";
+import { createVaultFolder, ensureVaultFolder, isVaultFolder } from "../vaultFolders";
+
+describe("ensureVaultFolder", () => {
+  let app: App;
+
+  beforeEach(() => {
+    app = new App();
+    (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(null);
+    (app.vault.createFolder as jest.Mock).mockResolvedValue(undefined);
+    (app.vault.adapter.exists as jest.Mock).mockResolvedValue(false);
+    (app.vault.adapter.stat as jest.Mock).mockResolvedValue(null);
+  });
+
+  it("creates missing ancestors in order, skipping indexed folders", async () => {
+    (app.vault.getAbstractFileByPath as jest.Mock).mockImplementation(path =>
+      path === "Notes" ? new TFolder({ path }) : null);
+    await ensureVaultFolder(app, "Notes/Phone/Inbox");
+    expect((app.vault.createFolder as jest.Mock).mock.calls).toEqual([["Notes/Phone"], ["Notes/Phone/Inbox"]]);
+    expect(app.vault.adapter.exists).not.toHaveBeenCalled();
+  });
+
+  it("accepts an unindexed ancestor confirmed by the adapter after a create race", async () => {
+    (app.vault.createFolder as jest.Mock).mockRejectedValueOnce(new Error("Folder already exists."));
+    (app.vault.adapter.exists as jest.Mock).mockResolvedValueOnce(true);
+    (app.vault.adapter.stat as jest.Mock).mockResolvedValueOnce({ type: "folder" });
+    await ensureVaultFolder(app, ".hidden/Inbox");
+    expect((app.vault.createFolder as jest.Mock).mock.calls).toEqual([[".hidden"], [".hidden/Inbox"]]);
+  });
+
+  it("preserves literal URI escapes and Unicode filenames", async () => {
+    await ensureVaultFolder(app, "日本語/100%20literal");
+    expect((app.vault.createFolder as jest.Mock).mock.calls).toEqual([["日本語"], ["日本語/100%20literal"]]);
+  });
+
+  it("rejects indexed file blockers before creating children", async () => {
+    (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(new TFile({ path: "Notes" }));
+    await expect(ensureVaultFolder(app, "Notes/Inbox")).rejects.toThrow('Cannot create folder "Notes": a file with that name already exists');
+    expect(app.vault.createFolder).not.toHaveBeenCalled();
+  });
+
+  it("rethrows an unindexed file blocker or real create failure without creating children", async () => {
+    const failure = new Error("permission denied");
+    (app.vault.createFolder as jest.Mock).mockRejectedValue(failure);
+    (app.vault.adapter.exists as jest.Mock).mockResolvedValue(true);
+    (app.vault.adapter.stat as jest.Mock).mockResolvedValue({ type: "file" });
+    await expect(ensureVaultFolder(app, "Locked/Inbox")).rejects.toBe(failure);
+    expect((app.vault.createFolder as jest.Mock).mock.calls).toEqual([["Locked"]]);
+  });
+
+  it.each(["", "/", "."])("does not create the vault root %p", async path => {
+    await ensureVaultFolder(app, path);
+    expect(app.vault.createFolder).not.toHaveBeenCalled();
+  });
+});
 
 describe("createVaultFolder", () => {
   let app: App;

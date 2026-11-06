@@ -1,7 +1,8 @@
+import type { ClaudeExecutionOptions } from './ClaudeExecutionOptions';
 import type { ChatMessage } from "../../types";
 import type { App } from 'obsidian';
 import { LocalAgentChatSession } from '../codex/LocalAgentChatSession';
-import { ClaudeChatTransport, claudeSessionPermissionUpdates, type ClaudeExecutionOptions } from './LocalClaudeClient';
+import { ClaudeChatTransport, claudeSessionPermissionUpdates } from './LocalClaudeClient';
 
 /** Chat presentation adapter. Claude Code owns every model step, tool, permission and durable session. */
 export class ClaudeChatSession extends LocalAgentChatSession {

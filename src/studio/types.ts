@@ -2,6 +2,14 @@ import type { HostCapability } from "../platform/hostCapabilities";
 import type { FileSource } from "../platform/fileSource";
 import type { ManagedFileSource } from "../services/managed/ManagedFileSource";
 
+/**
+ * Vault path of the generated agent reference document. Every serialized v2
+ * project carries this path in its "docs" field so an agent that opens a
+ * project anywhere in the vault can find the format guide and the node kind
+ * reference without either being embedded in the project file.
+ */
+export const STUDIO_AGENT_DOCS_PATH = "SystemSculpt/Studio/AGENTS.md" as const;
+
 export const STUDIO_PROJECT_EXTENSION = ".systemsculpt" as const;
 export const STUDIO_DISPLAY_NAME = "Studio" as const;
 export const STUDIO_PROJECT_SCHEMA_V1 = "studio.project.v1" as const;
@@ -21,6 +29,10 @@ const STUDIO_PORT_DATA_TYPES = [
 ] as const
 
 export type StudioPortDataType = (typeof STUDIO_PORT_DATA_TYPES)[number]
+
+export function areStudioPortTypesCompatible(source: string, target: string): boolean {
+  return source === 'any' || target === 'any' || source === target;
+}
 
 const STUDIO_PORT_DATA_TYPE_SET: ReadonlySet<string> = new Set(STUDIO_PORT_DATA_TYPES)
 

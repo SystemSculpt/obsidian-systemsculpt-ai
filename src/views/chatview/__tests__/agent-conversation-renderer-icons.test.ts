@@ -12,6 +12,7 @@ import {
   type AgentPresentationPhase,
 } from "../AgentConversationPresentation";
 import { AgentConversationRenderer } from "../AgentConversationRenderer";
+import { incidentMonotonicNow } from "../RenderIncidentMetrics";
 import { historicalToolPart } from "../ConversationPartPresentation";
 
 function toolRendererFor(renderer: AgentConversationRenderer): {
@@ -367,9 +368,9 @@ describe("AgentConversationRenderer tail status", () => {
     const performanceNow = jest.spyOn(window.performance, "now")
       .mockImplementation(() => { throw new Error("private clock failure"); });
     const dateNow = jest.spyOn(Date, "now").mockReturnValue(Number.NaN);
-    expect(internals.incidentMonotonicNow()).toBe(0);
+    expect(incidentMonotonicNow(() => parent.ownerDocument.defaultView)).toBe(0);
     dateNow.mockImplementation(() => { throw new Error("private wall clock failure"); });
-    expect(internals.incidentMonotonicNow()).toBe(0);
+    expect(incidentMonotonicNow(() => parent.ownerDocument.defaultView)).toBe(0);
     dateNow.mockRestore();
     performanceNow.mockRestore();
     renderer.unload();
@@ -404,7 +405,7 @@ describe("AgentConversationRenderer tail status", () => {
 
     const performanceNow = jest.spyOn(window.performance, "now").mockReturnValue(Number.NaN);
     const dateNow = jest.spyOn(Date, "now").mockReturnValue(321);
-    expect(internals.incidentMonotonicNow()).toBe(321);
+    expect(incidentMonotonicNow(() => parent.ownerDocument.defaultView)).toBe(321);
     dateNow.mockRestore();
     performanceNow.mockRestore();
 

@@ -1,3 +1,4 @@
+import type { StudioNodeDefinition } from "./types";
 import { buttonNode } from "./nodes/buttonNode";
 import { commandCenterNode } from "./nodes/commandCenterNode";
 import { StudioNodeRegistry } from "./StudioNodeRegistry";
@@ -49,4 +50,11 @@ export function registerBuiltInStudioNodes(registry: StudioNodeRegistry): void {
   registry.register(terminalNode);
   registry.register(processNode);
   registry.register(scriptNode);
+}
+
+export const builtInStudioNodeRegistry = new StudioNodeRegistry();
+registerBuiltInStudioNodes(builtInStudioNodeRegistry);
+
+export function findBuiltInStudioNodeDefinition(kind: string): StudioNodeDefinition | null {
+  return builtInStudioNodeRegistry.list().find((entry) => entry.kind === kind) || null;
 }

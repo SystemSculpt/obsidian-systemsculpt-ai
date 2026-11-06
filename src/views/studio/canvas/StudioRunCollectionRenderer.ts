@@ -2,7 +2,7 @@ import { Notice } from 'obsidian';
 import { StudioPresentation } from '../StudioPresentation';
 import { StudioRunDetailModal } from './StudioRunDetailModal';
 import type { StudioAgentRuns } from '../../../services/codex/StudioAgentRuns';
-import { isActiveAgentRun, type StudioAgentRun } from '../../../services/codex/StudioAgentRunStore';
+import { isActiveAgentRun, type StudioAgentRun } from '../../../services/codex/StudioAgentRunRecord';
 import { createStudioAction } from '../StudioAction';
 import { markStudioNodeCardInteractive } from './StudioGraphNodeCardPointer';
 import { activityPhaseFromAgentRunStatus } from '../activity/StudioActivity';

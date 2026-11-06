@@ -9,10 +9,8 @@ import {
   serializeStudioProject,
 } from "../schema";
 import { STUDIO_PROJECT_SCHEMA_V1 } from "../types";
-import {
-  STUDIO_AGENT_DOCS_PATH,
-  renderStudioAgentReferenceMarkdown,
-} from "../StudioProjectAgentContract";
+import { renderStudioAgentReferenceMarkdown } from '../StudioProjectAgentContract';
+import { STUDIO_AGENT_DOCS_PATH } from '../types';
 
 describe("Studio schema", () => {
   it("round-trips an empty project through the v2 dialect", () => {

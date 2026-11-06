@@ -13,7 +13,8 @@ import { CodexThreadLocator } from "../../services/codex/CodexThreadLocator";
 import { CodexChatSession } from "../../services/codex/CodexChatSession";
 import { LocalAgentChatSession } from "../../services/codex/LocalAgentChatSession";
 import { ClaudeChatSession } from "../../services/claude/ClaudeChatSession";
-import { claudeOptionsFromSettings } from "../../services/claude/LocalClaudeClient";
+import { claudeOptionsFromSettings, isClaudePermissionMode, type ClaudePermissionMode } from "../../services/claude/ClaudeExecutionOptions";
+import { isCodexApprovalMode, type CodexApprovalMode } from "../../services/codex/CodexApprovalPolicy";
 import { ItemView, MarkdownView, Menu, normalizePath, Notice, Scope, TFile, WorkspaceLeaf } from "obsidian";
 import type SystemSculptPlugin from "../../main";
 import { CHAT_VIEW_TYPE } from "../../core/plugin/viewTypes";
@@ -34,11 +35,8 @@ import { openExternalUrl } from "../../utils/externalUrl";
 import { tryCopyToClipboard } from "../../utils/clipboard";
 import { waitForIdle } from "../../utils/yieldToEventLoop";
 import { chatTitleFromMessage, generateDefaultChatTitle, isGeneratedChatTitle, normalizeChatTitle } from "../../utils/titleUtils";
-import {
-  ChatStorageService,
-  resolveChatsDirectory,
-  SavedChatCorruptedError,
-} from "./ChatStorageService";
+import { resolveChatsDirectory } from "./storage/ChatTranscriptLocations";
+import { ChatStorageService, SavedChatCorruptedError } from "./ChatStorageService";
 import {
   FILE_CONTEXT_STATE_CHANGED_EVENT,
   FileContextManager,
@@ -57,8 +55,6 @@ import {
   MODE_CHOICES,
   presentMode,
   type AgentChromeState,
-  type ClaudeChromeMode,
-  type CodexChromeMode,
 } from "./AgentChatChrome";
 import type { AgentEmptyStateAction } from "./AgentEmptyState";
 import { openChatResumeDescriptor } from "./ChatResumeUtils";
@@ -82,10 +78,8 @@ import {
   type RestoredChatMessageDraft,
 } from "./attachments/ChatMessageAttachments";
 import { ManagedChatDocumentAttachmentProcessor } from "./attachments/ManagedChatDocumentAttachmentProcessor";
-import {
-  ChatAttachmentVaultStore,
-  isChatAttachmentContentRef,
-} from "./attachments/ChatAttachmentVaultStore";
+import { isChatAttachmentContentRef } from "./attachments/ChatAttachmentDescriptor";
+import { ChatAttachmentVaultStore } from "./attachments/ChatAttachmentVaultStore";
 import { emitChatTranscriptCommitted } from "./ChatTranscriptEvents";
 import { nativeChatSessions } from "./NativeChatSessions";
 import {
@@ -3427,12 +3421,12 @@ export class AgentChatView extends ItemView {
       credits: this.creditsBalance,
       hostedMode: this.approvalMode,
       claude: {
-        mode: claude.permissionMode as ClaudeChromeMode,
+        mode: claude.permissionMode as ClaudePermissionMode,
         model: claude.model,
         autoUnavailable: this.claudeAutoUnavailable,
       },
       codex: {
-        mode: codex.approvalMode as CodexChromeMode,
+        mode: codex.approvalMode as CodexApprovalMode,
         model: codex.model,
         effort: codex.effort,
         serviceTier: codex.serviceTier,
@@ -3786,9 +3780,11 @@ export class AgentChatView extends ItemView {
     if (!choice) return;
     try {
       if (backend === "claude") {
-        await this.plugin.getSettingsManager().updateSettings({ claudePermissionMode: value as ClaudeChromeMode });
+        if (!isClaudePermissionMode(value)) return;
+        await this.plugin.getSettingsManager().updateSettings({ claudePermissionMode: value });
       } else if (backend === "codex") {
-        await this.plugin.getSettingsManager().updateSettings({ codexApprovalMode: value as CodexChromeMode });
+        if (!isCodexApprovalMode(value)) return;
+        await this.plugin.getSettingsManager().updateSettings({ codexApprovalMode: value });
       } else {
         await this.setApprovalMode(value as ChatApprovalMode);
       }

@@ -3,6 +3,8 @@ import type { ManagedTransportResult } from "../../../managed/ManagedTypes";
 import {
   MANAGED_EMBEDDINGS_INDEX_CONTRACT,
   MANAGED_EMBEDDINGS_INDEX_VECTOR_ENCODING,
+} from "../ManagedEmbeddingsIndexContract";
+import {
   ManagedEmbeddingsError,
   ManagedEmbeddingsIndexAdapter,
 } from "../ManagedEmbeddingsIndexAdapter";

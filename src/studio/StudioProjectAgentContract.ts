@@ -1,26 +1,16 @@
-import { StudioGraphCompiler } from "./StudioGraphCompiler";
+import { STUDIO_AGENT_DOCS_PATH } from "./types";
+import { compactStudioNodeKind, isStudioVisualOnlyNodeKind } from "./StudioNodeKinds";
 import {
   resolveStudioGraphNodeResizeBounds,
   resolveStudioNodeDefaultSize,
 } from "./StudioNodeGeometry";
-import { isStudioVisualOnlyNodeKind } from "./StudioNodeKinds";
-import { StudioNodeRegistry } from "./StudioNodeRegistry";
-import { registerBuiltInStudioNodes } from "./StudioBuiltInNodes";
+import { builtInStudioNodeRegistry } from "./StudioBuiltInNodes";
 import type {
   StudioJsonValue,
   StudioNodeConfigFieldDefinition,
   StudioNodeDefinition,
   StudioPortDefinition,
-  StudioProjectV1,
 } from "./types";
-
-/**
- * Vault path of the generated agent reference document. Every serialized v2
- * project carries this path in its "docs" field so an agent that opens a
- * project anywhere in the vault can find the format guide and the node kind
- * reference without either being embedded in the project file.
- */
-export const STUDIO_AGENT_DOCS_PATH = "SystemSculpt/Studio/AGENTS.md" as const;
 
 const NODE_PURPOSES: Readonly<Record<string, string>> = {
   "studio.audio_extract": "Extract audio from a media asset for downstream transcription or processing.",
@@ -46,32 +36,6 @@ const NODE_PURPOSES: Readonly<Record<string, string>> = {
   "studio.transcription": "Transcribe an audio or video asset through the managed SystemSculpt API.",
   "studio.value": "Provide a typed primitive or structured value to downstream nodes.",
 };
-
-const builtInRegistry = new StudioNodeRegistry();
-registerBuiltInStudioNodes(builtInRegistry);
-
-/**
- * v2 documents spell kinds without the "studio." namespace and never persist
- * node versions; both are restored here. A kind that is not built in keeps its
- * spelling and the default version so future or third-party kinds round-trip.
- */
-export function expandStudioNodeKind(kind: string): string {
-  const trimmed = String(kind || "").trim();
-  return trimmed && !trimmed.includes(".") ? `studio.${trimmed}` : trimmed;
-}
-
-export function compactStudioNodeKind(kind: string): string {
-  return kind.startsWith("studio.") ? kind.slice("studio.".length) : kind;
-}
-
-export function resolveBuiltInStudioNodeVersion(kind: string): string | null {
-  const definition = builtInRegistry.list().find((entry) => entry.kind === kind);
-  return definition ? definition.version : null;
-}
-
-export function findBuiltInStudioNodeDefinition(kind: string): StudioNodeDefinition | null {
-  return builtInRegistry.list().find((entry) => entry.kind === kind) || null;
-}
 
 function renderPortLine(port: StudioPortDefinition, direction: "in" | "out"): string {
   const flags = [port.type, ...(port.required ? ["required"] : [])].join(", ");
@@ -158,7 +122,7 @@ function renderNodeKindSection(definition: StudioNodeDefinition): string {
  * derived from the registry, so a byte comparison detects staleness.
  */
 export function renderStudioAgentReferenceMarkdown(): string {
-  const kinds = builtInRegistry
+  const kinds = builtInStudioNodeRegistry
     .list()
     .slice()
     .sort((left, right) => left.kind.localeCompare(right.kind));
@@ -275,21 +239,4 @@ The run methods return a promise for the completed summary. For a long run, star
 
 ${kinds.map(renderNodeKindSection).join("\n\n")}
 `;
-}
-
-export function validateStudioProjectForAgentEdit(project: StudioProjectV1): void {
-  // Document-mode compile: this gate decides whether Studio will adopt and
-  // open a project file at all, so it must accept every state Studio itself
-  // can persist (placeholder nodes, unfinished configs, unwired required
-  // inputs). Run readiness is enforced separately by the runtime's strict
-  // compile when the user actually runs the graph.
-  //
-  // graph.entryNodeIds is deliberately not validated here. It is derived
-  // data: the canvas recomputes it on every mutation and planStudioRun
-  // re-derives real entry points from executable-graph structure, ignoring
-  // the persisted list. The visual-only classification also changes across
-  // plugin versions (studio.text became executable in 6.2.x), so rejecting
-  // an entry by kind bricks files persisted by a sibling build. parse
-  // drops entry IDs that reference missing nodes.
-  new StudioGraphCompiler().compile(project, builtInRegistry, { validation: "document" });
 }

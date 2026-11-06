@@ -1,5 +1,5 @@
 import type { StudioJsonValue } from "./types";
-import { isRecord } from "./utils";
+import { isRecord } from "../utils/jsonRecord";
 
 type StudioCollectionResource = { title: string; url: string | null; role: string };
 type StudioCollectionComment = { id: string; body: string; author: string; updatedAt: string; url: string | null };

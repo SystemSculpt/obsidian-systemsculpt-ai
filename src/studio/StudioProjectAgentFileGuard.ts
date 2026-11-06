@@ -1,10 +1,8 @@
 import { normalizeVaultRelativePath } from "../utils/vaultPathUtils";
-import { validateStudioProjectForAgentEdit } from "./StudioProjectAgentContract";
+import { admitStudioProjectText } from "./StudioProjectAdmission";
 import {
   assertStableStudioProjectAgentDocumentFieldsUnchanged,
-  assertValidStudioProjectAgentDocumentStructure,
 } from "./StudioProjectAgentDocumentValidation";
-import { parseAndMigrateStudioProject } from "./schema";
 
 export type StudioProjectAgentFileMutation = Readonly<{
   path: string;
@@ -70,14 +68,12 @@ export function assertValidStudioProjectAgentFileMutation(
 
   try {
     const document = parseAgentProjectDocument(mutation.content);
-    assertValidStudioProjectAgentDocumentStructure(document);
     if (typeof mutation.previousContent === "string") {
       const previous = parseAgentProjectDocument(mutation.previousContent);
       assertStableStudioProjectAgentDocumentFieldsUnchanged(document, previous);
     }
     // Validate what Studio will adopt: a v1 file's retired node kinds are migrated on import.
-    const project = parseAndMigrateStudioProject(mutation.content, { projectPath: path });
-    validateStudioProjectForAgentEdit(project);
+    admitStudioProjectText(mutation.content, { projectPath: path });
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     throw new Error(`Studio project edit rejected before write: ${detail}`);

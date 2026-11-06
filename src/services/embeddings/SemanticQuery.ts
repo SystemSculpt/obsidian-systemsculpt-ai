@@ -1,5 +1,5 @@
 import type { ChatMessage } from "../../types";
-import { MANAGED_EMBEDDINGS_INDEX_MAX_QUERY_CHARS } from "./gateway/ManagedEmbeddingsIndexAdapter";
+import { MANAGED_EMBEDDINGS_INDEX_MAX_QUERY_CHARS } from "./gateway/ManagedEmbeddingsIndexContract";
 
 const FRAGMENT_SEPARATOR = "\n\n";
 const EXCERPT_SEPARATOR = "\n…\n";

@@ -1,3 +1,4 @@
+import { areStudioPortTypesCompatible } from "./types";
 import type {
   StudioEdge,
   StudioNodeDefinition,
@@ -46,11 +47,6 @@ export type StudioGraphCompileOptions = {
   /** Recorded-output boundaries participate in structure but will not execute. */
   providedNodeIds?: ReadonlySet<string>;
 };
-
-function typeCompatible(source: string, target: string): boolean {
-  if (source === "any" || target === "any") return true;
-  return source === target;
-}
 
 export class StudioGraphCompiler {
   compileRun(project: StudioProjectV1, registry: StudioNodeRegistry, options?: { entryNodeIds?: string[]; prepareInputsFor?: string }): StudioCompiledRun {
@@ -158,7 +154,7 @@ export class StudioGraphCompiler {
         );
       }
 
-      if (!typeCompatible(sourcePort.type, targetPort.type)) {
+      if (!areStudioPortTypesCompatible(sourcePort.type, targetPort.type)) {
         throw new Error(
           `Graph compile failed: type mismatch on edge "${edge.id}" (${sourcePort.type} -> ${targetPort.type}).`
         );

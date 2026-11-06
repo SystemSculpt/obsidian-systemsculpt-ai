@@ -286,7 +286,7 @@ export class DocumentProcessingService {
     const parentPath = extractionFolder ? `${extractionFolder}/${baseName}` : `${file.parent?.path || ""}/${baseName}`;
     const imagesPath = `${parentPath}/images-${this.sanitizeFilename(baseName).substring(0, 20)}`;
     const imagesFolder = imagesPath.split("/").pop() || "images";
-    const rawImages = this.extractImagesFromData(result);
+    const rawImages = this.extractImages(result.images);
     const preparedImages: PreparedImageEffect[] = [];
     const imagePathMap = new Map<string, string>();
     const contentPaths = new Map<string, { path: string; relativePath: string }>();
@@ -310,7 +310,7 @@ export class DocumentProcessingService {
     const processed = this.normalizeManagedResult(result);
     if (imagePathMap.size) {
       processed.images = rawImages;
-      let content = String(processed.content ?? processed.markdown ?? processed.text ?? "");
+      let content = processed.content;
       imagePathMap.forEach((newPath, originalName) => {
         const escaped = originalName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
         content = content
@@ -429,73 +429,39 @@ export class DocumentProcessingService {
     return Math.min(100, Math.max(0, value));
   }
 
-  private formatExtractionContent(data: unknown, imagesFolder: string): string {
-    const record = this.asRecord(data);
-    const metadata = this.asRecord(record.metadata);
-    const document = this.asRecord(record.document);
-    const title = this.firstNonEmptyString(
-      record.title,
-      metadata.title,
-      document.title,
-    ) ?? "Document Extraction";
-    let content = record.content
-      ?? record.text
-      ?? document.content
-      ?? document.text
-      ?? record.markdown
-      ?? record.extraction
-      ?? "";
-    if (!content && Object.keys(record).length > 0) content = JSON.stringify(record, null, 2);
-    if (!content) content = "No content was extracted from this document. The server may be experiencing issues or the document format is not supported.";
+  private formatExtractionContent(data: NormalizedManagedDocumentResult, imagesFolder: string): string {
+    const title = typeof data.metadata.title === "string" && data.metadata.title.length > 0
+      ? data.metadata.title
+      : "Document Extraction";
+    // Preserve the admitted empty-result representation: retries compare these
+    // exact Markdown bytes against already-staged or committed local effects.
+    const content = data.content || JSON.stringify(data, null, 2);
     let imageNote = "";
-    const rootImages = record.images;
-    if (rootImages && typeof rootImages === "object" && Object.keys(rootImages).length > 0) {
-      const imageCount = Object.keys(rootImages).length;
+    const imageCount = Object.keys(data.images).length;
+    if (imageCount > 0) {
       // Keep the first-delivery text stable across retries and prior conversions:
       // the folder comes from the file's name, never from session metadata.
       imageNote = `\n\n> [!note] Images\n> ${imageCount} image${imageCount > 1 ? "s were" : " was"} extracted from this document and saved in the '${imagesFolder}' folder.\n`;
     }
-    return `# ${title}\n\n${String(content)}${imageNote}\n\n---\nExtracted with SystemSculpt\n`;
+    return `# ${title}\n\n${content}${imageNote}\n\n---\nExtracted with SystemSculpt\n`;
   }
 
-  private extractImagesFromData(data: unknown): Record<string, string> {
-    const images: Record<string, string> = {};
+  private extractImages(values: ManagedDocumentDownloadResult["images"]): Record<string, string> {
+    const images = Object.create(null) as Record<string, string>;
     const add = (name: unknown, value: unknown, index: number) => {
       if (typeof value === "string" && value) images[typeof name === "string" && name ? name : `image-${index}.png`] = value;
     };
-    const record = this.asRecord(data);
-    const rootImages = record.images;
-    if (Array.isArray(rootImages)) {
-      rootImages.forEach((image: unknown, index: number) => {
-        if (typeof image === "string") add(undefined, image, index);
-        else {
-          const imageRecord = this.asRecord(image);
-          add(
-            imageRecord.name ?? imageRecord.filename,
-            imageRecord.data ?? imageRecord.base64 ?? imageRecord.content,
-            index,
-          );
-        }
-      });
-    } else if (rootImages && typeof rootImages === "object") {
-      Object.entries(rootImages).forEach(([name, value], index) => add(name, value, index));
-    }
-    const documentImages = this.asRecord(record.document).images;
-    if (documentImages && typeof documentImages === "object") {
-      Object.entries(documentImages).forEach(([name, value], index) => add(name, value, index));
-    }
-    if (Array.isArray(record.imageList)) {
-      record.imageList.forEach((image: unknown, index: number) => {
+    values.forEach((image: unknown, index: number) => {
+      if (typeof image === "string") add(undefined, image, index);
+      else {
         const imageRecord = this.asRecord(image);
-        add(imageRecord.name, imageRecord.data, index);
-      });
-    }
-    if (Array.isArray(record.figures)) {
-      record.figures.forEach((image: unknown, index: number) => {
-        const imageRecord = this.asRecord(image);
-        add(imageRecord.name, imageRecord.image, index);
-      });
-    }
+        add(
+          imageRecord.name ?? imageRecord.filename,
+          imageRecord.data ?? imageRecord.base64 ?? imageRecord.content,
+          index,
+        );
+      }
+    });
     return images;
   }
 
@@ -503,10 +469,6 @@ export class DocumentProcessingService {
     return value && typeof value === "object" && !Array.isArray(value)
       ? value as Record<string, unknown>
       : {};
-  }
-
-  private firstNonEmptyString(...values: unknown[]): string | undefined {
-    return values.find((value): value is string => typeof value === "string" && value.length > 0);
   }
 
   private generateUniqueImageName(baseName: string, imageName: string, imageData?: string): string {

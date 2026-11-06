@@ -51,10 +51,11 @@ function harness(cacheEntries: Record<string, unknown> = {}, supportFiles: Recor
     loadPolicy: jest.fn(async () => ({ schema: "studio.policy.v1", version: 1, updatedAt: "2026-09-13T00:00:00.000Z", grants: [] })),
     publishRun: jest.fn(async (_p: string, command: { cacheDocument: Uint8Array }) => { published.cache = JSON.parse(new TextDecoder().decode(command.cacheDocument)); }),
   } as never;
-  const plugin = { app: { vault: { adapter: {}, getAbstractFileByPath: jest.fn() } }, getLogger: () => ({ warn: jest.fn(), error: jest.fn(), debug: jest.fn() }) } as never;
+  const plugin = { settings: {}, app: { vault: { adapter: {}, getAbstractFileByPath: jest.fn() } }, getLogger: () => ({ warn: jest.fn(), error: jest.fn(), debug: jest.fn() }) } as never;
+  const nativeRun = jest.fn(async (_specification: unknown, _signal?: AbortSignal) => ({ text: "Native result", threadId: "thread", turnId: "turn", status: "completed" as const }));
   const runtime = new StudioRuntime(
     (plugin as { app: unknown }).app as never, plugin, projectStore, registry, new StudioGraphCompiler(), {} as never,
-    { beginLocalCommit: jest.fn(async () => undefined), completeLocalCommit: jest.fn(async () => undefined) } as never,
+    { beginLocalCommit: jest.fn(async () => undefined), completeLocalCommit: jest.fn(async () => undefined) } as never, { run: nativeRun }
   );
   (runtime as unknown as { nodeResultCacheStore: unknown }).nodeResultCacheStore = {
     load: jest.fn(async () => ({ schema: "studio.node-cache.v1", projectId: "proj_single", updatedAt: "2026-09-13T00:00:00.000Z", entries: cacheEntries })),
@@ -62,7 +63,7 @@ function harness(cacheEntries: Record<string, unknown> = {}, supportFiles: Recor
   };
   const events: StudioRunEvent[] = [];
   const run = (entryNodeIds?: string[]) => runtime.runProjectSnapshot("Studio/Single.systemsculpt", project(), { entryNodeIds, onEvent: async (event) => { events.push(event); } });
-  return { run, executed, events, published, runtime, registry };
+  return { run, executed, events, published, runtime, registry, nativeRun };
 }
 
 const entry = (nodeId: string, kind: string, outputs: Record<string, unknown>) => ({
@@ -221,4 +222,28 @@ describe("running one node", () => {
     expect(await pending).toEqual({ prompt: "one" });
   });
 
+});
+
+it("routes native execution through the required run owner with project identity and cancellation", async () => {
+  const { runtime, registry, nativeRun } = harness();
+  registry.register({
+    kind: "test.native", version: "1.0.0", requiredHostCapabilities: [], capabilityClass: "local_cpu",
+    inputPorts: [], outputPorts: [{ id: "result", type: "text" }], configDefaults: {}, configSchema: { fields: [] },
+    async execute(context) {
+      if (!context.services.codex) throw new Error("Native run capability missing");
+      const result = await context.services.codex({ prompt: "Owner task", workingDirectory: "." }, context.signal, context.log);
+      return { outputs: { result: result.text } };
+    },
+  });
+  const snapshot = project();
+  snapshot.graph.nodes = [{ id: "native", kind: "test.native", version: "1.0.0", title: "Native role", position: { x: 0, y: 0 }, config: {} }];
+  snapshot.graph.edges = []; snapshot.graph.entryNodeIds = ["native"];
+  const result = await runtime.runProjectSnapshot("Studio/Single.systemsculpt", snapshot);
+  expect(result.status).toBe("success");
+  expect(nativeRun).toHaveBeenCalledTimes(1);
+  expect(nativeRun).toHaveBeenCalledWith(expect.objectContaining({
+    projectId: "proj_single", projectPath: "Studio/Single.systemsculpt", nodeId: "native", title: "Native role",
+    request: expect.objectContaining({ prompt: "Owner task", workingDirectory: "." }),
+  }), expect.any(AbortSignal));
+  runtime.dispose();
 });

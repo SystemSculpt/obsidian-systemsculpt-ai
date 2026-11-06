@@ -1,4 +1,4 @@
-import { App, TFile, normalizePath } from "obsidian";
+import { App, TFile } from "obsidian";
 import { DiffViewer } from "../../components/DiffViewer";
 import { comparableNativePath, nativeToolPath, normalizedNativePath } from "../../utils/nativeToolPath";
 import type { ToolCall } from "../../types/toolCalls";
@@ -8,10 +8,8 @@ import { resolveAbsoluteVaultPath } from "../../utils/vaultPathUtils";
 import { localAgentChatDirectory } from "../../services/codex/CodexExecutionSettings";
 import { extractPrimaryPathArg, splitToolName } from "../../utils/toolPolicy";
 import { generateDiff, DiffResult } from "../../utils/diffUtils";
-import { applyFileEdits } from "../../tools/vault/editApplication";
-import { resolveExistingVaultFile } from "../../tools/vault/folderNotes";
-import { normalizeLineEndings, normalizeVaultPath } from "../../tools/vault/utils";
-import type { FileEdit, SkippedEdit } from "../../tools/vault/types";
+import { VaultMutationPreparation, type PreparedVaultMutation } from "../../tools/vault/VaultMutationPreparation";
+import type { FileEdit, MultiEditParams, SkippedEdit, WriteFileParams } from "../../tools/vault/types";
 
 /**
  * Why a preview shows no diff. Only "identical" means the change is genuinely
@@ -47,86 +45,46 @@ export async function prepareWriteEditPreviews(app: App, toolCall: ToolCall): Pr
     const preview = await prepareWriteEditPreview(app, toolCall);
     return preview ? [preview] : [];
   }
-  const files = Array.isArray((fn.arguments as { files?: unknown }).files)
-    ? (fn.arguments as { files: Array<Record<string, unknown>> }).files
-    : [];
-  const previews: WriteEditPreview[] = [];
-  for (const [index, file] of files.entries()) {
-    const path = typeof file.path === "string" ? file.path : "";
-    const edits = Array.isArray(file.edits) ? file.edits : [];
-    if (!path || edits.length === 0) continue;
-    const preview = await prepareWriteEditPreview(app, {
-      ...toolCall,
-      id: `${toolCall.id}:file:${index}`,
-      request: {
-        ...toolCall.request,
-        id: `${toolCall.request.id}:file:${index}`,
-        function: {
-          name: "edit",
-          arguments: JSON.stringify({ path, edits, strict: file.strict }),
-        },
-      },
-    });
-    if (preview) previews.push(preview);
+  try {
+    const { mutations } = await new VaultMutationPreparation(app).multiEdit(fn.arguments as unknown as MultiEditParams);
+    return mutations.map(previewFromPreparation);
+  } catch (error) {
+    return [{ path: "multi_edit", oldContent: "", newContent: "", diff: generateDiff("", "", 5),
+      status: "unavailable", requestedCount: 0, appliedCount: 0, skipped: [],
+      notice: error instanceof Error ? error.message : String(error) }];
   }
-  return previews;
 }
 
 /** @internal Unit-tested directly. */
 export async function prepareWriteEditPreview(app: App, toolCall: ToolCall): Promise<WriteEditPreview | null> {
   const fn = getFunctionDataFromToolCall(toolCall);
-  if (!fn) return null;
-  if (!isWriteOrEditTool(fn.name)) return null;
-
+  if (!fn || !isWriteOrEditTool(fn.name)) return null;
+  const { canonicalName: base } = splitToolName(fn.name);
+  if (base === "multi_edit") return (await prepareWriteEditPreviews(app, toolCall))[0] ?? null;
   const path = extractPrimaryPathArg(fn.name, fn.arguments);
   if (!path) return null;
+  const preparation = new VaultMutationPreparation(app);
+  const prepared = base === "write"
+    ? await preparation.write({ path, content: String(fn.arguments.content ?? ""),
+      ifExists: String(fn.arguments.ifExists ?? "overwrite") as WriteFileParams['ifExists'],
+      appendNewline: fn.arguments.appendNewline === true }, true)
+    : await preparation.edit({ path, edits: Array.isArray(fn.arguments.edits) ? fn.arguments.edits as FileEdit[] : [],
+      strict: fn.arguments.strict !== false });
+  return previewFromPreparation(prepared);
+}
 
-  let oldContent = "";
-  const file = resolveExistingVaultFile(app, normalizePath(normalizeVaultPath(path)));
-  if (file && file instanceof TFile) {
-    try {
-      // The executor edits normalized text, so the preview must diff against the
-      // same normalization or a CRLF file reads as a whole-file rewrite.
-      oldContent = normalizeLineEndings(await app.vault.read(file));
-    } catch {
-      // A missing source file produces an empty-before preview.
-    }
-  }
-
-  let newContent = "";
-  let status: WriteEditPreviewStatus = "changed";
-  let requestedCount = 0;
-  let appliedCount = 0;
-  let skipped: SkippedEdit[] = [];
-  const { canonicalName: base } = splitToolName(fn.name);
-  if (base === "write") {
-    const content = String(fn.arguments.content ?? "");
-    const ifExists = String(fn.arguments.ifExists ?? "overwrite");
-    if (file && file instanceof TFile && ifExists === "append") {
-      const appendNewline = fn.arguments.appendNewline === true;
-      newContent = oldContent + (appendNewline && !oldContent.endsWith("\n") ? "\n" : "") + content;
-    } else if (file && file instanceof TFile && ifExists === "skip") {
-      newContent = oldContent;
-    } else {
-      newContent = content;
-    }
-  } else if (base === "edit") {
-    const edits: FileEdit[] = Array.isArray(fn.arguments.edits)
-      ? fn.arguments.edits as FileEdit[]
-      : [];
-    requestedCount = edits.length;
-    const applied = applyFileEdits(oldContent, edits, false);
-    newContent = applied.modifiedContent;
-    appliedCount = applied.appliedCount;
-    skipped = applied.skipped;
-    if (!file) status = "missing";
-    else if (appliedCount === 0 && requestedCount > 0) status = "unmatched";
-  }
-
-  if (status === "changed" && newContent === oldContent) status = "identical";
-
-  const diff = generateDiff(oldContent ?? "", newContent ?? "", 5);
-  return { path, oldContent, newContent, diff, status, requestedCount, appliedCount, skipped, ...(base === "write" && !file ? { isNewFile: true } : {}) };
+function previewFromPreparation(prepared: PreparedVaultMutation): WriteEditPreview {
+  const newContent = prepared.failure ? prepared.original : prepared.modified;
+  const status = prepared.failure?.status ?? (prepared.appliedCount === 0 && prepared.requestedCount > 0 ? "unmatched"
+    : newContent === prepared.original ? "identical" : "changed");
+  const notice = prepared.failure
+    ? prepared.failure.error instanceof Error ? prepared.failure.error.message : String(prepared.failure.error)
+    : prepared.notice;
+  return { path: prepared.path, oldContent: prepared.original, newContent,
+    diff: generateDiff(prepared.original, newContent, 5), status, requestedCount: prepared.requestedCount,
+    appliedCount: prepared.failure ? 0 : prepared.appliedCount, skipped: prepared.skipped,
+    ...(notice ? { notice } : {}),
+    ...(!prepared.failure && !prepared.exists && (prepared.mode === "overwrite" || prepared.mode === "append") ? { isNewFile: true } : {}) };
 }
 
 function nativeRecord(value: unknown): Record<string, unknown> {
@@ -270,7 +228,7 @@ function describeSkippedEdits(preview: WriteEditPreview): string | undefined {
 function renderInlineDiffSummary(container: HTMLElement, previews: readonly WriteEditPreview[]): void {
   const additions = previews.reduce((sum, preview) => sum + preview.diff.stats.additions, 0);
   const deletions = previews.reduce((sum, preview) => sum + preview.diff.stats.deletions, 0);
-  const blocked = previews.filter((preview) => preview.status === "unmatched" || preview.status === "missing");
+  const blocked = previews.filter((preview) => preview.status === "unmatched" || preview.status === "missing" || preview.status === "unavailable");
 
   const summary = container.createDiv({ cls: "systemsculpt-inline-diff__summary" });
   summary.createSpan({

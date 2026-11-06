@@ -1,11 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-import {
-  MANAGED_OUTPUT_PENDING_KEY,
-  MANAGED_TEXT_OWNER,
-  MANAGED_TEXT_OWNER_KEY,
-} from "../../../studio/StudioManagedOutputNodes";
+import { MANAGED_OUTPUT_PENDING_KEY, MANAGED_TEXT_OWNER, MANAGED_TEXT_OWNER_KEY } from '../../../studio/StudioManagedOutputMetadata';
 import type { StudioNodeInstance, StudioProjectV1 } from "../../../studio/types";
 import type { StudioGraphNodeMutationOptions } from "../canvas/StudioGraphNodeCardTypes";
 import {

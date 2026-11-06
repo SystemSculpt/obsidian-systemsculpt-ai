@@ -1,4 +1,5 @@
-import { isRecord } from '../../studio/utils';
+import { NativeTurnText } from './NativeTurnText';
+import { isRecord } from '../../utils/jsonRecord';
 import { connectCodex, type CodexConnection, type CodexJson } from './CodexAppServer';
 import { resolveCodexOptions, type CodexExecutionOptions } from './CodexExecutionSettings';
 import { codexActivity, type CodexActivity } from './CodexActivity';
@@ -57,8 +58,8 @@ export async function runLocalCodex(input: CodexRequest, signal: AbortSignal, ca
   const approvalMode = resolveCodexApprovalMode(input.approvalMode ?? 'settings');
   const approvalParameters = codexApprovalParameters(approvalMode, input.workingDirectory);
   const approvalItems = new Map<string, CodexJson>();
-  let connection: CodexConnection | undefined, threadId = '', turnId = '', text = '', streamingText = '', lockedThreadId = '';
-  let textLength = 0, streamedItemLength = 0;
+  let connection: CodexConnection | undefined, threadId = '', turnId = '', lockedThreadId = '';
+  const text = new NativeTurnText({ mode: owner ? 'offsets' : 'snapshot', snapshot: 'rolling' }, (...update) => callbacks.text?.(...update));
   let liveConnection: CodexLiveConnection | undefined, retained = false, active = true, closed = false, previousTurnId = '';
   const lifetime = new AbortController();
   const abort = () => lifetime.abort();
@@ -95,27 +96,19 @@ export async function runLocalCodex(input: CodexRequest, signal: AbortSignal, ca
         }
         if (method === 'turn/started' && isRecord(params.turn)) turnId = String(params.turn.id || '');
         if (method === 'item/agentMessage/delta' && typeof params.delta === 'string') {
-          const separator = textLength ? '\n\n' : '';
-          if (owner) callbacks.text?.((streamedItemLength ? '' : separator) + params.delta, textLength + (streamedItemLength ? separator.length + streamedItemLength : 0));
-          streamedItemLength += params.delta.length;
-          streamingText = (streamingText + params.delta).slice(-256_000);
-          if (!owner) callbacks.text?.(streamingText);
+          text.append(params.delta);
         }
         if (method === 'item/completed' && isRecord(params.item)) {
           const item = params.item;
           if (item.type === 'agentMessage' && typeof item.text === 'string') {
-            const segment = (textLength ? '\n\n' : '') + item.text;
-            if (owner) callbacks.text?.(segment, textLength);
-            textLength += segment.length; streamedItemLength = 0;
-            text = (text + (text ? '\n\n' : '') + item.text).slice(-256_000); callbacks.log(item.text.slice(-8000)); streamingText = `${text}\n\n`;
-            if (!owner) callbacks.text?.(text);
+            text.complete(item.text); callbacks.log(item.text.slice(-8000));
           } else if (item.type === 'commandExecution') callbacks.log(`Command ${String(item.status)}: ${String(item.command).slice(0, 2000)}`);
           else if (item.type === 'fileChange') { approvalItems.delete(String(item.id)); callbacks.log(`File changes: ${String(item.status)}`); }
         }
         if (method === 'turn/completed' && isRecord(params.turn)) {
           active = false;
           const turn = params.turn;
-          if (turn.status === 'completed') complete({ threadId, turnId: String(turn.id), text, status: 'completed' });
+          if (turn.status === 'completed') complete({ threadId, turnId: String(turn.id), text: text.text, status: 'completed' });
           else if (isRecord(turn.error) && turn.error.codexErrorInfo === 'usageLimitExceeded') {
             const notice = [turn.error.message, turn.error.additionalDetails].filter(value => typeof value === 'string' && value).join('\n\n');
             fail(new LocalAgentUsageLimitError(notice || 'Codex reported a usage limit.'));
@@ -180,7 +173,7 @@ export async function runLocalCodex(input: CodexRequest, signal: AbortSignal, ca
           if (active || closed) throw new Error('Codex connection is not ready for another turn.');
           if (nextSignal.aborted) throw new Error('Codex run canceled.');
           input = nextInput; signal = nextSignal; callbacks = nextCallbacks;
-          previousTurnId = turnId; turnId = ''; text = ''; streamingText = ''; textLength = 0; streamedItemLength = 0; approvalItems.clear(); active = true;
+          previousTurnId = turnId; turnId = ''; text.reset(); approvalItems.clear(); active = true;
           completion = new Promise<CodexResult>((resolve, reject) => { complete = resolve; fail = reject; });
           void completion.catch(() => {});
           signal.addEventListener('abort', abort, { once: true });
