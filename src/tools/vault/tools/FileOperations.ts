@@ -19,21 +19,14 @@ import {
   isHiddenSystemPath,
   ensureAdapterFolder,
   ensureVaultFolder,
-  adapterPathExists,
-  resolvePortableVaultPath,
-  portableVaultPathNotice,
   readAdapterText,
   writeAdapterText,
   statAdapterPath,
 } from "../utils";
-import { assertValidObsidianBasesYaml } from "../../../utils/obsidianBasesYaml";
 import { resolveExistingVaultFile } from "../folderNotes";
-import { applyFileEdits } from "../editApplication";
-import { planFileWrite } from "../fileMutationPlan";
-import {
-  assertValidStudioProjectAgentFileMutation,
-  isStudioProjectDocumentPath,
-} from "../../../studio/StudioProjectAgentFileGuard";
+import { VaultMutationPreparation, type PreparedVaultMutation } from "../VaultMutationPreparation";
+import { withVaultFileMutation } from "../VaultMutationSerialization";
+import { isStudioProjectDocumentPath } from "../../../studio/StudioProjectAgentFileGuard";
 
 /**
  * Raised when a file changed between the read that produced an edit and the
@@ -261,128 +254,32 @@ export class FileOperations {
    * portable name, which the result reports as `path` plus a `notice`.
    */
   async writeFile(params: WriteFileParams): Promise<WriteFileResult> {
-    const path = params.path;
-    const content = params.content;
-    const createDirs = params.createDirs ?? true;
-    const ifExists = params.ifExists ?? "overwrite";
-    const appendNewline = params.appendNewline ?? false;
-    
-    if (!validatePath(path, this.allowedPaths)) {
-      throw new Error(`Access denied: ${path}`);
-    }
-    
-    // Limit content size to prevent memory issues
-    if (content.length > FILESYSTEM_LIMITS.MAX_CONTENT_SIZE) {
-      throw new Error(`Content too large (${content.length} characters). Maximum allowed is ${FILESYSTEM_LIMITS.MAX_CONTENT_SIZE} characters`);
-    }
-    
-    const requestedPath = normalizePath(normalizeVaultPath(path));
-    const normalizedPath = this.shouldUseAdapter(requestedPath)
-      || this.app.vault.getAbstractFileByPath(requestedPath) instanceof TFile
-      ? requestedPath
-      : resolvePortableVaultPath(this.app, requestedPath);
-    if (!validatePath(normalizedPath, this.allowedPaths)) {
-      throw new Error(`Access denied: ${normalizedPath}`);
-    }
-    const renamed = normalizedPath === requestedPath
-      ? {}
-      : { requestedPath, notice: portableVaultPathNotice(requestedPath, normalizedPath) };
-    const isBaseFile = normalizedPath.toLowerCase().endsWith(".base");
-    const file = this.app.vault.getAbstractFileByPath(normalizedPath);
-
-    if (file && file instanceof TFile) {
-      const current = ifExists === "append" ? await this.app.vault.read(file) : undefined;
-      const plan = planFileWrite({ path: normalizedPath || path, exists: true, currentContent: current, content, ifExists, appendNewline });
-      if (plan.disposition === "skip") return { path: normalizedPath || path, success: true, ...renamed };
-      if (ifExists === 'append') {
-        const newContent = plan.modifiedContent;
-        assertValidStudioProjectAgentFileMutation({
-          path: normalizedPath || path,
-          content: newContent,
-          exists: true,
-          mode: "append",
-        });
-        if (isBaseFile) {
-          assertValidObsidianBasesYaml(normalizedPath || path, newContent);
+    return withVaultFileMutation(this.app, async () => {
+      const prepared = await new VaultMutationPreparation(this.app, this.allowedPaths).write(params);
+      if (prepared.failure) throw prepared.failure.error;
+      const result: WriteFileResult = { path: prepared.path, success: true,
+        ...(prepared.requestedPath ? { requestedPath: prepared.requestedPath, notice: prepared.notice } : {}) };
+      if (prepared.disposition === "skip") return result;
+      if (prepared.file) {
+        if (prepared.mode === "append" || isStudioProjectDocumentPath(prepared.path)) {
+          await this.commitPreparedEdit(prepared);
+        } else await this.app.vault.modify(prepared.file, prepared.modified);
+      } else if (prepared.adapterBacked) {
+        if (params.createDirs ?? true) {
+          const lastSlash = prepared.path.lastIndexOf("/");
+          if (lastSlash > 0) await ensureAdapterFolder(this.app.vault.adapter, prepared.path.substring(0, lastSlash));
         }
-        if (isStudioProjectDocumentPath(normalizedPath || path)) {
-          await this.writeStudioProjectIfUnchanged(file, current!, newContent);
-        } else {
-          await this.writeIfUnchanged(file, current!, newContent, EDIT_CONFLICT_MESSAGE);
-        }
+        await writeAdapterText(this.app.vault.adapter, prepared.path, prepared.modified);
       } else {
-        const previousContent = isStudioProjectDocumentPath(normalizedPath || path)
-          ? await this.app.vault.read(file)
-          : undefined;
-        assertValidStudioProjectAgentFileMutation({
-          path: normalizedPath || path,
-          content,
-          previousContent,
-          exists: true,
-          mode: "overwrite",
-        });
-        if (isBaseFile) {
-          assertValidObsidianBasesYaml(normalizedPath || path, content);
+        // Build missing ancestors through the Vault API, preserving its errors.
+        if (params.createDirs ?? true) {
+          const lastSlash = prepared.path.lastIndexOf("/");
+          if (lastSlash > 0) await ensureVaultFolder(this.app, prepared.path.substring(0, lastSlash));
         }
-        if (typeof previousContent === "string") {
-          await this.writeStudioProjectIfUnchanged(file, previousContent, content);
-        } else {
-          await this.app.vault.modify(file, content);
-        }
+        await this.app.vault.create(prepared.path, prepared.modified);
       }
-    } else if (this.shouldUseAdapter(normalizedPath)) {
-      const adapter = this.app.vault.adapter;
-      const exists = await adapterPathExists(adapter, normalizedPath);
-      let previousContent = exists && ifExists === "append" ? await readAdapterText(adapter, normalizedPath) : undefined;
-      const plan = planFileWrite({ path, exists, currentContent: previousContent, content, ifExists, appendNewline });
-      if (plan.disposition === "skip") return { path: normalizedPath || path, success: true, ...renamed };
-      const nextContent = plan.modifiedContent;
-      if (exists && ifExists !== "append" && isStudioProjectDocumentPath(normalizedPath || path)) {
-        previousContent = await readAdapterText(adapter, normalizedPath);
-      }
-      assertValidStudioProjectAgentFileMutation({
-        path: normalizedPath || path,
-        content: nextContent,
-        previousContent,
-        exists,
-        mode: ifExists === "append" ? "append" : "overwrite",
-      });
-      if (isBaseFile) {
-        assertValidObsidianBasesYaml(normalizedPath || path, nextContent);
-      }
-      if (createDirs) {
-        const lastSlash = normalizedPath.lastIndexOf("/");
-        if (lastSlash > 0) {
-          const folderPath = normalizedPath.substring(0, lastSlash);
-          await ensureAdapterFolder(adapter, folderPath);
-        }
-      }
-      await writeAdapterText(adapter, normalizedPath, nextContent);
-    } else {
-      assertValidStudioProjectAgentFileMutation({
-        path: normalizedPath || path,
-        content,
-        exists: false,
-        mode: "overwrite",
-      });
-      if (isBaseFile) {
-        assertValidObsidianBasesYaml(normalizedPath || path, content);
-      }
-      // Ensure parent directories exist if requested. ensureVaultFolder builds
-      // every missing ancestor through the Vault API alone and only swallows
-      // "already exists", so a missing mid-level folder no longer silently
-      // fails the write (#142).
-      if (createDirs) {
-        const lastSlash = normalizedPath.lastIndexOf('/');
-        if (lastSlash > 0) {
-          const folderPath = normalizedPath.substring(0, lastSlash);
-          await ensureVaultFolder(this.app, folderPath);
-        }
-      }
-      await this.app.vault.create(normalizedPath, content);
-    }
-    
-    return { path: normalizedPath || path, success: true, ...renamed };
+      return result;
+    });
   }
 
   /**
@@ -396,90 +293,24 @@ export class FileOperations {
    * non-matching edit still throws, so behavior on the default path is unchanged.
    */
   async editFile(params: EditFileParams): Promise<EditFileResult> {
-    const filePath = params.path;
-    const edits = params.edits;
-    const strict = params.strict ?? true;
-
-    if (!validatePath(filePath, this.allowedPaths)) {
-      throw new Error(`Access denied: ${filePath}`);
-    }
-
-    // Read file content and normalize line endings
-    const normalizedPath = normalizePath(normalizeVaultPath(filePath));
-    const isBaseFile = normalizedPath.toLowerCase().endsWith(".base");
-    assertValidStudioProjectAgentFileMutation({
-      path: normalizedPath || filePath,
-      exists: true,
-      mode: "edit",
+    return withVaultFileMutation(this.app, async () => {
+      const prepared = await new VaultMutationPreparation(this.app, this.allowedPaths).edit(params);
+      if (prepared.failure) throw prepared.failure.error;
+      if (prepared.modified !== prepared.original) await this.commitPreparedEdit(prepared);
+      return { diff: createSimpleDiff(prepared.original, prepared.modified, prepared.path),
+        appliedCount: prepared.appliedCount, requestedCount: prepared.requestedCount, skipped: prepared.skipped };
     });
-    if (this.shouldUseAdapter(normalizedPath)) {
-      const adapter = this.app.vault.adapter;
-      const content = normalizeLineEndings(await readAdapterText(adapter, normalizedPath));
+  }
 
-      const { modifiedContent, appliedCount, skipped } = applyFileEdits(content, edits, strict);
-
-      const diff = createSimpleDiff(content, modifiedContent, filePath);
-      // Only write when content actually changed — skip the redundant no-op write
-      // so a zero-match (strict:false) edit never touches the file's mtime.
-      if (modifiedContent !== content) {
-        assertValidStudioProjectAgentFileMutation({
-          path: normalizedPath || filePath,
-          content: modifiedContent,
-          previousContent: content,
-          exists: true,
-          mode: "edit",
-        });
-        if (isBaseFile) {
-          assertValidObsidianBasesYaml(normalizedPath || filePath, modifiedContent);
-        }
-        await writeAdapterText(adapter, normalizedPath, modifiedContent);
-      }
-      return { diff, appliedCount, requestedCount: edits.length, skipped };
+  private async commitPreparedEdit(prepared: PreparedVaultMutation): Promise<void> {
+    if (prepared.file) {
+      if (isStudioProjectDocumentPath(prepared.path)) {
+        await this.writeStudioProjectIfUnchanged(prepared.file, prepared.rawOriginal!, prepared.modified);
+      } else await this.writeIfUnchanged(prepared.file, prepared.rawOriginal!, prepared.modified, EDIT_CONFLICT_MESSAGE);
+    } else {
+      // Preparation and commit share the adapter queue, not a pretend atomic CAS.
+      await writeAdapterText(this.app.vault.adapter, prepared.path, prepared.modified);
     }
-
-    const abstractFile = resolveExistingVaultFile(this.app, normalizedPath);
-    if (!abstractFile) {
-      throw new Error(`File not found: ${filePath}`);
-    }
-    const resolvedPath = abstractFile.path;
-
-    const originalContent = await this.app.vault.read(abstractFile);
-    const content = normalizeLineEndings(originalContent);
-
-    const { modifiedContent, appliedCount, skipped } = applyFileEdits(content, edits, strict);
-
-    // Create simple diff
-    const diff = createSimpleDiff(content, modifiedContent, resolvedPath);
-
-    // Apply the changes to the file only when something actually changed.
-    if (modifiedContent !== content) {
-      assertValidStudioProjectAgentFileMutation({
-        path: resolvedPath,
-        content: modifiedContent,
-        previousContent: content,
-        exists: true,
-        mode: "edit",
-      });
-      if (isBaseFile) {
-        assertValidObsidianBasesYaml(resolvedPath, modifiedContent);
-      }
-      if (isStudioProjectDocumentPath(resolvedPath)) {
-        await this.writeStudioProjectIfUnchanged(
-          abstractFile,
-          originalContent,
-          modifiedContent
-        );
-      } else {
-        await this.writeIfUnchanged(
-          abstractFile,
-          originalContent,
-          modifiedContent,
-          EDIT_CONFLICT_MESSAGE
-        );
-      }
-    }
-
-    return { diff, appliedCount, requestedCount: edits.length, skipped };
   }
 
   /**
@@ -489,176 +320,38 @@ export class FileOperations {
    * then left untouched and reported explicitly.
    */
   async multiEditFiles(params: MultiEditParams): Promise<MultiEditResult> {
-    const files = Array.isArray(params?.files) ? params.files : [];
-    if (files.length === 0) {
-      throw new Error("Missing required 'files'. Provide one or more file edit plans.");
-    }
-    const maxFiles = FILESYSTEM_LIMITS.MAX_MULTI_EDIT_FILES ?? 20;
-    if (files.length > maxFiles) {
-      throw new Error(`Cannot edit more than ${maxFiles} files at once.`);
-    }
+    return withVaultFileMutation(this.app, async () => {
+      const { mutations, preflightFailed } = await new VaultMutationPreparation(this.app, this.allowedPaths).multiEdit(params);
+      const results: MultiEditFileResult[] = mutations.map(prepared => ({
+        path: prepared.path, success: !prepared.failure, appliedCount: prepared.appliedCount,
+        requestedCount: prepared.requestedCount, skipped: prepared.skipped,
+        ...(prepared.rawOriginal !== undefined ? { diff: createSimpleDiff(prepared.original, prepared.modified, prepared.path) } : {}),
+        ...(prepared.failure ? { error: prepared.failure.error instanceof Error ? prepared.failure.error.message : String(prepared.failure.error) } : {}),
+      }));
+      if (preflightFailed) return { success: false, requestedFiles: mutations.length, appliedFiles: 0, preflightFailed: true, results };
 
-    type Plan = {
-      index: number;
-      path: string;
-      original: string;
-      modified: string;
-      readCurrent: () => Promise<string>;
-      write: (content: string) => Promise<void>;
-      result: MultiEditFileResult;
-    };
-
-    const plans: Plan[] = [];
-    const results: MultiEditFileResult[] = files.map((entry) => ({
-      path: String(entry?.path ?? ""),
-      success: false,
-      appliedCount: 0,
-      requestedCount: Array.isArray(entry?.edits) ? entry.edits.length : 0,
-      skipped: [],
-    }));
-    const seen = new Set<string>();
-
-    for (let index = 0; index < files.length; index += 1) {
-      const entry = files[index];
-      const path = String(entry?.path ?? "").trim();
-      try {
-        if (!path || !Array.isArray(entry?.edits) || entry.edits.length === 0) {
-          throw new Error("Each file requires a path and at least one edit.");
+      let appliedFiles = 0;
+      for (let index = 0; index < mutations.length; index += 1) {
+        const prepared = mutations[index];
+        try {
+          const current = normalizeLineEndings(prepared.file
+            ? await this.app.vault.read(prepared.file)
+            : await readAdapterText(this.app.vault.adapter, prepared.path));
+          if (current !== prepared.original) {
+            throw new Error("File changed after preflight; batch stopped before overwriting newer content.");
+          }
+          await this.commitPreparedEdit(prepared);
+          appliedFiles += 1;
+        } catch (error) {
+          results[index] = { ...results[index], success: false, error: error instanceof Error ? error.message : String(error) };
+          for (let remaining = index + 1; remaining < mutations.length; remaining += 1) {
+            results[remaining] = { ...results[remaining], success: false, error: "Not applied because an earlier file failed during commit." };
+          }
+          return { success: false, requestedFiles: mutations.length, appliedFiles, preflightFailed: false, results };
         }
-        if (!validatePath(path, this.allowedPaths)) {
-          throw new Error(`Access denied: ${path}`);
-        }
-        const normalizedPath = normalizePath(normalizeVaultPath(path));
-        assertValidStudioProjectAgentFileMutation({
-          path: normalizedPath || path,
-          exists: true,
-          mode: "multi_edit",
-        });
-        if (seen.has(normalizedPath)) {
-          throw new Error(`Duplicate file in multi_edit: ${path}`);
-        }
-        seen.add(normalizedPath);
-
-        let original: string;
-        let resolvedPath = normalizedPath;
-        let readCurrent: () => Promise<string>;
-        let write: (content: string) => Promise<void>;
-        if (this.shouldUseAdapter(normalizedPath)) {
-          const adapter = this.app.vault.adapter;
-          original = normalizeLineEndings(await readAdapterText(adapter, normalizedPath));
-          readCurrent = async () => normalizeLineEndings(await readAdapterText(adapter, normalizedPath));
-          write = async (content) => writeAdapterText(adapter, normalizedPath, content);
-        } else {
-          const file = resolveExistingVaultFile(this.app, normalizedPath);
-          if (!file) throw new Error(`File not found: ${path}`);
-          resolvedPath = file.path;
-          const rawOriginal = await this.app.vault.read(file);
-          original = normalizeLineEndings(rawOriginal);
-          readCurrent = async () => normalizeLineEndings(await this.app.vault.read(file));
-          write = isStudioProjectDocumentPath(resolvedPath)
-            ? async (content) => this.writeStudioProjectIfUnchanged(file, rawOriginal, content)
-            : async (content) => this.writeIfUnchanged(file, rawOriginal, content, EDIT_CONFLICT_MESSAGE);
-        }
-
-        const strict = entry.strict ?? true;
-        const applied = applyFileEdits(original, entry.edits, strict);
-        if (applied.appliedCount === 0 || applied.modifiedContent === original) {
-          throw new Error("No edits applied during preflight.");
-        }
-        if (resolvedPath.toLowerCase().endsWith(".base")) {
-          assertValidObsidianBasesYaml(resolvedPath, applied.modifiedContent);
-        }
-        assertValidStudioProjectAgentFileMutation({
-          path: resolvedPath,
-          content: applied.modifiedContent,
-          previousContent: original,
-          exists: true,
-          mode: "multi_edit",
-        });
-        const result: MultiEditFileResult = {
-          path: resolvedPath,
-          success: true,
-          appliedCount: applied.appliedCount,
-          requestedCount: entry.edits.length,
-          skipped: applied.skipped,
-          diff: createSimpleDiff(original, applied.modifiedContent, resolvedPath),
-        };
-        results[index] = result;
-        plans.push({
-          index,
-          path: resolvedPath,
-          original,
-          modified: applied.modifiedContent,
-          readCurrent,
-          write,
-          result,
-        });
-      } catch (error) {
-        results[index] = {
-          ...results[index],
-          path: path || results[index].path,
-          error: error instanceof Error ? error.message : String(error),
-        };
       }
-    }
-
-    if (plans.length !== files.length) {
-      for (const plan of plans) {
-        results[plan.index] = {
-          ...plan.result,
-          success: false,
-          error: "Not applied because another file failed preflight.",
-        };
-      }
-      return {
-        success: false,
-        requestedFiles: files.length,
-        appliedFiles: 0,
-        preflightFailed: true,
-        results,
-      };
-    }
-
-    let appliedFiles = 0;
-    for (let planIndex = 0; planIndex < plans.length; planIndex += 1) {
-      const plan = plans[planIndex];
-      try {
-        const current = await plan.readCurrent();
-        if (current !== plan.original) {
-          throw new Error("File changed after preflight; batch stopped before overwriting newer content.");
-        }
-        await plan.write(plan.modified);
-        appliedFiles += 1;
-      } catch (error) {
-        results[plan.index] = {
-          ...plan.result,
-          success: false,
-          error: error instanceof Error ? error.message : String(error),
-        };
-        for (const remaining of plans.slice(planIndex + 1)) {
-          results[remaining.index] = {
-            ...remaining.result,
-            success: false,
-            error: "Not applied because an earlier file failed during commit.",
-          };
-        }
-        return {
-          success: false,
-          requestedFiles: files.length,
-          appliedFiles,
-          preflightFailed: false,
-          results,
-        };
-      }
-    }
-
-    return {
-      success: true,
-      requestedFiles: files.length,
-      appliedFiles,
-      preflightFailed: false,
-      results,
-    };
+      return { success: true, requestedFiles: mutations.length, appliedFiles, preflightFailed: false, results };
+    });
   }
 
   private enforceReadResponseBudget(

@@ -1,6 +1,6 @@
 export type FileWritePlan = Readonly<{ disposition: 'skip' | 'write'; modifiedContent: string }>;
 
-/** Pure write calculation. I/O, authorization, validation and conflict guards stay with the executor. */
+/** Pure write calculation. I/O, admission, authorization and conflict guards stay outside this calculation. */
 export function planFileWrite(input: Readonly<{
   path: string;
   exists: boolean;

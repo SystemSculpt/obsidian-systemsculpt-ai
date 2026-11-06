@@ -25,7 +25,7 @@ public operations and behavioral tests before following private helpers.
 | Studio execution | `src/studio/StudioService.ts`, `StudioRuntime.ts`, `StudioGraphCompiler.ts`, `nodes/` | User-requested scopes, typed dependency plans, immutable run snapshots, execution gates, and node results. |
 | Studio interaction | `src/views/studio/SystemSculptStudioView.ts`, `PendingStudioView.ts`, `canvas/`, `connections/` | Obsidian leaf, canvas cards, visual connections, editors, and pointer/keyboard interaction. The view's code is evaluated when Studio first opens (`ViewManager.loadStudioView`); until then `PendingStudioView` holds a tab Obsidian opens and hands it to the real view. The source editor's language packs load with the first source card. |
 | Studio edit history | `src/views/studio/StudioGraphHistory.ts` | Each view's local edit transactions, rebased onto the shared canvas for undo/redo. Restoration preserves unrelated peer edits and the accepted disk baseline. |
-| Vault operations | `src/tools/FirstPartyToolService.ts`, `src/tools/vault/` | Advertised local actions, validated vault paths, execution, and typed results. `fileMutationPlan.ts` owns proposed write/edit content shared with approval previews; execution retains authorization, I/O and conflict checks. |
+| Vault operations | `src/tools/FirstPartyToolService.ts`, `src/tools/vault/` | Advertised local actions, validated vault paths, execution, and typed results. `VaultMutationPreparation.ts` owns read-only target resolution, reads, document admission and batch preflight shared with hosted approval previews. Execution retains authorization and commit-time conflict checks. |
 | Audio Processor | `src/features/audio-processor/AudioProcessorService.ts`, `AudioProcessorDelivery.ts` | Input/job workflow and durable local output delivery respectively. |
 | Choosing audio | `src/components/AudioSourcePicker.ts` | The vault audio list, device dropzone, keyboard navigation and selected-audio preview shared by Transcribe audio and Audio Processor. Each modal keeps only its output options and submit. |
 | Inbox automation | `src/features/inbox-transcription/InboxTranscriptionService.ts` | Vault event admission, batching, user confirmation, and cancellation for automatic transcription. |
@@ -44,6 +44,11 @@ validation and `vaultFileName.ts` policies. Callers retain domain errors, root
 mapping, project extensions and directory-prefix boundaries. Native filesystem
 paths (including Studio's desktop picker) must retain their absolute roots and
 must not use a vault-relative normalizer.
+
+`src/tools/vault/VaultMutationSerialization.ts` serializes preparation through
+commit for cooperating file-tool instances sharing a vault adapter. Indexed
+writes retain `Vault.process` conflict checks. Adapter serialization is not
+compare-and-swap against sync, native processes or other adapter writers.
 
 `src/utils/SupportDiagnosticEvent.ts` owns the lifecycle scalar inventory and
 immutable snapshot provenance. `AgentLifecycle` normalizes once; the logger
