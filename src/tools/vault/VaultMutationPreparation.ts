@@ -126,14 +126,15 @@ export class VaultMutationPreparation {
   private async resolveTarget(prepared: PreparedVaultMutation, requested: string, operation: 'write' | 'edit'): Promise<void> {
     const normalized = normalizePath(normalizeVaultPath(requested));
     if (operation === 'write') {
-      prepared.path = isHiddenSystemPath(normalized) || this.app.vault.getAbstractFileByPath(normalized) instanceof TFile
+      const requestedFile = this.app.vault.getAbstractFileByPath(normalized);
+      prepared.path = isHiddenSystemPath(normalized) || requestedFile instanceof TFile
         ? normalized : resolvePortableVaultPath(this.app, normalized);
       this.assertAllowed(prepared.path);
       if (prepared.path !== normalized) {
         prepared.requestedPath = normalized;
         prepared.notice = portableVaultPathNotice(normalized, prepared.path);
       }
-      const direct = this.app.vault.getAbstractFileByPath(prepared.path);
+      const direct = prepared.path === normalized ? requestedFile : this.app.vault.getAbstractFileByPath(prepared.path);
       prepared.file = direct instanceof TFile ? direct : null;
       prepared.adapterBacked = !prepared.file && isHiddenSystemPath(prepared.path);
     } else {

@@ -1441,8 +1441,8 @@ describe("AgentChatSession", () => {
         }>,
       ): void;
     };
-    internals.continuations.results = { size: 513 };
-    internals.continuations.approvals = { size: 513 };
+    jest.spyOn(internals.continuations, 'results', 'get').mockReturnValue({ size: 513 });
+    jest.spyOn(internals.continuations, 'approvals', 'get').mockReturnValue({ size: 513 });
     internals.pendingCancelRequestId = requestId;
     internals.runStalled = true;
     internals.awaitingClientWork = true;

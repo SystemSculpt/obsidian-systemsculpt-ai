@@ -858,12 +858,11 @@ export class AgentChatSession implements ChatSession {
     });
     const serverRequested = tool.part.state === "approval-requested";
     if (serverRequested) {
-      const delivery = this.continuations.createApproval(Object.freeze({
+      const delivery = this.continuations.retainApproval(Object.freeze({
           ...decision,
           requestId: active.requestId,
           callId,
         }));
-      this.continuations.approvals.set(callId, delivery);
       this.deliverPendingApproval(active, delivery);
     } else if (approved) {
       this.startLocalTool(active, tool);
@@ -949,8 +948,7 @@ export class AgentChatSession implements ChatSession {
     this.conversationId = null;
     this.projection = new ConversationProjection();
     this.reconciledKey = null;
-    this.continuations.results.clear();
-    this.continuations.approvals.clear();
+    this.continuations.clear();
     this.pendingCancelRequestId = null;
     this.pendingCancelInFlight = false;
     this.clientLatency.clear();
@@ -2002,7 +2000,7 @@ export class AgentChatSession implements ChatSession {
         ...(toolExecutionOrdinal === undefined ? {} : { toolExecutionOrdinal }),
         ...this.clientLatency.fields(active.requestId),
       });
-      delivery = this.continuations.createResult({
+      delivery = this.continuations.retainResult({
         requestId: active.requestId,
         call,
         ...(toolExecutionOrdinal === undefined ? {} : { toolExecutionOrdinal }),
@@ -2035,7 +2033,7 @@ export class AgentChatSession implements ChatSession {
         ...(toolExecutionOrdinal === undefined ? {} : { toolExecutionOrdinal }),
         ...this.clientLatency.fields(active.requestId),
       });
-      delivery = this.continuations.createResult({
+      delivery = this.continuations.retainResult({
         requestId: active.requestId,
         call,
         ...(toolExecutionOrdinal === undefined ? {} : { toolExecutionOrdinal }),
@@ -2052,7 +2050,6 @@ export class AgentChatSession implements ChatSession {
     if (this.active?.token === active.token && !active.terminal) {
       this.publishActive(active, true);
     }
-    this.continuations.results.set(call.callId, delivery);
     await this.deliverToolResult(active, delivery);
   }
 
@@ -2539,8 +2536,7 @@ export class AgentChatSession implements ChatSession {
     this.clearResynchronization();
     this.runStalled = false;
     this.stallRecovery = null;
-    this.continuations.results.clear();
-    this.continuations.approvals.clear();
+    this.continuations.clear();
     this.pendingCancelRequestId = null;
     this.pendingCancelInFlight = false;
     this.recordLifecycle({

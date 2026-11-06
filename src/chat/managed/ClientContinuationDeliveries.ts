@@ -52,13 +52,29 @@ type DeliveryAttempt = Readonly<{
 
 /** Retains exact managed client continuations across uncertain stream delivery. */
 export class ClientContinuationDeliveries {
-  readonly results = new Map<string, PendingToolDelivery>();
-  readonly approvals = new Map<string, PendingApprovalDelivery>();
+  private readonly retainedResults = new Map<string, PendingToolDelivery>();
+  private readonly retainedApprovals = new Map<string, PendingApprovalDelivery>();
+  get results(): ReadonlyMap<string, PendingToolDelivery> { return this.retainedResults; }
+  get approvals(): ReadonlyMap<string, PendingApprovalDelivery> { return this.retainedApprovals; }
   private openEpoch = 0;
   opened(): void { this.openEpoch += 1; }
 
-  createResult(input: ToolDelivery): PendingToolDelivery { return Object.assign(new DeliveryState(), input); }
-  createApproval(decision: ApprovalDecision): PendingApprovalDelivery { return Object.assign(new DeliveryState(), { decision }); }
+  retainResult(input: ToolDelivery): PendingToolDelivery {
+    const delivery = Object.assign(new DeliveryState(), input);
+    this.retainedResults.set(input.call.callId, delivery);
+    return delivery;
+  }
+
+  retainApproval(decision: ApprovalDecision): PendingApprovalDelivery {
+    const delivery = Object.assign(new DeliveryState(), { decision });
+    this.retainedApprovals.set(decision.callId, delivery);
+    return delivery;
+  }
+
+  clear(): void {
+    this.retainedResults.clear();
+    this.retainedApprovals.clear();
+  }
 
   acknowledgeResult(callId: string, requestId: string): { delivery: PendingToolDelivery; first: boolean } | null {
     const delivery = this.results.get(callId);
@@ -80,10 +96,10 @@ export class ClientContinuationDeliveries {
     approval: (delivery: PendingApprovalDelivery) => boolean;
   }): void {
     for (const [callId, delivery] of this.results) {
-      if (delivery.requestId === requestId && delivery.acknowledged && matches.result(delivery)) this.results.delete(callId);
+      if (delivery.requestId === requestId && delivery.acknowledged && matches.result(delivery)) this.retainedResults.delete(callId);
     }
     for (const [callId, delivery] of this.approvals) {
-      if (delivery.decision.requestId === requestId && delivery.acknowledged && matches.approval(delivery)) this.approvals.delete(callId);
+      if (delivery.decision.requestId === requestId && delivery.acknowledged && matches.approval(delivery)) this.retainedApprovals.delete(callId);
     }
   }
 

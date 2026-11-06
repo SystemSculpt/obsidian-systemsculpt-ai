@@ -1,4 +1,4 @@
-import { ClientContinuationDeliveries, type PendingApprovalDelivery, type PendingToolDelivery } from '../ClientContinuationDeliveries';
+import { ClientContinuationDeliveries } from '../ClientContinuationDeliveries';
 
 function deferred() {
   let resolve!: () => void;
@@ -10,10 +10,8 @@ function harness(kind: 'approval' | 'result') {
   const owner = new ClientContinuationDeliveries();
   owner.opened();
   const delivery = kind === 'approval'
-    ? owner.createApproval({ approvalId: 'approval-1', approved: true, source: 'manual', requestId: 'request-1', callId: 'call-1' })
-    : owner.createResult({ requestId: 'request-1', call: { callId: 'call-1', name: 'write', input: { path: 'note.md' } }, state: 'output-available', output: { success: true } });
-  if (kind === 'approval') owner.approvals.set('call-1', delivery as PendingApprovalDelivery);
-  else owner.results.set('call-1', delivery as PendingToolDelivery);
+    ? owner.retainApproval({ approvalId: 'approval-1', approved: true, source: 'manual', requestId: 'request-1', callId: 'call-1' })
+    : owner.retainResult({ requestId: 'request-1', call: { callId: 'call-1', name: 'write', input: { path: 'note.md' } }, state: 'output-available', output: { success: true } });
   const receipt = (requestId = 'request-1') => kind === 'approval'
     ? owner.acknowledgeApproval('call-1', requestId) : owner.acknowledgeResult('call-1', requestId);
   const retained = () => (kind === 'approval' ? owner.approvals : owner.results).has('call-1');
@@ -27,6 +25,25 @@ function harness(kind: 'approval' | 'result') {
 }
 
 describe.each(['approval', 'result'] as const)('retained managed %s delivery', kind => {
+  it('clears both delivery kinds and prevents an in-flight continuation from being replayed', async () => {
+    const h = harness(kind);
+    h.owner.retainApproval({ approvalId: 'other-approval', approved: false, source: 'manual', requestId: 'request-1', callId: 'other-call' });
+    h.owner.retainResult({ requestId: 'request-1', call: { callId: 'other-call', name: 'write', input: {} }, state: 'output-error', errorText: 'Failed' });
+    const stream = deferred();
+    const send = jest.fn(() => stream.promise);
+    const task = h.owner.deliver(h.delivery, { ...h.context, prepare: () => send });
+    h.owner.clear();
+    expect(h.owner.results.size).toBe(0);
+    expect(h.owner.approvals.size).toBe(0);
+    expect(h.receipt()).toBeNull();
+    h.owner.opened();
+    stream.resolve();
+    await task;
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(h.context.markUnsynchronized).not.toHaveBeenCalled();
+    expect(h.context.reportError).not.toHaveBeenCalled();
+  });
+
   it('requires a current in-flight ACK and exact projection before retirement', async () => {
     const h = harness(kind);
     const stream = deferred();
