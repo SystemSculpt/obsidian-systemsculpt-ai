@@ -220,12 +220,20 @@ export class SystemSculptSearchModal extends StandardModal {
       });
 
       if (serial < this.querySerial || controller.signal.aborted) return;
-      this.renderResponse(response);
+      const indexing = response.stats.indexingPending && response.stats.metadataOnly;
+      const semanticFollows = !indexing && trimmed.length >= this.SEMANTIC_MIN_CHARS;
+      if (semanticFollows && response.results.length === 0) {
+        // A question that matches no words yet may still match by meaning:
+        // keep what is on screen until the semantic pass decides.
+        if (!this.hasRenderedResults()) this.renderLoading("Searching...");
+      } else {
+        this.renderResponse(response);
+      }
 
-      if (response.stats.indexingPending && response.stats.metadataOnly) {
+      if (indexing) {
         this.scheduleIndexRefresh(trimmed, serial);
-      } else if (trimmed.length >= this.SEMANTIC_MIN_CHARS) {
-        this.scheduleSemanticPass(trimmed, serial);
+      } else if (semanticFollows) {
+        this.scheduleSemanticPass(trimmed, serial, response);
       }
     } catch (error) {
       if (this.isAbortError(error) || serial < this.querySerial) return;
@@ -238,11 +246,11 @@ export class SystemSculptSearchModal extends StandardModal {
     }
   }
 
-  private scheduleSemanticPass(query: string, serial: number) {
+  private scheduleSemanticPass(query: string, serial: number, lexical: SearchResponse) {
     this.cancelSemanticPass();
     this.semanticHandle = this.ownerWindow.setTimeout(() => {
       this.semanticHandle = null;
-      void this.runSemanticPass(query, serial);
+      void this.runSemanticPass(query, serial, lexical);
     }, Math.max(0, this.SEMANTIC_IDLE_MS - this.SEARCH_DEBOUNCE_MS));
   }
 
@@ -256,10 +264,11 @@ export class SystemSculptSearchModal extends StandardModal {
     this.semanticAbortController = null;
   }
 
-  private async runSemanticPass(query: string, serial: number) {
+  private async runSemanticPass(query: string, serial: number, lexical: SearchResponse) {
     if (serial !== this.querySerial || this.currentQuery.trim() !== query || !this.listEl) return;
     const controller = new AbortController();
     this.semanticAbortController = controller;
+    const current = () => serial === this.querySerial && !controller.signal.aborted;
     try {
       const response = await this.engine.search(query, {
         mode: "smart",
@@ -267,12 +276,15 @@ export class SystemSculptSearchModal extends StandardModal {
         limit: this.SEARCH_LIMIT,
         signal: controller.signal,
       });
-      // Without semantic hits the lexical results already on screen stand.
-      if (serial === this.querySerial && !controller.signal.aborted && response.stats.usedEmbeddings) {
+      if (current() && response.stats.usedEmbeddings) {
         this.renderResponse(response, { stabilize: true });
+      } else if (current() && lexical.results.length === 0) {
+        // No semantic answer: the empty lexical result is the answer.
+        this.renderResponse(lexical);
       }
+      // Otherwise the lexical results already on screen stand.
     } catch {
-      // The lexical results already on screen stand.
+      if (current() && lexical.results.length === 0) this.renderResponse(lexical);
     } finally {
       if (this.semanticAbortController === controller) {
         this.semanticAbortController = null;
@@ -314,7 +326,7 @@ export class SystemSculptSearchModal extends StandardModal {
       if (serial === this.querySerial && !controller.signal.aborted) {
         this.renderResponse(response, { stabilize: true });
         if (query.length >= this.SEMANTIC_MIN_CHARS) {
-          this.scheduleSemanticPass(query, serial);
+          this.scheduleSemanticPass(query, serial, response);
         }
       }
     } catch (error) {
@@ -625,11 +637,14 @@ export class SystemSculptSearchModal extends StandardModal {
     const rawMatches: Array<{ start: number; end: number }> = [];
     for (const term of terms) {
       // A term marks words that start with it ("cross" in "crossing"), never
-      // the inside of another word ("the" in "then").
-      const pattern = new RegExp(`(?<![\\p{L}\\p{N}])${escapeRegExp(term)}`, "giu");
+      // the inside of another word ("the" in "then"). Scripts written without
+      // spaces between words match anywhere. No lookbehind: iOS before 16.4
+      // rejects it, so the boundary is captured and skipped.
+      const boundary = UNSPACED_SCRIPT.test(term) ? "()" : "(^|[^\\p{L}\\p{N}])";
+      const pattern = new RegExp(`${boundary}(${escapeRegExp(term)})`, "giu");
       for (const match of text.matchAll(pattern)) {
-        const start = match.index ?? 0;
-        rawMatches.push({ start, end: start + match[0].length });
+        const start = (match.index ?? 0) + match[1].length;
+        rawMatches.push({ start, end: start + match[2].length });
       }
     }
 
@@ -679,9 +694,14 @@ const HIGHLIGHT_STOP_WORDS = new Set([
  */
 export function highlightTerms(query: string): string[] {
   const words = [...new Set(query.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [])];
-  const content = words.filter((word) => !HIGHLIGHT_STOP_WORDS.has(word));
+  // A lone letter is a fragment ("s" of "what's", "e" of "e-mail"), not a word to mark.
+  const content = words.filter((word) =>
+    !HIGHLIGHT_STOP_WORDS.has(word) && (word.length > 1 || UNSPACED_SCRIPT.test(word)));
   return (content.length > 0 || words.length !== 1 ? content : words).sort((a, b) => b.length - a.length);
 }
+
+/** Scripts written without spaces between words. */
+const UNSPACED_SCRIPT = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Thai}]/u;
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

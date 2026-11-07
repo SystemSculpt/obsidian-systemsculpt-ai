@@ -7,7 +7,7 @@ export class StudioOutputContainerController {
   private observer: ResizeObserver | null = null;
   private owner: Window | null = null;
   private timer: number | null = null;
-  private observed = new WeakSet<Element>();
+  private observed = new Map<string, Element>();
 
   constructor(private readonly host: {
     getProject: () => StudioProjectV1 | null;
@@ -31,15 +31,25 @@ export class StudioOutputContainerController {
     this.sync();
   }
 
-  /** Watches output cards and producers added since the last call, e.g. by an in-place canvas refresh. */
+  /**
+   * Watches the output cards and producers on the canvas now, e.g. after an
+   * in-place refresh added, replaced or removed one. Returns whether any is new.
+   */
   sync(): boolean {
     if (!this.owner) return false;
     const groups = this.host.getProject()?.graph.groups?.filter(group => group.outputForNodeId) || [];
-    let added = false;
+    const current = new Map<string, Element>();
     for (const id of new Set(groups.flatMap(group => [...group.nodeIds, group.outputForNodeId!]))) {
       const element = this.host.getNodeElement(id);
-      if (!element || this.observed.has(element)) continue;
-      this.observed.add(element);
+      if (element) current.set(id, element);
+    }
+    let added = false;
+    for (const [id, element] of this.observed) {
+      if (current.get(id) !== element) { this.observer?.unobserve(element); this.observed.delete(id); }
+    }
+    for (const [id, element] of current) {
+      if (this.observed.has(id)) continue;
+      this.observed.set(id, element);
       this.observer?.observe(element);
       added = true;
     }
@@ -73,7 +83,7 @@ export class StudioOutputContainerController {
   dispose(): void {
     this.observer?.disconnect();
     this.observer = null;
-    this.observed = new WeakSet();
+    this.observed.clear();
     if (this.timer !== null) this.owner?.clearTimeout(this.timer);
     this.timer = null;
     this.owner = null;

@@ -61,9 +61,10 @@ it("watches an output card that an in-place refresh adds after mounting", () => 
   jest.useFakeTimers();
   const original = window.ResizeObserver;
   const observed: Element[] = [];
+  const unobserved: Element[] = [];
   window.ResizeObserver = class {
     observe(element: Element) { observed.push(element); }
-    unobserve() {}
+    unobserve(element: Element) { unobserved.push(element); }
     disconnect() {}
   } as unknown as typeof ResizeObserver;
   const project = createEmptyStudioProject({ name: "Outputs", policyPath: "policy.json", minPluginVersion: "0", maxRuns: 1, maxArtifactsMb: 1 });
@@ -85,5 +86,10 @@ it("watches an output card that an in-place refresh adds after mounting", () => 
     expect(observed.map(el => (el as HTMLElement).dataset.nodeId).sort()).toEqual(["n1", "source"]);
     jest.advanceTimersByTime(40);
     expect(positionsChanged).toHaveBeenCalledTimes(1);
+    // A refresh replaces the card: the detached one stops being watched.
+    const replaced = elements.get("n1");
+    card("n1");
+    expect(controller.sync()).toBe(true);
+    expect(unobserved).toEqual([replaced]);
   } finally { controller.dispose(); window.ResizeObserver = original; jest.useRealTimers(); }
 });

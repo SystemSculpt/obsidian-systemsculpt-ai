@@ -2,7 +2,7 @@
  * @jest-environment jsdom
  */
 import { App } from "obsidian";
-import { SystemSculptSearchModal } from "../SystemSculptSearchModal";
+import { SystemSculptSearchModal, highlightTerms } from "../SystemSculptSearchModal";
 import { SearchResponse } from "../../services/search/SystemSculptSearchEngine";
 
 const flush = async (cycles = 2) => {
@@ -279,6 +279,37 @@ describe("SystemSculptSearchModal", () => {
 
       await jest.advanceTimersByTimeAsync(400);
       expect(semanticCalls()).toEqual([["test", expect.objectContaining({ mode: "smart" })]]);
+    });
+
+    it("waits for the semantic pass before saying a question matches nothing", async () => {
+      modal.onOpen();
+      const searchInput = (modal as any).searchInputEl as HTMLInputElement;
+      const listEl = (modal as any).listEl as HTMLElement;
+      let embeddings = true;
+      plugin._testEngine.search.mockImplementation(async (_query: string, options: { semantic?: boolean }) => (
+        options.semantic === false
+          ? createMockSearchResponse({ results: [], stats: { ...createMockSearchResponse().stats, usedEmbeddings: false } })
+          : createMockSearchResponse({
+            results: embeddings ? [{ path: "Research/Old ferry crossing.md", title: "Old ferry crossing", score: 0.6, origin: "semantic", updatedAt: Date.now() }] : [],
+            stats: { ...createMockSearchResponse().stats, usedEmbeddings: embeddings },
+          })
+      ));
+
+      searchInput.value = "where did the old boat cross";
+      searchInput.dispatchEvent(new Event("input"));
+      await jest.advanceTimersByTimeAsync(190);
+      expect(listEl.textContent).not.toContain("No matches yet");
+      await jest.advanceTimersByTimeAsync(400);
+      expect(listEl.textContent).toContain("Old ferry crossing");
+      expect(listEl.textContent).not.toContain("No matches yet");
+
+      embeddings = false;
+      searchInput.value = "zzz qqq";
+      searchInput.dispatchEvent(new Event("input"));
+      await jest.advanceTimersByTimeAsync(190);
+      expect(listEl.textContent).not.toContain("No matches yet");
+      await jest.advanceTimersByTimeAsync(400);
+      expect(listEl.textContent).toContain("No matches yet");
     });
 
     it("never runs a semantic pass for a query shorter than three characters", async () => {
@@ -589,6 +620,15 @@ describe("SystemSculptSearchModal", () => {
       expect(((modal as any).listEl as HTMLElement).querySelectorAll("mark.ss-hl").length).toBeGreaterThan(0);
     });
 
+    it("drops lone-letter fragments and marks unspaced scripts anywhere", () => {
+      expect(highlightTerms("what's the plan")).toEqual(["plan"]);
+      expect(highlightTerms("e-mail setup")).toEqual(["setup", "mail"]);
+      const ranges = (text: string, query: string) => (modal as any).getHighlightRanges(text, query)
+        .map(({ start, end }: { start: number; end: number }) => text.slice(start, end));
+      expect(ranges("私は東京に行く", "東京")).toEqual(["東京"]);
+      expect(ranges("Then the ferry", "the ferry")).toEqual(["ferry"]);
+    });
+
     it("does not show a missing-preview placeholder for metadata-only recents", async () => {
       modal.onOpen();
       await flush();
@@ -604,6 +644,8 @@ describe("SystemSculptSearchModal", () => {
       plugin._testEngine.search.mockResolvedValue(createMockSearchResponse({ results: [] }));
 
       await (modal as any).executeSearch("nonexistent");
+      // The semantic pass decides first; mocked without embeddings, the empty result stands.
+      await jest.advanceTimersByTimeAsync(400);
 
       const listEl = (modal as any).listEl as HTMLElement;
       expect(listEl.querySelector(".ss-ui-state.is-empty")).not.toBeNull();
