@@ -101,7 +101,7 @@ export function renderAccountSection(
       : signedInWithoutPlan
         ? `Signed in as ${signedInEmail}.`
         : "Use your own AI. Subscribe for image and video generation, smart search and Studio.";
-    statusSetting.setDesc(`${accountDesc}${hasHostCapability("local-cli", root) ? " Claude Code and Codex need no license." : ""}${pendingSignIn ? " Waiting for browser sign-in…" : ""}`);
+    statusSetting.setDesc(`${accountDesc}${hasHostCapability("local-cli", root) ? " Claude Code and Codex stay free on desktop." : ""}${pendingSignIn ? " Waiting for browser sign-in…" : ""}`);
     renderConnectOutcome(statusSetting.descEl, tabInstance.accountConnectOutcome);
   };
   renderStatus(null);
