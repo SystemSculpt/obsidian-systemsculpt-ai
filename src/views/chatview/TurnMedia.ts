@@ -2,7 +2,7 @@ import { TFile, type App } from "obsidian";
 import type { AgentToolPart } from "../../chat/ChatConversation";
 import { decodeSystemSculptToolOutput, systemSculptToolName, type SystemSculptMedia } from "../../tools/systemsculpt/SystemSculptTools";
 
-export type TurnMedia = Readonly<{
+type TurnMedia = Readonly<{
   media: readonly SystemSculptMedia[];
   /** A one-line next step such as Subscribe, from a tool the account can't use yet. */
   notices: readonly Readonly<{ text: string; label: string; url: string }>[];
@@ -24,6 +24,7 @@ function embeddedInAnswer(answer: string, path: string): boolean {
  * SystemSculpt tool results. A file the reply already embeds shows once, in
  * the reply.
  */
+/** @internal Exported for tests. */
 export function presentTurnMedia(parts: readonly AgentToolPart[], answer = ""): TurnMedia {
   const media = new Map<string, SystemSculptMedia>();
   const notices = new Map<string, { text: string; label: string; url: string }>();
@@ -33,7 +34,8 @@ export function presentTurnMedia(parts: readonly AgentToolPart[], answer = ""): 
     if (!result) continue;
     for (const item of result.media ?? []) if (!embeddedInAnswer(answer, item.path)) media.set(item.path, item);
     if (result.link) {
-      const text = result.message.replace(new RegExp(`\\s*${result.link.label}:\\s*\\S+\\s*$`, "u"), "").trim();
+      // The line is the message's first part; what follows the link is guidance for the agent.
+      const text = result.message.split(`${result.link.label}:`)[0].trim();
       notices.set(`${result.link.url}\n${text}`, { text, label: result.link.label, url: result.link.url });
     }
   }

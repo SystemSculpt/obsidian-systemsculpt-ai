@@ -74,7 +74,9 @@ describe("SystemSculpt chat tools", () => {
   it("answers a person without a license with one Subscribe line and generates nothing", async () => {
     const { host: fake, images } = host({ hasLicenseKey: () => false });
     const result = await new SystemSculptToolService(fake).call("generate_image", { prompt: "x" }, signal());
-    expect(result).toEqual({ ok: false, message: `Image generation comes with a SystemSculpt subscription. Subscribe: ${SUBSCRIBE}`, link: { label: "Subscribe", url: SUBSCRIBE } });
+    expect(result).toEqual({ ok: false, message: expect.stringMatching(/^Image generation comes with a SystemSculpt subscription\. Subscribe: \S+ The chat already shows the person this line/u), link: { label: "Subscribe", url: SUBSCRIBE } });
+    expect(presentTurnMedia([{ id: "a", order: 0, kind: "tool", messageId: "m", callId: "a", name: "generate_image", state: "succeeded", input: {}, location: "server", output: { data: { systemsculpt_tool: 1, ...result } } } as unknown as AgentToolPart]).notices)
+      .toEqual([{ text: "Image generation comes with a SystemSculpt subscription.", label: "Subscribe", url: SUBSCRIBE }]);
     expect(images.generate).not.toHaveBeenCalled();
   });
 
@@ -82,7 +84,7 @@ describe("SystemSculpt chat tools", () => {
     const { host: fake } = host({ checkLicense: async () => ({ outcome: "license_required" }) });
     const result = await new SystemSculptToolService(fake).call("generate_video", { prompt: "x" }, signal());
     expect(result.link).toEqual({ label: "Subscribe", url: SUBSCRIBE });
-    expect(result.message).toBe(`Video generation comes with a SystemSculpt subscription. Subscribe: ${SUBSCRIBE}`);
+    expect(result.message).toMatch(/^Video generation comes with a SystemSculpt subscription\. Subscribe: /u);
   });
 
   it("turns a credits shortfall into a Buy credits line, not an error dump", async () => {

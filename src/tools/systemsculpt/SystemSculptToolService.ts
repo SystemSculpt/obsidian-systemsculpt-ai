@@ -17,10 +17,12 @@ import {
 } from "./SystemSculptTools";
 
 /** The chat shows generated files under the reply; an embed in the reply would show them twice. */
+/** The chat shows the link as its own line; the reply repeating it would say it twice. */
+const LINK_SHOWN = "The chat already shows the person this line and its link under your reply. Don't restate it, explain it or mention subscribing or credits; at most say in a few words that nothing was made.";
 const SHOWN_IN_CHAT = "The chat already shows generated files under your reply, so don't embed them again.";
 
-export const GENERATED_IMAGES_FOLDER = "SystemSculpt/Images";
-export const GENERATED_VIDEOS_FOLDER = "SystemSculpt/Videos";
+const GENERATED_IMAGES_FOLDER = "SystemSculpt/Images";
+const GENERATED_VIDEOS_FOLDER = "SystemSculpt/Videos";
 
 type StudioTarget = Pick<StudioService,
   | "listProjects" | "createProjectFile" | "readAgentDocument" | "editAgentDocument"
@@ -35,7 +37,8 @@ export type SystemSculptToolHost = Readonly<{
   videos: Pick<ManagedVideoGenerationAdapter, "generate" | "beginLocalCommit" | "markDisplayed" | "markVaultWriteCompleted" | "completeLocalCommit">;
   videoModels: (signal: AbortSignal) => Promise<readonly ManagedVideoModel[]>;
   studio: () => StudioTarget;
-  openFile: (path: string) => Promise<void>;
+  /** Opens a vault file in a new tab; inactive keeps the chat in front. */
+  openFile: (path: string, active: boolean) => Promise<void>;
   links: Readonly<{ subscribe: string; credits: string }>;
   now?: () => Date;
   randomId?: () => string;
@@ -110,7 +113,7 @@ export class SystemSculptToolService {
   private subscribe(feature: string): SystemSculptToolResult {
     return {
       ok: false,
-      message: `${feature} comes with a SystemSculpt subscription. Subscribe: ${this.host.links.subscribe}`,
+      message: `${feature} comes with a SystemSculpt subscription. Subscribe: ${this.host.links.subscribe} ${LINK_SHOWN}`,
       link: { label: "Subscribe", url: this.host.links.subscribe },
     };
   }
@@ -118,7 +121,7 @@ export class SystemSculptToolService {
   private failure(error: unknown): SystemSculptToolResult {
     const code = errorCode(error), message = errorText(error);
     if (code === "payment_required" || /insufficient_credits|not enough credits/i.test(message)) {
-      return { ok: false, message: `Not enough SystemSculpt credits for this. Buy credits: ${this.host.links.credits}`, link: { label: "Buy credits", url: this.host.links.credits } };
+      return { ok: false, message: `Not enough SystemSculpt credits for this. Buy credits: ${this.host.links.credits} ${LINK_SHOWN}`, link: { label: "Buy credits", url: this.host.links.credits } };
     }
     if (code === "license_required" || code === "license_rejected" || /license_required|license_rejected/.test(message)) {
       return this.subscribe("This");
@@ -246,6 +249,8 @@ export class SystemSculptToolService {
         frameImages: frames,
       }),
     });
+    // The model may snap the request to another length; report the one made.
+    const seconds = result.outputs[0]?.metadata.duration_seconds ?? null;
     const media: SystemSculptMedia[] = [];
     for (const [index, output] of result.outputs.entries()) {
       const path = await this.save(GENERATED_VIDEOS_FOLDER, prompt, output.bytes, output.metadata.mime_type, index, result.outputs.length);
@@ -259,7 +264,7 @@ export class SystemSculptToolService {
     } catch { /* Recovery retries the receipt. */ }
     return {
       ok: true,
-      message: `Saved the video to the vault: ${media.map(item => item.path).join(", ")}. ${SHOWN_IN_CHAT}`,
+      message: `Saved the video${seconds ? ` (${seconds} s)` : ""} to the vault: ${media.map(item => item.path).join(", ")}. ${SHOWN_IN_CHAT}`,
       media,
       data: { model: model?.id ?? requested },
     };
@@ -281,7 +286,8 @@ export class SystemSculptToolService {
     const studio = this.host.studio();
     const created = await studio.createProjectFile({ name, ...(projectPath ? { projectPath } : {}) });
     const document = record(await studio.readAgentDocument(created.path));
-    if (args.show !== false) await this.host.openFile(created.path);
+    // A new workflow opens beside the chat; the person keeps the conversation in view.
+    if (args.show !== false) await this.host.openFile(created.path, false);
     return {
       ok: true,
       message: `Created ${created.path}.`,
@@ -292,7 +298,7 @@ export class SystemSculptToolService {
   private async openWorkflow(args: Record<string, unknown>): Promise<SystemSculptToolResult> {
     const path = requiredString(args, "path", 1_000);
     const document = record(await this.host.studio().readAgentDocument(path));
-    if (args.show === true) await this.host.openFile(path);
+    if (args.show === true) await this.host.openFile(path, true);
     return {
       ok: true,
       message: `Read ${path}.`,

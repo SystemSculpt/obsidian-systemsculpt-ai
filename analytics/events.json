@@ -114,7 +114,7 @@
       "name": "api_request",
       "feature": "image_generation",
       "kind": "server",
-      "description": "Image generation job created or delivered.",
+      "description": "Image generation job created or delivered, from Studio or the chat generate_image tool (any chat agent).",
       "endpoints": [
         "/api/plugin/images/generations/jobs"
       ],
@@ -128,7 +128,7 @@
       "name": "api_request",
       "feature": "video_generation",
       "kind": "server",
-      "description": "Video generation job created or delivered.",
+      "description": "Video generation job created or delivered, from Studio or the chat generate_video tool (any chat agent).",
       "endpoints": [
         "/api/plugin/videos/generations/jobs"
       ],
@@ -401,6 +401,36 @@
       "where": [
         "src/constants/externalServices.ts",
         "src/views/chatview/AgentChatView.ts"
+      ],
+      "owner": "engineer",
+      "added": "2026-11-07"
+    },
+    {
+      "name": "checkout_view",
+      "feature": "plugin_chat_tools_monthly",
+      "kind": "browser",
+      "description": "Website checkout viewed from a chat agent's SystemSculpt tool (generate_image, generate_video) refused for a missing subscription. utm_source=plugin, utm_medium=chat, cta=plugin_chat_tools_monthly, utm_campaign=plugin_chat_tools_nov2026. Website/Stripe attribution only under existing consent; no plugin client telemetry or measured offer impressions.",
+      "endpoints": [
+        "MONTHLY_CHAT_TOOLS"
+      ],
+      "where": [
+        "src/constants/externalServices.ts",
+        "src/tools/systemsculpt/SystemSculptToolHost.ts"
+      ],
+      "owner": "engineer",
+      "added": "2026-11-07"
+    },
+    {
+      "name": "begin_checkout",
+      "feature": "plugin_chat_tools_monthly",
+      "kind": "server",
+      "description": "Server begin_checkout after Stripe Session creation from a chat agent's SystemSculpt tool (generate_image, generate_video) refused for a missing subscription. utm_source=plugin, utm_medium=chat, cta=plugin_chat_tools_monthly, utm_campaign=plugin_chat_tools_nov2026. Website/Stripe attribution only under existing consent; no plugin client telemetry or measured offer impressions.",
+      "endpoints": [
+        "MONTHLY_CHAT_TOOLS"
+      ],
+      "where": [
+        "src/constants/externalServices.ts",
+        "src/tools/systemsculpt/SystemSculptToolHost.ts"
       ],
       "owner": "engineer",
       "added": "2026-11-07"

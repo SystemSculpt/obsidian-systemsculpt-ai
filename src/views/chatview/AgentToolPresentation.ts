@@ -203,7 +203,7 @@ const TOOL_ACTION_FORMS: Readonly<Record<string, readonly [active: string, compl
 };
 
 /** A SystemSculpt call that finished but did nothing (no subscription, no credits). */
-function refusedSystemSculptCall(part: AgentToolPart): boolean {
+export function refusedSystemSculptCall(part: AgentToolPart): boolean {
   return part.state === "succeeded" && Boolean(systemSculptToolName(part.name))
     && decodeSystemSculptToolOutput(part.output?.data)?.ok === false;
 }
@@ -267,6 +267,9 @@ function hasPartialOutcome(part: AgentToolPart, counts: ToolOutcomeCounts): bool
  * work may still continue and that successful partial results were retained.
  */
 export function presentAgentToolFailure(part: AgentToolPart): string {
+  // SystemSculpt tools write their own plain reason; show it, without the link the chat shows already.
+  const own = systemSculptToolName(part.name) ? decodeSystemSculptToolOutput(part.output?.data) : null;
+  if (own && !own.ok && own.message) return (own.link ? own.message.split(`${own.link.label}:`)[0] : own.message).trim().slice(0, 300);
   const native = nativeToolPresentation(part);
   if (native) return part.state === "outcome-unknown"
     ? `The result from ${native.agentName} is uncertain. Check the requested action before retrying.`

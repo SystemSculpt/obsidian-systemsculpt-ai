@@ -406,7 +406,7 @@ function applyStudioDocumentEdits(before: StudioProjectEntities, edits: StudioDo
     if (edit.kind === "create" || edit.kind === "restore") {
       if (edit.kind === "create" && (before[edit.entityId] || tombstones[edit.entityId] !== undefined)) throw new Error("This entity ID is already used; choose a new ID or explicitly restore it.");
       if (after[edit.entityId]) throw new Error("An entity with this ID already exists.");
-      if (!edit.value || typeof edit.value !== "object" || Array.isArray(edit.value)) throw new Error("Provide an entity object.");
+      if (!edit.value || typeof edit.value !== "object" || Array.isArray(edit.value)) throw new Error(`Provide an entity object${edit.entityId.startsWith("edge:") ? `, for an edge {"value":"${edit.entityId.slice(5)}"}` : ""}.`);
       after[edit.entityId] = JSON.parse(JSON.stringify(edit.value));
       continue;
     }

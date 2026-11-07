@@ -202,10 +202,6 @@ export function systemSculptToolName(nativeName: unknown): SystemSculptToolName 
   return NAMES.has(name) ? name as SystemSculptToolName : null;
 }
 
-export function systemSculptToolTitle(name: SystemSculptToolName): string {
-  return SYSTEMSCULPT_TOOLS.find(tool => tool.name === name)?.title ?? name;
-}
-
 const MARKER = "systemsculpt_tool";
 
 /** The text an agent receives. The marker lets Chat find media in a saved tool output. */

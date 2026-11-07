@@ -352,15 +352,13 @@ video.systemsculpt-agent-media-frame {
 }
 
 .systemsculpt-agent-media-caption {
-  /* Follows the frame's width instead of widening it. */
+  /* Follows the frame's width instead of widening it; long names wrap whole. */
   width: 0;
   min-width: 100%;
-  overflow: hidden;
   color: var(--ss-ink-muted);
   font-family: var(--font-interface);
   font-size: var(--ss-text-xs);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .systemsculpt-agent-media-caption a { color: var(--ss-ink-muted); }

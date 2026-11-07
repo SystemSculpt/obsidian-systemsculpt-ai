@@ -53,9 +53,13 @@ export function systemSculptToolService(plugin: SystemSculptPlugin): SystemSculp
     },
     videoModels: async signal => (await getStudioMediaCatalogs(plugin).videos.load(signal)).models,
     studio: () => plugin.getStudioService(),
-    openFile: async path => {
+    openFile: async (path, active) => {
       const file = plugin.app.vault.getAbstractFileByPath(normalizePath(path));
-      if (file instanceof TFile) await plugin.app.workspace.getLeaf("tab").openFile(file);
+      if (!(file instanceof TFile)) return;
+      const workspace = plugin.app.workspace, shown = workspace.getMostRecentLeaf();
+      await workspace.getLeaf("tab").openFile(file, { active });
+      // A new tab shows in its group even when inactive; put the chat back in front.
+      if (!active && shown) workspace.setActiveLeaf(shown, { focus: false });
     },
     links: { subscribe: SYSTEMSCULPT_WEBSITE.MONTHLY_CHAT_TOOLS, credits: SYSTEMSCULPT_WEBSITE.BUY_CREDITS },
   });

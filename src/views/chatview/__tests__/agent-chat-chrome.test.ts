@@ -267,7 +267,7 @@ describe("mode and model menus", () => {
     expect(choices.find(entry => entry.id === "effort:")).toMatchObject({ title: "Codex default", checked: true, disabled: false });
     expect(choices.filter(entry => entry.checked && entry.id.startsWith("model:"))).toHaveLength(1);
     const line = presentRunLine(current);
-    expect(line.kind === "segments" && line.segments.find(segment => segment.key === "detail")?.label).toBe(title);
+    expect(line.kind === "segments" && line.segments.find(segment => segment.key === "detail")?.label).toBe(models?.length ? "Native model" : "Codex default");
   });
 
   it("offers Codex models, the thinking levels each supports, and speed", () => {

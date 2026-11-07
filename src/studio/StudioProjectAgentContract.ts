@@ -153,7 +153,8 @@ and \`editAgentDocument(path, heads, edits)\` in the active vault.
 ~~~json
 [
   {"kind":"set","entityId":"node:summary","path":["config","systemPrompt"],"value":"Summarize in three paragraphs."},
-  {"kind":"create","entityId":"node:note","value":{"id":"note","kind":"studio.text","x":400,"y":100,"config":{"value":"Notes"}}}
+  {"kind":"create","entityId":"node:note","value":{"id":"note","kind":"studio.text","x":400,"y":100,"config":{"value":"Notes"}}},
+  {"kind":"create","entityId":"edge:note.text -> summary.prompt","value":{"value":"note.text -> summary.prompt"}}
 ]
 ~~~
 

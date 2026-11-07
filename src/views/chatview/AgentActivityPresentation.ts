@@ -1,7 +1,8 @@
 import type { AgentPart } from "../../chat/ChatConversation";
-import { presentAgentTool } from "./AgentToolPresentation";
+import { presentAgentTool, refusedSystemSculptCall } from "./AgentToolPresentation";
 
-export type AgentActivitySummary = Readonly<{ label: string; failedCount: number }>;
+/** refused: a SystemSculpt tool declined (no subscription or credits); not a failure, but not done either. */
+export type AgentActivitySummary = Readonly<{ label: string; failedCount: number; refused?: true }>;
 
 type ActivityGroup = { label: string; items: Set<string>; uncounted: number };
 
@@ -10,7 +11,7 @@ const groupSize = (group: ActivityGroup): number => group.items.size + group.unc
 /** Count adjacent activity by action without repeating payloads or full paths. */
 export function summarizeAgentActivity(parts: readonly AgentPart[]): AgentActivitySummary {
   const groups = new Map<string, ActivityGroup>();
-  let failedCount = 0;
+  let failedCount = 0, refused = false;
   const add = (kind: string, label: string, items: readonly string[] = [], count = 1): void => {
     const group = groups.get(kind) ?? { label, items: new Set<string>(), uncounted: 0 };
     group.label = label;
@@ -23,6 +24,7 @@ export function summarizeAgentActivity(parts: readonly AgentPart[]): AgentActivi
       add("reasoning", "Thought");
     } else if (part.kind === "tool") {
       const tool = presentAgentTool(part);
+      if (refusedSystemSculptCall(part)) refused = true;
       // Only completed or in-progress work counts toward "Edited 2 notes", and
       // each note once. Denials are decisions, withdrawn requests never ran and
       // failed or uncertain actions aren't completed changes: each keeps its
@@ -56,6 +58,7 @@ export function summarizeAgentActivity(parts: readonly AgentPart[]): AgentActivi
   return {
     label: `${visible || "Activity"}${more ? ` · ${more} more` : ""}${failedCount ? ` · ${failedCount} failed` : ""}`,
     failedCount,
+    ...(refused ? { refused: true as const } : {}),
   };
 }
 
