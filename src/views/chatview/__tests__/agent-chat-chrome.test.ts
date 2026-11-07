@@ -358,6 +358,13 @@ describe("empty states (spec 3.1)", () => {
     expect(spent.lead).toBe("Your free credits are used.");
     expect(spent.offer).toBeNull();
     expect(spent.starters).toEqual([]);
+    const spentActive = presentEmptyState(state({
+      backend: "systemsculpt",
+      account: "paid",
+      credits: credits({ includedCreditsEntitled: false, totalRemaining: 0, availableUnreserved: 0 }),
+    }));
+    expect(spentActive.lead).toBe("Your free credits are used.");
+    expect(spentActive.starters).toEqual([]);
   });
 
   it("E: paid plans see no local-agent mention even with agents installed", () => {
