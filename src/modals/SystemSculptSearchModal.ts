@@ -619,19 +619,19 @@ export class SystemSculptSearchModal extends StandardModal {
   }
 
   private getHighlightRanges(text: string, query: string): Array<{ start: number; end: number }> {
-    if (!query || !query.trim()) return [];
+    const terms = highlightTerms(query);
+    if (terms.length === 0) return [];
 
-    const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
-    const lowerText = text.toLowerCase();
     const rawMatches: Array<{ start: number; end: number }> = [];
-
-    terms.forEach((term) => {
-      let idx = 0;
-      while ((idx = lowerText.indexOf(term, idx)) > -1) {
-        rawMatches.push({ start: idx, end: idx + term.length });
-        idx += term.length;
+    for (const term of terms) {
+      // A term marks words that start with it ("cross" in "crossing"), never
+      // the inside of another word ("the" in "then").
+      const pattern = new RegExp(`(?<![\\p{L}\\p{N}])${escapeRegExp(term)}`, "giu");
+      for (const match of text.matchAll(pattern)) {
+        const start = match.index ?? 0;
+        rawMatches.push({ start, end: start + match[0].length });
       }
-    });
+    }
 
     if (rawMatches.length === 0) return [];
     rawMatches.sort((a, b) => a.start - b.start || b.end - a.end);
@@ -658,4 +658,27 @@ export class SystemSculptSearchModal extends StandardModal {
     if (diff < 7 * day) return `${Math.round(diff / day)}d ago`;
     return date.toLocaleDateString();
   }
+}
+
+/**
+ * Words a question is made of rather than what it is about. Marking every
+ * "the" and "is" in a result hides the words that made it match.
+ */
+const HIGHLIGHT_STOP_WORDS = new Set([
+  "a", "about", "an", "and", "any", "are", "as", "at", "be", "but", "by", "can", "could", "did", "do", "does",
+  "for", "from", "had", "has", "have", "how", "i", "if", "in", "into", "is", "it", "its", "me", "my", "of", "on",
+  "or", "our", "should", "so", "than", "that", "the", "their", "them", "then", "there", "these", "they", "this",
+  "to", "us", "was", "we", "were", "what", "when", "where", "which", "who", "why", "will", "with", "would",
+  "you", "your",
+]);
+
+/** The query's content words, longest first; its own words when it has no others. */
+export function highlightTerms(query: string): string[] {
+  const words = [...new Set(query.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [])];
+  const content = words.filter((word) => !HIGHLIGHT_STOP_WORDS.has(word));
+  return (content.length > 0 ? content : words).sort((a, b) => b.length - a.length);
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
