@@ -130,10 +130,10 @@ export const SYSTEMSCULPT_TOOLS: readonly SystemSculptToolDefinition[] = Object.
     name: "studio_open_workflow",
     title: "Open Studio workflow",
     readOnly: true,
-    description: "Read a Studio workflow: its canvas JSON, entity IDs and current revision for studio_edit_workflow. Set show to also open it in Studio for the person.",
+    description: "Read a Studio workflow: its canvas JSON, entity IDs and current revision for studio_edit_workflow. Set show only when the person asks to see it: it opens in a Studio tab beside the chat.",
     inputSchema: {
       type: "object",
-      properties: { path: workflowPath, show: { type: "boolean", description: "Open it in Studio for the person. Default false." } },
+      properties: { path: workflowPath, show: { type: "boolean", description: "Open it in a Studio tab beside the chat. Only when the person asks to see it. Default false." } },
       required: ["path"],
       additionalProperties: false,
     },

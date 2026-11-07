@@ -150,6 +150,14 @@ describe("billing and approval", () => {
     expect(result).toMatchObject({ ok: false, link: { label: "Subscribe" }, message: expect.stringMatching(/^SystemSculpt Studio comes with a SystemSculpt subscription\./u) });
   });
 
+  it("opens a workflow beside the chat, never in front of it", async () => {
+    const studio = { readAgentDocument: jest.fn(async () => ({ heads: ["h1"], canvas: {}, entities: {} })), ensureAgentReference: jest.fn(async () => {}) };
+    const { host: fake } = host({ studio: () => studio as never });
+    const result = await new SystemSculptToolService(fake).call("studio_open_workflow", { path: "SystemSculpt/Studio/P.systemsculpt", show: true }, signal());
+    expect(result).toMatchObject({ ok: true });
+    expect(fake.openFile).toHaveBeenCalledWith("SystemSculpt/Studio/P.systemsculpt", false);
+  });
+
   it("stops a Studio run with the chat and shows only files made by this run", async () => {
     const runProject = jest.fn(async () => ({ runId: "run_2", status: "success", startedAt: "", finishedAt: "", error: null, executedNodeIds: ["new"], cachedNodeIds: ["old"] }));
     const entry = (nodeId: string) => ({ nodeId, nodeKind: "studio.image_generation", nodeVersion: "1", inputFingerprint: "", outputs: {}, updatedAt: "", runId: "r",

@@ -312,7 +312,8 @@ export class SystemSculptToolService {
   private async openWorkflow(args: Record<string, unknown>): Promise<SystemSculptToolResult> {
     const path = requiredString(args, "path", 1_000);
     const document = record(await this.host.studio().readAgentDocument(path));
-    if (args.show === true) await this.host.openFile(path, true);
+    // Beside the chat, like a new workflow: the turn's approvals and results stay in view.
+    if (args.show === true) await this.host.openFile(path, false);
     return {
       ok: true,
       message: `Read ${path}.`,
