@@ -5,7 +5,7 @@ import { codexDefaultLabel, type CodexModel } from "../../services/codex/CodexMo
 import { isLocalAgentUsable as usable, type LocalAgentDetection } from "../../services/codex/LocalAgentDetection";
 import { LOCAL_AGENTS, isLocalAgentId, type LocalAgentId, type TextExecutionBackend } from "../../services/codex/LocalAgents";
 import { PLAN_REQUIRED_MESSAGE } from "../../utils/errors";
-import { MONTHLY_OFFER_LINE, PAYMENT_FIX_LEAD, PAYMENT_FIX_LINK, isStarterBalance, needsPaymentFix, starterOfferLead } from "../../utils/licenseUtils";
+import { PAYMENT_FIX_LEAD, PAYMENT_FIX_LINK, isStarterBalance, needsPaymentFix, starterOfferLead } from "../../utils/licenseUtils";
 import type { ChatApprovalMode } from "./storage/ChatPersistenceTypes";
 
 /**
@@ -579,11 +579,12 @@ export function presentEmptyState(state: AgentChromeState): EmptyStatePresentati
   };
 }
 
-/** The one-line Monthly offer above the composer once half the starter credits are used (T-4520, T-4652). */
+/** One short Pro offer whenever a verified free starter uses hosted Chat (T-5452). */
 export function presentCreditsOffer(state: AgentChromeState): Readonly<{ lead: string; link: string }> | null {
   if (isLocalAgentId(state.backend) || state.account === "signed-out") return null;
   // A failed renewal: the line fixes the card, never offers a second plan (T-5348).
   if (needsPaymentFix(state.credits)) return { lead: PAYMENT_FIX_LEAD, link: PAYMENT_FIX_LINK };
-  const lead = starterOfferLead(state.credits);
-  return lead ? { lead, link: MONTHLY_OFFER_LINE } : null;
+  // An old server omitting subscription status cannot verify there is no billable plan.
+  return isStarterBalance(state.credits) && state.credits?.subscriptionStatus === null
+    ? { lead: "", link: "Get Pro for $9/month" } : null;
 }

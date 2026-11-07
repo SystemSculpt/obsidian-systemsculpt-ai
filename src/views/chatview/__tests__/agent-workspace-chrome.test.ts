@@ -102,6 +102,30 @@ describe("AgentWorkspace chrome", () => {
     workspace.unload();
   });
 
+  it("renders one short Pro link for a full hosted starter grant without blocking the composer", () => {
+    const onCreditsOffer = jest.fn();
+    const onMonthlyOffer = jest.fn();
+    const { parent, workspace } = mount({ onCreditsOffer, onMonthlyOffer });
+    workspace.setChrome(chrome({
+      account: "signed-in",
+      credits: {
+        usageClass: "customer", totalRemaining: 500, availableUnreserved: 500,
+        includedRemaining: 0, addOnRemaining: 500, includedPerMonth: 0,
+        includedCreditsEntitled: false, subscriptionStatus: null,
+        cycleEndsAt: "2026-12-01T00:00:00Z", cycleStartedAt: "2026-11-01T00:00:00Z", cycleAnchorAt: "2026-11-01T00:00:00Z",
+        turnInFlightUntil: null, purchaseUrl: null,
+      },
+    }));
+    const offer = parent.querySelector<HTMLElement>('[data-testid="chat.credits-offer"]')!;
+    expect(offer.hasAttribute("hidden")).toBe(false);
+    expect(offer.textContent).toBe("Get Pro for $9/month");
+    offer.querySelector<HTMLAnchorElement>("a")!.click();
+    expect(onCreditsOffer).toHaveBeenCalledTimes(1);
+    expect(onMonthlyOffer).not.toHaveBeenCalled();
+    expect(parent.querySelector<HTMLTextAreaElement>("textarea")?.disabled).toBe(false);
+    workspace.unload();
+  });
+
   it("fills the More menu from the view", () => {
     const buildMoreMenu = jest.fn((menu: Menu) => {
       menu.addItem((item) => item.setTitle("Rename chat"));

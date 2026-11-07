@@ -433,6 +433,7 @@ describe("chromeAccount", () => {
 describe("presentCreditsOffer", () => {
   const starter = (left: number) => credits({
     includedCreditsEntitled: false,
+    subscriptionStatus: null,
     includedRemaining: 0,
     includedPerMonth: 0,
     addOnRemaining: left,
@@ -440,24 +441,33 @@ describe("presentCreditsOffer", () => {
     availableUnreserved: left,
   });
   const hosted = { backend: "systemsculpt" as const, account: "signed-in" as const };
-  const link = "$9 a month for 10,000 credits every month";
+  const link = "Get Pro for $9/month";
 
-  it("offers Monthly to a hosted starter under 250 credits and at 0", () => {
-    expect(presentCreditsOffer(state({ ...hosted, credits: starter(249) })))
-      .toEqual({ lead: "249 starter credits left.", link });
-    expect(presentCreditsOffer(state({ ...hosted, credits: starter(100) })))
-      .toEqual({ lead: "100 starter credits left.", link });
-    expect(presentCreditsOffer(state({ ...hosted, credits: starter(99) })))
-      .toEqual({ lead: "Running low on credits.", link });
-    expect(presentCreditsOffer(state({ ...hosted, account: "no-plan", credits: starter(0) })))
-      .toEqual({ lead: "Out of credits.", link });
-    expect(presentCreditsOffer(state({ ...hosted, credits: { ...starter(120), availableUnreserved: 0 } })))
-      .toEqual({ lead: "Out of credits.", link });
+  it("offers Pro to every verified hosted starter, including a full grant", () => {
+    for (const left of [0, 99, 100, 249, 250, 500, 10_000]) {
+      expect(presentCreditsOffer(state({ ...hosted, credits: starter(left) })))
+        .toEqual({ lead: "", link });
+    }
   });
 
-  it("stays hidden at 250 or more, on paid plans, internal QA and local agents", () => {
-    expect(presentCreditsOffer(state({ ...hosted, credits: starter(250) }))).toBeNull();
-    expect(presentCreditsOffer(state({ ...hosted, credits: starter(500) }))).toBeNull();
+  it("keeps the same short offer at low and exhausted balances", () => {
+    expect(presentCreditsOffer(state({ ...hosted, credits: starter(249) })))
+      .toEqual({ lead: "", link });
+    expect(presentCreditsOffer(state({ ...hosted, credits: starter(100) })))
+      .toEqual({ lead: "", link });
+    expect(presentCreditsOffer(state({ ...hosted, credits: starter(99) })))
+      .toEqual({ lead: "", link });
+    expect(presentCreditsOffer(state({ ...hosted, account: "no-plan", credits: starter(0) })))
+      .toEqual({ lead: "", link });
+    expect(presentCreditsOffer(state({ ...hosted, credits: { ...starter(120), availableUnreserved: 0 } })))
+      .toEqual({ lead: "", link });
+  });
+
+  it("stays hidden for paid or legacy plans, internal QA, native agents and unknown or signed-out accounts", () => {
+    expect(presentCreditsOffer(state({ ...hosted, credits: { ...starter(500), includedCreditsEntitled: undefined } }))).toBeNull();
+    expect(presentCreditsOffer(state({ ...hosted, credits: { ...starter(500), subscriptionStatus: undefined } }))).toBeNull();
+    expect(presentCreditsOffer(state({ ...hosted, account: "signed-out", credits: starter(500) }))).toBeNull();
+    expect(presentCreditsOffer(state({ backend: "codex", account: "signed-in", credits: starter(500) }))).toBeNull();
     expect(presentCreditsOffer(state({ ...hosted, account: "paid", credits: credits({ includedCreditsEntitled: true, availableUnreserved: 10 }) }))).toBeNull();
     expect(presentCreditsOffer(state({ ...hosted, credits: { ...starter(10), usageClass: "master_auth" } }))).toBeNull();
     expect(presentCreditsOffer(state({ backend: "claude", account: "signed-in", credits: starter(10) }))).toBeNull();
@@ -470,7 +480,7 @@ describe("presentCreditsOffer", () => {
     expect(presentCreditsOffer(state({ ...hosted, credits: { ...starter(400), subscriptionStatus: "unpaid" } }))).toEqual(fix);
     // A starter (no plan subscription) keeps the Monthly offer.
     expect(presentCreditsOffer(state({ ...hosted, credits: { ...starter(0), subscriptionStatus: null } })))
-      .toEqual({ lead: "Out of credits.", link });
+      .toEqual({ lead: "", link });
     expect(presentCreditsOffer(state({ ...hosted, credits: { ...starter(0), subscriptionStatus: "active" } }))).toBeNull();
   });
 });

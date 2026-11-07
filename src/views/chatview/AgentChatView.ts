@@ -684,7 +684,8 @@ export class AgentChatView extends ItemView {
       showPlanOffer: this.shouldOfferPlan(),
       showMonthlyOffer: () => isStarterBalance(this.creditsBalance),
       showPaymentFix: () => needsPaymentFix(this.creditsBalance),
-      onCreditsOffer: () => this.openMonthlyCheckout(),
+      onCreditsOffer: () => this.openMonthlyCheckout("hosted-chat"),
+      onMonthlyOffer: () => this.openMonthlyCheckout(),
       onUpdateCard: () => this.openBillingPortal(),
       onViewPlans: (error) => {
         if (isPlanAccessError(error)) {
@@ -3737,25 +3738,32 @@ export class AgentChatView extends ItemView {
   }
 
   /**
-   * The $9 Monthly checkout, one tap from every low or out-of-credits surface
-   * (T-5302). The balance is read fresh first: an account that already bought
-   * Monthly or credits since the offer appeared gets the credits view instead
-   * of a second checkout.
+   * Read entitlement fresh before opening checkout. The composer offers Pro
+   * at any starter balance; existing low-credit surfaces keep their threshold
+   * and attribution. Paid, legacy and unknown accounts never get a new plan.
    */
-  private async openMonthlyCheckout(): Promise<void> {
-    await this.refreshCreditsBalance({ requireFresh: true, reason: "view_open" }).catch(() => undefined);
+  private async openMonthlyCheckout(placement: "low-credits" | "hosted-chat" = "low-credits"): Promise<void> {
+    try {
+      await this.refreshCreditsBalance({ requireFresh: true, reason: "view_open" });
+    } catch {
+      return; // Never authorize a checkout from a stale offer after a failed refresh.
+    }
     const balance = this.creditsBalance;
     // A failed renewal fixes its card on the existing plan, never a second checkout (T-5348).
     if (needsPaymentFix(balance)) {
       await this.openBillingPortal();
       return;
     }
-    if (balance && !(isStarterBalance(balance) && starterOfferLead(balance) !== null)) {
+    if (!isStarterBalance(balance)
+      || (placement === "hosted-chat" && balance?.subscriptionStatus !== null)
+      || (placement === "low-credits" && starterOfferLead(balance) === null)) {
       await this.openCreditsBalanceModal();
       return;
     }
     await openExternalUrl(
-      withPluginAttribution(SYSTEMSCULPT_WEBSITE.MONTHLY_LOW_CREDITS, "chat"),
+      placement === "hosted-chat"
+        ? SYSTEMSCULPT_WEBSITE.MONTHLY_HOSTED_CHAT
+        : withPluginAttribution(SYSTEMSCULPT_WEBSITE.MONTHLY_LOW_CREDITS, "chat"),
       this.containerEl.ownerDocument.defaultView ?? undefined,
     );
   }

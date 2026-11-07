@@ -35,7 +35,7 @@
   font-size: var(--ss-text-sm);
 }
 
-/* One line above the composer: the Monthly offer when starter credits run low (T-4520). */
+/* Existing inline offer above the composer: Pro for hosted starters, or payment repair. */
 .systemsculpt-agent-credits-offer {
   box-sizing: border-box;
   /* The composer's width and side padding, so the line starts at its edge. */
