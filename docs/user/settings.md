@@ -17,6 +17,10 @@ Source of truth: `src/settings/SettingsTabRegistry.ts`.
 | `Advanced` | Quick actions, reset defaults, diagnostics recording (off by default), and diagnostics tools |
 | `Send feedback` | One message sent to SystemSculpt support, with plugin version and your account when signed in |
 
+## Pro and your own AI
+
+Use your own AI. Subscribe for image and video generation, smart search and Studio. Claude Code and Codex stay free on desktop.
+
 ## Support
 
 In **Account → Support**, choose **Support us on Patreon** to help fund SystemSculpt. Patreon support does not activate Pro.

@@ -99,8 +99,8 @@ export function renderAccountSection(
         ? activeAccountLine(plugin.settings, balance, formatCredits)
         : userStatus.greeting || "Pro features enabled."
       : signedInWithoutPlan
-        ? `Signed in as ${signedInEmail}. Choose a plan to start.`
-        : "Sign in to turn on SystemSculpt.";
+        ? `Signed in as ${signedInEmail}.`
+        : "Use your own AI. Subscribe for image and video generation, smart search and Studio.";
     statusSetting.setDesc(`${accountDesc}${hasHostCapability("local-cli", root) ? " Claude Code and Codex need no license." : ""}${pendingSignIn ? " Waiting for browser sign-in…" : ""}`);
     renderConnectOutcome(statusSetting.descEl, tabInstance.accountConnectOutcome);
   };

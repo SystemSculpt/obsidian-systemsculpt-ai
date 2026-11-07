@@ -2,7 +2,6 @@ import { Notice, setIcon } from "obsidian";
 import { StandardModal } from "../core/ui/modals/standard/StandardModal";
 import { getSurfaceOwnerWindow } from "../core/ui/surface";
 import { SYSTEMSCULPT_WEBSITE, withPluginAttribution } from "../constants/externalServices";
-import { PLAN_REQUIRED_MESSAGE } from "../utils/errors";
 import { openExternalUrl } from "../utils/externalUrl";
 import { getRuntimeWindow } from "../utils/runtimeWindow";
 import {
@@ -107,7 +106,7 @@ export class UpgradePlanModal extends StandardModal {
 
   constructor(
     private readonly plugin: SystemSculptPlugin,
-    private readonly options: UpgradePlanOptions = {},
+    _options: UpgradePlanOptions = {},
   ) {
     super(plugin.app);
     this.setSize("small");
@@ -202,9 +201,9 @@ export class UpgradePlanModal extends StandardModal {
   }
 
   private renderSignedOut(): void {
-    this.addTitle("Unlock SystemSculpt AI", this.featureLine());
+    this.addTitle("Use your own AI", "Subscribe for image and video generation, smart search and Studio.");
     this.renderIcon("sparkles");
-    this.addDetail("Start with 500 free credits. No card needed.");
+    this.addDetail("Claude Code and Codex stay free on desktop.");
     this.addLink("upgrade-plan.pricing", "Compare plans", SYSTEMSCULPT_WEBSITE.LICENSE);
     this.addLink("upgrade-plan.license-key", "I have a license key", () => {
       this.close();
@@ -216,13 +215,13 @@ export class UpgradePlanModal extends StandardModal {
   }
 
   private renderChoosePlan(): void {
-    this.addTitle("Unlock SystemSculpt AI", this.featureLine());
+    this.addTitle("Use your own AI", "Subscribe for image and video generation, smart search and Studio.");
     this.renderIcon("sparkles");
     const email = this.signedInEmail();
     if (email) {
       this.addDetail(`Signed in as ${email}.`);
     }
-    this.addDetail(PLAN_REQUIRED_MESSAGE);
+    this.addDetail("Claude Code and Codex stay free on desktop.");
     // A key the server rejects may be a renewal whose card failed: Billing
     // fixes it; a second subscription would bill twice (T-5348).
     const lapsed = hasActivePlan(this.plugin);
@@ -352,12 +351,6 @@ export class UpgradePlanModal extends StandardModal {
     status.createDiv({ cls: "ss-upgrade-plan__spinner", attr: { "aria-hidden": "true" } });
     status.createDiv({ cls: "ss-upgrade-plan__status-text", text: "Signing you in…" });
     void this.plugin.getAccountConnectService().submitManualCode(code);
-  }
-
-  private featureLine(): string {
-    return this.options.feature
-      ? `${this.options.feature} needs an active SystemSculpt plan.`
-      : "SystemSculpt AI needs an active plan.";
   }
 
   private signedInEmail(): string | null {
