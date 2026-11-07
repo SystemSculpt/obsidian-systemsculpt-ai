@@ -2,7 +2,11 @@
  * callout metadata. Obsidian's callout colors are tuned for icons, not small
  * bold text: light-theme cyan reads 2.1:1 and blue 4.3:1 on their own tint.
  * Mixing halfway toward body text keeps the hue and clears 4.5:1 in light
- * (cyan 5.3:1) and dark (8.8:1) without changing the user's other callouts. */
+ * (cyan 5.3:1) and dark (8.8:1) without changing the person's other callouts.
+ * The title text reads --callout-title-color, so a theme that sets it is
+ * overridden here too. Where --callout-color is not a full color, the mix is
+ * invalid and the title inherits body text, which still reads. */
 [data-callout-metadata="systemsculpt"].callout > .callout-title {
-  color: color-mix(in srgb, var(--callout-color) 50%, var(--text-normal));
+  --callout-title-color: color-mix(in srgb, var(--callout-color) 50%, var(--text-normal));
+  color: var(--callout-title-color);
 }

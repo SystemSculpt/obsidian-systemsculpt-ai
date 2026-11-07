@@ -566,12 +566,12 @@ describe("AudioProcessorService", () => {
     expect(ensureDirectoryByPath).toHaveBeenCalledWith("SystemSculpt/Audio Notes");
     expect(app.vault.create).toHaveBeenCalledWith(
       "SystemSculpt/Audio Notes/Product sync — Transcript.md",
-      expect.stringContaining("[[SystemSculpt/Audio Notes/Product sync|Back to the audio note]]"),
+      expect.stringContaining("> [!info|systemsculpt] Audio note\n> [[SystemSculpt/Audio Notes/Product sync|Back to the audio note]]"),
     );
     expect(app.vault.create).toHaveBeenCalledWith(
       "SystemSculpt/Audio Notes/Product sync.md",
       expect.stringMatching(
-        /systemsculpt-audio-artifact: full[\s\S]*\[\[SystemSculpt\/Audio Notes\/Product sync — Transcript\|Open the full timestamped transcript\]\][\s\S]*## Transcript/,
+        /systemsculpt-audio-artifact: full[\s\S]*> \[!info\|systemsculpt\] Timestamped transcript\n> \[\[SystemSculpt\/Audio Notes\/Product sync — Transcript\|Open the full timestamped transcript\]\][\s\S]*## Transcript/,
       ),
     );
     expect(api.downloadNote).toHaveBeenCalledWith(result.noteUrl, expect.any(AbortSignal));
