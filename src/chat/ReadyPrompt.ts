@@ -27,7 +27,7 @@ function qualifies(file: TFile, isExcluded: (path: string) => boolean): boolean 
     && !isExcluded(file.path);
 }
 
-/** The open note when it qualifies, else the most recently edited qualifying note. */
+/** @internal Unit-tested directly. The open note when it qualifies, else the most recently edited qualifying note. */
 export function latestNote(app: App, sources: ReadyPromptSources): TFile | null {
   if (sources.openNote && qualifies(sources.openNote, sources.isExcluded)) return sources.openNote;
   let latest: TFile | null = null;

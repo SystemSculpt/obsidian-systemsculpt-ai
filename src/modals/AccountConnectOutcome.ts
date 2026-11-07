@@ -32,7 +32,7 @@ export function signedInLine(email: string | null): string {
   return email ? `Signed in as ${email}.` : "Signed in to SystemSculpt.";
 }
 
-export const START_CHAT_LABEL = "Start a chat";
+const START_CHAT_LABEL = "Start a chat";
 
 type FirstChatHost = Readonly<{
   readyPrompt: () => string | null;
