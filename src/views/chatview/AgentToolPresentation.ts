@@ -44,6 +44,14 @@ const TOOL_LABELS: Readonly<Record<string, string>> = {
   search: "Search vault",
   open: "Open files",
   context: "Manage pinned files",
+  generate_image: "Generate image",
+  generate_video: "Generate video",
+  studio_list_workflows: "List Studio workflows",
+  studio_create_workflow: "Create Studio workflow",
+  studio_open_workflow: "Open Studio workflow",
+  studio_edit_workflow: "Edit Studio workflow",
+  studio_run_workflow: "Run Studio workflow",
+  studio_list_outputs: "List Studio outputs",
 };
 
 const SERVER_TOOL_LABELS: Readonly<Record<string, string>> = {
@@ -65,6 +73,14 @@ const TOOL_ACTION_ICONS: Readonly<Record<string, string>> = {
   search: "search",
   open: "folder-open",
   context: "pin",
+  generate_image: "image",
+  generate_video: "film",
+  studio_list_workflows: "layout-dashboard",
+  studio_create_workflow: "layout-dashboard",
+  studio_open_workflow: "layout-dashboard",
+  studio_edit_workflow: "layout-dashboard",
+  studio_run_workflow: "play",
+  studio_list_outputs: "layout-dashboard",
   web_search: "globe-2",
   server_action: "wand-sparkles",
 };
@@ -176,6 +192,7 @@ const TOOL_ACTION_FORMS: Readonly<Record<string, readonly [active: string, compl
   Pin: ["Pinning", "Pinned"],
   Unpin: ["Unpinning", "Unpinned"],
   Run: ["Running", "Ran"],
+  Generate: ["Generating", "Generated"],
   Use: ["Using", "Used"],
   Change: ["Changing", "Changed"],
   Delete: ["Deleting", "Deleted"],

@@ -30,6 +30,8 @@ import {
   type FirstPartyToolName,
 } from "./toolNames";
 import { toError } from "../utils/errors";
+import { encodeSystemSculptToolResult, systemSculptToolName } from "./systemsculpt/SystemSculptTools";
+import { systemSculptToolService } from "./systemsculpt/SystemSculptToolHost";
 
 export class FirstPartyToolService {
   private fileOps!: FileOperations;
@@ -85,6 +87,11 @@ export class FirstPartyToolService {
     chatView?: FirstPartyToolChatTarget,
     signal?: AbortSignal,
   ): Promise<unknown> {
+    if (systemSculptToolName(toolName)) {
+      const result = await systemSculptToolService(this.plugin).call(toolName, args, signal ?? new AbortController().signal);
+      // The hosted result keeps the same marker Chat reads back from native tool output.
+      return JSON.parse(encodeSystemSculptToolResult(result)) as unknown;
+    }
     switch (toolName) {
       case "read":
         return await this.fileOps.readFiles(args as ReadFilesParams);

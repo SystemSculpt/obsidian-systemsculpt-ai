@@ -35,6 +35,9 @@ export const SYSTEMSCULPT_WEBSITE = {
   MONTHLY_LOW_CREDITS: "https://systemsculpt.com/checkout?resourceId=0db55c50-daa0-4e46-bf8d-f3f6cf47d729&ref=plugin_low_credits",
   /** Hosted Chat composer only; fixed campaign tags survive the browser sign-in handoff. */
   MONTHLY_HOSTED_CHAT: "https://systemsculpt.com/checkout?resourceId=0db55c50-daa0-4e46-bf8d-f3f6cf47d729&utm_source=plugin&utm_medium=chat&cta=plugin_hosted_chat_monthly&utm_campaign=plugin_hosted_chat_nov2026",
+  /** The $9 Monthly checkout from a chat agent's image, video or Studio tool. */
+  MONTHLY_CHAT_TOOLS: "https://systemsculpt.com/checkout?resourceId=0db55c50-daa0-4e46-bf8d-f3f6cf47d729&utm_source=plugin&utm_medium=chat&cta=plugin_chat_tools_monthly&utm_campaign=plugin_chat_tools_nov2026",
+  BUY_CREDITS: "https://systemsculpt.com/buy-credits?utm_source=obsidian-plugin&utm_medium=chat&utm_campaign=upgrade",
   SUBSCRIBE: "https://systemsculpt.com/subscribe?ref=plugin_modal_monthly",
   DOCS: pluginPageLink("https://systemsculpt.com/obsidian-ai-plugin-docs", "docs"),
   BILLING: pluginPageLink("https://systemsculpt.com/dashboard/billing", "account"),

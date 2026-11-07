@@ -1,3 +1,6 @@
+import { SYSTEMSCULPT_TOOL_NAMES } from "./systemsculpt/SystemSculptTools";
+
+/** Vault tools (obsidian.vault@1), then SystemSculpt tools (systemsculpt.tools@1). */
 const FIRST_PARTY_TOOL_NAMES = [
   "read",
   "write",
@@ -11,6 +14,7 @@ const FIRST_PARTY_TOOL_NAMES = [
   "search",
   "open",
   "context",
+  ...SYSTEMSCULPT_TOOL_NAMES,
 ] as const;
 
 export type FirstPartyToolName = typeof FIRST_PARTY_TOOL_NAMES[number];

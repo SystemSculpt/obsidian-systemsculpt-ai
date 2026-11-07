@@ -1,3 +1,4 @@
+import { systemSculptToolName } from "../../tools/systemsculpt/SystemSculptTools";
 import { MarkdownRenderer, type App, type Component } from "obsidian";
 import type { AgentToolPart } from "../../chat/ChatConversation";
 import { DiffViewer } from "../../components/DiffViewer";
@@ -116,6 +117,21 @@ export function nativeToolPresentation(part: AgentToolPart): NativeToolPresentat
       ...(items.length ? { groupItems: items } : {}),
     };
   };
+  const systemsculpt = systemSculptToolName(part.name);
+  if (systemsculpt) {
+    const workflow = text(input.path) ? basename(text(input.path)!).replace(/\.systemsculpt$/iu, "") : text(input.name) ?? "workflow";
+    const [verb, completed, running, target, icon] = ({
+      generate_image: ["Generate", "Generated", "Generating", typeof input.count === "number" && input.count > 1 ? "images" : "image", "image"],
+      generate_video: ["Generate", "Generated", "Generating", "video", "film"],
+      studio_list_workflows: ["List", "Listed", "Listing", "Studio workflows", "layout-dashboard"],
+      studio_create_workflow: ["Create", "Created", "Creating", workflow, "layout-dashboard"],
+      studio_open_workflow: ["Open", "Opened", "Opening", workflow, "layout-dashboard"],
+      studio_edit_workflow: ["Edit", "Edited", "Editing", workflow, "layout-dashboard"],
+      studio_run_workflow: ["Run", "Ran", "Running", workflow, "play"],
+      studio_list_outputs: ["List outputs of", "Listed outputs of", "Listing outputs of", workflow, "layout-dashboard"],
+    } as const)[systemsculpt];
+    return presentation(verb, completed, running, target, icon, `systemsculpt:${systemsculpt}`);
+  }
   const rawPath = text(input.file_path) ?? text(input.path);
   const path = rawPath ? displayPath(part, rawPath) : undefined;
   const target = path ? basename(path) : "file";

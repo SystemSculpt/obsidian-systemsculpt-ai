@@ -43,8 +43,11 @@ export function isThinAgentCommandKind(
 }
 
 export const THIN_AGENT_CAPABILITIES = Object.freeze([
-  Object.freeze({ id: "obsidian.vault", version: 1 as const }),
+  Object.freeze({ id: "obsidian.vault" as const, version: 1 as const }),
+  /** generate_image, generate_video and the studio_* tools; see tools/systemsculpt. */
+  Object.freeze({ id: "systemsculpt.tools" as const, version: 1 as const }),
 ]);
+const CAPABILITY_IDS: ReadonlySet<string> = new Set(THIN_AGENT_CAPABILITIES.map(capability => capability.id));
 
 /** @internal Tests assert against this value. */
 export const THIN_AGENT_DATA_PART_TYPES = Object.freeze([
@@ -53,7 +56,7 @@ export const THIN_AGENT_DATA_PART_TYPES = Object.freeze([
 ] as const);
 
 type ThinAgentCapability = Readonly<{
-  id: "obsidian.vault";
+  id: "obsidian.vault" | "systemsculpt.tools";
   version: 1;
 }>;
 
@@ -534,7 +537,7 @@ function parseCapabilityList(value: unknown): readonly ThinAgentCapability[] {
         "Client capabilities may contain only an ID and version.",
       );
     }
-    if (item.id !== "obsidian.vault" || item.version !== 1) {
+    if (typeof item.id !== "string" || !CAPABILITY_IDS.has(item.id) || item.version !== 1) {
       throw new ThinAgentContractError(
         "invalid_capabilities",
         "The client requires an unsupported capability version.",
@@ -548,7 +551,7 @@ function parseCapabilityList(value: unknown): readonly ThinAgentCapability[] {
       );
     }
     seen.add(key);
-    capabilities.push(Object.freeze({ id: item.id, version: item.version }));
+    capabilities.push(Object.freeze({ id: item.id as ThinAgentCapability["id"], version: item.version as 1 }));
   }
   return Object.freeze(capabilities.sort((left, right) =>
     left.id.localeCompare(right.id) || left.version - right.version));
@@ -826,7 +829,8 @@ function parseClientToolRequest(
     || typeof data.tool_name !== "string"
     || !TOOL_NAME.test(data.tool_name)
     || !isRecord(data.target)
-    || data.target.id !== "obsidian.vault"
+    || typeof data.target.id !== "string"
+    || !CAPABILITY_IDS.has(data.target.id)
     || data.target.version !== 1) {
     return { kind: "invalid", type };
   }
@@ -840,7 +844,7 @@ function parseClientToolRequest(
       tool_call_id: data.tool_call_id,
       tool_name: data.tool_name,
       target: Object.freeze({
-        id: "obsidian.vault",
+        id: data.target.id as ThinAgentCapability["id"],
         version: 1,
       }),
       input: input.value,

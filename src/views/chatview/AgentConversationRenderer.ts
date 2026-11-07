@@ -25,6 +25,8 @@ import {
   summarizeAgentActivity,
 } from "./AgentActivityPresentation";
 import { presentTurnChanges } from "./TurnChangeSummary";
+import { renderTurnMedia } from "./TurnMedia";
+import { openExternalUrl } from "../../utils/externalUrl";
 import { enhanceMarkdownCodeBlocks } from "./MarkdownCodeBlocks";
 import {
   isActiveAgentToolState,
@@ -720,8 +722,10 @@ export class AgentConversationRenderer extends Component {
             return;
           }
         }
-        this.renderTurnChanges(body, turnParts.flatMap((part) => part.type === "tool_call"
-          ? [historicalToolPart(part.data)] : []));
+        const historicalTools = turnParts.flatMap((part) => part.type === "tool_call"
+          ? [historicalToolPart(part.data)] : []);
+        this.renderTurnMediaBlock(body, historicalTools);
+        this.renderTurnChanges(body, historicalTools);
       } else {
         const { content } = presented[0];
         if (inlineEdit) {
@@ -1455,7 +1459,11 @@ export class AgentConversationRenderer extends Component {
     // An unchanged receipt survives reconciliation, so a focused link keeps focus.
     const receipt = presentation.busy ? null
       : body.querySelector<HTMLElement>(":scope > .systemsculpt-agent-turn-changes");
-    this.reconcileChildren(body, [...visibleLanes.map((lane) => lane.node), ...(receipt ? [receipt] : [])]);
+    // Generated media shows as soon as a tool saves it, above the working status.
+    const media = this.renderTurnMediaBlock(body, orderedParts.filter((part): part is AgentToolPart => part.kind === "tool"));
+    const laneNodes = visibleLanes.map((lane) => lane.node);
+    if (media) laneNodes.splice(tailStatus ? laneNodes.length - 1 : laneNodes.length, 0, media);
+    this.reconcileChildren(body, [...laneNodes, ...(receipt ? [receipt] : [])]);
     for (const [key, node] of this.activeNodes) {
       if (!wantedParts.has(key)) {
         this.forgetMarkdown(node);
@@ -2854,6 +2862,13 @@ export class AgentConversationRenderer extends Component {
       throw error;
     }
     if (!details.open || state.revision !== revision) state.dirty = true;
+  }
+
+  private renderTurnMediaBlock(parent: HTMLElement, parts: readonly AgentToolPart[]): HTMLElement | null {
+    return renderTurnMedia(this.options.app, parent, parts, {
+      openFile: (path) => void this.options.onOpenArtifact({ id: path, kind: "generated_file", title: path.split("/").pop() ?? path, path }),
+      openLink: (url) => void openExternalUrl(url, parent.ownerDocument.defaultView ?? undefined),
+    });
   }
 
   private renderTurnChanges(parent: HTMLElement, parts: readonly AgentToolPart[]): void {

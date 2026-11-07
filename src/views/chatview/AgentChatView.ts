@@ -13,6 +13,7 @@ import { CodexThreadLocator } from "../../services/codex/CodexThreadLocator";
 import { CodexChatSession } from "../../services/codex/CodexChatSession";
 import { LocalAgentChatSession } from "../../services/codex/LocalAgentChatSession";
 import { ClaudeChatSession } from "../../services/claude/ClaudeChatSession";
+import { systemSculptToolService } from "../../tools/systemsculpt/SystemSculptToolHost";
 import { claudeOptionsFromSettings, isClaudePermissionMode, type ClaudePermissionMode } from "../../services/claude/ClaudeExecutionOptions";
 import { isCodexApprovalMode, type CodexApprovalMode } from "../../services/codex/CodexApprovalPolicy";
 import { ItemView, MarkdownView, Menu, normalizePath, Notice, Scope, TFile, WorkspaceLeaf } from "obsidian";
@@ -466,10 +467,10 @@ export class AgentChatView extends ItemView {
     };
     // Retry context belongs to the submitting turn, never the creating pane.
     if (backend === "codex") {
-      return new CodexChatSession(app, { persistAssistant: persistNativeAssistant, notice }, () => [], () => codexOptionsFromSettings(plugin.settings));
+      return new CodexChatSession(app, { persistAssistant: persistNativeAssistant, notice }, () => [], () => codexOptionsFromSettings(plugin.settings), () => systemSculptToolService(plugin).toolset());
     }
     if (backend === "claude") {
-      return new ClaudeChatSession(app, { persistAssistant: persistNativeAssistant, notice }, () => [], () => claudeOptionsFromSettings(plugin.settings));
+      return new ClaudeChatSession(app, { persistAssistant: persistNativeAssistant, notice }, () => [], () => claudeOptionsFromSettings(plugin.settings), () => ({ toolset: systemSculptToolService(plugin).toolset(), pluginVersion: plugin.manifest.version }));
     }
     return new AgentChatSession({
       recoveryEnvironment: chatRecoveryEnvironment(this.app, this.containerEl),

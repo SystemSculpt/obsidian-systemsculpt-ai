@@ -4,8 +4,10 @@ import { desktopHost } from '../../platform/desktopOnly';
 import { isRecord } from '../../utils/jsonRecord';
 import { readLocalAgentLaunchConfig, resolveLocalAgentCommand } from '../codex/LocalAgentLaunch';
 import { LocalAgentUsageLimitError } from '../codex/LocalAgents';
+import type { SystemSculptToolset } from '../../tools/systemsculpt/SystemSculptTools';
+import { answerClaudeToolBridgeMessage, claudeToolBridgeArgs, claudeToolBridgeInitialize, isClaudeToolBridgeMessage } from './ClaudeToolBridge';
 
-export type ClaudeRequest = ClaudeExecutionOptions & { prompt: string; workingDirectory: string; sessionId?: string; images?: readonly string[] };
+export type ClaudeRequest = ClaudeExecutionOptions & { prompt: string; workingDirectory: string; sessionId?: string; images?: readonly string[]; tools?: SystemSculptToolset; pluginVersion?: string };
 export type ClaudeResult = { sessionId: string; text: string };
 export type ClaudePermissionRequest = {
   toolName: string; description: string; input: Record<string, unknown>;
@@ -64,7 +66,7 @@ function rejectsAutoMode(message: string): boolean {
  * Print mode with JSON streams on both ends; permission prompts come back to the plugin over stdio.
  * @internal Unit-tested directly.
  */
-export function claudeLaunchArgs(options: ClaudeExecutionOptions, sessionId?: string): string[] {
+export function claudeLaunchArgs(options: ClaudeExecutionOptions, sessionId?: string, withTools = false): string[] {
   const { model, permissionMode } = resolveClaudeOptions(options);
   if (sessionId !== undefined && !SESSION_PATTERN.test(sessionId)) throw new Error('Invalid saved Claude Code session identity.');
   return ['-p', '--output-format', 'stream-json', '--input-format', 'stream-json', '--verbose', '--include-partial-messages',
@@ -72,7 +74,8 @@ export function claudeLaunchArgs(options: ClaudeExecutionOptions, sessionId?: st
     // "settings" leaves the mode to Claude Code's own configuration.
     ...(permissionMode === 'settings' ? [] : ['--permission-mode', permissionMode]),
     ...(model ? ['--model', model] : []),
-    ...(sessionId ? ['--resume', sessionId] : [])];
+    ...(sessionId ? ['--resume', sessionId] : []),
+    ...(withTools ? claudeToolBridgeArgs(permissionMode) : [])];
 }
 
 function userMessage(prompt: string, images: readonly string[]): Record<string, unknown> {
@@ -97,7 +100,7 @@ type ClaudeLiveConnection = {
   next: (input: ClaudeRequest, signal: AbortSignal, callbacks: ClaudeCallbacks) => Promise<ClaudeResult>;
   close: () => Promise<void>;
 };
-const claudeConnectionKey = (input: ClaudeRequest) => JSON.stringify([input.workingDirectory, resolveClaudeOptions(input)]);
+const claudeConnectionKey = (input: ClaudeRequest) => JSON.stringify([input.workingDirectory, resolveClaudeOptions(input), Boolean(input.tools)]);
 
 /** A chat owns its live native permission context. Nothing is replayed from the transcript. */
 export class ClaudeChatTransport {
@@ -137,7 +140,7 @@ export async function runLocalClaude(input: ClaudeRequest, signal: AbortSignal, 
 async function runClaudeAttempt(input: ClaudeRequest, signal: AbortSignal, callbacks: ClaudeCallbacks, owner?: ClaudeChatTransport): Promise<ClaudeResult> {
   if (!input.prompt.trim() || input.prompt.length > 256_000) throw new Error('A Claude Code prompt must contain 1–256,000 characters.');
   if (owner?.connection) return owner.connection.next(input, signal, callbacks);
-  const args = claudeLaunchArgs(input, input.sessionId);
+  const args = claudeLaunchArgs(input, input.sessionId, Boolean(input.tools));
   const message = userMessage(input.prompt, input.images || []);
   if (signal.aborted) throw new Error('Claude Code run canceled.');
   const [childProcess, fs, path] = await Promise.all([desktopHost.childProcess(), desktopHost.fs(), desktopHost.path()]);
@@ -162,6 +165,7 @@ async function runClaudeAttempt(input: ClaudeRequest, signal: AbortSignal, callb
     const child = childProcess.spawn(command.binary, command.args, { cwd: input.workingDirectory, env: environment, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, shell: false });
     return await new Promise<ClaudeResult>((resolve, reject) => {
       const prompts = new Map<string, AbortController>();
+      const toolCalls = new Map<string, AbortController>();
       const toolBlocks = new Map<number, { id: string; name: string; inputText: string }>();
       let buffer = '', stderr = '', settled = false, signedOut = false, nextRequest = 0;
       let initialized = false, activityStarted = false, pipeFailure = false, fallbackRequestId: string | undefined;
@@ -190,6 +194,7 @@ async function runClaudeAttempt(input: ClaudeRequest, signal: AbortSignal, callb
         if (settled) { if (value.error && owner) void closeProcess(); return; }
         outcome = value; settled = true; signal.removeEventListener('abort', abort);
         for (const prompt of prompts.values()) prompt.abort(); prompts.clear();
+        for (const call of toolCalls.values()) call.abort(); toolCalls.clear();
         if (owner && value.result && saving) {
           // Keep native session grants alive between successful chat turns. Studio still closes below.
           void saving.then(() => resolve(value.result!), error => { outcome = { error }; void closeProcess(); });
@@ -242,6 +247,19 @@ async function runClaudeAttempt(input: ClaudeRequest, signal: AbortSignal, callb
           write({ type: 'control_response', response: { subtype: 'success', request_id: requestId, response: claudePermissionResponse(permission, decision) } });
         }, () => { if (prompts.get(requestId) === controller && prompts.delete(requestId) && !settled && !controller.signal.aborted) deny('The user declined this action in SystemSculpt.'); });
       };
+      const callTool = (requestId: string, message: Record<string, unknown>) => {
+        const tools = input.tools!, controller = new AbortController();
+        toolCalls.set(requestId, controller);
+        const stop = () => controller.abort();
+        signal.addEventListener('abort', stop, { once: true });
+        void answerClaudeToolBridgeMessage(tools, message, input.pluginVersion ?? '0', controller.signal)
+          .catch(error => ({ jsonrpc: '2.0', id: message.id ?? 0, error: { code: -32603, message: error instanceof Error ? error.message : 'SystemSculpt tool failed.' } }))
+          .then(response => {
+            signal.removeEventListener('abort', stop);
+            if (toolCalls.get(requestId) !== controller || !toolCalls.delete(requestId) || controller.signal.aborted) return;
+            write({ type: 'control_response', response: { subtype: 'success', request_id: requestId, response: { mcp_response: response } } });
+          });
+      };
       const receive = (event: Record<string, unknown>) => {
         if (typeof event.session_id === 'string') {
           if (event.session_id !== sessionId) { finish({ error: new Error('Claude Code returned a different session identity.') }); return; }
@@ -273,13 +291,19 @@ async function runClaudeAttempt(input: ClaudeRequest, signal: AbortSignal, callb
           fallbackRequestId = undefined;
           return;
         }
-        if (event.type === 'assistant' || event.type === 'stream_event' || event.type === 'control_request') activityStarted = true;
+        // The tool server handshake runs at startup; only model activity counts.
+        if (event.type === 'assistant' || event.type === 'stream_event' || event.type === 'control_request' && !(isRecord(event.request) && event.request.subtype === 'mcp_message')) activityStarted = true;
         if (event.type === 'control_request' && typeof event.request_id === 'string' && isRecord(event.request)) {
           if (event.request.subtype === 'can_use_tool') answer(event.request_id, event.request);
+          else if (input.tools && isClaudeToolBridgeMessage(event.request)) callTool(event.request_id, event.request.message as Record<string, unknown>);
           else write({ type: 'control_response', response: { subtype: 'error', request_id: event.request_id, error: `SystemSculpt does not support ${String(event.request.subtype)}.` } });
           return;
         }
-        if (event.type === 'control_cancel_request' && typeof event.request_id === 'string') { prompts.get(event.request_id)?.abort(); prompts.delete(event.request_id); return; }
+        if (event.type === 'control_cancel_request' && typeof event.request_id === 'string') {
+          prompts.get(event.request_id)?.abort(); prompts.delete(event.request_id);
+          toolCalls.get(event.request_id)?.abort(); toolCalls.delete(event.request_id);
+          return;
+        }
         // Native ids match tool results even when the tool belongs to a subagent. Only main-conversation text becomes the reply.
         if ((event.type === 'assistant' || event.type === 'user') && isRecord(event.message)) {
           for (const block of Array.isArray(event.message.content) ? event.message.content : []) {
@@ -401,6 +425,7 @@ async function runClaudeAttempt(input: ClaudeRequest, signal: AbortSignal, callb
         };
         owner.connection = connection; retained = true;
       }
+      if (input.tools) write(claudeToolBridgeInitialize(`systemsculpt-init-${++nextRequest}`));
       write(message);
     });
   } finally {
