@@ -1,4 +1,4 @@
-import { systemSculptToolName } from "../../tools/systemsculpt/SystemSculptTools";
+import { decodeSystemSculptToolOutput, systemSculptToolName } from "../../tools/systemsculpt/SystemSculptTools";
 import { MarkdownRenderer, type App, type Component } from "obsidian";
 import type { AgentToolPart } from "../../chat/ChatConversation";
 import { DiffViewer } from "../../components/DiffViewer";
@@ -130,7 +130,9 @@ export function nativeToolPresentation(part: AgentToolPart): NativeToolPresentat
       studio_run_workflow: ["Run", "Ran", "Running", workflow, "play"],
       studio_list_outputs: ["List outputs of", "Listed outputs of", "Listing outputs of", workflow, "layout-dashboard"],
     } as const)[systemsculpt];
-    return presentation(verb, completed, running, target, icon, `systemsculpt:${systemsculpt}`);
+    // A refused call (no subscription, no credits) finished normally but did nothing.
+    const refused = part.state === "succeeded" && decodeSystemSculptToolOutput(part.output?.data)?.ok === false;
+    return presentation(verb, refused ? `Couldn't ${verb.toLowerCase()}` : completed, running, target, icon, `systemsculpt:${systemsculpt}`);
   }
   const rawPath = text(input.file_path) ?? text(input.path);
   const path = rawPath ? displayPath(part, rawPath) : undefined;

@@ -6,6 +6,7 @@ import {
 import type { AgentToolPart } from "../../chat/ChatConversation";
 import { isActiveAgentToolState } from "./AgentConversationPresentation";
 import { nativeToolPresentation } from "./NativeToolPresentation";
+import { decodeSystemSculptToolOutput, systemSculptToolName } from "../../tools/systemsculpt/SystemSculptTools";
 
 type AgentToolDisplayState = AgentToolPart["state"] | "partial";
 
@@ -200,6 +201,12 @@ const TOOL_ACTION_FORMS: Readonly<Record<string, readonly [active: string, compl
   Answer: ["Answering", "Answered"],
   Send: ["Sending", "Sent"],
 };
+
+/** A SystemSculpt call that finished but did nothing (no subscription, no credits). */
+function refusedSystemSculptCall(part: AgentToolPart): boolean {
+  return part.state === "succeeded" && Boolean(systemSculptToolName(part.name))
+    && decodeSystemSculptToolOutput(part.output?.data)?.ok === false;
+}
 
 function actionState(displayState: AgentToolDisplayState): ToolActionState {
   if (displayState !== "partial" && isActiveAgentToolState(displayState)) {
@@ -589,7 +596,7 @@ export function presentAgentTool(part: AgentToolPart): AgentToolPresentation {
                     : counted ? countedLabel(counted, "base") : TOOL_LABELS[canonicalName] ?? `Use ${canonicalName || "tool"}`;
   const query = webSearchQuery(part);
   const label = serverTool ? actionLabel(query ? `Search the web for “${query}”` : serverLabel ?? UNKNOWN_SERVER_TOOL_LABEL, labelState)
-    : displayState === "failed" ? `Couldn't ${baseLabel.charAt(0).toLowerCase()}${baseLabel.slice(1)}` : actionLabel(baseLabel, labelState);
+    : displayState === "failed" || refusedSystemSculptCall(part) ? `Couldn't ${baseLabel.charAt(0).toLowerCase()}${baseLabel.slice(1)}` : actionLabel(baseLabel, labelState);
   const output = record(part.output?.data);
   const resultCount = serverTool ? webSearchResultCount(part)
     : typeof output.totalMatches === "number" ? output.totalMatches

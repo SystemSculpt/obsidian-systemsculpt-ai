@@ -177,3 +177,16 @@ describe("hosted chat capability", () => {
     expect(contract.parseThinAgentDataPart(request({ id: "systemsculpt.other", version: 1 }))).toMatchObject({ kind: "invalid" });
   });
 });
+
+describe("saved chats", () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { durableToolResult } = require("../../../chat/managed/DurableToolResult") as typeof import("../../../chat/managed/DurableToolResult");
+
+  it("keep every generated file and the Subscribe link once a result is stored structured", () => {
+    const media = Array.from({ length: 4 }, (_, index) => ({ kind: "image" as const, path: `SystemSculpt/Images/2026-11-07 090503 ${"A very long prompt ".repeat(4)}${index}.png` }));
+    const saved = durableToolResult({ success: true, data: { systemsculpt_tool: 1, ok: true, message: "Saved", media } });
+    expect(decodeSystemSculptToolOutput(saved.data)?.media).toEqual(media);
+    const refused = durableToolResult({ success: true, data: { systemsculpt_tool: 1, ok: false, message: `Image generation comes with a SystemSculpt subscription. Subscribe: ${SUBSCRIBE}`, link: { label: "Subscribe", url: SUBSCRIBE } } });
+    expect(presentTurnMedia([{ id: "a", order: 0, kind: "tool", messageId: "m", callId: "a", name: "generate_image", state: "succeeded", input: {}, location: "server", output: { data: refused.data } } as unknown as AgentToolPart]).notices).toHaveLength(1);
+  });
+});
