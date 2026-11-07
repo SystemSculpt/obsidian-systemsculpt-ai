@@ -16,6 +16,17 @@
   margin-top: var(--ss-space-2);
 }
 
+/* Notices sit outside .ss-surface; keep the primary action's text contrast. */
+.systemsculpt-notice-action.mod-cta {
+  background-color: var(--ss-accent-fill);
+  color: var(--ss-ink-on-accent);
+}
+
+.systemsculpt-notice-action.mod-cta:hover,
+.systemsculpt-notice-action.mod-cta:active {
+  background-color: var(--ss-accent-fill-hover);
+}
+
 .systemsculpt-notice-actions {
   display: flex;
   flex-wrap: wrap;
