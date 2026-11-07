@@ -13,6 +13,8 @@
 
 /* Phase → color, resolved once per element through --ss-activity-color. */
 .ss-studio-view {
+  /* Accent text (selected modes, links) keeps AA on Studio's cards and tints. */
+  --ss-ink-accent: color-mix(in srgb, var(--text-accent) 75%, var(--text-normal));
   --ss-activity-color-idle: var(--ss-ink-muted);
   --ss-activity-color-queued: var(--ss-warning);
   --ss-activity-color-active: var(--ss-accent);
@@ -150,9 +152,11 @@
   animation: ss-pulse 1.2s var(--ss-ease) infinite;
 }
 
+/* Status words are text: the phase color mixed toward ink keeps 4.5:1 on the
+ * card in both themes; the dot carries the pure phase color. */
 .ss-studio-node-activity-label {
   flex-shrink: 0;
-  color: var(--ss-activity-color);
+  color: color-mix(in srgb, var(--ss-activity-color) 60%, var(--ss-ink));
   font-weight: var(--ss-weight-medium);
 }
 

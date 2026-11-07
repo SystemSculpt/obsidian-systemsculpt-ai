@@ -66,12 +66,19 @@ input.ss-studio-node-inline-config-input,
   outline: none;
 }
 
+/* The inset is a transparent border, not padding: a long prompt scrolls inside
+ * it, so its last line never runs into the field's edge. An inset outline
+ * draws the 1px edge. */
 .ss-studio-node-inline-config-textarea {
   width: 100%;
-  min-height: 60px;
-  padding: var(--ss-space-2);
+  /* Whole lines: three of them plus the inset, so the field never opens on a
+   * line cut through its middle. */
+  min-height: calc(3lh + 2 * (var(--ss-space-2) - 1px));
+  padding: 0;
   background-color: var(--ss-surface-sunken);
-  border: 1px solid var(--ss-line);
+  border: calc(var(--ss-space-2) - 1px) solid transparent;
+  outline: 1px solid var(--ss-line);
+  outline-offset: -1px;
   border-radius: var(--ss-radius-sm);
   color: var(--ss-ink);
   font-size: var(--ss-text-sm);
@@ -81,8 +88,7 @@ input.ss-studio-node-inline-config-input,
 }
 
 .ss-studio-node-inline-config-textarea:focus {
-  border-color: var(--ss-accent);
-  outline: none;
+  outline-color: var(--ss-accent);
 }
 
 .ss-studio-node-inline-config-select-button-group {

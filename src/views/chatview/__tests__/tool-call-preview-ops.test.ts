@@ -62,18 +62,22 @@ describe('Operations preview (grouping + dedup)', () => {
     expect(text).toBe('Trash: a.md, b.md');
   });
 
-  test('renderOperationsInlinePreview groups move pairs into one line with arrow and FULL paths', async () => {
+  test('renderOperationsInlinePreview shows each move as its FULL source, then an arrow and its destination', async () => {
     const host = document.createElement('div');
     const tc = createTC('4', 'move', { items: [
       { source: 'docs/old/a.md', destination: 'docs/new/a.md' },
       { source: 'notes/x.txt', destination: 'archive/x.txt' },
     ]});
     await renderOperationsInlinePreview(host, tc);
-    const li = host.querySelector<HTMLLIElement>('.systemsculpt-inline-ops li');
-    expect(li).toBeTruthy();
-    const text = li!.textContent || '';
-    expect(text).toBe('Move: docs/old/a.md → docs/new/a.md, notes/x.txt → archive/x.txt');
-    const codes = Array.from(li!.querySelectorAll('code'));
+    const items = Array.from(host.querySelectorAll<HTMLLIElement>('.systemsculpt-inline-ops li'));
+    expect(items.map((li) => [
+      li.querySelector(':scope > code')?.textContent,
+      li.querySelector('.systemsculpt-inline-ops__move-to')?.textContent,
+    ])).toEqual([
+      ['docs/old/a.md', '→docs/new/a.md'],
+      ['notes/x.txt', '→archive/x.txt'],
+    ]);
+    const codes = Array.from(host.querySelectorAll('.systemsculpt-inline-ops code'));
     expect(codes.every(c => !c.hasAttribute('title'))).toBe(true);
   });
 

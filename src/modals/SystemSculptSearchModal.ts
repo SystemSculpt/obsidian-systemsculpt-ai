@@ -425,8 +425,15 @@ export class SystemSculptSearchModal extends StandardModal {
     const titleEl = header.createDiv({ cls: "ss-search__title" });
     this.appendHighlightedText(titleEl, result.title, query);
 
+    // The title already names the note; the meta line says where it lives and
+    // when it changed. A long folder shortens before the date ever does.
     const meta = item.createDiv({ cls: "ss-search__meta" });
-    meta.setText([result.path, this.formatUpdated(result.updatedAt)].join(" · "));
+    const slash = result.path.lastIndexOf("/");
+    if (slash > 0) {
+      meta.createSpan({ cls: "ss-search__meta-folder", text: result.path.slice(0, slash) });
+      meta.createSpan({ cls: "ss-search__meta-sep", text: "·" });
+    }
+    meta.createSpan({ cls: "ss-search__meta-date", text: this.formatUpdated(result.updatedAt) });
 
     if (result.excerpt) {
       const excerpt = item.createDiv({ cls: "ss-search__excerpt" });

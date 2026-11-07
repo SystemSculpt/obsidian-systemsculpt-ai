@@ -338,16 +338,15 @@ export async function renderOperationsInlinePreview(hostElement: HTMLElement, to
 
   const list = body.createEl("ul");
   if (preview.type === "move") {
-    // Render as a single compact line with FULL paths: "Move: path/src → path/dst, ..."
-    const li = list.createEl("li");
-    li.createSpan({ text: "Move: " });
-    preview.items.forEach((it, idx) => {
-      const src = li.createEl("code", { cls: "ss-modal__inline-code" });
-      src.textContent = it.source;
-      li.createSpan({ text: " → " });
-      const dst = li.createEl("code", { cls: "ss-modal__inline-code" });
-      dst.textContent = it.destination;
-      if (idx < preview.items.length - 1) li.appendChild(li.ownerDocument.createTextNode(", "));
+    // One move per item: the FULL source path, then "→ destination" on its own
+    // line, so neither path breaks around the arrow in a narrow pane.
+    list.addClass("is-moves");
+    preview.items.forEach((it) => {
+      const li = list.createEl("li", { cls: "systemsculpt-inline-ops__move" });
+      li.createEl("code", { cls: "ss-modal__inline-code", text: it.source });
+      const to = li.createDiv({ cls: "systemsculpt-inline-ops__move-to" });
+      to.createSpan({ cls: "systemsculpt-inline-ops__arrow", text: "→" });
+      to.createEl("code", { cls: "ss-modal__inline-code", text: it.destination });
     });
   } else {
     // Keep full paths visible so folders with the same base name stay distinct.
