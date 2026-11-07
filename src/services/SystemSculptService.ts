@@ -85,6 +85,12 @@ export type CreditsBalanceSnapshot = {
   billingCycle?: "monthly" | "annual" | "unknown";
   /** The account has used the iOS app. False when an older server doesn't say. */
   iosAppLinked?: boolean;
+  /**
+   * The plan subscription that can still bill (T-5348); null with none.
+   * Undefined when an older server does not say. past_due and unpaid mean a
+   * failed renewal: the card needs fixing in the billing portal.
+   */
+  subscriptionStatus?: "active" | "trialing" | "past_due" | "unpaid" | null;
   annualUpgradeOffer?: {
     amountSavedCents: number;
     percentSaved: number;
@@ -271,6 +277,11 @@ export function decodeCreditsBalance(payload: unknown): CreditsBalanceSnapshot {
     purchaseUrl: normalizeCreditsCheckoutUrl(value.purchase_url),
     billingCycle,
     iosAppLinked: value.ios_app_linked === true,
+    ...(value.subscription_status === null
+      || value.subscription_status === "active" || value.subscription_status === "trialing"
+      || value.subscription_status === "past_due" || value.subscription_status === "unpaid"
+      ? { subscriptionStatus: value.subscription_status }
+      : {}),
     annualUpgradeOffer,
   };
 }
@@ -653,6 +664,33 @@ export class SystemSculptService {
    */
   public readCreditsBalance(options: CreditsBalanceReadOptions = {}): Promise<CreditsBalanceSnapshot> {
     return this.creditsBalances().read(options);
+  }
+
+  /**
+   * A Stripe billing portal link for this license key's account (T-5348), so
+   * a subscriber whose renewal failed can fix their card. The URL is a
+   * credential for the customer's billing: open it, never log or store it.
+   */
+  public async createBillingPortalLink(): Promise<string> {
+    const licenseKey = (this.plugin.settings.licenseKey || "").trim();
+    if (!licenseKey) {
+      throw new SystemSculptError("License key required to open billing.", ERROR_CODES.INVALID_LICENSE, 401);
+    }
+    const url = `${this.baseUrl}${SYSTEMSCULPT_API_ENDPOINTS.BILLING.PORTAL}`;
+    const response = await this.requestClient.request({
+      url,
+      method: "POST",
+      headers: { ...SystemSculptEnvironment.buildHeaders(licenseKey), Accept: "application/json" },
+    });
+    if (!response.ok) {
+      await StreamingErrorHandler.handleResponseError(response, { endpoint: url });
+    }
+    const body = await response.json().catch(() => null) as { url?: unknown } | null;
+    const link = typeof body?.url === "string" ? body.url.trim() : "";
+    if (!link.startsWith("https://")) {
+      throw new SystemSculptError("The billing portal did not return a link.", ERROR_CODES.INVALID_RESPONSE, 502);
+    }
+    return link;
   }
 
   /** Hears every balance read from the server, e.g. to resume work after a top-up. */

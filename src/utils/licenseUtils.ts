@@ -34,10 +34,23 @@ export function checkPremiumUserStatus(settings: SystemSculptSettings): PremiumU
   return status;
 }
 
-/** A free starter account: a valid key whose plan includes no monthly credits. */
+/**
+ * A free starter account: a valid key whose plan includes no monthly credits
+ * and no plan subscription that can still bill. A failed renewal also earns
+ * no included credits, so the plan status keeps it out (T-5348).
+ */
 export function isStarterBalance(balance: CreditsBalanceSnapshot | null | undefined): boolean {
-  return !!balance && balance.usageClass !== "master_auth" && balance.includedCreditsEntitled === false;
+  return !!balance && balance.usageClass !== "master_auth" && balance.includedCreditsEntitled === false
+    && !balance.subscriptionStatus;
 }
+
+/** A plan whose renewal payment failed: the card is fixed in the billing portal, never with a second checkout (T-5348). */
+export function needsPaymentFix(balance: CreditsBalanceSnapshot | null | undefined): boolean {
+  return balance?.subscriptionStatus === "past_due" || balance?.subscriptionStatus === "unpaid";
+}
+
+export const PAYMENT_FIX_LEAD = "Your last payment failed.";
+export const PAYMENT_FIX_LINK = "Update your card";
 
 /** Under this many available credits, a starter account is told it is running low (T-4520). */
 const LOW_CREDITS_OFFER_THRESHOLD = 100;

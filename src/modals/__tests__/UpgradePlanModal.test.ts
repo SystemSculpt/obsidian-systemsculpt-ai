@@ -245,6 +245,25 @@ describe("UpgradePlanModal", () => {
     }
   });
 
+  it("leads a rejected key with Billing, where a failed card is fixed (T-5348)", () => {
+    const { hrefs, spy } = spyOnAnchorClicks();
+    try {
+      const modal = new UpgradePlanModal(createPlugin({ userEmail: "user@example.com", licenseKey: "expired-key" }));
+      modal.onOpen();
+      expect(modal.modalEl.textContent).toContain("If a payment failed, update your card in Billing");
+      findButtonByText(modal.modalEl, "Open billing").click();
+      expect(new URL(hrefs[0]).pathname).toBe("/dashboard/billing");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("shows no Billing button to an account without a key", () => {
+    const modal = new UpgradePlanModal(createPlugin({ userEmail: "user@example.com" }));
+    modal.onOpen();
+    expect(modal.modalEl.textContent).not.toContain("Open billing");
+  });
+
   it.each([{}, { userEmail: "account@example.com" }])("opens comparison pricing without changing access (%j)", (settings) => {
     const { hrefs, spy } = spyOnAnchorClicks();
     try {

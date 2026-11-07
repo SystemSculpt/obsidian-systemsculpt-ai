@@ -88,6 +88,10 @@ export type AgentConversationRendererOptions = Readonly<{
   onMonthlyOffer?: () => void | Promise<void>;
   /** Only a starter account gets Subscribe; any other account sees plans instead. */
   showMonthlyOffer?: () => boolean;
+  /** A failed renewal: the credits error offers Update card instead (T-5348). */
+  showPaymentFix?: () => boolean;
+  /** Opens the billing portal to fix the card. */
+  onUpdateCard?: () => void | Promise<void>;
   onRetryFailedTurn?: (messageId: string) => void | Promise<void>;
   onPrepareIncidentReport?: (reportId: string, retry?: boolean) => Promise<boolean>;
   onCopyIncidentReport?: (
@@ -2575,7 +2579,9 @@ export class AgentConversationRenderer extends Component {
         const errorIcon = node.createSpan({ cls: "systemsculpt-agent-error-icon" });
         setIcon(errorIcon, "circle-alert");
         const copy = node.createDiv({ cls: "systemsculpt-agent-error-copy" });
-        const presented = presentAgentError(part.error, part.retryable, this.options.showPlanOffer?.());
+        const presented = presentAgentError(
+          part.error, part.retryable, this.options.showPlanOffer?.(), this.options.showPaymentFix?.() ?? false,
+        );
         copy.createEl("strong", {
           cls: "systemsculpt-agent-error-heading",
           text: presented.heading,
@@ -2611,6 +2617,10 @@ export class AgentConversationRenderer extends Component {
         if (actions && monthlyOffer) {
           const monthly = createUiAction(actions, { label: "Subscribe", testId: "chat.turn.subscribe", tone: "primary", size: "small" });
           monthly.onclick = () => void this.options.onMonthlyOffer?.();
+        }
+        if (actions && presented.action === "update-card" && this.options.onUpdateCard) {
+          const card = createUiAction(actions, { label: "Update card", testId: "chat.turn.update-card", tone: "primary", size: "small" });
+          card.onclick = () => void this.options.onUpdateCard?.();
         }
         if (actions && presented.action === "add-credits" && this.options.onOpenCredits) {
           const credits = createUiAction(actions, { label: "Add credits", testId: "chat.turn.add-credits", tone: "primary", size: "small" });

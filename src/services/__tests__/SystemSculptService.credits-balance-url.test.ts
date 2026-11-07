@@ -26,6 +26,20 @@ const creditsBalancePayload = {
 };
 
 describe("decodeCreditsBalance", () => {
+  it.each([
+    ["past_due", "past_due"],
+    ["unpaid", "unpaid"],
+    ["active", "active"],
+    [null, null],
+  ] as const)("keeps the plan status %j (T-5348)", (wire, decoded) => {
+    expect(decodeCreditsBalance({ ...creditsBalancePayload, subscription_status: wire }).subscriptionStatus).toBe(decoded);
+  });
+
+  it("leaves the plan status unknown for an older server or an unknown value", () => {
+    expect(decodeCreditsBalance(creditsBalancePayload)).not.toHaveProperty("subscriptionStatus");
+    expect(decodeCreditsBalance({ ...creditsBalancePayload, subscription_status: "paused" })).not.toHaveProperty("subscriptionStatus");
+  });
+
   it.each([null, [], "balance", 0])("rejects a non-record balance (%j)", (payload) => {
     expect(() => decodeCreditsBalance(payload)).toThrow(expect.objectContaining({
       code: ERROR_CODES.INVALID_RESPONSE,

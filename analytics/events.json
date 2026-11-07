@@ -322,6 +322,20 @@
       "added": "2026-11-03"
     },
     {
+      "name": "api_request",
+      "feature": "billing_portal",
+      "kind": "server",
+      "description": "A plan whose renewal failed (subscription_status past_due or unpaid) opened its Stripe billing portal to update the card, from the chat's payment line, the Payment failed card and banner Update card button, the Out of credits pill or the Account settings line (T-5348). The website also records billing_portal_opened.",
+      "endpoints": [
+        "BILLING.PORTAL"
+      ],
+      "where": [
+        "src/services/SystemSculptService.ts"
+      ],
+      "owner": "engineer",
+      "added": "2026-11-06"
+    },
+    {
       "name": "checkout_view",
       "feature": "plugin_low_credits",
       "kind": "browser",

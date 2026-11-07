@@ -155,6 +155,9 @@ describe("run line (spec 4.1)", () => {
     // A spent starter account goes straight to Monthly checkout (T-5302).
     expect(segments(state({ ...hosted, account: "no-plan", credits: credits({ includedCreditsEntitled: false, totalRemaining: 0, availableUnreserved: 0 }) }))[2])
       .toMatchObject({ label: "Out of credits", tone: "danger", action: "monthly" });
+    // A spent past-due subscriber fixes their card, never a second checkout (T-5348).
+    expect(segments(state({ ...hosted, account: "no-plan", credits: credits({ includedCreditsEntitled: false, subscriptionStatus: "past_due", totalRemaining: 0, availableUnreserved: 0 }) }))[2])
+      .toMatchObject({ label: "Out of credits", tone: "danger", action: "update-card" });
     expect(segments(state({ ...hosted, account: "signed-out" }))[2])
       .toMatchObject({ label: "Sign in", action: "sign-in" });
     expect(segments(state({ ...hosted, account: "signed-in", credits: credits({ usageClass: "master_auth" }) }))[2].label)
@@ -419,6 +422,12 @@ describe("chromeAccount", () => {
     expect(chromeAccount({ licenseKey: "key" }, credits({ includedCreditsEntitled: true }))).toBe("paid");
     expect(chromeAccount({ licenseKey: "key", subscriptionStatus: "lifetime" }, null)).toBe("paid");
   });
+
+  it("keeps a failed renewal on its plan, never the plan offer (T-5348)", () => {
+    const pastDue = credits({ includedCreditsEntitled: false, totalRemaining: 0, subscriptionStatus: "past_due" });
+    expect(chromeAccount({ licenseKey: "key" }, pastDue)).toBe("paid");
+    expect(chromeAccount({ licenseKey: "key" }, credits({ includedCreditsEntitled: false, totalRemaining: 0, subscriptionStatus: null }))).toBe("no-plan");
+  });
 });
 
 describe("presentCreditsOffer", () => {
@@ -453,5 +462,15 @@ describe("presentCreditsOffer", () => {
     expect(presentCreditsOffer(state({ ...hosted, credits: { ...starter(10), usageClass: "master_auth" } }))).toBeNull();
     expect(presentCreditsOffer(state({ backend: "claude", account: "signed-in", credits: starter(10) }))).toBeNull();
     expect(presentCreditsOffer(state({ ...hosted, credits: null }))).toBeNull();
+  });
+
+  it("tells a past-due subscriber to update their card instead of offering Monthly (T-5348)", () => {
+    const fix = { lead: "Your last payment failed.", link: "Update your card" };
+    expect(presentCreditsOffer(state({ ...hosted, credits: { ...starter(0), subscriptionStatus: "past_due" } }))).toEqual(fix);
+    expect(presentCreditsOffer(state({ ...hosted, credits: { ...starter(400), subscriptionStatus: "unpaid" } }))).toEqual(fix);
+    // A starter (no plan subscription) keeps the Monthly offer.
+    expect(presentCreditsOffer(state({ ...hosted, credits: { ...starter(0), subscriptionStatus: null } })))
+      .toEqual({ lead: "Out of credits.", link });
+    expect(presentCreditsOffer(state({ ...hosted, credits: { ...starter(0), subscriptionStatus: "active" } }))).toBeNull();
   });
 });

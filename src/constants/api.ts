@@ -42,6 +42,9 @@ if (COMPILED_API_BASE_URL === undefined) {
 export const API_BASE_URL = normalizeCompiledApiBaseUrl(COMPILED_API_BASE_URL);
 
 export const SYSTEMSCULPT_API_ENDPOINTS = {
+  BILLING: {
+    PORTAL: "/billing/portal",
+  },
   CREDITS: {
     BALANCE: "/credits/balance",
     USAGE: "/credits/usage",

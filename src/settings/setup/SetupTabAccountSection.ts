@@ -8,8 +8,12 @@ import {
   checkPremiumUserStatus,
   isStarterBalance,
   MONTHLY_OFFER_LINE,
+  PAYMENT_FIX_LEAD,
+  PAYMENT_FIX_LINK,
+  needsPaymentFix,
   starterOfferLead,
 } from "../../utils/licenseUtils";
+import { openBillingPortal } from "../../utils/billingPortal";
 import { SystemSculptSettingTab } from "../SystemSculptSettingTab";
 import { getSurfaceOwnerWindow } from "../../core/ui/surface/SurfaceDomContext";
 import { UpgradePlanModal } from "../../modals/UpgradePlanModal";
@@ -448,6 +452,19 @@ export function renderAccountSection(
             balance.addOnRemaining
           )}). Resets ${formatDate(balance.cycleEndsAt)}.${annualSavingsSuffix}`
         );
+        if (needsPaymentFix(balance)) {
+          // A failed renewal fixes its card on the existing plan (T-5348).
+          const line = creditsSetting.descEl.createDiv({
+            cls: "ss-account-credits-offer",
+            text: `${PAYMENT_FIX_LEAD} `,
+            attr: { "data-testid": "settings.account.payment-fix" },
+          });
+          const link = line.createEl("a", { text: PAYMENT_FIX_LINK, href: "#" });
+          link.addEventListener("click", (event) => {
+            event.preventDefault();
+            void openBillingPortal(aiService, ownerWindow);
+          });
+        }
         refreshAnnualUpgradeButton?.();
         refreshBuyCreditsButton?.();
       } catch {
