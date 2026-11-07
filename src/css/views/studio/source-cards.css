@@ -3,7 +3,7 @@
  * the source toolbar only appears while a source definition is showing. */
 .ss-studio-surface-card { background: var(--ss-surface-0); overflow: visible; }
 .ss-studio-surface-card .ss-studio-node-header { container: ss-studio-node-header / inline-size; display: flex; flex-wrap: wrap; align-items: center; min-height: 36px; padding: var(--ss-space-1) var(--ss-space-3); border-bottom: 1px solid var(--ss-line); gap: 8px; }
-.ss-studio-node-type { flex: 0 0 auto; font: var(--ss-text-xs) var(--ss-font-mono); text-transform: uppercase; letter-spacing: .07em; color: color-mix(in srgb, var(--ss-accent) 70%, var(--ss-ink)); white-space: nowrap; } /* Pure accent is ~3.4:1 at 11px; the ink mix clears 4.5:1 in both themes. */
+.ss-studio-node-type { flex: 0 0 auto; font: var(--ss-text-xs) var(--ss-font-mono); text-transform: uppercase; letter-spacing: .07em; color: color-mix(in srgb, var(--ss-ink-accent) 70%, var(--ss-ink)); white-space: nowrap; } /* Accent ink mixed toward text clears 4.5:1 at 11px in both themes. */
 .ss-studio-surface-card .ss-studio-node-title-input { flex: 1 1 0; min-width: 4ch; font-size: var(--ss-text-sm); font-weight: var(--ss-weight-semibold); height: 24px; padding: 0 4px; }
 .ss-studio-surface-card .ss-studio-node-header button { min-height: 24px; height: 24px; padding: 2px 6px; font-size: var(--ss-text-xs); }
 /* A node resized narrower than its header puts the kind on its own line, so

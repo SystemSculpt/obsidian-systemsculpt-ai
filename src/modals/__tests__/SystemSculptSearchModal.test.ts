@@ -568,7 +568,7 @@ describe("SystemSculptSearchModal", () => {
       await (modal as any).executeSearch("test");
 
       expect(modal.contentEl.querySelector(".ss-search__status")?.textContent).toBe("1 result");
-      expect((modal as any).listEl?.textContent).toContain("notes/test.md");
+      expect((modal as any).listEl?.querySelector(".ss-search__meta-folder")?.textContent).toBe("notes");
       expect((modal as any).listEl?.textContent).not.toContain("1.0 KB");
     });
 

@@ -136,16 +136,30 @@
 }
 
 .ss-search__meta {
+  display: flex;
+  gap: var(--ss-space-1);
   min-width: 0;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   font-size: var(--ss-text-xs);
   color: var(--ss-ink-muted);
 }
 
+.ss-search__meta-folder {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ss-search__meta-sep,
+.ss-search__meta-date {
+  flex: none;
+}
+
+/* Whole lines with an ellipsis, never a line cut through its middle. */
 .ss-search__excerpt {
-  max-height: 36px;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   overflow: hidden;
   margin-top: var(--ss-space-0);
   font-size: var(--ss-text-sm);
@@ -204,6 +218,6 @@
 
 @container ss-surface (max-width: 700px) {
   .ss-search__excerpt {
-    max-height: 18px;
+    -webkit-line-clamp: 1;
   }
 }

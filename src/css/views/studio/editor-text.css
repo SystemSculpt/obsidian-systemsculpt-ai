@@ -19,7 +19,7 @@
 
 .ss-studio-node-text-editor-label {
   font-size: var(--ss-text-xs);
-  color: var(--ss-ink-faint);
+  color: var(--ss-ink-muted);
   letter-spacing: var(--ss-tracking-wide);
   text-transform: uppercase;
 }

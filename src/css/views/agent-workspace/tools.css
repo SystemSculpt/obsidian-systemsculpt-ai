@@ -360,6 +360,12 @@
   .systemsculpt-agent-approval-actions [data-focus-key="tool-allow-chat"] {
     flex-basis: 100%;
   }
+
+  /* A pane this narrow has no room for shortcut glyphs beside a full-width
+   * button; the button's words carry it, as on touch. */
+  .systemsculpt-agent-approval kbd {
+    display: none;
+  }
 }
 .systemsculpt-agent-approval-details summary {
   cursor: pointer;
@@ -465,6 +471,22 @@
 .systemsculpt-agent-approval-preview .systemsculpt-inline-ops ul {
   margin: 0;
   padding-left: var(--ss-space-4);
+}
+.systemsculpt-inline-ops ul.is-moves {
+  display: grid;
+  gap: var(--ss-space-2);
+  padding-left: 0;
+  list-style: none;
+}
+.systemsculpt-inline-ops__move-to {
+  display: flex;
+  align-items: baseline;
+  gap: var(--ss-space-1);
+  margin-top: var(--ss-space-0);
+}
+.systemsculpt-inline-ops__arrow {
+  flex: none;
+  color: var(--ss-ink-muted);
 }
 .systemsculpt-agent-approval-preview code {
   overflow-wrap: anywhere;

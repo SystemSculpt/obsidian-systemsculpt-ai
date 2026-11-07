@@ -428,7 +428,11 @@ describe("presentAgentTool", () => {
     expect(presentAgentTool(part({ name: "search", input: { patterns: ["launch"] }, state: "succeeded", output: { data: { totalMatches: 7 } } })))
       .toMatchObject({ label: "Searched “launch”", meta: "7 results" });
     expect(presentAgentTool(part({ name: "move", input: { items: [{ source: "Notes/Plan.md", destination: "Archive/Plan.md" }] }, state: "succeeded" })).label)
-      .toBe("Moved Plan.md → Archive/Plan.md");
+      .toBe("Moved Plan.md to Archive");
+    expect(presentAgentTool(part({ name: "move", input: { items: [{ source: "Notes/Plan.md", destination: "Plan.md" }] }, state: "succeeded" })).label)
+      .toBe("Moved Plan.md to the vault root");
+    expect(presentAgentTool(part({ name: "move", input: { items: [{ source: "Notes/Plan.md", destination: "Archive/Old plan.md" }] }, state: "succeeded" })).label)
+      .toBe("Moved Plan.md → Archive/Old plan.md");
   });
 
   it("presents an item-level partial failure independently", () => {

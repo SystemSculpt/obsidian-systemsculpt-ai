@@ -5,7 +5,7 @@
 .ss-studio-node-card[data-node-kind="studio.image_generation"]
   .ss-studio-node-inline-config-field--prompt
   .ss-studio-node-inline-config-textarea {
-  min-height: 108px;
+  min-height: calc(5lh + 2 * (var(--ss-space-2) - 1px));
 }
 
 /* Model names are long; the model spans both columns so the name and its

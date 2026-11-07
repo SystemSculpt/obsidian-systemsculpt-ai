@@ -604,7 +604,11 @@ export function presentAgentTool(part: AgentToolPart): AgentToolPresentation {
                 : canonicalName === "trash" ? `Move ${target ?? `${paths.length} notes`} to trash`
                   : canonicalName === "move" ? (() => {
                     const sources = objectStrings(input.items, "source"), destinations = objectStrings(input.items, "destination");
-                    return sources.length === 1 && destinations.length === 1 ? `Move ${sources[0].split(/[\\/]/u).pop()} → ${destinations[0]}` : `Move ${sources.length || ""} notes`.replace("  ", " ");
+                    if (sources.length !== 1 || destinations.length !== 1) return `Move ${sources.length || ""} notes`.replace("  ", " ");
+                    // Same name, new folder: name the folder, so the title never breaks a path in two.
+                    const name = sources[0].split(/[\\/]/u).pop()!, slash = destinations[0].search(/[\\/][^\\/]*$/u);
+                    if (destinations[0].slice(slash + 1) !== name) return `Move ${name} → ${destinations[0]}`;
+                    return `Move ${name} to ${slash > 0 ? destinations[0].slice(0, slash) : "the vault root"}`;
                   })()
                   : canonicalName === "find" || canonicalName === "search"
                     ? counted && counted.items.length > 1 ? countedLabel(counted, "base") : `Search “${firstString(input.patterns) ?? firstString(input.query) ?? firstString(input.pattern) ?? "your vault"}”`
