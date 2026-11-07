@@ -29,7 +29,8 @@ import type { ChatMessage } from "../../types";
 import type { ChatExportOptions } from "../../types/chatExport";
 import { isMutatingTool, type ToolApprovalPolicy } from "../../utils/toolPolicy";
 import { isPlanAccessError, planRequiredError, PLAN_REQUIRED_MESSAGE } from "../../utils/errors";
-import { isStarterBalance, starterOfferLead } from "../../utils/licenseUtils";
+import { isStarterBalance, needsPaymentFix, starterOfferLead } from "../../utils/licenseUtils";
+import { openBillingPortal } from "../../utils/billingPortal";
 import { hasActivePlan, UpgradePlanModal } from "../../modals/UpgradePlanModal";
 import { SYSTEMSCULPT_WEBSITE, withPluginAttribution } from "../../constants/externalServices";
 import { openExternalUrl } from "../../utils/externalUrl";
@@ -682,7 +683,9 @@ export class AgentChatView extends ItemView {
       buildMoreMenu: (menu) => this.addChatMenuItems(menu),
       showPlanOffer: this.shouldOfferPlan(),
       showMonthlyOffer: () => isStarterBalance(this.creditsBalance),
+      showPaymentFix: () => needsPaymentFix(this.creditsBalance),
       onCreditsOffer: () => this.openMonthlyCheckout(),
+      onUpdateCard: () => this.openBillingPortal(),
       onViewPlans: (error) => {
         if (isPlanAccessError(error)) {
           UpgradePlanModal.openOnce(this.plugin, { feature: "Chat" });
@@ -702,6 +705,7 @@ export class AgentChatView extends ItemView {
           if (action === "sign-in") this.beginAccountConnect("sign-in");
           else if (action === "see-plans") void this.viewPlans();
           else if (action === "monthly") void this.openMonthlyCheckout();
+          else if (action === "update-card") void this.openBillingPortal();
           else void this.openCreditsBalanceModal();
         },
         onModelMenuOpen: () => this.loadCodexCatalog(),
@@ -1454,8 +1458,15 @@ export class AgentChatView extends ItemView {
       message: rawMessage,
       ...(status === undefined ? {} : { status }),
       retryable,
-    } satisfies ManagedAgentError, retryable, this.creditsBalance?.includedCreditsEntitled === false);
-    if (presented.action === "see-plans") {
+    } satisfies ManagedAgentError, retryable, this.creditsBalance?.includedCreditsEntitled === false,
+    needsPaymentFix(this.creditsBalance));
+    if (presented.action === "update-card") {
+      this.workspace?.setBanner(presented.message, "error", {
+        label: "Update card",
+        testId: "chat.banner.update-card",
+        onSelect: () => void this.openBillingPortal(),
+      });
+    } else if (presented.action === "see-plans") {
       this.workspace?.setBanner(presented.message, "error", true);
     } else if (presented.action === "monthly" && !isStarterBalance(this.creditsBalance)) {
       // Only a starter account gets the direct Monthly checkout; others compare plans.
@@ -3734,6 +3745,11 @@ export class AgentChatView extends ItemView {
   private async openMonthlyCheckout(): Promise<void> {
     await this.refreshCreditsBalance({ requireFresh: true, reason: "view_open" }).catch(() => undefined);
     const balance = this.creditsBalance;
+    // A failed renewal fixes its card on the existing plan, never a second checkout (T-5348).
+    if (needsPaymentFix(balance)) {
+      await this.openBillingPortal();
+      return;
+    }
     if (balance && !(isStarterBalance(balance) && starterOfferLead(balance) !== null)) {
       await this.openCreditsBalanceModal();
       return;
@@ -3742,6 +3758,11 @@ export class AgentChatView extends ItemView {
       withPluginAttribution(SYSTEMSCULPT_WEBSITE.MONTHLY_LOW_CREDITS, "chat"),
       this.containerEl.ownerDocument.defaultView ?? undefined,
     );
+  }
+
+  /** The Stripe billing portal, where a failed renewal's card is fixed (T-5348). */
+  private openBillingPortal(): Promise<void> {
+    return openBillingPortal(this.plugin.aiService, this.containerEl.ownerDocument.defaultView ?? undefined);
   }
 
   private viewPlans(): Promise<void> {

@@ -97,6 +97,10 @@ export type AgentWorkspaceOptions = Readonly<{
   showMonthlyOffer?: () => boolean;
   /** Opens Monthly checkout from the low-credits offer line. */
   onCreditsOffer?: () => void | Promise<void>;
+  /** The plan's renewal failed: offers fix the card instead of a checkout (T-5348). */
+  showPaymentFix?: () => boolean;
+  /** Opens the billing portal to fix the card. */
+  onUpdateCard?: () => void | Promise<void>;
   onCancelQueued?: (id: string) => void | Promise<void>;
   onRunQueuedNow?: (id: string) => void | Promise<void>;
   runLine?: AgentRunLineOptions;
@@ -327,6 +331,8 @@ export class AgentWorkspace extends Component {
       onViewPlans: options.onViewPlans,
       onMonthlyOffer: options.onCreditsOffer,
       showMonthlyOffer: options.showMonthlyOffer,
+      showPaymentFix: options.showPaymentFix,
+      onUpdateCard: options.onUpdateCard,
       onRetryFailedTurn: options.onRetryFailedTurn,
       onPrepareIncidentReport: options.onPrepareIncidentReport,
       onCopyIncidentReport: options.onCopyIncidentReport,

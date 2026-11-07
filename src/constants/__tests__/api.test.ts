@@ -14,8 +14,9 @@ describe("managed API constants", () => {
     expect(API_BASE_URL).toBe("https://systemsculpt.com/api/plugin");
   });
 
-  it("exposes only current license and credits endpoints", () => {
+  it("exposes only current billing and credits endpoints", () => {
     expect(SYSTEMSCULPT_API_ENDPOINTS).toEqual({
+      BILLING: { PORTAL: "/billing/portal" },
       CREDITS: { BALANCE: "/credits/balance", USAGE: "/credits/usage" },
     });
   });

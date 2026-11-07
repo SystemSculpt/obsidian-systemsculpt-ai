@@ -16,7 +16,7 @@ const NOT_STARTED_ERROR =
 export type PresentedAgentError = Readonly<{
   heading: string;
   message: string;
-  action?: "see-plans" | "monthly" | "add-credits" | "detect" | "sign-in" | "use-hosted";
+  action?: "see-plans" | "monthly" | "update-card" | "add-credits" | "detect" | "sign-in" | "use-hosted";
   details?: string;
   /** Local report id, or a legacy server incident id while capture settles. */
   reportId?: string;
@@ -42,6 +42,7 @@ export function presentAgentError(
   error: ManagedAgentError,
   retryable: boolean,
   showPlanOffer = false,
+  paymentFix = false,
 ): PresentedAgentError {
   const nativeAgent = /^local_(claude|codex)_/.exec(error.code)?.[1];
   if (nativeAgent) {
@@ -68,6 +69,14 @@ export function presentAgentError(
       heading: `${name} stopped before finishing`,
       message: `Retry this message. If it keeps failing, run \`${nativeAgent}\` in a terminal to check it works.`,
       details: error.message,
+    };
+  }
+  if (paymentFix && ["out_of_credits", "insufficient_credits", "payment_required"].includes(error.code)) {
+    return {
+      heading: "Payment failed",
+      message: "Your last payment failed. Update your card to get your monthly credits.",
+      // Fix the card on the existing plan, never a second checkout (T-5348).
+      action: "update-card",
     };
   }
   if (showPlanOffer && ["out_of_credits", "insufficient_credits", "payment_required"].includes(error.code)) {

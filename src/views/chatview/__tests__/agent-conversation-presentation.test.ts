@@ -204,6 +204,17 @@ describe("AgentConversationPresentation product-copy boundary", () => {
     },
   );
 
+  it.each(["out_of_credits", "insufficient_credits", "payment_required"])(
+    "asks a past-due subscriber to update their card, not to subscribe, with %s (T-5348)",
+    (code) => {
+      expect(presentAgentError({ code, message: "Remote billing detail." }, false, true, true)).toEqual({
+        heading: "Payment failed",
+        message: "Your last payment failed. Update your card to get your monthly credits.",
+        action: "update-card",
+      });
+    },
+  );
+
   it("uses the same final copy filter for global banners and tool failures", () => {
     expect(presentAgentErrorMessage(
       "Agent connection closed: WebSocket closed with code 4001",

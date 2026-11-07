@@ -5,7 +5,7 @@ import { codexDefaultLabel, type CodexModel } from "../../services/codex/CodexMo
 import { isLocalAgentUsable as usable, type LocalAgentDetection } from "../../services/codex/LocalAgentDetection";
 import { LOCAL_AGENTS, isLocalAgentId, type LocalAgentId, type TextExecutionBackend } from "../../services/codex/LocalAgents";
 import { PLAN_REQUIRED_MESSAGE } from "../../utils/errors";
-import { MONTHLY_OFFER_LINE, isStarterBalance, starterOfferLead } from "../../utils/licenseUtils";
+import { MONTHLY_OFFER_LINE, PAYMENT_FIX_LEAD, PAYMENT_FIX_LINK, isStarterBalance, needsPaymentFix, starterOfferLead } from "../../utils/licenseUtils";
 import type { ChatApprovalMode } from "./storage/ChatPersistenceTypes";
 
 /**
@@ -190,7 +190,7 @@ export type RunLineSegment = Readonly<{
   tone?: "warning" | "danger";
   /** Opens a menu; otherwise `action` runs. */
   menu: boolean;
-  action?: "credits" | "sign-in" | "see-plans" | "monthly";
+  action?: "credits" | "sign-in" | "see-plans" | "monthly" | "update-card";
 }>;
 
 export type RunLinePresentation =
@@ -212,6 +212,10 @@ function hostedDetail(state: AgentChromeState): RunLineSegment {
       : { ...base, label: "Credits", ariaLabel: "Open credits", action: "credits" };
   }
   if (credits.totalRemaining <= 0) {
+    // A failed renewal fixes its card in the billing portal (T-5348).
+    if (needsPaymentFix(credits)) {
+      return { ...base, label: "Out of credits", ariaLabel: "Out of credits. Payment failed: update your card", tone: "danger", action: "update-card" };
+    }
     // A spent starter account goes straight to the $9 Monthly checkout (T-5302).
     return isStarterBalance(credits)
       ? { ...base, label: "Out of credits", ariaLabel: "Out of credits. Get Monthly for $9", tone: "danger", action: "monthly" }
@@ -576,6 +580,8 @@ export function presentEmptyState(state: AgentChromeState): EmptyStatePresentati
 /** The one-line Monthly offer above the composer once half the starter credits are used (T-4520, T-4652). */
 export function presentCreditsOffer(state: AgentChromeState): Readonly<{ lead: string; link: string }> | null {
   if (isLocalAgentId(state.backend) || state.account === "signed-out") return null;
+  // A failed renewal: the line fixes the card, never offers a second plan (T-5348).
+  if (needsPaymentFix(state.credits)) return { lead: PAYMENT_FIX_LEAD, link: PAYMENT_FIX_LINK };
   const lead = starterOfferLead(state.credits);
   return lead ? { lead, link: MONTHLY_OFFER_LINE } : null;
 }

@@ -4,6 +4,7 @@ import { PLATFORM_REQUEST_TIMEOUT_MS, PlatformRequestClient } from "./PlatformRe
 import { openExternalUrl } from "../utils/externalUrl";
 import { bytesToBase64 } from "../utils/base64";
 import { sha256HexFromBytes } from "../utils/sha256";
+import { isStarterBalance } from "../utils/licenseUtils";
 import { requireApiVersion } from "obsidian";
 
 export type AccountConnectMode = "sign-in" | "sign-up";
@@ -580,7 +581,7 @@ export class AccountConnectService {
         this.plugin.aiService.readCreditsBalance({ fresh: true }).catch(() => null),
         CONNECT_CREDITS_WAIT_MS,
       );
-      if (!balance || balance.usageClass === "master_auth" || balance.includedCreditsEntitled !== false) return null;
+      if (!balance || !isStarterBalance(balance)) return null;
       const credits = Math.floor(balance.availableUnreserved ?? balance.totalRemaining);
       return Number.isFinite(credits) && credits > 0 ? credits : null;
     } catch {
