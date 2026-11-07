@@ -69,6 +69,7 @@ export class SystemSculptSearchModal extends StandardModal {
 
     this.listEl = shell.createDiv({ cls: "ss-search__list" });
     this.listEl.id = this.listId;
+    this.registerDomEvent(this.listEl, "scroll", () => this.syncListFade());
     this.registerDomEvent(this.listEl, "pointermove", () => {
       this.pointerOverResults = true;
     });
@@ -178,6 +179,12 @@ export class SystemSculptSearchModal extends StandardModal {
     this.cancelSemanticPass();
     if (this.debounceHandle) {
       this.ownerWindow.clearTimeout(this.debounceHandle);
+      this.debounceHandle = null;
+    }
+    // An emptied box shows recents at once, never the cleared query's results.
+    if (!query.trim()) {
+      void this.executeSearch(query);
+      return;
     }
     this.debounceHandle = this.ownerWindow.setTimeout(() => {
       void this.executeSearch(query);
@@ -220,12 +227,20 @@ export class SystemSculptSearchModal extends StandardModal {
       });
 
       if (serial < this.querySerial || controller.signal.aborted) return;
-      this.renderResponse(response);
+      const indexing = response.stats.indexingPending && response.stats.metadataOnly;
+      const semanticFollows = !indexing && trimmed.length >= this.SEMANTIC_MIN_CHARS;
+      if (semanticFollows && response.results.length === 0) {
+        // A question that matches no words yet may still match by meaning:
+        // keep what is on screen until the semantic pass decides.
+        if (!this.hasRenderedResults()) this.renderLoading("Searching...");
+      } else {
+        this.renderResponse(response);
+      }
 
-      if (response.stats.indexingPending && response.stats.metadataOnly) {
+      if (indexing) {
         this.scheduleIndexRefresh(trimmed, serial);
-      } else if (trimmed.length >= this.SEMANTIC_MIN_CHARS) {
-        this.scheduleSemanticPass(trimmed, serial);
+      } else if (semanticFollows) {
+        this.scheduleSemanticPass(trimmed, serial, response);
       }
     } catch (error) {
       if (this.isAbortError(error) || serial < this.querySerial) return;
@@ -238,11 +253,11 @@ export class SystemSculptSearchModal extends StandardModal {
     }
   }
 
-  private scheduleSemanticPass(query: string, serial: number) {
+  private scheduleSemanticPass(query: string, serial: number, lexical: SearchResponse) {
     this.cancelSemanticPass();
     this.semanticHandle = this.ownerWindow.setTimeout(() => {
       this.semanticHandle = null;
-      void this.runSemanticPass(query, serial);
+      void this.runSemanticPass(query, serial, lexical);
     }, Math.max(0, this.SEMANTIC_IDLE_MS - this.SEARCH_DEBOUNCE_MS));
   }
 
@@ -256,10 +271,11 @@ export class SystemSculptSearchModal extends StandardModal {
     this.semanticAbortController = null;
   }
 
-  private async runSemanticPass(query: string, serial: number) {
+  private async runSemanticPass(query: string, serial: number, lexical: SearchResponse) {
     if (serial !== this.querySerial || this.currentQuery.trim() !== query || !this.listEl) return;
     const controller = new AbortController();
     this.semanticAbortController = controller;
+    const current = () => serial === this.querySerial && !controller.signal.aborted;
     try {
       const response = await this.engine.search(query, {
         mode: "smart",
@@ -267,12 +283,15 @@ export class SystemSculptSearchModal extends StandardModal {
         limit: this.SEARCH_LIMIT,
         signal: controller.signal,
       });
-      // Without semantic hits the lexical results already on screen stand.
-      if (serial === this.querySerial && !controller.signal.aborted && response.stats.usedEmbeddings) {
+      if (current() && response.stats.usedEmbeddings) {
         this.renderResponse(response, { stabilize: true });
+      } else if (current() && lexical.results.length === 0) {
+        // No semantic answer: the empty lexical result is the answer.
+        this.renderResponse(lexical);
       }
+      // Otherwise the lexical results already on screen stand.
     } catch {
-      // The lexical results already on screen stand.
+      if (current() && lexical.results.length === 0) this.renderResponse(lexical);
     } finally {
       if (this.semanticAbortController === controller) {
         this.semanticAbortController = null;
@@ -314,7 +333,7 @@ export class SystemSculptSearchModal extends StandardModal {
       if (serial === this.querySerial && !controller.signal.aborted) {
         this.renderResponse(response, { stabilize: true });
         if (query.length >= this.SEMANTIC_MIN_CHARS) {
-          this.scheduleSemanticPass(query, serial);
+          this.scheduleSemanticPass(query, serial, response);
         }
       }
     } catch (error) {
@@ -388,6 +407,14 @@ export class SystemSculptSearchModal extends StandardModal {
       this.combobox?.clearActive();
       this.focusSearchInput();
     }
+    this.syncListFade();
+  }
+
+  /** Rows below the fold fade out at the edge instead of being cut through. */
+  private syncListFade() {
+    const list = this.listEl;
+    if (!list) return;
+    list.classList.toggle("has-more-below", list.scrollTop + list.clientHeight < list.scrollHeight - 1);
   }
 
   private renderResult(result: SearchHit, query: string): HTMLElement {
@@ -619,19 +646,22 @@ export class SystemSculptSearchModal extends StandardModal {
   }
 
   private getHighlightRanges(text: string, query: string): Array<{ start: number; end: number }> {
-    if (!query || !query.trim()) return [];
+    const terms = highlightTerms(query);
+    if (terms.length === 0) return [];
 
-    const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
-    const lowerText = text.toLowerCase();
     const rawMatches: Array<{ start: number; end: number }> = [];
-
-    terms.forEach((term) => {
-      let idx = 0;
-      while ((idx = lowerText.indexOf(term, idx)) > -1) {
-        rawMatches.push({ start: idx, end: idx + term.length });
-        idx += term.length;
+    for (const term of terms) {
+      // A term marks words that start with it ("cross" in "crossing"), never
+      // the inside of another word ("the" in "then"). Scripts written without
+      // spaces between words match anywhere. No lookbehind: iOS before 16.4
+      // rejects it, so the boundary is captured and skipped.
+      const boundary = UNSPACED_SCRIPT.test(term) ? "()" : "(^|[^\\p{L}\\p{N}])";
+      const pattern = new RegExp(`${boundary}(${escapeRegExp(term)})`, "giu");
+      for (const match of text.matchAll(pattern)) {
+        const start = (match.index ?? 0) + match[1].length;
+        rawMatches.push({ start, end: start + match[2].length });
       }
-    });
+    }
 
     if (rawMatches.length === 0) return [];
     rawMatches.sort((a, b) => a.start - b.start || b.end - a.end);
@@ -658,4 +688,46 @@ export class SystemSculptSearchModal extends StandardModal {
     if (diff < 7 * day) return `${Math.round(diff / day)}d ago`;
     return date.toLocaleDateString();
   }
+}
+
+/**
+ * Words a question is made of rather than what it is about. Marking every
+ * "the" and "is" in a result hides the words that made it match.
+ */
+const HIGHLIGHT_STOP_WORDS = new Set([
+  "a", "about", "an", "and", "any", "are", "as", "at", "be", "but", "by", "can", "could", "did", "do", "does",
+  "for", "from", "had", "has", "have", "how", "i", "if", "in", "into", "is", "it", "its", "me", "my", "of", "on",
+  "or", "our", "should", "so", "than", "that", "the", "their", "them", "then", "there", "these", "they", "this",
+  "to", "us", "was", "we", "were", "what", "when", "where", "which", "who", "why", "will", "with", "would",
+  "you", "your",
+]);
+
+/**
+ * The query's content words, longest first. A one-word query keeps its word
+ * even when it is a common one; a half-typed question ("when did the") marks
+ * nothing rather than every "the".
+ */
+export function highlightTerms(query: string): string[] {
+  const typed = query.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+  const words = [...new Set(typed)];
+  const last = typed.length > 1 ? typed[typed.length - 1] : null;
+  const content = words.filter((word) =>
+    !HIGHLIGHT_STOP_WORDS.has(word)
+    // A lone letter is a fragment ("s" of "what's", "e" of "e-mail"), not a word to mark.
+    && (word.length > 1 || UNSPACED_SCRIPT.test(word))
+    // The word still being typed ("th" on the way to "the") waits until it is a word.
+    && !(word === last && isStopWordPrefix(word)));
+  return (content.length > 0 || words.length !== 1 ? content : words).sort((a, b) => b.length - a.length);
+}
+
+function isStopWordPrefix(word: string): boolean {
+  for (const stop of HIGHLIGHT_STOP_WORDS) if (stop.startsWith(word)) return true;
+  return false;
+}
+
+/** Scripts written without spaces between words. */
+const UNSPACED_SCRIPT = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Thai}]/u;
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

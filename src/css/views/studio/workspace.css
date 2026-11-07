@@ -236,8 +236,9 @@
   color: var(--ss-ink);
 }
 
+/* Status green alone reads under AA as small text on the light toolbar. */
 .ss-studio-graph-workspace-control-button.is-run {
-  color: var(--ss-success);
+  color: color-mix(in srgb, var(--ss-success) 70%, var(--ss-ink));
 }
 
 .ss-studio-graph-workspace-control-button.is-run:hover {
@@ -306,6 +307,17 @@
 
   .ss-studio-graph-workspace-control-row:not(.is-tools) > :last-child {
     grid-column: span 2;
+  }
+
+  /* Nine tools share one row; wrapping left the arrow alone on a third row. */
+  .ss-studio-graph-workspace-control-row.is-tools {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
+  }
+
+  .ss-studio-graph-workspace-control-row.is-tools > .ss-studio-graph-workspace-control-button {
+    padding-inline: 0;
   }
 }
 

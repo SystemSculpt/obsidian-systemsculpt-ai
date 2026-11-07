@@ -772,15 +772,22 @@ export class AgentComposer extends Component {
 
   private syncSuggestion(): void {
     const note = this.vault?.activeNote() ?? null;
-    const visible = Boolean(note)
+    const offered = Boolean(note)
       && !this.readOnlyMessage
       && !this.historyEditing
-      && this.input.value.trim().length === 0
       && !this.messageAttachments.hasEntries()
       && !this.isVaultFileAttached(note!.path);
-    this.suggestionChip.toggleAttribute("hidden", !visible);
-    this.chipRow.classList.toggle("is-empty", !visible && this.attachmentList.childElementCount === 0);
-    if (!note || !visible) return;
+    const visible = offered && this.input.value.trim().length === 0;
+    // While the person types, the ghost fades but keeps its row, so the
+    // composer and the empty state above it don't jump on the first key.
+    const reserved = offered && !visible;
+    this.suggestionChip.toggleAttribute("hidden", !offered);
+    this.suggestionChip.classList.toggle("is-reserved", reserved);
+    this.suggestionChip.toggleAttribute("inert", reserved);
+    if (reserved) this.suggestionChip.setAttribute("aria-hidden", "true");
+    else this.suggestionChip.removeAttribute("aria-hidden");
+    this.chipRow.classList.toggle("is-empty", !offered && this.attachmentList.childElementCount === 0);
+    if (!note || !offered) return;
     const name = note.extension === "md" ? note.basename : note.name;
     updateUiAction(this.suggestionChip, { label: name });
     this.suggestionChip.setAttribute("aria-label", `Add current note: ${name}`);

@@ -4,6 +4,7 @@ import { fuzzyMatchScore } from "../../tools/vault/searchUtils";
 import { containsNonAscii } from "../../utils/characterValidation";
 import { extractCanvasText } from "./canvasTextExtractor";
 import { extractStudioText } from "./studioTextExtractor";
+import { markdownExcerptText } from "./excerptText";
 import { resolveStudioEntry } from "../../studio/StudioEntry";
 import { STUDIO_PROJECT_EXTENSION } from "../../studio/types";
 import { searchVaultExclusions, type VaultExclusions } from "./VaultExclusions";
@@ -363,7 +364,7 @@ export class SystemSculptSearchEngine {
       try {
         const content = this.isStudioFile(file) ? "" : await this.safeRead(file);
         if (signal?.aborted) return;
-        const preview = copyFlat(this.buildPreviewFromText(this.getIndexText(file, content)));
+        const preview = copyFlat(this.buildPreviewFromText(this.getIndexText(file, content), this.isMarkdownFile(file)));
         if (preview) {
           previews.set(path, preview);
           this.recentPreviewCache.set(file.path, { key: cacheKey, preview });
@@ -631,7 +632,7 @@ export class SystemSculptSearchEngine {
         title: file.basename,
         lowerTitle: metadata.lowerTitle,
         lowerPath: metadata.lowerPath,
-        preview: copyFlat(this.buildPreviewFromText(extracted)),
+        preview: copyFlat(this.buildPreviewFromText(extracted, this.isMarkdownFile(file))),
         mtime: this.modifiedTime(file),
         size: this.fileSize(file),
       },
@@ -812,8 +813,19 @@ export class SystemSculptSearchEngine {
     return this.stripFrontmatter(content);
   }
 
-  private buildPreviewFromText(text: string): string {
-    const trimmed = text.trim();
+  /** Markdown shows as its words; canvas and Studio text is already plain. */
+  /** Embedded chunks are raw note text; show them as the note's words. */
+  private semanticExcerpt(file: TFile, excerpt: unknown): string | undefined {
+    if (typeof excerpt !== "string" || !excerpt) return undefined;
+    return this.isMarkdownFile(file) ? markdownExcerptText(excerpt) : excerpt;
+  }
+
+  private isMarkdownFile(file: TFile): boolean {
+    return (file.extension ?? "").toLowerCase() === "md";
+  }
+
+  private buildPreviewFromText(text: string, markdown: boolean): string {
+    const trimmed = markdown ? markdownExcerptText(text.slice(0, this.PREVIEW_CHARS * 4)) : text.trim();
     if (trimmed.length <= this.PREVIEW_CHARS) return trimmed;
     return `${trimmed.slice(0, this.PREVIEW_CHARS)}...`;
   }
@@ -1270,7 +1282,8 @@ export class SystemSculptSearchEngine {
     for (const { hit, docId } of shown) {
       const note = bodies.index.note(docId);
       if (!note) continue;
-      hit.excerpt = copyFlat(this.extractExcerpt(bodies.text(docId)?.raw ?? "", note.preview, terms, phrase));
+      const raw = bodies.text(docId)?.raw ?? "";
+      hit.excerpt = copyFlat(this.extractExcerpt(this.isMarkdownFile(note.file) ? markdownExcerptText(raw) : raw, note.preview, terms, phrase));
     }
   }
 
@@ -1300,8 +1313,17 @@ export class SystemSculptSearchEngine {
     }
 
     const contextRadius = 90;
-    const start = Math.max(0, bestIdx - contextRadius);
-    const end = Math.min(source.length, bestIdx + targetTerm.length + contextRadius);
+    let start = Math.max(0, bestIdx - contextRadius);
+    let end = Math.min(source.length, bestIdx + targetTerm.length + contextRadius);
+    // Cut at spaces so an excerpt never starts or ends inside a word.
+    if (start > 0 && /\S/.test(source[start - 1])) {
+      const space = source.indexOf(" ", start);
+      if (space !== -1 && space < bestIdx) start = space + 1;
+    }
+    if (end < source.length && /\S/.test(source[end])) {
+      const space = source.lastIndexOf(" ", end);
+      if (space > bestIdx + targetTerm.length) end = space;
+    }
     const slice = source.slice(start, end).trim();
     const prefix = start > 0 ? "..." : "";
     const suffix = end < source.length ? "..." : "";
@@ -1333,7 +1355,7 @@ export class SystemSculptSearchEngine {
             return {
               path: item.path,
               title: this.extractTitle(item.path, item?.metadata?.title),
-              excerpt: item?.metadata?.excerpt,
+              excerpt: this.semanticExcerpt(file, item?.metadata?.excerpt),
               score,
               semScore: score,
               origin: "semantic",

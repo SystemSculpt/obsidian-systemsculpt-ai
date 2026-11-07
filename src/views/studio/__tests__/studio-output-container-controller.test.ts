@@ -44,9 +44,53 @@ it("measures only output cards, reflows growing rows, waits for the end of a dra
     dragging = false; controller.schedule(); jest.advanceTimersByTime(40);
     expect(project.graph.nodes[4].position.y).toBe(568);
     expect(source.position).toEqual({ x: 10, y: 20 });
+    // The last card grows in place: nothing moves, but its container frame must follow.
+    const before = positionsChanged.mock.calls.length;
+    Object.defineProperty(elements.get("n4"), "offsetHeight", { value: 640 });
+    // Arranged in the observer callback itself, before paint, not a timer later.
+    resized();
+    expect(project.graph.nodes[4].position.y).toBe(568);
+    expect(positionsChanged).toHaveBeenCalledTimes(before + 1);
     const calls = positionsChanged.mock.calls.length;
-    resized(); controller.dispose(); jest.advanceTimersByTime(80);
+    controller.schedule(); controller.dispose(); resized(); jest.advanceTimersByTime(80);
     expect(positionsChanged).toHaveBeenCalledTimes(calls);
     expect(disconnect).toHaveBeenCalledTimes(1);
+  } finally { controller.dispose(); window.ResizeObserver = original; jest.useRealTimers(); }
+});
+
+it("watches an output card that an in-place refresh adds after mounting", () => {
+  jest.useFakeTimers();
+  const original = window.ResizeObserver;
+  const observed: Element[] = [];
+  const unobserved: Element[] = [];
+  window.ResizeObserver = class {
+    observe(element: Element) { observed.push(element); }
+    unobserve(element: Element) { unobserved.push(element); }
+    disconnect() {}
+  } as unknown as typeof ResizeObserver;
+  const project = createEmptyStudioProject({ name: "Outputs", policyPath: "policy.json", minPluginVersion: "0", maxRuns: 1, maxArtifactsMb: 1 });
+  const source = { id: "source", kind: "studio.image_generation", title: "Images", version: "1.0.0", position: { x: 10, y: 20 }, config: {} };
+  project.graph.nodes = [source];
+  const elements = new Map<string, HTMLElement>();
+  const card = (id: string) => { const element = document.createElement("div"); element.dataset.nodeId = id; elements.set(id, element); return element; };
+  card("source");
+  const positionsChanged = jest.fn();
+  const controller = new StudioOutputContainerController({ getProject: () => project, getNodeElement: id => elements.get(id) || null,
+    isDragging: () => false, commit: mutate => mutate(project), positionsChanged });
+  try {
+    controller.mount(document.createElement("div"));
+    expect(observed).toHaveLength(0);
+    materializeImageOutputsAsMediaNodes({ project, sourceNode: source, outputs: { images: [{ path: "a" }] }, createNodeId: () => "n1", createEdgeId: () => "e1" });
+    card("n1");
+    expect(controller.sync()).toBe(true);
+    expect(controller.sync()).toBe(false);
+    expect(observed.map(el => (el as HTMLElement).dataset.nodeId).sort()).toEqual(["n1", "source"]);
+    jest.advanceTimersByTime(40);
+    expect(positionsChanged).toHaveBeenCalledTimes(1);
+    // A refresh replaces the card: the detached one stops being watched.
+    const replaced = elements.get("n1");
+    card("n1");
+    expect(controller.sync()).toBe(true);
+    expect(unobserved).toEqual([replaced]);
   } finally { controller.dispose(); window.ResizeObserver = original; jest.useRealTimers(); }
 });

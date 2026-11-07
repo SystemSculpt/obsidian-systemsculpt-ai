@@ -526,15 +526,22 @@ describe("AgentComposer", () => {
     const { composer, input, query, submissions } = mount({ app });
     const ghost = query('[data-testid="chat.composer.suggest-note"]')!;
     expect(ghost.hidden).toBe(false);
+    expect(ghost.classList.contains("is-reserved")).toBe(false);
     expect(ghost.getAttribute("aria-label")).toBe("Add current note: Plan");
     expect(composer.getMessageAttachments()).toEqual([]);
 
+    // Typing fades the ghost out of reach but keeps its row: the composer doesn't jump.
     type(input, "Hello");
-    expect(ghost.hidden).toBe(true);
+    expect(ghost.hidden).toBe(false);
+    expect(ghost.classList.contains("is-reserved")).toBe(true);
+    expect(ghost.hasAttribute("inert")).toBe(true);
+    expect(ghost.getAttribute("aria-hidden")).toBe("true");
     key(input, { key: "Enter" });
     await idle(composer);
     expect(submissions[0].attachments).toBeUndefined();
     expect(ghost.hidden).toBe(false);
+    expect(ghost.classList.contains("is-reserved")).toBe(false);
+    expect(ghost.hasAttribute("inert")).toBe(false);
 
     ghost.click();
     await idle(composer);
