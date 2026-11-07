@@ -3,7 +3,7 @@
 **Put Claude Code, Codex or hosted AI to work on your Obsidian notes.**
 
 - **Chat with your vault.** Ask about your notes, attach files and images, and let the agent search, create and edit notes. Approval modes decide which changes ask first.
-- **Make media and run Studio from chat.** With a SystemSculpt subscription, any chat agent can make images and videos or create, edit and run Studio workflows. Generation uses hosted SystemSculpt credits, even with your own Claude Code or Codex.
+- **Make media and run Studio from chat.** Pro adds hosted image/video generation and Studio tools in every chat. Native Studio text generation with your own Claude Code or Codex still works without a SystemSculpt plan.
 - **Turn audio into notes.** Record or import audio, or paste a YouTube link, and get a Markdown transcript or a note with a summary and action items.
 - **Find related notes.** Similar Notes shows the notes closest in meaning to the one you are reading.
 
