@@ -38,7 +38,7 @@ export function entitiesToProject(entities: StudioProjectEntities, template: Stu
     } else if (/^(node|group|shape):/.test(key)) {
       if (value.id !== key.slice(key.indexOf(":") + 1)) throw new Error("Entity key and ID must match.");
     } else if (key.startsWith("edge:")) {
-      if (key !== `edge:${String(value.value)}` || Object.keys(value).some(field => field !== "value")) throw new Error("Invalid edge entity.");
+      if (key !== `edge:${String(value.value)}` || Object.keys(value).some(field => field !== "value")) throw new Error(`Invalid edge entity. Use entityId "edge:from.port -> to.port" with value {"value":"from.port -> to.port"}.`);
     } else if (key.startsWith("arrow:")) {
       if (key !== `arrow:${JSON.stringify([value.from, value.to])}`) throw new Error("Invalid arrow entity.");
     } else throw new Error(`Unknown Studio entity ${key}.`);

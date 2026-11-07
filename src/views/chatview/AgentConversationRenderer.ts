@@ -25,6 +25,8 @@ import {
   summarizeAgentActivity,
 } from "./AgentActivityPresentation";
 import { presentTurnChanges } from "./TurnChangeSummary";
+import { renderTurnMedia } from "./TurnMedia";
+import { openExternalUrl } from "../../utils/externalUrl";
 import { enhanceMarkdownCodeBlocks } from "./MarkdownCodeBlocks";
 import {
   isActiveAgentToolState,
@@ -732,8 +734,11 @@ export class AgentConversationRenderer extends Component {
             return;
           }
         }
-        this.renderTurnChanges(body, turnParts.flatMap((part) => part.type === "tool_call"
-          ? [historicalToolPart(part.data)] : []));
+        const historicalTools = turnParts.flatMap((part) => part.type === "tool_call"
+          ? [historicalToolPart(part.data)] : []);
+        this.renderTurnMediaBlock(body, historicalTools,
+          turnParts.flatMap((part) => part.type === "content" && typeof part.data === "string" ? [part.data] : []).join("\n"));
+        this.renderTurnChanges(body, historicalTools);
       } else {
         const { content } = presented[0];
         if (inlineEdit) {
@@ -1467,7 +1472,15 @@ export class AgentConversationRenderer extends Component {
     // An unchanged receipt survives reconciliation, so a focused link keeps focus.
     const receipt = presentation.busy ? null
       : body.querySelector<HTMLElement>(":scope > .systemsculpt-agent-turn-changes");
-    this.reconcileChildren(body, [...visibleLanes.map((lane) => lane.node), ...(receipt ? [receipt] : [])]);
+    // Generated media shows as soon as a tool saves it, above the working status.
+    const media = this.renderTurnMediaBlock(
+      body,
+      orderedParts.filter((part): part is AgentToolPart => part.kind === "tool"),
+      orderedParts.flatMap((part) => part.kind === "text" ? [part.markdown] : []).join("\n"),
+    );
+    const laneNodes = visibleLanes.map((lane) => lane.node);
+    if (media) laneNodes.splice(tailStatus ? laneNodes.length - 1 : laneNodes.length, 0, media);
+    this.reconcileChildren(body, [...laneNodes, ...(receipt ? [receipt] : [])]);
     for (const [key, node] of this.activeNodes) {
       if (!wantedParts.has(key)) {
         this.forgetMarkdown(node);
@@ -1737,13 +1750,14 @@ export class AgentConversationRenderer extends Component {
     const header = element.querySelector<HTMLElement>(":scope > summary")!;
     const duration = formatAgentActivityDuration(elapsedMs);
     const label = cancelled ? this.workedLabel(elapsedMs, true) : summary.label;
-    header.querySelector(".systemsculpt-agent-activity-label")?.setText(label);
+    // A wrapped summary keeps each "· 2 failed" whole instead of stranding the dot.
+    header.querySelector(".systemsculpt-agent-activity-label")?.setText(label.replace(/ · /gu, " ·\u00a0"));
     let icon = header.querySelector<HTMLElement>(".systemsculpt-agent-activity-state");
     if (!icon) {
       icon = header.createSpan({ cls: "systemsculpt-agent-activity-state", attr: { "aria-hidden": "true" } });
       header.prepend(icon);
     }
-    setIcon(icon, summary.failedCount ? "circle-alert" : cancelled ? "square" : "check");
+    setIcon(icon, summary.failedCount ? "circle-alert" : summary.gated ? "lock" : summary.refused ? "circle-alert" : cancelled ? "square" : summary.denied ? "ban" : "check");
     let meta = header.querySelector<HTMLElement>(".systemsculpt-agent-activity-duration");
     if (!meta) meta = header.createSpan({ cls: "systemsculpt-agent-activity-duration" });
     meta.setText(!cancelled && duration ? duration : "");
@@ -1849,10 +1863,11 @@ export class AgentConversationRenderer extends Component {
     if (!state) return;
     const count = Number(element.dataset.hiddenCount);
     const expanded = this.activityOverflowExpanded(element);
-    const label = element.dataset.activitySummary ?? this.activityOverflowLabel(
+    // Same as the turn summary: "· 2 failed" never strands its dot at a line end.
+    const label = (element.dataset.activitySummary ?? this.activityOverflowLabel(
       Number.isFinite(count) ? count : 0,
       state.latestNode,
-    );
+    )).replace(/ · /gu, " ·\u00a0");
     if (state.label.textContent !== label) state.label.setText(label);
     if (Number(element.dataset.failedCount) > 0) {
       setIcon(state.icon, "circle-alert");
@@ -2866,6 +2881,13 @@ export class AgentConversationRenderer extends Component {
       throw error;
     }
     if (!details.open || state.revision !== revision) state.dirty = true;
+  }
+
+  private renderTurnMediaBlock(parent: HTMLElement, parts: readonly AgentToolPart[], answer: string): HTMLElement | null {
+    return renderTurnMedia(this.options.app, parent, parts, {
+      openFile: (path) => void this.options.onOpenArtifact({ id: path, kind: "generated_file", title: path.split("/").pop() ?? path, path }),
+      openLink: (url) => void openExternalUrl(url, parent.ownerDocument.defaultView ?? undefined),
+    }, answer);
   }
 
   private renderTurnChanges(parent: HTMLElement, parts: readonly AgentToolPart[]): void {

@@ -11,6 +11,7 @@ import { resolveAbsoluteVaultPath } from '../../utils/vaultPathUtils';
 import { localAgentPromptText } from './LocalAgentMessageParts';
 import { localAgentReplay } from './LocalAgentReplay';
 import { desktopHost } from '../../platform/desktopOnly';
+import { decodeSystemSculptToolOutput, systemSculptToolName } from '../../tools/systemsculpt/SystemSculptTools';
 
 type LocalAgentTurn = { prompt: string; images: string[]; workingDirectory: string; threadId?: string };
 export type LocalAgentToolUpdate = Pick<AgentToolPart, 'callId' | 'state'> & Partial<Pick<AgentToolPart, 'name' | 'input' | 'inputText' | 'native' | 'output' | 'error'>>;
@@ -84,8 +85,9 @@ export class LocalAgentChatSession implements ChatSession {
     const waiting = () => this.publish(this.approvals.size
       ? { status: 'waiting', phase: 'waiting', waitingReason: 'approval', statusLabel: `${name} needs your input` }
       : { status: 'running', phase: 'working', waitingReason: undefined, statusLabel: working });
-    const tool = (update: LocalAgentToolUpdate) => {
+    const tool = (rawUpdate: LocalAgentToolUpdate) => {
       if (!live()) return;
+      const update = withStructuredSystemSculptOutput(rawUpdate, this.localSnapshot.parts);
       const terminal = terminalToolStates.has(update.state);
       if (terminal) for (const pending of [...this.approvals.values()]) if (pending.callId === update.callId) pending.finish();
       const previous = this.localSnapshot.parts.find((part): part is AgentToolPart => part.kind === 'tool' && part.callId === update.callId);
@@ -249,4 +251,17 @@ export class LocalAgentChatSession implements ChatSession {
     if (!pending || source !== 'manual' || pending.signal.aborted || this.localController?.signal.aborted) return false;
     pending.finish({ ...options, approved }); return true;
   }
+}
+
+/**
+ * Saved chats cut long tool text, so a SystemSculpt result is kept as its
+ * structured object (media paths stay whole) instead of the encoded string.
+ */
+function withStructuredSystemSculptOutput(update: LocalAgentToolUpdate, parts: readonly AgentPart[]): LocalAgentToolUpdate {
+  if (!update.output) return update;
+  const name = update.name ?? parts.find((part): part is AgentToolPart => part.kind === 'tool' && part.callId === update.callId)?.name;
+  if (!systemSculptToolName(name)) return update;
+  const result = decodeSystemSculptToolOutput(update.output.data);
+  if (!result) return update;
+  return { ...update, output: { summary: result.message, data: { systemsculpt_tool: 1, ...result } } };
 }

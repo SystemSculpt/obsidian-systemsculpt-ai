@@ -13,6 +13,7 @@ import { CodexThreadLocator } from "../../services/codex/CodexThreadLocator";
 import { CodexChatSession } from "../../services/codex/CodexChatSession";
 import { LocalAgentChatSession } from "../../services/codex/LocalAgentChatSession";
 import { ClaudeChatSession } from "../../services/claude/ClaudeChatSession";
+import { systemSculptToolService } from "../../tools/systemsculpt/SystemSculptToolHost";
 import { claudeOptionsFromSettings, isClaudePermissionMode, type ClaudePermissionMode } from "../../services/claude/ClaudeExecutionOptions";
 import { isCodexApprovalMode, type CodexApprovalMode } from "../../services/codex/CodexApprovalPolicy";
 import { ItemView, MarkdownView, Menu, normalizePath, Notice, Scope, TFile, WorkspaceLeaf } from "obsidian";
@@ -466,10 +467,10 @@ export class AgentChatView extends ItemView {
     };
     // Retry context belongs to the submitting turn, never the creating pane.
     if (backend === "codex") {
-      return new CodexChatSession(app, { persistAssistant: persistNativeAssistant, notice }, () => [], () => codexOptionsFromSettings(plugin.settings));
+      return new CodexChatSession(app, { persistAssistant: persistNativeAssistant, notice }, () => [], () => codexOptionsFromSettings(plugin.settings), () => systemSculptToolService(plugin).toolset());
     }
     if (backend === "claude") {
-      return new ClaudeChatSession(app, { persistAssistant: persistNativeAssistant, notice }, () => [], () => claudeOptionsFromSettings(plugin.settings));
+      return new ClaudeChatSession(app, { persistAssistant: persistNativeAssistant, notice }, () => [], () => claudeOptionsFromSettings(plugin.settings), () => ({ toolset: systemSculptToolService(plugin).toolset(), pluginVersion: plugin.manifest.version }));
     }
     return new AgentChatSession({
       recoveryEnvironment: chatRecoveryEnvironment(this.app, this.containerEl),
@@ -3058,7 +3059,33 @@ export class AgentChatView extends ItemView {
       .some((message) => message.message_id === messageIdToResubmit);
   }
 
+  private hideApprovalNotice(): void {
+    this.approvalNotice?.hide();
+    this.approvalNotice = null;
+    this.approvalNoticeSurface = null;
+  }
+
+  /** The notice points at a hidden card; once the chat shows again it only covers the header. */
+  private dismissApprovalNoticeIfShown(): void {
+    if (this.approvalNotice && this.containerEl.isShown()) this.hideApprovalNotice();
+  }
+
+  onResize(): void {
+    this.dismissApprovalNoticeIfShown();
+  }
+
   private showApprovalNotice(part: AgentToolPart): void {
+    // A theme switch or resize can hide the chat for a frame; only a chat that
+    // stays hidden needs the notice.
+    const view = this.containerEl.ownerDocument.defaultView;
+    if (!view) return this.openApprovalNotice(part);
+    view.setTimeout(() => {
+      const pending = this.agent.getSnapshot().parts.some(candidate => candidate.kind === "tool" && candidate.state === "approval-required");
+      if (pending && !this.containerEl.isShown()) this.openApprovalNotice(part);
+    }, 400);
+  }
+
+  private openApprovalNotice(part: AgentToolPart): void {
     if (this.closing || this.approvalNoticeSurface?.isConnected) return;
     const owner = this.containerEl.ownerDocument;
     const surface = createSurfaceElement(owner, "div");
@@ -3368,6 +3395,7 @@ export class AgentChatView extends ItemView {
     ));
     this.registerEvent(this.app.workspace.on("active-leaf-change", (leaf) => {
       if (leaf === this.leaf) {
+        this.dismissApprovalNoticeIfShown();
         // Activating the chat focuses the composer, unless the person is
         // already on another control in this view (a run-line menu, history).
         const focused = this.containerEl.ownerDocument.activeElement;
@@ -4107,9 +4135,9 @@ export class AgentChatView extends ItemView {
       void this.refreshDetection(true);
     }
     if (!snapshot.parts.some(part => part.kind === "tool" && part.state === "approval-required")) {
-      this.approvalNotice?.hide();
-      this.approvalNotice = null;
-      this.approvalNoticeSurface = null;
+      this.hideApprovalNotice();
+    } else {
+      this.dismissApprovalNoticeIfShown();
     }
     // Running state feeds the mode menu's "Applies from your next message."
     this.syncChrome();

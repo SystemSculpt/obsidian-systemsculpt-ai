@@ -256,9 +256,9 @@ describe("built bundle (main.js)", () => {
   it("does not ship the retired generic HTTP MCP runtime", () => {
     const code = readFileSync(BUNDLE_PATH, "utf8");
 
+    // "tools/list" and "tools/call" stay: Claude Code's in-process SystemSculpt
+    // tool bridge answers them over its stdio control channel, not over HTTP.
     expect(code).not.toContain("HTTPAdapter");
-    expect(code).not.toContain('"tools/list"');
-    expect(code).not.toContain('"tools/call"');
     expect(code).not.toContain("Invalid HTTP server configuration");
   });
 });

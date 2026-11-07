@@ -279,6 +279,11 @@ export class StudioService {
   }
 
   /** `heads` holds one revision: the SHA-256 of the canonical document text. */
+  /** Writes SystemSculpt/Studio/AGENTS.md if it is missing or stale; agents read it before editing. */
+  async ensureAgentReference(): Promise<void> {
+    await this.agentReferenceFile.ensureCurrent();
+  }
+
   async readAgentDocument(path: string): Promise<unknown> {
     path = this.requireProjectPath(path);
     await this.getProjectSession(path)?.flushPendingSaveWork({force: true});
@@ -572,7 +577,7 @@ export class StudioService {
 
   async runProject(
     projectPath: string,
-    options?: { onEvent?: StudioRunEventHandler }
+    options?: { onEvent?: StudioRunEventHandler; signal?: AbortSignal }
   ): Promise<StudioRunSummary> {
     const normalized = this.requireProjectPath(projectPath);
     const session = this.projectSessionManager.getSession(normalized);
@@ -581,6 +586,7 @@ export class StudioService {
       this.assertProjectWritable(normalized);
       return this.runtime.runProjectSnapshot(normalized, project, {
         onEvent: options?.onEvent,
+        signal: options?.signal,
       });
     }
     this.assertProjectWritable(normalized);
@@ -588,13 +594,14 @@ export class StudioService {
     const projectSnapshot = session.getProjectSnapshot();
     return this.runtime.runProjectSnapshot(normalized, projectSnapshot, {
       onEvent: options?.onEvent,
+      signal: options?.signal,
     });
   }
 
   async runProjectFromNode(
     projectPath: string,
     nodeId: string,
-    options?: { onEvent?: StudioRunEventHandler }
+    options?: { onEvent?: StudioRunEventHandler; signal?: AbortSignal }
   ): Promise<StudioRunSummary> {
     const normalized = this.requireProjectPath(projectPath);
 
@@ -619,6 +626,7 @@ export class StudioService {
       entryNodeIds: [normalizedNodeId],
       forceNodeIds: [normalizedNodeId],
       onEvent: options?.onEvent,
+      signal: options?.signal,
     });
   }
 

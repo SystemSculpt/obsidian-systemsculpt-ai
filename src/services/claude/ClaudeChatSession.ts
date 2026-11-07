@@ -3,12 +3,15 @@ import type { ChatMessage } from "../../types";
 import type { App } from 'obsidian';
 import { LocalAgentChatSession } from '../codex/LocalAgentChatSession';
 import { ClaudeChatTransport, claudeSessionPermissionUpdates } from './LocalClaudeClient';
+import type { SystemSculptToolset } from '../../tools/systemsculpt/SystemSculptTools';
+
+const claudeTools = (value: { toolset: SystemSculptToolset; pluginVersion: string } | undefined) => value ? { tools: value.toolset, pluginVersion: value.pluginVersion } : {};
 
 /** Chat presentation adapter. Claude Code owns every model step, tool, permission and durable session. */
 export class ClaudeChatSession extends LocalAgentChatSession {
-  constructor(app: App, localOptions: { persistAssistant: (message: ChatMessage) => Promise<void>; notice?: (text: string, reason?: 'session-reset' | 'auto-unavailable') => void }, forkHistory: () => readonly ChatMessage[] = () => [], executionOptions: () => ClaudeExecutionOptions = () => ({})) {
+  constructor(app: App, localOptions: { persistAssistant: (message: ChatMessage) => Promise<void>; notice?: (text: string, reason?: 'session-reset' | 'auto-unavailable') => void }, forkHistory: () => readonly ChatMessage[] = () => [], executionOptions: () => ClaudeExecutionOptions = () => ({}), tools?: () => { toolset: SystemSculptToolset; pluginVersion: string } | undefined) {
     const transport = new ClaudeChatTransport(text => localOptions.notice?.(text, 'session-reset'));
-    super(app, 'claude', localOptions, forkHistory, (turn, signal, events) => transport.run({ ...executionOptions(), prompt: turn.prompt, images: turn.images, workingDirectory: turn.workingDirectory, sessionId: turn.threadId }, signal, {
+    super(app, 'claude', localOptions, forkHistory, (turn, signal, events) => transport.run({ ...executionOptions(), ...claudeTools(tools?.()), prompt: turn.prompt, images: turn.images, workingDirectory: turn.workingDirectory, sessionId: turn.threadId }, signal, {
       session: events.thread,
       log: text => events.status(text.startsWith('Tool: ') ? text.slice(6) : 'Claude Code is working'),
       text: events.text,

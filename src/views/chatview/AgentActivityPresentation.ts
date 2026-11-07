@@ -1,7 +1,9 @@
 import type { AgentPart } from "../../chat/ChatConversation";
-import { presentAgentTool } from "./AgentToolPresentation";
+import { gatedSystemSculptTurn, presentAgentTool, refusedSystemSculptCall } from "./AgentToolPresentation";
 
-export type AgentActivitySummary = Readonly<{ label: string; failedCount: number }>;
+/** refused: a SystemSculpt tool did nothing; not a failure, but not done either. gated: it needs a subscription or credits. */
+/** denied: the person declined an action, so the turn is not marked done with a check. */
+export type AgentActivitySummary = Readonly<{ label: string; failedCount: number; refused?: true; gated?: true; denied?: true }>;
 
 type ActivityGroup = { label: string; items: Set<string>; uncounted: number };
 
@@ -10,7 +12,7 @@ const groupSize = (group: ActivityGroup): number => group.items.size + group.unc
 /** Count adjacent activity by action without repeating payloads or full paths. */
 export function summarizeAgentActivity(parts: readonly AgentPart[]): AgentActivitySummary {
   const groups = new Map<string, ActivityGroup>();
-  let failedCount = 0;
+  let failedCount = 0, refused = false, gated = false, denied = false;
   const add = (kind: string, label: string, items: readonly string[] = [], count = 1): void => {
     const group = groups.get(kind) ?? { label, items: new Set<string>(), uncounted: 0 };
     group.label = label;
@@ -23,11 +25,13 @@ export function summarizeAgentActivity(parts: readonly AgentPart[]): AgentActivi
       add("reasoning", "Thought");
     } else if (part.kind === "tool") {
       const tool = presentAgentTool(part);
+      if (refusedSystemSculptCall(part)) refused = true;
+      if (gatedSystemSculptTurn(part)) gated = true;
       // Only completed or in-progress work counts toward "Edited 2 notes", and
       // each note once. Denials are decisions, withdrawn requests never ran and
       // failed or uncertain actions aren't completed changes: each keeps its
       // own clause, and a withdrawn request is not a failure.
-      if (tool.displayState === "denied") add("denied", `${tool.label} · Denied`);
+      if (tool.displayState === "denied") { denied = true; add("denied", `${tool.label} · Denied`); }
       else if (tool.displayState === "cancelled" || part.approvalDecision === "withdrawn") add("withdrawn", `${tool.label} · Withdrawn`);
       else if (tool.displayState === "failed" || tool.displayState === "outcome-unknown") add("failed", tool.label);
       else add(tool.groupKind, tool.label.replace(/…$/u, ""), tool.groupItems, tool.groupCount);
@@ -56,6 +60,9 @@ export function summarizeAgentActivity(parts: readonly AgentPart[]): AgentActivi
   return {
     label: `${visible || "Activity"}${more ? ` · ${more} more` : ""}${failedCount ? ` · ${failedCount} failed` : ""}`,
     failedCount,
+    ...(refused ? { refused: true as const } : {}),
+    ...(gated ? { gated: true as const } : {}),
+    ...(denied ? { denied: true as const } : {}),
   };
 }
 

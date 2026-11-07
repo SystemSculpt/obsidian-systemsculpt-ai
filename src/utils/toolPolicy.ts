@@ -34,6 +34,23 @@ const MUTATING_TOOLS = new Set<FirstPartyToolName>([
   "trash",
 ]);
 
+/**
+ * SystemSculpt tools that write vault files or spend credits. They ask like
+ * write does (only in Ask); they stay out of the vault mutation journal.
+ */
+const SYSTEMSCULPT_CHANGING_TOOLS = new Set<FirstPartyToolName>([
+  "generate_image",
+  "generate_video",
+  "studio_create_workflow",
+  "studio_edit_workflow",
+  "studio_run_workflow",
+]);
+
+/** Whether a SystemSculpt tool changes files or spends credits, so Ask modes ask first. */
+export function isChangingSystemSculptTool(name: string): boolean {
+  return SYSTEMSCULPT_CHANGING_TOOLS.has(normalizeFirstPartyToolName(name) as FirstPartyToolName);
+}
+
 function normalizePolicyName(value: unknown): string {
   return normalizeFirstPartyToolName(value);
 }
@@ -65,7 +82,7 @@ export function requiresUserApproval(
 ): boolean {
   const canonicalName = normalizeFirstPartyToolName(toolName);
   if (!isFirstPartyToolName(canonicalName)) return true;
-  if (!MUTATING_TOOLS.has(canonicalName)) return false;
+  if (!MUTATING_TOOLS.has(canonicalName) && !SYSTEMSCULPT_CHANGING_TOOLS.has(canonicalName)) return false;
   if (policy.requireDestructiveApproval === false || policy.mode === "full-access") return false;
   if (policy.mode === "auto") return canonicalName === "move" || canonicalName === "trash";
   if (canonicalName === "trash") return true;

@@ -248,7 +248,8 @@ function modelDetail(state: AgentChromeState): RunLineSegment | null {
     // The installed Codex's own name for the model, as its menu shows it.
     const model = state.codex.model
       ? state.codex.models?.find((candidate) => candidate.model === state.codex.model)?.name ?? state.codex.model
-      : codexDefaultLabel(state.codex.models);
+      // The run line names the default model itself; the menu says it is Codex's default.
+      : state.codex.models?.find((candidate) => candidate.isDefault)?.name ?? codexDefaultLabel(state.codex.models);
     return {
       key: "detail",
       label: model,

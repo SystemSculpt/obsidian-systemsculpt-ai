@@ -6,6 +6,7 @@ import {
 import type { AgentToolPart } from "../../chat/ChatConversation";
 import { isActiveAgentToolState } from "./AgentConversationPresentation";
 import { nativeToolPresentation } from "./NativeToolPresentation";
+import { decodeSystemSculptToolOutput, systemSculptToolName } from "../../tools/systemsculpt/SystemSculptTools";
 
 type AgentToolDisplayState = AgentToolPart["state"] | "partial";
 
@@ -44,6 +45,14 @@ const TOOL_LABELS: Readonly<Record<string, string>> = {
   search: "Search vault",
   open: "Open files",
   context: "Manage pinned files",
+  generate_image: "Generate image",
+  generate_video: "Generate video",
+  studio_list_workflows: "List Studio workflows",
+  studio_create_workflow: "Create Studio workflow",
+  studio_open_workflow: "Open Studio workflow",
+  studio_edit_workflow: "Edit Studio workflow",
+  studio_run_workflow: "Run Studio workflow",
+  studio_list_outputs: "List Studio outputs",
 };
 
 const SERVER_TOOL_LABELS: Readonly<Record<string, string>> = {
@@ -65,6 +74,14 @@ const TOOL_ACTION_ICONS: Readonly<Record<string, string>> = {
   search: "search",
   open: "folder-open",
   context: "pin",
+  generate_image: "image",
+  generate_video: "film",
+  studio_list_workflows: "layout-dashboard",
+  studio_create_workflow: "layout-dashboard",
+  studio_open_workflow: "layout-dashboard",
+  studio_edit_workflow: "layout-dashboard",
+  studio_run_workflow: "play",
+  studio_list_outputs: "layout-dashboard",
   web_search: "globe-2",
   server_action: "wand-sparkles",
 };
@@ -176,6 +193,7 @@ const TOOL_ACTION_FORMS: Readonly<Record<string, readonly [active: string, compl
   Pin: ["Pinning", "Pinned"],
   Unpin: ["Unpinning", "Unpinned"],
   Run: ["Running", "Ran"],
+  Generate: ["Generating", "Generated"],
   Use: ["Using", "Used"],
   Change: ["Changing", "Changed"],
   Delete: ["Deleting", "Deleted"],
@@ -183,6 +201,24 @@ const TOOL_ACTION_FORMS: Readonly<Record<string, readonly [active: string, compl
   Answer: ["Answering", "Answered"],
   Send: ["Sending", "Sent"],
 };
+
+/** A SystemSculpt call that finished but did nothing (no subscription, no credits). */
+export function refusedSystemSculptCall(part: AgentToolPart): boolean {
+  return part.state === "succeeded" && Boolean(systemSculptToolName(part.name))
+    && decodeSystemSculptToolOutput(part.output?.data)?.ok === false;
+}
+
+/** A refused SystemSculpt call that only needs a subscription or credits: an expected gate, not a failure. */
+function gatedSystemSculptCall(part: AgentToolPart): string | null {
+  if (!refusedSystemSculptCall(part)) return null;
+  const label = decodeSystemSculptToolOutput(part.output?.data)?.link?.label;
+  return label === "Subscribe" ? "Needs a subscription" : label === "Buy credits" ? "Needs credits" : null;
+}
+
+/** Whether a turn's SystemSculpt call stopped at the subscription or credits gate. */
+export function gatedSystemSculptTurn(part: AgentToolPart): boolean {
+  return gatedSystemSculptCall(part) !== null;
+}
 
 function actionState(displayState: AgentToolDisplayState): ToolActionState {
   if (displayState !== "partial" && isActiveAgentToolState(displayState)) {
@@ -243,6 +279,9 @@ function hasPartialOutcome(part: AgentToolPart, counts: ToolOutcomeCounts): bool
  * work may still continue and that successful partial results were retained.
  */
 export function presentAgentToolFailure(part: AgentToolPart): string {
+  // SystemSculpt tools write their own plain reason; show it, without the link the chat shows already.
+  const own = systemSculptToolName(part.name) ? decodeSystemSculptToolOutput(part.output?.data) : null;
+  if (own && !own.ok && own.message) return (own.link ? own.message.split(`${own.link.label}:`)[0] : own.message).trim().slice(0, 300);
   const native = nativeToolPresentation(part);
   if (native) return part.state === "outcome-unknown"
     ? `The result from ${native.agentName} is uncertain. Check the requested action before retrying.`
@@ -572,7 +611,8 @@ export function presentAgentTool(part: AgentToolPart): AgentToolPresentation {
                     : counted ? countedLabel(counted, "base") : TOOL_LABELS[canonicalName] ?? `Use ${canonicalName || "tool"}`;
   const query = webSearchQuery(part);
   const label = serverTool ? actionLabel(query ? `Search the web for “${query}”` : serverLabel ?? UNKNOWN_SERVER_TOOL_LABEL, labelState)
-    : displayState === "failed" ? `Couldn't ${baseLabel.charAt(0).toLowerCase()}${baseLabel.slice(1)}` : actionLabel(baseLabel, labelState);
+    : gatedSystemSculptCall(part) ? `${baseLabel} · ${gatedSystemSculptCall(part)}`
+    : displayState === "failed" || refusedSystemSculptCall(part) ? `Couldn't ${baseLabel.charAt(0).toLowerCase()}${baseLabel.slice(1)}` : actionLabel(baseLabel, labelState);
   const output = record(part.output?.data);
   const resultCount = serverTool ? webSearchResultCount(part)
     : typeof output.totalMatches === "number" ? output.totalMatches

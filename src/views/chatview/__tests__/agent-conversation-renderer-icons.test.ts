@@ -5327,7 +5327,7 @@ describe("AgentConversationRenderer tail status", () => {
     await renderer.renderActive(snapshot, presentation("completed", false, "Done", snapshot));
 
     expect(parent.querySelector("details[data-agent-turn-fold] > summary .systemsculpt-agent-activity-label")?.textContent)
-      .toBe("Edited Launch plan.md, denied 2 actions, edit Launch plan.md · Withdrawn");
+      .toBe("Edited Launch plan.md, denied 2 actions, edit Launch plan.md ·\u00a0Withdrawn");
     expect(parent.querySelector('[data-testid="chat.turn.changes"]')?.textContent).toBe("Changed 1 note: Launch plan.md");
     const overflow = parent.querySelector<HTMLButtonElement>("button[data-agent-activity-overflow]")!;
     expect(overflow.dataset.activitySummary).toBe("Edited Launch plan.md, denied 2 actions, edit Launch plan.md · Withdrawn");

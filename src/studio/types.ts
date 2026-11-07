@@ -607,6 +607,8 @@ export type StudioRunOptions = {
   entryNodeIds?: string[];
   forceNodeIds?: string[];
   onEvent?: StudioRunEventHandler;
+  /** Aborts the run, as closing Studio does. */
+  signal?: AbortSignal;
 };
 
 export type StudioRunSummary = {

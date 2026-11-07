@@ -320,6 +320,9 @@ export class StudioRuntime {
           });
           const controller = new AbortController();
           this.activeRunControllers.add(controller);
+          const stop = () => controller.abort();
+          if (options?.signal?.aborted) stop();
+          else options?.signal?.addEventListener("abort", stop, { once: true });
           try {
             return await this.executeRun(normalizedPath, compiled, runId, startedAt, controller, {
               entryNodeIds: scopedEntryNodeIds.length > 0 ? scopedEntryNodeIds : undefined,
@@ -332,6 +335,7 @@ export class StudioRuntime {
             this.runs.publish(normalizedPath, { type: "run.completed", runId, status: "failed", at: nowIso() });
             throw error;
           } finally {
+            options?.signal?.removeEventListener("abort", stop);
             this.activeRunControllers.delete(controller);
           }
         },

@@ -324,6 +324,8 @@ export class AgentToolRenderer {
     const meta = presentToolLineMeta(presentation);
     if (meta) {
       if (summary.textContent !== meta) summary.setText(meta);
+      // A short outcome ("exit 0", "+3 −1") stays whole; the label gives way.
+      summary.toggleClass("is-compact", meta.length <= 16);
       summary.toggleAttribute("hidden", false);
     } else {
       if (summary.textContent) summary.setText("");

@@ -1,3 +1,4 @@
+import { decodeSystemSculptToolOutput, systemSculptToolName } from "../../tools/systemsculpt/SystemSculptTools";
 import { MarkdownRenderer, type App, type Component } from "obsidian";
 import type { AgentToolPart } from "../../chat/ChatConversation";
 import { DiffViewer } from "../../components/DiffViewer";
@@ -95,6 +96,12 @@ function realReason(part: AgentToolPart, target: string, title: string): string 
   return candidates.find(candidate => candidate && !repeated.some(value => candidate.toLowerCase() === value.toLowerCase()));
 }
 
+/** A Codex dynamic call stores its whole item; the tool's own arguments sit inside it. */
+function systemSculptArguments(part: AgentToolPart): Record<string, unknown> {
+  const input = record(part.input);
+  return input.type === "dynamicToolCall" ? { ...input, ...record(input.arguments) } : input;
+}
+
 /** Native metadata stays separate from hosted-tool names, policy, and summaries. */
 export function nativeToolPresentation(part: AgentToolPart): NativeToolPresentation | null {
   if (!part.native) return null;
@@ -116,6 +123,28 @@ export function nativeToolPresentation(part: AgentToolPart): NativeToolPresentat
       ...(items.length ? { groupItems: items } : {}),
     };
   };
+  const systemsculpt = systemSculptToolName(part.name);
+  if (systemsculpt) {
+    const input = systemSculptArguments(part);
+    const workflow = text(input.path) ? basename(text(input.path)!).replace(/\.systemsculpt$/iu, "") : text(input.name) ?? "workflow";
+    const [verb, completed, running, target, icon] = ({
+      generate_image: ["Generate", "Generated", "Generating", typeof input.count === "number" && input.count > 1 ? "images" : "image", "image"],
+      generate_video: ["Generate", "Generated", "Generating", "video", "film"],
+      studio_list_workflows: ["List", "Listed", "Listing", "Studio workflows", "layout-dashboard"],
+      studio_create_workflow: ["Create", "Created", "Creating", workflow, "layout-dashboard"],
+      studio_open_workflow: ["Open", "Opened", "Opening", workflow, "layout-dashboard"],
+      studio_edit_workflow: ["Edit", "Edited", "Editing", workflow, "layout-dashboard"],
+      studio_run_workflow: ["Run", "Ran", "Running", workflow, "play"],
+      studio_list_outputs: ["List outputs of", "Listed outputs of", "Listing outputs of", workflow, "layout-dashboard"],
+    } as const)[systemsculpt];
+    // A refused call (no subscription, no credits) finished normally but did nothing.
+    const result = part.state === "succeeded" ? decodeSystemSculptToolOutput(part.output?.data) : null;
+    const refused = result?.ok === false;
+    // Needing a subscription or credits is an expected gate, not a failure.
+    const gate = refused && result?.link?.label === "Subscribe" ? "Needs a subscription" : refused && result?.link?.label === "Buy credits" ? "Needs credits" : null;
+    if (gate) return presentation(verb, verb, running, `${target} · ${gate}`, icon, `systemsculpt:${systemsculpt}`);
+    return presentation(verb, refused ? `Couldn't ${verb.toLowerCase()}` : completed, running, target, icon, `systemsculpt:${systemsculpt}`);
+  }
   const rawPath = text(input.file_path) ?? text(input.path);
   const path = rawPath ? displayPath(part, rawPath) : undefined;
   const target = path ? basename(path) : "file";
@@ -233,6 +262,17 @@ function previewDetails(part: AgentToolPart): Detail[] {
   if (text(network.host)) add("Access", `Connect to ${network.host as string}`);
   if (text(input.grantRoot)) add("Access", `Change files in ${displayPath(part, input.grantRoot as string)}`);
   details.push(...permissionDetails(part, input.permissions));
+  const own = systemSculptToolName(part.name);
+  if (own) {
+    const input = systemSculptArguments(part);
+    // What the person is agreeing to: the prompt or workflow, and whether it spends credits.
+    add("Prompt", input.prompt);
+    const workflow = text(input.path);
+    if (workflow) details.push({ label: "Workflow", value: displayPath(part, workflow), path: resolvedPath(part, workflow).vaultPath ?? undefined });
+    if (own === "studio_create_workflow") add("Name", input.name);
+    if (own === "generate_image" || own === "generate_video") add("Cost", "Uses SystemSculpt credits");
+    if (own === "studio_run_workflow") add("Cost", "Hosted steps use SystemSculpt credits");
+  }
   return details;
 }
 function renderOutput(container: HTMLElement, output: unknown): void {
