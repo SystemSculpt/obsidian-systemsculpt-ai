@@ -5,7 +5,7 @@ import { codexDefaultLabel, type CodexModel } from "../../services/codex/CodexMo
 import { isLocalAgentUsable as usable, type LocalAgentDetection } from "../../services/codex/LocalAgentDetection";
 import { LOCAL_AGENTS, isLocalAgentId, type LocalAgentId, type TextExecutionBackend } from "../../services/codex/LocalAgents";
 import { PLAN_REQUIRED_MESSAGE } from "../../utils/errors";
-import { MONTHLY_OFFER_LINE, starterOfferLead } from "../../utils/licenseUtils";
+import { MONTHLY_OFFER_LINE, isStarterBalance, starterOfferLead } from "../../utils/licenseUtils";
 import type { ChatApprovalMode } from "./storage/ChatPersistenceTypes";
 
 /**
@@ -190,7 +190,7 @@ export type RunLineSegment = Readonly<{
   tone?: "warning" | "danger";
   /** Opens a menu; otherwise `action` runs. */
   menu: boolean;
-  action?: "credits" | "sign-in" | "see-plans";
+  action?: "credits" | "sign-in" | "see-plans" | "monthly";
 }>;
 
 export type RunLinePresentation =
@@ -212,7 +212,10 @@ function hostedDetail(state: AgentChromeState): RunLineSegment {
       : { ...base, label: "Credits", ariaLabel: "Open credits", action: "credits" };
   }
   if (credits.totalRemaining <= 0) {
-    return { ...base, label: "Out of credits", ariaLabel: "Out of credits. Open credits", tone: "danger", action: "credits" };
+    // A spent starter account goes straight to the $9 Monthly checkout (T-5302).
+    return isStarterBalance(credits)
+      ? { ...base, label: "Out of credits", ariaLabel: "Out of credits. Get Monthly for $9", tone: "danger", action: "monthly" }
+      : { ...base, label: "Out of credits", ariaLabel: "Out of credits. Open credits", tone: "danger", action: "credits" };
   }
   const available = credits.availableUnreserved ?? credits.totalRemaining;
   const label = `${formatCredits(Math.max(0, available))} credits`;
@@ -547,6 +550,11 @@ export function presentEmptyState(state: AgentChromeState): EmptyStatePresentati
       hints: localHints(state),
       starters: [],
     };
+  }
+  if (starterOfferLead(state.credits) === "Out of credits.") {
+    // Starter credits are spent: the $9 Monthly link above the composer is the next step (T-5302).
+    // Any valid key validates as "active", so the account alone can read "paid" here.
+    return { ...empty, lead: "Your free credits are used.", notes, starters: [] };
   }
   if (state.account === "no-plan") {
     return {

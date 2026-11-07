@@ -271,7 +271,7 @@
     {
       "name": "first_hosted_reply",
       "kind": "server",
-      "description": "Activation: the account's first committed hosted chat turn.",
+      "description": "Activation: the account's first committed hosted chat turn. After a valid sign-in the result surfaces (plan modal, Account settings, notice) offer Summarize my latest note, which sends that ready prompt on the free credits in one tap (T-5302); its target is new accounts with a first hosted reply within 24 hours of plugin_connect_done (6 of 408 before).",
       "endpoints": [
         "agent/turn"
       ],
@@ -320,6 +320,21 @@
       ],
       "owner": "engineer",
       "added": "2026-11-03"
+    },
+    {
+      "name": "checkout_view",
+      "feature": "plugin_low_credits",
+      "kind": "browser",
+      "description": "Website checkout_view with ref=plugin_low_credits: the $9 Monthly checkout opened in one tap by a starter account (T-5302). utm_medium=chat for the chat's low/out-of-credits line, the Out of credits card and banner Subscribe button and the Out of credits pill; utm_medium=account for the Account settings line.",
+      "endpoints": [
+        "MONTHLY_LOW_CREDITS"
+      ],
+      "where": [
+        "src/views/chatview/AgentChatView.ts",
+        "src/settings/setup/SetupTabAccountSection.ts"
+      ],
+      "owner": "engineer",
+      "added": "2026-11-06"
     },
     {
       "name": "plugin_public_stats_daily",

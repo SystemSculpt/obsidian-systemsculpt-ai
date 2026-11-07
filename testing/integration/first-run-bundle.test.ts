@@ -620,7 +620,7 @@ describe.each(["desktop", "mobile"])("a new user's first run in the built bundle
     expect(saved[0][1]).toEqual(expect.stringContaining(ANSWER));
   });
 
-  it("402 out of credits: offers plans, then answers once credits are added", async () => {
+  it("402 out of credits: one tap to Monthly checkout, then answers once credits are added", async () => {
     await signUpFromChat();
     server.failNext("/api/plugin/agent/turn", {
       status: 402,
@@ -631,17 +631,20 @@ describe.each(["desktop", "mobile"])("a new user's first run in the built bundle
 
     expect(failure().textContent).toContain("Out of credits");
     expect(control("chat.run.detail", chat()).textContent).toBe("Out of credits");
-    control("chat.turn.see-plans", failure()).click();
-    await jest.advanceTimersByTimeAsync(0);
+    control("chat.turn.subscribe", failure()).click();
+    await jest.advanceTimersByTimeAsync(1_000);
     const plans = new URL(openedUrls[openedUrls.length - 1]);
-    expect(`${plans.origin}${plans.pathname}`).toBe("https://systemsculpt.com/pricing");
+    expect(`${plans.origin}${plans.pathname}`).toBe("https://systemsculpt.com/checkout");
+    expect(plans.searchParams.get("ref")).toBe("plugin_low_credits");
     await expectComposerUsable();
 
-    // After buying credits, the run line's credits view reads the new balance.
+    // After buying credits, the run line reads the new balance instead of offering a second checkout.
     server.credits = 10_000;
+    const opens = openedUrls.length;
     control("chat.run.detail", chat()).click();
     await jest.advanceTimersByTimeAsync(1_000);
     expect(document.querySelector("[role='dialog']")?.textContent).toContain("10,000 credits");
+    expect(openedUrls).toHaveLength(opens);
     control("modal.close").click();
     await jest.advanceTimersByTimeAsync(500);
     expect(control("chat.run.detail", chat()).textContent).toBe("10,000 credits");
@@ -740,7 +743,7 @@ describe.each(["desktop", "mobile"])("a new user's first run in the built bundle
     const attempts = turnRequests().length;
     await send("Second try");
 
-    expect(control("chat.banner.see-plans", chat()).isConnected).toBe(true);
+    expect(control("chat.banner.subscribe", chat()).isConnected).toBe(true);
     expect(composer().value).toBe("Second try");
     expect(turnRequests()).toHaveLength(attempts);
     await expectComposerUsable();

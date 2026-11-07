@@ -152,6 +152,9 @@ describe("run line (spec 4.1)", () => {
       .toMatchObject({ label: "1,000 credits", tone: "warning" });
     expect(segments(state({ ...hosted, account: "no-plan", credits: credits({ totalRemaining: 0, availableUnreserved: 0 }) }))[2])
       .toMatchObject({ label: "Out of credits", tone: "danger", action: "credits" });
+    // A spent starter account goes straight to Monthly checkout (T-5302).
+    expect(segments(state({ ...hosted, account: "no-plan", credits: credits({ includedCreditsEntitled: false, totalRemaining: 0, availableUnreserved: 0 }) }))[2])
+      .toMatchObject({ label: "Out of credits", tone: "danger", action: "monthly" });
     expect(segments(state({ ...hosted, account: "signed-out" }))[2])
       .toMatchObject({ label: "Sign in", action: "sign-in" });
     expect(segments(state({ ...hosted, account: "signed-in", credits: credits({ usageClass: "master_auth" }) }))[2].label)
@@ -346,6 +349,22 @@ describe("empty states (spec 3.1)", () => {
     const noPlan = presentEmptyState(state({ backend: "systemsculpt", account: "no-plan" }));
     expect(noPlan.lead).toBe("Start free with 500 credits, or choose a plan.");
     expect(noPlan.offer?.actions).toEqual(["see-plans"]);
+    // Spent starter credits: no "Start free" contradiction; the Monthly line above the composer is the one tap (T-5302).
+    const spent = presentEmptyState(state({
+      backend: "systemsculpt",
+      account: "no-plan",
+      credits: credits({ includedCreditsEntitled: false, totalRemaining: 0, availableUnreserved: 0 }),
+    }));
+    expect(spent.lead).toBe("Your free credits are used.");
+    expect(spent.offer).toBeNull();
+    expect(spent.starters).toEqual([]);
+    const spentActive = presentEmptyState(state({
+      backend: "systemsculpt",
+      account: "paid",
+      credits: credits({ includedCreditsEntitled: false, totalRemaining: 0, availableUnreserved: 0 }),
+    }));
+    expect(spentActive.lead).toBe("Your free credits are used.");
+    expect(spentActive.starters).toEqual([]);
   });
 
   it("E: paid plans see no local-agent mention even with agents installed", () => {

@@ -1,4 +1,5 @@
 import type { ConnectErrorReason, ConnectOutcome } from "../services/AccountConnectService";
+import { READY_PROMPT_LABEL } from "../chat/ReadyPrompt";
 
 /** What each sign-in failure tells the user, wherever the result is shown. */
 export const CONNECT_ERROR_COPY: Record<ConnectErrorReason, string> = {
@@ -32,6 +33,26 @@ export function signedInLine(email: string | null): string {
 }
 
 export const START_CHAT_LABEL = "Start a chat";
+
+type FirstChatHost = Readonly<{
+  readyPrompt: () => string | null;
+  startHostedChat: (options?: Readonly<{ prompt?: string }>) => Promise<void>;
+}>;
+
+/**
+ * The one step after a valid sign-in (T-5302): run the ready prompt on the
+ * person's latest note, or open an empty hosted chat when the vault has none.
+ */
+export function firstChatAction(host: FirstChatHost): Readonly<{ label: string; onSelect: () => void }> {
+  const ready = host.readyPrompt() !== null;
+  return {
+    label: ready ? READY_PROMPT_LABEL : START_CHAT_LABEL,
+    onSelect: () => {
+      const prompt = ready ? host.readyPrompt() ?? undefined : undefined;
+      void host.startHostedChat(prompt ? { prompt } : {});
+    },
+  };
+}
 
 /** "500 credits ready." for a starter account whose balance is known; null otherwise. */
 export function creditsReadyLine(outcome: ConnectOutcome): string | null {
