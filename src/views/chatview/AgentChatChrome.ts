@@ -551,7 +551,7 @@ export function presentEmptyState(state: AgentChromeState): EmptyStatePresentati
       starters: [],
     };
   }
-  if (state.account !== "signed-out" && starterOfferLead(state.credits) === "Out of credits.") {
+  if (starterOfferLead(state.credits) === "Out of credits.") {
     // Starter credits are spent: the $9 Monthly link above the composer is the next step (T-5302).
     // Any valid key validates as "active", so the account alone can read "paid" here.
     return { ...empty, lead: "Your free credits are used.", notes, starters: [] };
