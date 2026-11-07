@@ -47,11 +47,12 @@ it("measures only output cards, reflows growing rows, waits for the end of a dra
     // The last card grows in place: nothing moves, but its container frame must follow.
     const before = positionsChanged.mock.calls.length;
     Object.defineProperty(elements.get("n4"), "offsetHeight", { value: 640 });
-    resized(); jest.advanceTimersByTime(40);
+    // Arranged in the observer callback itself, before paint, not a timer later.
+    resized();
     expect(project.graph.nodes[4].position.y).toBe(568);
     expect(positionsChanged).toHaveBeenCalledTimes(before + 1);
     const calls = positionsChanged.mock.calls.length;
-    resized(); controller.dispose(); jest.advanceTimersByTime(80);
+    controller.schedule(); controller.dispose(); resized(); jest.advanceTimersByTime(80);
     expect(positionsChanged).toHaveBeenCalledTimes(calls);
     expect(disconnect).toHaveBeenCalledTimes(1);
   } finally { controller.dispose(); window.ResizeObserver = original; jest.useRealTimers(); }

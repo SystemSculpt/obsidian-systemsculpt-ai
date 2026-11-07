@@ -184,7 +184,8 @@ export function renderNodeMediaPreview(options: {
     imageEl.setAttribute("data-studio-asset-path", mediaPreview.path);
     imageEl.alt = `${node.title || node.kind} output image`;
     imageEl.loading = "lazy";
-    imageEl.decoding = "async";
+    // Painted only once decoded: an async decode showed the grown card blank for a frame.
+    imageEl.decoding = "sync";
     imageEl.draggable = false;
     imageEl.addEventListener("error", () => {
       imageEl.removeAttribute("src");
