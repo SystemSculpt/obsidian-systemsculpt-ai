@@ -383,6 +383,44 @@ describe("Setup tab SystemSculpt-only layout", () => {
     }
   });
 
+  it.each([0, 249, 250, 500])("keeps the Account starter offer under 250 credits with legacy checkout attribution (%s)", async (credits) => {
+    getCreditsBalanceMock.mockResolvedValueOnce({
+      totalRemaining: credits,
+      availableUnreserved: credits,
+      includedRemaining: 0,
+      includedPerMonth: 0,
+      includedCreditsEntitled: false,
+      subscriptionStatus: null,
+      addOnRemaining: credits,
+      usageClass: "customer",
+      cycleStartedAt: "2026-07-01T00:00:00.000Z",
+      cycleEndsAt: "2026-08-01T00:00:00.000Z",
+      purchaseUrl: null,
+      billingCycle: "unknown",
+      annualUpgradeOffer: null,
+    });
+    const plugin = createPluginStub();
+    plugin.settings.licenseValid = true;
+    plugin.settings.licenseKey = "skss-starter";
+    const tab = new SystemSculptSettingTab(app, plugin);
+    const container = document.createElement("div");
+
+    renderAccountSection(container, tab, true);
+    await flushSetupSectionRender();
+
+    const offer = container.querySelector<HTMLAnchorElement>('[data-testid="settings.account.credits-offer"] a');
+    if (credits >= 250) {
+      expect(offer).toBeNull();
+      expect(anchorHrefs).toEqual([]);
+      return;
+    }
+    expect(offer?.textContent).toBe("$9 a month for 10,000 credits every month");
+    offer!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    expect(anchorHrefs).toEqual([
+      "https://systemsculpt.com/checkout?resourceId=0db55c50-daa0-4e46-bf8d-f3f6cf47d729&ref=plugin_low_credits&utm_source=obsidian-plugin&utm_medium=account&utm_campaign=upgrade",
+    ]);
+  });
+
   it("presents master auth as Internal QA without customer billing actions", async () => {
     getCreditsBalanceMock.mockResolvedValueOnce({
       totalRemaining: 0,

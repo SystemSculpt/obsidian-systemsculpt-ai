@@ -25,6 +25,7 @@ const ACCESS_TOKEN = "fixture.access.signature";
 const QUESTION = "What is in my vault?";
 const ANSWER = "Your vault has three project notes.";
 const STARTER_CREDITS = 500;
+const LEGACY_MONTHLY_CHECKOUT = "https://systemsculpt.com/checkout?resourceId=0db55c50-daa0-4e46-bf8d-f3f6cf47d729&ref=plugin_low_credits&utm_source=obsidian-plugin&utm_medium=chat&utm_campaign=upgrade";
 
 type Reply = Readonly<{ status: number; json?: unknown; stream?: true }>;
 type ServerRequest = Readonly<{
@@ -51,6 +52,10 @@ class FakeSystemSculpt {
   readonly unexpected: string[] = [];
   online = true;
   credits = STARTER_CREDITS;
+  includedCreditsEntitled = false;
+  reportsSubscriptionStatus = true;
+  balanceUnknown = false;
+  subscriptionStatus: "active" | "past_due" | "unpaid" | null = null;
   /** Holds each answer after its first words until `finishAnswer`. */
   holdAnswers = false;
   phoneHandoff = false;
@@ -130,18 +135,22 @@ class FakeSystemSculpt {
           contract_version: "admission-v1", code: "allowed", message: "License admitted.", request_id: "req_first_run",
         } };
       case "/api/plugin/credits/balance":
+        if (this.balanceUnknown) return { status: 200, json: {} };
         return { status: 200, json: {
           included_remaining: 0,
           add_on_remaining: this.credits,
           total_remaining: this.credits,
           included_per_month: 0,
-          included_credits_entitled: false,
+          included_credits_entitled: this.includedCreditsEntitled,
+          ...(this.reportsSubscriptionStatus ? { subscription_status: this.subscriptionStatus } : {}),
           usage_class: "customer",
           cycle_anchor_at: "2026-10-01T00:00:00.000Z",
           cycle_started_at: "2026-10-01T00:00:00.000Z",
           cycle_ends_at: "2026-11-01T00:00:00.000Z",
           turn_in_flight_until: null,
         } };
+      case "/api/plugin/billing/portal":
+        return { status: 200, json: { url: "https://billing.stripe.com/p/session/test_qa_portal" } };
       case "/api/plugin/connectivity":
         return { status: 200, json: { ok: true } };
       case "/api/plugin/agent/bootstrap":
@@ -620,6 +629,56 @@ describe.each(["desktop", "mobile"])("a new user's first run in the built bundle
     expect(saved[0][1]).toEqual(expect.stringContaining(ANSWER));
   });
 
+  it("hosted starter at 500 credits opens the tagged $9 Pro checkout after a fresh entitlement read", async () => {
+    await signUpFromChat();
+    const offer = control("chat.credits-offer.link", chat());
+    expect(offer.textContent).toBe("Get Pro for $9/month");
+    const reads = server.paths().filter((p) => p === "/api/plugin/credits/balance").length;
+    offer.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    await jest.advanceTimersByTimeAsync(1_000);
+    expect(server.paths().filter((p) => p === "/api/plugin/credits/balance")).toHaveLength(reads + 1);
+    const url = new URL(openedUrls.at(-1)!);
+    expect(`${url.origin}${url.pathname}`).toBe("https://systemsculpt.com/checkout");
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      resourceId: "0db55c50-daa0-4e46-bf8d-f3f6cf47d729",
+      utm_source: "plugin", utm_medium: "chat",
+      cta: "plugin_hosted_chat_monthly", utm_campaign: "plugin_hosted_chat_nov2026",
+    });
+    await send(QUESTION);
+    expectAnswered(QUESTION); // The offer does not block the free starter's work.
+  });
+
+  it.each(["active", "missing-status", "unknown", "offline"])("stale hosted offer fails closed after fresh %s entitlement", async (status) => {
+    await signUpFromChat();
+    const offer = control("chat.credits-offer.link", chat());
+    const opens = openedUrls.length;
+    if (status === "active") {
+      server.includedCreditsEntitled = true;
+      server.subscriptionStatus = "active";
+    } else if (status === "missing-status") {
+      server.reportsSubscriptionStatus = false;
+    } else if (status === "unknown") {
+      server.balanceUnknown = true;
+    } else {
+      server.online = false;
+    }
+    offer.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    await jest.advanceTimersByTimeAsync(1_000);
+    expect(openedUrls).toHaveLength(opens);
+    expect(chat().querySelector('[data-testid="chat.credits-offer"]')?.hasAttribute("hidden")).toBe(true);
+    server.online = true;
+  });
+
+  it.each(["past_due", "unpaid"] as const)("stale hosted offer repairs the existing %s subscription instead of checkout", async (status) => {
+    await signUpFromChat();
+    server.subscriptionStatus = status;
+    control("chat.credits-offer.link", chat()).dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    await jest.advanceTimersByTimeAsync(1_000);
+    expect(server.paths()).toContain("/api/plugin/billing/portal");
+    expect(openedUrls.at(-1)).toBe("https://billing.stripe.com/p/session/test_qa_portal");
+    expect(control("chat.credits-offer.link", chat()).textContent).toBe("Update your card");
+  });
+
   it("402 out of credits: one tap to Monthly checkout, then answers once credits are added", async () => {
     await signUpFromChat();
     server.failNext("/api/plugin/agent/turn", {
@@ -631,11 +690,13 @@ describe.each(["desktop", "mobile"])("a new user's first run in the built bundle
 
     expect(failure().textContent).toContain("Out of credits");
     expect(control("chat.run.detail", chat()).textContent).toBe("Out of credits");
+    const checkoutOpens = openedUrls.length;
     control("chat.turn.subscribe", failure()).click();
     await jest.advanceTimersByTimeAsync(1_000);
-    const plans = new URL(openedUrls[openedUrls.length - 1]);
-    expect(`${plans.origin}${plans.pathname}`).toBe("https://systemsculpt.com/checkout");
-    expect(plans.searchParams.get("ref")).toBe("plugin_low_credits");
+    expect(openedUrls.slice(checkoutOpens)).toEqual([LEGACY_MONTHLY_CHECKOUT]);
+    control("chat.run.detail", chat()).click();
+    await jest.advanceTimersByTimeAsync(1_000);
+    expect(openedUrls.slice(checkoutOpens)).toEqual([LEGACY_MONTHLY_CHECKOUT, LEGACY_MONTHLY_CHECKOUT]);
     await expectComposerUsable();
 
     // After buying credits, the run line reads the new balance instead of offering a second checkout.
@@ -747,6 +808,11 @@ describe.each(["desktop", "mobile"])("a new user's first run in the built bundle
     expect(composer().value).toBe("Second try");
     expect(turnRequests()).toHaveLength(attempts);
     await expectComposerUsable();
+
+    const checkoutOpens = openedUrls.length;
+    control("chat.banner.subscribe", chat()).click();
+    await jest.advanceTimersByTimeAsync(1_000);
+    expect(openedUrls.slice(checkoutOpens)).toEqual([LEGACY_MONTHLY_CHECKOUT]);
 
     server.credits = 10_000;
     control("chat.run.detail", chat()).click();

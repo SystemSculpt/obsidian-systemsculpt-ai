@@ -339,7 +339,7 @@
       "name": "checkout_view",
       "feature": "plugin_low_credits",
       "kind": "browser",
-      "description": "Website checkout_view with ref=plugin_low_credits: the $9 Monthly checkout opened in one tap by a starter account (T-5302). utm_medium=chat for the chat's low/out-of-credits line, the Out of credits card and banner Subscribe button and the Out of credits pill; utm_medium=account for the Account settings line.",
+      "description": "Website checkout_view with ref=plugin_low_credits: the $9 Monthly checkout opened in one tap by a starter account (T-5302). utm_medium=chat for the Out of credits card and banner Subscribe button and the Out of credits pill; utm_medium=account for the Account settings line. The hosted Chat composer now has its own plugin_hosted_chat_monthly CTA (T-5452).",
       "endpoints": [
         "MONTHLY_LOW_CREDITS"
       ],
@@ -349,6 +349,51 @@
       ],
       "owner": "engineer",
       "added": "2026-11-06"
+    },
+    {
+      "name": "checkout_view",
+      "feature": "plugin_hosted_chat_monthly",
+      "kind": "browser",
+      "description": "Website checkout viewed from the hosted Chat composer for a verified free starter at any known balance. utm_source=plugin, utm_medium=chat, cta=plugin_hosted_chat_monthly, utm_campaign=plugin_hosted_chat_nov2026. Website/Stripe attribution only under existing consent; no plugin client telemetry or measured offer impressions.",
+      "endpoints": [
+        "MONTHLY_HOSTED_CHAT"
+      ],
+      "where": [
+        "src/constants/externalServices.ts",
+        "src/views/chatview/AgentChatView.ts"
+      ],
+      "owner": "engineer",
+      "added": "2026-11-07"
+    },
+    {
+      "name": "begin_checkout",
+      "feature": "plugin_hosted_chat_monthly",
+      "kind": "server",
+      "description": "Server begin_checkout after Stripe Session creation; retained checkout_funnel_sessions and Stripe sessions are start truth. From the hosted Chat composer for a verified free starter at any known balance. utm_source=plugin, utm_medium=chat, cta=plugin_hosted_chat_monthly, utm_campaign=plugin_hosted_chat_nov2026. Website/Stripe attribution only under existing consent; no plugin client telemetry or measured offer impressions.",
+      "endpoints": [
+        "MONTHLY_HOSTED_CHAT"
+      ],
+      "where": [
+        "src/constants/externalServices.ts",
+        "src/views/chatview/AgentChatView.ts"
+      ],
+      "owner": "engineer",
+      "added": "2026-11-07"
+    },
+    {
+      "name": "purchase",
+      "feature": "plugin_hosted_chat_monthly",
+      "kind": "server",
+      "description": "Server purchase at paid fulfillment (not a return URL or client handoff) from the hosted Chat composer for a verified free starter at any known balance. utm_source=plugin, utm_medium=chat, cta=plugin_hosted_chat_monthly, utm_campaign=plugin_hosted_chat_nov2026. Website/Stripe attribution only under existing consent; no plugin client telemetry or measured offer impressions.",
+      "endpoints": [
+        "MONTHLY_HOSTED_CHAT"
+      ],
+      "where": [
+        "src/constants/externalServices.ts",
+        "src/views/chatview/AgentChatView.ts"
+      ],
+      "owner": "engineer",
+      "added": "2026-11-07"
     },
     {
       "name": "plugin_public_stats_daily",

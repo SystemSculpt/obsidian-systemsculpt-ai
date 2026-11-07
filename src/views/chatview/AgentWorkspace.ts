@@ -95,8 +95,10 @@ export type AgentWorkspaceOptions = Readonly<{
   showPlanOffer?: boolean;
   /** The account may go straight to the $9 Monthly checkout (a starter balance). */
   showMonthlyOffer?: () => boolean;
-  /** Opens Monthly checkout from the low-credits offer line. */
+  /** Opens Pro checkout from the hosted Chat composer offer. */
   onCreditsOffer?: () => void | Promise<void>;
+  /** Keeps the existing out-of-credits cards on their own checkout attribution. */
+  onMonthlyOffer?: () => void | Promise<void>;
   /** The plan's renewal failed: offers fix the card instead of a checkout (T-5348). */
   showPaymentFix?: () => boolean;
   /** Opens the billing portal to fix the card. */
@@ -329,7 +331,7 @@ export class AgentWorkspace extends Component {
       onCopyArtifactPath: options.onCopyArtifactPath,
       showPlanOffer: () => this.showPlanOffer,
       onViewPlans: options.onViewPlans,
-      onMonthlyOffer: options.onCreditsOffer,
+      onMonthlyOffer: options.onMonthlyOffer,
       showMonthlyOffer: options.showMonthlyOffer,
       showPaymentFix: options.showPaymentFix,
       onUpdateCard: options.onUpdateCard,
@@ -473,7 +475,7 @@ export class AgentWorkspace extends Component {
     this.creditsOffer.empty();
     this.creditsOffer.toggleAttribute("hidden", !offer);
     if (!offer) return;
-    this.creditsOffer.createSpan({ text: `${offer.lead} ` });
+    if (offer.lead) this.creditsOffer.createSpan({ text: `${offer.lead} ` });
     const link = this.creditsOffer.createEl("a", {
       text: offer.link,
       href: "#",
