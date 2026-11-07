@@ -131,7 +131,11 @@ export function nativeToolPresentation(part: AgentToolPart): NativeToolPresentat
       studio_list_outputs: ["List outputs of", "Listed outputs of", "Listing outputs of", workflow, "layout-dashboard"],
     } as const)[systemsculpt];
     // A refused call (no subscription, no credits) finished normally but did nothing.
-    const refused = part.state === "succeeded" && decodeSystemSculptToolOutput(part.output?.data)?.ok === false;
+    const result = part.state === "succeeded" ? decodeSystemSculptToolOutput(part.output?.data) : null;
+    const refused = result?.ok === false;
+    // Needing a subscription or credits is an expected gate, not a failure.
+    const gate = refused && result?.link?.label === "Subscribe" ? "Needs a subscription" : refused && result?.link?.label === "Buy credits" ? "Needs credits" : null;
+    if (gate) return presentation(verb, verb, running, `${target} · ${gate}`, icon, `systemsculpt:${systemsculpt}`);
     return presentation(verb, refused ? `Couldn't ${verb.toLowerCase()}` : completed, running, target, icon, `systemsculpt:${systemsculpt}`);
   }
   const rawPath = text(input.file_path) ?? text(input.path);

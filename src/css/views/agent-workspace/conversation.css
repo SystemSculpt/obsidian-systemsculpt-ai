@@ -57,6 +57,8 @@
 }
 
 .systemsculpt-agent-turn.is-user .systemsculpt-agent-turn-body {
+  /* No one-word last line in a request bubble. */
+  text-wrap: pretty;
   padding: var(--ss-space-3) var(--ss-space-4);
   border: none;
   border-radius: var(--ss-radius-lg);

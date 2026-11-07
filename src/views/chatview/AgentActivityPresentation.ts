@@ -1,9 +1,9 @@
 import type { AgentPart } from "../../chat/ChatConversation";
-import { presentAgentTool, refusedSystemSculptCall } from "./AgentToolPresentation";
+import { gatedSystemSculptTurn, presentAgentTool, refusedSystemSculptCall } from "./AgentToolPresentation";
 
-/** refused: a SystemSculpt tool declined (no subscription or credits); not a failure, but not done either. */
+/** refused: a SystemSculpt tool did nothing; not a failure, but not done either. gated: it needs a subscription or credits. */
 /** denied: the person declined an action, so the turn is not marked done with a check. */
-export type AgentActivitySummary = Readonly<{ label: string; failedCount: number; refused?: true; denied?: true }>;
+export type AgentActivitySummary = Readonly<{ label: string; failedCount: number; refused?: true; gated?: true; denied?: true }>;
 
 type ActivityGroup = { label: string; items: Set<string>; uncounted: number };
 
@@ -12,7 +12,7 @@ const groupSize = (group: ActivityGroup): number => group.items.size + group.unc
 /** Count adjacent activity by action without repeating payloads or full paths. */
 export function summarizeAgentActivity(parts: readonly AgentPart[]): AgentActivitySummary {
   const groups = new Map<string, ActivityGroup>();
-  let failedCount = 0, refused = false, denied = false;
+  let failedCount = 0, refused = false, gated = false, denied = false;
   const add = (kind: string, label: string, items: readonly string[] = [], count = 1): void => {
     const group = groups.get(kind) ?? { label, items: new Set<string>(), uncounted: 0 };
     group.label = label;
@@ -26,6 +26,7 @@ export function summarizeAgentActivity(parts: readonly AgentPart[]): AgentActivi
     } else if (part.kind === "tool") {
       const tool = presentAgentTool(part);
       if (refusedSystemSculptCall(part)) refused = true;
+      if (gatedSystemSculptTurn(part)) gated = true;
       // Only completed or in-progress work counts toward "Edited 2 notes", and
       // each note once. Denials are decisions, withdrawn requests never ran and
       // failed or uncertain actions aren't completed changes: each keeps its
@@ -60,6 +61,7 @@ export function summarizeAgentActivity(parts: readonly AgentPart[]): AgentActivi
     label: `${visible || "Activity"}${more ? ` · ${more} more` : ""}${failedCount ? ` · ${failedCount} failed` : ""}`,
     failedCount,
     ...(refused ? { refused: true as const } : {}),
+    ...(gated ? { gated: true as const } : {}),
     ...(denied ? { denied: true as const } : {}),
   };
 }

@@ -18,7 +18,7 @@ import {
 
 /** The chat shows generated files under the reply; an embed in the reply would show them twice. */
 /** The chat shows the link as its own line; the reply repeating it would say it twice. */
-const LINK_SHOWN = "The chat already shows the person this line and its link under your reply. Don't restate it, explain it or mention subscribing or credits; at most say in a few words that nothing was made.";
+const LINK_SHOWN = "The chat already shows the person this line and its link under your reply. Don't restate it, explain it, apologise or say that nothing was made: that line already says it. If the person asked for nothing else, end your turn without any reply text.";
 const SHOWN_IN_CHAT = "The chat already shows generated files right after your reply, so don't embed them or say where they appear.";
 
 const GENERATED_IMAGES_FOLDER = "SystemSculpt/Images";

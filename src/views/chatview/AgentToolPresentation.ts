@@ -208,6 +208,18 @@ export function refusedSystemSculptCall(part: AgentToolPart): boolean {
     && decodeSystemSculptToolOutput(part.output?.data)?.ok === false;
 }
 
+/** A refused SystemSculpt call that only needs a subscription or credits: an expected gate, not a failure. */
+function gatedSystemSculptCall(part: AgentToolPart): string | null {
+  if (!refusedSystemSculptCall(part)) return null;
+  const label = decodeSystemSculptToolOutput(part.output?.data)?.link?.label;
+  return label === "Subscribe" ? "Needs a subscription" : label === "Buy credits" ? "Needs credits" : null;
+}
+
+/** Whether a turn's SystemSculpt call stopped at the subscription or credits gate. */
+export function gatedSystemSculptTurn(part: AgentToolPart): boolean {
+  return gatedSystemSculptCall(part) !== null;
+}
+
 function actionState(displayState: AgentToolDisplayState): ToolActionState {
   if (displayState !== "partial" && isActiveAgentToolState(displayState)) {
     return "active";
@@ -599,6 +611,7 @@ export function presentAgentTool(part: AgentToolPart): AgentToolPresentation {
                     : counted ? countedLabel(counted, "base") : TOOL_LABELS[canonicalName] ?? `Use ${canonicalName || "tool"}`;
   const query = webSearchQuery(part);
   const label = serverTool ? actionLabel(query ? `Search the web for “${query}”` : serverLabel ?? UNKNOWN_SERVER_TOOL_LABEL, labelState)
+    : gatedSystemSculptCall(part) ? `${baseLabel} · ${gatedSystemSculptCall(part)}`
     : displayState === "failed" || refusedSystemSculptCall(part) ? `Couldn't ${baseLabel.charAt(0).toLowerCase()}${baseLabel.slice(1)}` : actionLabel(baseLabel, labelState);
   const output = record(part.output?.data);
   const resultCount = serverTool ? webSearchResultCount(part)
