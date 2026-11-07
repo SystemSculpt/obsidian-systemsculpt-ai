@@ -97,4 +97,6 @@ Building or contributing to the plugin: see [development.md](https://github.com/
 - Platforms: desktop and mobile
 - License: MIT (Obsidian plugin; the hosted service and iPhone app are not covered by this license)
 
+[Support us on Patreon](https://www.patreon.com/SystemSculpt?utm_source=plugin_readme&utm_campaign=patreon_everywhere).
+
 Support: [systemsculpt.com](https://systemsculpt.com/?utm_source=github&utm_medium=readme&utm_campaign=evergreen&utm_content=obsidian-plugin) · [GitHub issues](https://github.com/SystemSculpt/obsidian-systemsculpt-ai/issues) · support@systemsculpt.com

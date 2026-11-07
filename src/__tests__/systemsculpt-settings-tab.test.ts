@@ -404,6 +404,19 @@ describe("SystemSculptSettingTab native layout", () => {
     expect(knowledgePanelAfter?.getAttribute("role")).toBe("tabpanel");
   });
 
+  it("scopes the opaque host header to the visible plugin settings", async () => {
+    const tab = new SystemSculptSettingTab(app, createPluginStub());
+    const host = document.createElement("div");
+    host.classList.add("modal");
+    host.appendChild(tab.containerEl);
+    await tab.display();
+    expect(host.classList.contains("ss-settings-host")).toBe(true);
+    await tab.display();
+    expect(host.classList.contains("ss-settings-host")).toBe(true);
+    tab.hide();
+    expect(host.classList.contains("ss-settings-host")).toBe(false);
+  });
+
   it.each(["display", "hide"] as const)("invalidates each registered render task once on %s despite a failing cleanup", async (entry) => {
     const plugin = createPluginStub();
     const tab = new SystemSculptSettingTab(app, plugin);

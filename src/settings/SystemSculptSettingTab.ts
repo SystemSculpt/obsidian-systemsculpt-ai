@@ -341,6 +341,9 @@ export class SystemSculptSettingTab extends PluginSettingTab {
 
     const surfaceRoot = containerEl.createDiv({ cls: "ss-settings-surface" });
     applyPluginSurface(surfaceRoot, "view");
+    const settingsModal = containerEl.closest<HTMLElement>(".modal");
+    settingsModal?.addClass("ss-settings-host");
+    this.registerRenderCleanup(() => settingsModal?.removeClass("ss-settings-host"));
 
     const titleRow = surfaceRoot.createDiv({ cls: "ss-settings-title-row" });
     const titleGroup = titleRow.createDiv({ cls: "ss-settings-title-group" });

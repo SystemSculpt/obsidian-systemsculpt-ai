@@ -10,9 +10,9 @@
     {
       "name": "patreon_support_referral",
       "kind": "attribution-only",
-      "description": "Direct Patreon support links carry utm_campaign=patreon_everywhere and utm_source=plugin_settings, plugin_upgrade_modal or plugin_funding. Patreon may use these campaign tags; plugin clicks are not measured and no client telemetry or redirect is sent. Patreon support does not activate SystemSculpt Pro.",
+      "description": "Direct Patreon support links carry utm_campaign=patreon_everywhere and utm_source=plugin_settings, plugin_upgrade_modal, plugin_funding or plugin_readme. Patreon may use these campaign tags; plugin clicks are not measured and no client telemetry or redirect is sent. Patreon support does not activate SystemSculpt Pro.",
       "endpoints": ["patreon.com/SystemSculpt"],
-      "where": ["src/constants/externalServices.ts", "manifest.json"],
+      "where": ["src/constants/externalServices.ts", "manifest.json", "README.md"],
       "owner": "engineer",
       "added": "2026-11-07"
     },
