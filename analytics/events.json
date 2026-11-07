@@ -68,7 +68,6 @@
       ],
       "where": [
         "src/services/managed/ManagedCapabilityCatalog.ts",
-        "src/features/inbox-transcription/InboxTranscriptionService.ts",
         "src/services/managed/ManagedJobClient.ts"
       ],
       "owner": "engineer",
