@@ -1,5 +1,5 @@
 import { boundedIncidentRenderCount, boundedIncidentRenderDuration, incidentMonotonicNow } from "./RenderIncidentMetrics";
-import { App, Component, MarkdownRenderer, setIcon } from "obsidian";
+import { App, Component, Keymap, MarkdownRenderer, setIcon } from "obsidian";
 import {
   createSurfaceElement,
   createUiAction,
@@ -318,6 +318,18 @@ export class AgentConversationRenderer extends Component {
         "aria-atomic": "false",
       },
     });
+    // Delegate from the stable root: streamed Markdown reconciliation clones links.
+    const openSourceLink = (event: MouseEvent): void => {
+      if (event.defaultPrevented || (event.type === "click" ? event.button !== 0 : event.button !== 1)) return;
+      const link = (event.target as Element | null)?.closest?.("a.internal-link");
+      const href = link?.getAttribute("data-href") ?? link?.getAttribute("href");
+      if (!href) return;
+      event.preventDefault();
+      event.stopPropagation();
+      void this.options.app.workspace.openLinkText(href, this.options.sourcePath(), Keymap.isModEvent(event));
+    };
+    this.registerDomEvent(this.element, "click", openSourceLink);
+    this.registerDomEvent(this.element, "auxclick", openSourceLink);
     this.historyRoot = this.element.createDiv({ cls: "systemsculpt-agent-history" });
     this.activeRoot = this.element.createDiv({ cls: "systemsculpt-agent-active-run" });
     this.inlineEditor = new InlineMessageEditor(this.element, {

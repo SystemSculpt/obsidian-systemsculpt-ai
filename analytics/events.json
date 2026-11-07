@@ -6,6 +6,13 @@
     "x-obsidian-version": "Obsidian apiVersion",
     "x-systemsculpt-platform": "macos | windows | linux | ios | android"
   },
+  "local_interactions": {
+    "chat-source-citation-open": {
+      "events": [],
+      "not_measured": "Opening a cited source note stays in the vault through Obsidian openLinkText. No server call or client telemetry is sent.",
+      "where": ["src/views/chatview/AgentConversationRenderer.ts"]
+    }
+  },
   "events": [
     {
       "name": "patreon_support_referral",
