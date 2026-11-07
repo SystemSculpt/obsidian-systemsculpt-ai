@@ -4,6 +4,7 @@ import { getSurfaceOwnerWindow } from "../core/ui/surface";
 import { SYSTEMSCULPT_WEBSITE, withPluginAttribution } from "../constants/externalServices";
 import { PLAN_REQUIRED_MESSAGE } from "../utils/errors";
 import { openExternalUrl } from "../utils/externalUrl";
+import { getRuntimeWindow } from "../utils/runtimeWindow";
 import {
   CONNECT_ERROR_COPY,
   LICENSE_CONFIRMING_COPY,
@@ -46,11 +47,22 @@ export function requireActivePlan(plugin: SystemSculptPlugin, feature: string): 
 export function presentAccountConnectOutcome(plugin: SystemSculptPlugin, outcome: ConnectOutcome): void {
   if (UpgradePlanModal.showConnectOutcome(outcome)) return;
   if (plugin.settingsTab?.showAccountConnectOutcome(outcome)) return;
-  if (canStartHostedChat(outcome)) {
-    showActionNotice(connectOutcomeMessage(outcome), firstChatAction(plugin));
-    return;
+  const ownerWindow = getRuntimeWindow();
+  const away = !ownerWindow.document.hasFocus();
+  const hasChatAction = canStartHostedChat(outcome);
+  const durationMs = outcome.kind === "error" || hasChatAction ? 10_000 : 6_000;
+  const duration = away ? 0 : durationMs;
+  const message = connectOutcomeMessage(outcome);
+  const notice = hasChatAction
+    ? showActionNotice(message, firstChatAction(plugin), { duration })
+    : new Notice(message, duration);
+  // A browser handoff can finish long before the person returns. Start the
+  // notice's normal time on screen only when Obsidian regains focus.
+  if (away) {
+    ownerWindow.addEventListener("focus", () => {
+      ownerWindow.setTimeout(() => notice.hide(), durationMs);
+    }, { once: true });
   }
-  new Notice(connectOutcomeMessage(outcome), outcome.kind === "error" ? 10_000 : 6_000);
 }
 
 /**

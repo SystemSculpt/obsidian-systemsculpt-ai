@@ -68,8 +68,10 @@ export function canStartHostedChat(outcome: ConnectOutcome): boolean {
 /** The complete result in one message, for when no account surface is open. */
 export function connectOutcomeMessage(outcome: ConnectOutcome): string {
   if (outcome.kind === "error") return CONNECT_ERROR_COPY[outcome.reason];
-  if (outcome.kind === "no-license") return `${signedInLine(outcome.email)} ${NO_PLAN_COPY}`;
-  if (!outcome.licenseValid) return `${signedInLine(outcome.email)} ${LICENSE_CONFIRMING_COPY}`;
+  // A notice has no surrounding screen to say what this sign-in was for.
+  const signedIn = outcome.email ? `Signed in to SystemSculpt as ${outcome.email}.` : "Signed in to SystemSculpt.";
+  if (outcome.kind === "no-license") return `${signedIn} ${NO_PLAN_COPY}`;
+  if (!outcome.licenseValid) return `${signedIn} ${LICENSE_CONFIRMING_COPY}`;
   const credits = creditsReadyLine(outcome);
-  return credits ? `Signed in. ${credits}` : signedInLine(outcome.email);
+  return credits ? `${signedIn} ${credits}` : signedIn;
 }

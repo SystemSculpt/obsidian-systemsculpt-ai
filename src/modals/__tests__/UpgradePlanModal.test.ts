@@ -520,6 +520,7 @@ describe("UpgradePlanModal", () => {
     const plugin = createPlugin();
     const showAccountConnectOutcome = jest.fn(() => true);
     plugin.settingsTab = { showAccountConnectOutcome };
+    jest.spyOn(document, "hasFocus").mockReturnValue(true);
 
     const modal = UpgradePlanModal.openOnce(plugin);
     presentAccountConnectOutcome(plugin, outcome);
@@ -538,11 +539,64 @@ describe("UpgradePlanModal", () => {
     expect(Notice).toHaveBeenNthCalledWith(1,
       "Sign-in expired. Try again.", 10_000);
     expect(Notice).toHaveBeenNthCalledWith(2,
-      "Signed in as user@example.test. No active plan. Choose one to start.", 6_000);
+      "Signed in to SystemSculpt as user@example.test. No active plan. Choose one to start.", 6_000);
     expect(document.querySelector(".ss-upgrade-plan-modal")).toBeNull();
+    jest.restoreAllMocks();
+  });
+
+  it("keeps the result notice up while the person is away from Obsidian, then times it from their return", () => {
+    jest.useFakeTimers();
+    const hasFocus = jest.spyOn(document, "hasFocus").mockReturnValue(false);
+    const setTimeoutSpy = jest.spyOn(window, "setTimeout").mockImplementation(((callback: () => void, ms: number) =>
+      setTimeout(callback, ms)) as never);
+    const hide = jest.fn();
+    (Notice as unknown as jest.Mock).mockImplementationOnce(() => ({ hide }));
+    try {
+      presentAccountConnectOutcome(createPlugin(), { kind: "signed-in", name: null, email: "user@example.test", licenseValid: true });
+      const [fragment, duration] = (Notice as unknown as jest.Mock).mock.calls[0] as [DocumentFragment, number];
+      expect(fragment.textContent).toContain("Signed in to SystemSculpt as user@example.test.");
+      expect(fragment.querySelector('[data-testid="notice.action"]')?.textContent).toBe("Start a chat");
+      expect(duration).toBe(0);
+
+      jest.advanceTimersByTime(60_000);
+      expect(hide).not.toHaveBeenCalled();
+
+      window.dispatchEvent(new window.Event("focus"));
+      jest.advanceTimersByTime(9_999);
+      expect(hide).not.toHaveBeenCalled();
+      jest.advanceTimersByTime(1);
+      expect(hide).toHaveBeenCalledTimes(1);
+    } finally {
+      setTimeoutSpy.mockRestore();
+      hasFocus.mockRestore();
+      jest.useRealTimers();
+    }
+  });
+
+  it("keeps an error notice until the person returns to Obsidian", () => {
+    jest.useFakeTimers();
+    const hasFocus = jest.spyOn(document, "hasFocus").mockReturnValue(false);
+    const setTimeoutSpy = jest.spyOn(window, "setTimeout").mockImplementation(((callback: () => void, ms: number) =>
+      setTimeout(callback, ms)) as never);
+    const hide = jest.fn();
+    (Notice as unknown as jest.Mock).mockImplementationOnce(() => ({ hide }));
+    try {
+      presentAccountConnectOutcome(createPlugin(), { kind: "error", reason: "expired" });
+      expect(Notice).toHaveBeenCalledWith("Sign-in expired. Try again.", 0);
+      jest.advanceTimersByTime(60_000);
+      expect(hide).not.toHaveBeenCalled();
+      window.dispatchEvent(new window.Event("focus"));
+      jest.advanceTimersByTime(10_000);
+      expect(hide).toHaveBeenCalledTimes(1);
+    } finally {
+      setTimeoutSpy.mockRestore();
+      hasFocus.mockRestore();
+      jest.useRealTimers();
+    }
   });
 
   it("offers Start a chat in the notice when no account surface is open", () => {
+    jest.spyOn(document, "hasFocus").mockReturnValue(true);
     const plugin = createPlugin();
     plugin.settingsTab = { showAccountConnectOutcome: jest.fn(() => false) };
     (Notice as unknown as jest.Mock).mockImplementationOnce(() => ({ hide: jest.fn() }));
@@ -550,11 +604,13 @@ describe("UpgradePlanModal", () => {
       kind: "signed-in", name: null, email: "user@example.test", licenseValid: true, starterCredits: 500,
     });
     const fragment = (Notice as unknown as jest.Mock).mock.calls[0][0] as DocumentFragment;
-    expect(fragment.textContent).toContain("Signed in. 500 credits ready.");
+    expect(fragment.textContent).toContain("Signed in to SystemSculpt as user@example.test. 500 credits ready.");
     const action = fragment.querySelector<HTMLButtonElement>('[data-testid="notice.action"]');
     expect(action?.textContent).toBe("Start a chat");
     action?.click();
     expect(plugin.startHostedChat).toHaveBeenCalledTimes(1);
+    expect((Notice as unknown as jest.Mock).mock.calls[0][1]).toBe(10_000);
+    jest.restoreAllMocks();
   });
 
   it("opens at most one instance at a time via openOnce", () => {

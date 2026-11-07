@@ -298,7 +298,7 @@
     {
       "name": "plugin_connect_done",
       "kind": "server",
-      "description": "Sign-in finished: the vault is connected.",
+      "description": "Sign-in finished: the vault is connected. Account surfaces show the result; otherwise the account-naming notice waits for Obsidian focus before timing out (T-4201). Notice views are not tracked client-side; this server event measures credential exchange, not whether the person saw the result.",
       "endpoints": [
         "/auth/exchange"
       ],
