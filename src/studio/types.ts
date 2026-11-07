@@ -2,6 +2,14 @@ import type { HostCapability } from "../platform/hostCapabilities";
 import type { FileSource } from "../platform/fileSource";
 import type { ManagedFileSource } from "../services/managed/ManagedFileSource";
 
+/**
+ * Vault path of the generated agent reference document. Every serialized v2
+ * project carries this path in its "docs" field so an agent that opens a
+ * project anywhere in the vault can find the format guide and the node kind
+ * reference without either being embedded in the project file.
+ */
+export const STUDIO_AGENT_DOCS_PATH = "SystemSculpt/Studio/AGENTS.md" as const;
+
 export const STUDIO_PROJECT_EXTENSION = ".systemsculpt" as const;
 export const STUDIO_DISPLAY_NAME = "Studio" as const;
 export const STUDIO_PROJECT_SCHEMA_V1 = "studio.project.v1" as const;
@@ -21,6 +29,10 @@ const STUDIO_PORT_DATA_TYPES = [
 ] as const
 
 export type StudioPortDataType = (typeof STUDIO_PORT_DATA_TYPES)[number]
+
+export function areStudioPortTypesCompatible(source: string, target: string): boolean {
+  return source === 'any' || target === 'any' || source === target;
+}
 
 const STUDIO_PORT_DATA_TYPE_SET: ReadonlySet<string> = new Set(STUDIO_PORT_DATA_TYPES)
 
@@ -130,6 +142,7 @@ type StudioNodeConfigSelectPresentation =
   /** A catalog modal with search, sorting, favorites, and per-model detail. */
   | "model_picker_modal";
 export type StudioNodeConfigDynamicOptionsSource =
+  | "image_generation_models"
   | "video_generation_models"
   | "video_generation_durations"
   | "video_generation_resolutions"
@@ -464,6 +477,33 @@ export type StudioVideoGenerationResult = {
   operation: StudioManagedOperationRef;
 };
 
+export type StudioImageGenerationRequest = {
+  runId: string;
+  nodeId: string;
+  projectPath: string;
+  signal: AbortSignal;
+  buildPayload: () => Promise<{
+    /** Server catalog model ID; blank means the server default. */
+    model?: string;
+    prompt: string;
+    count?: number;
+    aspectRatio?: string;
+    quality?: string;
+    background?: string;
+    inputImages?: StudioImageInput[];
+  }>;
+  storeOutput: (bytes: ArrayBuffer, mimeType: string) => Promise<StudioAssetRef>;
+  onProgress?: (progress: StudioVideoGenerationProgress) => void;
+};
+
+export type StudioImageGenerationResult = {
+  images: StudioAssetRef[];
+  /** Model the server ran and the job's cost, for runners and agents. */
+  model: string;
+  usage: { usd: number; estimated: boolean };
+  operation: StudioManagedOperationRef;
+};
+
 export type StudioTranscriptionRequest = {
   runId: string;
   nodeId: string;
@@ -504,6 +544,7 @@ export type StudioCliExecutionResult = {
 export interface StudioApiAdapter {
   generateText(request: StudioTextGenerationRequest): Promise<StudioTextGenerationResult>;
   generateVideo(request: StudioVideoGenerationRequest): Promise<StudioVideoGenerationResult>;
+  generateImage(request: StudioImageGenerationRequest): Promise<StudioImageGenerationResult>;
   transcribeAudio(request: StudioTranscriptionRequest): Promise<StudioTranscriptionResult>;
   beginLocalCommit(operations: readonly StudioManagedOperationRef[], signal?: AbortSignal): Promise<void>;
   completeLocalCommit(operations: readonly StudioManagedOperationRef[], signal?: AbortSignal): Promise<void>;

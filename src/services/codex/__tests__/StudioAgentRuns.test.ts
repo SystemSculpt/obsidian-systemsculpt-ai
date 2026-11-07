@@ -1,3 +1,5 @@
+import { StudioAgentRunStore } from "../StudioAgentRunStore";
+import { AGENT_RUN_MAX_RESULT_CHARS, AGENT_RUN_MAX_ACTIVITY_DETAIL_CHARS, AGENT_RUN_MAX_ACTIVITY } from "../StudioAgentRunRecord";
 import { requireApiVersion } from 'obsidian';
 import { MAX_LOADED_AGENT_RUNS, STALE_AGENT_RUN_MS, StudioAgentRuns } from '../StudioAgentRuns';
 import { createStudioWorkflow } from '../StudioWorkflow';
@@ -566,4 +568,21 @@ describe('machine identity', () => {
     expect(run.status).toBe('running'); expect(runs.isStale(run.id)).toBe(false); expect(runs.canMarkStopped(run.id)).toBe(false);
     sessions[0].resolve(); await tick(); expect(run.status).toBe('completed'); await runs.dispose();
   });
+});
+
+it("reopens the live projection at its persisted result and activity bounds", async () => {
+  const { runs, files, adapter } = fixture();
+  const run = await runs.start(spec()); await tick();
+  sessions[0].cb.text("x".repeat(AGENT_RUN_MAX_RESULT_CHARS + 20));
+  for (let i = 0; i < AGENT_RUN_MAX_ACTIVITY + 5; i++) sessions[0].cb.activity({ id: String(i), kind: "message", title: "Codex", detail: "y".repeat(AGENT_RUN_MAX_ACTIVITY_DETAIL_CHARS + 20), status: "completed", at: "now" });
+  jest.advanceTimersByTime(5_000); await tick();
+  expect(run.result).toHaveLength(AGENT_RUN_MAX_RESULT_CHARS);
+  expect(run.activity).toHaveLength(AGENT_RUN_MAX_ACTIVITY);
+  expect(run.activity.every(item => item.detail.length === AGENT_RUN_MAX_ACTIVITY_DETAIL_CHARS)).toBe(true);
+  const store = new StudioAgentRunStore({ vault: { adapter } } as any);
+  const reopened = await store.read(run.projectPath, run.projectId, run.id);
+  expect(reopened?.result).toBe(run.result);
+  expect(reopened?.activity).toEqual(run.activity);
+  expect(files.has(`${agentRunFolder(run.projectPath)}/${run.id}.json`)).toBe(true);
+  await store.close(); await runs.dispose();
 });

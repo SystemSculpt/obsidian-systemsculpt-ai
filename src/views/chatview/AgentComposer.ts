@@ -1,6 +1,7 @@
 import { Component, Menu, TFile, setIcon, type App } from "obsidian";
 import {
   createUiAction,
+  containMenuEscape,
   updateUiAction,
   type UiActionTone,
 } from "../../core/ui/surface";
@@ -24,7 +25,6 @@ import {
 } from "./attachments/ChatMessageAttachments";
 import { AgentComposerMentionPopover, type ComposerMentionTrigger } from "./AgentComposerMentions";
 import { AgentComposerVault } from "./AgentComposerVault";
-import { containMenuEscape } from "./AgentRunLine";
 import { containsControlCharacters } from "../../utils/characterValidation";
 
 export type AgentComposerAttachment = Readonly<{
@@ -66,7 +66,7 @@ const DEFAULT_AGENT_NAME = "SystemSculpt";
 const READ_ONLY_PLACEHOLDER = "Start a new chat to continue.";
 const RUNNING_PLACEHOLDER = "Queue a follow-up…";
 const PINNED_FILES_DESCRIPTION =
-  "Pinned files are reread for every message. Files SystemSculpt reads while working remain part of this chat, but are not pinned automatically.";
+  "Pinned files are sent with every message.";
 /** Spec: the message box grows to 40% of the view, and never caps below six lines. */
 const INPUT_MAX_VIEW_FRACTION = 0.4;
 const INPUT_MIN_MAX_LINES = 6;

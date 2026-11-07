@@ -1,10 +1,11 @@
+import type { StudioNodeDefinition } from "./types";
 import { buttonNode } from "./nodes/buttonNode";
 import { commandCenterNode } from "./nodes/commandCenterNode";
 import { StudioNodeRegistry } from "./StudioNodeRegistry";
 import { audioExtractNode } from "./nodes/audioExtractNode";
 import { cliCommandNode } from "./nodes/cliCommandNode";
 import { datasetNode } from "./nodes/datasetNode";
-import { retiredImageGenerationNode } from "./nodes/retiredImageGenerationNode";
+import { imageGenerationNode } from "./nodes/imageGenerationNode";
 import { videoGenerationNode } from "./nodes/videoGenerationNode";
 import { inputNode } from "./nodes/inputNode";
 import { runCollectionNode } from './nodes/runCollectionNode';
@@ -38,7 +39,7 @@ export function registerBuiltInStudioNodes(registry: StudioNodeRegistry): void {
   registry.register(textOutputNode);
   registry.register(valueNode);
   registry.register(textGenerationNode);
-  registry.register(retiredImageGenerationNode);
+  registry.register(imageGenerationNode);
   registry.register(videoGenerationNode);
   registry.register(mediaIngestNode);
   registry.register(audioExtractNode);
@@ -49,4 +50,11 @@ export function registerBuiltInStudioNodes(registry: StudioNodeRegistry): void {
   registry.register(terminalNode);
   registry.register(processNode);
   registry.register(scriptNode);
+}
+
+export const builtInStudioNodeRegistry = new StudioNodeRegistry();
+registerBuiltInStudioNodes(builtInStudioNodeRegistry);
+
+export function findBuiltInStudioNodeDefinition(kind: string): StudioNodeDefinition | null {
+  return builtInStudioNodeRegistry.list().find((entry) => entry.kind === kind) || null;
 }

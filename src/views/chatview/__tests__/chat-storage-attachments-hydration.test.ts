@@ -5,11 +5,8 @@ import { App, TFile } from "obsidian";
 import type { ChatMessage } from "../../../types";
 import type SystemSculptPlugin from "../../../main";
 import { AgentTranscriptRepository } from "../AgentTranscriptRepository";
-import {
-  ChatStorageService,
-  resolveChatsDirectory,
-  resolveKnownChatsDirectories,
-} from "../ChatStorageService";
+import { resolveChatsDirectory, resolveKnownChatsDirectories } from "../storage/ChatTranscriptLocations";
+import { ChatStorageService } from "../ChatStorageService";
 import { ChatMarkdownSerializer } from "../storage/ChatMarkdownSerializer";
 import { ChatAttachmentVaultStore, type ChatAttachmentStoreAdapter } from "../attachments/ChatAttachmentVaultStore";
 

@@ -77,9 +77,9 @@ describe("AudioProcessorModal", () => {
     expect(modal.modalEl.textContent).toContain("Meeting brief");
     expect(modal.modalEl.textContent).toContain("Clean transcript");
     expect(buttonWithText(modal.modalEl, "Meeting brief").textContent)
-      .toContain("plus a linked transcript");
+      .toContain("Decisions, actions and questions.");
     expect(buttonWithText(modal.modalEl, "Clean transcript").textContent)
-      .toContain("without timestamps in the main note");
+      .toContain("no timestamps");
     expect(modal.modalEl.querySelectorAll(
       ".ss-audio-processor__output-option[role='radio']",
     )).toHaveLength(3);
@@ -118,7 +118,7 @@ describe("AudioProcessorModal", () => {
     const links = Array.from(line!.querySelectorAll<HTMLAnchorElement>("a"));
     expect(links.map((link) => link.getAttribute("href"))).toEqual([
       "https://www.youtube.com/t/terms",
-      "https://systemsculpt.com/privacy#data-collected",
+      "https://systemsculpt.com/privacy?utm_source=obsidian-plugin&utm_medium=plugin&utm_campaign=evergreen&utm_content=privacy#data-collected",
     ]);
     for (const link of links) {
       expect(link.target).toBe("_blank");
@@ -264,7 +264,7 @@ describe("AudioProcessorModal", () => {
       expect(modal.modalEl.querySelector(".ss-audio-source__file")).toBeNull();
       expect(Array.from(modal.modalEl.querySelectorAll("button"))
         .some((button) => button.textContent === "Vault")).toBe(false);
-      expect(modal.modalEl.textContent).toContain("Large files upload in small parts");
+      expect(modal.modalEl.textContent).toContain("Choose a recording from this device.");
       expect(modal.modalEl.querySelector<HTMLInputElement>(
         ".ss-audio-source__file-input",
       )).toBeTruthy();

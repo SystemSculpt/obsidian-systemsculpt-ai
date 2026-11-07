@@ -3,12 +3,15 @@ import { createStudioWorkflow, workflowOpen, readWorkflowSteps, studioWorkflowIn
 import type SystemSculptPlugin from '../../main';
 import { desktopHost } from '../../platform/desktopOnly';
 import { hasHostCapability } from '../../platform/hostCapabilities';
-import { isRecord, randomId } from '../../studio/utils';
+import { isRecord } from '../../utils/jsonRecord';
+import { randomId } from '../../studio/utils';
 import { studioDevice } from '../../studio/StudioDevice';
 import { codexWorkingDirectory } from './CodexExecutionSettings';
 import { runLocalCodex, type CodexRequest, type CodexResult } from './LocalCodexClient';
 import { answerCodexRequest } from './CodexRequestModal';
-import { StudioAgentRunStore, isActiveAgentRun, type AgentRunPage, type StudioAgentRun, type AgentRunMessage, type StudioAgentRunView, type AgentRunMessageView } from './StudioAgentRunStore';
+import { codexClientRequestKind } from './CodexClientRequests';
+import { StudioAgentRunStore, type AgentRunPage } from './StudioAgentRunStore';
+import { AGENT_RUN_MAX_RESULT_CHARS, AGENT_RUN_MAX_ACTIVITY_DETAIL_CHARS, AGENT_RUN_MAX_ACTIVITY, AGENT_RUN_MAX_MESSAGES, AGENT_RUN_MAX_MESSAGE_CHARS, isActiveAgentRun, type StudioAgentRun, type AgentRunMessage, type StudioAgentRunView, type AgentRunMessageView } from './StudioAgentRunRecord';
 import type { CodexJson } from './CodexAppServer';
 
 export type StudioAgentSpecification = { workflow?: StudioWorkflow; assignmentId?: string; projectId: string; projectPath: string; nodeId: string; title: string; request: CodexRequest; parentRunId?: string; prepare?: () => Promise<CodexRequest> };
@@ -321,18 +324,18 @@ export class StudioAgentRuns {
             for (const pending of record.messages.filter(item => item.to === record.id && item.status === 'pending')) void this.deliver(record, pending).catch(() => {});
           },
           log: text => { if (text.startsWith('Connected to')) { record.currentActivity = 'Starting native turn'; this.changed(record); } },
-          text: text => { record.result = text.slice(-64_000); this.changed(record, 'stream'); },
+          text: text => { record.result = text.slice(-AGENT_RUN_MAX_RESULT_CHARS); this.changed(record, 'stream'); },
           activity: activity => {
             const existing = record.activity.findIndex(item => item.id === activity.id);
-            const projected = { ...activity, detail: activity.detail.slice(-2000) };
+            const projected = { ...activity, detail: activity.detail.slice(-AGENT_RUN_MAX_ACTIVITY_DETAIL_CHARS) };
             if (existing >= 0) record.activity[existing] = projected; else record.activity.push(projected);
-            record.activity = record.activity.slice(-40);
+            record.activity = record.activity.slice(-AGENT_RUN_MAX_ACTIVITY);
             if (activity.kind !== 'message' || activity.detail) record.currentActivity = activity.kind === 'message' ? activity.detail.replace(/\s+/g, ' ').slice(0, 180) : activity.title;
             this.changed(record, 'stream');
           },
           request: (method, params, signal) => method === 'item/tool/call' ? this.tool(record, params, control.controller.signal) : this.waitForReview(record, control, method, params, signal),
         });
-        record.status = 'completed'; record.result = result.text.slice(-64_000); record.currentActivity = 'Completed'; record.finishedAt = new Date().toISOString();
+        record.status = 'completed'; record.result = result.text.slice(-AGENT_RUN_MAX_RESULT_CHARS); record.currentActivity = 'Completed'; record.finishedAt = new Date().toISOString();
         await this.persist(record); control.resolve(result);
       } catch (cause) {
         const error = cause instanceof Error ? cause : new Error(String(cause));
@@ -385,7 +388,7 @@ export class StudioAgentRuns {
     this.changed(record);
   }
   private waitForReview(record: StudioAgentRun, control: Control, method: string, params: CodexJson, signal: AbortSignal): Promise<unknown> {
-    if (!['item/commandExecution/requestApproval','item/fileChange/requestApproval','item/permissions/requestApproval','item/tool/requestUserInput'].includes(method)) return Promise.reject(new Error(`Unsupported native request: ${method}`));
+    if (!codexClientRequestKind(method)) return Promise.reject(new Error(`Unsupported native request: ${method}`));
     if (signal.aborted || control.controller.signal.aborted) return Promise.reject(new Error('Run stopped.'));
     if (control.reviews.length >= 16) return Promise.reject(new Error('Too many native requests are awaiting review.'));
     return new Promise((resolve, reject) => {
@@ -613,7 +616,7 @@ export class StudioAgentRuns {
   private emit(projectId: string): void { for (const listener of this.listeners) { try { listener(projectId); } catch (error) { this.plugin.getLogger().error('Run presentation failed', error); } } }
   private changed(record: StudioAgentRun, kind: 'state' | 'stream' = 'state'): void {
     record.updatedAt = new Date().toISOString();
-    while (record.messages.length > 100 || record.messages.reduce((total, item) => total + item.text.length, 0) > 48_000) {
+    while (record.messages.length > AGENT_RUN_MAX_MESSAGES || record.messages.reduce((total, item) => total + item.text.length, 0) > AGENT_RUN_MAX_MESSAGE_CHARS) {
       const removable = record.messages.findIndex(item => item.status !== 'pending'); if (removable < 0) break; record.messages.splice(removable, 1);
     }
     if (this.disposed) return;

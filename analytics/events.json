@@ -1,0 +1,604 @@
+{
+  "about": "SystemSculpt Obsidian plugin analytics catalog (T-4689). Obsidian's developer policies ban client-side telemetry, so the plugin sends no analytics events itself. Use is measured server-side: each plugin call to api.systemsculpt.com becomes a PostHog event (project 706615, site=systemsculpt.com) defined in the systemsculpt-website repo's analytics/events.json, tagged with the headers below. Public stats (Obsidian community downloads per version, GitHub stars and release downloads) arrive daily as plugin_public_stats_daily. src/core/plugin/__tests__/analytics-catalog.test.ts fails when a command has no entry here, an entry names no command, a command names an unknown event, or an event's endpoint is called nowhere.",
+  "headers": {
+    "X-SystemSculpt-Client": "obsidian-plugin",
+    "x-plugin-version": "plugin manifest version",
+    "x-obsidian-version": "Obsidian apiVersion",
+    "x-systemsculpt-platform": "macos | windows | linux | ios | android"
+  },
+  "events": [
+    {
+      "name": "plugin_feedback.queued",
+      "kind": "server",
+      "description": "Explicit feedback durably queued for support; operational count only, without message text or account identity. No client telemetry or form-open tracking.",
+      "endpoints": ["/feedback"],
+      "where": ["src/services/PluginFeedback.ts"],
+      "owner": "engineer",
+      "added": "2026-11-04"
+    },
+    {
+      "name": "api_request",
+      "feature": "agent_session",
+      "kind": "server",
+      "description": "Hosted chat session opened or resumed (agent bootstrap).",
+      "endpoints": [
+        "agent/bootstrap"
+      ],
+      "where": [
+        "src/services/managed/ThinAgentV1Contract.ts"
+      ],
+      "owner": "engineer",
+      "added": "2026-11-03"
+    },
+    {
+      "name": "api_request",
+      "feature": "agent_turn",
+      "kind": "server",
+      "description": "One hosted chat turn sent, with status and latency.",
+      "endpoints": [
+        "agent/turn"
+      ],
+      "where": [
+        "src/services/managed/ThinAgentV1Contract.ts"
+      ],
+      "owner": "engineer",
+      "added": "2026-11-03"
+    },
+    {
+      "name": "api_request",
+      "feature": "chat",
+      "kind": "server",
+      "description": "One hosted text generation (titles, Studio text nodes, chat completions).",
+      "endpoints": [
+        "/api/plugin/chat/completions"
+      ],
+      "where": [
+        "src/services/managed/ManagedCapabilityCatalog.ts"
+      ],
+      "owner": "engineer",
+      "added": "2026-11-03"
+    },
+    {
+      "name": "api_request",
+      "feature": "transcription",
+      "kind": "server",
+      "description": "Audio transcription job created, uploaded or started, including inbox arrivals after their on-disk size and mtime settle. HTTP status measures unreadable or audio-free sources; local sync waits send no telemetry.",
+      "endpoints": [
+        "/api/plugin/audio/transcriptions/jobs"
+      ],
+      "where": [
+        "src/services/managed/ManagedCapabilityCatalog.ts",
+        "src/services/managed/ManagedJobClient.ts"
+      ],
+      "owner": "engineer",
+      "added": "2026-11-03"
+    },
+    {
+      "name": "api_request",
+      "feature": "audio_processing",
+      "kind": "server",
+      "description": "Audio processor job (audio file or YouTube URL) created, resumed or acknowledged.",
+      "endpoints": [
+        "/audio-processor/jobs"
+      ],
+      "where": [
+        "src/features/audio-processor/AudioProcessorApiClient.ts"
+      ],
+      "owner": "engineer",
+      "added": "2026-11-03"
+    },
+    {
+      "name": "api_request",
+      "feature": "document_processing",
+      "kind": "server",
+      "description": "Document conversion job created or started.",
+      "endpoints": [
+        "/api/plugin/documents/jobs"
+      ],
+      "where": [
+        "src/services/managed/ManagedCapabilityCatalog.ts"
+      ],
+      "owner": "engineer",
+      "added": "2026-11-03"
+    },
+    {
+      "name": "api_request",
+      "feature": "image_generation",
+      "kind": "server",
+      "description": "Image generation job created or delivered.",
+      "endpoints": [
+        "/api/plugin/images/generations/jobs"
+      ],
+      "where": [
+        "src/services/managed/ManagedMediaJobClient.ts"
+      ],
+      "owner": "engineer",
+      "added": "2026-11-03"
+    },
+    {
+      "name": "api_request",
+      "feature": "video_generation",
+      "kind": "server",
+      "description": "Video generation job created or delivered.",
+      "endpoints": [
+        "/api/plugin/videos/generations/jobs"
+      ],
+      "where": [
+        "src/services/managed/ManagedMediaJobClient.ts"
+      ],
+      "owner": "engineer",
+      "added": "2026-11-03"
+    },
+    {
+      "name": "api_request",
+      "feature": "embeddings_index",
+      "kind": "server",
+      "description": "Hosted embeddings index written.",
+      "endpoints": [
+        "/api/plugin/embeddings/index"
+      ],
+      "where": [
+        "src/services/managed/adapters/HostedTransportAdapter.ts"
+      ],
+      "owner": "engineer",
+      "added": "2026-11-03"
+    },
+    {
+      "name": "api_request",
+      "feature": "semantic_search",
+      "kind": "server",
+      "description": "Semantic search or similar-notes query.",
+      "endpoints": [
+        "/api/plugin/embeddings/index/query"
+      ],
+      "where": [
+        "src/services/managed/adapters/HostedTransportAdapter.ts"
+      ],
+      "owner": "engineer",
+      "added": "2026-11-03"
+    },
+    {
+      "name": "api_request",
+      "feature": "license_check",
+      "kind": "server",
+      "description": "Account/license check at load and in settings.",
+      "endpoints": [
+        "/api/plugin/license/validate"
+      ],
+      "where": [
+        "src/services/managed/adapters/HostedTransportAdapter.ts"
+      ],
+      "owner": "engineer",
+      "added": "2026-11-03"
+    },
+    {
+      "name": "api_request",
+      "feature": "plugin_config",
+      "kind": "server",
+      "description": "Plugin session start: capability negotiation (counts active installs per day).",
+      "endpoints": [
+        "/api/plugin/config"
+      ],
+      "where": [
+        "src/services/managed/adapters/HostedTransportAdapter.ts"
+      ],
+      "owner": "engineer",
+      "added": "2026-11-03"
+    },
+    {
+      "name": "api_request",
+      "feature": "credits_usage",
+      "kind": "server",
+      "description": "Credits and usage view opened.",
+      "endpoints": [
+        "CREDITS.USAGE"
+      ],
+      "where": [
+        "src/services/SystemSculptService.ts"
+      ],
+      "owner": "engineer",
+      "added": "2026-11-03"
+    },
+    {
+      "name": "api_request",
+      "feature": "plugin_connect",
+      "kind": "server",
+      "description": "Sign-in code exchanged.",
+      "endpoints": [
+        "/auth/exchange"
+      ],
+      "where": [
+        "src/services/AccountConnectService.ts"
+      ],
+      "owner": "engineer",
+      "added": "2026-11-03"
+    },
+    {
+      "name": "api_request",
+      "feature": "captures",
+      "kind": "server",
+      "description": "iPhone captures inbox read.",
+      "endpoints": [
+        "/captures"
+      ],
+      "where": [
+        "src/features/phone-captures/PhoneCaptureInbox.ts"
+      ],
+      "owner": "engineer",
+      "added": "2026-11-03"
+    },
+    {
+      "name": "api_request",
+      "feature": "capture_sync",
+      "kind": "server",
+      "description": "iPhone capture saved to the vault and acknowledged.",
+      "endpoints": [
+        "/ack"
+      ],
+      "where": [
+        "src/features/phone-captures/PhoneCaptureInbox.ts"
+      ],
+      "owner": "engineer",
+      "added": "2026-11-03"
+    },
+    {
+      "name": "api_request",
+      "feature": "handoffs",
+      "kind": "server",
+      "description": "iPhone handoff claimed, completed or failed.",
+      "endpoints": [
+        "/handoffs"
+      ],
+      "where": [
+        "src/features/phone-captures/PhoneHandoffInbox.ts"
+      ],
+      "owner": "engineer",
+      "added": "2026-11-03"
+    },
+    {
+      "name": "hosted_ai_used",
+      "kind": "server",
+      "description": "One settled hosted AI charge by feature and model (agent turns, chat, transcription, audio, documents, images, video, embeddings).",
+      "endpoints": [
+        "/api/plugin/chat/completions",
+        "/api/plugin/embeddings"
+      ],
+      "where": [
+        "src/services/managed/ManagedCapabilityCatalog.ts"
+      ],
+      "owner": "engineer",
+      "added": "2026-11-03"
+    },
+    {
+      "name": "first_hosted_reply",
+      "kind": "server",
+      "description": "Activation: the account's first committed hosted chat turn. After a valid sign-in the result surfaces (plan modal, Account settings, notice) offer Summarize my latest note, which sends that ready prompt on the free credits in one tap (T-5302); its target is new accounts with a first hosted reply within 24 hours of plugin_connect_done (6 of 408 before).",
+      "endpoints": [
+        "agent/turn"
+      ],
+      "where": [
+        "src/services/managed/ThinAgentV1Contract.ts"
+      ],
+      "owner": "engineer",
+      "added": "2026-11-03"
+    },
+    {
+      "name": "plugin_connect_start",
+      "kind": "server",
+      "description": "Sign-in started: the plugin opens systemsculpt.com/plugin/connect.",
+      "endpoints": [
+        "/plugin/connect"
+      ],
+      "where": [
+        "src/services/AccountConnectService.ts"
+      ],
+      "owner": "engineer",
+      "added": "2026-11-03"
+    },
+    {
+      "name": "plugin_connect_done",
+      "kind": "server",
+      "description": "Sign-in finished: the vault is connected. Account surfaces show the result; otherwise the account-naming notice waits for Obsidian focus before timing out (T-4201). Notice views are not tracked client-side; this server event measures credential exchange, not whether the person saw the result.",
+      "endpoints": [
+        "/auth/exchange"
+      ],
+      "where": [
+        "src/services/AccountConnectService.ts"
+      ],
+      "owner": "engineer",
+      "added": "2026-11-03"
+    },
+    {
+      "name": "$pageview",
+      "feature": "plugin_link",
+      "kind": "browser",
+      "description": "A plugin link to systemsculpt.com (plans, credits, docs) lands as a website page view tagged utm_source=obsidian-plugin and the surface.",
+      "endpoints": [
+        "withPluginAttribution"
+      ],
+      "where": [
+        "src/constants/externalServices.ts"
+      ],
+      "owner": "engineer",
+      "added": "2026-11-03"
+    },
+    {
+      "name": "api_request",
+      "feature": "billing_portal",
+      "kind": "server",
+      "description": "A plan whose renewal failed (subscription_status past_due or unpaid) opened its Stripe billing portal to update the card, from the chat's payment line, the Payment failed card and banner Update card button, the Out of credits pill or the Account settings line (T-5348). The website also records billing_portal_opened.",
+      "endpoints": [
+        "BILLING.PORTAL"
+      ],
+      "where": [
+        "src/services/SystemSculptService.ts"
+      ],
+      "owner": "engineer",
+      "added": "2026-11-06"
+    },
+    {
+      "name": "checkout_view",
+      "feature": "plugin_low_credits",
+      "kind": "browser",
+      "description": "Website checkout_view with ref=plugin_low_credits: the $9 Monthly checkout opened in one tap by a starter account (T-5302). utm_medium=chat for the Out of credits card and banner Subscribe button and the Out of credits pill; utm_medium=account for the Account settings line. The hosted Chat composer now has its own plugin_hosted_chat_monthly CTA (T-5452).",
+      "endpoints": [
+        "MONTHLY_LOW_CREDITS"
+      ],
+      "where": [
+        "src/views/chatview/AgentChatView.ts",
+        "src/settings/setup/SetupTabAccountSection.ts"
+      ],
+      "owner": "engineer",
+      "added": "2026-11-06"
+    },
+    {
+      "name": "checkout_view",
+      "feature": "plugin_hosted_chat_monthly",
+      "kind": "browser",
+      "description": "Website checkout viewed from the hosted Chat composer for a verified free starter at any known balance. utm_source=plugin, utm_medium=chat, cta=plugin_hosted_chat_monthly, utm_campaign=plugin_hosted_chat_nov2026. Website/Stripe attribution only under existing consent; no plugin client telemetry or measured offer impressions.",
+      "endpoints": [
+        "MONTHLY_HOSTED_CHAT"
+      ],
+      "where": [
+        "src/constants/externalServices.ts",
+        "src/views/chatview/AgentChatView.ts"
+      ],
+      "owner": "engineer",
+      "added": "2026-11-07"
+    },
+    {
+      "name": "begin_checkout",
+      "feature": "plugin_hosted_chat_monthly",
+      "kind": "server",
+      "description": "Server begin_checkout after Stripe Session creation; retained checkout_funnel_sessions and Stripe sessions are start truth. From the hosted Chat composer for a verified free starter at any known balance. utm_source=plugin, utm_medium=chat, cta=plugin_hosted_chat_monthly, utm_campaign=plugin_hosted_chat_nov2026. Website/Stripe attribution only under existing consent; no plugin client telemetry or measured offer impressions.",
+      "endpoints": [
+        "MONTHLY_HOSTED_CHAT"
+      ],
+      "where": [
+        "src/constants/externalServices.ts",
+        "src/views/chatview/AgentChatView.ts"
+      ],
+      "owner": "engineer",
+      "added": "2026-11-07"
+    },
+    {
+      "name": "purchase",
+      "feature": "plugin_hosted_chat_monthly",
+      "kind": "server",
+      "description": "Server purchase at paid fulfillment (not a return URL or client handoff) from the hosted Chat composer for a verified free starter at any known balance. utm_source=plugin, utm_medium=chat, cta=plugin_hosted_chat_monthly, utm_campaign=plugin_hosted_chat_nov2026. Website/Stripe attribution only under existing consent; no plugin client telemetry or measured offer impressions.",
+      "endpoints": [
+        "MONTHLY_HOSTED_CHAT"
+      ],
+      "where": [
+        "src/constants/externalServices.ts",
+        "src/views/chatview/AgentChatView.ts"
+      ],
+      "owner": "engineer",
+      "added": "2026-11-07"
+    },
+    {
+      "name": "plugin_public_stats_daily",
+      "kind": "daily",
+      "description": "Daily public stats, one event per Pacific day: Obsidian community downloads total and per version, GitHub stars, forks, watchers, open issues and release downloads per tag (deltas since the last run).",
+      "properties": {
+        "obsidian_downloads_total": "count",
+        "obsidian_downloads_new": "since last run",
+        "obsidian_downloads_by_version": "version: count",
+        "github_stars": "count",
+        "github_stars_new": "since last run",
+        "github_release_downloads_total": "count",
+        "github_release_downloads": "tag: count",
+        "latest_release": "tag"
+      },
+      "endpoints": [],
+      "where": [
+        "trellis: tools/product-stats-daily.mjs (schedule product-stats-daily, 06:20 Pacific)"
+      ],
+      "owner": "analytics",
+      "added": "2026-11-03"
+    }
+  ],
+  "commands": {
+    "resume-inbox-transcription": {
+      "events": [
+        "api_request:transcription",
+        "hosted_ai_used"
+      ]
+    },
+    "systemsculpt-copy-resource-report": {
+      "events": [],
+      "not_measured": "local only: no server call, and Obsidian bans client-side telemetry"
+    },
+    "save-ios-captures": {
+      "events": [
+        "api_request:captures",
+        "api_request:capture_sync"
+      ]
+    },
+    "toggle-audio-recorder": {
+      "events": [],
+      "not_measured": "recording is local; the transcription that follows counts as api_request:transcription"
+    },
+    "open-systemsculpt-chat": {
+      "events": [
+        "api_request:agent_session"
+      ]
+    },
+    "chat-new-chat": {
+      "events": [
+        "api_request:agent_session"
+      ]
+    },
+    "chat-open-history": {
+      "events": [],
+      "not_measured": "local only: no server call, and Obsidian bans client-side telemetry"
+    },
+    "chat-focus-message-box": {
+      "events": [],
+      "not_measured": "local only: no server call, and Obsidian bans client-side telemetry"
+    },
+    "chat-stop-response": {
+      "events": [],
+      "not_measured": "cancels a turn already counted as api_request:agent_turn"
+    },
+    "chat-change-mode": {
+      "events": [],
+      "not_measured": "local only: no server call, and Obsidian bans client-side telemetry"
+    },
+    "chat-change-backend": {
+      "events": [],
+      "not_measured": "local only: no server call, and Obsidian bans client-side telemetry"
+    },
+    "chat-review-pending-approval": {
+      "events": [],
+      "not_measured": "hosted approvals ride the next api_request:agent_turn; native approvals, including background subagents, make no SystemSculpt API call and emit no plugin telemetry"
+    },
+    "open-systemsculpt-history": {
+      "events": [],
+      "not_measured": "local only: no server call, and Obsidian bans client-side telemetry"
+    },
+    "open-systemsculpt-janitor": {
+      "events": [],
+      "not_measured": "local only: no server call, and Obsidian bans client-side telemetry"
+    },
+    "transcribe-audio-file": {
+      "events": [
+        "api_request:transcription",
+        "hosted_ai_used"
+      ]
+    },
+    "open-audio-processor": {
+      "events": [
+        "api_request:audio_processing",
+        "hosted_ai_used"
+      ]
+    },
+    "process-youtube-video": {
+      "events": [
+        "api_request:audio_processing",
+        "hosted_ai_used"
+      ]
+    },
+    "save-audio-${kind}": {
+      "events": [
+        "api_request:audio_processing"
+      ]
+    },
+    "open-systemsculpt-search": {
+      "events": [
+        "api_request:semantic_search"
+      ]
+    },
+    "check-for-updates": {
+      "events": [],
+      "not_measured": "unauthenticated release check, not tracked; updates show in plugin_public_stats_daily downloads per version"
+    },
+    "open-systemsculpt-settings": {
+      "events": [
+        "api_request:license_check"
+      ]
+    },
+    "open-credits-balance": {
+      "events": [
+        "api_request:credits_usage"
+      ]
+    },
+    "sign-in": {
+      "events": [
+        "plugin_connect_start",
+        "api_request:plugin_connect",
+        "plugin_connect_done"
+      ]
+    },
+    "view-plans": {
+      "events": [
+        "$pageview:plugin_link"
+      ]
+    },
+    "chat-with-file": {
+      "events": [
+        "api_request:agent_session",
+        "api_request:agent_turn",
+        "hosted_ai_used"
+      ]
+    },
+    "resume-chat-from-history": {
+      "events": [
+        "api_request:agent_session"
+      ]
+    },
+    "change-chat-title": {
+      "events": [
+        "api_request:chat",
+        "hosted_ai_used"
+      ]
+    },
+    "open-embeddings-view": {
+      "events": [
+        "api_request:semantic_search"
+      ]
+    },
+    "new-systemsculpt-studio-project": {
+      "events": [],
+      "not_measured": "local only: no server call, and Obsidian bans client-side telemetry"
+    },
+    "open-systemsculpt-studio": {
+      "events": [],
+      "not_measured": "local only: no server call, and Obsidian bans client-side telemetry"
+    },
+    "run-systemsculpt-studio-project": {
+      "events": [
+        "api_request:chat",
+        "api_request:image_generation",
+        "api_request:video_generation",
+        "hosted_ai_used"
+      ]
+    },
+    "fit-systemsculpt-studio-selection-in-viewport": {
+      "events": [],
+      "not_measured": "local only: no server call, and Obsidian bans client-side telemetry"
+    },
+    "overview-systemsculpt-studio-graph-in-viewport": {
+      "events": [],
+      "not_measured": "local only: no server call, and Obsidian bans client-side telemetry"
+    },
+    "copy-current-file-path": {
+      "events": [],
+      "not_measured": "local only: no server call, and Obsidian bans client-side telemetry"
+    },
+    "embeddings-database-stats": {
+      "events": [],
+      "not_measured": "local only: no server call, and Obsidian bans client-side telemetry"
+    },
+    "rebuild-embeddings-current-model": {
+      "events": [
+        "api_request:embeddings_index",
+        "hosted_ai_used"
+      ]
+    },
+    "systemsculpt-show-load-diagnostics": {
+      "events": [],
+      "not_measured": "local only: no server call, and Obsidian bans client-side telemetry"
+    }
+  }
+}

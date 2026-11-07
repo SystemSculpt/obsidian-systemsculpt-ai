@@ -67,7 +67,16 @@ describe("ManagedMediaJobClient managed-job-protocol-v2 wire contract", () => {
     const body = { prompt: "a red fox", model: "test/model-1", options: { count: 2, aspect_ratio: "16:9", image_size: "2K" as const, seed: 7 } };
     const result = await client.images.create(body, "operation-1");
     expect(result).toEqual({ job: createJob(), poll_url: `/api/plugin/images/generations/jobs/${JOB_ID}` });
+    expect(request.mock.calls[0][0].body).not.toHaveProperty("price");
+    expect(request.mock.calls[0][0].body).not.toHaveProperty("raw_usd");
     expect(request.mock.calls[0][0]).toEqual(expect.objectContaining({ method: "POST", body, url: "https://api.test/api/plugin/images/generations/jobs" }));
+  });
+
+  it("does not resubmit a selected image model after a lost create response", async () => {
+    request.mockRejectedValue(new Error("network lost"));
+    await expect(client.images.create({ model: "maker/new-image", prompt: "Draw" }, "choice-2")).rejects.toThrow("network lost");
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request.mock.calls[0][0].allowTransportFallback).toBe(false);
   });
 
   it("creates a video job with frame images and surfaces idempotent replay", async () => {
@@ -91,6 +100,7 @@ describe("ManagedMediaJobClient managed-job-protocol-v2 wire contract", () => {
     ["image too many inputs", () => client.images.create({ prompt: "x", input_images: Array.from({ length: 5 }, () => ({ type: "uploaded" as const, key: "k", mime_type: "image/png" as const, size_bytes: 1, sha256: "a".repeat(64) })) }, "op")],
     ["image idempotency", () => client.images.create({ prompt: "x" }, "bad:id")],
     ["image missing idempotency", () => client.images.create({ prompt: "x" }, undefined as never)],
+    ["image idempotency length", () => client.images.create({ prompt: "x" }, "x".repeat(122))],
     ["video missing model", () => client.videos.create({ prompt: "x" } as any, "op")],
     ["video duplicate roles", () => client.videos.create({ model: "test/model-1", prompt: "x", frame_images: [frame("first_frame"), frame("first_frame")] }, "op")],
     ["video frame role", () => client.videos.create({ model: "test/model-1", prompt: "x", frame_images: [{ ...frame(), role: "middle_frame" as any }] }, "op")],
@@ -138,6 +148,19 @@ describe("ManagedMediaJobClient managed-job-protocol-v2 wire contract", () => {
     await expect(client.videos.status(JOB_ID)).resolves.toMatchObject({ poll_after_ms: 1500, typical_duration_ms: 45_000 });
     request.mockResolvedValueOnce(json({ job: mediaJob("processing", { processing_started_at: "2026-01-01T00:00:01Z" }), outputs: [], usage: usage(0) }, 200, { "retry-after": "2" }));
     await expect(client.images.status(JOB_ID)).resolves.toMatchObject({ poll_after_ms: 2_000 });
+  });
+
+  it.each(["images", "videos"] as const)("honors the longer body or Retry-After hint for %s", async kind => {
+    for (const [pollAfterMs, retryAfter, expected] of [[2_000, "30", 30_000], [30_000, "2", 30_000], [0, "30", 30_000]] as const) {
+      request.mockResolvedValueOnce(json({ job: mediaJob(), outputs: [], usage: usage(0), poll_after_ms: pollAfterMs }, 200, { "retry-after": retryAfter }));
+      await expect(client[kind].status(JOB_ID)).resolves.toMatchObject({ poll_after_ms: expected });
+    }
+  });
+
+  it.each(["Wed, 04 Nov 2026 00:00:00 GMT", "invalid", null])("keeps HTTP Date %s as local observation metadata", async date => {
+    request.mockResolvedValueOnce(json({ job: mediaJob(), outputs: [], usage: usage(0) }, 200, date === null ? {} : { date }));
+    const result = await client.images.status(JOB_ID);
+    expect(result.serverTimeMs).toBe(date === "Wed, 04 Nov 2026 00:00:00 GMT" ? Date.parse(date) : undefined);
   });
 
   it("returns succeeded status metadata for both media kinds without signed fields", async () => {
@@ -230,9 +253,10 @@ describe("ManagedMediaJobClient managed-job-protocol-v2 wire contract", () => {
     ["extra upload header", { entryHeaders: { "content-type": "image/png", authorization: "secret" } }],
     ["non-https upload", { url: "http://signed/a" }],
     ["mismatched input identity", { sha256: "c".repeat(64) }],
+    ["provider input", { type: "provider" }],
   ] as const)("rejects a malformed prepare response: %s", async (_name, override: Record<string, unknown>) => {
     request.mockResolvedValue(json({ contract: (override.contract as string) ?? "systemsculpt-image-input-upload-v1", upload_id: "up-1", expires_at: futureUploadExpiry(), input_uploads: [
-      { index: 0, upload: { method: "PUT", url: (override.url as string) ?? "https://signed/a", headers: (override.entryHeaders as Record<string, string>) ?? { "content-type": "image/png" }, expires_in_seconds: 900, expires_at: futureUploadExpiry() }, input_image: { type: "uploaded", key: "key-a", mime_type: "image/png", size_bytes: 1, sha256: (override.sha256 as string) ?? "a".repeat(64) } },
+      { index: 0, upload: { method: "PUT", url: (override.url as string) ?? "https://signed/a", headers: (override.entryHeaders as Record<string, string>) ?? { "content-type": "image/png" }, expires_in_seconds: 900, expires_at: futureUploadExpiry() }, input_image: { type: override.type ?? "uploaded", key: "key-a", mime_type: "image/png", size_bytes: 1, sha256: (override.sha256 as string) ?? "a".repeat(64) } },
     ] }));
     await expect(client.images.prepareInputs([{ mime_type: "image/png", size_bytes: 1, sha256: "a".repeat(64) }], async () => new ArrayBuffer(1))).rejects.toMatchObject({ code: "malformed_response" });
   });
@@ -307,6 +331,9 @@ describe("ManagedMediaJobClient managed-job-protocol-v2 wire contract", () => {
 
   it.each([
     ["content type", videoDownloadHeaders({ "content-type": "video/webm" }), "content-type"],
+    ["request id", videoDownloadHeaders({ "x-request-id": "different-id" }), "x-request-id"],
+    ["capability contract", videoDownloadHeaders({ "x-systemsculpt-contract": "other" }), "x-systemsculpt-contract"],
+    ["nosniff", videoDownloadHeaders({ "x-content-type-options": "other" }), "x-content-type-options"],
     ["disposition", videoDownloadHeaders({ "content-disposition": "inline" }), "disposition"],
     ["job contract", videoDownloadHeaders({ "x-systemsculpt-job-contract": "managed-job-protocol-v1" }), "x-systemsculpt-job-contract"],
     ["index", videoDownloadHeaders({ "x-systemsculpt-output-index": "1" }), "x-systemsculpt-output-index"],
@@ -318,6 +345,25 @@ describe("ManagedMediaJobClient managed-job-protocol-v2 wire contract", () => {
   ] as const)("rejects media output %s mismatch without returning bytes", async (_name, headers, diagnostic) => {
     request.mockResolvedValue(new Response(new Uint8Array([1, 2]), { status: 200, headers }));
     await expect(client.videos.downloadOutput(JOB_ID, 0, videoOutput)).rejects.toMatchObject({ code: "malformed_response", message: expect.stringContaining(diagnostic) });
+  });
+
+  it.each([
+    ["malformed", "invalid"], ["conflicting", "2, 3"], ["leading zero", "02"],
+    ["negative", "-1"], ["declared oversize", "31457281"],
+  ])("rejects a %s image content-length before reading bytes", async (_label, contentLength) => {
+    request.mockResolvedValue(new Response(new Uint8Array([1, 2]), {
+      status: 200, headers: imageDownloadHeaders({ "content-length": contentLength }),
+    }));
+    await expect(client.images.downloadOutput(JOB_ID, 0, imageOutput)).rejects.toMatchObject({
+      code: "malformed_response", message: expect.stringContaining("content-length"),
+    });
+  });
+
+  it("rejects corrupt image bytes even when their size and headers agree", async () => {
+    request.mockResolvedValue(new Response(new Uint8Array([2, 1]), { status: 200, headers: imageDownloadHeaders() }));
+    await expect(client.images.downloadOutput(JOB_ID, 0, imageOutput)).rejects.toMatchObject({
+      code: "malformed_response", message: "Managed media output integrity mismatch.",
+    });
   });
 
   it("rejects and cancels an oversized chunked media body", async () => {

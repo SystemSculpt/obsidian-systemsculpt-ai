@@ -1,8 +1,9 @@
-import { isRecord } from '../../studio/utils';
+import { isRecord } from '../../utils/jsonRecord';
 import type { CodexJson } from './CodexAppServer';
 import type { LocalAgentToolUpdate } from './LocalAgentChatSession';
 
-export type CodexActivity = { id: string; kind: 'command' | 'file' | 'tool' | 'plan' | 'message'; title: string; detail: string; status: string; at: string };
+export const CODEX_ACTIVITY_KINDS = ['command', 'file', 'tool', 'plan', 'message'] as const;
+export type CodexActivity = { id: string; kind: typeof CODEX_ACTIVITY_KINDS[number]; title: string; detail: string; status: string; at: string };
 /** Public messages, plans and tool activity only. Reasoning internals are never projected. */
 export function codexActivity(method: string, params: CodexJson): CodexActivity | null {
   const at = new Date().toISOString();

@@ -1,7 +1,7 @@
 import { type App, type EventRef, type TAbstractFile, TFile, normalizePath, parseYaml, stringifyYaml } from "obsidian";
 import { PlatformRequestClient } from "../../services/PlatformRequestClient";
 import { SystemSculptEnvironment } from "../../services/api/SystemSculptEnvironment";
-import { ensureVaultFolder } from "../../tools/vault/utils";
+import { ensureVaultFolder } from "../../utils/vaultFolders";
 import { sha256HexFromBytesPortable } from "../../utils/sha256";
 import { toSafeVaultFileName } from "../../utils/vaultFileName";
 

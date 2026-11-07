@@ -1,7 +1,10 @@
+import { boundedIncidentRenderCount, boundedIncidentRenderDuration, incidentMonotonicNow } from "./RenderIncidentMetrics";
 import { App, Component, Menu, setIcon } from "obsidian";
 import { getHostOperatingSystem } from "../../platform/hostCapabilities";
 import {
   applyPluginSurface,
+  containMenuEscape,
+  returnFocusAfterMenu,
   createUiAction,
   updateUiAction,
 } from "../../core/ui/surface";
@@ -31,9 +34,9 @@ import type { AgentArtifact, AgentConversationSnapshot, ManagedAgentError } from
 import { presentAgentConversation } from "./AgentConversationPresentation";
 import type { ApprovalAnswer } from "./AgentApprovalCards";
 import type { AgentToolPart } from "../../chat/ChatConversation";
-import { presentEmptyState, type AgentChromeState } from "./AgentChatChrome";
+import { presentCreditsOffer, presentEmptyState, type AgentChromeState } from "./AgentChatChrome";
 import { AgentEmptyState, type AgentEmptyStateOptions } from "./AgentEmptyState";
-import { AgentRunLine, containMenuEscape, returnFocusAfterMenu, type AgentRunLineOptions } from "./AgentRunLine";
+import { AgentRunLine, type AgentRunLineOptions } from "./AgentRunLine";
 import { ChatHistoryPanel, type ChatHistoryPanelOptions } from "../history/ChatHistoryPanel";
 import {
   AgentConversationRenderer,
@@ -90,6 +93,16 @@ export type AgentWorkspaceOptions = Readonly<{
   buildMoreMenu?: (menu: Menu) => void;
   onViewPlans?: (error?: ManagedAgentError) => void | Promise<void>;
   showPlanOffer?: boolean;
+  /** The account may go straight to the $9 Monthly checkout (a starter balance). */
+  showMonthlyOffer?: () => boolean;
+  /** Opens Pro checkout from the hosted Chat composer offer. */
+  onCreditsOffer?: () => void | Promise<void>;
+  /** Keeps the existing out-of-credits cards on their own checkout attribution. */
+  onMonthlyOffer?: () => void | Promise<void>;
+  /** The plan's renewal failed: offers fix the card instead of a checkout (T-5348). */
+  showPaymentFix?: () => boolean;
+  /** Opens the billing portal to fix the card. */
+  onUpdateCard?: () => void | Promise<void>;
   onCancelQueued?: (id: string) => void | Promise<void>;
   onRunQueuedNow?: (id: string) => void | Promise<void>;
   runLine?: AgentRunLineOptions;
@@ -175,19 +188,6 @@ export type AgentWorkspaceIncidentRenderingSnapshot = Readonly<{
   scroller: AnchoredScrollerIncidentSnapshot;
 }>;
 
-const INCIDENT_RENDER_COUNT_LIMIT = 1_000_000;
-const INCIDENT_RENDER_DURATION_LIMIT_MS = 86_400_000;
-
-function boundedIncidentRenderCount(value: number): number {
-  if (!Number.isFinite(value)) return 0;
-  return Math.min(INCIDENT_RENDER_COUNT_LIMIT, Math.max(0, Math.floor(value)));
-}
-
-function boundedIncidentRenderDuration(value: number): number {
-  if (!Number.isFinite(value)) return 0;
-  return Math.min(INCIDENT_RENDER_DURATION_LIMIT_MS, Math.max(0, Math.round(value)));
-}
-
 /** Complete native shell for the managed agent experience inside Obsidian. */
 export class AgentWorkspace extends Component {
   public readonly element: HTMLElement;
@@ -212,6 +212,7 @@ export class AgentWorkspace extends Component {
   private showPlanOffer = false;
   private readonly banner: HTMLElement;
   private readonly queueElement: HTMLElement;
+  private readonly creditsOffer: HTMLElement;
   private readonly jumpButton: HTMLButtonElement;
   private readonly scroller: AnchoredScroller;
   private readonly registeredRows = new Map<string, HTMLElement>();
@@ -296,7 +297,7 @@ export class AgentWorkspace extends Component {
     const transcript = this.element.createDiv({ cls: "systemsculpt-agent-transcript" });
     this.viewport = transcript.createDiv({
       cls: "systemsculpt-agent-viewport",
-      attr: { tabindex: "0" },
+      attr: { tabindex: "0", "data-testid": "chat.scroller" },
     });
     this.emptyState = new AgentEmptyState(this.viewport, options.emptyState ?? NO_EMPTY_STATE);
 
@@ -330,6 +331,10 @@ export class AgentWorkspace extends Component {
       onCopyArtifactPath: options.onCopyArtifactPath,
       showPlanOffer: () => this.showPlanOffer,
       onViewPlans: options.onViewPlans,
+      onMonthlyOffer: options.onMonthlyOffer,
+      showMonthlyOffer: options.showMonthlyOffer,
+      showPaymentFix: options.showPaymentFix,
+      onUpdateCard: options.onUpdateCard,
       onRetryFailedTurn: options.onRetryFailedTurn,
       onPrepareIncidentReport: options.onPrepareIncidentReport,
       onCopyIncidentReport: options.onCopyIncidentReport,
@@ -374,6 +379,12 @@ export class AgentWorkspace extends Component {
       },
     });
     this.queueElement.toggleAttribute("hidden", true);
+
+    this.creditsOffer = this.element.createDiv({
+      cls: "systemsculpt-agent-credits-offer",
+      attr: { "data-testid": "chat.credits-offer" },
+    });
+    this.creditsOffer.toggleAttribute("hidden", true);
 
     this.composer = new AgentComposer(this.element, {
       app: options.app,
@@ -456,11 +467,37 @@ export class AgentWorkspace extends Component {
     this.chromeKey = key;
     this.runLine.render(state);
     this.emptyState.render(presentEmptyState(state));
+    this.renderCreditsOffer(state);
   }
 
-  /** The header hides its title on mobile, where Obsidian's own header shows it. */
+  private renderCreditsOffer(state: AgentChromeState): void {
+    const offer = this.options.onCreditsOffer ? presentCreditsOffer(state) : null;
+    this.creditsOffer.empty();
+    this.creditsOffer.toggleAttribute("hidden", !offer);
+    if (!offer) return;
+    if (offer.lead) this.creditsOffer.createSpan({ text: `${offer.lead} ` });
+    const link = this.creditsOffer.createEl("a", {
+      text: offer.link,
+      href: "#",
+      attr: { "data-testid": "chat.credits-offer.link" },
+    });
+    link.addEventListener("click", (event) => {
+      event.preventDefault();
+      void this.options.onCreditsOffer?.();
+    });
+  }
+
+  /** False while Obsidian's own view header shows the title and actions. */
   public isTitleVisible(): boolean {
     return this.titleElement.getClientRects().length > 0;
+  }
+
+  /**
+   * The workspace's title row is a fallback for layouts where Obsidian hides
+   * its view header (sidebars, phone drawers, "Show tab title bar" off).
+   */
+  public setHostHeaderHidden(hidden: boolean): void {
+    this.element.classList.toggle("is-host-header-hidden", hidden);
   }
 
   public get isHistoryOpen(): boolean {
@@ -1191,7 +1228,7 @@ export class AgentWorkspace extends Component {
           this.incidentRenderPassCount + 1,
         );
       }
-      const startedAt = this.incidentMonotonicNow();
+      const startedAt = incidentMonotonicNow(() => this.element.ownerDocument.defaultView);
       try {
         await task();
       } finally {
@@ -1201,7 +1238,7 @@ export class AgentWorkspace extends Component {
             this.incidentActiveRenderCount - 1,
           );
           const durationMs = boundedIncidentRenderDuration(
-            this.incidentMonotonicNow() - startedAt,
+            incidentMonotonicNow(() => this.element.ownerDocument.defaultView) - startedAt,
           );
           this.incidentLastRenderDurationMs = durationMs;
           this.incidentMaxRenderDurationMs = Math.max(
@@ -1228,21 +1265,6 @@ export class AgentWorkspace extends Component {
     this.incidentFailureSurfaceDomCommitted = false;
     this.incidentFailureSurfacePaintOpportunityObserved = false;
     this.renderer.resetIncidentRenderMetrics();
-  }
-
-  private incidentMonotonicNow(): number {
-    try {
-      const value = this.element.ownerDocument.defaultView?.performance?.now?.();
-      if (typeof value === "number" && Number.isFinite(value)) return value;
-    } catch {
-      // Incident measurement must never affect rendering.
-    }
-    try {
-      const value = Date.now();
-      return Number.isFinite(value) ? value : 0;
-    } catch {
-      return 0;
-    }
   }
 
   private ensureSnapshotRender(): void {

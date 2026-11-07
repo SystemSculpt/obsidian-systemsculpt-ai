@@ -162,7 +162,7 @@ describe("PostProcessingService", () => {
     await expect(PostProcessingService.getInstance(mock).processTranscription("raw", { operationId: "postprocess:1" }))
       .resolves.toEqual({
         text: "raw",
-        warning: "Transcript cleanup was unavailable, so the raw transcript was saved instead.",
+        warning: "Cleanup unavailable. Saved the raw transcript.",
       });
     expect(mock.generateText).toHaveBeenCalledTimes(1);
   });
@@ -181,7 +181,7 @@ describe("PostProcessingService", () => {
       operationId: "postprocess:blank",
     })).resolves.toEqual({
       text: "full raw transcript",
-      warning: "Transcript cleanup was incomplete, so the raw transcript was saved instead.",
+      warning: "Cleanup didn't finish. Saved the raw transcript.",
     });
   });
 
@@ -199,7 +199,7 @@ describe("PostProcessingService", () => {
       operationId: "postprocess:length",
     })).resolves.toEqual({
       text: "full raw transcript",
-      warning: "Transcript cleanup was incomplete, so the raw transcript was saved instead.",
+      warning: "Cleanup didn't finish. Saved the raw transcript.",
     });
   });
 

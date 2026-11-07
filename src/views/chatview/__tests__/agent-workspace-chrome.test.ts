@@ -102,6 +102,41 @@ describe("AgentWorkspace chrome", () => {
     workspace.unload();
   });
 
+  it("renders one short Pro link for a full hosted starter grant without blocking the composer", () => {
+    const onCreditsOffer = jest.fn();
+    const onMonthlyOffer = jest.fn();
+    const { parent, workspace } = mount({ onCreditsOffer, onMonthlyOffer });
+    workspace.setChrome(chrome({
+      account: "signed-in",
+      credits: {
+        usageClass: "customer", totalRemaining: 500, availableUnreserved: 500,
+        includedRemaining: 0, addOnRemaining: 500, includedPerMonth: 0,
+        includedCreditsEntitled: false, subscriptionStatus: null,
+        cycleEndsAt: "2026-12-01T00:00:00Z", cycleStartedAt: "2026-11-01T00:00:00Z", cycleAnchorAt: "2026-11-01T00:00:00Z",
+        turnInFlightUntil: null, purchaseUrl: null,
+      },
+    }));
+    const offer = parent.querySelector<HTMLElement>('[data-testid="chat.credits-offer"]')!;
+    expect(offer.hasAttribute("hidden")).toBe(false);
+    expect(offer.textContent).toBe("Get Pro for $9/month");
+    offer.querySelector<HTMLAnchorElement>("a")!.click();
+    expect(onCreditsOffer).toHaveBeenCalledTimes(1);
+    expect(onMonthlyOffer).not.toHaveBeenCalled();
+    expect(parent.querySelector<HTMLTextAreaElement>("textarea")?.disabled).toBe(false);
+    workspace.unload();
+  });
+
+  it("marks its title row as the fallback for a hidden Obsidian view header", () => {
+    const { workspace } = mount();
+    try {
+      expect(workspace.element.classList.contains("is-host-header-hidden")).toBe(false);
+      workspace.setHostHeaderHidden(true);
+      expect(workspace.element.classList.contains("is-host-header-hidden")).toBe(true);
+      workspace.setHostHeaderHidden(false);
+      expect(workspace.element.classList.contains("is-host-header-hidden")).toBe(false);
+    } finally { workspace.unload(); }
+  });
+
   it("fills the More menu from the view", () => {
     const buildMoreMenu = jest.fn((menu: Menu) => {
       menu.addItem((item) => item.setTitle("Rename chat"));
@@ -232,7 +267,7 @@ describe("AgentWorkspace chrome", () => {
     expect(parent.querySelector('[data-testid="chat.composer.approval-mode"]')).toBeNull();
     expect(parent.querySelector('[data-testid="chat.empty"]')?.textContent).toContain("Chat with your vault using SystemSculpt.");
     workspace.setChrome(chrome({ account: "signed-in" }));
-    expect(parent.querySelector('[data-testid="chat.empty"]')?.textContent).toContain("Ask about your notes or give SystemSculpt a task.");
+    expect(parent.querySelector('[data-testid="chat.empty"]')?.textContent).toContain("Ask about your notes.");
     expect(parent.querySelector('[data-testid="chat.run.detail"]')?.textContent).toBe("Credits");
     workspace.unload();
   });

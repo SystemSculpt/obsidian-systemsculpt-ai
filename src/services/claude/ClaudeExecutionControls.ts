@@ -1,8 +1,6 @@
 import type SystemSculptPlugin from '../../main';
-import { claudeOptionsFromSettings } from './LocalClaudeClient';
+import { claudeOptionsFromSettings, CLAUDE_MODELS, CLAUDE_PERMISSION_MODES, CLAUDE_PERMISSION_LABELS, isClaudePermissionMode, type ClaudePermissionMode } from './ClaudeExecutionOptions';
 
-const MODELS: readonly [string, string][] = [['', 'Claude Code default'], ['opus', 'Opus'], ['sonnet', 'Sonnet'], ['haiku', 'Haiku']];
-const PERMISSIONS: readonly [string, string][] = [['auto', 'Auto'], ['manual', 'Ask before edits'], ['acceptEdits', 'Accept edits'], ['plan', 'Plan only'], ['settings', 'Claude Code settings']];
 
 /** Next-turn Claude Code choices. Login, tools and permission rules stay in Claude Code. */
 export function mountClaudeExecutionControls(root: HTMLElement, plugin: SystemSculptPlugin, enabled: () => boolean): { refresh: () => void; dispose: () => void } {
@@ -26,18 +24,18 @@ export function mountClaudeExecutionControls(root: HTMLElement, plugin: SystemSc
     let selected;
     try { selected = claudeOptionsFromSettings(plugin.settings); status.setText(''); }
     catch (cause) { selected = { model: '', permissionMode: 'auto' }; status.setText(cause instanceof Error ? cause.message : 'Invalid Claude Code options.'); }
-    fill(model, MODELS, selected.model); fill(permissions, PERMISSIONS, selected.permissionMode);
+    fill(model, CLAUDE_MODELS.map(([value, label]) => [value, value ? label : 'Claude Code default']), selected.model); fill(permissions, CLAUDE_PERMISSION_MODES.map(value => [value, CLAUDE_PERMISSION_LABELS[value]]), selected.permissionMode);
     for (const select of [model, permissions]) select.parentElement!.hidden = !visible;
     status.hidden = !visible || !status.textContent;
   };
-  const save = (patch: { claudeModel?: string; claudePermissionMode?: 'auto' | 'manual' | 'acceptEdits' | 'plan' | 'settings' }) => {
+  const save = (patch: { claudeModel?: string; claudePermissionMode?: ClaudePermissionMode }) => {
     if (!enabled()) return;
     void plugin.getSettingsManager().updateSettings(patch).catch(cause => { status.setText(cause instanceof Error ? cause.message : 'Could not save Claude Code options.'); status.hidden = false; });
   };
   model.addEventListener('change', () => save({ claudeModel: model.value }));
   permissions.addEventListener('change', () => {
     const value = permissions.value;
-    if (value === 'auto' || value === 'manual' || value === 'acceptEdits' || value === 'plan' || value === 'settings') save({ claudePermissionMode: value });
+    if (isClaudePermissionMode(value)) save({ claudePermissionMode: value });
   });
   refresh();
   return { refresh, dispose: () => { disposed = true; } };

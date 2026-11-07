@@ -9,9 +9,13 @@ import {
   CONNECT_ERROR_COPY,
   LICENSE_CONFIRMING_COPY,
   RETRYABLE_CONNECT_REASONS,
+  canStartHostedChat,
+  firstChatAction,
   connectOutcomeMessage,
+  creditsReadyLine,
   signedInLine,
 } from "./AccountConnectOutcome";
+import { showActionNotice } from "../core/ui/notifications";
 import type SystemSculptPlugin from "../main";
 import type { AccountConnectMode, ConnectOutcome } from "../services/AccountConnectService";
 
@@ -43,24 +47,22 @@ export function requireActivePlan(plugin: SystemSculptPlugin, feature: string): 
 export function presentAccountConnectOutcome(plugin: SystemSculptPlugin, outcome: ConnectOutcome): void {
   if (UpgradePlanModal.showConnectOutcome(outcome)) return;
   if (plugin.settingsTab?.showAccountConnectOutcome(outcome)) return;
-  showConnectNotice(connectOutcomeMessage(outcome), outcome.kind === "error" ? 10_000 : 6_000);
-}
-
-/**
- * Polling usually finishes a sign-in while the person is still in the browser,
- * where a timed notice would expire unseen. Away from Obsidian, the notice
- * stays until they come back and only then starts its normal time on screen.
- */
-function showConnectNotice(message: string, durationMs: number): void {
   const ownerWindow = getRuntimeWindow();
-  if (ownerWindow.document.hasFocus()) {
-    new Notice(message, durationMs);
-    return;
+  const away = !ownerWindow.document.hasFocus();
+  const hasChatAction = canStartHostedChat(outcome);
+  const durationMs = outcome.kind === "error" || hasChatAction ? 10_000 : 6_000;
+  const duration = away ? 0 : durationMs;
+  const message = connectOutcomeMessage(outcome);
+  const notice = hasChatAction
+    ? showActionNotice(message, firstChatAction(plugin), { duration })
+    : new Notice(message, duration);
+  // A browser handoff can finish long before the person returns. Start the
+  // notice's normal time on screen only when Obsidian regains focus.
+  if (away) {
+    ownerWindow.addEventListener("focus", () => {
+      ownerWindow.setTimeout(() => notice.hide(), durationMs);
+    }, { once: true });
   }
-  const notice = new Notice(message, 0);
-  ownerWindow.addEventListener("focus", () => {
-    ownerWindow.setTimeout(() => notice.hide(), durationMs);
-  }, { once: true });
 }
 
 /**
@@ -158,10 +160,23 @@ export class UpgradePlanModal extends StandardModal {
       return;
     }
     this.resetSections();
+    if (outcome.kind === "signed-in" && canStartHostedChat(outcome)) {
+      this.addTitle("You're in", creditsReadyLine(outcome) ?? signedInLine(outcome.email));
+      this.renderTitleIcon("check-circle-2", "is-success");
+      // Title, credits line and actions read as one block: no empty body band.
+      this.modalEl.addClass("is-compact");
+      const first = firstChatAction(this.plugin);
+      this.addActionButton("upgrade-plan.start-chat", first.label, () => {
+        this.close();
+        first.onSelect();
+      }, true, "message-square");
+      this.addActionButton("upgrade-plan.done", "Done", () => this.close());
+      return;
+    }
     if (outcome.kind === "signed-in") {
       this.addTitle("You're signed in", signedInLine(outcome.email));
-      this.renderIcon("check-circle-2", "is-success");
-      if (!outcome.licenseValid) this.addDetail(LICENSE_CONFIRMING_COPY);
+      this.renderTitleIcon("check-circle-2", "is-success");
+      this.addDetail(LICENSE_CONFIRMING_COPY);
       this.addActionButton("upgrade-plan.done", "Done", () => this.close(), true);
       return;
     }
@@ -189,8 +204,8 @@ export class UpgradePlanModal extends StandardModal {
   private renderSignedOut(): void {
     this.addTitle("Unlock SystemSculpt AI", this.featureLine());
     this.renderIcon("sparkles");
-    this.addDetail("Create a free SystemSculpt account to get 500 starter credits. No card needed.");
-    this.addLink("upgrade-plan.pricing", "Compare plans on systemsculpt.com", SYSTEMSCULPT_WEBSITE.LICENSE);
+    this.addDetail("Start with 500 free credits. No card needed.");
+    this.addLink("upgrade-plan.pricing", "Compare plans", SYSTEMSCULPT_WEBSITE.LICENSE);
     this.addLink("upgrade-plan.license-key", "I have a license key", () => {
       this.close();
       this.plugin.openSettingsTab("account");
@@ -207,15 +222,21 @@ export class UpgradePlanModal extends StandardModal {
       this.addDetail(`Signed in as ${email}.`);
     }
     this.addDetail(PLAN_REQUIRED_MESSAGE);
-    if (hasActivePlan(this.plugin)) {
-      this.addDetail("Your current license isn't active. After renewing or purchasing, sync your license below.");
+    // A key the server rejects may be a renewal whose card failed: Billing
+    // fixes it; a second subscription would bill twice (T-5348).
+    const lapsed = hasActivePlan(this.plugin);
+    if (lapsed) {
+      this.addDetail("Your license isn't active. If a payment failed, update your card in Billing, then sync below.");
+      this.addActionButton("upgrade-plan.billing", "Open billing", () => {
+        void openExternalUrl(SYSTEMSCULPT_WEBSITE.BILLING, getSurfaceOwnerWindow(this.modalEl));
+      }, true, "credit-card");
     }
-    this.addLink("upgrade-plan.sync", "Already purchased? Sync your license", () => this.beginConnect("sign-in"));
+    this.addLink("upgrade-plan.sync", "Already paid? Sync", () => this.beginConnect("sign-in"));
     this.addActionButton(
       "upgrade-plan.yearly",
       "Subscribe yearly",
       () => this.openPurchase(SYSTEMSCULPT_WEBSITE.YEARLY),
-      true,
+      !lapsed,
       "external-link",
     );
     this.addActionButton(
@@ -242,7 +263,7 @@ export class UpgradePlanModal extends StandardModal {
     this.addTitle("Finish your purchase in the browser", "Complete checkout, then come back here.");
     this.renderIcon("shopping-cart");
     if (this.signedInEmail()) {
-      this.addDetail("Once you've purchased, sync your license to unlock AI features.");
+      this.addDetail("Then sync your license.");
       this.addActionButton(
         "upgrade-plan.sync",
         "I've purchased — Sync license",
@@ -251,7 +272,7 @@ export class UpgradePlanModal extends StandardModal {
         "refresh-cw",
       );
     } else {
-      this.addDetail("Once you've purchased, sign in here to activate your license.");
+      this.addDetail("Then sign in here.");
       this.addActionButton("upgrade-plan.sign-in", "Sign in", () => this.beginConnect("sign-in"), true, "log-in");
     }
     this.addActionButton("upgrade-plan.back", "Back", () => this.renderMain());
@@ -274,7 +295,7 @@ export class UpgradePlanModal extends StandardModal {
         status.empty();
         status.createDiv({
           cls: "ss-upgrade-plan__status-text",
-          text: "Couldn't open your browser. Reopen the sign-in page, then paste the connection code shown there.",
+          text: "Couldn't open your browser. Reopen sign-in.",
         });
       });
   }
@@ -285,12 +306,12 @@ export class UpgradePlanModal extends StandardModal {
     this.awaitingSignIn = true;
     this.addTitle(
       "Continue in your browser",
-      mode === "sign-up" ? "Create your free SystemSculpt account." : "Sign in to SystemSculpt.",
+      mode === "sign-up" ? "Create your free account." : "Sign in to SystemSculpt.",
     );
     const status = this.contentEl.createDiv({ cls: "ss-upgrade-plan__status" });
     status.createDiv({ cls: "ss-upgrade-plan__spinner", attr: { "aria-hidden": "true" } });
     status.createDiv({ cls: "ss-upgrade-plan__status-text", text: "Waiting for you to finish in the browser…" });
-    this.addDetail("This screen finishes automatically once you're signed in. If nothing happens, paste the connection code shown in your browser:");
+    this.addDetail("Stuck? Paste the code from your browser:");
     const codeInput = this.contentEl.createEl("input", {
       cls: "ss-upgrade-plan__code-input",
       attr: {
@@ -368,7 +389,21 @@ export class UpgradePlanModal extends StandardModal {
     setIcon(iconEl, icon);
   }
 
+  /** A small status icon leading the title, in place of a body icon. */
+  private renderTitleIcon(icon: string, toneClass: string): void {
+    const titleEl = this.headerEl.querySelector(".ss-modal__title");
+    const rowEl = titleEl?.parentElement;
+    if (!titleEl || !rowEl) return;
+    const iconEl = rowEl.createDiv({
+      cls: `ss-upgrade-plan__title-icon ${toneClass}`,
+      attr: { "aria-hidden": "true" },
+    });
+    setIcon(iconEl, icon);
+    titleEl.before(iconEl);
+  }
+
   private resetSections(): void {
+    this.modalEl.removeClass("is-compact");
     this.headerEl.empty();
     this.contentEl.empty();
     this.footerEl.empty();

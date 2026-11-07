@@ -133,6 +133,8 @@ function createPlugin(settings: Record<string, unknown> = {}) {
     getAccountConnectService: () => ({ begin, reopen, submitManualCode, pollInBackground, hasPendingRequest }),
     getSettingsManager: () => ({ updateSettings }),
     openNewChat: jest.fn(),
+    startHostedChat: jest.fn().mockResolvedValue(undefined),
+    readyPrompt: jest.fn((): string | null => null),
     openSettingsTab: jest.fn(),
     begin,
     reopen,
@@ -167,7 +169,7 @@ describe("UpgradePlanModal", () => {
     modal.onOpen();
 
     expect(modal.modalEl.textContent).toContain("Unlock SystemSculpt AI");
-    expect(modal.modalEl.textContent).toContain("Create a free SystemSculpt account to get 500 starter credits. No card needed.");
+    expect(modal.modalEl.textContent).toContain("Start with 500 free credits. No card needed.");
     expect(findButtonByText(modal.modalEl, "Sign in")).toBeTruthy();
     const start = modal.modalEl.querySelector<HTMLButtonElement>('[data-testid="upgrade-plan.create-account"]')!;
     expect(start.textContent).toContain("Start free");
@@ -196,7 +198,7 @@ describe("UpgradePlanModal", () => {
     modal.onOpen();
 
     expect(modal.modalEl.textContent).toContain("Signed in as user@example.com.");
-    expect(modal.modalEl.textContent).toContain("Create a free account for 500 starter credits, or choose a plan.");
+    expect(modal.modalEl.textContent).toContain("Start free with 500 credits, or choose a plan.");
     expect(findButtonByText(modal.modalEl, "Subscribe yearly")).toBeTruthy();
     expect(findButtonByText(modal.modalEl, "Subscribe monthly")).toBeTruthy();
     modal.onClose();
@@ -211,7 +213,7 @@ describe("UpgradePlanModal", () => {
     findButtonByText(modal.modalEl, "Subscribe yearly").click();
 
     expect(hrefs).toEqual([
-      "https://systemsculpt.com/checkout?resourceId=2b96b063-3ed9-4e5a-972c-6910fb611ab8&utm_source=obsidian-plugin&utm_medium=modal&utm_campaign=upgrade",
+      "https://systemsculpt.com/checkout?resourceId=2b96b063-3ed9-4e5a-972c-6910fb611ab8&ref=plugin_modal_annual&utm_source=obsidian-plugin&utm_medium=modal&utm_campaign=upgrade",
     ]);
     expect(modal.modalEl.textContent).toContain("Finish your purchase in the browser");
     expect(findButtonByText(modal.modalEl, "I've purchased — Sync license")).toBeTruthy();
@@ -225,11 +227,12 @@ describe("UpgradePlanModal", () => {
       const plugin = createPlugin({ userEmail: "user@example.com", licenseKey: "expired-key" });
       const modal = new UpgradePlanModal(plugin);
       modal.onOpen();
-      expect(modal.modalEl.textContent).toContain("Your current license isn't active.");
+      expect(modal.modalEl.textContent).toContain("Your license isn't active.");
       findButtonByText(modal.modalEl, "Subscribe monthly").click();
       const checkout = new URL(hrefs[0]);
       expect(checkout.origin).toBe("https://systemsculpt.com");
       expect(checkout.pathname).toBe("/subscribe");
+      expect(checkout.searchParams.get("ref")).toBe("plugin_modal_monthly");
       expect(checkout.searchParams.get("utm_source")).toBe("obsidian-plugin");
       expect(checkout.searchParams.get("utm_medium")).toBe("modal");
       expect(plugin.updateSettings).not.toHaveBeenCalled();
@@ -240,6 +243,25 @@ describe("UpgradePlanModal", () => {
     } finally {
       spy.mockRestore();
     }
+  });
+
+  it("leads a rejected key with Billing, where a failed card is fixed (T-5348)", () => {
+    const { hrefs, spy } = spyOnAnchorClicks();
+    try {
+      const modal = new UpgradePlanModal(createPlugin({ userEmail: "user@example.com", licenseKey: "expired-key" }));
+      modal.onOpen();
+      expect(modal.modalEl.textContent).toContain("If a payment failed, update your card in Billing");
+      findButtonByText(modal.modalEl, "Open billing").click();
+      expect(new URL(hrefs[0]).pathname).toBe("/dashboard/billing");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("shows no Billing button to an account without a key", () => {
+    const modal = new UpgradePlanModal(createPlugin({ userEmail: "user@example.com" }));
+    modal.onOpen();
+    expect(modal.modalEl.textContent).not.toContain("Open billing");
   });
 
   it.each([{}, { userEmail: "account@example.com" }])("opens comparison pricing without changing access (%j)", (settings) => {
@@ -269,7 +291,7 @@ describe("UpgradePlanModal", () => {
     expect(plugin.begin).toHaveBeenCalledWith("sign-in", expect.anything());
     expect(modal.modalEl.textContent).toContain("Continue in your browser");
     expect(modal.modalEl.textContent).toContain("Waiting for you to finish in the browser");
-    expect(modal.modalEl.textContent).toContain("finishes automatically");
+    expect(modal.modalEl.textContent).toContain("Paste the code from your browser");
     const codeInput = modal.modalEl.querySelector<HTMLInputElement>("[data-testid='upgrade-plan.code']");
     expect(codeInput).not.toBeNull();
 
@@ -285,7 +307,7 @@ describe("UpgradePlanModal", () => {
     const modal = UpgradePlanModal.openConnect(plugin, "sign-up", { feature: "Chat" });
     await flushPromises();
     expect(plugin.begin).toHaveBeenCalledWith("sign-up", expect.anything());
-    expect(modal.modalEl.textContent).toContain("Create your free SystemSculpt account.");
+    expect(modal.modalEl.textContent).toContain("Create your free account.");
     // A second press while the handoff is open reuses it.
     expect(UpgradePlanModal.openConnect(plugin, "sign-in")).toBe(modal);
   });
@@ -366,23 +388,60 @@ describe("UpgradePlanModal", () => {
     })).toBe(true);
 
     expect(document.querySelectorAll(".ss-upgrade-plan-modal")).toHaveLength(1);
-    expect(modal.modalEl.textContent).toContain("You're signed in");
+    expect(modal.modalEl.textContent).toContain("You're in");
     expect(modal.modalEl.textContent).toContain("Signed in as user@example.test.");
-    expect(modal.modalEl.textContent).not.toContain("Welcome");
+    expect(modal.modalEl.textContent).not.toContain("credits ready");
     expect(modal.modalEl.textContent).not.toContain("license is being confirmed");
-    expect(Array.from(modal["footerEl"].querySelectorAll("button")).map((button) => button.textContent)).toEqual(["Done"]);
+    expect(Array.from(modal["footerEl"].querySelectorAll("button")).map((button) => button.textContent))
+      .toEqual(["Start a chat", "Done"]);
     findButtonByText(modal.modalEl, "Done").click();
     modal.onClose();
     expect(plugin.pollInBackground).not.toHaveBeenCalled();
-    expect(plugin.openNewChat).not.toHaveBeenCalled();
+    expect(plugin.startHostedChat).not.toHaveBeenCalled();
+  });
+
+  it("goes from a starter sign-in straight to a hosted chat", () => {
+    const plugin = createPlugin();
+    const modal = UpgradePlanModal.openOnce(plugin);
+    UpgradePlanModal.showConnectOutcome({
+      kind: "signed-in", name: null, email: "user@example.test", licenseValid: true, starterCredits: 500,
+    });
+    expect(modal.modalEl.textContent).toContain("You're in");
+    expect(modal.modalEl.textContent).toContain("500 credits ready.");
+    expect(modal.modalEl.textContent).not.toContain("Signed in as");
+    // One tight block: the check leads the title and no empty body band remains.
+    expect(modal["headerEl"].querySelector(".ss-modal__title-container > .ss-upgrade-plan__title-icon + .ss-modal__title"))
+      .not.toBeNull();
+    expect(modal.contentEl.childElementCount).toBe(0);
+    expect(modal.modalEl.classList.contains("is-compact")).toBe(true);
+    findButtonByText(modal.modalEl, "Start a chat").click();
+    expect(plugin.startHostedChat).toHaveBeenCalledTimes(1);
+    expect(plugin.startHostedChat).toHaveBeenCalledWith({});
+    expect(document.querySelector(".ss-upgrade-plan-modal")).toBeNull();
+  });
+
+  it("runs the ready prompt on the latest note in one tap after sign-in (T-5302)", () => {
+    const plugin = createPlugin();
+    plugin.readyPrompt.mockReturnValue("Summarize [[Trip plan]]");
+    const modal = UpgradePlanModal.openOnce(plugin);
+    UpgradePlanModal.showConnectOutcome({
+      kind: "signed-in", name: null, email: "user@example.test", licenseValid: true, starterCredits: 500,
+    });
+    expect(Array.from(modal["footerEl"].querySelectorAll("button")).map((button) => button.textContent))
+      .toEqual(["Summarize my latest note", "Done"]);
+    findButtonByText(modal.modalEl, "Summarize my latest note").click();
+    expect(plugin.startHostedChat).toHaveBeenCalledWith({ prompt: "Summarize [[Trip plan]]" });
+    expect(document.querySelector(".ss-upgrade-plan-modal")).toBeNull();
   });
 
   it("keeps account and license validation apart in the signed-in result", async () => {
     const plugin = createPlugin();
     const modal = UpgradePlanModal.openOnce(plugin);
     UpgradePlanModal.showConnectOutcome({ kind: "signed-in", name: null, email: null, licenseValid: false });
+    expect(modal.modalEl.textContent).toContain("You're signed in");
     expect(modal.modalEl.textContent).toContain("Signed in to SystemSculpt.");
-    expect(modal.modalEl.textContent).toContain("Your license is being confirmed.");
+    expect(modal.modalEl.textContent).toContain("Confirming your license…");
+    expect(Array.from(modal["footerEl"].querySelectorAll("button")).map((button) => button.textContent)).toEqual(["Done"]);
     modal.onClose();
   });
 
@@ -413,7 +472,7 @@ describe("UpgradePlanModal", () => {
     UpgradePlanModal.showConnectOutcome({ kind: "error", reason: "unavailable" });
 
     expect(modal.modalEl.textContent).toContain("Sign-in didn't finish");
-    expect(modal.modalEl.textContent).toContain("Sign-in is temporarily unavailable. Try again in a moment.");
+    expect(modal.modalEl.textContent).toContain("Sign-in is down. Try again soon.");
     expect(modal.modalEl.textContent).not.toContain("signed in");
     findButtonByText(modal.modalEl, "Start sign-in again").click();
     await flushPromises();
@@ -429,7 +488,7 @@ describe("UpgradePlanModal", () => {
     await flushPromises();
 
     UpgradePlanModal.showConnectOutcome({ kind: "error", reason: "network" });
-    expect(modal.modalEl.textContent).toContain("Could not reach SystemSculpt.");
+    expect(modal.modalEl.textContent).toContain("Can't reach SystemSculpt.");
     findButtonByText(modal.modalEl, "Enter the code again").click();
     expect(modal.modalEl.querySelector("[data-testid='upgrade-plan.code']")).not.toBeNull();
     expect(plugin.begin).toHaveBeenCalledTimes(1);
@@ -478,9 +537,9 @@ describe("UpgradePlanModal", () => {
     presentAccountConnectOutcome(plugin, { kind: "error", reason: "expired" });
     presentAccountConnectOutcome(plugin, { kind: "no-license", name: null, email: "user@example.test" });
     expect(Notice).toHaveBeenNthCalledWith(1,
-      "The sign-in session expired. Start sign-in again from SystemSculpt settings.", 10_000);
+      "Sign-in expired. Try again.", 10_000);
     expect(Notice).toHaveBeenNthCalledWith(2,
-      "Signed in to SystemSculpt as user@example.test. Your account has no active plan yet. Choose a plan to enable SystemSculpt AI features.", 6_000);
+      "Signed in to SystemSculpt as user@example.test. No active plan. Choose one to start.", 6_000);
     expect(document.querySelector(".ss-upgrade-plan-modal")).toBeNull();
     jest.restoreAllMocks();
   });
@@ -494,13 +553,16 @@ describe("UpgradePlanModal", () => {
     (Notice as unknown as jest.Mock).mockImplementationOnce(() => ({ hide }));
     try {
       presentAccountConnectOutcome(createPlugin(), { kind: "signed-in", name: null, email: "user@example.test", licenseValid: true });
-      expect(Notice).toHaveBeenCalledWith("Signed in to SystemSculpt as user@example.test.", 0);
+      const [fragment, duration] = (Notice as unknown as jest.Mock).mock.calls[0] as [DocumentFragment, number];
+      expect(fragment.textContent).toContain("Signed in to SystemSculpt as user@example.test.");
+      expect(fragment.querySelector('[data-testid="notice.action"]')?.textContent).toBe("Start a chat");
+      expect(duration).toBe(0);
 
       jest.advanceTimersByTime(60_000);
       expect(hide).not.toHaveBeenCalled();
 
       window.dispatchEvent(new window.Event("focus"));
-      jest.advanceTimersByTime(5_999);
+      jest.advanceTimersByTime(9_999);
       expect(hide).not.toHaveBeenCalled();
       jest.advanceTimersByTime(1);
       expect(hide).toHaveBeenCalledTimes(1);
@@ -509,6 +571,46 @@ describe("UpgradePlanModal", () => {
       hasFocus.mockRestore();
       jest.useRealTimers();
     }
+  });
+
+  it("keeps an error notice until the person returns to Obsidian", () => {
+    jest.useFakeTimers();
+    const hasFocus = jest.spyOn(document, "hasFocus").mockReturnValue(false);
+    const setTimeoutSpy = jest.spyOn(window, "setTimeout").mockImplementation(((callback: () => void, ms: number) =>
+      setTimeout(callback, ms)) as never);
+    const hide = jest.fn();
+    (Notice as unknown as jest.Mock).mockImplementationOnce(() => ({ hide }));
+    try {
+      presentAccountConnectOutcome(createPlugin(), { kind: "error", reason: "expired" });
+      expect(Notice).toHaveBeenCalledWith("Sign-in expired. Try again.", 0);
+      jest.advanceTimersByTime(60_000);
+      expect(hide).not.toHaveBeenCalled();
+      window.dispatchEvent(new window.Event("focus"));
+      jest.advanceTimersByTime(10_000);
+      expect(hide).toHaveBeenCalledTimes(1);
+    } finally {
+      setTimeoutSpy.mockRestore();
+      hasFocus.mockRestore();
+      jest.useRealTimers();
+    }
+  });
+
+  it("offers Start a chat in the notice when no account surface is open", () => {
+    jest.spyOn(document, "hasFocus").mockReturnValue(true);
+    const plugin = createPlugin();
+    plugin.settingsTab = { showAccountConnectOutcome: jest.fn(() => false) };
+    (Notice as unknown as jest.Mock).mockImplementationOnce(() => ({ hide: jest.fn() }));
+    presentAccountConnectOutcome(plugin, {
+      kind: "signed-in", name: null, email: "user@example.test", licenseValid: true, starterCredits: 500,
+    });
+    const fragment = (Notice as unknown as jest.Mock).mock.calls[0][0] as DocumentFragment;
+    expect(fragment.textContent).toContain("Signed in to SystemSculpt as user@example.test. 500 credits ready.");
+    const action = fragment.querySelector<HTMLButtonElement>('[data-testid="notice.action"]');
+    expect(action?.textContent).toBe("Start a chat");
+    action?.click();
+    expect(plugin.startHostedChat).toHaveBeenCalledTimes(1);
+    expect((Notice as unknown as jest.Mock).mock.calls[0][1]).toBe(10_000);
+    jest.restoreAllMocks();
   });
 
   it("opens at most one instance at a time via openOnce", () => {

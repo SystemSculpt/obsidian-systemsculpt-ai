@@ -1,15 +1,16 @@
 import type { ConnectErrorReason, ConnectOutcome } from "../services/AccountConnectService";
+import { READY_PROMPT_LABEL } from "../chat/ReadyPrompt";
 
 /** What each sign-in failure tells the user, wherever the result is shown. */
 export const CONNECT_ERROR_COPY: Record<ConnectErrorReason, string> = {
-  expired: "The sign-in session expired. Start sign-in again from SystemSculpt settings.",
-  "state-mismatch": "The sign-in could not be verified. Start again from SystemSculpt settings.",
-  "missing-code": "No connection code was received. Paste the code shown in your browser into SystemSculpt settings.",
-  network: "Could not reach SystemSculpt. Check your connection, then try the code again from settings.",
-  "invalid-code": "The connection code was invalid or expired. Start sign-in again from SystemSculpt settings.",
-  "rate-limited": "Too many sign-in attempts. Wait a moment, then try again.",
-  unavailable: "Sign-in is temporarily unavailable. Try again in a moment.",
-  unconfirmed: "Your sign-in may have gone through, but Obsidian didn't receive the confirmation. Start sign-in again to finish connecting.",
+  expired: "Sign-in expired. Try again.",
+  "state-mismatch": "Couldn't verify sign-in. Try again.",
+  "missing-code": "No code received. Paste the code from your browser.",
+  network: "Can't reach SystemSculpt. Check your connection.",
+  "invalid-code": "Code invalid or expired. Sign in again.",
+  "rate-limited": "Too many tries. Wait a moment.",
+  unavailable: "Sign-in is down. Try again soon.",
+  unconfirmed: "Sign-in didn't finish. Try again.",
 };
 
 /** Error reasons a fresh browser sign-in can recover from in one tap. */
@@ -22,13 +23,46 @@ export const RETRYABLE_CONNECT_REASONS: ReadonlySet<ConnectErrorReason> = new Se
 ]);
 
 export const LICENSE_CONFIRMING_COPY =
-  "Your license is being confirmed. If AI features stay locked, open SystemSculpt settings and retry validation.";
+  "Confirming your license…";
 
 const NO_PLAN_COPY =
-  "Your account has no active plan yet. Choose a plan to enable SystemSculpt AI features.";
+  "No active plan. Choose one to start.";
 
 export function signedInLine(email: string | null): string {
   return email ? `Signed in as ${email}.` : "Signed in to SystemSculpt.";
+}
+
+const START_CHAT_LABEL = "Start a chat";
+
+type FirstChatHost = Readonly<{
+  readyPrompt: () => string | null;
+  startHostedChat: (options?: Readonly<{ prompt?: string }>) => Promise<void>;
+}>;
+
+/**
+ * The one step after a valid sign-in (T-5302): run the ready prompt on the
+ * person's latest note, or open an empty hosted chat when the vault has none.
+ */
+export function firstChatAction(host: FirstChatHost): Readonly<{ label: string; onSelect: () => void }> {
+  const ready = host.readyPrompt() !== null;
+  return {
+    label: ready ? READY_PROMPT_LABEL : START_CHAT_LABEL,
+    onSelect: () => {
+      const prompt = ready ? host.readyPrompt() ?? undefined : undefined;
+      void host.startHostedChat(prompt ? { prompt } : {});
+    },
+  };
+}
+
+/** "500 credits ready." for a starter account whose balance is known; null otherwise. */
+export function creditsReadyLine(outcome: ConnectOutcome): string | null {
+  if (outcome.kind !== "signed-in" || !outcome.licenseValid || !outcome.starterCredits) return null;
+  return `${outcome.starterCredits.toLocaleString("en-US")} credits ready.`;
+}
+
+/** A valid sign-in can go straight to a first hosted chat. */
+export function canStartHostedChat(outcome: ConnectOutcome): boolean {
+  return outcome.kind === "signed-in" && outcome.licenseValid;
 }
 
 /** The complete result in one message, for when no account surface is open. */
@@ -37,5 +71,7 @@ export function connectOutcomeMessage(outcome: ConnectOutcome): string {
   // A notice has no surrounding screen to say what this sign-in was for.
   const signedIn = outcome.email ? `Signed in to SystemSculpt as ${outcome.email}.` : "Signed in to SystemSculpt.";
   if (outcome.kind === "no-license") return `${signedIn} ${NO_PLAN_COPY}`;
-  return outcome.licenseValid ? signedIn : `${signedIn} ${LICENSE_CONFIRMING_COPY}`;
+  if (!outcome.licenseValid) return `${signedIn} ${LICENSE_CONFIRMING_COPY}`;
+  const credits = creditsReadyLine(outcome);
+  return credits ? `${signedIn} ${credits}` : signedIn;
 }

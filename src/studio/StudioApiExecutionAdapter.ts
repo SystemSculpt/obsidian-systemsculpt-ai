@@ -1,7 +1,8 @@
 import { StudioCodexRuns, codexRunKey } from "../services/codex/StudioCodexRuns";
 import { answerCodexRequest } from "../services/codex/CodexRequestModal";
 import { codexOptionsFromSettings, codexVaultDirectory, localTextAgent } from "../services/codex/CodexExecutionSettings";
-import { claudeOptionsFromSettings, runLocalClaude } from "../services/claude/LocalClaudeClient";
+import { runLocalClaude } from "../services/claude/LocalClaudeClient";
+import { claudeOptionsFromSettings } from "../services/claude/ClaudeExecutionOptions";
 import { answerClaudePermission } from "../services/claude/ClaudeRequestModal";
 import type SystemSculptPlugin from "../main";
 import { ManagedJobClient } from "../services/managed/ManagedJobClient";
@@ -9,12 +10,15 @@ import { ManagedMediaJobClient } from "../services/managed/ManagedMediaJobClient
 import type { ManagedJobRecoveryStore } from "../services/managed/ManagedJobRecoveryStore";
 import { ManagedTranscriptionAdapter } from "../services/transcription/ManagedTranscriptionAdapter";
 import { getTranscriptionMaxFileSize } from "../services/transcription/TranscriptionCoordinator";
+import { ManagedImageGenerationAdapter } from "../services/images/ManagedImageGenerationAdapter";
 import { ManagedVideoGenerationAdapter } from "../services/videos/ManagedVideoGenerationAdapter";
 import { snapManagedVideoRequestToModel, type ManagedVideoModel } from "../services/videos/ManagedVideoModelCatalog";
 import { getVideoGenerationAvailability } from "../services/videos/VideoGenerationAvailability";
 import { getStudioMediaCatalogs } from "./StudioMediaCatalogs";
 import type {
   StudioApiAdapter,
+  StudioImageGenerationRequest,
+  StudioImageGenerationResult,
   StudioManagedOperationRef,
   StudioTextGenerationRequest,
   StudioTextGenerationResult,
@@ -24,7 +28,7 @@ import type {
   StudioVideoGenerationResult,
 } from "./types";
 
-function operationId(capability: "text" | "video" | "transcription", runId: string, nodeId: string): string {
+function operationId(capability: "text" | "image" | "video" | "transcription", runId: string, nodeId: string): string {
   const value = `studio-${capability}-${runId}-${nodeId}`;
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value)) {
     throw new Error("Studio managed operation identity is invalid.");
@@ -37,6 +41,7 @@ export class StudioApiExecutionAdapter implements StudioApiAdapter {
   dispose(): void { this.codexRuns.dispose(); }
   private readonly recovery: ManagedJobRecoveryStore;
   private readonly videos: ManagedVideoGenerationAdapter;
+  private readonly images: ManagedImageGenerationAdapter;
   private readonly transcription: ManagedTranscriptionAdapter;
 
   constructor(private readonly plugin: SystemSculptPlugin) {
@@ -52,6 +57,12 @@ export class StudioApiExecutionAdapter implements StudioApiAdapter {
       admission: signal => graph.admission.checkLicense(signal),
       jobs: mediaJobs.videos,
       prepareFrames: mediaJobs.images.prepareInputs,
+      recovery: this.recovery,
+    });
+    this.images = new ManagedImageGenerationAdapter({
+      admission: signal => graph.admission.checkLicense(signal),
+      jobs: mediaJobs.images,
+      prepareInputs: mediaJobs.images.prepareInputs,
       recovery: this.recovery,
     });
     this.transcription = new ManagedTranscriptionAdapter({
@@ -147,6 +158,43 @@ export class StudioApiExecutionAdapter implements StudioApiAdapter {
     };
   }
 
+  async generateImage(request: StudioImageGenerationRequest): Promise<StudioImageGenerationResult> {
+    const id = operationId("image", request.runId, request.nodeId);
+    const result = await this.images.generate({
+      operationId: id,
+      sourceIdentity: `studio:${request.projectPath}:${request.runId}:${request.nodeId}`,
+      signal: request.signal,
+      ...(request.onProgress ? { onProgress: request.onProgress } : {}),
+      buildPayload: async () => {
+        const payload = await request.buildPayload();
+        return {
+          ...(payload.model ? { model: payload.model } : {}),
+          prompt: payload.prompt,
+          ...(payload.count === undefined ? {} : { count: payload.count }),
+          ...(payload.aspectRatio ? { aspectRatio: payload.aspectRatio } : {}),
+          ...(payload.quality ? { quality: payload.quality } : {}),
+          ...(payload.background ? { background: payload.background } : {}),
+          inputImages: (payload.inputImages || []).map(input => ({
+            mimeType: input.asset.mimeType as "image/png" | "image/jpeg" | "image/webp",
+            sizeBytes: input.asset.sizeBytes,
+            sha256: input.asset.hash,
+            load: input.load,
+          })),
+        };
+      },
+    });
+    const images = [];
+    for (const output of result.outputs) {
+      images.push(await request.storeOutput(output.bytes, output.metadata.mime_type));
+    }
+    return {
+      images,
+      model: result.model,
+      usage: { usd: result.usage.raw_usd, estimated: result.usage.estimated },
+      operation: { capability: "image_generation", operationId: result.operationId },
+    };
+  }
+
   /**
    * Returns null when the catalog is unreachable or the model is unknown;
    * the raw request then goes through and the server stays the validator.
@@ -177,7 +225,9 @@ export class StudioApiExecutionAdapter implements StudioApiAdapter {
 
   async beginLocalCommit(operations: readonly StudioManagedOperationRef[], signal?: AbortSignal): Promise<void> {
     for (const operation of operations) {
-      if (operation.capability === "video_generation") {
+      if (operation.capability === "image_generation") {
+        await this.images.beginLocalCommit(operation.operationId, signal);
+      } else if (operation.capability === "video_generation") {
         await this.videos.beginLocalCommit(operation.operationId, signal);
       } else if (operation.capability === "transcription") {
         await this.transcription.beginLocalCommit(operation.operationId, signal);
@@ -187,7 +237,9 @@ export class StudioApiExecutionAdapter implements StudioApiAdapter {
 
   async completeLocalCommit(operations: readonly StudioManagedOperationRef[], signal?: AbortSignal): Promise<void> {
     for (const operation of operations) {
-      if (operation.capability === "video_generation") {
+      if (operation.capability === "image_generation") {
+        await this.images.completeLocalCommit(operation.operationId, signal);
+      } else if (operation.capability === "video_generation") {
         // The runtime commits once the run's artifacts are persisted, so the
         // clip was displayed and written by now; the delivery receipt records
         // both before the server acknowledgment closes the record.

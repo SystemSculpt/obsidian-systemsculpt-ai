@@ -1,3 +1,4 @@
+import { requestAgentBootstrap } from "../Bootstrap";
 import { requestUrl } from "obsidian";
 import {
   AgentStreamingTransport,
@@ -2027,5 +2028,47 @@ describe("AgentStreamingTransport", () => {
     await expect(transport.sendToolResult(wrongSubmit)).rejects.toThrow("client tool results");
     await expect(transport.sendApproval(wrongSubmit)).rejects.toThrow("client tool approvals");
     await expect(transport.sendCancel(wrongSubmit)).rejects.toThrow("cancellation commands");
+  });
+});
+
+
+describe("shared managed bootstrap exchange", () => {
+  function options(request: jest.Mock) {
+    return { baseUrl: "https://systemsculpt.test/", pluginVersion: "6.18.18", licenseKey: () => "license_test", bootstrapRequest, requestClient: { request } as never };
+  }
+
+  it("uses the same bounded request and conversation validation before and after hydration", async () => {
+    const request = jest.fn(async () => bootstrapResponse());
+    const bootstrap = await requestAgentBootstrap(options(request), "context");
+    expect(bootstrap.conversation_id).toBe(CONVERSATION_ID);
+    expect(request).toHaveBeenCalledWith(expect.objectContaining({
+      url: "https://systemsculpt.test/api/plugin/agent/bootstrap",
+      method: "POST", maxResponseBytes: 64 * 1024, responseEncoding: "arrayBuffer",
+      body: expect.objectContaining({ conversation_id: CONVERSATION_ID }),
+    }));
+  });
+
+  it.each(["chat", "context"] as const)("bounds an oversized %s bootstrap even without a content-length header", async presentation => {
+    const request = jest.fn(async () => new Response("x".repeat(64 * 1024 + 1)));
+    await expect(requestAgentBootstrap(options(request), presentation)).rejects.toThrow("oversized");
+  });
+
+  it("rejects a different conversation identity", async () => {
+    const response = await bootstrapResponse().json();
+    const request = jest.fn(async () => new Response(JSON.stringify({ ...response, conversation_id: `conversation_${"f".repeat(32)}` })));
+    await expect(requestAgentBootstrap(options(request))).rejects.toThrow();
+  });
+
+  it("preserves distinct prehydration error presentation and safe transport incident correlation", async () => {
+    const incidentId = `incident_${"d".repeat(32)}`;
+    const request = jest.fn(async () => new Response(JSON.stringify({ error: { code: "bootstrap_busy", incident_id: incidentId, message: "private" } }), { status: 429 }));
+    await expect(requestAgentBootstrap(options(request), "context")).rejects.toMatchObject({
+      code: "response_start_rate_limited", status: 429, retryable: true,
+      message: "SystemSculpt is receiving too many requests. Try again shortly.",
+    });
+    await expect(requestAgentBootstrap(options(request))).rejects.toMatchObject({
+      code: "bootstrap_busy", requestId: incidentId, status: 429, retryable: true,
+      message: "SystemSculpt could not start this chat (429).",
+    });
   });
 });

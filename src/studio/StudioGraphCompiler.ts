@@ -1,3 +1,4 @@
+import { areStudioPortTypesCompatible } from "./types";
 import type {
   StudioEdge,
   StudioNodeDefinition,
@@ -47,11 +48,6 @@ export type StudioGraphCompileOptions = {
   providedNodeIds?: ReadonlySet<string>;
 };
 
-function typeCompatible(source: string, target: string): boolean {
-  if (source === "any" || target === "any") return true;
-  return source === target;
-}
-
 export class StudioGraphCompiler {
   compileRun(project: StudioProjectV1, registry: StudioNodeRegistry, options?: { entryNodeIds?: string[]; prepareInputsFor?: string }): StudioCompiledRun {
     const inputNodeId = options?.prepareInputsFor;
@@ -70,9 +66,6 @@ export class StudioGraphCompiler {
         for (const edge of node.inboundEdges) {
           if (providedNodeIds.has(edge.fromNodeId) && !outputs.has(edge.fromNodeId)) {
             const upstream = compiled.nodesById.get(edge.fromNodeId)?.node;
-            if (upstream?.kind === "studio.image_generation") {
-              throw new Error(`Image generation was retired and "${upstream.title || edge.fromNodeId}" has no saved output. Connect an existing image file instead.`);
-            }
             throw new Error(`Run "${upstream?.title || edge.fromNodeId}" first. It has no output yet, and Studio does not rerun it on your behalf.`);
           }
           const value = outputs.get(edge.fromNodeId)?.[edge.fromPortId];
@@ -161,7 +154,7 @@ export class StudioGraphCompiler {
         );
       }
 
-      if (!typeCompatible(sourcePort.type, targetPort.type)) {
+      if (!areStudioPortTypesCompatible(sourcePort.type, targetPort.type)) {
         throw new Error(
           `Graph compile failed: type mismatch on edge "${edge.id}" (${sourcePort.type} -> ${targetPort.type}).`
         );

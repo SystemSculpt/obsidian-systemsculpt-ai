@@ -41,7 +41,7 @@ it("preserves array-valued producer outputs across fan-in, sibling consumers and
   };
   const runtime = new StudioRuntime({} as never, { getLogger: () => ({ warn: jest.fn(), error: jest.fn(), debug: jest.fn() }) } as never,
     projectStore as never, registry, new StudioGraphCompiler(), {} as never,
-    { beginLocalCommit: jest.fn(async () => undefined), completeLocalCommit: jest.fn(async () => undefined) } as never);
+    { beginLocalCommit: jest.fn(async () => undefined), completeLocalCommit: jest.fn(async () => undefined) } as never, { run: jest.fn(async () => { throw new Error("Unexpected native run in this fixture."); }) });
   await runtime.runProjectSnapshot("Inputs.systemsculpt", project);
   expect(seen.get("sibling")).toEqual({ value: ["original"] });
   expect(seen.get("joined")).toEqual({ value: [["original"], "other"] });

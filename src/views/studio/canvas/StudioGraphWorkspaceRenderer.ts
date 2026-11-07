@@ -186,7 +186,7 @@ export function renderStudioGraphWorkspace(
   if (!currentProject || !currentProjectPath) {
     const emptyState = editor.createDiv({ cls: "ss-studio-empty-state" });
     emptyState.createEl("p", {
-      text: "Open a .systemsculpt file from the left file explorer to edit this graph.",
+      text: "Open a .systemsculpt file to edit.",
       cls: "ss-studio-muted",
     });
     return { viewportEl: null, canvasEl: null, refresh: () => false, dispose: () => undefined };
@@ -545,7 +545,7 @@ export function renderStudioGraphWorkspace(
       ...renderOptions,
       onNodeConfigValueChange: (nodeId, key, value, changeOptions) => {
         const current = typeof value === "string" && nodeId === node.id ? liveNode(nodeId) : undefined;
-        renderOptions.onNodeConfigValueChange?.(nodeId, key, current ? editor.commit(`config:${key}`, value as string, current.config[key]) : value, changeOptions);
+        renderOptions.onNodeConfigValueChange(nodeId, key, current ? editor.commit(`config:${key}`, value as string, current.config[key]) : value, changeOptions);
       },
       onNodeTitleInput: (target, value) => {
         const current = target.id === node.id ? liveNode(target.id) : undefined;

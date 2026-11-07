@@ -2,7 +2,16 @@ import { sha256HexFromArrayBuffer } from "../../../utils/sha256";
 import { containsControlCharacters } from "../../../utils/characterValidation";
 import { base64ToBytes, bytesToBase64, isBase64 } from "../../../utils/base64";
 import type { ManagedTransportResult } from "../../managed/ManagedTypes";
-import type { HostedTransportAdapter } from "../../managed/adapters/HostedTransportAdapter";
+import {
+  MANAGED_EMBEDDINGS_INDEX_CONTRACT,
+  MANAGED_EMBEDDINGS_INDEX_MAX_SOURCE_BYTES,
+  MANAGED_EMBEDDINGS_INDEX_MAX_RESULT_BYTES,
+  MANAGED_EMBEDDINGS_INDEX_MAX_JSON_BYTES,
+  MANAGED_EMBEDDINGS_INDEX_VECTOR_ENCODING,
+  MANAGED_EMBEDDINGS_INDEX_MAX_QUERY_BYTES,
+  MANAGED_EMBEDDINGS_INDEX_MAX_QUERY_CHARS,
+  type ManagedEmbeddingsIndexTransport,
+} from "./ManagedEmbeddingsIndexContract";
 
 export type ManagedEmbeddingsErrorCode =
   | "invalid_request"
@@ -41,15 +50,6 @@ export class ManagedEmbeddingsError extends Error {
   }
 }
 
-export const MANAGED_EMBEDDINGS_INDEX_CONTRACT = "managed-embeddings-index-v1" as const;
-export const MANAGED_EMBEDDINGS_INDEX_MAX_SOURCE_BYTES = 8 * 1024 * 1024;
-export const MANAGED_EMBEDDINGS_INDEX_MAX_RESULT_BYTES = 16 * 1024 * 1024;
-export const MANAGED_EMBEDDINGS_INDEX_MAX_JSON_BYTES = 64 * 1024;
-/** @internal Tests assert against this value. */
-export const MANAGED_EMBEDDINGS_INDEX_VECTOR_ENCODING = "float32-le-base64" as const;
-
-const MANAGED_EMBEDDINGS_INDEX_MAX_QUERY_BYTES = 16 * 1024;
-export const MANAGED_EMBEDDINGS_INDEX_MAX_QUERY_CHARS = 8_000;
 const GENERATION_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
 const CANONICAL_POSITIVE_DECIMAL = /^[1-9]\d*$/;
@@ -141,13 +141,6 @@ export type ManagedEmbeddingsIndexQueryResult = Readonly<{
   generation: ManagedEmbeddingsIndexGeneration;
   vector: Float32Array;
 }>;
-
-type IndexTransport = Pick<
-  HostedTransportAdapter,
-  | "managedEmbeddingsIndex"
-  | "getManagedEmbeddingsIndexMetadata"
-  | "managedEmbeddingsIndexQuery"
->;
 
 function exactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
   const actual = Object.keys(value).sort();
@@ -304,7 +297,7 @@ export class ManagedEmbeddingsIndexAdapter {
   public activeGeneration?: ManagedEmbeddingsIndexGeneration;
   public metadata?: ManagedEmbeddingsIndexMetadata;
 
-  constructor(private readonly transport: IndexTransport) {}
+  constructor(private readonly transport: ManagedEmbeddingsIndexTransport) {}
 
   async getMetadata(signal?: AbortSignal): Promise<ManagedEmbeddingsIndexMetadata> {
     if (signal?.aborted) throw requestCancelled();
@@ -532,8 +525,8 @@ export class ManagedEmbeddingsIndexAdapter {
         ?? (Number.isSafeInteger(resetAt) ? Math.max(0, resetAt - Date.now()) : undefined);
       const message = code === "payment_required"
         ? payload?.creditsRemaining === 0
-          ? "You have no credits left. Add credits to continue indexing notes."
-          : "Not enough credits are available. Add credits to continue indexing notes."
+          ? "Out of credits. Add more to keep indexing."
+          : "Not enough credits. Add more to keep indexing."
         : (matchesCode ? payload?.message : undefined) ?? "Managed embedding index request failed.";
       throw new ManagedEmbeddingsError(
         code,

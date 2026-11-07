@@ -79,6 +79,7 @@ function createContext(options: {
     services: {
       api: {
         generateText: generateTextMock,
+        generateImage: jest.fn(),
         generateVideo: jest.fn(async () => {
           throw new Error("Video generation is not used by these nodes.");
         }),

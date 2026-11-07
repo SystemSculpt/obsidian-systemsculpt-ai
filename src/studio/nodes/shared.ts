@@ -1,5 +1,5 @@
 import type { StudioImageInput, StudioJsonValue, StudioNodeExecutionContext } from "../types";
-import { isRecord } from "../utils";
+import { isRecord } from "../../utils/jsonRecord";
 
 export type StudioImageInputCandidate = {
   path: string;

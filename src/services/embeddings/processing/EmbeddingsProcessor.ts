@@ -1,4 +1,5 @@
 import { App, TFile } from "obsidian";
+import { isFatalManagedEmbeddingsCode } from "../ManagedEmbeddingsFailurePolicy";
 import { errorLogger } from "../../../utils/errorLogger";
 import {
   ManagedEmbeddingsError,
@@ -51,14 +52,6 @@ type AtomicStorage = Pick<EmbeddingsStorage, "publishPath" | "replacePath"> & Pa
   EmbeddingsStorage,
   "getVectorSync" | "touchPath"
 >>;
-
-const FATAL_MANAGED_ERROR_CODES = new Set([
-  "payment_required",
-  "license_required",
-  "license_rejected",
-  "version_unsupported",
-  "capability_unavailable",
-]);
 
 function sha256Hex(markdown: string): Promise<string> {
   return sha256HexFromArrayBuffer(new TextEncoder().encode(markdown).buffer);
@@ -160,7 +153,7 @@ export class EmbeddingsProcessor {
           ...(detail.requestId ? { requestId: detail.requestId } : {}),
         },
       });
-      if (managed && FATAL_MANAGED_ERROR_CODES.has(managed.code)) fatalError = managed;
+      if (managed && isFatalManagedEmbeddingsCode(managed.code)) fatalError = managed;
     };
 
     // One credits check per run, before any note is read or uploaded.

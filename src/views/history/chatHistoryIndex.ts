@@ -2,10 +2,7 @@ import { TFile, TFolder, type App, type EventRef, type TAbstractFile } from "obs
 import type SystemSculptPlugin from "../../main";
 import type { ChatMessage } from "../../types";
 import { parseAttachedTextContent } from "../../chat/ChatAttachmentContent";
-import {
-  isPathInDirectory,
-  resolveKnownChatsDirectories,
-} from "../chatview/ChatStorageService";
+import { isPathInDirectory, resolveKnownChatsDirectories } from "../chatview/storage/ChatTranscriptLocations";
 import { hasChatIdentityMetadata } from "../chatview/storage/ChatFrontmatterIdentity";
 import { ChatMarkdownSerializer } from "../chatview/storage/ChatMarkdownSerializer";
 import { parseAgentConversationId } from "../chatview/storage/ChatPersistenceTypes";

@@ -4758,7 +4758,7 @@ describe("AgentWorkspace", () => {
     const active = parent.querySelector(".systemsculpt-agent-active-run")!;
     expect(active.textContent).toContain("Final answer");
     expect(active.textContent).toContain(
-      "The response completed, but part of this chat could not be displayed. Reopen the chat to try again.",
+      "Part of this chat couldn't display. Reopen it.",
     );
     expect(active.textContent).not.toContain(renderError.message);
     expect(active.querySelector(".systemsculpt-agent-render-fallback")?.getAttribute("role"))

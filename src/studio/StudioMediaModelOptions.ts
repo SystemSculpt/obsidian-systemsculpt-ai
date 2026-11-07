@@ -6,14 +6,18 @@ import {
   STUDIO_VIDEO_GENERATION_NODE_KIND,
   STUDIO_VIDEO_MODEL_CONFIG_KEYS,
 } from "./StudioVideoModelOptions";
+import { resolveStudioImageModelOptions } from "./StudioImageModelOptions";
 import type { StudioNodeConfigDynamicOptionsSource, StudioNodeConfigSelectOption, StudioNodeInstance } from "./types";
 
-/** Resolves dynamic video options; retired media controls never load a catalog. */
+/** Resolves dynamic image and video options from the server catalogs. */
 export function resolveStudioMediaModelOptionsForPlugin(
   plugin: SystemSculptPlugin,
   source: StudioNodeConfigDynamicOptionsSource,
   node: StudioNodeInstance,
 ): Promise<StudioNodeConfigSelectOption[]> {
+  if (node.kind === "studio.image_generation" && source === "image_generation_models") {
+    return resolveStudioImageModelOptions(getStudioMediaCatalogs(plugin).images, node);
+  }
   if (node.kind !== STUDIO_VIDEO_GENERATION_NODE_KIND || !isStudioVideoOptionsSource(source)) return Promise.resolve([]);
   return resolveStudioVideoModelOptions(getStudioMediaCatalogs(plugin).videos, source, node);
 }

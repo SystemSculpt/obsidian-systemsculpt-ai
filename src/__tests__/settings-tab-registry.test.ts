@@ -23,6 +23,7 @@ describe("SettingsTabRegistry SystemSculpt-only anchors", () => {
       { id: "workspace", label: "Workspace" },
       { id: "studio", label: "Studio" },
       { id: "advanced", label: "Advanced" },
+      { id: "feedback", label: "Send feedback" },
     ]);
 
     const account = configs.find((config) => config.id === "account");
@@ -34,30 +35,29 @@ describe("SettingsTabRegistry SystemSculpt-only anchors", () => {
     const advanced = configs.find((config) => config.id === "advanced");
 
     expect(account?.anchor?.title).toContain("License");
-    expect(account?.anchor?.desc).toContain("credits and billing details");
+    expect(account?.anchor?.desc).toContain("credits, billing");
     expect(account?.anchor?.title).not.toMatch(/providers|api keys/i);
     expect(account?.anchor?.desc).not.toMatch(/fallback|openai|anthropic|ollama/i);
 
     expect(chat?.anchor?.title).toContain("Chat");
     expect(chat?.anchor?.title).not.toMatch(/favorites|prompts|templates/i);
-    expect(chat?.anchor?.desc).toContain("chat preferences");
-    expect(chat?.anchor?.desc).toContain("SystemSculpt handles the chat experience itself");
+    expect(chat?.anchor?.desc).toContain("Chat display");
     expect(chat?.anchor?.desc).not.toMatch(/prompt|model picker|templates/i);
 
     expect(workflow?.anchor?.title).toContain("Audio");
     expect(workflow?.anchor?.title).not.toContain("Automations");
-    expect(workflow?.anchor?.desc).toContain("recording");
-    expect(workflow?.anchor?.desc).toContain("post-processing");
+    expect(workflow?.anchor?.desc).toContain("Recording");
+    expect(workflow?.anchor?.desc).toContain("transcription");
     expect(workflow?.sections).toHaveLength(1);
 
-    expect(knowledge?.anchor?.desc).toContain("semantic search");
-    expect(knowledge?.anchor?.desc).toContain("related note discovery");
+    expect(knowledge?.anchor?.desc).toContain("Semantic search");
+    expect(knowledge?.anchor?.desc).toContain("similar notes");
     expect(knowledge?.anchor?.desc).not.toMatch(/custom provider|your own api/i);
 
     expect(workspace?.anchor?.title).toContain("Directories");
     expect(workspace?.anchor?.desc).toContain("backup");
 
-    expect(studio?.anchor?.desc).toContain("image generation options");
+    expect(studio?.anchor?.desc).toContain("image generation");
     expect(studio?.anchor?.desc).not.toMatch(/OpenRouter|model selection/i);
     expect(studio?.anchor?.desc).not.toMatch(/telemetry/i);
 

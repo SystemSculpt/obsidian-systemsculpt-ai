@@ -18,7 +18,8 @@ import {
 } from "../services/transcription/NoteInsertionTarget";
 import { getTranscriptionMaxFileSize } from "../services/transcription/TranscriptionCoordinator";
 import type { SystemSculptSettings } from "../types";
-import { formatFileSize, validateBrowserFileSize } from "../utils/FileValidator";
+import { formatFileSize } from "../utils/FileValidator";
+import { validateBrowserFileSize } from "../core/ui/fileSizeValidation";
 import { toSafeVaultFileName } from "../utils/vaultFileName";
 import { launchAudioTranscriptionPanel } from "./AudioTranscriptionPanel";
 
@@ -73,7 +74,7 @@ export class TranscribeAudioFileModal extends StandardModal {
     this.launchSurfaceOpen = true;
     this.addTitle(
       "Transcribe audio",
-      "Choose audio from your vault or device. The transcript is saved in your vault.",
+      "Choose audio to transcribe.",
     );
 
     this.transcribeButton = this.addActionButton(
@@ -267,7 +268,7 @@ export class TranscribeAudioFileModal extends StandardModal {
       await this.plugin.getSettingsManager().updateSettings(update);
     } catch (error) {
       console.warn("[SystemSculpt] Failed to save transcription format", error);
-      new Notice("This transcription will use your choice, but the default was not saved.", 5000);
+      new Notice("Using your choice. Default not saved.", 5000);
     }
   }
 

@@ -135,7 +135,7 @@ describe("AgentConversationPresentation product-copy boundary", () => {
       incidentId: "incident_0123456789abcdef0123456789abcdef",
     }, false)).toEqual({
       heading: "Out of credits",
-      message: "You have no credits left. Add credits to continue using Chat.",
+      message: "Out of credits. Add more to keep chatting.",
       action: "add-credits",
     });
   });
@@ -171,7 +171,7 @@ describe("AgentConversationPresentation product-copy boundary", () => {
       message: "Provider detail that must stay hidden.",
     }, false)).toEqual({
       heading: "Could not finish",
-      message: "The safety filter stopped this response. Change the request and try again.",
+      message: "Stopped by the safety filter. Try rewording.",
     });
   });
 
@@ -179,12 +179,12 @@ describe("AgentConversationPresentation product-copy boundary", () => {
     {
       code: "insufficient_credits",
       heading: "Not enough credits",
-      message: "Not enough credits are available. Add credits to continue using Chat.",
+      message: "Not enough credits. Add more to keep chatting.",
     },
     {
       code: "out_of_credits",
       heading: "Out of credits",
-      message: "You have no credits left. Add credits to continue using Chat.",
+      message: "Out of credits. Add more to keep chatting.",
     },
   ])("shows actionable first-party billing copy for $code", ({ code, heading, message }) => {
     expect(presentAgentError({
@@ -198,8 +198,19 @@ describe("AgentConversationPresentation product-copy boundary", () => {
     (code) => {
       expect(presentAgentError({ code, message: "Remote billing detail." }, false, true)).toEqual({
         heading: "Out of credits",
-        message: "Monthly is $9 and includes 10,000 credits every month. You can also add a credit pack.",
-        action: "see-plans",
+        message: "$9 a month for 10,000 credits.",
+        action: "monthly",
+      });
+    },
+  );
+
+  it.each(["out_of_credits", "insufficient_credits", "payment_required"])(
+    "asks a past-due subscriber to update their card, not to subscribe, with %s (T-5348)",
+    (code) => {
+      expect(presentAgentError({ code, message: "Remote billing detail." }, false, true, true)).toEqual({
+        heading: "Payment failed",
+        message: "Your last payment failed. Update your card to get your monthly credits.",
+        action: "update-card",
       });
     },
   );

@@ -1,5 +1,5 @@
 import { desktopHost } from '../../platform/desktopOnly';
-import { isRecord } from '../../studio/utils';
+import { isRecord } from '../../utils/jsonRecord';
 import { LOCAL_AGENTS, type LocalAgentId } from './LocalAgents';
 
 export type LocalAgentLaunchConfig = {

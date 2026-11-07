@@ -1,4 +1,4 @@
-const RETIRED_NODE_KINDS = new Set<string>(["studio.workflow", "studio.image_generation"]);
+const RETIRED_NODE_KINDS = new Set<string>(["studio.workflow"]);
 const VISUAL_ONLY_NODE_KINDS = new Set<string>(["studio.terminal", "studio.run_collection", "studio.command_center", "studio.button", ...RETIRED_NODE_KINDS]);
 
 export function isStudioRetiredNodeKind(kind: string): boolean {
@@ -22,4 +22,18 @@ export function isStudioVisualOnlyNodeKind(kind: string): boolean {
 
 export function isStudioManagedOutputProducerKind(kind: string): boolean {
   return MANAGED_OUTPUT_PRODUCER_NODE_KINDS.has(String(kind || "").trim());
+}
+
+/**
+ * v2 documents spell kinds without the "studio." namespace. Restore the
+ * namespace on import, preserving qualified future or third-party kinds.
+ * Version resolution belongs to the built-in catalog.
+ */
+export function expandStudioNodeKind(kind: string): string {
+  const trimmed = String(kind || "").trim();
+  return trimmed && !trimmed.includes(".") ? `studio.${trimmed}` : trimmed;
+}
+
+export function compactStudioNodeKind(kind: string): string {
+  return kind.startsWith("studio.") ? kind.slice("studio.".length) : kind;
 }

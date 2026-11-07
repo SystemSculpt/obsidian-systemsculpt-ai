@@ -84,10 +84,6 @@ type StudioProjectSessionOptions = {
     baseProject?: StudioProjectV1
   ) => Promise<void | StudioProjectReconciliation>;
   readProjectRawText?: (projectPath: string) => Promise<string | null>;
-  saveBlockedProjectRecovery?: (
-    projectPath: string,
-    project: StudioProjectV1
-  ) => Promise<void>;
   discreteDelayMs?: number;
   continuousDelayMs?: number;
 };
@@ -184,7 +180,7 @@ export class StudioProjectSession {
     if (this.disposed || this.readOnlyReason) return;
     let reconciled = reconcileStudioProject(snapshot.base, snapshot.project, this.project);
     if (reconciled.conflicts.length > 0) {
-      if (!await this.preserveConflict(snapshot.project, reconciled.conflicts)) return;
+      if (!await this.preserveConflict(snapshot.project, reconciled.conflicts) || this.disposed || this.readOnlyReason) return;
       reconciled = reconcileStudioProject(snapshot.base, snapshot.project, this.project);
     }
     if (serializeStudioProject(reconciled.project) === serializeStudioProject(this.project)) return;
@@ -259,8 +255,8 @@ export class StudioProjectSession {
     }
     let reconciled = reconcileStudioProject(before, draft, this.project);
     if (reconciled.conflicts.length > 0) {
-      if (!await this.preserveConflict(draft, reconciled.conflicts)) return false;
-      // Recovery is asynchronous too: rebase against edits made during its I/O.
+      if (!await this.preserveConflict(draft, reconciled.conflicts) || this.disposed || this.readOnlyReason) return false;
+      // Rebase again after yielding: a newer editor transaction still takes precedence.
       reconciled = reconcileStudioProject(before, draft, this.project);
     }
     updateStudioProjectIdentity(this.project, reconciled.project);
@@ -268,19 +264,6 @@ export class StudioProjectSession {
     if (options?.notifyListeners !== false) {
       this.notifyListeners({ kind: "project" });
     }
-    return true;
-  }
-
-  async mutateAndFlush(
-    reason: StudioProjectSessionMutationReason,
-    mutator: StudioProjectSessionMutator,
-    options?: StudioProjectSessionMutateOptions
-  ): Promise<boolean> {
-    const changed = this.mutate(reason, mutator, options);
-    if (!changed) {
-      return false;
-    }
-    await this.flushPendingSaveWork({ force: true });
     return true;
   }
 
@@ -323,17 +306,13 @@ export class StudioProjectSession {
     return true;
   }
 
-  replaceProjectSnapshot(project: StudioProjectV1, options?: StudioProjectSessionReplaceProjectOptions): void {
-    this.replaceProject(project, options);
-  }
-
   async reconcileExternalProject(project: StudioProjectV1, rawText: string | null): Promise<void> {
     if (this.disposed) return;
     const beforeRecovery = this.getProjectSnapshot();
     // Three-way: what this session last accepted, its own edits, and the file.
     let reconciled = reconcileStudioProject(this.baseProject, beforeRecovery, project);
     if (reconciled.conflicts.length > 0) {
-      if (!await this.preserveConflict(beforeRecovery, reconciled.conflicts)) return;
+      if (!await this.preserveConflict(beforeRecovery, reconciled.conflicts) || this.disposed) return;
       // Only the intent that arrived after reconciliation takes precedence;
       // the already-conflicting edit remains preserved in the recovery copy.
       reconciled = reconcileStudioProject(beforeRecovery, this.project, reconciled.project, { preferLocalConflicts: true });
@@ -418,10 +397,6 @@ export class StudioProjectSession {
     }
     this.lastAcceptedSignature = null;
     this.lastRejectedSignature = normalized;
-  }
-
-  markRejectedProjectText(rawText: string): void {
-    this.markRejectedProjectSignature(computeStudioProjectTextSignature(rawText));
   }
 
   resolveProjectFileTextUpdate(
@@ -537,14 +512,11 @@ export class StudioProjectSession {
 
   /**
    * Keep the losing side of a same-field conflict before another value is
-   * adopted: a configured recovery store, otherwise this session's recovery
-   * copy, which the view offers as an Undo step. False once disposed.
+   * adopted: the session keeps a recovery snapshot that the view offers as
+   * an Undo step. False once disposed.
    */
   private async preserveConflict(project: StudioProjectV1, fields: string[]): Promise<boolean> {
-    if (this.options.saveBlockedProjectRecovery) {
-      await this.options.saveBlockedProjectRecovery(this.projectPath, project);
-      return !this.disposed;
-    }
+    if (this.disposed) return false;
     this.conflictRecovery = { revision: (this.conflictRecovery?.revision || 0) + 1, project: cloneStudioProjectSnapshot(project), fields: [...fields] };
     return true;
   }

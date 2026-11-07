@@ -225,17 +225,6 @@
   white-space: nowrap;
 }
 
-.ss-studio-media-model-picker-card-default {
-  flex: 0 0 auto;
-  padding: 0 var(--ss-space-2);
-  background: var(--ss-accent-tint);
-  border-radius: var(--ss-radius-full);
-  color: var(--ss-accent);
-  font-size: var(--ss-text-xs);
-  font-weight: var(--ss-weight-semibold);
-  white-space: nowrap;
-}
-
 .ss-studio-media-model-picker-card-price {
   flex: 0 0 auto;
   color: var(--ss-ink);

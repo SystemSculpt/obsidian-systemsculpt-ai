@@ -339,7 +339,7 @@ describe("AudioProcessorApiClient", () => {
     )).rejects.toEqual(expect.objectContaining({
       status: 402,
       code: "payment_required",
-      message: "Not enough credits are available. Add credits to continue.",
+      message: "Not enough credits. Add more to continue.",
     }));
   });
 

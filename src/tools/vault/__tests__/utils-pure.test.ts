@@ -1042,6 +1042,12 @@ describe("ensureVaultFolder", () => {
     expect(createdPaths(createFolder)).toEqual(["A", "A/B", "A/B/C"]);
   });
 
+  it("decodes tool URI paths before creating vault folders", async () => {
+    const { app, createFolder } = makeApp();
+    await ensureVaultFolder(app, "My%2520Folder%252F日本語");
+    expect(createdPaths(createFolder)).toEqual(["My Folder", "My Folder/日本語"]);
+  });
+
   it("skips ancestors that already exist", async () => {
     const { app, createFolder } = makeApp({ A: "folder" });
     await ensureVaultFolder(app, "A/B/C");

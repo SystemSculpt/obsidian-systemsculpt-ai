@@ -6,7 +6,7 @@ import type { StudioNodeRunDisplayState } from "../../StudioRunPresentationState
 import type { StudioNodeActivity } from "../../activity/StudioActivity";
 import { renderStudioGraphNodeCard } from "../StudioGraphNodeCardRenderer";
 import { loadStudioSourceLanguages } from "../StudioSourceEditor";
-import { retiredImageGenerationNode } from "../../../../studio/nodes/retiredImageGenerationNode";
+import { imageGenerationNode } from "../../../../studio/nodes/imageGenerationNode";
 import { workflowNode } from "../../../../studio/nodes/workflowNode";
 import { EditorView } from "@codemirror/view";
 
@@ -44,7 +44,7 @@ function definitionFields(kind: string): StudioNodeDefinition["configSchema"]["f
 
 function createDefinition(kind: string): StudioNodeDefinition {
   if (kind === "studio.workflow") return workflowNode;
-  if (kind === "studio.image_generation") return retiredImageGenerationNode;
+  if (kind === "studio.image_generation") return imageGenerationNode;
   return {
     kind,
     version: "1.0.0",
@@ -163,8 +163,7 @@ function renderNodeCardHarness(options: {
     onToggleTextGenerationOutputLock: jest.fn(),
     onRemoveNode,
     onNodeTitleInput: jest.fn(),
-    onNodeConfigMutated: jest.fn(),
-    onNodeConfigValueChange: jest.fn(),
+     onNodeResize: jest.fn(), onNodeConfigValueChange: jest.fn(),
     onNodeSourceApply: options.onNodeSourceApply,
     registerNodeTeardown: (_nodeId, teardown) => nodeTeardowns.push(teardown),
     onOpenImageEditor,
@@ -259,31 +258,12 @@ describe("content-aware Studio cards", () => {
     expect(activity?.hidden).toBe(true);
     expect(nodeEl.dataset.activity).toBe('idle');
   });
-  it("opens retired images read-only with saved outputs, source inspection and no execution controls", () => {
-    const config = { prompt: "a lighthouse", model: "saved-model", future: { keep: true } };
-    const apply = jest.fn();
-    const outputs = { images: [{ path: "saved.png", mimeType: "image/png", hash: "a".repeat(64), sizeBytes: 10 }] };
-    const { nodeEl, graphInteraction } = renderNodeCardHarness({ kind: "studio.image_generation", config,
-      nodeRunState: { ...IDLE_NODE_RUN_STATE, status: "succeeded", outputs },
-      resolveAssetPreviewSrc: path => `app://vault/${path}`, onNodeSourceApply: apply });
-    expect(nodeEl.dataset.surface).toBe("panel");
-    expect(nodeEl.textContent).toContain("Image generation was retired. Saved outputs are preserved.");
-    expect(nodeEl.querySelector<HTMLImageElement>("img")?.src).toBe("app://vault/saved.png");
-    expect(nodeEl.querySelector(".ss-studio-node-run")).toBeNull();
-    expect(nodeEl.querySelector("textarea")).toBeNull();
-    expect(nodeEl.querySelector<HTMLInputElement>(".ss-studio-node-title-input")?.disabled).toBe(true);
-    const pins = nodeEl.querySelectorAll<HTMLButtonElement>(".ss-studio-port-pin");
-    expect(pins).toHaveLength(3);
-    for (const pin of pins) { expect(pin.disabled).toBe(true); pin.click(); }
-    expect(graphInteraction.beginConnection).not.toHaveBeenCalled();
-    expect(graphInteraction.completeConnection).not.toHaveBeenCalled();
-    nodeEl.querySelector<HTMLButtonElement>(".ss-studio-node-source-toggle")!.click();
-    expect(nodeEl.querySelector(".ss-studio-source-code")?.textContent).toContain("a lighthouse");
-    const edit = nodeEl.querySelector<HTMLButtonElement>('[data-testid="studio.source.edit.studio.image_generation_node"]')!;
-    expect(edit.disabled).toBe(true);
-    edit.click();
-    expect(apply).not.toHaveBeenCalled();
-    expect(config).toEqual({ prompt: "a lighthouse", model: "saved-model", future: { keep: true } });
+  it("renders image generation as an editable form with its settings", () => {
+    const nodeEl = renderNodeCard({ kind: "studio.image_generation", config: { ...imageGenerationNode.configDefaults, prompt: "a lighthouse" } });
+    expect(nodeEl.dataset.surface).toBe("form");
+    expect(nodeEl.textContent).not.toContain("retired");
+    expect(nodeEl.querySelector<HTMLTextAreaElement>("textarea")?.value).toBe("a lighthouse");
+    expect(nodeEl.querySelector<HTMLInputElement>(".ss-studio-node-title-input")?.disabled).toBe(false);
   });
   it("keeps text chromeless: no header, no source, ports only", () => {
     const nodeEl = renderNodeCard({ kind: "studio.text", config: { value: "Hello" } });

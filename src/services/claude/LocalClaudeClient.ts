@@ -1,11 +1,10 @@
+import { resolveClaudeOptions, type ClaudeExecutionOptions } from './ClaudeExecutionOptions';
+import { NativeTurnText } from '../codex/NativeTurnText';
 import { desktopHost } from '../../platform/desktopOnly';
-import { isRecord } from '../../studio/utils';
+import { isRecord } from '../../utils/jsonRecord';
 import { readLocalAgentLaunchConfig, resolveLocalAgentCommand } from '../codex/LocalAgentLaunch';
 import { LocalAgentUsageLimitError } from '../codex/LocalAgents';
 
-const CLAUDE_PERMISSION_MODES = ['auto', 'manual', 'acceptEdits', 'plan', 'settings'] as const;
-export type ClaudePermissionMode = typeof CLAUDE_PERMISSION_MODES[number];
-export type ClaudeExecutionOptions = { model?: string; permissionMode?: string };
 export type ClaudeRequest = ClaudeExecutionOptions & { prompt: string; workingDirectory: string; sessionId?: string; images?: readonly string[] };
 export type ClaudeResult = { sessionId: string; text: string };
 export type ClaudePermissionRequest = {
@@ -60,15 +59,6 @@ function rejectsAutoMode(message: string): boolean {
     && /invalid|unsupported|not (?:available|supported|allowed|enabled)|unavailable|not eligible|requires|choices|cannot use/i.test(message);
 }
 
-export function resolveClaudeOptions(options: ClaudeExecutionOptions): Required<ClaudeExecutionOptions> & { permissionMode: ClaudePermissionMode } {
-  const model = options.model?.trim() || '';
-  const selected = options.permissionMode?.trim() || 'auto';
-  // "default" was the old CLI spelling of Ask; persisted defaults migrate to Auto.
-  const permissionMode = selected === 'default' ? 'manual' : selected;
-  if (model && !/^[A-Za-z0-9][A-Za-z0-9._:[\]-]{0,99}$/.test(model)) throw new Error('Invalid Claude Code model.');
-  if (!(CLAUDE_PERMISSION_MODES as readonly string[]).includes(permissionMode)) throw new Error('Invalid Claude Code permission mode.');
-  return { model, permissionMode: permissionMode as ClaudePermissionMode };
-}
 
 /**
  * Print mode with JSON streams on both ends; permission prompts come back to the plugin over stdio.
@@ -156,6 +146,10 @@ async function runClaudeAttempt(input: ClaudeRequest, signal: AbortSignal, callb
   const binary = launch.setting('binary', 'claude');
   // A plugin turn is a top-level session even when Obsidian was opened from a Claude Code terminal.
   const environment = { ...launch.environment }; delete environment.CLAUDECODE;
+  // Native idle includes background agents and their notification turns, but not long-lived shell servers.
+  // A result alone only ends the main agent's current turn, not a resumed subagent's work.
+  environment.CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS = '1';
+  environment.CLAUDE_CODE_BG_TASKS_REPORT_RUNNING = '1';
   // A new session gets its identity up front, so every event can be checked against it.
   const sessionId = input.sessionId || window.crypto.randomUUID();
   if (!input.sessionId) args.push('--session-id', sessionId);
@@ -169,13 +163,15 @@ async function runClaudeAttempt(input: ClaudeRequest, signal: AbortSignal, callb
     return await new Promise<ClaudeResult>((resolve, reject) => {
       const prompts = new Map<string, AbortController>();
       const toolBlocks = new Map<number, { id: string; name: string; inputText: string }>();
-      let buffer = '', stderr = '', settled = false, text = '', partial = '', signedOut = false, nextRequest = 0;
+      let buffer = '', stderr = '', settled = false, signedOut = false, nextRequest = 0;
       let initialized = false, activityStarted = false, pipeFailure = false, fallbackRequestId: string | undefined;
       const auto = resolveClaudeOptions(input).permissionMode === 'auto';
-      let textLength = 0, partialLength = 0;
+      const text = new NativeTurnText({ mode: owner ? 'offsets' : 'snapshot', snapshot: 'joined-segments' }, (...update) => callbacks.text?.(...update));
       // A new identity is saved once Claude Code confirms it, so a launch that never started cannot leave a chat resuming a missing session.
       let saving: Promise<void> | undefined = input.sessionId ? Promise.resolve() : undefined;
       let outcome: { result?: ClaudeResult; error?: Error } | undefined;
+      let nativeState: 'running' | 'requires_action' | 'idle' | undefined;
+      let pendingResult: ClaudeResult | undefined;
       let killTimer: number | undefined, closing = false;
       let release!: () => void;
       const closed = new Promise<void>(resolveClosed => { release = resolveClosed; });
@@ -190,7 +186,6 @@ async function runClaudeAttempt(input: ClaudeRequest, signal: AbortSignal, callb
         return closed;
       };
       const write = (value: unknown) => { if (!child.stdin.destroyed && !child.stdin.writableEnded) child.stdin.write(`${JSON.stringify(value)}\n`); };
-      const publish = () => callbacks.text?.([text, partial].filter(Boolean).join('\n\n'));
       const finish = (value: { result?: ClaudeResult; error?: Error }) => {
         if (settled) { if (value.error && owner) void closeProcess(); return; }
         outcome = value; settled = true; signal.removeEventListener('abort', abort);
@@ -199,6 +194,10 @@ async function runClaudeAttempt(input: ClaudeRequest, signal: AbortSignal, callb
           // Keep native session grants alive between successful chat turns. Studio still closes below.
           void saving.then(() => resolve(value.result!), error => { outcome = { error }; void closeProcess(); });
         } else void closeProcess();
+      };
+      const finishWhenIdle = () => {
+        // Older CLIs without state events retain the result-only protocol.
+        if (pendingResult && (nativeState === undefined || nativeState === 'idle')) finish({ result: pendingResult });
       };
       const abort = () => {
         write({ type: 'control_request', request_id: `systemsculpt-${++nextRequest}`, request: { subtype: 'interrupt' } });
@@ -251,6 +250,12 @@ async function runClaudeAttempt(input: ClaudeRequest, signal: AbortSignal, callb
             saving.catch(error => finish({ error: error instanceof Error ? error : new Error(String(error)) }));
           }
         }
+        if (event.type === 'system' && event.subtype === 'session_state_changed'
+          && (event.state === 'running' || event.state === 'requires_action' || event.state === 'idle')) {
+          nativeState = event.state;
+          finishWhenIdle();
+          return;
+        }
         if (event.type === 'system' && event.subtype === 'init') {
           initialized = true;
           callbacks.log(`Connected to on-machine Claude Code${typeof event.model === 'string' ? ` · ${event.model}` : ''}`);
@@ -284,11 +289,15 @@ async function runClaudeAttempt(input: ClaudeRequest, signal: AbortSignal, callb
           }
         }
         if (event.parent_tool_use_id) return;
+        // A notification can start another native turn after an interim result. Its idle and result
+        // can arrive in either order; never settle that turn with the previous turn's result.
+        if (event.type === 'assistant' || event.type === 'stream_event'
+          || event.type === 'user' && isRecord(event.origin) && event.origin.kind === 'task-notification') pendingResult = undefined;
         if (event.type === 'stream_event' && isRecord(event.event)) {
           const streamed = event.event;
           if (streamed.type === 'message_start') toolBlocks.clear();
           if (streamed.type === 'content_block_start') {
-            partial = ''; partialLength = 0;
+            text.startSegment();
             if (isRecord(streamed.content_block) && streamed.content_block.type === 'tool_use' && typeof streamed.content_block.id === 'string') {
               const block = streamed.content_block;
               toolBlocks.set(Number(streamed.index), { id: String(block.id), name: String(block.name), inputText: '' });
@@ -309,11 +318,7 @@ async function runClaudeAttempt(input: ClaudeRequest, signal: AbortSignal, callb
             }
           }
           if (streamed.type === 'content_block_delta' && isRecord(streamed.delta) && streamed.delta.type === 'text_delta' && typeof streamed.delta.text === 'string') {
-            const separator = textLength ? '\n\n' : '';
-            if (owner) callbacks.text?.((partialLength ? '' : separator) + streamed.delta.text, textLength + (partialLength ? separator.length + partialLength : 0));
-            partialLength += streamed.delta.text.length;
-            partial = (partial + streamed.delta.text).slice(-256_000);
-            if (!owner) publish();
+            text.append(streamed.delta.text);
           }
           return;
         }
@@ -322,13 +327,11 @@ async function runClaudeAttempt(input: ClaudeRequest, signal: AbortSignal, callb
             const content = Array.isArray(event.message.content) ? event.message.content : [];
             const notice = content.filter(block => isRecord(block) && block.type === 'text' && typeof block.text === 'string').map(block => String(block.text)).join('\n\n');
             // Retract only text matching the native notice, not genuine unfinished output.
+            const partial = text.partialText, partialLength = text.partialLength;
             const noticeLength = partial && notice
               ? partialLength === partial.length && notice.startsWith(partial) ? partialLength : partial.endsWith(notice) ? notice.length : 0
               : 0;
-            if (noticeLength) {
-              partial = partial.slice(0, -noticeLength); partialLength -= noticeLength;
-              if (owner) callbacks.text?.('', textLength + partialLength + (textLength && partialLength ? 2 : 0)); else publish();
-            }
+            if (noticeLength) text.retractPartial(noticeLength);
             finish({ error: new LocalAgentUsageLimitError(notice || 'Claude Code reported a usage or billing limit.') });
             return;
           }
@@ -336,11 +339,7 @@ async function runClaudeAttempt(input: ClaudeRequest, signal: AbortSignal, callb
           for (const block of Array.isArray(event.message.content) ? event.message.content : []) {
             if (!isRecord(block)) continue;
             if (block.type === 'text' && typeof block.text === 'string' && !signedOut) {
-              const segment = (textLength ? '\n\n' : '') + block.text;
-              if (owner) callbacks.text?.(segment, textLength);
-              textLength += segment.length; partialLength = 0;
-              text = (text + (text ? '\n\n' : '') + block.text).slice(-256_000); partial = '';
-              if (!owner) publish();
+              text.complete(block.text);
               callbacks.log(block.text.slice(-8000));
             } else if (block.type === 'tool_use') {
               callbacks.log(`Tool: ${toolSummary(String(block.name), block.input, input.workingDirectory)}`);
@@ -356,7 +355,16 @@ async function runClaudeAttempt(input: ClaudeRequest, signal: AbortSignal, callb
             finish({ error: auto && !activityStarted && rejectsAutoMode(detail)
               ? new ClaudeAutoUnavailable('Claude Code rejected Auto mode before starting.')
               : new Error(`Claude Code did not finish: ${detail.slice(0, 2000)}`) });
-          } else finish({ result: { sessionId, text: typeof event.result === 'string' ? event.result : text } });
+          } else {
+            // Batched task notifications emit zero-turn placeholders before the result
+            // carrying their shared answer. Even an idle event must not settle on one.
+            if (event.num_turns === 0 && event.result === '' && isRecord(event.origin) && event.origin.kind === 'task-notification') {
+              pendingResult = undefined;
+              return;
+            }
+            pendingResult = { sessionId, text: typeof event.result === 'string' ? event.result : text.text };
+            finishWhenIdle();
+          }
         }
       };
       child.stdout.on('data', (chunk: string) => {
@@ -382,7 +390,9 @@ async function runClaudeAttempt(input: ClaudeRequest, signal: AbortSignal, callb
             const nextMessage = userMessage(nextInput.prompt, nextInput.images || []);
             return new Promise<ClaudeResult>((nextResolve, nextReject) => {
               input = nextInput; signal = nextSignal; callbacks = nextCallbacks; resolve = nextResolve; reject = nextReject;
-              buffer = ''; stderr = ''; text = ''; partial = ''; textLength = 0; partialLength = 0; signedOut = false; outcome = undefined; settled = false; toolBlocks.clear();
+              buffer = ''; stderr = ''; text.reset(); signedOut = false; outcome = undefined; settled = false; toolBlocks.clear();
+              pendingResult = undefined;
+              if (nativeState !== undefined) nativeState = 'running';
               signal.addEventListener('abort', abort, { once: true });
               write(nextMessage);
             });
@@ -396,8 +406,4 @@ async function runClaudeAttempt(input: ClaudeRequest, signal: AbortSignal, callb
   } finally {
     if (!retained) activeSessions.delete(sessionId);
   }
-}
-
-export function claudeOptionsFromSettings(settings: { claudeModel?: string; claudePermissionMode?: string }): ReturnType<typeof resolveClaudeOptions> {
-  return resolveClaudeOptions({ model: settings.claudeModel, permissionMode: settings.claudePermissionMode });
 }

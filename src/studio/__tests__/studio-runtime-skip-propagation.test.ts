@@ -68,7 +68,7 @@ function harness(overrides: { disabledNodeId?: string } = {}) {
   const plugin = { app: { vault: { adapter: {}, getAbstractFileByPath: jest.fn() } }, getLogger: () => ({ warn: jest.fn(), error: jest.fn(), debug: jest.fn() }) } as never;
   const runtime = new StudioRuntime(
     (plugin as { app: unknown }).app as never, plugin, projectStore, registry, new StudioGraphCompiler(), {} as never,
-    { beginLocalCommit: jest.fn(async () => undefined), completeLocalCommit: jest.fn(async () => undefined) } as never,
+    { beginLocalCommit: jest.fn(async () => undefined), completeLocalCommit: jest.fn(async () => undefined) } as never, { run: jest.fn(async () => { throw new Error("Unexpected native run in this fixture."); }) }
   );
   (runtime as unknown as { nodeResultCacheStore: unknown }).nodeResultCacheStore = {
     load: jest.fn(async () => ({ schema: "studio.node-cache.v1", projectId: "proj_skip", updatedAt: "2026-09-13T00:00:00.000Z", entries: {} })),

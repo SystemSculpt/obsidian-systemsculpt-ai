@@ -88,11 +88,10 @@ describe("Chat tab native layout", () => {
     expect(names).toContain("Default chat font size");
     expect(names).not.toContain("Hide SystemSculpt system & tool messages");
     expect(names).toContain("Reduce chat motion");
-    expect(container.textContent).toContain("Your system preference is always honored.");
+    expect(container.textContent).toContain("Fewer chat animations.");
     expect(names).not.toContain("Default system prompt");
     expect(names).not.toContain("Favorite models");
     expect(container.textContent).toContain("Chat settings");
-    expect(container.textContent).toContain("chat preferences and display choices");
     expect(container.querySelector(".ss-favorites-manager")).toBeNull();
   });
 

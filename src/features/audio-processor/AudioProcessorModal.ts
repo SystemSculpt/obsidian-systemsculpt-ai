@@ -67,7 +67,7 @@ export class AudioProcessorModal extends StandardModal {
     super.onOpen();
     this.addTitle(
       "Audio Processor",
-      "Turn audio or a YouTube video into a detailed note, meeting brief, or clean transcript.",
+      "Turn audio or YouTube into a note.",
     );
     this.processButton = this.addActionButton(
       "audio.modal.process",
@@ -137,7 +137,7 @@ export class AudioProcessorModal extends StandardModal {
       cls: "ss-audio-processor__intro",
       text: vaultAudioAvailable
         ? "Choose a recording from your vault or upload one from this device."
-        : "Choose a recording from this device. Large files upload in small parts.",
+        : "Choose a recording from this device.",
     });
     this.picker = new AudioSourcePicker(container, {
       app: this.app,
@@ -153,7 +153,7 @@ export class AudioProcessorModal extends StandardModal {
           return false;
         }
       },
-      deviceHint: "Large files upload in parts, so hours-long recordings are supported.",
+      deviceHint: "Hours-long recordings are fine.",
       sizeLimitLabel: "up to 1 GB",
       onChange: () => this.syncProcessButton(),
     });
@@ -162,7 +162,7 @@ export class AudioProcessorModal extends StandardModal {
   private renderYouTubePanel(container: HTMLElement): void {
     container.createDiv({
       cls: "ss-audio-processor__intro",
-      text: "Paste a YouTube video link. SystemSculpt handles retrieval, transcription, and note creation on the server.",
+      text: "Paste a YouTube link.",
     });
     const field = container.createDiv({ cls: "ss-audio-processor__youtube-field" });
     const inputId = `ss-audio-youtube-${this.instanceId}`;
@@ -238,14 +238,14 @@ export class AudioProcessorModal extends StandardModal {
       choices,
       "audio.modal.output.meeting-brief",
       "Meeting brief",
-      "Outcome, decisions, action items, and open questions, plus a linked transcript.",
+      "Decisions, actions and questions.",
       "list-checks",
     );
     const cleanTranscriptButton = this.createOutputPresetOption(
       choices,
       "audio.modal.output.clean-transcript",
       "Clean transcript",
-      "Readable paragraphs without timestamps in the main note, plus a linked transcript.",
+      "Clean paragraphs, no timestamps.",
       "align-left",
     );
     this.outputPresetGroup = createUiRadioGroup(

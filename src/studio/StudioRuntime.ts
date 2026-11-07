@@ -1,8 +1,6 @@
 import { studioAgentExecution } from './StudioCommandExecution';
 import type { StudioAgentRuns } from '../services/codex/StudioAgentRuns';
-import { codexOptionsFromSettings, codexWorkingDirectory } from "../services/codex/CodexExecutionSettings";
-import { StudioCodexRuns, codexRunKey } from '../services/codex/StudioCodexRuns';
-import { answerCodexRequest } from '../services/codex/CodexRequestModal';
+import { codexOptionsFromSettings } from "../services/codex/CodexExecutionSettings";
 import { App, normalizePath, TFile } from "obsidian";
 import type SystemSculptPlugin from "../main";
 import { desktopHost } from "../platform/desktopOnly";
@@ -68,7 +66,6 @@ const PREVIEWABLE_MEDIA_EXTENSIONS = new Set([
 ]);
 
 export class StudioRuntime {
-  private readonly codexRuns = new StudioCodexRuns();
   private disposed = false;
   private readonly activeRunControllers = new Set<AbortController>();
 
@@ -79,7 +76,6 @@ export class StudioRuntime {
       for (const pending of queue.splice(0)) pending.reject(new Error("Studio runtime is disposed."));
     }
     this.projectQueues.clear();
-    this.codexRuns.dispose();
   }
   private readonly projectQueues = new Map<string, PendingRun[]>();
   private readonly activeProjects = new Set<string>();
@@ -106,7 +102,7 @@ export class StudioRuntime {
     private readonly compiler: StudioGraphCompiler,
     private readonly assetStore: StudioAssetStore,
     private readonly apiAdapter: StudioApiAdapter,
-    private readonly agentRuns?: StudioAgentRuns
+    private readonly agentRuns: Pick<StudioAgentRuns, "run">
   ) {
     this.nodeResultCacheStore = new StudioNodeResultCacheStore(projectStore);
   }
@@ -654,7 +650,7 @@ export class StudioRuntime {
           inputs,
           signal: abortController.signal,
           services: {
-            codex: (input, signal, log) => this.agentRuns ? this.agentRuns.run({ projectId: project.projectId, projectPath, nodeId, title: compiledNode.node.title, request: { ...input, ...studioAgentExecution(project.graph.nodes, nodeId, { ...codexOptionsFromSettings(this.plugin.settings), ...input }) } }, signal) : this.codexRuns.run(codexRunKey(project.projectId, nodeId), { ...input, ...studioAgentExecution(project.graph.nodes, nodeId, { ...codexOptionsFromSettings(this.plugin.settings), ...input }), workingDirectory: codexWorkingDirectory(this.app, input.workingDirectory) }, signal, { log, thread: () => {}, request: (method, params, requestSignal) => answerCodexRequest(this.app, method, params, requestSignal) }),
+            codex: (input, signal) => this.agentRuns.run({ projectId: project.projectId, projectPath, nodeId, title: compiledNode.node.title, request: { ...input, ...studioAgentExecution(project.graph.nodes, nodeId, { ...codexOptionsFromSettings(this.plugin.settings), ...input }) } }, signal),
             api: this.apiAdapter,
             storeAsset: async (bytes, mimeType) => {
               const staged = await this.assetStore.stageArrayBuffer(projectPath, bytes, mimeType);

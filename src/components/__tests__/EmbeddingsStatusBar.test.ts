@@ -35,7 +35,11 @@ describe("EmbeddingsStatusBar", () => {
   let statusBar: EmbeddingsStatusBar;
 
   beforeEach(() => {
+    const hostStyles = document.createElement("style");
+    hostStyles.textContent = ".status-bar-item { display: flex; }";
+    document.body.appendChild(hostStyles);
     element = document.createElement("div");
+    element.classList.add("status-bar-item");
     document.body.appendChild(element);
     installObsidianDomHelpers(element);
     listener = null;
@@ -145,6 +149,8 @@ describe("EmbeddingsStatusBar", () => {
   it("is absent while embeddings are disabled", () => {
     statusBar.unload();
     const disabledElement = document.createElement("div");
+    disabledElement.classList.add("status-bar-item");
+    document.body.appendChild(disabledElement);
     installObsidianDomHelpers(disabledElement);
     plugin.addStatusBarItem.mockReturnValue(disabledElement);
     plugin.settings.embeddingsEnabled = false;
@@ -153,7 +159,22 @@ describe("EmbeddingsStatusBar", () => {
     disabled.load();
     expect(disabledElement.hidden).toBe(true);
     expect(disabledElement.getAttribute("aria-hidden")).toBe("true");
+    expect(getComputedStyle(disabledElement).display).toBe("none");
     disabled.unload();
+  });
+
+  it("hides on disable and restores native layout when monitoring resumes", () => {
+    expect(getComputedStyle(element).display).toBe("flex");
+    statusBar.stopMonitoring();
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+    expect(element.hidden).toBe(true);
+    expect(getComputedStyle(element).display).toBe("none");
+
+    statusBar.startMonitoring(plugin.embeddingsManager);
+    expect(element.hidden).toBe(false);
+    expect(element.hasAttribute("aria-hidden")).toBe(false);
+    expect(getComputedStyle(element).display).toBe("flex");
+    expect(element.textContent).toBe("12");
   });
 
   it("rebinds exactly once and releases the lifecycle listener on unload", () => {

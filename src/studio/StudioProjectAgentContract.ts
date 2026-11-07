@@ -1,32 +1,22 @@
-import { StudioGraphCompiler } from "./StudioGraphCompiler";
+import { STUDIO_AGENT_DOCS_PATH } from "./types";
+import { compactStudioNodeKind, isStudioVisualOnlyNodeKind } from "./StudioNodeKinds";
 import {
   resolveStudioGraphNodeResizeBounds,
   resolveStudioNodeDefaultSize,
 } from "./StudioNodeGeometry";
-import { isStudioVisualOnlyNodeKind } from "./StudioNodeKinds";
-import { StudioNodeRegistry } from "./StudioNodeRegistry";
-import { registerBuiltInStudioNodes } from "./StudioBuiltInNodes";
+import { builtInStudioNodeRegistry } from "./StudioBuiltInNodes";
 import type {
   StudioJsonValue,
   StudioNodeConfigFieldDefinition,
   StudioNodeDefinition,
   StudioPortDefinition,
-  StudioProjectV1,
 } from "./types";
-
-/**
- * Vault path of the generated agent reference document. Every serialized v2
- * project carries this path in its "docs" field so an agent that opens a
- * project anywhere in the vault can find the format guide and the node kind
- * reference without either being embedded in the project file.
- */
-export const STUDIO_AGENT_DOCS_PATH = "SystemSculpt/Studio/AGENTS.md" as const;
 
 const NODE_PURPOSES: Readonly<Record<string, string>> = {
   "studio.audio_extract": "Extract audio from a media asset for downstream transcription or processing.",
   "studio.cli_command": "Run a configured command in an approved filesystem scope on a desktop host.",
   "studio.dataset": "Represent, inspect, and emit structured tabular or record-oriented data.",
-  "studio.image_generation": "Retired image generation card. Preserve its saved configuration, connections and outputs; never add new instances. It never runs.",
+  "studio.image_generation": "Generate images on SystemSculpt hosted AI. Inputs: prompt (text) and images (up to 4 reference images, edge order). config: model (server catalog ID; blank uses the SystemSculpt default), quality (max), aspectRatio (auto, 1:1, 3:2, 2:3, 4:3, 3:4, 16:9, 9:16, 21:9), background (auto, transparent, opaque), count (1-4). Outputs: images (saved asset refs, shown as output cards) and generation ({model, usd, estimated}).",
   "studio.input": "Provide a static value or text input to downstream executable nodes.",
   "studio.button": "Reusable explicit button. Set config.label, action (run or focus), and target node ID. Reuses target permissions; graph traversal never presses it.",
   "studio.command_center": "Action panel for explicit run and focus commands targeting existing node IDs. Buttons reuse the target execution and permission path. It is visual-only and never runs from graph traversal.",
@@ -46,32 +36,6 @@ const NODE_PURPOSES: Readonly<Record<string, string>> = {
   "studio.transcription": "Transcribe an audio or video asset through the managed SystemSculpt API.",
   "studio.value": "Provide a typed primitive or structured value to downstream nodes.",
 };
-
-const builtInRegistry = new StudioNodeRegistry();
-registerBuiltInStudioNodes(builtInRegistry);
-
-/**
- * v2 documents spell kinds without the "studio." namespace and never persist
- * node versions; both are restored here. A kind that is not built in keeps its
- * spelling and the default version so future or third-party kinds round-trip.
- */
-export function expandStudioNodeKind(kind: string): string {
-  const trimmed = String(kind || "").trim();
-  return trimmed && !trimmed.includes(".") ? `studio.${trimmed}` : trimmed;
-}
-
-export function compactStudioNodeKind(kind: string): string {
-  return kind.startsWith("studio.") ? kind.slice("studio.".length) : kind;
-}
-
-export function resolveBuiltInStudioNodeVersion(kind: string): string | null {
-  const definition = builtInRegistry.list().find((entry) => entry.kind === kind);
-  return definition ? definition.version : null;
-}
-
-export function findBuiltInStudioNodeDefinition(kind: string): StudioNodeDefinition | null {
-  return builtInRegistry.list().find((entry) => entry.kind === kind) || null;
-}
 
 function renderPortLine(port: StudioPortDefinition, direction: "in" | "out"): string {
   const flags = [port.type, ...(port.required ? ["required"] : [])].join(", ");
@@ -158,7 +122,7 @@ function renderNodeKindSection(definition: StudioNodeDefinition): string {
  * derived from the registry, so a byte comparison detects staleness.
  */
 export function renderStudioAgentReferenceMarkdown(): string {
-  const kinds = builtInRegistry
+  const kinds = builtInStudioNodeRegistry
     .list()
     .slice()
     .sort((left, right) => left.kind.localeCompare(right.kind));
@@ -255,7 +219,7 @@ An entry is \`{"schema":"studio.entry.v1","id":"existing-project-id","projection
 - A node is \`{id, kind, title?, parent?, x, y, width?, height?, config?, disabled?, continueOnError?}\`. Omit \`width\`/\`height\` to use the kind's default size; omit \`config\` when empty.
 - \`config\` holds the node's authored content and settings; the node kind reference below lists allowed keys, defaults, and value constraints. Paths are vault-relative unless the field says otherwise.
 - An edge is the string \`"fromNode.outPort -> toNode.inPort"\`. Port types must match unless either side is \`any\`. When a node has exactly one output (or one input) port the port name may be omitted: \`"transcript -> summary.prompt"\`.
-- Edges connect data flow. Visual-only kinds never execute. Preserve existing retired image connections, which carry recorded outputs, but do not add new connections to retired nodes or invent port names.
+- Edges connect data flow. Visual-only kinds never execute. Do not add new connections to retired nodes or invent port names.
 - A group is \`{id, name, color?, nodes, shapes?, outputFor?, outputOffset?}\` framing existing node and shape ids. Membership defines its bounds; a member belongs to at most one group; a group needs at least one member; \`color\` is \`#rgb\` or \`#rrggbb\`.
 - A shape is \`{id, shape, x, y, width, height, label, style?}\` on the same canvas. Shapes are drawings, not nodes: they never run and cannot connect to a node. \`shape\` is one of \`rectangle\` (step), \`ellipse\`, \`diamond\` (decision), \`pill\` (start or end), \`cylinder\` (store), \`note\` (aside), \`hexagon\` (preparation). Sides are whole pixels between 48 and 4000.
 - An arrow is the string \`"fromItem -> toItem"\` between two different existing nodes or shapes; each direction of a pair may appear once. Arrows are drawn border to border and carry no data.
@@ -269,27 +233,10 @@ An entry is \`{"schema":"studio.entry.v1","id":"existing-project-id","projection
 
 In the installed Obsidian runtime, use the public Studio service: \`app.plugins.plugins["systemsculpt-ai"].getStudioService()\`. Call \`runProject(vaultRelativePath)\` for the graph or \`runProjectFromNode(vaultRelativePath, nodeId)\` for a node and its upstream prerequisites. These are the same execution methods used by the Run controls; every open view of that project receives progress, output, and errors automatically. Do not call private view handlers or fabricate run events.
 
-The run methods return a promise for the completed summary. For a long run, start it once and observe \`getActiveRun(path)\` (run ID, scoped node IDs, compact current events) and \`getRecentRuns(path)\` (saved results). \`subscribeRunEvents(listener)\` returns an unsubscribe function for live updates across projects; each update includes its project path. Opening a running project restores its current progress; reopening a finished project restores its saved run outputs, including images that bypass the execution cache. \`getLatestRunEvents(path)\` reads that saved event history without executing anything. A completed event means output files have been published. Image generation is retired: inspect saved image outputs without running the image card. Existing consumers reuse its recorded outputs; use an existing image file if no recorded output is available.
+The run methods return a promise for the completed summary. For a long run, start it once and observe \`getActiveRun(path)\` (run ID, scoped node IDs, compact current events) and \`getRecentRuns(path)\` (saved results). \`subscribeRunEvents(listener)\` returns an unsubscribe function for live updates across projects; each update includes its project path. Opening a running project restores its current progress; reopening a finished project restores its saved run outputs, including images that bypass the execution cache. \`getLatestRunEvents(path)\` reads that saved event history without executing anything. A completed event means output files have been published.
 
 ## Node kinds
 
 ${kinds.map(renderNodeKindSection).join("\n\n")}
 `;
-}
-
-export function validateStudioProjectForAgentEdit(project: StudioProjectV1): void {
-  // Document-mode compile: this gate decides whether Studio will adopt and
-  // open a project file at all, so it must accept every state Studio itself
-  // can persist (placeholder nodes, unfinished configs, unwired required
-  // inputs). Run readiness is enforced separately by the runtime's strict
-  // compile when the user actually runs the graph.
-  //
-  // graph.entryNodeIds is deliberately not validated here. It is derived
-  // data: the canvas recomputes it on every mutation and planStudioRun
-  // re-derives real entry points from executable-graph structure, ignoring
-  // the persisted list. The visual-only classification also changes across
-  // plugin versions (studio.text became executable in 6.2.x), so rejecting
-  // an entry by kind bricks files persisted by a sibling build. parse
-  // drops entry IDs that reference missing nodes.
-  new StudioGraphCompiler().compile(project, builtInRegistry, { validation: "document" });
 }

@@ -294,16 +294,6 @@ export class StudioProjectSessionController {
     return changed;
   }
 
-  schedulePersistFromLegacyMutation(options?: {
-    captureHistory?: boolean;
-    mode?: StudioProjectSessionAutosaveMode;
-  }): void {
-    if (options?.captureHistory !== false) {
-      if (this.currentProject) this.host.history.checkpoint(this.currentProject, this.host.graphInteraction.getSelectedNodeIds());
-    }
-    this.currentProjectSession?.schedulePersist({ mode: options?.mode || "discrete" });
-  }
-
   async flushPendingProjectSaveWork(options?: {
     force?: boolean;
     showNotice?: boolean;

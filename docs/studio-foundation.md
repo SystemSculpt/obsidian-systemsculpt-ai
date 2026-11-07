@@ -272,16 +272,17 @@ canvas. Organizational parents and execution connections do not control placemen
 Text execution can instead use the installed Codex app-server or Claude Code CLI on desktop (`services/claude/` holds the Claude Code transport). `services/codex/` contains the thin transport, native approval UI, local thread locator and ChatView presentation adapter. `studio.codex` runs explicit task prompts; the text-generation adapter honors the selected backend without creating managed operation receipts for local runs. Codex owns native sessions and all agent continuation.
 
 
-### Retired image generation
+### Image generation
 
-Image generation and **Edit with AI** are retired. Existing image-generation
-cards open read-only with a retirement notice and Source inspection. Their
-configuration, connections, generated output cards, vault assets and run history
-are preserved. They are hidden from Insert and never execute. Existing connected
-consumers reuse their recorded outputs; if no saved output exists, the run stops
-rather than silently dropping the image input. Historical count, size and seed
-settings are retained; existing removal of obsolete provider routing and
-credentials still applies. Local image editing, copying and viewing remain available.
+Image Generation cards make up to four images per run on SystemSculpt hosted AI.
+The prompt comes from a wired text input or the card's Prompt box. The `images`
+input takes up to four reference images (the first four distinct images in edge
+order; extras are skipped with a log line), for edits and style matching. Settings:
+model (server catalog; blank uses the SystemSculpt default), quality (default
+Max), aspect ratio, background (Transparent supported) and count. Results land as
+output cards in the Outputs group and as files in the project's assets folder.
+The `generation` output carries the model the server ran and the job's cost in USD.
+Cards saved while image generation was retired load and run unchanged.
 
 ### Video model catalog, favorites, and per-model inputs
 
@@ -302,8 +303,7 @@ defaults. Catalogs remain server-owned and cached for five minutes.
 Estimates include the SystemSculpt service fee; actual usage determines the final
 charge. Input uploads, durable operation identity and verified output downloads
 stay on the first-party transport. Video frames still use the shared
-`/images/inputs/prepare` endpoint. Retiring image generation does not remove this
-upload path or historical media records.
+`/images/inputs/prepare` endpoint. Image references use the same upload path.
 
 ### Video generation
 

@@ -25,3 +25,4 @@ export {
   getSurfaceOwnerWindow,
   resolveSurfaceDomContext,
 } from "./SurfaceDomContext";
+export { containMenuEscape, returnFocusAfterMenu } from "./SurfaceMenu";

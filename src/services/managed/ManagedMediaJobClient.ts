@@ -1,6 +1,7 @@
 import { readVerifiedManagedOutput } from "./ManagedOutputBytes";
 import { HostedTransportAdapter } from "./adapters/HostedTransportAdapter";
 import {
+  ManagedUploadedImageInput,
   MANAGED_CAPABILITY_CONTRACT,
   MANAGED_IMAGE_OUTPUT_MAX_BYTES,
   MANAGED_VIDEO_OUTPUT_MAX_BYTES,
@@ -11,14 +12,14 @@ import {
   ManagedDeliveredVideoOutputBytes,
   ManagedVideoOutputMetadata,
 } from "./ManagedTypes";
-import type { ManagedUploadedImageInput } from "./ManagedJobClient";
+import { MANAGED_MEDIA_DELIVERY_MAX_OFFSET_MS as MEDIA_DELIVERY_MAX_OFFSET_MS } from "./ManagedMediaDeliveryTiming";
 
 /**
  * managed-job-protocol-v2 — the negotiated media contract that adds model
  * selection, video generation, and synthesized progress fields
- * (typical_duration_ms). managed-job-protocol-v1 and its client
- * (ManagedJobClient) stay frozen for released artifacts; this sibling client
- * never shares parsing state with it.
+ * (typical_duration_ms). Audio and documents retain their strict
+ * managed-job-protocol-v1 parser in ManagedJobClient; media never shares
+ * parsing state with it.
  * @internal Tests assert against this value.
  */
 export const MANAGED_MEDIA_JOB_PROTOCOL = "managed-job-protocol-v2" as const;
@@ -44,7 +45,7 @@ export interface ManagedImageCreateBody {
   model?: string;
   prompt: string;
   input_images?: ManagedUploadedImageInput[];
-  options?: { count?: number; aspect_ratio?: string; image_size?: string; seed?: number };
+  options?: { count?: number; aspect_ratio?: string; image_size?: string; quality?: string; background?: string; seed?: number };
 }
 export interface ManagedVideoCreateBody {
   model: string;
@@ -64,6 +65,8 @@ export interface ManagedMediaStatusResponse<Output> {
   usage: ManagedMediaUsage;
   poll_after_ms?: number;
   typical_duration_ms?: number;
+  /** HTTP Date as observation metadata; never read from the response body. */
+  serverTimeMs?: number;
 }
 export interface ManagedMediaListResponse<Output> {
   items: Array<{ job: ManagedMediaJobSnapshot; outputs: readonly Output[]; usage: ManagedMediaUsage }>;
@@ -106,8 +109,9 @@ const VIDEO_EXTENSIONS: Record<string, string> = { "video/mp4": "mp4", "video/we
 const IMAGE_ASPECT_RATIO_PATTERN = /^\d{1,2}(\.\d{1,2})?:\d{1,2}(\.\d{1,2})?$/;
 const VIDEO_ASPECT_RATIO_PATTERN = /^[0-9]{1,2}:[0-9]{1,2}$/;
 const IMAGE_SIZE_PATTERN = /^\d{1,4}(\.\d{1,2})?K?$/i;
+// Quality and background values are model-specific; the server checks membership.
+const IMAGE_OPTION_TOKEN_PATTERN = /^[a-z][a-z0-9_-]{0,23}$/;
 const MEDIA_STATUSES: readonly ManagedMediaJobStatus[] = ["queued", "processing", "succeeded", "failed", "expired"];
-const MEDIA_DELIVERY_MAX_OFFSET_MS = 7 * 24 * 60 * 60 * 1_000;
 const MEDIA_DOWNLOAD_STARTED_AT_HEADER = "x-systemsculpt-download-started-at";
 const MEDIA_DOWNLOAD_REQUESTED_AT_HEADER = "x-systemsculpt-download-requested-at";
 const CAPABILITY: Record<ManagedMediaKind, "image_generation" | "video_generation"> = { image: "image_generation", video: "video_generation" };
@@ -335,11 +339,15 @@ export class ManagedMediaJobClient {
     const item = this.item(kind, { job: root.job, outputs: root.outputs, usage: root.usage });
     if (item.job.id !== jobId) malformed("Managed media status identity changed.");
     this.throwTerminal(kind, item.job, result.response.status, requestId);
-    const pollAfterMs = root.poll_after_ms === undefined
-      ? result.diagnostics.retryAfterMs
-      : root.poll_after_ms as number;
+    const bodyPollAfterMs = root.poll_after_ms as number | undefined;
+    const retryAfterMs = result.diagnostics.retryAfterMs;
+    const pollAfterMs = bodyPollAfterMs === undefined && retryAfterMs === undefined
+      ? undefined
+      : Math.max(bodyPollAfterMs ?? 0, retryAfterMs ?? 0);
+    const serverTimeMs = Date.parse(result.response.headers.get("date") ?? "");
     return {
       ...item,
+      ...(Number.isFinite(serverTimeMs) ? { serverTimeMs } : {}),
       ...(pollAfterMs === undefined ? {} : { poll_after_ms: pollAfterMs }),
       ...(root.typical_duration_ms === undefined ? {} : { typical_duration_ms: root.typical_duration_ms as number }),
     };
@@ -553,10 +561,12 @@ export class ManagedMediaJobClient {
     }
     if (body.options !== undefined) {
       const o = body.options;
-      if (!o || Object.keys(o).some(k => !["count", "aspect_ratio", "image_size", "seed"].includes(k))) invalid();
+      if (!o || Object.keys(o).some(k => !["count", "aspect_ratio", "image_size", "quality", "background", "seed"].includes(k))) invalid();
       if (o.count !== undefined && (!Number.isInteger(o.count) || o.count < 1 || o.count > 4)) invalid();
       if (o.aspect_ratio !== undefined && (typeof o.aspect_ratio !== "string" || !(o.aspect_ratio === "auto" || o.aspect_ratio === "match_input_image" || IMAGE_ASPECT_RATIO_PATTERN.test(o.aspect_ratio)))) invalid();
       if (o.image_size !== undefined && (typeof o.image_size !== "string" || !IMAGE_SIZE_PATTERN.test(o.image_size))) invalid();
+      if (o.quality !== undefined && (typeof o.quality !== "string" || !IMAGE_OPTION_TOKEN_PATTERN.test(o.quality))) invalid();
+      if (o.background !== undefined && (typeof o.background !== "string" || !IMAGE_OPTION_TOKEN_PATTERN.test(o.background))) invalid();
       if (o.seed !== undefined && (!Number.isInteger(o.seed) || o.seed < 0 || o.seed > 2147483647)) invalid();
     }
   }

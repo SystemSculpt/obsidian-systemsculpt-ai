@@ -128,8 +128,8 @@ export function displayDirectoriesTabContent(containerEl: HTMLElement, tabInstan
           try {
             const success = await plugin.repairDirectoryStructure();
             setStatus(success
-              ? "No directory repair is needed. Output folders are created when files are saved."
-              : "An output path is blocked or inaccessible. Resolve the conflict or choose another directory.");
+              ? "Folders look good."
+              : "A folder is blocked. Choose another.");
           } catch (error: unknown) {
             setStatus(`Repair failed: ${error instanceof Error ? error.message : String(error)}`);
           }

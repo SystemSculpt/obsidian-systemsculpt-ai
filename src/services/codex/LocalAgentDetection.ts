@@ -1,6 +1,6 @@
 import { desktopHost } from '../../platform/desktopOnly';
 import { hasHostCapability } from '../../platform/hostCapabilities';
-import { isRecord } from '../../studio/utils';
+import { isRecord } from '../../utils/jsonRecord';
 import { resolveCodexLaunchOptions } from './CodexLaunch';
 import { readLocalAgentLaunchConfig, resolveLocalAgentBinary, resolveLocalAgentCommand } from './LocalAgentLaunch';
 import { LOCAL_AGENTS, type LocalAgentId, type TextExecutionBackend } from './LocalAgents';

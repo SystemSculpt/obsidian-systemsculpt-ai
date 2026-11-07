@@ -8,6 +8,7 @@ import {
 import { sha256HexFromArrayBuffer, sha256HexFromBytesPortable } from "../../utils/sha256";
 import { createVaultFileSource } from "../../platform/fileSource";
 import type { ManagedFileSource } from "../managed/ManagedFileSource";
+import type { ManagedDocumentDownloadResult } from "../managed/ManagedDocumentProcessingAdapter";
 
 jest.mock("../../platform/fileSource", () => ({ createVaultFileSource: jest.fn() }));
 
@@ -35,7 +36,7 @@ function file(path = "documents/report.pdf"): TFile {
   return value;
 }
 
-function harness(options: { images?: boolean; exists?: boolean; existingMarkdown?: string } = {}) {
+function harness(options: { images?: boolean; exists?: boolean; existingMarkdown?: string; result?: Partial<ManagedDocumentDownloadResult> } = {}) {
   const events: string[] = [];
   const app = new App();
   app.vault.readBinary = jest.fn(async () => { throw new Error("Whole-file document reads are forbidden."); });
@@ -60,12 +61,13 @@ function harness(options: { images?: boolean; exists?: boolean; existingMarkdown
   app.vault.adapter.read = jest.fn(async () => options.existingMarkdown ?? "different");
   app.vault.adapter.readBinary = jest.fn(async () => new Uint8Array([9]).buffer);
 
-  const result = {
+  const result: ManagedDocumentDownloadResult = {
     content: [],
     text: "managed text",
     markdown: options.images ? "![figure](figure.png)" : "# Managed document",
     images: options.images ? [{ name: "figure.png", data: `data:image/png;base64,${imageBase64}` }] : [],
     metadata: { title: "Managed" },
+    ...options.result,
   };
   const managed = {
     processAndCommit: jest.fn(async (source: ManagedFileSource, context: any, commit: (value: any) => Promise<unknown>) => {
@@ -203,6 +205,60 @@ describe("DocumentProcessingService managed local effects", () => {
     );
   });
 
+  it.each([
+    ["Markdown", { markdown: "# Preferred", text: "Other", content: [{ text: "Structured" }] }, "# Preferred"],
+    ["plain text", { markdown: "  ", text: "Body", content: [{ text: "Structured" }] }, "Body"],
+    ["structured content", { markdown: "", text: "", content: [{ text: "Structured" }] }, JSON.stringify([{ text: "Structured" }], null, 2)],
+  ] as const)("renders admitted %s through the public conversion path", async (_label, result, expectedBody) => {
+    const { app, dependencies, plugin } = harness({ result: { ...result, content: [...result.content], metadata: { title: "Title" } } });
+    const receipt = await new DocumentProcessingService(app, plugin, dependencies)
+      .processDocumentWithReceipt(file(), { showNotices: false });
+    expect(app.vault.create).toHaveBeenCalledWith(receipt.extractionPath, `# Title\n\n${expectedBody}\n\n---\nExtracted with SystemSculpt\n`);
+  });
+
+  it("preserves exact empty-result Markdown bytes and the default metadata title", async () => {
+    const result = { content: [], text: "", markdown: "", images: [], metadata: {} };
+    const { app, dependencies, plugin } = harness({ result });
+    const receipt = await new DocumentProcessingService(app, plugin, dependencies)
+      .processDocumentWithReceipt(file(), { showNotices: false });
+    const normalized = { content: "", text: "", markdown: "", metadata: {}, images: [] };
+    expect(app.vault.create).toHaveBeenCalledWith(receipt.extractionPath, `# Document Extraction\n\n${JSON.stringify(normalized, null, 2)}\n\n---\nExtracted with SystemSculpt\n`);
+  });
+
+  it.each([
+    ["string", imageBase64, "image-0.png"],
+    ["filename/base64", { filename: "a.png", base64: imageBase64 }, "a.png"],
+    ["name/content", { name: "a.png", content: imageBase64 }, "a.png"],
+    ["name/data", { name: "a.png", data: `data:image/png;base64,${imageBase64}` }, "a.png"],
+    ["prototype name", { name: "__proto__", data: imageBase64 }, "__proto__"],
+    ["inherited name", { name: "constructor", data: imageBase64 }, "constructor"],
+  ] as const)("extracts admitted %s image entries through the public conversion path", async (_label, image, name) => {
+    const { app, dependencies, plugin } = harness({ result: { markdown: `![figure](${name})`, images: [image] } });
+    const receipt = await new DocumentProcessingService(app, plugin, dependencies)
+      .processDocumentWithReceipt(file(), { showNotices: false });
+    expect(receipt.imagePaths).toHaveLength(1);
+    expect(new TextDecoder().decode((app.vault.createBinary as jest.Mock).mock.calls[0][1])).toBe("managed-image-bytes");
+    const markdown = (app.vault.create as jest.Mock).mock.calls[0][1] as string;
+    expect(markdown).toContain("![figure](images-report/report-");
+    expect(markdown).not.toContain(`![figure](${name})`);
+  });
+
+  it("deduplicates identical image bytes while rewriting every reference and retaining the image note", async () => {
+    const { app, dependencies, plugin } = harness({ result: {
+      markdown: '![first](a.png)\n<img src="b.png">',
+      images: [{ name: "a.png", data: imageBase64 }, { filename: "b.png", base64: imageBase64 }],
+    } });
+    const receipt = await new DocumentProcessingService(app, plugin, dependencies)
+      .processDocumentWithReceipt(file(), { showNotices: false });
+    expect(receipt.imagePaths).toHaveLength(1);
+    expect(app.vault.createBinary).toHaveBeenCalledTimes(1);
+    const markdown = (app.vault.create as jest.Mock).mock.calls[0][1] as string;
+    const imagePath = receipt.imagePaths[0].split("/").slice(-2).join("/");
+    expect(markdown).toContain(`![first](${imagePath})`);
+    expect(markdown).toContain(`<img src="${imagePath}">`);
+    expect(markdown).toContain("2 images were extracted");
+  });
+
   it("shows a recovery notice for the selected file even when progress notices are off", async () => {
     const { app, dependencies, managed, plugin } = harness();
     const convert = managed.processAndCommit.getMockImplementation()!;
@@ -282,10 +338,8 @@ describe("DocumentProcessingService managed local effects", () => {
     const handler = jest.fn();
     (service as any).emitProgress(handler, { stage: "processing", progress: 150, label: "Test", icon: "cpu" }, { filePath: "doc.pdf" });
     expect(handler).toHaveBeenCalledWith(expect.objectContaining({ progress: 100, flow: "document" }));
-    expect((service as any).extractImagesFromData({ images: [{ filename: "a.png", base64: "abc" }] })).toEqual({ "a.png": "abc" });
     expect((service as any).generateUniqueImageName("My Doc", "Image 1.PNG", "data")).toMatch(/^My-Doc-Image-1-.*\.png$/);
     expect(new TextDecoder().decode((service as any).base64ToArrayBuffer(Buffer.from("hello").toString("base64")))).toBe("hello");
-    expect((service as any).formatExtractionContent({ metadata: { title: "Title" }, text: "Body" })).toContain("# Title\n\nBody");
   });
 
   it("contains progress-handler failures without altering conversion state", () => {

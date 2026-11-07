@@ -13,7 +13,8 @@ import { CodexThreadLocator } from "../../services/codex/CodexThreadLocator";
 import { CodexChatSession } from "../../services/codex/CodexChatSession";
 import { LocalAgentChatSession } from "../../services/codex/LocalAgentChatSession";
 import { ClaudeChatSession } from "../../services/claude/ClaudeChatSession";
-import { claudeOptionsFromSettings } from "../../services/claude/LocalClaudeClient";
+import { claudeOptionsFromSettings, isClaudePermissionMode, type ClaudePermissionMode } from "../../services/claude/ClaudeExecutionOptions";
+import { isCodexApprovalMode, type CodexApprovalMode } from "../../services/codex/CodexApprovalPolicy";
 import { ItemView, MarkdownView, Menu, normalizePath, Notice, Scope, TFile, WorkspaceLeaf } from "obsidian";
 import type SystemSculptPlugin from "../../main";
 import { CHAT_VIEW_TYPE } from "../../core/plugin/viewTypes";
@@ -28,17 +29,16 @@ import type { ChatMessage } from "../../types";
 import type { ChatExportOptions } from "../../types/chatExport";
 import { isMutatingTool, type ToolApprovalPolicy } from "../../utils/toolPolicy";
 import { isPlanAccessError, planRequiredError, PLAN_REQUIRED_MESSAGE } from "../../utils/errors";
+import { isStarterBalance, needsPaymentFix, starterOfferLead } from "../../utils/licenseUtils";
+import { openBillingPortal } from "../../utils/billingPortal";
 import { hasActivePlan, UpgradePlanModal } from "../../modals/UpgradePlanModal";
 import { SYSTEMSCULPT_WEBSITE, withPluginAttribution } from "../../constants/externalServices";
 import { openExternalUrl } from "../../utils/externalUrl";
 import { tryCopyToClipboard } from "../../utils/clipboard";
 import { waitForIdle } from "../../utils/yieldToEventLoop";
 import { chatTitleFromMessage, generateDefaultChatTitle, isGeneratedChatTitle, normalizeChatTitle } from "../../utils/titleUtils";
-import {
-  ChatStorageService,
-  resolveChatsDirectory,
-  SavedChatCorruptedError,
-} from "./ChatStorageService";
+import { resolveChatsDirectory } from "./storage/ChatTranscriptLocations";
+import { ChatStorageService, SavedChatCorruptedError } from "./ChatStorageService";
 import {
   FILE_CONTEXT_STATE_CHANGED_EVENT,
   FileContextManager,
@@ -57,8 +57,6 @@ import {
   MODE_CHOICES,
   presentMode,
   type AgentChromeState,
-  type ClaudeChromeMode,
-  type CodexChromeMode,
 } from "./AgentChatChrome";
 import type { AgentEmptyStateAction } from "./AgentEmptyState";
 import { openChatResumeDescriptor } from "./ChatResumeUtils";
@@ -82,10 +80,8 @@ import {
   type RestoredChatMessageDraft,
 } from "./attachments/ChatMessageAttachments";
 import { ManagedChatDocumentAttachmentProcessor } from "./attachments/ManagedChatDocumentAttachmentProcessor";
-import {
-  ChatAttachmentVaultStore,
-  isChatAttachmentContentRef,
-} from "./attachments/ChatAttachmentVaultStore";
+import { isChatAttachmentContentRef } from "./attachments/ChatAttachmentDescriptor";
+import { ChatAttachmentVaultStore } from "./attachments/ChatAttachmentVaultStore";
 import { emitChatTranscriptCommitted } from "./ChatTranscriptEvents";
 import { nativeChatSessions } from "./NativeChatSessions";
 import {
@@ -168,11 +164,11 @@ type DeferredRecoveredCompletion = Readonly<{
 }>;
 
 const LEGACY_HISTORY_VIEW_ONLY_BANNER =
-  "This older saved chat is view-only. You can read or export it. Start a new chat to continue.";
+  "Older chat, view only. Start a new chat to continue.";
 const LEGACY_HISTORY_VIEW_ONLY_COMPOSER =
   "View-only saved chat. Start a new chat to continue.";
 const AGENT_SESSION_RESTORE_ERROR =
-  "The agent session could not be restored. This cached transcript is shown for reference. Reload the chat to try again.";
+  "Couldn't restore this session. Reload the chat to retry.";
 /** Longest wait for an idle moment before attachment cleanup runs anyway. */
 const ATTACHMENT_PRUNE_IDLE_TIMEOUT_MS = 30_000;
 const LOCAL_FAILED_RECEIPT_MAX_ATTEMPTS = 3;
@@ -407,6 +403,7 @@ export class AgentChatView extends ItemView {
   private usedInVault: ReadonlySet<LocalAgentId> = new Set();
   /** The title of a not-yet-saved chat was typed by the person. */
   private titleExplicit = false;
+  private headerActionsAdded = false;
   /** The bubble of a message sent before first-open detection finished. */
   private detectionPendingBubble: ChatMessage | null = null;
   private transcriptSaveOptions() {
@@ -623,10 +620,50 @@ export class AgentChatView extends ItemView {
 
   public getViewType(): string { return CHAT_VIEW_TYPE; }
   public getDisplayText(): string { return this.displayTitle(); }
+  /** The tab shows the same icon as the Chat ribbon button. */
+  public getIcon(): string { return "message-square"; }
 
   /** A chat is "New chat" until its first message or a title the person typed. */
   private displayTitle(): string {
     return !this.chatId && !this.titleExplicit ? "New chat" : this.chatTitle || "New chat";
+  }
+
+  /**
+   * Chat's actions live in Obsidian's own view header, beside its title and
+   * More options menu, so the view has one title row and one menu.
+   */
+  private addHeaderActions(): void {
+    if (this.headerActionsAdded) return;
+    this.headerActionsAdded = true;
+    const modifier = getHostOperatingSystem() === "macOS" ? "Meta" : "Control";
+    // addAction prepends, so add right to left: history, then new chat.
+    this.addAction("square-pen", "New chat", () => void this.newChat())
+      .setAttrs({ "data-testid": "chat.header.new", "aria-keyshortcuts": `${modifier}+Shift+O` });
+    this.addAction("history", "Chat history", () => void this.openHistory())
+      .setAttrs({ "data-testid": "chat.header.history", "aria-keyshortcuts": `${modifier}+K` });
+  }
+
+  /**
+   * Obsidian hides its view header in sidebars, phone drawers and with "Show
+   * tab title bar" off. Only then does the workspace show its own title row,
+   * so a chat always has exactly one. Read from layout, not host class names.
+   */
+  private syncHostHeader(): void {
+    const header = this.containerEl.querySelector<HTMLElement>(":scope > .view-header");
+    const view = this.containerEl.ownerDocument.defaultView;
+    const hidden = !header || !view || view.getComputedStyle(header).display === "none";
+    this.workspace?.setHostHeaderHidden(hidden);
+  }
+
+  /** Hiding or showing Obsidian's header resizes it to or from 0, in every layout. */
+  private watchHostHeader(): void {
+    this.syncHostHeader();
+    const header = this.containerEl.querySelector<HTMLElement>(":scope > .view-header");
+    const Observer = this.containerEl.ownerDocument.defaultView?.ResizeObserver;
+    if (!header || !Observer) return;
+    const observer = new Observer(() => this.syncHostHeader());
+    observer.observe(header);
+    this.register(() => observer.disconnect());
   }
 
   private syncTitle(): void {
@@ -641,6 +678,7 @@ export class AgentChatView extends ItemView {
   public async onOpen(): Promise<void> {
     this.contentEl.empty();
     this.contentEl.addClass("systemsculpt-agent-view");
+    this.addHeaderActions();
     this.workspace = new AgentWorkspace(this.contentEl, {
       app: this.app,
       visibilityRoot: this.containerEl,
@@ -686,6 +724,11 @@ export class AgentChatView extends ItemView {
       onRename: (title) => this.renameFromHeader(title),
       buildMoreMenu: (menu) => this.addChatMenuItems(menu),
       showPlanOffer: this.shouldOfferPlan(),
+      showMonthlyOffer: () => isStarterBalance(this.creditsBalance),
+      showPaymentFix: () => needsPaymentFix(this.creditsBalance),
+      onCreditsOffer: () => this.openMonthlyCheckout("hosted-chat"),
+      onMonthlyOffer: () => this.openMonthlyCheckout(),
+      onUpdateCard: () => this.openBillingPortal(),
       onViewPlans: (error) => {
         if (isPlanAccessError(error)) {
           UpgradePlanModal.openOnce(this.plugin, { feature: "Chat" });
@@ -704,6 +747,8 @@ export class AgentChatView extends ItemView {
         onAction: (action) => {
           if (action === "sign-in") this.beginAccountConnect("sign-in");
           else if (action === "see-plans") void this.viewPlans();
+          else if (action === "monthly") void this.openMonthlyCheckout();
+          else if (action === "update-card") void this.openBillingPortal();
           else void this.openCreditsBalanceModal();
         },
         onModelMenuOpen: () => this.loadCodexCatalog(),
@@ -729,6 +774,7 @@ export class AgentChatView extends ItemView {
       },
     });
     this.addChild(this.workspace);
+    this.watchHostHeader();
     const phoneInbox = this.plugin.getPhoneHandoffInbox?.();
     if (phoneInbox) {
       // Keep inbox review outside transcript end-follow without moving focus or scroll.
@@ -879,7 +925,7 @@ export class AgentChatView extends ItemView {
       } catch (error) {
         if (this.conversationOriginToken !== loadOriginToken) return;
         const message = error instanceof SavedChatCorruptedError
-          ? "This saved chat is corrupted and was left unchanged. Start a new chat to continue."
+          ? "This chat is damaged. Start a new one."
           : "This chat could not be loaded.";
         await this.resetAfterFailedChatLoad(message);
         return;
@@ -1066,6 +1112,29 @@ export class AgentChatView extends ItemView {
   }
 
   public focusInput(): void { this.workspace?.focus(); }
+
+  /**
+   * Puts this view on SystemSculpt hosted AI and focuses the composer, as the
+   * step right after sign-in. A hosted chat stays as it is; a local-agent chat
+   * gives way to a new hosted chat that keeps the draft. The saved default
+   * backend is not changed.
+   */
+  public async startHostedChat(): Promise<void> {
+    if (backendOf(this.agent) === "systemsculpt" && !this.unavailableBackend) {
+      if (this.workspace?.isHistoryOpen) this.workspace.hideHistory(false);
+      void this.refreshCreditsBalance({ requireFresh: true, reason: "view_open" });
+      this.focusInput();
+      return;
+    }
+    const previousChatId = this.messageCount > 0 ? this.chatId : "";
+    if (this.workspace?.isHistoryOpen) this.workspace.hideHistory(false);
+    await this.startNewChat(true, undefined, undefined, {
+      backend: "systemsculpt",
+      carry: { pinned: [...this.contextManager.getPinnedFiles()] },
+      ...(previousChatId ? { switchedFrom: previousChatId } : {}),
+    });
+    this.workspace?.announce(`Started a new chat with ${agentName("systemsculpt")}`);
+  }
   public getInputText(): string { return this.workspace?.getInputText() || ""; }
   public setInputText(value: string | object, options?: { focus?: boolean }): void {
     this.workspace?.setInputText(typeof value === "string" ? value : JSON.stringify(value, null, 2), options);
@@ -1433,9 +1502,25 @@ export class AgentChatView extends ItemView {
       message: rawMessage,
       ...(status === undefined ? {} : { status }),
       retryable,
-    } satisfies ManagedAgentError, retryable, this.creditsBalance?.includedCreditsEntitled === false);
-    if (presented.action === "see-plans") {
+    } satisfies ManagedAgentError, retryable, this.creditsBalance?.includedCreditsEntitled === false,
+    needsPaymentFix(this.creditsBalance));
+    if (presented.action === "update-card") {
+      this.workspace?.setBanner(presented.message, "error", {
+        label: "Update card",
+        testId: "chat.banner.update-card",
+        onSelect: () => void this.openBillingPortal(),
+      });
+    } else if (presented.action === "see-plans") {
       this.workspace?.setBanner(presented.message, "error", true);
+    } else if (presented.action === "monthly" && !isStarterBalance(this.creditsBalance)) {
+      // Only a starter account gets the direct Monthly checkout; others compare plans.
+      this.workspace?.setBanner(presented.message, "error", true);
+    } else if (presented.action === "monthly") {
+      this.workspace?.setBanner(presented.message, "error", {
+        label: "Subscribe",
+        testId: "chat.banner.subscribe",
+        onSelect: () => void this.openMonthlyCheckout(),
+      });
     } else {
       this.workspace?.setBanner(presented.message, "error");
     }
@@ -1789,8 +1874,8 @@ export class AgentChatView extends ItemView {
     const outOfCredits = (this.creditsBalance?.totalRemaining ?? 0) <= 0;
     return Object.assign(
       new Error(outOfCredits
-        ? "You have no credits left. Add credits to continue using Chat."
-        : "Not enough credits are available. Add credits to continue using Chat."),
+        ? "Out of credits. Add more to keep chatting."
+        : "Not enough credits. Add more to keep chatting."),
       {
         code: outOfCredits ? "out_of_credits" : "insufficient_credits",
         status: 402,
@@ -2805,7 +2890,7 @@ export class AgentChatView extends ItemView {
       }
     } else if (!this.consumeRejectedSubmissionDraft(rejected.submission)) {
       this.workspace?.focus();
-      new Notice("The failed request is back in the composer. Send it again from there or edit it first.", 6000);
+      new Notice("Your message is back in the composer.", 6000);
       return true;
     }
     this.pendingRejectedRetry = null;
@@ -2871,7 +2956,7 @@ export class AgentChatView extends ItemView {
     if (!pending || pending.targetMessageId !== messageIdToResubmit) return false;
     const expectedMessageEditGeneration = this.messageEditGeneration;
     if (this.isSubmissionActive()) {
-      new Notice("Wait for the current response to finish before resubmitting this message.", 5000);
+      new Notice("Wait for the response to finish.", 5000);
       return false;
     }
     if (!text.trim() && pending.attachments.length === 0) return false;
@@ -2933,7 +3018,7 @@ export class AgentChatView extends ItemView {
       },
     );
     if (!operation) {
-      new Notice("Wait for the current response to finish before resubmitting this message.", 5000);
+      new Notice("Wait for the response to finish.", 5000);
       return false;
     }
     let executionStarted = false;
@@ -3400,12 +3485,12 @@ export class AgentChatView extends ItemView {
       credits: this.creditsBalance,
       hostedMode: this.approvalMode,
       claude: {
-        mode: claude.permissionMode as ClaudeChromeMode,
+        mode: claude.permissionMode as ClaudePermissionMode,
         model: claude.model,
         autoUnavailable: this.claudeAutoUnavailable,
       },
       codex: {
-        mode: codex.approvalMode as CodexChromeMode,
+        mode: codex.approvalMode as CodexApprovalMode,
         model: codex.model,
         effort: codex.effort,
         serviceTier: codex.serviceTier,
@@ -3642,12 +3727,14 @@ export class AgentChatView extends ItemView {
     if (next) await this.renameFromHeader(next);
   }
 
-  /** The header's More menu and the tab's pane menu share these items. */
+  /** Obsidian's More options menu, the tab's menu and the fallback row's More menu. */
   private addChatMenuItems(menu: Menu): void {
     menu.addItem((item) => item
       .setTitle("Rename chat")
       .setIcon("pencil")
       .onClick(() => void this.beginRename()));
+    // Its own group: phone menus box each group, and a label never joins a box.
+    menu.addSeparator();
     menu.addItem((item) => item.setTitle("Text size").setIcon("type").setIsLabel(true));
     for (const [size, label] of [["small", "Small"], ["medium", "Medium"], ["large", "Large"]] as const) {
       menu.addItem((item) => item
@@ -3667,6 +3754,10 @@ export class AgentChatView extends ItemView {
       .setDisabled(!this.getChatHistoryFilePath())
       .onClick(() => void this.openSavedChatNote()));
     menu.addSeparator();
+    menu.addItem((item) => item
+      .setTitle("Send feedback")
+      .setIcon("message-square")
+      .onClick(() => this.plugin.openSettingsTab("feedback")));
     menu.addItem((item) => item
       .setTitle("SystemSculpt settings")
       .setIcon("settings")
@@ -3689,6 +3780,42 @@ export class AgentChatView extends ItemView {
     const path = this.getChatHistoryFilePath();
     const file = path ? this.app.vault.getAbstractFileByPath(path) : null;
     if (file instanceof TFile) await this.app.workspace.getLeaf("tab").openFile(file);
+  }
+
+  /**
+   * Read entitlement fresh before opening checkout. The composer offers Pro
+   * at any starter balance; existing low-credit surfaces keep their threshold
+   * and attribution. Paid, legacy and unknown accounts never get a new plan.
+   */
+  private async openMonthlyCheckout(placement: "low-credits" | "hosted-chat" = "low-credits"): Promise<void> {
+    try {
+      await this.refreshCreditsBalance({ requireFresh: true, reason: "view_open" });
+    } catch {
+      return; // Never authorize a checkout from a stale offer after a failed refresh.
+    }
+    const balance = this.creditsBalance;
+    // A failed renewal fixes its card on the existing plan, never a second checkout (T-5348).
+    if (needsPaymentFix(balance)) {
+      await this.openBillingPortal();
+      return;
+    }
+    if (!isStarterBalance(balance)
+      || (placement === "hosted-chat" && balance?.subscriptionStatus !== null)
+      || (placement === "low-credits" && starterOfferLead(balance) === null)) {
+      await this.openCreditsBalanceModal();
+      return;
+    }
+    await openExternalUrl(
+      placement === "hosted-chat"
+        ? SYSTEMSCULPT_WEBSITE.MONTHLY_HOSTED_CHAT
+        : withPluginAttribution(SYSTEMSCULPT_WEBSITE.MONTHLY_LOW_CREDITS, "chat"),
+      this.containerEl.ownerDocument.defaultView ?? undefined,
+    );
+  }
+
+  /** The Stripe billing portal, where a failed renewal's card is fixed (T-5348). */
+  private openBillingPortal(): Promise<void> {
+    return openBillingPortal(this.plugin.aiService, this.containerEl.ownerDocument.defaultView ?? undefined);
   }
 
   private viewPlans(): Promise<void> {
@@ -3755,9 +3882,11 @@ export class AgentChatView extends ItemView {
     if (!choice) return;
     try {
       if (backend === "claude") {
-        await this.plugin.getSettingsManager().updateSettings({ claudePermissionMode: value as ClaudeChromeMode });
+        if (!isClaudePermissionMode(value)) return;
+        await this.plugin.getSettingsManager().updateSettings({ claudePermissionMode: value });
       } else if (backend === "codex") {
-        await this.plugin.getSettingsManager().updateSettings({ codexApprovalMode: value as CodexChromeMode });
+        if (!isCodexApprovalMode(value)) return;
+        await this.plugin.getSettingsManager().updateSettings({ codexApprovalMode: value });
       } else {
         await this.setApprovalMode(value as ChatApprovalMode);
       }
@@ -3934,7 +4063,7 @@ export class AgentChatView extends ItemView {
 
   private blockReadOnlyHistoryAction(): boolean {
     if (this.unavailableBackend) {
-      new Notice(`This chat is read-only here because ${LOCAL_AGENTS[this.unavailableBackend]} isn't available. Start a new chat to continue.`, 6000);
+      new Notice(`${LOCAL_AGENTS[this.unavailableBackend]} isn't available. Start a new chat.`, 6000);
       return true;
     }
     if (!this.legacyHistoryViewOnly) return false;

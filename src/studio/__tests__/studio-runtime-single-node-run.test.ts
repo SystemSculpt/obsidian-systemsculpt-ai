@@ -3,7 +3,6 @@ import { StudioGraphCompiler } from "../StudioGraphCompiler";
 import { StudioNodeRegistry } from "../StudioNodeRegistry";
 import { StudioSandboxRunner } from "../StudioSandboxRunner";
 import { StudioRuntime } from "../StudioRuntime";
-import { retiredImageGenerationNode } from "../nodes/retiredImageGenerationNode";
 import { workflowNode } from "../nodes/workflowNode";
 import type { StudioJsonValue, StudioNodeDefinition, StudioNodeInputMap, StudioProjectV1, StudioRunEvent } from "../types";
 
@@ -52,10 +51,11 @@ function harness(cacheEntries: Record<string, unknown> = {}, supportFiles: Recor
     loadPolicy: jest.fn(async () => ({ schema: "studio.policy.v1", version: 1, updatedAt: "2026-09-13T00:00:00.000Z", grants: [] })),
     publishRun: jest.fn(async (_p: string, command: { cacheDocument: Uint8Array }) => { published.cache = JSON.parse(new TextDecoder().decode(command.cacheDocument)); }),
   } as never;
-  const plugin = { app: { vault: { adapter: {}, getAbstractFileByPath: jest.fn() } }, getLogger: () => ({ warn: jest.fn(), error: jest.fn(), debug: jest.fn() }) } as never;
+  const plugin = { settings: {}, app: { vault: { adapter: {}, getAbstractFileByPath: jest.fn() } }, getLogger: () => ({ warn: jest.fn(), error: jest.fn(), debug: jest.fn() }) } as never;
+  const nativeRun = jest.fn(async (_specification: unknown, _signal?: AbortSignal) => ({ text: "Native result", threadId: "thread", turnId: "turn", status: "completed" as const }));
   const runtime = new StudioRuntime(
     (plugin as { app: unknown }).app as never, plugin, projectStore, registry, new StudioGraphCompiler(), {} as never,
-    { beginLocalCommit: jest.fn(async () => undefined), completeLocalCommit: jest.fn(async () => undefined) } as never,
+    { beginLocalCommit: jest.fn(async () => undefined), completeLocalCommit: jest.fn(async () => undefined) } as never, { run: nativeRun }
   );
   (runtime as unknown as { nodeResultCacheStore: unknown }).nodeResultCacheStore = {
     load: jest.fn(async () => ({ schema: "studio.node-cache.v1", projectId: "proj_single", updatedAt: "2026-09-13T00:00:00.000Z", entries: cacheEntries })),
@@ -63,7 +63,7 @@ function harness(cacheEntries: Record<string, unknown> = {}, supportFiles: Recor
   };
   const events: StudioRunEvent[] = [];
   const run = (entryNodeIds?: string[]) => runtime.runProjectSnapshot("Studio/Single.systemsculpt", project(), { entryNodeIds, onEvent: async (event) => { events.push(event); } });
-  return { run, executed, events, published, runtime, registry };
+  return { run, executed, events, published, runtime, registry, nativeRun };
 }
 
 const entry = (nodeId: string, kind: string, outputs: Record<string, unknown>) => ({
@@ -155,60 +155,6 @@ describe("running one node", () => {
 
   });
 
-  describe.each([true, false])("retired image outputs (desktop: %s)", isDesktopApp => {
-    it.each(["cache", "history"])("feeds full and scoped runs from %s without regenerating", async source => {
-      (Platform as { isDesktopApp: boolean }).isDesktopApp = isDesktopApp;
-      const images = [{ path: "saved.png", hash: "a".repeat(64), mimeType: "image/png", sizeBytes: 1 }];
-      const outputs = { images };
-      const { runtime, registry, executed, events } = harness(
-        source === "cache" ? { gen: entry("gen", "studio.image_generation", outputs) } : {},
-        source === "history" ? {
-          "runs/index.json": JSON.stringify([{ runId: "saved", status: "success", startedAt: "2026-09-01T00:00:00.000Z" }]),
-          "runs/saved/events.ndjson": JSON.stringify({ type: "node.output", runId: "saved", nodeId: "gen", outputs, at: "2026-09-01T00:00:00.000Z" }),
-        } : {},
-      );
-      const execute = jest.fn(retiredImageGenerationNode.execute);
-      registry.register({ ...retiredImageGenerationNode, execute });
-      const received: unknown[] = [];
-      registry.register({ ...registry.get("test.clip", "1.0.0")!, async execute(context) {
-        received.push(context.inputs.frame);
-        return { outputs: { video: "saved-frame-clip" } };
-      } });
-      const snapshot = project();
-      snapshot.graph.nodes[1].kind = "studio.image_generation";
-      snapshot.graph.edges[1].fromPortId = "images";
-      const before = JSON.stringify(snapshot);
-      for (const entryNodeIds of [undefined, ["clip"]]) {
-        const summary = await runtime.runProjectSnapshot("Studio/Single.systemsculpt", snapshot, {
-          entryNodeIds, onEvent: async event => { events.push(event); },
-        });
-        expect(summary.status).toBe("success");
-        expect(summary.executedNodeIds).not.toContain("gen");
-      }
-      expect(received).toEqual([images, images]);
-      expect(execute).not.toHaveBeenCalled();
-      expect(executed).not.toContain("gen");
-      expect(events.some(event => "nodeId" in event && event.nodeId === "gen")).toBe(false);
-      await expect(runtime.runProjectSnapshot("Studio/Single.systemsculpt", snapshot, { entryNodeIds: ["gen"] })).rejects.toThrow("visual-only");
-      expect(JSON.stringify(snapshot)).toBe(before);
-      runtime.dispose();
-    });
-
-    it("stops a connected consumer with no saved image instead of running without its frame", async () => {
-      (Platform as { isDesktopApp: boolean }).isDesktopApp = isDesktopApp;
-      const { runtime, registry, executed } = harness();
-      registry.register(retiredImageGenerationNode);
-      const snapshot = project();
-      snapshot.graph.nodes[1].kind = "studio.image_generation";
-      snapshot.graph.edges[1].fromPortId = "images";
-      for (const entryNodeIds of [undefined, ["clip"]]) {
-        await expect(runtime.runProjectSnapshot("Studio/Single.systemsculpt", snapshot, { entryNodeIds })).rejects.toThrow("has no saved output. Connect an existing image file instead.");
-      }
-      expect(executed).not.toContain("clip");
-      runtime.dispose();
-    });
-  });
-
   it("runs a cacheable node between the target and a never-cached boundary without crossing it", async () => {
     const { run, executed } = harness({ gen: entry("gen", "test.generate", { image: "kept" }) });
     // gen is the boundary; seed sits beyond it and must not run.
@@ -276,4 +222,28 @@ describe("running one node", () => {
     expect(await pending).toEqual({ prompt: "one" });
   });
 
+});
+
+it("routes native execution through the required run owner with project identity and cancellation", async () => {
+  const { runtime, registry, nativeRun } = harness();
+  registry.register({
+    kind: "test.native", version: "1.0.0", requiredHostCapabilities: [], capabilityClass: "local_cpu",
+    inputPorts: [], outputPorts: [{ id: "result", type: "text" }], configDefaults: {}, configSchema: { fields: [] },
+    async execute(context) {
+      if (!context.services.codex) throw new Error("Native run capability missing");
+      const result = await context.services.codex({ prompt: "Owner task", workingDirectory: "." }, context.signal, context.log);
+      return { outputs: { result: result.text } };
+    },
+  });
+  const snapshot = project();
+  snapshot.graph.nodes = [{ id: "native", kind: "test.native", version: "1.0.0", title: "Native role", position: { x: 0, y: 0 }, config: {} }];
+  snapshot.graph.edges = []; snapshot.graph.entryNodeIds = ["native"];
+  const result = await runtime.runProjectSnapshot("Studio/Single.systemsculpt", snapshot);
+  expect(result.status).toBe("success");
+  expect(nativeRun).toHaveBeenCalledTimes(1);
+  expect(nativeRun).toHaveBeenCalledWith(expect.objectContaining({
+    projectId: "proj_single", projectPath: "Studio/Single.systemsculpt", nodeId: "native", title: "Native role",
+    request: expect.objectContaining({ prompt: "Owner task", workingDirectory: "." }),
+  }), expect.any(AbortSignal));
+  runtime.dispose();
 });

@@ -111,10 +111,10 @@ describe("AgentChatView shared credits reads", () => {
     await view.handleError({ code: "out_of_credits", message: "private server detail" });
     if (includedCreditsEntitled === false) {
       expect(workspace.setBanner).toHaveBeenCalledWith(
-        "Monthly is $9 and includes 10,000 credits every month. You can also add a credit pack.", "error", true,
+        "$9 a month for 10,000 credits.", "error", expect.objectContaining({ label: "Subscribe", testId: "chat.banner.subscribe" }),
       );
     } else {
-      expect(workspace.setBanner).toHaveBeenCalledWith("You have no credits left. Add credits to continue using Chat.", "error");
+      expect(workspace.setBanner).toHaveBeenCalledWith("Out of credits. Add more to keep chatting.", "error");
     }
   });
 

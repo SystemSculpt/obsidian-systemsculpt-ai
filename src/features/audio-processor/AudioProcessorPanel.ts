@@ -233,7 +233,7 @@ export class AudioProcessorPanel {
       icon: stoppedWatching ? "eye-off" : cancelled ? "circle-slash" : "x-circle",
       progress: 100,
       details: stoppedWatching
-        ? "Processing is continuing on the server. Reopen Audio Processor to check it."
+        ? "Still processing. Reopen to check."
         : message,
       state: stoppedWatching ? "warning" : "error",
     });
@@ -384,8 +384,8 @@ export class AudioProcessorPanel {
     if (this.finished) return;
     new Notice(
       this.serverOwned
-        ? "Audio processing is continuing on the server. You can close Obsidian and resume later."
-        : "This audio is still being prepared. Keep Obsidian open until server processing begins.",
+        ? "Processing on the server. Safe to close Obsidian."
+        : "Preparing audio. Keep Obsidian open.",
       5000,
     );
   }

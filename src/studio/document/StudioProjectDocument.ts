@@ -1,7 +1,6 @@
+import { admitStudioProjectText, validateStudioProjectDocument } from "../StudioProjectAdmission";
 import type { DataAdapter } from "obsidian";
-import { parseAndMigrateStudioProject, parseStudioProject, serializeStudioProject } from "../schema";
-import { assertValidStudioProjectAgentDocumentStructure } from "../StudioProjectAgentDocumentValidation";
-import { validateStudioProjectForAgentEdit } from "../StudioProjectAgentContract";
+import { parseStudioProject, serializeStudioProject } from "../schema";
 import type { StudioProjectV1 } from "../types";
 import { reconcileStudioProject, type StudioProjectReconciliation } from "../StudioProjectReconciliation";
 import { cloneStudioProjectSnapshot } from "../StudioProjectSnapshots";
@@ -62,14 +61,10 @@ class StudioOriginalCopyError extends Error {}
  * Throws when Studio can't open it. It reads and writes nothing.
  */
 export function readStudioProjectFile(raw: string, projectPath: string): {record: Record<string, unknown>; project: StudioProjectV1} {
-  const parsed: unknown = JSON.parse(raw);
-  assertValidStudioProjectAgentDocumentStructure(parsed);
-  // Older dialects migrate before validation: retired v1 node kinds only compile once rewritten.
-  const project = parseAndMigrateStudioProject(raw, {projectPath});
+  const { record, project } = admitStudioProjectText(raw, { projectPath });
   // Grants belong to the file's own location; an authored reference cannot select another project's policy.
   project.permissionsRef = {...project.permissionsRef, policyPath: deriveStudioPolicyPath(projectPath)};
-  validateStudioProjectForAgentEdit(project);
-  return {record: parsed as Record<string, unknown>, project};
+  return { record, project };
 }
 
 /**
@@ -234,7 +229,7 @@ export class StudioProjectDocument {
   private canonical(template: StudioProjectV1, content: StudioProjectV1): {project: StudioProjectV1; text: string} {
     const text = serializeStudioProject(content), parsed = parseStudioProject(text);
     const project = {...template, name: parsed.name, graph: parsed.graph, diagram: parsed.diagram};
-    validateStudioProjectForAgentEdit(project);
+    validateStudioProjectDocument(project);
     return {project, text};
   }
   /**

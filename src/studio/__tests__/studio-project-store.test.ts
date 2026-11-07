@@ -895,7 +895,8 @@ describe("v1 projects with retired node kinds", () => {
     expect(legacyCopies(files).map(copy => files.get(copy))).toEqual([v1Text]);
     expect(notice).toHaveBeenCalledTimes(1);
     expect(files.has(deriveStudioPolicyPath(path))).toBe(true);
-    await session.mutateAndFlush("node.title", project => { project.name = "Recovered"; });
+    session.mutate("node.title", project => { project.name = "Recovered"; });
+    await session.flushPendingSaveWork({ force: true });
     expect(JSON.parse(files.get(path)!).name).toBe("Recovered");
     await service.releaseProjectSession(path);
     await service.releaseProjectSession(path);

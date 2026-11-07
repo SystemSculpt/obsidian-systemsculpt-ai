@@ -86,7 +86,7 @@ export const videoGenerationNode: StudioNodeDefinition = {
       {
         key: "model", label: "Video model", type: "select", required: true,
         selectPresentation: "model_picker_modal", optionsSource: "video_generation_models",
-        description: "Choose an available model. Estimates include the SystemSculpt service fee; the final charge follows actual usage. Frame images can add cost.",
+        description: "Estimates include fees. Final cost follows usage.",
       },
       {
         // Durations, resolutions and aspect ratios are model-specific, so the

@@ -2,6 +2,7 @@ import { App, TFile, TFolder, normalizePath, type DataAdapter } from "obsidian";
 import { desktopHost, hasNodeRuntime } from "../../platform/desktopOnly";
 import { joinFilesystemPath, normalizeVaultRelativePath } from "../../utils/vaultPathUtils";
 import { toSafeVaultFileName } from "../../utils/vaultFileName";
+import { ensureVaultFolder as ensureVaultFolderPath } from "../../utils/vaultFolders";
 import { FILESYSTEM_LIMITS } from "./constants";
 
 type VaultDataAdapter = DataAdapter & {
@@ -276,35 +277,9 @@ export async function renameAdapterPath(adapter: VaultDataAdapter, sourcePath: s
 }
 
 
-/**
- * Ensure a folder (and every missing ancestor) exists via the Vault API alone —
- * no Node required. Each ancestor is created segment-by-segment, skipping those
- * that already exist and tolerating "already exists" races, so a note write
- * never fails because a mid-level folder was missing (#142).
- */
-export async function ensureVaultFolder(app: App, folderPath: string): Promise<void> {
-  const normalized = normalizePath(normalizeVaultPath(String(folderPath ?? "")));
-  if (!normalized || normalized === "/" || normalized === ".") return;
-
-  const segments = normalized.split("/").filter(Boolean);
-  let current = "";
-  for (const segment of segments) {
-    current = current ? `${current}/${segment}` : segment;
-    const node = app.vault.getAbstractFileByPath(current);
-    if (node instanceof TFolder) continue;
-    if (node instanceof TFile) {
-      throw new Error(`Cannot create folder "${current}": a file with that name already exists`);
-    }
-    try {
-      await app.vault.createFolder(current);
-    } catch (err) {
-      // Tolerate a concurrent create: only rethrow if the folder truly isn't there.
-      const after = app.vault.getAbstractFileByPath(current);
-      if (!(after instanceof TFolder)) {
-        throw err;
-      }
-    }
-  }
+/** Tool paths may be URI-encoded; stored vault paths must not be decoded. */
+export function ensureVaultFolder(app: App, folderPath: string): Promise<void> {
+  return ensureVaultFolderPath(app, normalizeVaultPath(String(folderPath ?? "")));
 }
 
 /**

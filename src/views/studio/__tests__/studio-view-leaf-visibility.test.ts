@@ -9,7 +9,7 @@ import { codexNode } from "../../../studio/nodes/codexNode";
 import { runCollectionNode } from "../../../studio/nodes/runCollectionNode";
 import { commandCenterNode } from "../../../studio/nodes/commandCenterNode";
 import { collectionNode } from "../../../studio/nodes/collectionNode";
-import type { StudioAgentRun } from "../../../services/codex/StudioAgentRunStore";
+import type { StudioAgentRun } from '../../../services/codex/StudioAgentRunRecord';
 import type { StudioRunEvent } from "../../../studio/types";
 import { SystemSculptStudioView } from "../SystemSculptStudioView";
 

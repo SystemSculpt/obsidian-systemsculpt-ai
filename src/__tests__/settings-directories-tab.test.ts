@@ -66,8 +66,8 @@ describe("Directories tab managed-only layout", () => {
   });
 
   it.each([
-    [true, "No directory repair is needed. Output folders are created when files are saved."],
-    [false, "An output path is blocked or inaccessible. Resolve the conflict or choose another directory."],
+    [true, "Folders look good."],
+    [false, "A folder is blocked. Choose another."],
   ])("shows a repair result (%s) once, inline", async (repaired, expected) => {
     const { container, plugin } = render();
     plugin.repairDirectoryStructure.mockResolvedValue(repaired);

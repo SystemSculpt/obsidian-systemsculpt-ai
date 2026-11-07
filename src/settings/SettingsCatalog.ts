@@ -24,18 +24,18 @@ const SETTINGS_CATALOG = {
   "account.status": {
     tabId: "account",
     title: "Account",
-    description: "Sign in, activate a license, and manage your SystemSculpt account.",
+    description: "Sign in and manage your license.",
   },
   "account.browser-sign-in": {
     tabId: "account",
     title: "Browser sign-in",
-    description: "Open the same sign-in request again to get a connection code.",
+    description: "Reopen sign-in to get a code.",
     searchable: false,
   },
   "account.connection-code": {
     tabId: "account",
     title: "Connection code",
-    description: "If Obsidian did not open automatically, paste the code shown in your browser.",
+    description: "Paste the code from your browser.",
     searchable: false,
   },
   "account.license-key": {
@@ -46,7 +46,7 @@ const SETTINGS_CATALOG = {
   "account.credits": {
     tabId: "account",
     title: "Credits",
-    description: "Review your credits balance, usage, billing cycle, and credit purchases.",
+    description: "Balance and usage.",
     isVisible: (settings) => settings.licenseValid === true && (settings.licenseKey || "").trim().length > 0,
   },
   "account.ai-data": {
@@ -57,27 +57,32 @@ const SETTINGS_CATALOG = {
   "account.documentation": {
     tabId: "account",
     title: "Documentation",
-    description: "Guides, troubleshooting, and ways to contact support.",
+    description: "Guides and support.",
+  },
+  "feedback.message": {
+    tabId: "feedback",
+    title: "What should we improve?",
+    description: "Sent to support with your plugin version and account when signed in. No notes or chats attached.",
   },
   "chat.default-tag": {
     tabId: "chat",
     title: "Default chat tag",
-    description: "Optional. Adds this tag to new chat history notes (frontmatter `tags`).",
+    description: "Tag added to new chat notes.",
   },
   "chat.font-size": {
     tabId: "chat",
     title: "Default chat font size",
-    description: "Select the default text size for new chat messages.",
+    description: "Text size for new chats.",
   },
   "chat.reduce-motion": {
     tabId: "chat",
     title: "Reduce chat motion",
-    description: "Minimize chat animations even when your system does not request reduced motion. Your system preference is always honored.",
+    description: "Fewer chat animations.",
   },
   "workflow.microphone": {
     tabId: "workflow",
     title: "Microphone",
-    description: "Choose the microphone used for new recordings on this device.",
+    description: "Used for new recordings on this device.",
   },
   "workflow.auto-transcribe": {
     tabId: "workflow",
@@ -87,43 +92,43 @@ const SETTINGS_CATALOG = {
   "workflow.keep-source-audio": {
     tabId: "workflow",
     title: "Keep source audio",
-    description: "Keep the recording in your vault after transcription succeeds.",
+    description: "Keep the recording after transcribing.",
   },
   "workflow.default-output": {
     tabId: "workflow",
     title: "Default output",
-    description: "Choose the output selected when the processor opens.",
+    description: "Selected when the processor opens.",
   },
   "workflow.insert-transcript": {
     tabId: "workflow",
     title: "Insert transcript at origin",
-    description: "Add the finished text only if its exact note insertion target remains unchanged, or if the original chat conversation is still active.",
+    description: "Insert the text where you started recording.",
   },
   "workflow.file-format": {
     tabId: "workflow",
     title: "Default file format",
-    description: "Choose the format used when you transcribe an audio file.",
+    description: "Format for transcribed files.",
   },
   "workflow.clean-output": {
     tabId: "workflow",
     title: "Clean transcript output",
-    description: "Save only the transcript text, without source details or metadata.",
+    description: "Transcript text only, no metadata.",
   },
   "workflow.cleanup": {
     tabId: "workflow",
     title: "Clean up transcript",
-    description: "Fix punctuation, remove filler words, and format the transcript after transcription.",
+    description: "Fix punctuation and remove filler words.",
   },
   "workflow.cleanup-instructions": {
     tabId: "workflow",
     title: "Cleanup instructions",
-    description: "Tell SystemSculpt how to improve readability. Cleanup always keeps the original languages, names, and code-switches.",
+    description: "How to tidy the transcript.",
     isVisible: (settings) => Boolean(settings.postProcessingEnabled),
   },
   "workflow.send-after-dictation": {
     tabId: "workflow",
     title: "Send after dictation",
-    description: "Send the dictated chat message after the transcript is inserted.",
+    description: "Send the message once dictation ends.",
   },
   "knowledge.similar-notes": {
     tabId: "knowledge",
@@ -133,39 +138,39 @@ const SETTINGS_CATALOG = {
   "knowledge.index-status": {
     tabId: "knowledge",
     title: "Index status",
-    description: "Review semantic index progress and remaining files.",
+    description: "Indexing progress.",
     isVisible: (settings) => Boolean(settings.embeddingsEnabled),
   },
   "knowledge.rebuild-index": {
     tabId: "knowledge",
     title: "Rebuild index",
-    description: "Replace the local semantic index with a fresh copy.",
+    description: "Start the index fresh.",
     isVisible: (settings) => Boolean(settings.embeddingsEnabled),
   },
   "knowledge.exclude-chat-history": {
     tabId: "knowledge",
     title: "Exclude chat history",
-    description: "Skip chat transcripts when building embeddings.",
+    description: "Skip chat notes when indexing.",
   },
   "knowledge.respect-exclusions": {
     tabId: "knowledge",
     title: "Respect Obsidian exclusions",
-    description: "Reuse the ignored files configured in settings → files & links.",
+    description: "Skip files ignored in Files and links.",
   },
   "knowledge.excluded-folders": {
     tabId: "knowledge",
     title: "Excluded folders",
-    description: "Folders that should never be processed.",
+    description: "Never indexed.",
   },
   "knowledge.excluded-patterns": {
     tabId: "knowledge",
     title: "Excluded patterns",
-    description: "File name patterns (glob) to skip, e.g., *.PNG.",
+    description: "Glob patterns to skip, like *.png.",
   },
   "workspace.chats-directory": {
     tabId: "workspace",
     title: "Chats directory",
-    description: "Where new chats are saved. Existing chats stay in the folder they were saved in.",
+    description: "Where new chats are saved.",
   },
   "workspace.recordings-directory": {
     tabId: "workspace",
@@ -180,68 +185,63 @@ const SETTINGS_CATALOG = {
   "workspace.directory-health": {
     tabId: "workspace",
     title: "Directory health",
-    description: "Verify or repair SystemSculpt directories.",
+    description: "Check or repair folders.",
   },
   "workspace.phone-captures": {
     tabId: "workspace",
     title: "iOS captures",
-    description: "Notes and voice memos from the SystemSculpt iOS app arrive in this vault while you are signed in.",
+    description: "Notes and voice memos from the iOS app.",
     isVisible: (settings) => settings.phoneCapturesLinked === true,
   },
   "workspace.save-phone-captures": {
     tabId: "workspace",
     title: "Save iOS captures",
-    description: "Check for new captures when Obsidian opens, when it regains focus and every few minutes.",
+    description: "Save new captures as they arrive.",
     isVisible: (settings) => settings.phoneCapturesLinked === true,
   },
   "workspace.confirm-phone-captures": {
     tabId: "workspace",
     title: "Ask before saving iOS captures",
-    description: "Show the waiting captures and save them only when you confirm.",
+    description: "Confirm before captures are saved.",
     isVisible: (settings) => settings.phoneCapturesLinked === true,
   },
   "workspace.run-phone-handoffs": {
     tabId: "workspace",
     title: "Run iPhone handoffs without asking",
-    description: "Skips only the Run button for iPhone handoffs. Agent permissions and approval requests are unchanged.",
+    description: "Skips the Run button. Approvals still apply.",
     isVisible: (settings) => settings.phoneCapturesLinked === true,
   },
   "workspace.phone-captures-folder": {
     tabId: "workspace",
     title: "iOS captures folder",
-    description: "Notes and transcripts become new notes here. Existing notes are never overwritten.",
+    description: "New notes land here. Nothing is overwritten.",
     isVisible: (settings) => settings.phoneCapturesLinked === true,
   },
   "workspace.phone-meetings-folder": {
     tabId: "workspace",
     title: "iOS meetings folder",
-    description: "Meeting briefs, action items and transcripts become new notes here.",
+    description: "Meeting notes land here.",
     isVisible: (settings) => settings.phoneCapturesLinked === true,
   },
   "workspace.automatic-backups": {
     tabId: "workspace",
     title: "Automatic backups",
-    description: "Create a backup every 24 hours. Backups include SystemSculpt preferences and feature settings, but exclude secret keys and tokens.",
+    description: "Daily backup of settings, without keys.",
   },
   "workspace.manual-backups": {
     tabId: "workspace",
     title: "Manual backups",
-    description: "Create or restore backups on demand. Files live in .systemsculpt/settings-backups inside your vault, with sensitive keys redacted.",
+    description: "Back up or restore now.",
   },
   "workspace.restore-backup": {
     tabId: "workspace",
     title: "Restore from backup",
-    description: "Replace your current settings with a saved backup.",
+    description: "Replace settings with a backup.",
   },
   "workspace.backup-folder": {
     tabId: "workspace",
     title: "Backup folder",
     description: "Stored in .systemsculpt/settings-backups inside your vault.",
-  },
-  "workspace.backup-tips": {
-    tabId: "workspace",
-    title: "Tips",
-    description: "Automatic backups run in the background. Manual backups with custom names are useful before big changes. You can copy backup files to other devices to share your SystemSculpt configuration.",
   },
   "studio.open": {
     tabId: "studio",
@@ -261,7 +261,7 @@ const SETTINGS_CATALOG = {
   "studio.artifact-retention": {
     tabId: "studio",
     title: "Artifact retention (mb)",
-    description: "Target artifact storage per project before oldest run assets are pruned.",
+    description: "Oldest run files are pruned past this size.",
   },
   "advanced.quick-actions": {
     tabId: "advanced",
@@ -271,22 +271,22 @@ const SETTINGS_CATALOG = {
   "advanced.relative-line-numbers": {
     tabId: "advanced",
     title: "Relative line numbers",
-    description: "Use a vim-style line number gutter in the editor. The current line shows its absolute number; other lines show their distance from the Cursor. Turn off Obsidian's core \"show line number\" setting to avoid a doubled gutter.",
+    description: "Vim-style line numbers. Turn off Obsidian's own line numbers.",
   },
   "advanced.reset": {
     tabId: "advanced",
     title: "Reset to factory settings",
-    description: "Clear all custom settings and restore defaults for this plugin.",
+    description: "Restore every default.",
   },
   "advanced.record-diagnostics": {
     tabId: "advanced",
     title: "Record diagnostics",
-    description: "Save resource samples and long-frame reports in .systemsculpt/diagnostics. Leave off unless you are troubleshooting. Chat lifecycle logs follow the log level; failed chat runs still save incident reports.",
+    description: "For troubleshooting only.",
   },
   "advanced.copy-diagnostics": {
     tabId: "advanced",
     title: "Copy diagnostics snapshot",
-    description: "Copies a content-free runtime and resource summary for support.",
+    description: "A summary for support, no note content.",
   },
   "advanced.diagnostics-folder": {
     tabId: "advanced",

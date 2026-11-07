@@ -5,7 +5,7 @@
 import { EmbeddingsView } from "../EmbeddingsView";
 import { EMBEDDINGS_VIEW_TYPE } from "../../core/plugin/viewTypes";
 import { TFile } from "obsidian";
-import { MANAGED_EMBEDDINGS_INDEX_MAX_QUERY_CHARS } from "../../services/embeddings/gateway/ManagedEmbeddingsIndexAdapter";
+import { MANAGED_EMBEDDINGS_INDEX_MAX_QUERY_CHARS } from "../../services/embeddings/gateway/ManagedEmbeddingsIndexContract";
 import { emitChatTranscriptCommitted } from "../chatview/ChatTranscriptEvents";
 
 function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void; reject: (error: unknown) => void } {

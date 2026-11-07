@@ -13,11 +13,8 @@ jest.mock("../../../../utils/sha256", () => {
   const actual = jest.requireActual("../../../../utils/sha256");
   return { ...actual, sha256HexFromBytes: jest.fn(async (bytes: Uint8Array) => actual.sha256HexFromBytesPortable(bytes)) };
 });
-import {
-  ChatAttachmentVaultStore,
-  chatAttachmentRefKey,
-  type ChatAttachmentStoreAdapter,
-} from "../ChatAttachmentVaultStore";
+import { chatAttachmentRefKey } from "../ChatAttachmentDescriptor";
+import { ChatAttachmentVaultStore, type ChatAttachmentStoreAdapter } from "../ChatAttachmentVaultStore";
 
 function harness() {
   const directories = new Set<string>();

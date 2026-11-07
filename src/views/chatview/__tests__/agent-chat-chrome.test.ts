@@ -3,6 +3,7 @@ import {
   chromeAccount,
   modeMenu,
   modelMenu,
+  presentCreditsOffer,
   presentEmptyState,
   presentRunLine,
   type AgentChromeState,
@@ -151,6 +152,12 @@ describe("run line (spec 4.1)", () => {
       .toMatchObject({ label: "1,000 credits", tone: "warning" });
     expect(segments(state({ ...hosted, account: "no-plan", credits: credits({ totalRemaining: 0, availableUnreserved: 0 }) }))[2])
       .toMatchObject({ label: "Out of credits", tone: "danger", action: "credits" });
+    // A spent starter account goes straight to Monthly checkout (T-5302).
+    expect(segments(state({ ...hosted, account: "no-plan", credits: credits({ includedCreditsEntitled: false, totalRemaining: 0, availableUnreserved: 0 }) }))[2])
+      .toMatchObject({ label: "Out of credits", tone: "danger", action: "monthly" });
+    // A spent past-due subscriber fixes their card, never a second checkout (T-5348).
+    expect(segments(state({ ...hosted, account: "no-plan", credits: credits({ includedCreditsEntitled: false, subscriptionStatus: "past_due", totalRemaining: 0, availableUnreserved: 0 }) }))[2])
+      .toMatchObject({ label: "Out of credits", tone: "danger", action: "update-card" });
     expect(segments(state({ ...hosted, account: "signed-out" }))[2])
       .toMatchObject({ label: "Sign in", action: "sign-in" });
     expect(segments(state({ ...hosted, account: "signed-in", credits: credits({ usageClass: "master_auth" }) }))[2].label)
@@ -285,7 +292,7 @@ describe("empty states (spec 3.1)", () => {
     const empty = presentEmptyState(state({ detection: detection(ready, ready, "claude"), activeNote: note }));
     expect(empty.title).toBe("What should we work on?");
     expect(empty.lead).toBe(
-      "Using Claude Code, the agent you use most on this Mac. It runs on your own install and login. No SystemSculpt account or credits needed.",
+      "Using Claude Code, your most used agent. No credits needed.",
     );
     expect(empty.starters.map((starter) => [starter.label, starter.prompt])).toEqual([
       ["Summarize Plan", "Summarize [[Projects/Plan]]"],
@@ -296,9 +303,9 @@ describe("empty states (spec 3.1)", () => {
 
   it("A: drops the used-most clause when it is the only agent or the person chose it", () => {
     const only = presentEmptyState(state({ detection: detection(ready, missing, "claude") }));
-    expect(only.lead).toBe("Using Claude Code on this Mac. It runs on your own install and login. No SystemSculpt account or credits needed.");
+    expect(only.lead).toBe("Using Claude Code. No credits needed.");
     const chosen = presentEmptyState(state({ chosen: true, detection: detection(ready, ready, "claude") }));
-    expect(chosen.lead).toMatch(/^Using Claude Code on this Mac\./);
+    expect(chosen.lead).toMatch(/^Using Claude Code\. No credits/);
     expect(only.starters.map((starter) => starter.label)).toEqual([
       "Summarize my latest daily note", "Find notes I haven't linked yet", "Plan my week from my notes",
     ]);
@@ -306,7 +313,7 @@ describe("empty states (spec 3.1)", () => {
 
   it("B and C: Codex, with the other ready agent one click away", () => {
     const empty = presentEmptyState(state({ backend: "codex", detection: detection(ready, ready, "codex") }));
-    expect(empty.lead).toMatch(/^Using Codex, the agent you use most on this Mac\./);
+    expect(empty.lead).toMatch(/^Using Codex, your most used agent\./);
     expect(empty.notes).toEqual([{
       id: "also-ready",
       text: "Claude Code is ready too.",
@@ -318,12 +325,12 @@ describe("empty states (spec 3.1)", () => {
     const empty = presentEmptyState(state({ backend: "systemsculpt", detection: detection(missing, missing, "systemsculpt") }));
     expect(empty.lead).toBe("Chat with your vault using SystemSculpt.");
     expect(empty.offer).toEqual({
-      text: "Create a free account to get 500 starter credits. No card needed. Paid plans start at $9/month.",
+      text: "500 free credits. No card needed.",
       actions: ["start-free", "sign-in"],
     });
     expect(empty.hints).toEqual([{
       id: "local-hint",
-      before: "Already use Claude Code or Codex? Install or sign in on this computer, then",
+      before: "Use Claude Code or Codex? Sign in on this computer, then",
       after: ".",
     }]);
     expect(empty.starters).toEqual([]);
@@ -332,19 +339,35 @@ describe("empty states (spec 3.1)", () => {
   it("D2: says how to sign in to an installed agent", () => {
     const empty = presentEmptyState(state({ backend: "systemsculpt", detection: detection(signedOut, signedOut, "systemsculpt") }));
     expect(empty.hints.map((hint) => `${hint.before} Detect again${hint.after}`)).toEqual([
-      "Claude Code is installed but not signed in. Run `claude` in a terminal and type /login, then Detect again.",
-      "Codex is installed but not signed in. Run `codex login` in a terminal, then Detect again.",
+      "Sign in to Claude Code: run `claude`, type /login, then Detect again.",
+      "Sign in to Codex: run `codex login`, then Detect again.",
     ]);
   });
 
   it("E: signed in with credits, or with no plan and no credits", () => {
     const withCredits = presentEmptyState(state({ backend: "systemsculpt", account: "signed-in", credits: credits() }));
-    expect(withCredits.lead).toBe("Ask about your notes or give SystemSculpt a task.");
+    expect(withCredits.lead).toBe("Ask about your notes.");
     expect(withCredits.hints).toEqual([]);
     expect(withCredits.starters).toHaveLength(3);
     const noPlan = presentEmptyState(state({ backend: "systemsculpt", account: "no-plan" }));
-    expect(noPlan.lead).toBe("Create a free account for 500 starter credits, or choose a plan.");
+    expect(noPlan.lead).toBe("Start free with 500 credits, or choose a plan.");
     expect(noPlan.offer?.actions).toEqual(["see-plans"]);
+    // Spent starter credits: no "Start free" contradiction; the Monthly line above the composer is the one tap (T-5302).
+    const spent = presentEmptyState(state({
+      backend: "systemsculpt",
+      account: "no-plan",
+      credits: credits({ includedCreditsEntitled: false, totalRemaining: 0, availableUnreserved: 0 }),
+    }));
+    expect(spent.lead).toBe("Your free credits are used.");
+    expect(spent.offer).toBeNull();
+    expect(spent.starters).toEqual([]);
+    const spentActive = presentEmptyState(state({
+      backend: "systemsculpt",
+      account: "paid",
+      credits: credits({ includedCreditsEntitled: false, totalRemaining: 0, availableUnreserved: 0 }),
+    }));
+    expect(spentActive.lead).toBe("Your free credits are used.");
+    expect(spentActive.starters).toEqual([]);
   });
 
   it("E: paid plans see no local-agent mention even with agents installed", () => {
@@ -364,7 +387,7 @@ describe("empty states (spec 3.1)", () => {
       prefersLocalAgent: true,
       detection: null,
     }));
-    expect(empty.notes).toEqual([{ id: "mobile", text: "Claude Code and Codex run on desktop. Here, chat uses SystemSculpt." }]);
+    expect(empty.notes).toEqual([{ id: "mobile", text: "Claude Code and Codex are desktop only." }]);
     expect(empty.hints).toEqual([]);
   });
 
@@ -398,5 +421,66 @@ describe("chromeAccount", () => {
     expect(chromeAccount({ licenseKey: "key" }, credits({ includedCreditsEntitled: false, totalRemaining: 300 }))).toBe("signed-in");
     expect(chromeAccount({ licenseKey: "key" }, credits({ includedCreditsEntitled: true }))).toBe("paid");
     expect(chromeAccount({ licenseKey: "key", subscriptionStatus: "lifetime" }, null)).toBe("paid");
+  });
+
+  it("keeps a failed renewal on its plan, never the plan offer (T-5348)", () => {
+    const pastDue = credits({ includedCreditsEntitled: false, totalRemaining: 0, subscriptionStatus: "past_due" });
+    expect(chromeAccount({ licenseKey: "key" }, pastDue)).toBe("paid");
+    expect(chromeAccount({ licenseKey: "key" }, credits({ includedCreditsEntitled: false, totalRemaining: 0, subscriptionStatus: null }))).toBe("no-plan");
+  });
+});
+
+describe("presentCreditsOffer", () => {
+  const starter = (left: number) => credits({
+    includedCreditsEntitled: false,
+    subscriptionStatus: null,
+    includedRemaining: 0,
+    includedPerMonth: 0,
+    addOnRemaining: left,
+    totalRemaining: left,
+    availableUnreserved: left,
+  });
+  const hosted = { backend: "systemsculpt" as const, account: "signed-in" as const };
+  const link = "Get Pro for $9/month";
+
+  it("offers Pro to every verified hosted starter, including a full grant", () => {
+    for (const left of [0, 99, 100, 249, 250, 500, 10_000]) {
+      expect(presentCreditsOffer(state({ ...hosted, credits: starter(left) })))
+        .toEqual({ lead: "", link });
+    }
+  });
+
+  it("keeps the same short offer at low and exhausted balances", () => {
+    expect(presentCreditsOffer(state({ ...hosted, credits: starter(249) })))
+      .toEqual({ lead: "", link });
+    expect(presentCreditsOffer(state({ ...hosted, credits: starter(100) })))
+      .toEqual({ lead: "", link });
+    expect(presentCreditsOffer(state({ ...hosted, credits: starter(99) })))
+      .toEqual({ lead: "", link });
+    expect(presentCreditsOffer(state({ ...hosted, account: "no-plan", credits: starter(0) })))
+      .toEqual({ lead: "", link });
+    expect(presentCreditsOffer(state({ ...hosted, credits: { ...starter(120), availableUnreserved: 0 } })))
+      .toEqual({ lead: "", link });
+  });
+
+  it("stays hidden for paid or legacy plans, internal QA, native agents and unknown or signed-out accounts", () => {
+    expect(presentCreditsOffer(state({ ...hosted, credits: { ...starter(500), includedCreditsEntitled: undefined } }))).toBeNull();
+    expect(presentCreditsOffer(state({ ...hosted, credits: { ...starter(500), subscriptionStatus: undefined } }))).toBeNull();
+    expect(presentCreditsOffer(state({ ...hosted, account: "signed-out", credits: starter(500) }))).toBeNull();
+    expect(presentCreditsOffer(state({ backend: "codex", account: "signed-in", credits: starter(500) }))).toBeNull();
+    expect(presentCreditsOffer(state({ ...hosted, account: "paid", credits: credits({ includedCreditsEntitled: true, availableUnreserved: 10 }) }))).toBeNull();
+    expect(presentCreditsOffer(state({ ...hosted, credits: { ...starter(10), usageClass: "master_auth" } }))).toBeNull();
+    expect(presentCreditsOffer(state({ backend: "claude", account: "signed-in", credits: starter(10) }))).toBeNull();
+    expect(presentCreditsOffer(state({ ...hosted, credits: null }))).toBeNull();
+  });
+
+  it("tells a past-due subscriber to update their card instead of offering Monthly (T-5348)", () => {
+    const fix = { lead: "Your last payment failed.", link: "Update your card" };
+    expect(presentCreditsOffer(state({ ...hosted, credits: { ...starter(0), subscriptionStatus: "past_due" } }))).toEqual(fix);
+    expect(presentCreditsOffer(state({ ...hosted, credits: { ...starter(400), subscriptionStatus: "unpaid" } }))).toEqual(fix);
+    // A starter (no plan subscription) keeps the Monthly offer.
+    expect(presentCreditsOffer(state({ ...hosted, credits: { ...starter(0), subscriptionStatus: null } })))
+      .toEqual({ lead: "", link });
+    expect(presentCreditsOffer(state({ ...hosted, credits: { ...starter(0), subscriptionStatus: "active" } }))).toBeNull();
   });
 });

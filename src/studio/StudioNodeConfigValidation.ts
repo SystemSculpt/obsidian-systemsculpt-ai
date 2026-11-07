@@ -7,7 +7,7 @@ import type {
   StudioNodeConfigValidationResult,
   StudioNodeDefinition,
 } from "./types";
-import { isRecord } from "./utils";
+import { isRecord } from "../utils/jsonRecord";
 import { isStudioDynamicPortId, isStudioPortDataType, isStudioProcessFixedOutputPortId, STUDIO_DYNAMIC_PORT_MAX_COUNT } from "./types";
 
 function cloneJsonValue<T>(value: T): T {

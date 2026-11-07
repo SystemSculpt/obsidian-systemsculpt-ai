@@ -146,21 +146,19 @@ type MountStudioGraphNodeResizeFrameOptions = {
    * height follows the intrinsic aspect ratio (`height: auto` CSS).
    */
   hasAspectMediaContent?: boolean;
-  onNodeConfigMutated: (node: StudioNodeInstance) => void;
   /** Pure fontSize commits (text bottom-edge drags) ride the config path. */
-  onNodeConfigValueChange?: (
+  onNodeConfigValueChange: (
     nodeId: string,
     key: string,
     value: string | number,
     options?: StudioGraphNodeMutationOptions
   ) => void;
   /** Atomic geometry commits: size and/or position and/or fontSize. */
-  onNodeResize?: (
+  onNodeResize: (
     nodeId: string,
     patch: StudioGraphNodeResizePatch,
     options?: StudioGraphNodeMutationOptions
   ) => void;
-  onNodeGeometryMutated: (node: StudioNodeInstance) => void;
   /** Visual edge guides; the host never adjusts resize geometry. */
   showResizeGuides?: (
     moving: { left: number; top: number; right: number; bottom: number },
@@ -443,32 +441,10 @@ export function mountStudioGraphNodeResizeFrame(
       !target.writesHeight &&
       !target.writesPosition;
 
-    if (pureFontSize && options.onNodeConfigValueChange) {
+    if (pureFontSize) {
       options.onNodeConfigValueChange(node.id, "fontSize", target.fontSize, mutationOptions);
-    } else if (options.onNodeResize) {
-      options.onNodeResize(node.id, patch, mutationOptions);
     } else {
-      // Direct-fallback path (no resize host wired): write the first-class
-      // geometry fields, never legacy config geometry.
-      if (patch.size) {
-        node.size = {
-          ...node.size,
-          ...(patch.size.width !== undefined ? { width: patch.size.width } : {}),
-          ...(patch.size.height !== undefined ? { height: patch.size.height } : {}),
-        } as NonNullable<StudioNodeInstance["size"]>;
-      }
-      if (patch.position) {
-        node.position.x = patch.position.x;
-        node.position.y = patch.position.y;
-      }
-      if (patch.fontSize !== undefined) {
-        node.config.fontSize = patch.fontSize;
-      }
-      if (mode === "continuous") {
-        options.onNodeGeometryMutated(node);
-      } else {
-        options.onNodeConfigMutated(node);
-      }
+      options.onNodeResize(node.id, patch, mutationOptions);
     }
     if (mode === "continuous") {
       capturedHistoryForDrag = true;

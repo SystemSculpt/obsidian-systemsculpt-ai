@@ -95,14 +95,13 @@ export type RenderStudioGraphNodeCardOptions = {
   onRemoveNode: (nodeId: string) => void;
   onNodeTitleInput: (node: StudioNodeInstance, title: string) => void;
   onNodeSourceApply?: (nodeId: string, source: string, expectedSource: string) => void;
-  onNodeConfigMutated: (node: StudioNodeInstance) => void;
-  onNodeConfigValueChange?: (
+  onNodeConfigValueChange: (
     nodeId: string,
     key: string,
     value: StudioJsonValue,
     options?: StudioGraphNodeMutationOptions
   ) => void;
-  onNodeResize?: (
+  onNodeResize: (
     nodeId: string,
     patch: StudioGraphNodeResizePatch,
     options?: StudioGraphNodeMutationOptions

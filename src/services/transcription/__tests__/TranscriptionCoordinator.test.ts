@@ -189,7 +189,7 @@ describe("TranscriptionCoordinator", () => {
     const { app, coordinator, events } = harness({ clean: true, keep: false, postProcess: true });
     mockProcessTranscription.mockResolvedValueOnce({
       text: "managed transcript",
-      warning: "Transcript cleanup was incomplete, so the raw transcript was saved instead.",
+      warning: "Cleanup didn't finish. Saved the raw transcript.",
     } as any);
 
     const result = await coordinator.start({
@@ -213,7 +213,7 @@ describe("TranscriptionCoordinator", () => {
     expect(result).toMatchObject({
       text: "managed transcript",
       sourceDisposition: "trashed",
-      warning: "Transcript cleanup was incomplete, so the raw transcript was saved instead.",
+      warning: "Cleanup didn't finish. Saved the raw transcript.",
     });
   });
 
@@ -221,7 +221,7 @@ describe("TranscriptionCoordinator", () => {
     const { app, coordinator } = harness({ clean: false, postProcess: true });
     mockProcessTranscription.mockResolvedValueOnce({
       text: "managed transcript",
-      warning: "Transcript cleanup was incomplete, so the raw transcript was saved instead.",
+      warning: "Cleanup didn't finish. Saved the raw transcript.",
     } as any);
 
     const result = await coordinator.start({
@@ -235,7 +235,7 @@ describe("TranscriptionCoordinator", () => {
     expect(written).not.toContain("## Raw transcript");
     expect(written).not.toContain("## Cleaned transcript");
     expect(result.warning).toBe(
-      "Transcript cleanup was incomplete, so the raw transcript was saved instead.",
+      "Cleanup didn't finish. Saved the raw transcript.",
     );
   });
 
@@ -436,7 +436,7 @@ describe("TranscriptionCoordinator", () => {
     expect(result).toMatchObject({
       outputPath: "Recordings/demo.md",
       insertedIntoOrigin: false,
-      warning: expect.stringContaining("note where transcription started changed or closed"),
+      warning: expect.stringContaining("The note changed, so nothing was inserted"),
     });
   });
 
@@ -508,7 +508,7 @@ describe("TranscriptionCoordinator", () => {
 
     expect(result).toMatchObject({
       sourceDisposition: "cleanup-failed",
-      warning: expect.stringContaining("source audio could not be moved to trash"),
+      warning: expect.stringContaining("Couldn't trash the audio"),
     });
     expect(adapter.completeLocalCommit).toHaveBeenCalledTimes(1);
   });

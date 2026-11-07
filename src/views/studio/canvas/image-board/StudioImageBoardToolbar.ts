@@ -63,9 +63,9 @@ const TOOL_HINTS: Partial<Record<StudioImageBoardTool, string>> = {
   ellipse: "Drag a circle around it.",
   arrow: "Drag from the tail to the point.",
   highlight: "Drag across what to highlight.",
-  redact: "Drag over what to hide. Those pixels are thrown away, not blurred, so they cannot be recovered.",
-  magnify: "Drag over what to enlarge. It pops out beside the spot, joined to it by a beam, and moves anywhere.",
-  crop: "Drag the frame or its handles. Pull past the image to add transparent space.",
+  redact: "Drag over what to hide. It can't be recovered.",
+  magnify: "Drag over what to enlarge.",
+  crop: "Drag the frame or its handles.",
 };
 
 export const STUDIO_IMAGE_BOARD_SWATCHES: Array<{ id: string; label: string; color: string }> = [

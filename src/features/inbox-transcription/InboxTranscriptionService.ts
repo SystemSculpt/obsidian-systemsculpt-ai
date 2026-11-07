@@ -31,8 +31,10 @@ export class InboxTranscriptionService {
   private readonly app: App;
   private disposed = false;
   private pendingFiles: PendingFileEvent[] = [];
+  /** Only create/rename admits a file; modify invalidates its quiet interval. */
+  private fileStability = new Map<TFile, { size: number; mtime: number; changedAt: number }>();
   /** Files left waiting by Not now; only Resume inbox transcription sends them. */
-  private deferredFiles = new Map<string, TFile>();
+  private deferredFiles = new Set<TFile>();
   private debounceTimer: number | null = null;
   private isProcessingBulk = false;
   private progressWidget: BulkTranscriptionProgressWidget | null = null;
@@ -59,6 +61,14 @@ export class InboxTranscriptionService {
         void this.handleFileEvent(file);
       })
     );
+
+    this.plugin.registerEvent(
+      this.app.vault.on("modify", (file) => {
+        if (!this.disposed && file instanceof TFile && this.fileStability.has(file)) {
+          this.observeFile(file);
+        }
+      })
+    );
   }
 
   canResumeDeferredFiles(): boolean {
@@ -70,6 +80,7 @@ export class InboxTranscriptionService {
     this.requestStop({ type: "user" });
     this.clearDebounceTimer();
     this.pendingFiles = [];
+    this.fileStability.clear();
     this.deferredFiles.clear();
     this.progressWidget?.close();
     this.progressWidget = null;
@@ -191,17 +202,20 @@ export class InboxTranscriptionService {
       return;
     }
 
-    const isDuplicate = this.pendingFiles.some(
-      (p) => p.file.path === file.path
-    );
-    if (isDuplicate) {
+    if (this.fileStability.has(file)) {
       return;
     }
 
+    this.observeFile(file);
     this.pendingFiles.push(pending);
-    this.clearDebounceTimer();
+    this.scheduleFlush();
+  }
 
+  private scheduleFlush(): void {
+    this.clearDebounceTimer();
+    if (this.disposed || this.pendingFiles.length === 0) return;
     this.debounceTimer = window.setTimeout(() => {
+      this.debounceTimer = null;
       void this.flushPendingFiles();
     }, DEBOUNCE_MS);
   }
@@ -227,20 +241,34 @@ export class InboxTranscriptionService {
       return;
     }
 
-    const filesToProcess = [...this.pendingFiles];
+    const candidates = this.pendingFiles;
     this.pendingFiles = [];
     this.resetStopState();
 
-    if (filesToProcess.length >= BULK_THRESHOLD) {
-      await this.showBulkConfirmation(filesToProcess);
-    } else {
-      await this.processFilesInBatches(filesToProcess, null);
+    this.isProcessingBulk = true;
+    try {
+      // Bulk confirmation belongs to the arrival group, not just its ready
+      // subset. A still-syncing third file must not auto-send the first two.
+      const filesToProcess: PendingFileEvent[] = [];
+      for (const pending of candidates) {
+        if (candidates.length >= BULK_THRESHOLD || await this.isFileStable(pending.file)) {
+          filesToProcess.push(pending);
+        } else if (this.canTranscribe(pending.file)) this.pendingFiles.push(pending);
+        else this.fileStability.delete(pending.file);
+      }
+      if (filesToProcess.length === 0) return;
+      if (filesToProcess.length >= BULK_THRESHOLD) {
+        await this.showBulkConfirmation(filesToProcess);
+      } else {
+        await this.processFilesInBatches(filesToProcess, null);
+      }
+    } finally {
+      this.isProcessingBulk = false;
+      this.scheduleFlush();
     }
   }
 
   private async showBulkConfirmation(files: PendingFileEvent[]): Promise<void> {
-    this.isProcessingBulk = true;
-
     const pendingFiles: PendingTranscriptionFile[] = files.map((f) => ({
       file: f.file,
     }));
@@ -250,21 +278,21 @@ export class InboxTranscriptionService {
         app: this.app,
         pendingFiles,
         onConfirm: (confirmed) => {
+          const selected = new Set(confirmed.map((c) => c.file));
+          for (const pending of files) {
+            if (!selected.has(pending.file)) this.fileStability.delete(pending.file);
+          }
           const events: PendingFileEvent[] = confirmed.map((c) => ({
             file: c.file,
           }));
-          void this.startBulkProcessing(events).then(() => {
-            this.isProcessingBulk = false;
-            resolve();
-          });
+          void this.startBulkProcessing(events).then(resolve);
         },
         onDefer: () => {
-          for (const pending of files) this.deferredFiles.set(pending.file.path, pending.file);
+          for (const pending of files) this.deferredFiles.add(pending.file);
           this.plugin.getLogger().info("Bulk inbox transcription deferred by user", {
             source: "InboxTranscriptionService",
             metadata: { fileCount: files.length },
           });
-          this.isProcessingBulk = false;
           resolve();
         },
       });
@@ -280,10 +308,11 @@ export class InboxTranscriptionService {
     if (!this.canResumeDeferredFiles()) return;
     const settings = this.getWorkflowSettings();
     const files: PendingFileEvent[] = [];
-    for (const [path, file] of this.deferredFiles) {
-      if (this.app.vault.getAbstractFileByPath(path) !== file) continue;
-      const pending = this.classifyFile(file, settings);
+    for (const file of this.deferredFiles) {
+      const pending = this.app.vault.getAbstractFileByPath(file.path) === file
+        ? this.classifyFile(file, settings) : null;
       if (pending) files.push(pending);
+      else this.fileStability.delete(file);
     }
     this.deferredFiles.clear();
     if (files.length === 0 || this.isProcessingBulk) return;
@@ -346,9 +375,13 @@ export class InboxTranscriptionService {
         }
 
         try {
-          await this.processSingleFile(pending, { signal });
-          completedCount++;
-          widget?.markBatchItemComplete(pending.file);
+          if (await this.processSingleFile(pending, { signal })) {
+            completedCount++;
+            widget?.markBatchItemComplete(pending.file);
+          } else {
+            skippedCount++;
+            widget?.markBatchItemSkipped(pending.file, "Skipped");
+          }
         } catch (error) {
           if (this.isAbortError(error) || signal.aborted || this.stopReason?.type === "user") {
             skippedCount++;
@@ -379,7 +412,11 @@ export class InboxTranscriptionService {
 
       const hasMoreBatches = i + BATCH_SIZE < files.length;
       if (hasMoreBatches && !shouldStop()) {
-        await this.delay(INTER_BATCH_DELAY_MS);
+        try {
+          await this.delay(INTER_BATCH_DELAY_MS, signal);
+        } catch (error) {
+          if (!signal.aborted) throw error;
+        }
       }
     }
 
@@ -403,19 +440,65 @@ export class InboxTranscriptionService {
       }
     }
 
+    for (const pending of files) this.fileStability.delete(pending.file);
     if (this.abortController === controller) {
       this.abortController = null;
     }
   }
 
+  private observeFile(file: TFile): void {
+    this.fileStability.set(file, {
+      size: file.stat.size, mtime: file.stat.mtime, changedAt: Date.now(),
+    });
+  }
+
+  private canTranscribe(file: TFile): boolean {
+    const settings = this.getWorkflowSettings();
+    return !this.disposed
+      && this.app.vault.getAbstractFileByPath(file.path) === file
+      && this.isEngineActive(settings)
+      && this.classifyFile(file, settings) !== null;
+  }
+
+  private async isFileStable(file: TFile): Promise<boolean> {
+    if (!this.canTranscribe(file)) return false;
+    const observed = this.fileStability.get(file);
+    if (!observed) return false;
+    // A sync writer may advance before Obsidian updates its cached TFile.
+    const stat = await this.app.vault.adapter.stat(file.path).catch(() => null);
+    if (!this.canTranscribe(file) || this.fileStability.get(file) !== observed) return false;
+    if (!stat || stat.type !== "file" || stat.size <= 0
+      || stat.size !== observed.size || stat.mtime !== observed.mtime) {
+      this.fileStability.set(file, {
+        size: stat?.size ?? 0, mtime: stat?.mtime ?? 0, changedAt: Date.now(),
+      });
+      return false;
+    }
+    // The source reader captures TFile stats, so its length must match disk.
+    return Date.now() - observed.changedAt >= DEBOUNCE_MS
+      && file.stat.size === stat.size && file.stat.mtime === stat.mtime;
+  }
+
+  private async waitForStableFile(file: TFile, signal?: AbortSignal): Promise<boolean> {
+    // Recheck after confirmation and at each batch item's upload boundary.
+    while (this.canTranscribe(file)) {
+      signal?.throwIfAborted();
+      if (await this.isFileStable(file)) {
+        signal?.throwIfAborted();
+        return true;
+      }
+      await this.delay(DEBOUNCE_MS, signal);
+    }
+    return false;
+  }
+
   private async processSingleFile(
     pending: PendingFileEvent,
     options?: { signal?: AbortSignal }
-  ): Promise<void> {
-    if (options?.signal?.aborted) {
-      throw new DOMException("Aborted", "AbortError");
-    }
+  ): Promise<boolean> {
+    if (!await this.waitForStableFile(pending.file, options?.signal)) return false;
     await this.processTranscription(pending.file, options?.signal);
+    return true;
   }
 
   private async processTranscription(
@@ -471,8 +554,20 @@ export class InboxTranscriptionService {
     );
   }
 
-  private delay(ms: number): Promise<void> {
-    return new Promise((resolve) => window.setTimeout(resolve, ms));
+  private delay(ms: number, signal?: AbortSignal): Promise<void> {
+    signal?.throwIfAborted();
+    return new Promise((resolve, reject) => {
+      const onAbort = () => {
+        window.clearTimeout(timer);
+        signal?.removeEventListener("abort", onAbort);
+        reject(new DOMException("Aborted", "AbortError"));
+      };
+      const timer = window.setTimeout(() => {
+        signal?.removeEventListener("abort", onAbort);
+        resolve();
+      }, ms);
+      signal?.addEventListener("abort", onAbort, { once: true });
+    });
   }
 
   private getWorkflowSettings(): WorkflowEngineSettings {

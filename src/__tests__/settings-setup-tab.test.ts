@@ -67,6 +67,8 @@ const createPluginStub = () => {
     modelService: {
       refreshModels: jest.fn().mockResolvedValue(undefined),
     },
+    startHostedChat: jest.fn().mockResolvedValue(undefined),
+    readyPrompt: jest.fn(() => null),
   } as any;
 };
 
@@ -181,11 +183,11 @@ describe("Setup tab SystemSculpt-only layout", () => {
   });
 
   it.each([
-    [{ kind: "error", reason: "network" }, "Could not reach SystemSculpt. Check your connection, then try the code again from settings."],
+    [{ kind: "error", reason: "network" }, "Can't reach SystemSculpt. Check your connection."],
     [{ kind: "signed-in", name: null, email: "user@example.test", licenseValid: true }, "Signed in as user@example.test."],
     [
       { kind: "signed-in", name: null, email: "user@example.test", licenseValid: false },
-      "Signed in as user@example.test. Your license is being confirmed. If AI features stay locked, open SystemSculpt settings and retry validation.",
+      "Signed in as user@example.test. Confirming your license…",
     ],
   ])("shows the latest sign-in result once under Account: %j", (outcome, text) => {
     const plugin = createPluginStub();
@@ -200,6 +202,28 @@ describe("Setup tab SystemSculpt-only layout", () => {
     expect(results[0].getAttribute("role")).toBe("status");
   });
 
+  it("offers Start a chat with the starter credits after a valid sign-in, and not while the license confirms", () => {
+    const plugin = createPluginStub();
+    const tab = new SystemSculptSettingTab(app, plugin);
+    tab.accountConnectOutcome = {
+      kind: "signed-in", name: null, email: "user@example.test", licenseValid: true, starterCredits: 500,
+    };
+    const container = document.createElement("div");
+    renderAccountSection(container, tab, true);
+
+    expect(container.querySelector('[data-testid="settings.account.connect-result"]')?.textContent)
+      .toBe("Signed in as user@example.test. 500 credits ready.");
+    const start = container.querySelector<HTMLButtonElement>('[data-testid="settings.account.start-chat"]');
+    expect(start?.textContent).toBe("Start a chat");
+    start!.click();
+    expect(plugin.startHostedChat).toHaveBeenCalledTimes(1);
+
+    tab.accountConnectOutcome = { kind: "signed-in", name: null, email: "user@example.test", licenseValid: false };
+    const confirming = document.createElement("div");
+    renderAccountSection(confirming, tab, false);
+    expect(confirming.querySelector('[data-testid="settings.account.start-chat"]')).toBeNull();
+  });
+
   it("adds no result line for a plan-less account, whose Account row already says so", () => {
     const plugin = createPluginStub();
     plugin.settings.userEmail = "user@example.test";
@@ -209,7 +233,7 @@ describe("Setup tab SystemSculpt-only layout", () => {
     renderAccountSection(container, tab, false);
 
     expect(container.querySelector('[data-testid="settings.account.connect-result"]')).toBeNull();
-    expect(container.textContent).toContain("Signed in as user@example.test. No active plan yet");
+    expect(container.textContent).toContain("Signed in as user@example.test. Choose a plan to start.");
   });
 
   it("takes a sign-in result only while Account settings are on screen, and forgets it when settings close", () => {
@@ -323,6 +347,80 @@ describe("Setup tab SystemSculpt-only layout", () => {
     expect(container.textContent).not.toContain("Remaining: 6,030 credits");
   });
 
+  it.each([
+    [false, "Welcome, ada@example.com. Free starter plan: 480 credits left.", "Available: 480 starter credits."],
+    [true, "Welcome, ada@example.com. SystemSculpt Pro is active.", "Included 1,200/2,000"],
+  ])("names the real plan on the Account row (paid %s)", async (paid, statusLine, creditsLine) => {
+    getCreditsBalanceMock.mockResolvedValueOnce({
+      totalRemaining: paid ? 2500 : 480,
+      includedRemaining: paid ? 1200 : 0,
+      includedPerMonth: paid ? 2000 : 0,
+      includedCreditsEntitled: paid,
+      addOnRemaining: paid ? 1300 : 480,
+      usageClass: "customer",
+      cycleStartedAt: "2026-07-01T00:00:00.000Z",
+      cycleEndsAt: "2026-08-01T00:00:00.000Z",
+      purchaseUrl: null,
+      billingCycle: paid ? "monthly" : "unknown",
+      annualUpgradeOffer: null,
+    });
+    const plugin = createPluginStub();
+    plugin.settings.licenseValid = true;
+    plugin.settings.licenseKey = "skss-plan";
+    plugin.settings.userEmail = "ada@example.com";
+    const tab = new SystemSculptSettingTab(app, plugin);
+    const container = document.createElement("div");
+
+    renderAccountSection(container, tab, true);
+    expect(container.textContent).not.toContain("Pro is active");
+    await flushSetupSectionRender();
+
+    expect(container.textContent).toContain(statusLine);
+    expect(container.textContent).toContain(creditsLine);
+    if (!paid) {
+      expect(container.textContent).not.toContain("Pro");
+      expect(container.textContent).not.toContain("Resets");
+    }
+  });
+
+  it.each([0, 249, 250, 500])("keeps the Account starter offer under 250 credits with legacy checkout attribution (%s)", async (credits) => {
+    getCreditsBalanceMock.mockResolvedValueOnce({
+      totalRemaining: credits,
+      availableUnreserved: credits,
+      includedRemaining: 0,
+      includedPerMonth: 0,
+      includedCreditsEntitled: false,
+      subscriptionStatus: null,
+      addOnRemaining: credits,
+      usageClass: "customer",
+      cycleStartedAt: "2026-07-01T00:00:00.000Z",
+      cycleEndsAt: "2026-08-01T00:00:00.000Z",
+      purchaseUrl: null,
+      billingCycle: "unknown",
+      annualUpgradeOffer: null,
+    });
+    const plugin = createPluginStub();
+    plugin.settings.licenseValid = true;
+    plugin.settings.licenseKey = "skss-starter";
+    const tab = new SystemSculptSettingTab(app, plugin);
+    const container = document.createElement("div");
+
+    renderAccountSection(container, tab, true);
+    await flushSetupSectionRender();
+
+    const offer = container.querySelector<HTMLAnchorElement>('[data-testid="settings.account.credits-offer"] a');
+    if (credits >= 250) {
+      expect(offer).toBeNull();
+      expect(anchorHrefs).toEqual([]);
+      return;
+    }
+    expect(offer?.textContent).toBe("$9 a month for 10,000 credits every month");
+    offer!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    expect(anchorHrefs).toEqual([
+      "https://systemsculpt.com/checkout?resourceId=0db55c50-daa0-4e46-bf8d-f3f6cf47d729&ref=plugin_low_credits&utm_source=obsidian-plugin&utm_medium=account&utm_campaign=upgrade",
+    ]);
+  });
+
   it("presents master auth as Internal QA without customer billing actions", async () => {
     getCreditsBalanceMock.mockResolvedValueOnce({
       totalRemaining: 0,
@@ -348,7 +446,7 @@ describe("Setup tab SystemSculpt-only layout", () => {
 
     expect(container.textContent).toContain("Usage mode");
     expect(container.textContent).toContain("Internal testing");
-    expect(container.textContent).toContain("Provider usage is tracked internally");
+    expect(container.textContent).toContain("Internal testing. No credits used.");
     expect(container.textContent).not.toContain("Remaining: 0 credits");
     expect(plugin.embeddingsManager.resumeProcessing).toHaveBeenCalledTimes(1);
     const buyCreditsButton = Array.from(container.querySelectorAll("button")).find(
@@ -390,8 +488,8 @@ describe("Setup tab SystemSculpt-only layout", () => {
       `${button.textContent} ${button.getAttribute("aria-label")} ${button.getAttribute("title")}`.includes("Copy license key")
     )).toBe(false);
     expect(clipboardWrite).not.toHaveBeenCalled();
-    expect(container.querySelector<HTMLAnchorElement>('a[href="https://systemsculpt.com/terms"]')?.textContent).toBe("Terms");
-    expect(container.querySelector<HTMLAnchorElement>('a[href="https://systemsculpt.com/privacy"]')?.textContent).toBe("Privacy");
+    expect(container.querySelector<HTMLAnchorElement>('a[href="https://systemsculpt.com/terms?utm_source=obsidian-plugin&utm_medium=plugin&utm_campaign=evergreen&utm_content=terms"]')?.textContent).toBe("Terms");
+    expect(container.querySelector<HTMLAnchorElement>('a[href="https://systemsculpt.com/privacy?utm_source=obsidian-plugin&utm_medium=plugin&utm_campaign=evergreen&utm_content=privacy"]')?.textContent).toBe("Privacy");
   });
 
   it("replaces a saved license only on an explicit keyboard action", async () => {
@@ -472,7 +570,7 @@ describe("Setup tab SystemSculpt-only layout", () => {
     expect(plugin.getSettingsManager().updateSettings.mock.calls).toEqual([
       [{ licenseKey: "new-license" }], [{ licenseValid: false }],
     ]);
-    expect(mockedNotice).toHaveBeenCalledWith("License validation is temporarily unavailable. Try again.");
+    expect(mockedNotice).toHaveBeenCalledWith("Can't check licenses right now. Try again.");
     expect(input.value).toBe("");
     expect(tab.refreshAccountSection).toHaveBeenCalledTimes(1);
   });
@@ -488,7 +586,7 @@ describe("Setup tab SystemSculpt-only layout", () => {
     await flushSetupSectionRender();
     expect(plugin.getSettingsManager().updateSettings).not.toHaveBeenCalled();
     expect(plugin.getLicenseManager().validateLicenseKeyDetailed).not.toHaveBeenCalled();
-    expect(mockedNotice).toHaveBeenCalledWith("Please enter a license key first.");
+    expect(mockedNotice).toHaveBeenCalledWith("Enter a license key first.");
     expect([...container.querySelectorAll("button")].find((button) => button.textContent === "Activate")?.disabled).toBe(false);
   });
 
@@ -538,7 +636,7 @@ describe("Setup tab SystemSculpt-only layout", () => {
     getCreditsBalanceMock.mockRejectedValueOnce(new Error("offline"));
     [...container.querySelectorAll("button")].find((button) => button.textContent === "Refresh")!.click();
     await flushSetupSectionRender();
-    expect(container.textContent).toContain("Unable to fetch credits balance. Try again.");
+    expect(container.textContent).toContain("Couldn't load credits. Try again.");
     const annual = [...container.querySelectorAll("button")].find((button) => button.textContent === "Switch to annual")!;
     expect(annual.disabled).toBe(true);
     expect(annual.style.display).toBe("none");

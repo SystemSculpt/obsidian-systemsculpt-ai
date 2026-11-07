@@ -15,6 +15,7 @@ Source of truth: `src/settings/SettingsTabRegistry.ts`.
 | `Workspace` | Directory paths, iOS captures (once shown), workspace diagnostics, automatic backups, and restore workflow |
 | `Studio` | Studio project storage, run retention, and generated-artifact retention |
 | `Advanced` | Quick actions, reset defaults, diagnostics recording (off by default), and diagnostics tools |
+| `Send feedback` | One message sent to SystemSculpt support, with plugin version and your account when signed in |
 
 ## Chat execution and automatic detection
 
@@ -101,6 +102,17 @@ ownership or changing accounts stops local execution. An interrupted handoff is
 not silently run again: its result note records that it started, and its chat
 retains the conversation. Review both before sending the instruction again.
 
+## Send feedback
+
+Choose **Send feedback** in SystemSculpt settings or the chat's **More** menu.
+Both open the same inline form. Write one message and choose **Send feedback**
+to queue it as an email to `support@systemsculpt.com`.
+
+The message includes the plugin version and, when your license identifies a signed-in
+account, that account. Notes, chat content and diagnostics are not attached.
+You can send feedback without signing in. Nothing is sent until you choose **Send feedback**;
+there are no feedback popups or reminders. A failed send keeps your message in the form.
+
 ## Saving changes
 
 Chat tags and Studio text fields save after a short typing pause, or immediately
@@ -116,7 +128,7 @@ refresh account credits.
 
 ## Notes
 
-- The top-level settings tabs are `Account`, `Chat`, `Workflow`, `Knowledge`, `Workspace`, `Studio`, and `Advanced`.
+- The top-level settings tabs are `Account`, `Chat`, `Workflow`, `Knowledge`, `Workspace`, `Studio`, `Advanced`, and `Send feedback`.
 - `Default output` under Workflow selects the Audio Processor preset used when the modal opens. You can still choose a different preset for one new job.
 - **iOS captures** appears under Workspace only after your SystemSculpt account has signed in to the SystemSculpt iOS app; until then the plugin shows no iOS settings and makes no capture requests. Once it appears, it saves notes and voice memos from the app into the vault while you are signed in; the new notes are the receipt, with no notice unless something could not be saved or confirmed. It checks when Obsidian opens, when it regains focus and every five minutes, on desktop and mobile. Notes and transcripts become new notes in `SystemSculpt/Inbox` (**iOS captures folder**) with `source`, `captured`, `tags` and `capture_id` frontmatter. Meetings go to `SystemSculpt/Meetings` (**iOS meetings folder**, next to the inbox folder setting), with additional `type: meeting`, `meeting_start`, `duration` when known, and `attendees` frontmatter. Meeting notes preserve the server's Summary, Decisions, checkable Action items, Topics and folded Transcript callout, omitting empty sections. If no brief is available, the transcript callout is unfolded. Both folders are configurable; existing notes are never overwritten, and delivery is confirmed only after the note is verified in the vault. Turn on **Ask before saving iOS captures** to confirm each batch, or turn the inbox off. The command **Save iOS captures now** checks immediately and always reports what it found.
 - Some sections are conditionally visible based on current settings.

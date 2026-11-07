@@ -1,3 +1,4 @@
+import { boundedIncidentRenderCount, boundedIncidentRenderDuration, incidentMonotonicNow } from "./RenderIncidentMetrics";
 import { App, Component, MarkdownRenderer, setIcon } from "obsidian";
 import {
   createSurfaceElement,
@@ -83,6 +84,14 @@ export type AgentConversationRendererOptions = Readonly<{
   onUseHosted?: () => void | Promise<void>;
   onOpenCredits?: () => void | Promise<void>;
   onViewPlans?: (error?: ManagedAgentError) => void | Promise<void>;
+  /** Opens the $9 Monthly checkout. */
+  onMonthlyOffer?: () => void | Promise<void>;
+  /** Only a starter account gets Subscribe; any other account sees plans instead. */
+  showMonthlyOffer?: () => boolean;
+  /** A failed renewal: the credits error offers Update card instead (T-5348). */
+  showPaymentFix?: () => boolean;
+  /** Opens the billing portal to fix the card. */
+  onUpdateCard?: () => void | Promise<void>;
   onRetryFailedTurn?: (messageId: string) => void | Promise<void>;
   onPrepareIncidentReport?: (reportId: string, retry?: boolean) => Promise<boolean>;
   onCopyIncidentReport?: (
@@ -126,8 +135,6 @@ function button(parent: HTMLElement, testId: string, label: string, icon?: strin
   return element;
 }
 
-const INCIDENT_RENDER_COUNT_LIMIT = 1_000_000;
-const INCIDENT_RENDER_DURATION_LIMIT_MS = 86_400_000;
 let activityDrawerSequence = 0;
 
 type IncidentDisclosureKind = "activity" | "reasoning" | "tool" | "overflow";
@@ -137,16 +144,6 @@ type IncidentDisclosureState = {
   available: boolean;
   open: boolean;
 };
-
-function boundedIncidentRenderCount(value: number): number {
-  if (!Number.isFinite(value)) return 0;
-  return Math.min(INCIDENT_RENDER_COUNT_LIMIT, Math.max(0, Math.floor(value)));
-}
-
-function boundedIncidentRenderDuration(value: number): number {
-  if (!Number.isFinite(value)) return 0;
-  return Math.min(INCIDENT_RENDER_DURATION_LIMIT_MS, Math.max(0, Math.round(value)));
-}
 
 type HistoricalActivityHydrationState = {
   element: HTMLDetailsElement;
@@ -314,7 +311,6 @@ export class AgentConversationRenderer extends Component {
     this.element = parent.createDiv({
       cls: "systemsculpt-agent-conversation",
       attr: {
-        "data-testid": "chat.scroller",
         role: "log",
         "aria-label": "Conversation",
         "aria-live": "off",
@@ -512,7 +508,7 @@ export class AgentConversationRenderer extends Component {
     this.incidentPendingRenderPassCount = boundedIncidentRenderCount(
       this.incidentPendingRenderPassCount + 1,
     );
-    const startedAt = this.incidentMonotonicNow();
+    const startedAt = incidentMonotonicNow(() => getSurfaceOwnerWindow(this.element));
     try {
       await task();
     } finally {
@@ -522,7 +518,7 @@ export class AgentConversationRenderer extends Component {
           this.incidentPendingRenderPassCount - 1,
         );
         const durationMs = boundedIncidentRenderDuration(
-          this.incidentMonotonicNow() - startedAt,
+          incidentMonotonicNow(() => getSurfaceOwnerWindow(this.element)) - startedAt,
         );
         this.incidentLastRenderDurationMs = durationMs;
         this.incidentMaxRenderDurationMs = Math.max(
@@ -530,21 +526,6 @@ export class AgentConversationRenderer extends Component {
           durationMs,
         );
       }
-    }
-  }
-
-  private incidentMonotonicNow(): number {
-    try {
-      const value = getSurfaceOwnerWindow(this.element).performance?.now?.();
-      if (typeof value === "number" && Number.isFinite(value)) return value;
-    } catch {
-      // Incident measurement must never affect rendering.
-    }
-    try {
-      const value = Date.now();
-      return Number.isFinite(value) ? value : 0;
-    } catch {
-      return 0;
     }
   }
 
@@ -2539,7 +2520,7 @@ export class AgentConversationRenderer extends Component {
     if (this.activeRoot.querySelector(".systemsculpt-agent-render-fallback")) return;
     this.activeRoot.createDiv({
       cls: "systemsculpt-agent-render-fallback systemsculpt-agent-banner is-error",
-      text: "The response completed, but part of this chat could not be displayed. Reopen the chat to try again.",
+      text: "Part of this chat couldn't display. Reopen it.",
       attr: {
         role: "alert",
         "aria-live": "assertive",
@@ -2598,7 +2579,9 @@ export class AgentConversationRenderer extends Component {
         const errorIcon = node.createSpan({ cls: "systemsculpt-agent-error-icon" });
         setIcon(errorIcon, "circle-alert");
         const copy = node.createDiv({ cls: "systemsculpt-agent-error-copy" });
-        const presented = presentAgentError(part.error, part.retryable, this.options.showPlanOffer?.());
+        const presented = presentAgentError(
+          part.error, part.retryable, this.options.showPlanOffer?.(), this.options.showPaymentFix?.() ?? false,
+        );
         copy.createEl("strong", {
           cls: "systemsculpt-agent-error-heading",
           text: presented.heading,
@@ -2614,7 +2597,7 @@ export class AgentConversationRenderer extends Component {
             text: "Preparing report…",
           }) : null;
         const canRetry = part.retryable && part.retryMessageId && this.options.onRetryFailedTurn
-          && !presented.action?.match(/^(see-plans|add-credits|detect|use-hosted)$/)
+          && !presented.action?.match(/^(see-plans|monthly|add-credits|detect|use-hosted)$/)
           && part.error.code !== "content_filter";
         const actions = canRetry || presented.action || presented.reportId && this.options.onCopyIncidentReport
           ? copy.createDiv({ cls: "systemsculpt-agent-error-actions" }) : null;
@@ -2627,6 +2610,17 @@ export class AgentConversationRenderer extends Component {
           });
           retry.addClass("systemsculpt-agent-error-retry");
           retry.onclick = () => void this.options.onRetryFailedTurn?.(part.retryMessageId!);
+        }
+        const monthlyOffer = presented.action === "monthly"
+          && this.options.onMonthlyOffer
+          && (this.options.showMonthlyOffer?.() ?? true);
+        if (actions && monthlyOffer) {
+          const monthly = createUiAction(actions, { label: "Subscribe", testId: "chat.turn.subscribe", tone: "primary", size: "small" });
+          monthly.onclick = () => void this.options.onMonthlyOffer?.();
+        }
+        if (actions && presented.action === "update-card" && this.options.onUpdateCard) {
+          const card = createUiAction(actions, { label: "Update card", testId: "chat.turn.update-card", tone: "primary", size: "small" });
+          card.onclick = () => void this.options.onUpdateCard?.();
         }
         if (actions && presented.action === "add-credits" && this.options.onOpenCredits) {
           const credits = createUiAction(actions, { label: "Add credits", testId: "chat.turn.add-credits", tone: "primary", size: "small" });
@@ -2652,7 +2646,7 @@ export class AgentConversationRenderer extends Component {
           details.createEl("summary", { text: "Details", attr: { "data-testid": "chat.turn.error-details" } });
           details.createEl("pre", { attr: { tabindex: "0" } }).createEl("code", { text: presented.details });
         }
-        if (actions && presented.action === "see-plans" && this.options.onViewPlans) {
+        if (actions && (presented.action === "see-plans" || presented.action === "monthly" && !monthlyOffer) && this.options.onViewPlans) {
           const plans = createUiAction(actions, {
             label: "See plans",
             testId: "chat.turn.see-plans",

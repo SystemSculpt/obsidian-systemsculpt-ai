@@ -53,7 +53,7 @@ function options(currentProject: StudioProjectV1): StudioGraphWorkspaceRendererO
     shapeLayer: { selection: { shapeIds: [], arrowIds: [] }, onSelect: no, onMoveSelection: no, onResizeShape: no, onLabelChange: no, onArrowLabelChange: no, onConnectShapes: no, registerLayerHandle: no },
     onZoomIn: no, onZoomOut: no, onZoomReset: no, onZoomOverview: no, onToggleNodeDetailMode: no, onOpenNodeContextMenu: no,
     onCreateTextNodeAtPosition: no, onRunNode: no, onCopyTextGenerationPromptBundle: no, onToggleTextGenerationOutputLock: no,
-    onRemoveNode: no, onNodeTitleInput: no, onNodeConfigMutated: no, onNodeGeometryMutated: no,
+    onRemoveNode: no, onNodeTitleInput: no, onNodeConfigValueChange: jest.fn(), onNodeResize: jest.fn(), onNodeGeometryMutated: no,
     takeTextNodeEditorMountState: () => ({ isEditing: false, shouldAutoFocus: false }), onRequestTextNodeEdit: no, onStopTextNodeEdit: no, onRevealPathInFinder: no,
   };
 }

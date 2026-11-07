@@ -44,12 +44,41 @@
   color: var(--ss-ink-muted);
 }
 
+/* Keep selected labels readable in light themes; the tint still marks selection. */
+.ss-settings-surface .ss-tab-button.is-selected {
+  color: var(--ss-ink);
+}
+
 .systemsculpt-tab-content {
   display: none;
 }
 
 .systemsculpt-tab-content.is-active {
   display: block;
+}
+
+/* Feedback uses native setting controls, stacked at every pane width. */
+.ss-feedback-form .setting-item {
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--ss-space-3);
+}
+
+.ss-feedback-form .setting-item-control {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
+.ss-feedback-form textarea {
+  width: 100%;
+  min-width: 0;
+  resize: vertical;
+  border-color: var(--ss-ink-muted);
+}
+
+.ss-feedback-form textarea::placeholder {
+  color: var(--ss-ink-muted);
+  opacity: 1;
 }
 
 /* ------------------------------------------------------------------ *

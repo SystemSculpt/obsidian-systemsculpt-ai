@@ -8,6 +8,7 @@ import {
   SYSTEMSCULPT_STUDIO_VIEW_TYPE,
 } from "../viewTypes";
 import { PendingStudioView } from "../../../views/studio/PendingStudioView";
+import { AgentChatView } from "../../../views/chatview/AgentChatView";
 
 let mockStudioLoadError: Error | null = null;
 // The real view is exercised by the Studio view suites and the bundle tests.
@@ -173,6 +174,46 @@ describe("ViewManager", () => {
     expect(view.addFileToContext).toHaveBeenCalledWith(file);
     expect(view.focusInput).toHaveBeenCalledTimes(1);
     expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it("sends the ready prompt in an empty hosted chat, never into a chat with messages or a draft (T-5302)", async () => {
+    const { app, manager } = createFixture();
+    const chatView = (messages: number, draft: string, chatId = "") => Object.defineProperties(Object.create(AgentChatView.prototype), {
+      messageCount: { value: messages },
+      chatId: { value: chatId },
+      getInputText: { value: () => draft },
+      getMessageAttachments: { value: () => [] },
+      startHostedChat: { value: jest.fn().mockResolvedValue(undefined) },
+      sendAutomationMessage: { value: jest.fn().mockResolvedValue(undefined) },
+    });
+    const busy = chatView(3, "");
+    const drafted = chatView(0, "my draft");
+    const loadingSaved = chatView(0, "", "chat-saved");
+    const fresh = chatView(0, "");
+    const leafOf = (view: unknown) => ({ view, loadIfDeferred: jest.fn().mockResolvedValue(undefined), setViewState: jest.fn() });
+    const leaves = [leafOf(busy), leafOf(drafted), leafOf(loadingSaved)];
+    const newLeaf = leafOf(fresh);
+    busy.leaf = leaves[0];
+    Object.assign(app.workspace, {
+      getActiveViewOfType: jest.fn(() => busy),
+      getLeavesOfType: jest.fn(() => leaves),
+      getLeaf: jest.fn(() => newLeaf),
+      revealLeaf: jest.fn().mockResolvedValue(undefined),
+      setActiveLeaf: jest.fn(),
+    });
+
+    await manager.startHostedChat({ prompt: "Summarize [[Trip plan]]" });
+
+    expect(newLeaf.setViewState).toHaveBeenCalledWith(expect.objectContaining({ type: CHAT_VIEW_TYPE }));
+    expect(fresh.startHostedChat).toHaveBeenCalledTimes(1);
+    expect(fresh.sendAutomationMessage).toHaveBeenCalledWith({ message: "Summarize [[Trip plan]]", includeContextFiles: false });
+    expect(busy.sendAutomationMessage).not.toHaveBeenCalled();
+    expect(drafted.sendAutomationMessage).not.toHaveBeenCalled();
+    expect(loadingSaved.sendAutomationMessage).not.toHaveBeenCalled();
+
+    await manager.startHostedChat();
+    expect(busy.startHostedChat).toHaveBeenCalledTimes(1);
+    expect(busy.sendAutomationMessage).not.toHaveBeenCalled();
   });
 
   it("propagates a failed chat open without focusing or attaching to an unopened view", async () => {

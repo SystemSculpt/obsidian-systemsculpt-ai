@@ -72,7 +72,7 @@ export class SystemSculptError extends Error {
 
 /** Single source for the "why is this locked" sentence shown across the plugin. */
 export const PLAN_REQUIRED_MESSAGE =
-  "Create a free account for 500 starter credits, or choose a plan.";
+  "Start free with 500 credits, or choose a plan.";
 
 /** Pre-flight error thrown before contacting the server when no plan is active. */
 export function planRequiredError(feature: string): SystemSculptError {
@@ -104,7 +104,7 @@ export function isPlanAccessError(error: unknown): boolean {
 }
 
 /** Shared wording for a managed request the account cannot currently fund. */
-export const CREDITS_REQUIRED_MESSAGE = "Not enough credits are available. Add credits to continue.";
+export const CREDITS_REQUIRED_MESSAGE = "Not enough credits. Add more to continue.";
 
 const CREDITS_REQUIRED_CODES = new Set<string>([
   ERROR_CODES.INSUFFICIENT_CREDITS,

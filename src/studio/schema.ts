@@ -14,15 +14,13 @@ import {
   type StudioPermissionPolicyV1,
   type StudioProjectV1,
 } from "./types";
-import {
-  asNumber,
+import { isRecord } from "../utils/jsonRecord";
+import { asNumber,
   asString,
   ensureArray,
   isBlanketCliCommandPattern,
-  isRecord,
   nowIso,
-  randomId,
-} from "./utils";
+  randomId } from "./utils";
 import {
   ALL_STUDIO_GRAPH_MIGRATION_IDS,
   migrateStudioProjectToPathOnlyPorts,
@@ -33,13 +31,9 @@ import {
   createEmptyStudioDiagram,
   readStudioDiagram,
 } from "./StudioShapes";
-import {
-  STUDIO_AGENT_DOCS_PATH,
-  compactStudioNodeKind,
-  expandStudioNodeKind,
-  findBuiltInStudioNodeDefinition,
-  resolveBuiltInStudioNodeVersion,
-} from "./StudioProjectAgentContract";
+import { STUDIO_AGENT_DOCS_PATH } from './types';
+import { compactStudioNodeKind, expandStudioNodeKind } from './StudioNodeKinds';
+import { findBuiltInStudioNodeDefinition } from './StudioBuiltInNodes';
 import { resolveNodeDefinitionPorts } from "./StudioNodePortResolution";
 
 /**
@@ -370,7 +364,7 @@ function readNodeV2(raw: unknown): StudioProjectV1["graph"]["nodes"][number] {
   return {
     id,
     kind,
-    version: resolveBuiltInStudioNodeVersion(kind) || "1.0.0",
+    version: findBuiltInStudioNodeDefinition(kind)?.version || "1.0.0",
     title: asString(raw.title).trim() || compactStudioNodeKind(kind),
     position: { x: asNumber(raw.x) ?? 0, y: asNumber(raw.y) ?? 0 },
     ...(typeof raw.parent === "string" ? { parentId: raw.parent } : {}),

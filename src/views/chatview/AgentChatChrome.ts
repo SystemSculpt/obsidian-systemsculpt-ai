@@ -1,8 +1,11 @@
+import { CLAUDE_MODELS, CLAUDE_PERMISSION_LABELS, type ClaudePermissionMode } from "../../services/claude/ClaudeExecutionOptions";
+import { CODEX_APPROVAL_LABELS, type CodexApprovalMode } from "../../services/codex/CodexApprovalPolicy";
 import type { CreditsBalanceSnapshot } from "../../services/SystemSculptService";
 import { codexDefaultLabel, type CodexModel } from "../../services/codex/CodexModelCatalog";
 import { isLocalAgentUsable as usable, type LocalAgentDetection } from "../../services/codex/LocalAgentDetection";
 import { LOCAL_AGENTS, isLocalAgentId, type LocalAgentId, type TextExecutionBackend } from "../../services/codex/LocalAgents";
 import { PLAN_REQUIRED_MESSAGE } from "../../utils/errors";
+import { PAYMENT_FIX_LEAD, PAYMENT_FIX_LINK, isStarterBalance, needsPaymentFix, starterOfferLead } from "../../utils/licenseUtils";
 import type { ChatApprovalMode } from "./storage/ChatPersistenceTypes";
 
 /**
@@ -22,9 +25,6 @@ export type AgentChromeAccount =
   /** An active paid plan; hosted stays the default and local agents go unmentioned. */
   | "paid";
 
-export type ClaudeChromeMode = "auto" | "manual" | "acceptEdits" | "plan" | "settings";
-export type CodexChromeMode = "auto" | "ask" | "read-only" | "settings";
-
 export type AgentChromeState = Readonly<{
   backend: TextExecutionBackend;
   /** On-machine agents can run here (desktop). */
@@ -41,9 +41,9 @@ export type AgentChromeState = Readonly<{
   account: AgentChromeAccount;
   credits: CreditsBalanceSnapshot | null;
   hostedMode: ChatApprovalMode;
-  claude: Readonly<{ mode: ClaudeChromeMode; model: string; autoUnavailable: boolean }>;
+  claude: Readonly<{ mode: ClaudePermissionMode; model: string; autoUnavailable: boolean }>;
   codex: Readonly<{
-    mode: CodexChromeMode;
+    mode: CodexApprovalMode;
     model: string;
     effort: string;
     serviceTier: string;
@@ -70,17 +70,17 @@ export type ChromeModeChoice = Readonly<{
 
 export const MODE_CHOICES: Readonly<Record<TextExecutionBackend, readonly ChromeModeChoice[]>> = {
   claude: [
-    { value: "auto", label: "Auto", icon: "sparkles", description: "Runs safe actions without asking. Claude Code's safety check blocks risky ones." },
-    { value: "manual", label: "Ask before edits", icon: "hand", description: "Asks before every edit and command." },
-    { value: "acceptEdits", label: "Accept edits", icon: "file-pen-line", description: "Edits notes without asking. Asks before commands." },
-    { value: "plan", label: "Plan only", icon: "list-checks", description: "Reads and plans. Changes nothing until you approve the plan." },
-    { value: "settings", label: "Claude Code settings", icon: "settings-2", description: "Uses the permission rules in your Claude Code settings." },
+    { value: "auto", label: CLAUDE_PERMISSION_LABELS.auto, icon: "sparkles", description: "Runs safe actions without asking. Claude Code's safety check blocks risky ones." },
+    { value: "manual", label: CLAUDE_PERMISSION_LABELS.manual, icon: "hand", description: "Asks before every edit and command." },
+    { value: "acceptEdits", label: CLAUDE_PERMISSION_LABELS.acceptEdits, icon: "file-pen-line", description: "Edits notes without asking. Asks before commands." },
+    { value: "plan", label: CLAUDE_PERMISSION_LABELS.plan, icon: "list-checks", description: "Reads and plans. Changes nothing until you approve the plan." },
+    { value: "settings", label: CLAUDE_PERMISSION_LABELS.settings, icon: "settings-2", description: "Uses the permission rules in your Claude Code settings." },
   ],
   codex: [
-    { value: "auto", label: "Auto", icon: "sparkles", description: "Works inside this vault. Codex's reviewer only asks you about unsafe actions." },
-    { value: "ask", label: "Ask", icon: "hand", description: "Works inside this vault. Asks before editing other files or using the internet." },
-    { value: "read-only", label: "Read only", icon: "eye", description: "Reads your vault without changing it." },
-    { value: "settings", label: "Codex settings", icon: "settings-2", description: "Uses your own Codex configuration." },
+    { value: "auto", label: CODEX_APPROVAL_LABELS["auto"], icon: "sparkles", description: "Works inside this vault. Codex's reviewer only asks you about unsafe actions." },
+    { value: "ask", label: CODEX_APPROVAL_LABELS["ask"], icon: "hand", description: "Works inside this vault. Asks before editing other files or using the internet." },
+    { value: "read-only", label: CODEX_APPROVAL_LABELS["read-only"], icon: "eye", description: "Reads your vault without changing it." },
+    { value: "settings", label: CODEX_APPROVAL_LABELS["settings"], icon: "settings-2", description: "Uses your own Codex configuration." },
   ],
   systemsculpt: [
     { value: "auto", label: "Auto", icon: "sparkles", description: "Reads, creates and edits notes without asking. Asks before moving or deleting." },
@@ -90,22 +90,15 @@ export const MODE_CHOICES: Readonly<Record<TextExecutionBackend, readonly Chrome
 };
 
 const CLAUDE_AUTO_UNAVAILABLE =
-  "Claude Code's Auto mode isn't available here, so edits are accepted automatically and other actions ask. Update Claude Code to use Auto.";
+  "Update Claude Code to use Auto. Until then, edits run and other actions ask.";
 const CODEX_AUTO_UNAVAILABLE =
-  "Codex's automatic review isn't available in this version, so Codex asks you when it needs approval. Update Codex to use Auto.";
+  "Update Codex to use Auto. Until then, Codex asks.";
 const MODE_APPLIES_NEXT = "Applies from your next message.";
 const SWITCH_STARTS_NEW_CHAT = "Switching starts a new chat. This one stays in your history.";
 const DETECTING_AGENTS = "Finding Claude Code or Codex…";
 const EMPTY_TITLE = "What should we work on?";
 /** T-36 free-start copy, read by the Nov 6 experiment: do not edit. */
-const FREE_START_OFFER = "Create a free account to get 500 starter credits. No card needed. Paid plans start at $9/month.";
-
-const CLAUDE_MODELS: readonly (readonly [string, string, string?])[] = [
-  ["", "Default", "Claude Code's choice"],
-  ["opus", "Opus"],
-  ["sonnet", "Sonnet"],
-  ["haiku", "Haiku"],
-];
+const FREE_START_OFFER = "500 free credits. No card needed.";
 
 const EFFORT_LABELS: Readonly<Record<string, string>> = {
   none: "None",
@@ -144,6 +137,8 @@ export function chromeAccount(
     credits?.includedCreditsEntitled === true
     || settings.subscriptionStatus === "active"
     || settings.subscriptionStatus === "lifetime"
+    // A failed renewal still holds its plan: it fixes its card, never re-buys (T-5348).
+    || (credits !== null && needsPaymentFix(credits))
   ) return "paid";
   if (credits?.includedCreditsEntitled === false && credits.totalRemaining <= 0) return "no-plan";
   return "signed-in";
@@ -197,7 +192,7 @@ export type RunLineSegment = Readonly<{
   tone?: "warning" | "danger";
   /** Opens a menu; otherwise `action` runs. */
   menu: boolean;
-  action?: "credits" | "sign-in" | "see-plans";
+  action?: "credits" | "sign-in" | "see-plans" | "monthly" | "update-card";
 }>;
 
 export type RunLinePresentation =
@@ -219,7 +214,14 @@ function hostedDetail(state: AgentChromeState): RunLineSegment {
       : { ...base, label: "Credits", ariaLabel: "Open credits", action: "credits" };
   }
   if (credits.totalRemaining <= 0) {
-    return { ...base, label: "Out of credits", ariaLabel: "Out of credits. Open credits", tone: "danger", action: "credits" };
+    // A failed renewal fixes its card in the billing portal (T-5348).
+    if (needsPaymentFix(credits)) {
+      return { ...base, label: "Out of credits", ariaLabel: "Out of credits. Payment failed: update your card", tone: "danger", action: "update-card" };
+    }
+    // A spent starter account goes straight to the $9 Monthly checkout (T-5302).
+    return isStarterBalance(credits)
+      ? { ...base, label: "Out of credits", ariaLabel: "Out of credits. Get Monthly for $9", tone: "danger", action: "monthly" }
+      : { ...base, label: "Out of credits", ariaLabel: "Out of credits. Open credits", tone: "danger", action: "credits" };
   }
   const available = credits.availableUnreserved ?? credits.totalRemaining;
   const label = `${formatCredits(Math.max(0, available))} credits`;
@@ -488,14 +490,14 @@ function localHints(state: AgentChromeState): readonly EmptyStateHint[] {
   if (claude?.installed && claude.signedIn === false) {
     hints.push({
       id: "claude-signed-out",
-      before: "Claude Code is installed but not signed in. Run `claude` in a terminal and type /login, then",
+      before: "Sign in to Claude Code: run `claude`, type /login, then",
       after: ".",
     });
   }
   if (codex?.installed && codex.signedIn === false) {
     hints.push({
       id: "codex-signed-out",
-      before: "Codex is installed but not signed in. Run `codex login` in a terminal, then",
+      before: "Sign in to Codex: run `codex login`, then",
       after: ".",
     });
   }
@@ -503,7 +505,7 @@ function localHints(state: AgentChromeState): readonly EmptyStateHint[] {
   if (usable(claude) || usable(codex) || claude?.signedIn === null || codex?.signedIn === null) return [];
   return [{
     id: "local-hint",
-    before: "Already use Claude Code or Codex? Install or sign in on this computer, then",
+    before: "Use Claude Code or Codex? Sign in on this computer, then",
     after: ".",
   }];
 }
@@ -530,8 +532,8 @@ export function presentEmptyState(state: AgentChromeState): EmptyStatePresentati
       && state.detection?.preferred === backend;
     const name = LOCAL_AGENTS[backend];
     const lead = mostUsed
-      ? `Using ${name}, the agent you use most on this ${state.host}. It runs on your own install and login. No SystemSculpt account or credits needed.`
-      : `Using ${name} on this ${state.host}. It runs on your own install and login. No SystemSculpt account or credits needed.`;
+      ? `Using ${name}, your most used agent. No credits needed.`
+      : `Using ${name}. No credits needed.`;
     if (state.localAgents && usable(agents?.[other])) {
       notes.push({
         id: "also-ready",
@@ -543,7 +545,7 @@ export function presentEmptyState(state: AgentChromeState): EmptyStatePresentati
   }
 
   if (!state.localAgents && state.prefersLocalAgent) {
-    notes.push({ id: "mobile", text: "Claude Code and Codex run on desktop. Here, chat uses SystemSculpt." });
+    notes.push({ id: "mobile", text: "Claude Code and Codex are desktop only." });
   }
   if (state.account === "signed-out") {
     return {
@@ -554,6 +556,11 @@ export function presentEmptyState(state: AgentChromeState): EmptyStatePresentati
       hints: localHints(state),
       starters: [],
     };
+  }
+  if (starterOfferLead(state.credits) === "Out of credits.") {
+    // Starter credits are spent: the $9 Monthly link above the composer is the next step (T-5302).
+    // Any valid key validates as "active", so the account alone can read "paid" here.
+    return { ...empty, lead: "Your free credits are used.", notes, starters: [] };
   }
   if (state.account === "no-plan") {
     return {
@@ -566,8 +573,18 @@ export function presentEmptyState(state: AgentChromeState): EmptyStatePresentati
   }
   return {
     ...empty,
-    lead: "Ask about your notes or give SystemSculpt a task.",
+    lead: "Ask about your notes.",
     notes,
     starters: starters(state.activeNote),
   };
+}
+
+/** One short Pro offer whenever a verified free starter uses hosted Chat (T-5452). */
+export function presentCreditsOffer(state: AgentChromeState): Readonly<{ lead: string; link: string }> | null {
+  if (isLocalAgentId(state.backend) || state.account === "signed-out") return null;
+  // A failed renewal: the line fixes the card, never offers a second plan (T-5348).
+  if (needsPaymentFix(state.credits)) return { lead: PAYMENT_FIX_LEAD, link: PAYMENT_FIX_LINK };
+  // An old server omitting subscription status cannot verify there is no billable plan.
+  return isStarterBalance(state.credits) && state.credits?.subscriptionStatus === null
+    ? { lead: "", link: "Get Pro for $9/month" } : null;
 }

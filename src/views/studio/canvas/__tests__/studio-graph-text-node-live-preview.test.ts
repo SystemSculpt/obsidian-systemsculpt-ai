@@ -54,7 +54,6 @@ function renderHarness(options: HarnessOptions = {}) {
   const node = createTextNode(options.value ?? "");
   const nodeEl = document.body.createDiv({ cls: "ss-studio-node-card" });
   const graphInteraction = createGraphInteractionStub();
-  const onNodeConfigMutated = jest.fn();
   const onNodeConfigValueChange = jest.fn();
   const onRequestTextNodeEdit = jest.fn();
   const onStopTextNodeEdit = jest.fn();
@@ -64,8 +63,7 @@ function renderHarness(options: HarnessOptions = {}) {
     node,
     busy: options.busy ?? false,
     graphInteraction: graphInteraction as never,
-    onNodeConfigMutated,
-    onNodeConfigValueChange,
+     onNodeResize: jest.fn(), onNodeConfigValueChange,
     onNodeGeometryMutated: jest.fn(),
     isEditing: options.isEditing ?? false,
     shouldAutoFocus: options.shouldAutoFocus ?? false,
@@ -82,8 +80,7 @@ function renderHarness(options: HarnessOptions = {}) {
     node,
     nodeEl,
     graphInteraction,
-    onNodeConfigMutated,
-    onNodeConfigValueChange,
+     onNodeConfigValueChange,
     onRequestTextNodeEdit,
     onStopTextNodeEdit,
   };

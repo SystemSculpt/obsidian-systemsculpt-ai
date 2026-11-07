@@ -36,7 +36,6 @@ const PANEL_KINDS = new Set([
   "studio.command_center",
   "studio.button",
   "studio.workflow",
-  "studio.image_generation",
 ]);
 
 const surface = (kind: StudioNodeSurfaceKind, sourceToggle = false): StudioNodeSurface => ({ kind, sourceToggle });

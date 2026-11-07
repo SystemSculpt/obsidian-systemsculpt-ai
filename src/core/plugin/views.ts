@@ -364,6 +364,34 @@ export class ViewManager {
     }
   }
 
+  /**
+   * Shows a hosted SystemSculpt chat: the chat the person was in (keeping a
+   * typed draft), else an empty chat, else a new tab. A `prompt` goes only to
+   * an empty chat with no draft, else a new tab, and is sent at once.
+   */
+  async startHostedChat(options: Readonly<{ prompt?: string }> = {}): Promise<void> {
+    const { workspace } = this.app;
+    const prompt = options.prompt?.trim() ?? "";
+    // A prompt never goes into a saved chat (even one still loading) or over a draft.
+    const blank = (view: unknown): view is AgentChatView => view instanceof AgentChatView
+      && view.messageCount === 0
+      && (!prompt || (!view.chatId && !view.getInputText().trim() && view.getMessageAttachments().length === 0));
+    const active = workspace.getActiveViewOfType(AgentChatView);
+    const leaves = workspace.getLeavesOfType(CHAT_VIEW_TYPE);
+    let leaf = (prompt ? (blank(active) ? active.leaf : undefined) : active?.leaf)
+      ?? leaves.find((candidate) => blank(candidate.view));
+    if (!leaf) {
+      leaf = workspace.getLeaf("tab");
+      await leaf.setViewState({ type: CHAT_VIEW_TYPE, active: true, state: { chatId: "", chatTitle: generateDefaultChatTitle() } });
+    }
+    await leaf.loadIfDeferred();
+    await workspace.revealLeaf(leaf);
+    workspace.setActiveLeaf(leaf, { focus: true });
+    if (!(leaf.view instanceof AgentChatView)) return;
+    await leaf.view.startHostedChat();
+    if (prompt) await leaf.view.sendAutomationMessage({ message: prompt, includeContextFiles: false });
+  }
+
   /** Own a fresh leaf so phone work never replaces a person's current draft. */
   async runPhoneHandoff(execution: HandoffExecution): Promise<string> {
     if (execution.signal.aborted) throw new Error("The handoff was cancelled.");

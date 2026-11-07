@@ -9,6 +9,7 @@ import { displayBackupTabContent } from "./BackupTabContent";
 import { displayEmbeddingsTabContent } from "./EmbeddingsTabContent";
 import { displayImageGenerationTabContent } from "./ImageGenerationTabContent";
 import { displayAdvancedTabContent } from "./AdvancedTabContent";
+import { displayFeedbackTabContent } from "./FeedbackTabContent";
 
 export interface SettingsTabConfig {
   id: string;
@@ -28,7 +29,7 @@ export function buildSettingsTabConfigs(tab: SystemSculptSettingTab): SettingsTa
       ],
       anchor: {
         title: "SystemSculpt Account, License, Credits, Support",
-        desc: "Activate your SystemSculpt license, review credits and billing details, and open docs or support links.",
+        desc: "License, credits, billing and support.",
       },
     },
   ];
@@ -42,7 +43,7 @@ export function buildSettingsTabConfigs(tab: SystemSculptSettingTab): SettingsTa
       ],
       anchor: {
         title: "Chat Preferences, Display",
-        desc: "Keep chat preferences here, including display defaults, history tagging, and accessibility choices while SystemSculpt handles the chat experience itself.",
+        desc: "Chat display, tags and motion.",
       },
     },
     {
@@ -53,7 +54,7 @@ export function buildSettingsTabConfigs(tab: SystemSculptSettingTab): SettingsTa
       ],
       anchor: {
         title: "Audio Capture, Recording, Transcription",
-        desc: "Configure recording, transcription, and post-processing.",
+        desc: "Recording and transcription.",
       },
     },
     {
@@ -66,7 +67,7 @@ export function buildSettingsTabConfigs(tab: SystemSculptSettingTab): SettingsTa
       ],
       anchor: {
         title: "Embeddings, Similar Notes",
-        desc: "Manage semantic search and related note discovery while SystemSculpt handles the processing.",
+        desc: "Semantic search and similar notes.",
       },
     },
     {
@@ -82,7 +83,7 @@ export function buildSettingsTabConfigs(tab: SystemSculptSettingTab): SettingsTa
           title: tab.plugin.settings.phoneCapturesLinked === true
             ? "Directories, Files, iOS Captures, Backups, Restore"
             : "Directories, Files, Backups, Restore",
-          desc: "Control vault folders, verify or repair the SystemSculpt workspace layout, and manage backups and restores for client-side settings.",
+          desc: "Folders, backups and restore.",
         };
       },
     },
@@ -96,7 +97,7 @@ export function buildSettingsTabConfigs(tab: SystemSculptSettingTab): SettingsTa
       ],
       anchor: {
         title: "SystemSculpt Studio, Image Generation",
-        desc: "Manage Studio workflows and SystemSculpt image generation options.",
+        desc: "Studio and image generation.",
       },
     },
     {
@@ -109,7 +110,16 @@ export function buildSettingsTabConfigs(tab: SystemSculptSettingTab): SettingsTa
       ],
       anchor: {
         title: "Advanced, Reset, Diagnostics",
-        desc: "Reset to factory settings and open diagnostics or troubleshooting tools.",
+        desc: "Reset and diagnostics.",
+      },
+    },
+    {
+      id: "feedback",
+      label: "Send feedback",
+      sections: [(parent) => displayFeedbackTabContent(parent, tab)],
+      anchor: {
+        title: "Send feedback, Support",
+        desc: "Tell us what is working or getting in your way.",
       },
     },
   );

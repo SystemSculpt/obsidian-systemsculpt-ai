@@ -1,3 +1,4 @@
+import { CHAT_ATTACHMENT_REF_SCHEMA, chatAttachmentRefKey, isChatAttachmentContentRef, isPersistedReadyAttachment, type PersistedReadyAttachment } from "./ChatAttachmentDescriptor";
 import type {
   ChatAttachmentContentRef,
   ChatAttachmentMetadata,
@@ -13,9 +14,7 @@ import {
   parseAttachedTextContent,
 } from "../../../chat/ChatAttachmentContent";
 
-const CHAT_ATTACHMENT_REF_SCHEMA = "systemsculpt-chat-attachment-v1" as const;
 const CHAT_ATTACHMENT_STORE_ROOT = ".systemsculpt/chat-attachments";
-const SHA256_HEX = /^[a-f0-9]{64}$/;
 const REFERENCE_IMAGE_PLACEHOLDER = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAF/gL+XyG7WQAAAABJRU5ErkJggg==";
 const ATTACHMENT_ORPHAN_GRACE_MS = 7 * 24 * 60 * 60 * 1000;
 const ATTACHMENT_SWEEP_RETRY_MS = 5 * 60 * 1000;
@@ -28,15 +27,6 @@ export type ChatAttachmentStoreAdapter = Readonly<{
   list?: (path: string) => Promise<{ files: string[]; folders: string[] }>;
   remove?: (path: string) => Promise<void>;
   stat?: (path: string) => Promise<{ mtime: number; ctime?: number } | null>;
-}>;
-
-export type PersistedReadyAttachment = Readonly<{
-  id: string;
-  name: string;
-  mimeType: string;
-  byteLength: number;
-  kind: "document" | "image" | "text";
-  contentRef: ChatAttachmentContentRef;
 }>;
 
 type RuntimeReadyAttachmentLike = Readonly<{
@@ -81,45 +71,6 @@ function attachmentStoreState(adapter: ChatAttachmentStoreAdapter): AttachmentSt
   };
   ATTACHMENT_STORE_STATES.set(key, created);
   return created;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-export function isChatAttachmentContentRef(value: unknown): value is ChatAttachmentContentRef {
-  return isRecord(value)
-    && Object.keys(value).every((key) => ["schema", "payload", "sha256", "byteLength"].includes(key))
-    && value.schema === CHAT_ATTACHMENT_REF_SCHEMA
-    && (value.payload === "image-bytes" || value.payload === "utf8-content-part")
-    && typeof value.sha256 === "string"
-    && SHA256_HEX.test(value.sha256)
-    && Number.isSafeInteger(value.byteLength)
-    && (value.byteLength as number) >= 0;
-}
-
-export function isPersistedReadyAttachment(value: unknown): value is PersistedReadyAttachment {
-  return isRecord(value)
-    && Object.keys(value).every((key) => [
-      "id", "name", "mimeType", "byteLength", "kind", "contentRef",
-    ].includes(key))
-    && typeof value.id === "string"
-    && !!value.id.trim()
-    && typeof value.name === "string"
-    && !!value.name.trim()
-    && typeof value.mimeType === "string"
-    && !!value.mimeType.trim()
-    && Number.isSafeInteger(value.byteLength)
-    && (value.byteLength as number) >= 0
-    && (value.kind === "document" || value.kind === "image" || value.kind === "text")
-    && isChatAttachmentContentRef(value.contentRef)
-    && (value.kind === "image"
-      ? value.contentRef.payload === "image-bytes"
-      : value.contentRef.payload === "utf8-content-part");
-}
-
-export function chatAttachmentRefKey(ref: ChatAttachmentContentRef): string {
-  return `${ref.payload}:${ref.sha256}`;
 }
 
 export function isChatAttachmentReferencePlaceholder(part: MultiPartContent): boolean {

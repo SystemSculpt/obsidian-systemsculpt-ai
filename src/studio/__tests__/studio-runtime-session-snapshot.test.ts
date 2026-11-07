@@ -97,7 +97,7 @@ describe("StudioRuntime session snapshot runs", () => {
       {} as any,
       {} as any,
       {} as any,
-      { completeLocalCommit } as any,
+      { completeLocalCommit } as any, { run: jest.fn(async () => { throw new Error("Unexpected native run in this fixture."); }) }
     );
 
     await expect(runtime.getRecentRuns("Studio/Test.systemsculpt"))
@@ -132,7 +132,7 @@ describe("StudioRuntime session snapshot runs", () => {
       {} as any,
       {} as any,
       {} as any,
-      { completeLocalCommit } as any,
+      { completeLocalCommit } as any, { run: jest.fn(async () => { throw new Error("Unexpected native run in this fixture."); }) }
     );
     const eventReads = () => projectStore.readSupportFile.mock.calls.filter(([, path]: [string, string]) => path.endsWith("events.ndjson")).length;
 
@@ -213,7 +213,7 @@ describe("StudioRuntime session snapshot runs", () => {
       {} as any,
       compiler,
       assetStore,
-      apiAdapter
+      apiAdapter, { run: jest.fn(async () => { throw new Error("Unexpected native run in this fixture."); }) }
     );
     (runtime as any).nodeResultCacheStore = {
       load: jest.fn(async () => ({
@@ -328,7 +328,7 @@ describe("StudioRuntime session snapshot runs", () => {
     const runtime = new StudioRuntime(app, plugin, projectStore, registry, new StudioGraphCompiler(), assetStore, {
       beginLocalCommit: async () => undefined,
       completeLocalCommit: async () => undefined,
-    } as any);
+    } as any, { run: jest.fn(async () => { throw new Error("Unexpected native run in this fixture."); }) });
     (runtime as any).nodeResultCacheStore = { load: async () => ({ projectId: "proj_live_runtime", updatedAt: "2026-03-22T00:00:00.000Z", entries: {} }) };
     const project = projectFixture();
     project.graph.nodes = [producer.node as any, consumer.node as any];
@@ -420,7 +420,7 @@ describe("StudioRuntime session snapshot runs", () => {
       transcribeAudio,
       beginLocalCommit: async () => undefined,
       completeLocalCommit: async () => undefined,
-    } as any);
+    } as any, { run: jest.fn(async () => { throw new Error("Unexpected native run in this fixture."); }) });
     const project = projectFixture();
     project.graph.nodes = [
       { id: "path", kind: textNode.kind, version: textNode.version, title: "Audio path", position: { x: 0, y: 0 }, config: { value: file.path } },
@@ -499,7 +499,7 @@ describe("StudioRuntime session snapshot runs", () => {
         stageArrayBuffer: jest.fn(),
         readArrayBuffer: jest.fn(),
       } as any,
-      apiAdapter
+      apiAdapter, { run: jest.fn(async () => { throw new Error("Unexpected native run in this fixture."); }) }
     );
     (runtime as any).nodeResultCacheStore = {
       load: jest.fn(async () => ({

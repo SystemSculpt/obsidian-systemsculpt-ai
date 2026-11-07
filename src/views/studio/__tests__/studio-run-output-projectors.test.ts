@@ -3,12 +3,8 @@ import {
   type StudioNodeInstance,
   type StudioProjectV1,
 } from "../../../studio/types";
-import {
-  MANAGED_TEXT_OWNER,
-  MANAGED_TEXT_OWNER_KEY,
-  MANAGED_TEXT_SOURCE_NODE_ID_KEY,
-  removePendingManagedOutputNodes,
-} from "../../../studio/StudioManagedOutputNodes";
+import { removePendingManagedOutputNodes } from '../../../studio/StudioManagedOutputNodes';
+import { MANAGED_TEXT_OWNER, MANAGED_TEXT_OWNER_KEY, MANAGED_TEXT_SOURCE_NODE_ID_KEY } from '../../../studio/StudioManagedOutputMetadata';
 import {
   materializeManagedOutputNodesForNodeOutput,
   materializeManagedOutputNodesFromCacheEntries,

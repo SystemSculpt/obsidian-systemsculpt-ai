@@ -1,7 +1,7 @@
 import { type App, TFile, parseYaml, stringifyYaml } from "obsidian";
 import { PlatformRequestClient } from "../../services/PlatformRequestClient";
 import { SystemSculptEnvironment } from "../../services/api/SystemSculptEnvironment";
-import { ensureVaultFolder } from "../../tools/vault/utils";
+import { ensureVaultFolder } from "../../utils/vaultFolders";
 import { sha256HexFromBytesPortable } from "../../utils/sha256";
 import { parseRetryAfterMs } from "../../utils/retryAfter";
 import { PHONE_CAPTURE_MIN_SYNC_GAP_MS, PHONE_CAPTURE_POLL_INTERVAL_MS } from "./PhoneCaptureInbox";

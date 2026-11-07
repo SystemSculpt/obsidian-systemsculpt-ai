@@ -3,14 +3,32 @@ import { createCatalogSetting } from "../SettingsCatalog";
 import { hasHostCapability } from "../../platform/hostCapabilities";
 import { SystemSculptService } from "../../services/SystemSculptService";
 import { SYSTEMSCULPT_LEGAL_URLS, SYSTEMSCULPT_WEBSITE, withPluginAttribution } from "../../constants/externalServices";
-import { checkPremiumUserStatus } from "../../utils/licenseUtils";
+import {
+  activeAccountLine,
+  checkPremiumUserStatus,
+  isStarterBalance,
+  MONTHLY_OFFER_LINE,
+  PAYMENT_FIX_LEAD,
+  PAYMENT_FIX_LINK,
+  needsPaymentFix,
+  starterOfferLead,
+} from "../../utils/licenseUtils";
+import { openBillingPortal } from "../../utils/billingPortal";
 import { SystemSculptSettingTab } from "../SystemSculptSettingTab";
 import { getSurfaceOwnerWindow } from "../../core/ui/surface/SurfaceDomContext";
 import { UpgradePlanModal } from "../../modals/UpgradePlanModal";
-import { CONNECT_ERROR_COPY, LICENSE_CONFIRMING_COPY, signedInLine } from "../../modals/AccountConnectOutcome";
+import {
+  CONNECT_ERROR_COPY,
+  LICENSE_CONFIRMING_COPY,
+  canStartHostedChat,
+  firstChatAction,
+  creditsReadyLine,
+  signedInLine,
+} from "../../modals/AccountConnectOutcome";
 import type { ConnectOutcome } from "../../services/AccountConnectService";
 import { openExternalUrl } from "../../utils/externalUrl";
 import type { LicenseValidationResult } from "../../services/LicenseService";
+import type { CreditsBalanceSnapshot } from "../../services/SystemSculptService";
 
 export function renderAccountSection(
   root: HTMLElement,
@@ -37,7 +55,7 @@ export function renderAccountSection(
       tabInstance.accountConnectOutcome = null;
       const opened = await connectService.begin(mode, ownerWindow);
       if (!opened) {
-        new Notice("Couldn't open your browser. Reopen the sign-in page below, then paste the connection code shown there.");
+        new Notice("Couldn't open your browser. Reopen sign-in below.");
       }
     } finally {
       button.setDisabled(false);
@@ -50,11 +68,11 @@ export function renderAccountSection(
     try {
       const result = await plugin.getLicenseManager().validateLicenseKeyDetailed();
       if (result.outcome === "rejected") {
-        new Notice("Invalid license key. Please check and try again.");
+        new Notice("Invalid license key.");
         return result;
       }
       if (result.outcome === "unavailable") {
-        new Notice("License validation is temporarily unavailable. Try again.");
+        new Notice("Can't check licenses right now. Try again.");
         return result;
       }
       tabInstance.refreshAccountSection();
@@ -65,14 +83,38 @@ export function renderAccountSection(
     }
   };
 
-  const accountDesc = isProActive
-    ? userStatus.greeting || "Pro features enabled."
-    : signedInWithoutPlan
-      ? `Signed in as ${signedInEmail}. No active plan yet — choose a plan to enable AI features.`
-      : "Activate your license to turn on SystemSculpt chat, search, transcription, and workspace services.";
-  const statusSetting = createCatalogSetting(root, "account.status")
-    .setDesc(`${accountDesc}${hasHostCapability("local-cli", root) ? " Claude Code and Codex chat on desktop need no license." : ""}${pendingSignIn ? " Waiting for browser sign-in…" : ""}`);
-  renderConnectOutcome(statusSetting.descEl, tabInstance.accountConnectOutcome);
+  const formatCredits = (value: number): string => {
+    try {
+      return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(value);
+    } catch {
+      return String(value);
+    }
+  };
+
+  const statusSetting = createCatalogSetting(root, "account.status");
+  // An active key's plan is known only from the balance, read below.
+  const renderStatus = (balance: CreditsBalanceSnapshot | null): void => {
+    const accountDesc = isProActive
+      ? hasSavedLicense
+        ? activeAccountLine(plugin.settings, balance, formatCredits)
+        : userStatus.greeting || "Pro features enabled."
+      : signedInWithoutPlan
+        ? `Signed in as ${signedInEmail}. Choose a plan to start.`
+        : "Sign in to turn on SystemSculpt.";
+    statusSetting.setDesc(`${accountDesc}${hasHostCapability("local-cli", root) ? " Claude Code and Codex need no license." : ""}${pendingSignIn ? " Waiting for browser sign-in…" : ""}`);
+    renderConnectOutcome(statusSetting.descEl, tabInstance.accountConnectOutcome);
+  };
+  renderStatus(null);
+  if (tabInstance.accountConnectOutcome && canStartHostedChat(tabInstance.accountConnectOutcome)) {
+    const first = firstChatAction(plugin);
+    statusSetting.addButton((button) => {
+      button
+        .setButtonText(first.label)
+        .setCta()
+        .onClick(first.onSelect);
+      button.buttonEl.setAttribute("data-testid", "settings.account.start-chat");
+    });
+  }
 
   if (isProActive) {
     statusSetting.addButton((button) => {
@@ -223,7 +265,7 @@ export function renderAccountSection(
   const licenseSetting = createCatalogSetting(root, "account.license-key")
     .setDesc(
       hasSavedLicense
-        ? "Saved key is hidden. Enter a new key only to replace it."
+        ? "Key saved. Enter a new one to replace it."
         : "Enter a license key to activate SystemSculpt."
     );
 
@@ -259,7 +301,7 @@ export function renderAccountSection(
         button.setDisabled(true);
         button.setButtonText("Working...");
         if (!currentValue) {
-          new Notice("Please enter a license key first.");
+          new Notice("Enter a license key first.");
           return;
         }
 
@@ -289,14 +331,6 @@ export function renderAccountSection(
   if (isProActive && (plugin.settings.licenseKey || "").trim().length > 0) {
     const creditsSetting = createCatalogSetting(root, "account.credits").setDesc("Fetching credits balance…");
     const aiService = SystemSculptService.getInstance(plugin);
-
-    const formatCredits = (value: number): string => {
-      try {
-        return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(value);
-      } catch {
-        return String(value);
-      }
-    };
 
     const formatDate = (iso: string): string => {
       if (!iso) return "unknown";
@@ -348,6 +382,7 @@ export function renderAccountSection(
         ) {
           void Promise.resolve(plugin.embeddingsManager.resumeProcessing("funding")).catch(() => undefined);
         }
+        renderStatus(balance);
         internalQa = balance.usageClass === "master_auth";
         if (internalQa) {
           purchaseUrl = null;
@@ -355,7 +390,7 @@ export function renderAccountSection(
           creditsSetting
             .setName("Usage mode")
             .setDesc(
-              "Internal testing. Provider usage is tracked internally; customer credits are not used.",
+              "Internal testing. No credits used.",
             );
           refreshAnnualUpgradeButton?.();
           refreshBuyCreditsButton?.();
@@ -383,6 +418,31 @@ export function renderAccountSection(
           : "";
         const heldInFlight = balance.heldInFlight ?? 0;
         const availableUnreserved = balance.availableUnreserved ?? balance.totalRemaining;
+        if (isStarterBalance(balance)) {
+          // Starter credits are a one-time grant: no monthly allowance or reset.
+          creditsSetting.setDesc(
+            `Available: ${formatCredits(availableUnreserved)} starter credits.${
+              heldInFlight > 0 ? ` Held in current requests: ${formatCredits(heldInFlight)} credits.` : ""
+            }`
+          );
+          const lead = starterOfferLead(balance);
+          if (lead) {
+            // The Monthly offer once half the starter credits are used (T-4520, T-4652).
+            const line = creditsSetting.descEl.createDiv({
+              cls: "ss-account-credits-offer",
+              text: `${lead} `,
+              attr: { "data-testid": "settings.account.credits-offer" },
+            });
+            const link = line.createEl("a", { text: MONTHLY_OFFER_LINE, href: "#" });
+            link.addEventListener("click", (event) => {
+              event.preventDefault();
+              void openExternalUrl(withPluginAttribution(SYSTEMSCULPT_WEBSITE.MONTHLY_LOW_CREDITS, "account"), ownerWindow);
+            });
+          }
+          refreshAnnualUpgradeButton?.();
+          refreshBuyCreditsButton?.();
+          return;
+        }
         creditsSetting.setDesc(
           `Available: ${formatCredits(availableUnreserved)} credits. Held in current requests: ${formatCredits(
             heldInFlight
@@ -392,13 +452,26 @@ export function renderAccountSection(
             balance.addOnRemaining
           )}). Resets ${formatDate(balance.cycleEndsAt)}.${annualSavingsSuffix}`
         );
+        if (needsPaymentFix(balance)) {
+          // A failed renewal fixes its card on the existing plan (T-5348).
+          const line = creditsSetting.descEl.createDiv({
+            cls: "ss-account-credits-offer",
+            text: `${PAYMENT_FIX_LEAD} `,
+            attr: { "data-testid": "settings.account.payment-fix" },
+          });
+          const link = line.createEl("a", { text: PAYMENT_FIX_LINK, href: "#" });
+          link.addEventListener("click", (event) => {
+            event.preventDefault();
+            void openBillingPortal(aiService, ownerWindow);
+          });
+        }
         refreshAnnualUpgradeButton?.();
         refreshBuyCreditsButton?.();
       } catch {
         annualUpgradeOffer = null;
         refreshAnnualUpgradeButton?.();
         refreshBuyCreditsButton?.();
-        creditsSetting.setDesc("Unable to fetch credits balance. Try again.");
+        creditsSetting.setDesc("Couldn't load credits. Try again.");
       } finally {
         tabInstance.invalidateSearchIndex();
       }
@@ -432,7 +505,7 @@ export function renderAccountSection(
       refreshAnnualUpgradeButton = applyState;
       button.setButtonText("Switch to annual").onClick(() => {
         if (!annualUpgradeOffer?.checkoutUrl) {
-          new Notice("Annual upgrade offer is currently unavailable for this account.");
+          new Notice("Annual upgrade isn't available for this account.");
           return;
         }
         void openExternalUrl(withPluginAttribution(annualUpgradeOffer.checkoutUrl, "account"), ownerWindow);
@@ -482,7 +555,7 @@ function renderConnectOutcome(descEl: HTMLElement, outcome: ConnectOutcome | nul
   const text = outcome.kind === "error"
     ? CONNECT_ERROR_COPY[outcome.reason]
     : outcome.licenseValid
-      ? signedInLine(outcome.email)
+      ? [signedInLine(outcome.email), creditsReadyLine(outcome)].filter(Boolean).join(" ")
       : `${signedInLine(outcome.email)} ${LICENSE_CONFIRMING_COPY}`;
   descEl.createDiv({
     cls: `ss-account-connect-result${outcome.kind === "error" ? " is-error" : ""}`,

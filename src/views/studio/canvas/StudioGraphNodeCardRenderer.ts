@@ -6,7 +6,7 @@ import { renderStudioCollection } from './StudioCollectionRenderer';
 import { renderStudioWorkflow } from './StudioWorkflowRenderer';
 import { renderStudioNodeSourceBody } from './StudioNodeSourceBody';
 import { resolveStudioNodeSurface } from './StudioNodeSurface';
-import { commitInlineConfigValueChange } from './StudioGraphInlineConfigPanel';
+import type { StudioJsonValue } from "../../../studio/types";
 import { renderStudioNodeInlineEditor, shouldSuppressNodeOutputPreview } from './StudioGraphNodeInlineEditors';
 import { resolveStudioNodeDetailSectionVisibility } from './StudioGraphNodeDetailMode';
 import { renderTextNodeCard } from './StudioGraphTextNodeCard';
@@ -111,8 +111,8 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     interactionLocked: locked, getGraphZoom: () => graphInteraction.getGraphZoom(),
     showResizeGuides: (moving, edges) => graphInteraction.showNodeResizeGuides(node.id, moving, edges),
     onResizeGuidesEnd: () => graphInteraction.clearAlignmentGuides(), hasAspectMediaContent: media !== null,
-    onNodeConfigMutated: options.onNodeConfigMutated, onNodeConfigValueChange: options.onNodeConfigValueChange,
-    onNodeResize: options.onNodeResize, onNodeGeometryMutated: options.onNodeGeometryMutated,
+    onNodeConfigValueChange: options.onNodeConfigValueChange,
+    onNodeResize: options.onNodeResize,
     applySize: ({ width, height }) => { nodeEl.style.width = `${width}px`; if (height === null) return; if (node.kind === 'studio.terminal') nodeEl.style.height = `${height}px`; else nodeEl.style.minHeight = `${height}px`; },
     readInitialSize: () => { const aspect = aspectContentEl?.offsetHeight ?? 0; return { width: resolveStudioGraphNodeWidth(node), height: aspect > 0 ? aspect : nodeEl.offsetHeight > 0 ? nodeEl.offsetHeight : Math.max(minimum, 1) }; },
   })); };
@@ -136,8 +136,8 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
       : undefined;
     if (isStudioFillTextNode(node)) {
       teardowns.push(renderFillTextNodeCard({ nodeEl, node, busy: locked, graphInteraction,
-        onNodeConfigMutated: options.onNodeConfigMutated, onNodeConfigValueChange: options.onNodeConfigValueChange,
-        onNodeResize: options.onNodeResize, onNodeGeometryMutated: options.onNodeGeometryMutated,
+        onNodeConfigValueChange: options.onNodeConfigValueChange,
+        onNodeResize: options.onNodeResize,
         ...options.takeTextNodeEditorMountState(node.id),
         onRequestTextNodeEdit: options.onRequestTextNodeEdit, onStopTextNodeEdit: options.onStopTextNodeEdit,
         registerEditorTeardown }));
@@ -145,7 +145,7 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
       return finish();
     }
     teardowns.push(renderTextNodeCard({ nodeEl, node, busy: locked, graphInteraction,
-      onNodeConfigMutated: options.onNodeConfigMutated, onNodeConfigValueChange: options.onNodeConfigValueChange,
+      onNodeConfigValueChange: options.onNodeConfigValueChange,
       onNodeResize: options.onNodeResize, onNodeGeometryMutated: options.onNodeGeometryMutated,
       ...options.takeTextNodeEditorMountState(node.id),
       onRequestTextNodeEdit: options.onRequestTextNodeEdit, onStopTextNodeEdit: options.onStopTextNodeEdit,
@@ -169,7 +169,7 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
       const editor = mountStudioImageBoardEditor({ app: imageBoard.app, readAsset: imageBoard.readAsset, storeAsset: imageBoard.storeAsset,
         contentEl: content, toolbarHost: workspaceEl ?? nodeEl, toolbarDocked: workspaceEl !== null, node, nodeRunState,
         getGraphZoom: () => graphInteraction.getGraphZoom(),
-        onNodeConfigValueChange: (nodeId, key, value, changeOptions) => options.onNodeConfigValueChange?.(nodeId, key, value, changeOptions),
+        onNodeConfigValueChange: options.onNodeConfigValueChange,
         onClose: imageBoard.onClose });
       imageBoard.onEditorMounted(node.id, editor);
       teardowns.push(() => { imageBoard.onEditorUnmounted(node.id, editor); editor.dispose(); });
@@ -223,22 +223,18 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     mountResizeFrame(); return finish();
   }
 
-  const change = (key: string, value: Parameters<typeof commitInlineConfigValueChange>[0]['value']) => commitInlineConfigValueChange({ node, key, value, onNodeConfigValueChange: options.onNodeConfigValueChange, onNodeConfigMutated: options.onNodeConfigMutated });
+  const change = (key: string, value: StudioJsonValue) => options.onNodeConfigValueChange(node.id, key, value);
   const renderPanel = (root: HTMLElement): (() => void) | void => {
     if (node.kind === 'studio.command_center' || node.kind === 'studio.button') return renderStudioCommandCenter(root, { node, nodes: options.projectNodes || [], projectId: options.projectId || '', projectPath: options.projectPath, busy: options.busy, runs: options.agentRuns, presentation: options.presentation, getRunState: options.getRelatedNodeRunState, definition: options.findNodeDefinition, run: options.onRunNode,
       onExecutionChange: value => change('execution', value), focus: id => { graphInteraction.setSelectedNodeIds([id]); graphInteraction.fitSelectedNodesInViewport(); } });
     if (node.kind === 'studio.run_collection' && options.agentRuns && options.projectPath) return renderStudioRunCollection(root, { runs: options.agentRuns, presentation: options.presentation, projectId: options.projectId || '', projectPath: options.projectPath, sources: Array.isArray(node.config.sources) ? node.config.sources.filter((value): value is string => typeof value === 'string') : [], compact: false, groupBy: String(node.config.groupBy || 'status'), showCompleted: node.config.showCompleted !== false });
     if (node.kind === 'studio.collection') return renderStudioCollection(root, { node, outputs: nodeRunState.outputs || {}, scope: options.projectId, onChange: change, presentation: options.presentation });
     if (node.kind === 'studio.workflow') return renderStudioWorkflow(root, { node });
-    if (node.kind === 'studio.image_generation') {
-      root.createEl('p', { text: 'Image generation was retired. Saved outputs are preserved.', attr: { role: 'status' } });
-      return renderNodeMediaPreview({ nodeEl: root, node, nodeRunState, resolveAssetPreviewSrc: options.resolveAssetPreviewSrc, onRevealPathInFinder: options.onRevealPathInFinder, onOpenMediaPreview: options.onOpenMediaPreview });
-    }
     root.createDiv({ cls: 'ss-studio-source-empty', text: 'This panel is available once its project is open.' });
   };
 
   if (surface.kind === 'code' || surface.kind === 'panel') {
-    sourceBody = renderStudioNodeSourceBody(nodeEl, { node, definition, scope: options.projectId, locked: node.kind === 'studio.image_generation' || locked, mode: surface.kind === 'panel' ? 'panel' : 'source',
+    sourceBody = renderStudioNodeSourceBody(nodeEl, { node, definition, scope: options.projectId, locked, mode: surface.kind === 'panel' ? 'panel' : 'source',
       onApply: options.onNodeSourceApply, renderPanel: surface.kind === 'panel' ? renderPanel : undefined,
       onViewChange: view => { if (header.sourceToggle) updateUiAction(header.sourceToggle, { selected: view === 'source' }); } });
     teardowns.push(sourceBody.dispose);
@@ -246,7 +242,7 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
   } else {
     const visible = (section: 'textEditor' | 'systemPrompt' | 'outputPreview' | 'fieldHelp') => resolveStudioNodeDetailSectionVisibility({ node, mode: options.nodeDetailMode, section });
     renderStudioNodeInlineEditor({ nodeEl, node, nodeRunState, definition, inboundEdges: options.inboundEdges, interactionLocked: locked,
-      onNodeConfigMutated: options.onNodeConfigMutated, onNodeConfigValueChange: options.onNodeConfigValueChange,
+      onNodeConfigValueChange: options.onNodeConfigValueChange,
       renderMarkdownPreview, resolveDynamicSelectOptions: options.resolveDynamicSelectOptions, pathBrowseOptions: options.pathBrowseOptions,
       openMediaModelPicker: options.openMediaModelPicker, mediaInputPlan: mediaPlan,
       nodeDetailMode: options.nodeDetailMode, showTextEditor: visible('textEditor'), showSystemPromptField: visible('systemPrompt'), showOutputPreview: visible('outputPreview'), showFieldHelp: visible('fieldHelp') });

@@ -72,7 +72,7 @@ export class LicenseManager {
         void this.validateLicenseKeyDetailed().then((result) => {
           if (hadValidLicense && !result.isValid && licenseKey === this.plugin.settings.licenseKey?.trim()) {
             new Notice(
-              "Your SystemSculpt license could not be validated. Open account settings to check your access.",
+              "Couldn't validate your license. Check your account.",
               7000
             );
           }

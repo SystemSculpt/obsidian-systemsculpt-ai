@@ -1,3 +1,5 @@
+import { requestAgentBootstrap } from "./Bootstrap";
+import { readBoundedText, responseErrorPayload } from "./ManagedHttpResponse";
 import {
   getPlatformResponseDeliveryMode,
   platformTransferTimeoutMs,
@@ -6,12 +8,10 @@ import {
 } from "../../services/PlatformRequestClient";
 import {
   THIN_AGENT_ACCEPT_EVENTS_HEADER,
-  THIN_AGENT_BOOTSTRAP_PATH,
   THIN_AGENT_CONNECTIVITY_PATH,
   THIN_AGENT_LIVE_DELTA_EVENT_KIND,
   THIN_AGENT_MESSAGES_PATH,
   THIN_AGENT_TURN_PATH,
-  parseThinAgentBootstrapResponse,
   type ThinAgentBootstrapRequest,
   type ThinAgentBootstrapResponse,
 } from "../../services/managed/ThinAgentV1Contract";
@@ -125,7 +125,6 @@ const ACCESS_REFRESH_MARGIN_MS = 5_000;
 // A ticket inside this window at a turn boundary is refreshed in the
 // background so the likely follow-up send starts with fresh access.
 const ACCESS_BACKGROUND_REFRESH_WINDOW_MS = 20_000;
-const MAX_BOOTSTRAP_RESPONSE_BYTES = 64 * 1024;
 const MAX_SNAPSHOT_BYTES = 64 * 1024 * 1024;
 // A long history can approach the snapshot cap; its deadline admits that on a
 // slow link instead of the ordinary JSON exchange allowance.
@@ -175,71 +174,6 @@ function addBoundedSegmentMetric(
     return;
   }
   metrics[key] = current + amount;
-}
-
-async function readBoundedText(
-  response: Response,
-  maximumBytes: number,
-): Promise<string> {
-  const declaredLength = Number(response.headers.get("content-length"));
-  if (Number.isFinite(declaredLength) && declaredLength > maximumBytes) {
-    throw new Error("SystemSculpt returned an oversized chat snapshot.");
-  }
-  if (!response.body) {
-    throw new Error("SystemSculpt returned an empty chat snapshot.");
-  }
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let byteLength = 0;
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      byteLength += value.byteLength;
-      if (byteLength > maximumBytes) {
-        await reader.cancel();
-        throw new Error("SystemSculpt returned an oversized chat snapshot.");
-      }
-      chunks.push(value);
-    }
-  } finally {
-    reader.releaseLock();
-  }
-  const bytes = new Uint8Array(byteLength);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-}
-
-async function responseErrorPayload(response: Response): Promise<Readonly<{
-  code?: string;
-  incidentId?: string;
-}>> {
-  try {
-    const text = await readBoundedText(response, 4_096);
-    const value = JSON.parse(text) as unknown;
-    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-    const record = value as Record<string, unknown>;
-    const nested = record.error && typeof record.error === "object"
-      && !Array.isArray(record.error)
-      ? record.error as Record<string, unknown>
-      : {};
-    const code = nested.code ?? record.code;
-    const incidentId = nested.incident_id ?? record.incident_id;
-    return {
-      ...(typeof code === "string" && /^[a-z][a-z0-9_]{0,63}$/u.test(code)
-        ? { code }
-        : {}),
-      ...(typeof incidentId === "string" && /^incident_[a-f0-9]{32}$/u.test(incidentId)
-        ? { incidentId }
-        : {}),
-    };
-  } catch {
-    return {};
-  }
 }
 
 function isInitialSessionSnapshot(
@@ -587,35 +521,7 @@ implements AgentConnectionPort {
   }
 
   private async requestBootstrap(): Promise<BootstrapAccess> {
-    const request = this.options.bootstrapRequest();
-    const response = await this.options.requestClient.request({
-      url: `${this.options.baseUrl}${THIN_AGENT_BOOTSTRAP_PATH}`,
-      method: "POST",
-      headers: { "x-plugin-version": this.options.pluginVersion },
-      licenseKey: this.options.licenseKey(),
-      body: request,
-      allowTransportFallback: true,
-      responseEncoding: "arrayBuffer",
-      maxResponseBytes: MAX_BOOTSTRAP_RESPONSE_BYTES,
-    });
-    if (!response.ok) {
-      const payload = await responseErrorPayload(response);
-      throw Object.assign(new Error(
-        `SystemSculpt could not start this chat (${response.status}).`,
-      ), {
-        ...(payload.code ? { code: payload.code } : {}),
-        ...(payload.incidentId ? { requestId: payload.incidentId } : {}),
-        status: response.status,
-        retryable: response.status === 401 || response.status === 429
-          || response.status >= 500,
-      });
-    }
-    const value = JSON.parse(
-      await readBoundedText(response, MAX_BOOTSTRAP_RESPONSE_BYTES),
-    ) as unknown;
-    const bootstrap = parseThinAgentBootstrapResponse(value, {
-      conversation_id: request.conversation_id,
-    });
+    const bootstrap = await requestAgentBootstrap(this.options);
     const expiresAt = Date.parse(bootstrap.access.expires_at);
     return {
       response: bootstrap,

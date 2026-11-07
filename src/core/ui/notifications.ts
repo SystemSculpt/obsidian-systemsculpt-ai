@@ -46,7 +46,7 @@ export function showActionNotice(
   message: string,
   action: { label: string; onSelect: () => void },
   options: NotificationOptions = {},
-): void {
+): Notice {
   const fragment = createSurfaceFragment(resolveSurfaceDomContext().document);
   fragment.createDiv({ cls: "systemsculpt-notice-message", text: message });
   const button = fragment.createEl("button", {
@@ -60,6 +60,7 @@ export function showActionNotice(
     notice.hide();
     action.onSelect();
   });
+  return notice;
 }
 
 /**

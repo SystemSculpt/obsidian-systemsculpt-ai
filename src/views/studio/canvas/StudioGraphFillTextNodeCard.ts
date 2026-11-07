@@ -11,7 +11,6 @@ import {
   type StudioFillTextAppearance,
 } from "./StudioFillTextSurface";
 import { mountStudioFillTextToolbar, type StudioFillTextToolbar } from "./StudioFillTextToolbar";
-import { commitInlineConfigValueChange } from "./StudioGraphInlineConfigPanel";
 import { markStudioNodeCardInteractive } from "./StudioGraphNodeCardPointer";
 import type { StudioGraphNodeMutationOptions } from "./StudioGraphNodeCardTypes";
 import { mountStudioGraphNodeResizeFrame } from "./StudioGraphNodeResizeFrame";
@@ -28,10 +27,8 @@ type RenderFillTextNodeCardOptions = Pick<
   | "node"
   | "busy"
   | "graphInteraction"
-  | "onNodeConfigMutated"
   | "onNodeConfigValueChange"
   | "onNodeResize"
-  | "onNodeGeometryMutated"
   | "isEditing"
   | "shouldAutoFocus"
   | "initialEditorSnapshot"
@@ -54,7 +51,6 @@ export function renderFillTextNodeCard(options: RenderFillTextNodeCardOptions): 
     node,
     busy,
     graphInteraction,
-    onNodeConfigMutated,
     onNodeConfigValueChange,
     onStopTextNodeEdit,
   } = options;
@@ -66,7 +62,7 @@ export function renderFillTextNodeCard(options: RenderFillTextNodeCardOptions): 
     ...readStudioFillTextLook(node.config),
   };
   const save = (key: string, value: StudioJsonValue, mutationOptions: StudioGraphNodeMutationOptions): void =>
-    commitInlineConfigValueChange({ node, key, value, onNodeConfigValueChange, onNodeConfigMutated, mutationOptions });
+    onNodeConfigValueChange(node.id, key, value, mutationOptions);
   let box = resolveStudioFillTextNodeSize(node);
   let surface: HTMLElement | null = null;
   let toolbar: StudioFillTextToolbar | null = null;
@@ -197,10 +193,8 @@ export function renderFillTextNodeCard(options: RenderFillTextNodeCardOptions): 
     getGraphZoom: () => graphInteraction.getGraphZoom(),
     showResizeGuides: (moving, edges) => graphInteraction.showNodeResizeGuides(node.id, moving, edges),
     onResizeGuidesEnd: () => graphInteraction.clearAlignmentGuides(),
-    onNodeConfigMutated,
     onNodeConfigValueChange,
     onNodeResize: options.onNodeResize,
-    onNodeGeometryMutated: options.onNodeGeometryMutated,
     applySize: ({ width, height }) => {
       box = { width, height: height ?? box.height };
       nodeEl.style.width = `${box.width}px`;

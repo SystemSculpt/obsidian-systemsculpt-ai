@@ -113,6 +113,17 @@ describe("AgentChatView chrome wiring", () => {
     document.body.empty();
   });
 
+  it("opens the same inline feedback settings form from the chat menu without sending anything", () => {
+    const { view } = harness();
+    const openSettingsTab = jest.fn();
+    view.plugin.openSettingsTab = openSettingsTab;
+    const menu = new Menu();
+    (view as any).addChatMenuItems(menu);
+    expect(openSettingsTab).not.toHaveBeenCalled();
+    (menu as any).select("Send feedback");
+    expect(openSettingsTab.mock.calls).toEqual([["feedback"]]);
+  });
+
   it("exports through the reachable chat menu using the real export service", async () => {
     const { view } = harness({ messages: 1 });
     view.chatVersion = 1;

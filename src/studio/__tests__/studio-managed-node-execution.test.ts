@@ -63,10 +63,11 @@ function services(api: Record<string, unknown>) {
 }
 
 describe("managed-only Studio remote nodes", () => {
-  it("registers exactly three remote executors and keeps retired HTTP hidden and inert", async () => {
+  it("registers exactly four remote executors and keeps retired HTTP hidden and inert", async () => {
     const registry = new StudioNodeRegistry();
     registerBuiltInStudioNodes(registry);
     expect(registry.list().filter(definition => definition.capabilityClass === "api").map(definition => definition.kind).sort()).toEqual([
+      "studio.image_generation",
       "studio.text_generation",
       "studio.transcription",
       "studio.video_generation",

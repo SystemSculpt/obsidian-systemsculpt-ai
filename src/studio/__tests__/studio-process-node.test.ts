@@ -26,7 +26,7 @@ function harness(config: Record<string, StudioJsonValue> = {}) {
     node: { id: "process", kind: "studio.process", version: "1.0.0", title: "Process", position: { x: 0, y: 0 }, config: { ...processNode.configDefaults, executable: "/bin/helper", workingDirectory: "/vault", ...config } },
     inputs: {}, signal: controller.signal, log: jest.fn(), reportProgress: jest.fn(),
     services: {
-      api: { generateText: jest.fn(), generateVideo: jest.fn(), transcribeAudio: jest.fn(), beginLocalCommit: jest.fn(), completeLocalCommit: jest.fn() },
+      api: { generateText: jest.fn(), generateVideo: jest.fn(), generateImage: jest.fn(), transcribeAudio: jest.fn(), beginLocalCommit: jest.fn(), completeLocalCommit: jest.fn() },
       storeAsset: jest.fn(async (bytes, mimeType) => ({ path: "assets/staged", hash: "hash", sizeBytes: bytes.byteLength, mimeType })),
       readAsset: jest.fn(), resolveAbsolutePath: (path) => path.startsWith("/") ? path : `/vault/${path}`,
       readVaultText: jest.fn(), statVaultFileSize: jest.fn(), openVaultFileSource: jest.fn(), readVaultBinary: jest.fn(), statLocalFileSize: jest.fn(), openLocalFileSource: jest.fn(),

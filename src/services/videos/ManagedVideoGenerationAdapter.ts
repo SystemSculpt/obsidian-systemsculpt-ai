@@ -1,6 +1,7 @@
-import type { ManagedUploadedImageInput } from "../managed/ManagedJobClient";
+import { managedMediaDeliveryOffset, type ManagedMediaDeliveryClock } from "../managed/ManagedMediaDeliveryTiming";
 import type { ManagedJobRecoveryStore } from "../managed/ManagedJobRecoveryStore";
 import type {
+  ManagedUploadedImageInput,
   ManagedJobRecoveryRecord,
   ManagedPendingDispatch,
   ManagedDeliveredVideoOutputBytes,
@@ -19,7 +20,6 @@ const CAPABILITY = "video_generation" as const;
 const RESOLUTION_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,15}$/;
 const ASPECT_RATIO_PATTERN = /^[0-9]{1,2}:[0-9]{1,2}$/;
 const VIDEO_METADATA_TIMEOUT_MS = 3_000;
-const MEDIA_DELIVERY_MAX_OFFSET_MS = 7 * 24 * 60 * 60 * 1_000;
 
 type VideoOutputMeasurement = {
   index: number;
@@ -311,7 +311,7 @@ export class ManagedVideoGenerationAdapter {
   private readonly elapsedNow: () => number;
   private readonly probeOutputMetadata: (output: ManagedDeliveredVideoOutputBytes) => Promise<VideoOutputMeasurement>;
   private readonly wait: (milliseconds: number, signal: AbortSignal) => Promise<void>;
-  private readonly deliveryClocks = new Map<string, { completedOffsetMs: number; completedAtMs: number }>();
+  private readonly deliveryClocks = new Map<string, ManagedMediaDeliveryClock>();
   private readonly outputMeasurementTasks = new Map<string, Promise<VideoOutputMeasurement[]>>();
 
   constructor(private readonly dependencies: ManagedVideoGenerationDependencies) {
@@ -474,11 +474,7 @@ export class ManagedVideoGenerationAdapter {
     const delivery = record.mediaDelivery;
     if (!delivery) throw new Error("Managed video delivery timing is unavailable.");
     const clock = this.deliveryClocks.get(record.operationId);
-    const rawOffset = clock
-      ? clock.completedOffsetMs + Math.max(0, this.elapsedNow() - clock.completedAtMs)
-      : this.nowMs() - Date.parse(delivery.downloadStartedAt);
-    const floor = delivery.displayedOffsetMs ?? delivery.downloadCompletedOffsetMs;
-    return Math.min(MEDIA_DELIVERY_MAX_OFFSET_MS, Math.max(floor, Math.round(rawOffset)));
+    return managedMediaDeliveryOffset(delivery, clock, clock ? this.elapsedNow() : this.nowMs());
   }
 
   private beginDispatch(

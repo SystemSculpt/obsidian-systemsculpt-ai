@@ -16,7 +16,7 @@ const NOT_STARTED_ERROR =
 export type PresentedAgentError = Readonly<{
   heading: string;
   message: string;
-  action?: "see-plans" | "add-credits" | "detect" | "sign-in" | "use-hosted";
+  action?: "see-plans" | "monthly" | "update-card" | "add-credits" | "detect" | "sign-in" | "use-hosted";
   details?: string;
   /** Local report id, or a legacy server incident id while capture settles. */
   reportId?: string;
@@ -42,6 +42,7 @@ export function presentAgentError(
   error: ManagedAgentError,
   retryable: boolean,
   showPlanOffer = false,
+  paymentFix = false,
 ): PresentedAgentError {
   const nativeAgent = /^local_(claude|codex)_/.exec(error.code)?.[1];
   if (nativeAgent) {
@@ -70,31 +71,40 @@ export function presentAgentError(
       details: error.message,
     };
   }
+  if (paymentFix && ["out_of_credits", "insufficient_credits", "payment_required"].includes(error.code)) {
+    return {
+      heading: "Payment failed",
+      message: "Your last payment failed. Update your card to get your monthly credits.",
+      // Fix the card on the existing plan, never a second checkout (T-5348).
+      action: "update-card",
+    };
+  }
   if (showPlanOffer && ["out_of_credits", "insufficient_credits", "payment_required"].includes(error.code)) {
     return {
       heading: "Out of credits",
-      message: "Monthly is $9 and includes 10,000 credits every month. You can also add a credit pack.",
-      action: "see-plans",
+      message: "$9 a month for 10,000 credits.",
+      // One tap to the Monthly checkout, not the pricing page (T-5302).
+      action: "monthly",
     };
   }
   if (error.code === "out_of_credits") {
     return {
       heading: "Out of credits",
-      message: "You have no credits left. Add credits to continue using Chat.",
+      message: "Out of credits. Add more to keep chatting.",
       action: "add-credits",
     };
   }
   if (error.code === "insufficient_credits" || error.code === "payment_required") {
     return {
       heading: "Not enough credits",
-      message: "Not enough credits are available. Add credits to continue using Chat.",
+      message: "Not enough credits. Add more to keep chatting.",
       action: showPlanOffer ? "see-plans" : "add-credits",
     };
   }
   if (error.code === "content_filter") {
     return {
       heading: "Could not finish",
-      message: "The safety filter stopped this response. Change the request and try again.",
+      message: "Stopped by the safety filter. Try rewording.",
     };
   }
   const interrupted = retryable

@@ -41,7 +41,7 @@ export function displayAdvancedTabContent(containerEl: HTMLElement, tabInstance:
             "Reset to Factory Defaults",
             {
                 description:
-                    "Reset SystemSculpt’s saved settings to defaults and reload Obsidian? Your current settings will be replaced.",
+                    "Reset all SystemSculpt settings and reload Obsidian?",
                 primaryButton: "Reset & Reload",
                 secondaryButton: "Cancel",
             }
@@ -106,7 +106,7 @@ export function displayAdvancedTabContent(containerEl: HTMLElement, tabInstance:
         diagnosticsFolderSetting.addButton((button) => {
             button.setButtonText("Open folder").onClick(async () => {
                 if (!await plugin.openDiagnosticsFolder()) {
-                    new Notice("Unable to open diagnostics folder. Locate .systemsculpt/diagnostics manually.", 5000);
+                    new Notice("Couldn't open .systemsculpt/diagnostics.", 5000);
                 }
             });
         });
