@@ -241,14 +241,21 @@
   opacity: 1;
 }
 
+/* Touch has no hover: the row stays visible and only its icons dim, so the
+ * muted duration text keeps full text contrast (4.5:1) in both themes. */
 @media (pointer: coarse) {
   .systemsculpt-agent-message-actions {
-    opacity: 0.72;
+    opacity: 1;
   }
 
   .systemsculpt-agent-message-actions .ss-button {
     min-width: var(--ss-touch-target);
     min-height: var(--ss-touch-target);
+    opacity: 0.72;
+  }
+
+  .systemsculpt-agent-message-actions .ss-button:focus-visible {
+    opacity: 1;
   }
 }
 

@@ -79,7 +79,7 @@
 .systemsculpt-history-item-time {
   flex-shrink: 0;
   font-size: var(--ss-text-xs);
-  color: var(--ss-ink-faint);
+  color: var(--ss-ink-muted);
   font-variant-numeric: tabular-nums;
 }
 
