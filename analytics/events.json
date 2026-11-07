@@ -62,12 +62,14 @@
       "name": "api_request",
       "feature": "transcription",
       "kind": "server",
-      "description": "Audio transcription job created, uploaded or started.",
+      "description": "Audio transcription job created, uploaded or started, including inbox arrivals after their on-disk size and mtime settle. HTTP status measures unreadable or audio-free sources; local sync waits send no telemetry.",
       "endpoints": [
         "/api/plugin/audio/transcriptions/jobs"
       ],
       "where": [
-        "src/services/managed/ManagedCapabilityCatalog.ts"
+        "src/services/managed/ManagedCapabilityCatalog.ts",
+        "src/features/inbox-transcription/InboxTranscriptionService.ts",
+        "src/services/managed/ManagedJobClient.ts"
       ],
       "owner": "engineer",
       "added": "2026-11-03"

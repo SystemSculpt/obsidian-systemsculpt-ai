@@ -109,7 +109,22 @@ export class ManagedJobClient {
   }
 
   private async parse(capability: MultipartJobCapability, operation: Operation, result: ManagedTransportResult): Promise<unknown> {
-    if (!result.response.ok) { const map: Record<number, [ErrorCode, boolean]> = { 400: ["invalid_request", false], 401: ["license_required", false], 402: ["payment_required", false], 403: ["license_rejected", false], 409: ["operation_conflict", false], 426: ["upgrade_required", false], 429: ["rate_limited", true], 502: ["temporarily_unavailable", true], 503: ["temporarily_unavailable", true] }; const [code, retryable] = map[result.response.status] ?? ["managed_job_error", false]; const message = MANAGED_JOB_HTTP_ERROR_MESSAGES[result.response.status] ?? `Managed job request failed (${result.response.status}).`; throw new ManagedJobError(code, message, result.response.status, result.diagnostics.requestId, retryable, null, result.diagnostics.retryAfterMs); }
+    if (!result.response.ok) {
+      const status = result.response.status;
+      const map: Record<number, [ErrorCode, boolean]> = { 400: ["invalid_request", false], 401: ["license_required", false], 402: ["payment_required", false], 403: ["license_rejected", false], 409: ["operation_conflict", false], 426: ["upgrade_required", false], 429: ["rate_limited", true], 502: ["temporarily_unavailable", true], 503: ["temporarily_unavailable", true] };
+      const [code, retryable] = map[status] ?? ["managed_job_error", false];
+      let message = MANAGED_JOB_HTTP_ERROR_MESSAGES[status] ?? `Managed job request failed (${status}).`;
+      if (status >= 400 && status < 500) {
+        const value: unknown = await result.response.json().catch(() => null);
+        if (value && typeof value === "object" && !Array.isArray(value)) {
+          const record = value as JsonObject;
+          const detail = [record.error, record.message, jobFailureDetail(record).message]
+            .find((candidate): candidate is string => typeof candidate === "string" && JOB_ERROR_MESSAGE_PATTERN.test(candidate));
+          message = detail ?? message;
+        }
+      }
+      throw new ManagedJobError(code, message, status, result.diagnostics.requestId, retryable, null, result.diagnostics.retryAfterMs);
+    }
     let value: unknown; try { value = await result.response.json(); } catch { malformed("Expected a JSON response."); }
     const parsed = this.validateResponse(capability, operation, value); const terminal = operation === "upload_abort" ? null : this.terminalError(capability, parsed);
     if (terminal) {

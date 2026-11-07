@@ -31,6 +31,12 @@ Audio and transcription settings now live inside the `Workflow` tab.
 
 - **Send after dictation** sends the dictated chat message after the transcript is inserted.
 
+## Inbox transcription
+
+New audio or video files in your configured inbox wait until their on-disk size and modification time stay unchanged before upload. Further sync writes restart that wait. Empty files are not uploaded.
+
+Bulk arrivals still ask for confirmation. **Not now** leaves them waiting without uploading; run **Resume inbox transcription** when ready.
+
 ## Recording on a phone or tablet
 
 - The recorder is a compact, non-modal card. You can move between notes, chat, search, and settings while it records.
@@ -75,6 +81,8 @@ Raw `.aac` and `.opus` files are not accepted by the managed transcription runti
 - Post-processing, output persistence, optional insertion, and recording retention happen after the managed result is ready.
 
 ## If transcription fails
+
+An unreadable-file message can mean the recording is incomplete or damaged. Wait for it to finish saving or syncing before retrying. A file with no audio track needs a different source.
 
 1. Re-run license validation and retry the request.
 2. Confirm credits or quota are still available for your SystemSculpt account.

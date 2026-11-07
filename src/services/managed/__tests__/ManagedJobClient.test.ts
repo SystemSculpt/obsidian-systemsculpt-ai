@@ -168,6 +168,48 @@ describe("ManagedJobClient exact wire contract", () => {
     });
   });
 
+  it.each([
+    ["audio_unreadable", "This file can't be read. It may be incomplete or damaged. Try again once it has finished saving."],
+    ["audio_stream_missing", "This recording has no audio track. Choose a file with audio."],
+  ])("shows the bounded server error for %s instead of a generic 400", async (code, message) => {
+    request.mockResolvedValue(json({ error: message, code }, 400));
+    await expect(client.transcription.start("job", "op")).rejects.toMatchObject({
+      code: "invalid_request", message, status: 400, requestId: "req-1", retryable: false,
+    });
+  });
+
+  it.each([400, 401, 402, 403, 404, 409, 422, 426, 429, 499])("preserves bounded server messages on HTTP %s", async status => {
+    request.mockResolvedValue(json({ message: "Choose a supported file." }, status));
+    await expect(client.documents.status("doc")).rejects.toMatchObject({ message: "Choose a supported file.", status });
+  });
+
+  it("accepts bounded nested errors and the exact message length boundary", async () => {
+    request.mockResolvedValue(json({ error: { message: "x".repeat(240) } }, 400));
+    await expect(client.transcription.status("job")).rejects.toMatchObject({ message: "x".repeat(240) });
+  });
+
+  it.each([
+    { error: "x".repeat(241) }, { error: "" }, { error: "line\nbreak" },
+    { error: "control\u0000byte" }, { error: "hidden\u007fbyte" }, { error: "hidden\u202etext" },
+    { error: ["not a message"] }, [{ message: "array response" }], null,
+  ])("rejects unsafe HTTP error messages: %j", async body => {
+    request.mockResolvedValue(json(body, 400));
+    await expect(client.transcription.status("job")).rejects.toMatchObject({
+      code: "invalid_request", message: "Managed job request failed (400).", status: 400, retryable: false,
+    });
+  });
+
+  it("keeps HTTP error mapping when the response is not JSON", async () => {
+    request.mockResolvedValue(new Response("<html>Bad request</html>", { status: 400 }));
+    await expect(client.transcription.status("job")).rejects.toMatchObject({ message: "Managed job request failed (400)." });
+  });
+
+  it.each([500, 502, 503])("does not expose HTTP %s server internals", async status => {
+    request.mockResolvedValue(json({ error: "upstream secret internal detail" }, status));
+    const message = status === 500 ? "Managed job request failed (500)." : "SystemSculpt processing is temporarily unavailable.";
+    await expect(client.transcription.status("job")).rejects.toMatchObject({ message, status });
+  });
+
   it("turns a 402 into the credits message instead of a raw status (#300)", async () => {
     request.mockResolvedValue(json({ error: { code: "insufficient_credits" } }, 402));
 
