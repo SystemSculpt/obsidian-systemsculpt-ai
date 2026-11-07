@@ -25,6 +25,7 @@
 @import 'components/recorder.css';
 @import 'components/audio-source-picker.css';
 @import 'components/diff-viewer.css';
+@import 'components/audio-note-callouts.css';
 
 /* Modal system */
 @import 'modals/modal.css';
