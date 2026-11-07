@@ -416,6 +416,35 @@
       ],
       "owner": "analytics",
       "added": "2026-11-03"
+    },
+    {
+      "name": "plugin_usage_daily",
+      "kind": "daily",
+      "description": "Daily SystemSculpt account use from the production database, counts only (no person, no consent-gated sampling): accounts active in the trailing 7 days by plan and mode, and hosted use returning from the prior 7 days. Active = license key used by the plugin or a hosted charge. Each property is <metric>_<plan>, plan in subscriber | lifetime | free | no_key | all. Plugin users who never sign in make no server call; only plugin_public_stats_daily downloads count them.",
+      "properties": {
+        "accounts_<plan>": "accounts (company and test accounts excluded)",
+        "signups_7d_<plan>": "accounts created in the last 7 days",
+        "active_7d_<plan>": "license key used or hosted charge in the last 7 days",
+        "active_7d_older_30d_<plan>": "active accounts created over 30 days ago",
+        "no_hosted_7d_<plan>": "active, no hosted charge: own provider, Claude Code/Codex or local features only",
+        "own_ai_7d_<plan>": "active, no hosted chat (chat, if any, on their own AI)",
+        "hosted_7d_<plan>": "any hosted charge",
+        "hosted_chat_7d_<plan>": "hosted chat (agent turns, chat completions)",
+        "embeddings_7d_<plan>": "hosted embeddings",
+        "embeddings_no_hosted_chat_7d_<plan>": "hosted embeddings without hosted chat",
+        "image_video_7d_<plan>": "hosted image or video generation",
+        "audio_docs_7d_<plan>": "hosted transcription, audio processing or documents",
+        "hosted_prev_7d_<plan>": "any hosted charge 8-14 days ago",
+        "hosted_returning_7d_<plan>": "hosted in both the last 7 days and the 7 before",
+        "hosted_chat_prev_7d_<plan>": "hosted chat 8-14 days ago",
+        "hosted_chat_returning_7d_<plan>": "hosted chat in both windows"
+      },
+      "endpoints": [],
+      "where": [
+        "trellis: tools/product-stats-daily.mjs (schedule product-stats-daily, 06:20 Pacific)"
+      ],
+      "owner": "analytics",
+      "added": "2026-11-07"
     }
   ],
   "commands": {
