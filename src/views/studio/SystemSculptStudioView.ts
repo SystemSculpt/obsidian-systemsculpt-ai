@@ -2865,6 +2865,7 @@ export class SystemSculptStudioView extends ItemView {
     }
     const mountedRoot = this.contentEl.querySelector<HTMLElement>(":scope > .ss-studio-view");
     if (mountedRoot && this.graphWorkspace?.refresh(this.createGraphWorkspaceOptions(mountedRoot))) {
+      this.outputContainers.sync();
       refreshStudioMessages(mountedRoot, this.lastError, this.projectFileWarning, recovery);
       this.activity.project();
       this.activity.apply();

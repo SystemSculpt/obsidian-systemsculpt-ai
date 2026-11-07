@@ -7,6 +7,7 @@ export class StudioOutputContainerController {
   private observer: ResizeObserver | null = null;
   private owner: Window | null = null;
   private timer: number | null = null;
+  private observed = new WeakSet<Element>();
 
   constructor(private readonly host: {
     getProject: () => StudioProjectV1 | null;
@@ -24,19 +25,26 @@ export class StudioOutputContainerController {
 
   mount(viewport: HTMLElement): void {
     this.dispose();
-    const project = this.host.getProject();
-    const groups = project?.graph.groups?.filter(group => group.outputForNodeId) || [];
-    if (!groups.length) return;
     this.owner = getStudioOwnerWindow(viewport);
     const Observer = (this.owner as Window & { ResizeObserver?: typeof ResizeObserver }).ResizeObserver;
-    if (Observer) {
-      this.observer = new Observer(() => this.schedule());
-      for (const id of new Set(groups.flatMap(group => [...group.nodeIds, group.outputForNodeId!]))) {
-        const element = this.host.getNodeElement(id);
-        if (element) this.observer.observe(element);
-      }
+    if (Observer) this.observer = new Observer(() => this.schedule());
+    this.sync();
+  }
+
+  /** Watches output cards and producers added since the last call, e.g. by an in-place canvas refresh. */
+  sync(): boolean {
+    if (!this.owner) return false;
+    const groups = this.host.getProject()?.graph.groups?.filter(group => group.outputForNodeId) || [];
+    let added = false;
+    for (const id of new Set(groups.flatMap(group => [...group.nodeIds, group.outputForNodeId!]))) {
+      const element = this.host.getNodeElement(id);
+      if (!element || this.observed.has(element)) continue;
+      this.observed.add(element);
+      this.observer?.observe(element);
+      added = true;
     }
-    this.schedule();
+    if (added) this.schedule();
+    return added;
   }
 
   schedule(): void {
@@ -51,7 +59,8 @@ export class StudioOutputContainerController {
         return moved.length > 0;
       });
       const project = this.host.getProject();
-      if (!project || !moved.length) return;
+      if (!project) return;
+      // A card that grew without moving (an image finished loading) still needs its frame and edges redrawn.
       const nodes = new Map(project.graph.nodes.map(node => [node.id, node]));
       for (const id of moved) {
         const element = this.host.getNodeElement(id), node = nodes.get(id);
@@ -64,6 +73,7 @@ export class StudioOutputContainerController {
   dispose(): void {
     this.observer?.disconnect();
     this.observer = null;
+    this.observed = new WeakSet();
     if (this.timer !== null) this.owner?.clearTimeout(this.timer);
     this.timer = null;
     this.owner = null;

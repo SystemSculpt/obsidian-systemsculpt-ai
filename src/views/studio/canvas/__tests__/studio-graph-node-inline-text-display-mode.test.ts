@@ -285,3 +285,15 @@ describe("StudioGraphNodeInlineEditors text display mode", () => {
     expect(renderedButton?.classList.contains("is-selected")).toBe(true);
   });
 });
+
+describe("text display mode stylesheet", () => {
+  it("hides every surface the inline editor marks is-hidden, so only one of Raw and Rendered shows", () => {
+    // jsdom applies no stylesheet; check the rule the editor's is-hidden toggles rely on.
+    const css: string = jest.requireActual<typeof import("fs")>("fs")
+      .readFileSync(require("path").join(__dirname, "../../../../css/views/studio/editor-text.css"), "utf8");
+    for (const cls of ["ss-studio-node-text-display-mode", "ss-studio-node-text-editor-surface", "ss-studio-node-text-rendered"]) {
+      const rule = new RegExp(`\\.${cls}\\.is-hidden[^{]*\\{[^}]*display:\\s*none`);
+      expect(css).toMatch(rule);
+    }
+  });
+});
