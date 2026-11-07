@@ -1738,7 +1738,8 @@ export class AgentConversationRenderer extends Component {
     const header = element.querySelector<HTMLElement>(":scope > summary")!;
     const duration = formatAgentActivityDuration(elapsedMs);
     const label = cancelled ? this.workedLabel(elapsedMs, true) : summary.label;
-    header.querySelector(".systemsculpt-agent-activity-label")?.setText(label);
+    // A wrapped summary keeps each "· 2 failed" whole instead of stranding the dot.
+    header.querySelector(".systemsculpt-agent-activity-label")?.setText(label.replace(/ · /gu, " ·\u00a0"));
     let icon = header.querySelector<HTMLElement>(".systemsculpt-agent-activity-state");
     if (!icon) {
       icon = header.createSpan({ cls: "systemsculpt-agent-activity-state", attr: { "aria-hidden": "true" } });
