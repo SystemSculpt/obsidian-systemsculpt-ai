@@ -333,13 +333,20 @@ describe("SystemSculptSearchModal", () => {
       input.dispatchEvent(new Event("input"));
       expect(clear.hidden).toBe(false);
       expect(clear.classList.contains("ss-button")).toBe(true);
+      await jest.advanceTimersByTimeAsync(190);
+      const listEl = (modal as any).listEl as HTMLElement;
+      expect(listEl.querySelector('[data-path="notes/test.md"]')).not.toBeNull();
+      plugin._testEngine.getRecent.mockClear();
 
       clear.click();
-      await flush();
+      await flush(4);
 
+      // Recents replace the cleared query's results at once, without the typing debounce.
       expect(input.value).toBe("");
       expect(clear.hidden).toBe(true);
       expect(plugin._testEngine.getRecent).toHaveBeenCalledWith(25);
+      expect(listEl.querySelector('[data-path="notes/test.md"]')).toBeNull();
+      expect(listEl.querySelector('[data-path="notes/recent.md"]')).not.toBeNull();
     });
 
     it("uses query serials to prevent stale responses from replacing newer results", async () => {
@@ -623,6 +630,10 @@ describe("SystemSculptSearchModal", () => {
     it("drops lone-letter fragments and marks unspaced scripts anywhere", () => {
       expect(highlightTerms("what's the plan")).toEqual(["plan"]);
       expect(highlightTerms("e-mail setup")).toEqual(["setup", "mail"]);
+      expect(highlightTerms("where did th")).toEqual([]);
+      expect(highlightTerms("old boat wh")).toEqual(["boat", "old"]);
+      expect(highlightTerms("with the")).toEqual([]);
+      expect(highlightTerms("wher")).toEqual(["wher"]);
       const ranges = (text: string, query: string) => (modal as any).getHighlightRanges(text, query)
         .map(({ start, end }: { start: number; end: number }) => text.slice(start, end));
       expect(ranges("私は東京に行く", "東京")).toEqual(["東京"]);

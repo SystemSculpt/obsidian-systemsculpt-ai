@@ -178,6 +178,12 @@ export class SystemSculptSearchModal extends StandardModal {
     this.cancelSemanticPass();
     if (this.debounceHandle) {
       this.ownerWindow.clearTimeout(this.debounceHandle);
+      this.debounceHandle = null;
+    }
+    // An emptied box shows recents at once, never the cleared query's results.
+    if (!query.trim()) {
+      void this.executeSearch(query);
+      return;
     }
     this.debounceHandle = this.ownerWindow.setTimeout(() => {
       void this.executeSearch(query);
@@ -693,11 +699,21 @@ const HIGHLIGHT_STOP_WORDS = new Set([
  * nothing rather than every "the".
  */
 export function highlightTerms(query: string): string[] {
-  const words = [...new Set(query.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [])];
-  // A lone letter is a fragment ("s" of "what's", "e" of "e-mail"), not a word to mark.
+  const typed = query.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+  const words = [...new Set(typed)];
+  const last = typed.length > 1 ? typed[typed.length - 1] : null;
   const content = words.filter((word) =>
-    !HIGHLIGHT_STOP_WORDS.has(word) && (word.length > 1 || UNSPACED_SCRIPT.test(word)));
+    !HIGHLIGHT_STOP_WORDS.has(word)
+    // A lone letter is a fragment ("s" of "what's", "e" of "e-mail"), not a word to mark.
+    && (word.length > 1 || UNSPACED_SCRIPT.test(word))
+    // The word still being typed ("th" on the way to "the") waits until it is a word.
+    && !(word === last && isStopWordPrefix(word)));
   return (content.length > 0 || words.length !== 1 ? content : words).sort((a, b) => b.length - a.length);
+}
+
+function isStopWordPrefix(word: string): boolean {
+  for (const stop of HIGHLIGHT_STOP_WORDS) if (stop.startsWith(word)) return true;
+  return false;
 }
 
 /** Scripts written without spaces between words. */
