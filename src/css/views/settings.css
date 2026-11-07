@@ -424,6 +424,7 @@
 /* The host header overlays the scrolling settings; keep its title opaque. */
 .ss-mobile-layout .ss-settings-host > .modal-header {
   background-color: var(--ss-surface-sunken);
+  box-shadow: 0 var(--ss-space-4) 0 var(--ss-surface-sunken);
 }
 
 .ss-mobile-layout .ss-settings-surface {
