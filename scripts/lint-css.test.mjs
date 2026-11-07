@@ -124,6 +124,9 @@ test("lintCssDirectory passes properly scoped plugin selectors (the gate stays g
       ".workspace-leaf-content[data-type=\"systemsculpt-chat\"] {",
       "  padding: 0;",
       "}",
+      "[data-callout-metadata=\"systemsculpt\"].callout > .callout-title {",
+      "  color: inherit;",
+      "}",
       "",
     ].join("\n")
   );

@@ -29,7 +29,9 @@ const BOLD = "\x1b[1m";
 function isScopedToPlugin(selector) {
   // Check if selector contains plugin-specific class/attribute after the Obsidian selector
   return /\.(systemsculpt-|ss-)/.test(selector) ||
-         /\[data-type="systemsculpt-/.test(selector);
+         /\[data-type="systemsculpt-/.test(selector) ||
+         // Callouts the plugin writes into notes carry this callout metadata.
+         /\[data-callout-metadata="systemsculpt"\]/.test(selector);
 }
 
 function stripComments(content) {

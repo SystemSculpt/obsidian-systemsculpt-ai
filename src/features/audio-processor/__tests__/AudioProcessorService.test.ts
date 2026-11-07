@@ -344,19 +344,22 @@ describe("AudioProcessorService", () => {
   it("preserves source attribution, citations, timestamps, and headings within the returned content", async () => {
     const { plugin, contents } = createPlugin();
     const api = createApi();
-    const attribution = "> [!info] Source\n> [YouTube](https://www.youtube.com/watch?v=dQw4w9WgXcQ) · Gull Point · 2m 4s · en";
-    const content = "# Quoted slide\n\nA timestamp in the content: 2026-10-25T12:34:56.000Z. [[#seg-000001|00:00]]";
+    const sourceDetails = "> [YouTube](https://www.youtube.com/watch?v=dQw4w9WgXcQ) · Gull Point · 2m 4s · en";
+    const attribution = `> [!info] Source\n${sourceDetails}`;
+    const content = "# Quoted slide\n\nA timestamp in the content: 2026-10-25T12:34:56.000Z. [[#seg-000001|00:00]]\n\n> [!summary] Recap\n> Not ours.";
     api.createYouTubeJob.mockResolvedValue({ job: job("succeeded", "complete", 1), upload: null });
     api.downloadNote.mockImplementation(async (url: string) => (url.includes("transcript")
       ? transcriptMarkdown() : fullNoteMarkdown())
-      .replace(/(\n# [^\n]+\n)/u, `$1\n${attribution} · processed 2026-10-25T12:34:56.000Z\n`)
+      .replace(/(\n# [^\n]+\n)/u, `$1\n${attribution} · processed 2026-10-25T12:34:56.000Z\n\n> [!summary] Outcome\n> Agreed.\n`)
       + `\n\n${content}\n`);
     const service = new AudioProcessorService(plugin, { apiClient: api as unknown as AudioProcessorApiClient });
 
     await service.process({ type: "youtube", url: "https://youtu.be/dQw4w9WgXcQ" }, { signal: new AbortController().signal });
 
     for (const markdown of contents.values()) {
-      expect(markdown).toContain(attribution + "\n");
+      // SystemSculpt's own callouts carry metadata the plugin styles for contrast.
+      expect(markdown).toContain(`> [!info|systemsculpt] Source\n${sourceDetails}\n`);
+      expect(markdown).toContain("> [!summary|systemsculpt] Outcome\n> Agreed.\n");
       expect(markdown).toContain(content);
       expect(markdown).toContain("**00:00** Speaker 1: Hello.");
       expect(markdown).not.toContain(" · processed 2026-10-25T12:34:56.000Z");
@@ -563,12 +566,12 @@ describe("AudioProcessorService", () => {
     expect(ensureDirectoryByPath).toHaveBeenCalledWith("SystemSculpt/Audio Notes");
     expect(app.vault.create).toHaveBeenCalledWith(
       "SystemSculpt/Audio Notes/Product sync — Transcript.md",
-      expect.stringContaining("[[SystemSculpt/Audio Notes/Product sync|Back to the audio note]]"),
+      expect.stringContaining("> [!info|systemsculpt] Audio note\n> [[SystemSculpt/Audio Notes/Product sync|Back to the audio note]]"),
     );
     expect(app.vault.create).toHaveBeenCalledWith(
       "SystemSculpt/Audio Notes/Product sync.md",
       expect.stringMatching(
-        /systemsculpt-audio-artifact: full[\s\S]*\[\[SystemSculpt\/Audio Notes\/Product sync — Transcript\|Open the full timestamped transcript\]\][\s\S]*## Transcript/,
+        /systemsculpt-audio-artifact: full[\s\S]*> \[!info\|systemsculpt\] Timestamped transcript\n> \[\[SystemSculpt\/Audio Notes\/Product sync — Transcript\|Open the full timestamped transcript\]\][\s\S]*## Transcript/,
       ),
     );
     expect(api.downloadNote).toHaveBeenCalledWith(result.noteUrl, expect.any(AbortSignal));

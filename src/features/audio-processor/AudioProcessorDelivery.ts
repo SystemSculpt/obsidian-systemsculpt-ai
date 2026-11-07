@@ -365,6 +365,9 @@ function sanitizeMarkdownFilename(filename: string): string {
   });
 }
 
+/** Styled by src/css/components/audio-note-callouts.css. */
+const OWN_CALLOUT_METADATA = "systemsculpt";
+
 /** Host presentation only: verify server bytes before adapting them for Obsidian. */
 function formatVaultAudioMarkdown(markdown: string): string {
   const frontmatter = FRONTMATTER.exec(markdown)?.[0] ?? "";
@@ -376,7 +379,18 @@ function formatVaultAudioMarkdown(markdown: string): string {
     // Both values remain in the original frontmatter, alongside job provenance.
     .replace(/(Uploaded media) `(?:sha256:)?[a-f0-9]{64}`/giu, "$1")
     .replace(/ · processed \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z/gu, ""));
+  body = tagOwnCallouts(body);
   return frontmatter + body;
+}
+
+/**
+ * Marks the callouts SystemSculpt writes (Outcome, Source) with callout
+ * metadata so the plugin can lift their titles to text contrast without
+ * restyling the person's own callouts. Obsidian ignores unknown metadata, so
+ * the note reads the same without the plugin.
+ */
+function tagOwnCallouts(body: string): string {
+  return body.replace(/^> \[!(summary|info)\] (Outcome|Source)$/gmu, `> [!$1|${OWN_CALLOUT_METADATA}] $2`);
 }
 
 function addVaultNavigation(
@@ -403,11 +417,11 @@ function addVaultNavigation(
     .replace(/\]/g, "\\]");
   const navigation = kind !== "transcript"
     ? [
-      "> [!info] Timestamped transcript",
+      `> [!info|${OWN_CALLOUT_METADATA}] Timestamped transcript`,
       `> [[${linkTarget}|Open the full timestamped transcript]]`,
     ].join("\n")
     : [
-      "> [!info] Audio note",
+      `> [!info|${OWN_CALLOUT_METADATA}] Audio note`,
       `> [[${linkTarget}|Back to the audio note]]`,
     ].join("\n");
   return insertAfterFrontmatter(setFrontmatterField(markdown, field, "true"), navigation);
