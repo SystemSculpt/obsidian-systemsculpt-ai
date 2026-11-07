@@ -76,8 +76,9 @@ it("preserves a revealed approval's focus when Obsidian emits delayed leaf activ
   const handlers = new Map<string, (leaf: unknown) => void>();
   const leaf = {};
   const syncChrome = jest.fn();
+  const dismissApprovalNoticeIfShown = jest.fn();
   const view = {
-    containerEl, leaf, workspace: { focus }, registerEvent: jest.fn(), syncChrome,
+    containerEl, leaf, workspace: { focus }, registerEvent: jest.fn(), syncChrome, dismissApprovalNoticeIfShown,
     app: { workspace: { on: (name: string, callback: (leaf: unknown) => void) => { handlers.set(name, callback); } } },
   };
   prototype.installWorkspaceBindings.call(view);
@@ -86,6 +87,8 @@ it("preserves a revealed approval's focus when Obsidian emits delayed leaf activ
   handlers.get("active-leaf-change")!(leaf);
   expect(focus).not.toHaveBeenCalled();
   expect(owner.activeElement).toBe(card);
+  // Showing the chat again retires the "waiting for your approval" notice.
+  expect(dismissApprovalNoticeIfShown).toHaveBeenCalledTimes(1);
   card.blur();
   handlers.get("active-leaf-change")!({});
   expect(focus).not.toHaveBeenCalled();
@@ -94,4 +97,16 @@ it("preserves a revealed approval's focus when Obsidian emits delayed leaf activ
   handlers.get("active-leaf-change")!(leaf);
   expect(focus).toHaveBeenCalledTimes(1);
   ownerFrame.remove();
+});
+
+it("retires the approval notice once the chat is visible again", () => {
+  const hide = jest.fn();
+  const view = { approvalNotice: { hide }, approvalNoticeSurface: {}, containerEl: { isShown: () => false } } as unknown as Record<string, unknown>;
+  prototype.dismissApprovalNoticeIfShown.call(view);
+  expect(hide).not.toHaveBeenCalled();
+  (view.containerEl as { isShown: () => boolean }).isShown = () => true;
+  view.hideApprovalNotice = prototype.hideApprovalNotice;
+  prototype.dismissApprovalNoticeIfShown.call(view);
+  expect(hide).toHaveBeenCalledTimes(1);
+  expect(view.approvalNotice).toBeNull();
 });
