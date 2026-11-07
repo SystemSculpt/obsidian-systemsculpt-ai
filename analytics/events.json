@@ -420,7 +420,7 @@
     {
       "name": "plugin_usage_daily",
       "kind": "daily",
-      "description": "Daily SystemSculpt account use from the production database, counts only (no person, no consent-gated sampling): accounts active in the trailing 7 days by plan and mode, and hosted use returning from the prior 7 days. Active = license key used by the plugin or a hosted charge. Each property is <metric>_<plan>, plan in subscriber | lifetime | free | no_key | all. Plugin users who never sign in make no server call; only plugin_public_stats_daily downloads count them.",
+      "description": "Daily SystemSculpt account use from the production database, counts only (no person, no consent-gated sampling): accounts active in the trailing 7 days by plan and mode, and hosted use returning from the prior 7 days. Active = license key used by the plugin or a hosted charge. Each property is <metric>_<plan>, plan in subscriber | lifetime | free | no_key | all. Open installs, signed in or not, come from the update check every running plugin already makes (startup and every 6 hours): distinct client IPs per day and week from Cloudflare request analytics, counts only, no new client call. An IP proxy, not people. Signed-in active counts include iPhone app use; iphone_captures_7d shows it.",
       "properties": {
         "accounts_<plan>": "accounts (company and test accounts excluded)",
         "signups_7d_<plan>": "accounts created in the last 7 days",
@@ -437,7 +437,14 @@
         "hosted_prev_7d_<plan>": "any hosted charge 8-14 days ago",
         "hosted_returning_7d_<plan>": "hosted in both the last 7 days and the 7 before",
         "hosted_chat_prev_7d_<plan>": "hosted chat 8-14 days ago",
-        "hosted_chat_returning_7d_<plan>": "hosted chat in both windows"
+        "hosted_chat_returning_7d_<plan>": "hosted chat in both windows",
+        "iphone_captures_7d_<plan>": "charged iPhone capture actions (format, ask, action) in the last 7 days",
+        "update_check_installs_1d_<6x|5x>": "distinct client IPs calling the update check in the last 24 hours",
+        "update_check_calls_1d_<6x|5x>": "update-check requests in the last 24 hours",
+        "update_check_installs_7d_<6x|5x>": "distinct client IPs calling the update check in the last 7 days",
+        "update_check_installs_prev_7d_<6x|5x>": "distinct client IPs 8-14 days ago",
+        "update_check_installs_returning_7d_<6x|5x>": "IPs seen in both the last 7 days and the 7 before",
+        "update_check_max_sample_interval": "Cloudflare adaptive sampling interval (1 = unsampled); counts are never extrapolated"
       },
       "endpoints": [],
       "where": [
@@ -540,7 +547,7 @@
     },
     "check-for-updates": {
       "events": [],
-      "not_measured": "unauthenticated release check, not tracked; updates show in plugin_public_stats_daily downloads per version"
+      "not_measured": "the manual check is not told apart from the automatic one; all release checks count as open installs in plugin_usage_daily (update_check_*)"
     },
     "open-systemsculpt-settings": {
       "events": [
