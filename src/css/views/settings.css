@@ -12,6 +12,20 @@
   gap: var(--ss-space-4);
 }
 
+/* Reuse the shared readable accent fill for native settings actions. */
+.ss-settings-surface .setting-item-control > button.mod-cta {
+  background-color: var(--ss-accent-fill);
+}
+
+.ss-settings-surface .setting-item-control > button.mod-cta:hover {
+  background-color: var(--ss-accent-fill-hover);
+}
+
+.ss-settings-surface input::placeholder {
+  color: var(--ss-ink-muted);
+  opacity: 1;
+}
+
 .ss-settings-surface > .setting-item-description {
   margin: 0;
 }
@@ -407,6 +421,12 @@
 
 /* Mobile settings keep navigation on one predictable, swipeable row and put
  * the actual setting controls in the first viewport. */
+/* The host header overlays the scrolling settings; keep its title opaque. */
+.ss-mobile-layout .ss-settings-host > .modal-header {
+  background-color: var(--ss-surface-sunken);
+  box-shadow: 0 var(--ss-space-4) 0 var(--ss-surface-sunken);
+}
+
 .ss-mobile-layout .ss-settings-surface {
   gap: var(--ss-space-3);
   padding-bottom: var(--ss-mobile-bottom-clearance);

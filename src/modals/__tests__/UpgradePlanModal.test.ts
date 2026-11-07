@@ -1,7 +1,6 @@
 import { JSDOM } from "jsdom";
 import { Notice } from "obsidian";
 import { UpgradePlanModal, hasActivePlan, presentAccountConnectOutcome, requireActivePlan } from "../UpgradePlanModal";
-import { PLAN_REQUIRED_MESSAGE } from "../../utils/errors";
 
 jest.mock("../../platform/hostCapabilities", () => ({
   ...jest.requireActual("../../platform/hostCapabilities"),
@@ -163,13 +162,39 @@ describe("UpgradePlanModal", () => {
     jest.clearAllMocks();
   });
 
-  it("leads a signed-out vault with free starter credits and sign-up", async () => {
+  it.each([{}, { userEmail: "user@example.test" }, { userEmail: "user@example.test", licenseKey: "lapsed-key" }])(
+    "keeps Patreon support external, attributed and separate from plan activation: %j",
+    (settings) => {
+      const plugin = createPlugin(settings);
+      const before = { ...plugin.settings };
+      const modal = new UpgradePlanModal(plugin);
+      modal.onOpen();
+      const { hrefs, spy } = spyOnAnchorClicks();
+      try {
+        const link = modal.modalEl.querySelector<HTMLButtonElement>('[data-testid="upgrade-plan.patreon"]')!;
+        expect(link.textContent).toBe("Support us on Patreon");
+        link.click();
+        expect(hrefs).toEqual([
+          "https://www.patreon.com/SystemSculpt?utm_source=plugin_upgrade_modal&utm_campaign=patreon_everywhere",
+        ]);
+        expect(plugin.settings).toEqual(before);
+        expect(plugin.begin).not.toHaveBeenCalled();
+        expect(plugin.updateSettings).not.toHaveBeenCalled();
+        expect(modal.modalEl.textContent).not.toContain("Finish your purchase");
+      } finally {
+        spy.mockRestore();
+      }
+    },
+  );
+
+  it("leads a signed-out vault with free own AI and the Pro feature set", async () => {
     const plugin = createPlugin();
     const modal = new UpgradePlanModal(plugin, { feature: "Chat" });
     modal.onOpen();
 
-    expect(modal.modalEl.textContent).toContain("Unlock SystemSculpt AI");
-    expect(modal.modalEl.textContent).toContain("Start with 500 free credits. No card needed.");
+    expect(modal.modalEl.textContent).toContain("Use your own AI");
+    expect(modal.modalEl.textContent).toContain("Subscribe for image and video generation, smart search and Studio.");
+    expect(modal.modalEl.textContent).toContain("Claude Code and Codex stay free on desktop.");
     expect(findButtonByText(modal.modalEl, "Sign in")).toBeTruthy();
     const start = modal.modalEl.querySelector<HTMLButtonElement>('[data-testid="upgrade-plan.create-account"]')!;
     expect(start.textContent).toContain("Start free");
@@ -198,7 +223,8 @@ describe("UpgradePlanModal", () => {
     modal.onOpen();
 
     expect(modal.modalEl.textContent).toContain("Signed in as user@example.com.");
-    expect(modal.modalEl.textContent).toContain("Start free with 500 credits, or choose a plan.");
+    expect(modal.modalEl.textContent).toContain("Subscribe for image and video generation, smart search and Studio.");
+    expect(modal.modalEl.textContent).toContain("Claude Code and Codex stay free on desktop.");
     expect(findButtonByText(modal.modalEl, "Subscribe yearly")).toBeTruthy();
     expect(findButtonByText(modal.modalEl, "Subscribe monthly")).toBeTruthy();
     modal.onClose();
@@ -456,7 +482,8 @@ describe("UpgradePlanModal", () => {
     UpgradePlanModal.showConnectOutcome({ kind: "no-license", name: null, email: "user@example.test" });
 
     expect(modal.modalEl.textContent).toContain("Signed in as user@example.test.");
-    expect(modal.modalEl.textContent).toContain(PLAN_REQUIRED_MESSAGE);
+    expect(modal.modalEl.textContent).toContain("Subscribe for image and video generation, smart search and Studio.");
+    expect(modal.modalEl.textContent).toContain("Claude Code and Codex stay free on desktop.");
     expect(findButtonByText(modal.modalEl, "Subscribe yearly")).toBeTruthy();
     modal.onClose();
     expect(plugin.pollInBackground).not.toHaveBeenCalled();
@@ -639,7 +666,7 @@ describe("plan gate helpers", () => {
   it("requireActivePlan opens the modal and blocks when no plan is active", () => {
     const plugin = createPlugin();
     expect(requireActivePlan(plugin, "Chat")).toBe(false);
-    expect(document.body.textContent).toContain("Unlock SystemSculpt AI");
+    expect(document.body.textContent).toContain("Use your own AI");
     closeOpenModal();
 
     expect(requireActivePlan(createPlugin({ licenseKey: "skss-1" }), "Chat")).toBe(true);

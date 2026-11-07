@@ -233,7 +233,9 @@ describe("Setup tab SystemSculpt-only layout", () => {
     renderAccountSection(container, tab, false);
 
     expect(container.querySelector('[data-testid="settings.account.connect-result"]')).toBeNull();
-    expect(container.textContent).toContain("Signed in as user@example.test. Choose a plan to start.");
+    expect(container.textContent).toContain("Signed in as user@example.test.");
+    expect(container.textContent).not.toContain("Choose a plan to start.");
+    expect(container.textContent).toContain("Claude Code and Codex stay free on desktop.");
   });
 
   it("takes a sign-in result only while Account settings are on screen, and forgets it when settings close", () => {

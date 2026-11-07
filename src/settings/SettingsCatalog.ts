@@ -59,6 +59,11 @@ const SETTINGS_CATALOG = {
     title: "Documentation",
     description: "Guides and support.",
   },
+  "account.patreon": {
+    tabId: "account",
+    title: "Support",
+    description: "Help fund SystemSculpt.",
+  },
   "feedback.message": {
     tabId: "feedback",
     title: "What should we improve?",
