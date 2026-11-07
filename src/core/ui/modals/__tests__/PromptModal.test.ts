@@ -32,6 +32,20 @@ describe("PromptModal", () => {
     expect(submit?.disabled).toBe(true);
   });
 
+  it("opens a prefilled value selected from its start, ready to replace", () => {
+    const prompt = new PromptModal(new App(), "", {
+      title: "Rename chat",
+      primaryButton: "Rename",
+      inputs: [{ type: "text", value: "Plan my week from my trip notes", required: true }],
+    });
+
+    void prompt.openAndWait();
+
+    const input = prompt.modalEl.querySelector<HTMLInputElement>("input")!;
+    expect(document.activeElement).toBe(input);
+    expect([input.selectionStart, input.selectionEnd, input.selectionDirection]).toEqual([0, 31, "backward"]);
+  });
+
   it("submits values without leaking the checkbox into the inputs array", async () => {
     const resultPromise = showPrompt(new App(), "Paste the authorization code.", {
       title: "Manual sign in",

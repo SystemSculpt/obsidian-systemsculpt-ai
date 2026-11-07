@@ -113,7 +113,10 @@ export class AgentApprovalCards extends Component {
     this.registerDomEvent(composer, "input", () => this.syncReviewVisibility());
     this.registerDomEvent(composer, "focusin", () => this.syncReviewVisibility());
     this.registerDomEvent(composer, "focusout", () => this.syncReviewVisibilityAfterFocusMoves());
-    const keyboardRoot = composer.closest<HTMLElement>(".systemsculpt-agent-workspace") ?? composer;
+    // The whole leaf, so Obsidian's view header actions review cards too.
+    const keyboardRoot = composer.closest<HTMLElement>(".workspace-leaf-content")
+      ?? composer.closest<HTMLElement>(".systemsculpt-agent-workspace")
+      ?? composer;
     this.registerDomEvent(keyboardRoot, "keydown", event => {
       if (event.altKey && (event.key === "ArrowUp" || event.key === "ArrowDown")
         && !event.ctrlKey && !event.metaKey && !event.shiftKey

@@ -144,6 +144,14 @@ export class PromptModal extends StandardModal {
 
     const initialFocus = this.fieldEls[0] ?? this.primaryButton ?? this.modalEl;
     initialFocus.focus();
+    // A prefilled value (a rename) opens selected, ready to replace, and
+    // scrolled to its start: Chrome reveals a selection's end on focus.
+    if (initialFocus instanceof HTMLInputElement && initialFocus.value) {
+      const input = initialFocus;
+      input.setSelectionRange(0, input.value.length, "backward");
+      input.scrollLeft = 0;
+      input.ownerDocument.defaultView?.requestAnimationFrame(() => { input.scrollLeft = 0; });
+    }
   }
 
   onClose(): void {

@@ -54,6 +54,10 @@ body {
    * ------------------------------------------------------------------ */
   --ss-accent: var(--interactive-accent);
   --ss-accent-hover: var(--interactive-accent-hover);
+  /* Filled accent buttons: the host accent darkened so white labels keep
+   * 4.5:1 contrast (Obsidian's default light accent alone gives ~3.4:1). */
+  --ss-accent-fill: color-mix(in srgb, var(--ss-accent) 80%, black);
+  --ss-accent-fill-hover: color-mix(in srgb, var(--ss-accent) 70%, black);
   --ss-accent-tint: color-mix(in srgb, var(--ss-accent) 12%, var(--ss-surface-0));
   --ss-accent-tint-strong: color-mix(in srgb, var(--ss-accent) 22%, var(--ss-surface-0));
 

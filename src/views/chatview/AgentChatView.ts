@@ -403,6 +403,7 @@ export class AgentChatView extends ItemView {
   private usedInVault: ReadonlySet<LocalAgentId> = new Set();
   /** The title of a not-yet-saved chat was typed by the person. */
   private titleExplicit = false;
+  private headerActionsAdded = false;
   /** The bubble of a message sent before first-open detection finished. */
   private detectionPendingBubble: ChatMessage | null = null;
   private transcriptSaveOptions() {
@@ -619,10 +620,50 @@ export class AgentChatView extends ItemView {
 
   public getViewType(): string { return CHAT_VIEW_TYPE; }
   public getDisplayText(): string { return this.displayTitle(); }
+  /** The tab shows the same icon as the Chat ribbon button. */
+  public getIcon(): string { return "message-square"; }
 
   /** A chat is "New chat" until its first message or a title the person typed. */
   private displayTitle(): string {
     return !this.chatId && !this.titleExplicit ? "New chat" : this.chatTitle || "New chat";
+  }
+
+  /**
+   * Chat's actions live in Obsidian's own view header, beside its title and
+   * More options menu, so the view has one title row and one menu.
+   */
+  private addHeaderActions(): void {
+    if (this.headerActionsAdded) return;
+    this.headerActionsAdded = true;
+    const modifier = getHostOperatingSystem() === "macOS" ? "Meta" : "Control";
+    // addAction prepends, so add right to left: history, then new chat.
+    this.addAction("square-pen", "New chat", () => void this.newChat())
+      .setAttrs({ "data-testid": "chat.header.new", "aria-keyshortcuts": `${modifier}+Shift+O` });
+    this.addAction("history", "Chat history", () => void this.openHistory())
+      .setAttrs({ "data-testid": "chat.header.history", "aria-keyshortcuts": `${modifier}+K` });
+  }
+
+  /**
+   * Obsidian hides its view header in sidebars, phone drawers and with "Show
+   * tab title bar" off. Only then does the workspace show its own title row,
+   * so a chat always has exactly one. Read from layout, not host class names.
+   */
+  private syncHostHeader(): void {
+    const header = this.containerEl.querySelector<HTMLElement>(":scope > .view-header");
+    const view = this.containerEl.ownerDocument.defaultView;
+    const hidden = !header || !view || view.getComputedStyle(header).display === "none";
+    this.workspace?.setHostHeaderHidden(hidden);
+  }
+
+  /** Hiding or showing Obsidian's header resizes it to or from 0, in every layout. */
+  private watchHostHeader(): void {
+    this.syncHostHeader();
+    const header = this.containerEl.querySelector<HTMLElement>(":scope > .view-header");
+    const Observer = this.containerEl.ownerDocument.defaultView?.ResizeObserver;
+    if (!header || !Observer) return;
+    const observer = new Observer(() => this.syncHostHeader());
+    observer.observe(header);
+    this.register(() => observer.disconnect());
   }
 
   private syncTitle(): void {
@@ -637,6 +678,7 @@ export class AgentChatView extends ItemView {
   public async onOpen(): Promise<void> {
     this.contentEl.empty();
     this.contentEl.addClass("systemsculpt-agent-view");
+    this.addHeaderActions();
     this.workspace = new AgentWorkspace(this.contentEl, {
       app: this.app,
       visibilityRoot: this.containerEl,
@@ -732,6 +774,7 @@ export class AgentChatView extends ItemView {
       },
     });
     this.addChild(this.workspace);
+    this.watchHostHeader();
     const phoneInbox = this.plugin.getPhoneHandoffInbox?.();
     if (phoneInbox) {
       // Keep inbox review outside transcript end-follow without moving focus or scroll.
@@ -3684,12 +3727,14 @@ export class AgentChatView extends ItemView {
     if (next) await this.renameFromHeader(next);
   }
 
-  /** The header's More menu and the tab's pane menu share these items. */
+  /** Obsidian's More options menu, the tab's menu and the fallback row's More menu. */
   private addChatMenuItems(menu: Menu): void {
     menu.addItem((item) => item
       .setTitle("Rename chat")
       .setIcon("pencil")
       .onClick(() => void this.beginRename()));
+    // Its own group: phone menus box each group, and a label never joins a box.
+    menu.addSeparator();
     menu.addItem((item) => item.setTitle("Text size").setIcon("type").setIsLabel(true));
     for (const [size, label] of [["small", "Small"], ["medium", "Medium"], ["large", "Large"]] as const) {
       menu.addItem((item) => item

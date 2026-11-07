@@ -450,6 +450,18 @@ class ItemView extends View {
     this.contentEl = this.containerEl.children[1];
   }
 
+  // Obsidian prepends each action to the view header, before More options.
+  addAction(icon, title, callback) {
+    const header = this.containerEl.children[0];
+    const action = document.createElement("button");
+    action.className = "clickable-icon view-action";
+    action.setAttribute("aria-label", title);
+    action.dataset.icon = icon;
+    action.addEventListener("click", (event) => callback(event));
+    header.insertBefore(action, header.firstChild);
+    return action;
+  }
+
   getViewType() {
     return "";
   }

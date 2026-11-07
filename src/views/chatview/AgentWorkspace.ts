@@ -487,9 +487,17 @@ export class AgentWorkspace extends Component {
     });
   }
 
-  /** The header hides its title on mobile, where Obsidian's own header shows it. */
+  /** False while Obsidian's own view header shows the title and actions. */
   public isTitleVisible(): boolean {
     return this.titleElement.getClientRects().length > 0;
+  }
+
+  /**
+   * The workspace's title row is a fallback for layouts where Obsidian hides
+   * its view header (sidebars, phone drawers, "Show tab title bar" off).
+   */
+  public setHostHeaderHidden(hidden: boolean): void {
+    this.element.classList.toggle("is-host-header-hidden", hidden);
   }
 
   public get isHistoryOpen(): boolean {
