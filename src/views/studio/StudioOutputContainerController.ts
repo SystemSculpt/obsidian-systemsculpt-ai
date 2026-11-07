@@ -27,7 +27,9 @@ export class StudioOutputContainerController {
     this.dispose();
     this.owner = getStudioOwnerWindow(viewport);
     const Observer = (this.owner as Window & { ResizeObserver?: typeof ResizeObserver }).ResizeObserver;
-    if (Observer) this.observer = new Observer(() => this.schedule());
+    // Arranged inside the observer callback, before the browser paints: a card
+    // that grew never shows a frame where its Outputs frame lags behind.
+    if (Observer) this.observer = new Observer(() => this.arrange());
     this.sync();
   }
 
@@ -61,23 +63,28 @@ export class StudioOutputContainerController {
     if (!this.owner || this.timer !== null) return;
     this.timer = this.owner.setTimeout(() => {
       this.timer = null;
-      // The view schedules again when the drag ends; nothing polls meanwhile.
-      if (this.host.isDragging()) return;
-      let moved: string[] = [];
-      this.host.commit(project => {
-        moved = arrangeManagedOutputContainers(project, this.measure);
-        return moved.length > 0;
-      });
-      const project = this.host.getProject();
-      if (!project) return;
-      // A card that grew without moving (an image finished loading) still needs its frame and edges redrawn.
-      const nodes = new Map(project.graph.nodes.map(node => [node.id, node]));
-      for (const id of moved) {
-        const element = this.host.getNodeElement(id), node = nodes.get(id);
-        if (element && node) element.style.transform = `translate(${node.position.x}px, ${node.position.y}px)`;
-      }
-      this.host.positionsChanged();
+      this.arrange();
     }, 40);
+  }
+
+  private arrange(): void {
+    if (!this.owner) return;
+    // The view schedules again when the drag ends; nothing polls meanwhile.
+    if (this.host.isDragging()) return;
+    let moved: string[] = [];
+    this.host.commit(project => {
+      moved = arrangeManagedOutputContainers(project, this.measure);
+      return moved.length > 0;
+    });
+    const project = this.host.getProject();
+    if (!project) return;
+    // A card that grew without moving (an image finished loading) still needs its frame and edges redrawn.
+    const nodes = new Map(project.graph.nodes.map(node => [node.id, node]));
+    for (const id of moved) {
+      const element = this.host.getNodeElement(id), node = nodes.get(id);
+      if (element && node) element.style.transform = `translate(${node.position.x}px, ${node.position.y}px)`;
+    }
+    this.host.positionsChanged();
   }
 
   dispose(): void {
