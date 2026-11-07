@@ -1,5 +1,10 @@
 /** @jest-environment jsdom */
 
+jest.mock("../../../platform/hostCapabilities", () => ({
+  ...jest.requireActual("../../../platform/hostCapabilities"),
+  getHostOperatingSystem: () => "macOS",
+}));
+
 import { AgentChatView } from "../AgentChatView";
 import { generateDefaultChatTitle } from "../../../utils/titleUtils";
 
@@ -62,5 +67,56 @@ describe("AgentChatView title synchronization", () => {
     await chat.setState({ draftKey: "draft-1", chatTitle: generateDefaultChatTitle() });
     expect(chat.getDisplayText()).toBe("New chat");
     expect(titles()).toEqual(Array(3).fill("New chat"));
+  });
+});
+
+describe("AgentChatView header", () => {
+  it("puts history and new chat in Obsidian's view header, once, with their view shortcuts", () => {
+    const chat = Object.create(AgentChatView.prototype) as AgentChatView;
+    const actions: Array<{ icon: string; title: string; element: HTMLElement; run: () => void }> = [];
+    const newChat = jest.fn(async () => undefined);
+    const openHistory = jest.fn(async () => undefined);
+    Object.assign(chat, {
+      headerActionsAdded: false,
+      newChat,
+      openHistory,
+      // Obsidian's addAction prepends each action before the ones already there.
+      addAction: (icon: string, title: string, run: () => void) => {
+        const element = document.createElement("button");
+        actions.unshift({ icon, title, element, run });
+        return element;
+      },
+    });
+    const add = (chat as unknown as { addHeaderActions(): void }).addHeaderActions.bind(chat);
+    add();
+    add();
+    expect(actions.map(({ icon, title }) => [icon, title])).toEqual([["history", "Chat history"], ["square-pen", "New chat"]]);
+    expect(actions.map(({ element }) => element.dataset.testid)).toEqual(["chat.header.history", "chat.header.new"]);
+    expect(actions.map(({ element }) => element.getAttribute("aria-keyshortcuts"))).toEqual(["Meta+K", "Meta+Shift+O"]);
+    actions[0].run();
+    actions[1].run();
+    expect(openHistory).toHaveBeenCalledTimes(1);
+    expect(newChat).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the workspace's own title row only while Obsidian hides its view header", () => {
+    const chat = Object.create(AgentChatView.prototype) as AgentChatView;
+    const containerEl = document.body.createDiv();
+    const header = containerEl.createDiv({ cls: "view-header" });
+    containerEl.createDiv({ cls: "view-content" });
+    const setHostHeaderHidden = jest.fn();
+    Object.assign(chat, { containerEl, workspace: { setHostHeaderHidden } });
+    const sync = (chat as unknown as { syncHostHeader(): void }).syncHostHeader.bind(chat);
+    try {
+      sync();
+      expect(setHostHeaderHidden).toHaveBeenLastCalledWith(false);
+      // A sidebar, phone drawer or "Show tab title bar" off.
+      header.style.display = "none";
+      sync();
+      expect(setHostHeaderHidden).toHaveBeenLastCalledWith(true);
+      header.remove();
+      sync();
+      expect(setHostHeaderHidden).toHaveBeenLastCalledWith(true);
+    } finally { containerEl.remove(); }
   });
 });

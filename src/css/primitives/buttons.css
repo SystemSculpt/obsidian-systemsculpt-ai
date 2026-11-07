@@ -68,21 +68,21 @@
  * ------------------------------------------------------------------ */
 .ss-surface .ss-button--primary,
 .ss-surface .ss-button.mod-cta {
-  background-color: var(--ss-accent);
-  border-color: var(--ss-accent);
+  background-color: var(--ss-accent-fill);
+  border-color: var(--ss-accent-fill);
   color: var(--ss-ink-on-accent);
   box-shadow: var(--ss-elevation-1);
 }
 
 .ss-surface .ss-button--primary:hover,
 .ss-surface .ss-button.mod-cta:hover {
-  background-color: var(--ss-accent-hover);
-  border-color: var(--ss-accent-hover);
+  background-color: var(--ss-accent-fill-hover);
+  border-color: var(--ss-accent-fill-hover);
 }
 
 .ss-surface .ss-button--primary:active,
 .ss-surface .ss-button.mod-cta:active {
-  background-color: var(--ss-accent-hover);
+  background-color: var(--ss-accent-fill-hover);
 }
 
 .ss-surface .ss-button--danger {

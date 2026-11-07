@@ -126,6 +126,17 @@ describe("AgentWorkspace chrome", () => {
     workspace.unload();
   });
 
+  it("marks its title row as the fallback for a hidden Obsidian view header", () => {
+    const { workspace } = mount();
+    try {
+      expect(workspace.element.classList.contains("is-host-header-hidden")).toBe(false);
+      workspace.setHostHeaderHidden(true);
+      expect(workspace.element.classList.contains("is-host-header-hidden")).toBe(true);
+      workspace.setHostHeaderHidden(false);
+      expect(workspace.element.classList.contains("is-host-header-hidden")).toBe(false);
+    } finally { workspace.unload(); }
+  });
+
   it("fills the More menu from the view", () => {
     const buildMoreMenu = jest.fn((menu: Menu) => {
       menu.addItem((item) => item.setTitle("Rename chat"));

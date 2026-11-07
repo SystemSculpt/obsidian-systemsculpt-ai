@@ -189,6 +189,12 @@
   margin-bottom: 0;
 }
 
+/* No one-word last lines in finished replies; streaming text keeps plain wrap
+ * so lines already read never reflow. */
+.systemsculpt-agent-part.is-text:not(.is-streaming) :is(p, li) {
+  text-wrap: pretty;
+}
+
 .systemsculpt-agent-turn table {
   border-collapse: collapse;
   font-size: inherit;

@@ -69,9 +69,11 @@
   font-size: var(--ss-text-lg);
 }
 
+/* Obsidian's view header owns the title, History, New chat and More options.
+ * This row stands in only where Obsidian hides that header. */
 .systemsculpt-agent-header {
   z-index: var(--ss-z-raised);
-  display: flex;
+  display: none;
   align-items: center;
   gap: var(--ss-space-2);
   min-height: 36px;
@@ -122,6 +124,15 @@
   border-color: var(--ss-line-accent);
   background: var(--ss-surface-0);
   color: var(--ss-ink);
+}
+
+.systemsculpt-agent-workspace.is-host-header-hidden > .systemsculpt-agent-header {
+  display: flex;
+}
+
+/* History's own New chat repeats the header's, except where the header is hidden. */
+.systemsculpt-agent-workspace:not(.is-host-header-hidden) [data-testid="history.new-chat"] {
+  display: none;
 }
 
 .systemsculpt-agent-header-actions {
@@ -175,8 +186,7 @@
   scrollbar-gutter: stable both-edges;
 }
 
-/* The native mobile view header already owns the current chat title. Keep the
- * plugin row focused on session actions and clear Obsidian's fixed nav. */
+/* Clear Obsidian's fixed mobile nav. */
 .ss-mobile-layout .systemsculpt-agent-workspace {
   padding-bottom: var(--ss-mobile-bottom-clearance);
 }
@@ -190,10 +200,6 @@
 
 .ss-mobile-layout .systemsculpt-agent-header {
   padding: var(--ss-space-1) var(--ss-space-3);
-}
-
-.ss-mobile-layout .systemsculpt-agent-header-title {
-  display: none;
 }
 
 .ss-mobile-layout .systemsculpt-agent-header-button {
