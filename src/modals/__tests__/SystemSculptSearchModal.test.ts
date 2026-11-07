@@ -581,6 +581,12 @@ describe("SystemSculptSearchModal", () => {
 
       const marks = [...((modal as any).listEl as HTMLElement).querySelectorAll("mark.ss-hl")].map((mark) => mark.textContent);
       expect(marks).toEqual(["ferry", "ferry", "stop"]);
+
+      await (modal as any).executeSearch("when did the");
+      expect(((modal as any).listEl as HTMLElement).querySelectorAll("mark.ss-hl")).toHaveLength(0);
+
+      await (modal as any).executeSearch("the");
+      expect(((modal as any).listEl as HTMLElement).querySelectorAll("mark.ss-hl").length).toBeGreaterThan(0);
     });
 
     it("does not show a missing-preview placeholder for metadata-only recents", async () => {
