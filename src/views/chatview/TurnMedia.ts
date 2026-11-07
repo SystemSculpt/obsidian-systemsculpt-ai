@@ -68,7 +68,7 @@ export function renderTurnMedia(app: App, parent: HTMLElement, parts: readonly A
     if (presented.media.length > 1) grid.addClass("is-multiple");
     for (const item of presented.media) {
       const file = app.vault.getAbstractFileByPath(item.path);
-      const name = item.path.split("/").pop() ?? item.path;
+      const name = item.label ?? item.path.split("/").pop() ?? item.path;
       const figure = grid.createEl("figure", { cls: "systemsculpt-agent-media", attr: { "data-kind": item.kind } });
       if (!(file instanceof TFile)) {
         figure.addClass("is-missing");

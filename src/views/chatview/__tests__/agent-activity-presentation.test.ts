@@ -31,11 +31,11 @@ describe("AgentActivityPresentation", () => {
       : { changes: [{ path: "/vault/Notes/Launch plan.md", kind: { type: "update" } }] }, {
       location: "server", native: { agent, workingDirectory: "/vault" }, state: "denied", approvalDecision: "denied",
     });
-    expect(summarizeAgentActivity([denied])).toEqual({ label: "Edit Launch plan.md · Denied", failedCount: 0 });
+    expect(summarizeAgentActivity([denied])).toEqual({ label: "Edit Launch plan.md · Denied", failedCount: 0, denied: true });
     expect(summarizeAgentActivity([denied, { ...denied, callId: "another", id: "another" }]))
-      .toEqual({ label: "Denied 2 actions", failedCount: 0 });
+      .toEqual({ label: "Denied 2 actions", failedCount: 0, denied: true });
     expect(summarizeAgentActivity([{ ...denied, state: "succeeded", approvalDecision: "approved" }, denied]))
-      .toEqual({ label: "Edited Launch plan.md, edit Launch plan.md · Denied", failedCount: 0 });
+      .toEqual({ label: "Edited Launch plan.md, edit Launch plan.md · Denied", failedCount: 0, denied: true });
   });
 
   it.each(["claude", "codex"] as const)("does not claim a denied %s command ran or failed", agent => {
@@ -43,7 +43,7 @@ describe("AgentActivityPresentation", () => {
       tool(agent === "claude" ? "Bash" : "commandExecution", { command: "printf hello" }, {
         location: "server", native: { agent, workingDirectory: "/vault" }, state: "denied", approvalDecision: "denied",
       }),
-    ])).toEqual({ label: "Run printf hello · Denied", failedCount: 0 });
+    ])).toEqual({ label: "Run printf hello · Denied", failedCount: 0, denied: true });
   });
 
   it.each(["claude", "codex", "hosted"] as const)("counts a %s note edited twice as one edited note", backend => {
@@ -98,7 +98,7 @@ describe("AgentActivityPresentation", () => {
       tool("ExitPlanMode", { plan: "Review the checklist before editing." }, {
         id: "kept-planning", callId: "kept-planning", approvalId: "kept-planning", location: "server", native, state: "denied", approvalDecision: "denied",
       }),
-    ])).toEqual({ label: "Edited Launch plan.md, denied 2 actions, edit Launch plan.md · Withdrawn", failedCount: 0 });
+    ])).toEqual({ label: "Edited Launch plan.md, denied 2 actions, edit Launch plan.md · Withdrawn", failedCount: 0, denied: true });
   });
 
   it.each(["claude", "codex", "hosted"] as const)("never counts a cancelled or withdrawn %s action as a change or failure", backend => {
@@ -126,7 +126,7 @@ describe("AgentActivityPresentation", () => {
       tool("edit", { path: "Notes/A.md" }),
       tool("edit", { path: "Notes/B.md" }, { id: "failed", callId: "failed", state: "failed" }),
       tool("edit", { path: "Notes/C.md" }, { id: "denied", callId: "denied", state: "denied" }),
-    ])).toEqual({ label: "Edited A.md, couldn't edit B.md, edit C.md · Denied · 1 failed", failedCount: 1 });
+    ])).toEqual({ label: "Edited A.md, couldn't edit B.md, edit C.md · Denied · 1 failed", failedCount: 1, denied: true });
     expect(summarizeAgentActivity([
       tool("edit", { path: "Notes/A.md" }, { state: "failed" }),
       tool("edit", { path: "Notes/A.md" }, { id: "retry", callId: "retry" }),
@@ -140,14 +140,14 @@ describe("AgentActivityPresentation", () => {
       tool("Edit", { file_path: "/vault/A.md" }, { ...native, approvalDecision: "approved" }),
       tool("Bash", { command: "npm test" }, { ...native, id: "bash", callId: "bash", state: "failed", output: { data: { exitCode: 1 } } }),
       tool("Edit", { file_path: "/vault/B.md" }, { ...native, id: "denied", callId: "denied", state: "denied", approvalDecision: "denied" }),
-    ])).toEqual({ label: "Edited A.md, couldn't run npm test, edit B.md · Denied · 1 failed", failedCount: 1 });
+    ])).toEqual({ label: "Edited A.md, couldn't run npm test, edit B.md · Denied · 1 failed", failedCount: 1, denied: true });
   });
 
   it("distinguishes failed and denied work without exposing hosted server inputs", () => {
     expect(summarizeAgentActivity([
       tool("edit", { path: "Notes/Plan.md" }, { state: "failed" }),
       tool("edit", { path: "Notes/Other.md" }, { state: "denied" }),
-    ])).toEqual({ label: "Couldn't edit Plan.md, edit Other.md · Denied · 1 failed", failedCount: 1 });
+    ])).toEqual({ label: "Couldn't edit Plan.md, edit Other.md · Denied · 1 failed", failedCount: 1, denied: true });
     const summary = summarizeAgentActivity([tool("private_provider_action", { paths: ["Secret.md"] }, { location: "server" })]);
     expect(summary.label).toBe("Ran SystemSculpt action");
     expect(JSON.stringify(summary)).not.toMatch(/private|Secret/u);

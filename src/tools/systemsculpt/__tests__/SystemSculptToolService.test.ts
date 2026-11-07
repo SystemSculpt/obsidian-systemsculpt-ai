@@ -154,12 +154,13 @@ describe("billing and approval", () => {
     const runProject = jest.fn(async () => ({ runId: "run_2", status: "success", startedAt: "", finishedAt: "", error: null, executedNodeIds: ["new"], cachedNodeIds: ["old"] }));
     const entry = (nodeId: string) => ({ nodeId, nodeKind: "studio.image_generation", nodeVersion: "1", inputFingerprint: "", outputs: {}, updatedAt: "", runId: "r",
       artifacts: [{ hash: nodeId, mimeType: "image/png", sizeBytes: 4, path: `SystemSculpt/Studio/P/assets/${nodeId}.png` }] });
-    const studio = { runProject, getProjectNodeCache: jest.fn(async () => ({ schema: "studio.node-cache.v1", projectId: "p", updatedAt: "", entries: { new: entry("new"), old: entry("old") } })) };
+    const studio = { runProject, getProjectNodeCache: jest.fn(async () => ({ schema: "studio.node-cache.v1", projectId: "p", updatedAt: "", entries: { new: entry("new"), old: entry("old") } })),
+      readAgentDocument: jest.fn(async () => ({ entities: { "node:new": { id: "new", title: "Seed packet" } } })) };
     const { host: fake } = host({ studio: () => studio as never });
     const stop = new AbortController();
     const result = await new SystemSculptToolService(fake).call("studio_run_workflow", { path: "SystemSculpt/Studio/P.systemsculpt" }, stop.signal);
     expect((runProject.mock.calls[0] as unknown[])[1]).toEqual({ signal: stop.signal });
-    expect(result.media).toEqual([{ kind: "image", path: "SystemSculpt/Studio/P/assets/new.png", mimeType: "image/png" }]);
+    expect(result.media).toEqual([{ kind: "image", path: "SystemSculpt/Studio/P/assets/new.png", mimeType: "image/png", label: "Seed packet" }]);
     expect((result.data as { nodes: unknown[] }).nodes).toHaveLength(2);
   });
 });

@@ -1744,7 +1744,7 @@ export class AgentConversationRenderer extends Component {
       icon = header.createSpan({ cls: "systemsculpt-agent-activity-state", attr: { "aria-hidden": "true" } });
       header.prepend(icon);
     }
-    setIcon(icon, summary.failedCount || summary.refused ? "circle-alert" : cancelled ? "square" : "check");
+    setIcon(icon, summary.failedCount || summary.refused ? "circle-alert" : cancelled ? "square" : summary.denied ? "ban" : "check");
     let meta = header.querySelector<HTMLElement>(".systemsculpt-agent-activity-duration");
     if (!meta) meta = header.createSpan({ cls: "systemsculpt-agent-activity-duration" });
     meta.setText(!cancelled && duration ? duration : "");

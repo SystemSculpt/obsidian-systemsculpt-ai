@@ -279,6 +279,11 @@ export class StudioService {
   }
 
   /** `heads` holds one revision: the SHA-256 of the canonical document text. */
+  /** Writes SystemSculpt/Studio/AGENTS.md if it is missing or stale; agents read it before editing. */
+  async ensureAgentReference(): Promise<void> {
+    await this.agentReferenceFile.ensureCurrent();
+  }
+
   async readAgentDocument(path: string): Promise<unknown> {
     path = this.requireProjectPath(path);
     await this.getProjectSession(path)?.flushPendingSaveWork({force: true});

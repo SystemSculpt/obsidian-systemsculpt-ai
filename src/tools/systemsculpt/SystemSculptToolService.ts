@@ -19,14 +19,14 @@ import {
 /** The chat shows generated files under the reply; an embed in the reply would show them twice. */
 /** The chat shows the link as its own line; the reply repeating it would say it twice. */
 const LINK_SHOWN = "The chat already shows the person this line and its link under your reply. Don't restate it, explain it or mention subscribing or credits; at most say in a few words that nothing was made.";
-const SHOWN_IN_CHAT = "The chat already shows generated files under your reply, so don't embed them again.";
+const SHOWN_IN_CHAT = "The chat already shows generated files right after your reply, so don't embed them or say where they appear.";
 
 const GENERATED_IMAGES_FOLDER = "SystemSculpt/Images";
 const GENERATED_VIDEOS_FOLDER = "SystemSculpt/Videos";
 
 type StudioTarget = Pick<StudioService,
   | "listProjects" | "createProjectFile" | "readAgentDocument" | "editAgentDocument"
-  | "runProject" | "runProjectFromNode" | "getProjectNodeCache" | "getRecentRuns">;
+  | "runProject" | "runProjectFromNode" | "getProjectNodeCache" | "getRecentRuns" | "ensureAgentReference">;
 
 /** The narrow plugin surface the tools need; tests supply fakes. */
 export type SystemSculptToolHost = Readonly<{
@@ -290,7 +290,7 @@ export class SystemSculptToolService {
     return {
       ok: true,
       message: workflows.length ? `${workflows.length} Studio ${workflows.length === 1 ? "workflow" : "workflows"}.` : "No Studio workflows yet.",
-      data: { workflows, reference: STUDIO_AGENT_DOCS_PATH },
+      data: { workflows, reference: await this.agentReference() },
     };
   }
 
@@ -305,7 +305,7 @@ export class SystemSculptToolService {
     return {
       ok: true,
       message: `Created ${created.path}.`,
-      data: { path: created.path, revision: Array.isArray(document.heads) ? document.heads[0] : undefined, canvas: document.canvas, entities: document.entities, reference: STUDIO_AGENT_DOCS_PATH },
+      data: { path: created.path, revision: Array.isArray(document.heads) ? document.heads[0] : undefined, canvas: document.canvas, entities: document.entities, reference: await this.agentReference() },
     };
   }
 
@@ -316,7 +316,7 @@ export class SystemSculptToolService {
     return {
       ok: true,
       message: `Read ${path}.`,
-      data: { path, revision: Array.isArray(document.heads) ? document.heads[0] : undefined, canvas: document.canvas, entities: document.entities, reference: STUDIO_AGENT_DOCS_PATH },
+      data: { path, revision: Array.isArray(document.heads) ? document.heads[0] : undefined, canvas: document.canvas, entities: document.entities, reference: await this.agentReference() },
     };
   }
 
@@ -332,14 +332,37 @@ export class SystemSculptToolService {
     };
   }
 
+  /** The reference path, written first so an agent told to read it finds it. */
+  private async agentReference(): Promise<string> {
+    try { await this.host.studio().ensureAgentReference(); } catch { /* Studio still works without it. */ }
+    return STUDIO_AGENT_DOCS_PATH;
+  }
+
+  private async nodeTitles(path: string): Promise<Map<string, string>> {
+    const titles = new Map<string, string>();
+    try {
+      const entities = record(record(await this.host.studio().readAgentDocument(path)).entities);
+      for (const [id, value] of Object.entries(entities)) {
+        const title = record(value).title;
+        if (id.startsWith("node:") && typeof title === "string" && title.trim()) titles.set(id.slice(5), title.trim());
+      }
+    } catch { /* Titles only improve captions. */ }
+    return titles;
+  }
+
   private async nodeOutputs(path: string, onlyNodeIds?: readonly string[]) {
     const cache = await this.host.studio().getProjectNodeCache(path);
     const wanted = onlyNodeIds ? new Set(onlyNodeIds) : null;
     const media: SystemSculptMedia[] = [];
+    const titles = await this.nodeTitles(path);
     const nodes = Object.values(cache?.entries ?? {}).filter(entry => !wanted || wanted.has(entry.nodeId)).map(entry => {
       const files = (entry.artifacts ?? []).map(asset => {
-        if (asset.mimeType.startsWith("image/")) media.push({ kind: "image", path: asset.path, mimeType: asset.mimeType });
-        if (asset.mimeType.startsWith("video/")) media.push({ kind: "video", path: asset.path, mimeType: asset.mimeType });
+        const kind = asset.mimeType.startsWith("image/") ? "image" : asset.mimeType.startsWith("video/") ? "video" : null;
+        // Studio names assets by hash; the step's title says what the file is. Same bytes show once.
+        if (kind && !media.some(item => item.path === asset.path)) {
+          const title = titles.get(entry.nodeId);
+          media.push({ kind, path: asset.path, mimeType: asset.mimeType, ...(title ? { label: title } : {}) });
+        }
         return { path: asset.path, mimeType: asset.mimeType, sizeBytes: asset.sizeBytes };
       });
       const outputs = JSON.stringify(entry.outputs ?? {});

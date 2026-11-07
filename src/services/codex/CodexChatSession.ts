@@ -36,7 +36,7 @@ export class CodexChatSession extends LocalAgentChatSession {
               callId: callId ?? String(requestId ?? tool), name: tool, input: isRecord(params.arguments) ? params.arguments : {}, state: 'approval-required',
               native: { agent: 'codex', workingDirectory: turn.workingDirectory, requestMethod: method, requestId },
             }, requestSignal, false);
-            if (!decision.approved) return toolReply({ ok: false, message: 'The person declined this action.' });
+            if (!decision.approved) return toolReply({ ok: false, message: 'Declined in chat, so it did not run and nothing was spent.' });
           }
           return toolReply(await toolset.call(tool, params.arguments ?? {}, requestSignal, callId));
         }

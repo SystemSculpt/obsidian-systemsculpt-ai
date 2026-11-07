@@ -33,6 +33,8 @@ export type SystemSculptMedia = Readonly<{
   /** Vault-relative path of the saved file. */
   path: string;
   mimeType?: string;
+  /** Caption when the file name says nothing, as with Studio's hashed assets. */
+  label?: string;
 }>;
 
 /** What a call returns to the agent and what Chat renders from the saved tool output. */
@@ -219,7 +221,8 @@ function decodeText(text: string): SystemSculptToolResult | null {
       if (!item || typeof item !== "object") return [];
       const entry = item as Record<string, unknown>;
       if ((entry.kind !== "image" && entry.kind !== "video") || typeof entry.path !== "string" || !entry.path.trim()) return [];
-      return [{ kind: entry.kind, path: entry.path, ...(typeof entry.mimeType === "string" ? { mimeType: entry.mimeType } : {}) }];
+      return [{ kind: entry.kind, path: entry.path, ...(typeof entry.mimeType === "string" ? { mimeType: entry.mimeType } : {}),
+        ...(typeof entry.label === "string" && entry.label.trim() ? { label: entry.label.trim().slice(0, 120) } : {}) }];
     }) : [];
     const link = value.link && typeof value.link === "object" ? value.link as Record<string, unknown> : null;
     const safeLink = link && typeof link.label === "string" && link.label.length <= 40 && typeof link.url === "string"
