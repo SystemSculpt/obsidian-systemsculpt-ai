@@ -22,7 +22,7 @@ jest.mock("../../../modals/BulkTranscriptionConfirmModal", () => ({
 }));
 
 function audio(path = "Inbox/audio.mp3"): TFile {
-  return Object.assign(new TFile({ path }), { parent: { path: path.split("/").slice(0, -1).join("/") } });
+  return Object.assign(new TFile({ path, stat: { size: 1024 } }), { parent: { path: path.split("/").slice(0, -1).join("/") } });
 }
 
 // Drive the same vault events and modal callbacks as Obsidian. No test reaches
@@ -48,7 +48,9 @@ describe("InboxTranscriptionService through its host interface", () => {
     };
   }
 
-  function emit(event: "create" | "rename", file: TFile, oldPath = "Elsewhere/audio.mp3") {
+  const vaultFiles = new Map<string, TFile>();
+  function emit(event: "create" | "rename" | "modify", file: TFile, oldPath = "Elsewhere/audio.mp3") {
+    vaultFiles.set(file.path, file);
     const registration = (app.vault.on as jest.Mock).mock.calls.find(([name]) => name === event);
     expect(registration).toBeDefined();
     registration![1](file, oldPath);
@@ -82,7 +84,12 @@ describe("InboxTranscriptionService through its host interface", () => {
     ) => commit("Transcribed text", `operation-${file.basename}`));
     app = new App();
     (app.vault.getFiles as jest.Mock).mockReturnValue([]);
-    (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(null);
+    vaultFiles.clear();
+    (app.vault.getAbstractFileByPath as jest.Mock).mockImplementation((path: string) => vaultFiles.get(path) ?? null);
+    (app.vault.adapter.stat as jest.Mock).mockImplementation(async (path: string) => {
+      const file = vaultFiles.get(path);
+      return file ? { type: "file", ...file.stat } : null;
+    });
     (app.vault.create as jest.Mock).mockImplementation(async (path: string) => new TFile({ path }));
     plugin = createPlugin();
     service = new InboxTranscriptionService(plugin as unknown as SystemSculptPlugin);
@@ -95,9 +102,9 @@ describe("InboxTranscriptionService through its host interface", () => {
     jest.useRealTimers();
   });
 
-  it("registers both vault event subscriptions without registering commands", () => {
-    expect((app.vault.on as jest.Mock).mock.calls.map(([name]) => name)).toEqual(["create", "rename"]);
-    expect(plugin.registerEvent).toHaveBeenCalledTimes(2);
+  it("registers create, rename, and modify subscriptions without registering commands", () => {
+    expect((app.vault.on as jest.Mock).mock.calls.map(([name]) => name)).toEqual(["create", "rename", "modify"]);
+    expect(plugin.registerEvent).toHaveBeenCalledTimes(3);
     expect(plugin.addCommand).not.toHaveBeenCalled();
   });
 
@@ -123,6 +130,197 @@ describe("InboxTranscriptionService through its host interface", () => {
     await flushInbox();
     expect(mockTranscribeFile).toHaveBeenCalledTimes(1);
     expect(app.vault.create).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["size", "mtime"] as const)("waits for unchanged on-disk %s even without modify events", async field => {
+    const file = audio("Inbox/syncing.mp4");
+    emit("create", file);
+    const stat = { type: "file", ...file.stat };
+    (app.vault.adapter.stat as jest.Mock).mockImplementation(async () => ({ ...stat }));
+    stat[field] += 1;
+    await flushInbox();
+    expect(mockTranscribeFile).not.toHaveBeenCalled();
+    stat[field] += 1;
+    await flushInbox();
+    expect(mockTranscribeFile).not.toHaveBeenCalled();
+    await flushInbox();
+    expect(mockTranscribeFile).not.toHaveBeenCalled();
+    // Obsidian's cached length/mtime must catch up before the reader opens it.
+    file.stat[field] = stat[field];
+    await flushInbox();
+    expect(mockTranscribeFile).toHaveBeenCalledTimes(1);
+  });
+
+  it("restarts the quiet interval on modify without queuing duplicate transcriptions", async () => {
+    const file = audio();
+    emit("create", file);
+    await jest.advanceTimersByTimeAsync(600);
+    file.stat.size += 1024;
+    emit("modify", file);
+    await jest.advanceTimersByTimeAsync(200);
+    expect(mockTranscribeFile).not.toHaveBeenCalled();
+    await flushInbox();
+    expect(mockTranscribeFile).toHaveBeenCalledTimes(1);
+    emit("modify", file);
+    await flushInbox();
+    expect(mockTranscribeFile).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not auto-upload existing audio from modify notifications alone", async () => {
+    emit("modify", audio());
+    await flushInbox();
+    expect(mockTranscribeFile).not.toHaveBeenCalled();
+  });
+
+  it("waits for empty files to receive bytes and settle", async () => {
+    const file = audio();
+    file.stat.size = 0;
+    emit("create", file);
+    await flushInbox();
+    expect(mockTranscribeFile).not.toHaveBeenCalled();
+    file.stat.size = 1024;
+    await flushInbox();
+    expect(mockTranscribeFile).not.toHaveBeenCalled();
+    await flushInbox();
+    expect(mockTranscribeFile).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["deleted", "moved", "disabled"])("does not upload a queued file that is %s", async change => {
+    const file = audio();
+    emit("create", file);
+    if (change === "deleted") vaultFiles.delete(file.path);
+    if (change === "moved") file.path = "Elsewhere/audio.mp3";
+    if (change === "disabled") plugin.settings.workflowEngine.autoTranscribeInboxNotes = false;
+    await flushInbox();
+    expect(mockTranscribeFile).not.toHaveBeenCalled();
+  });
+
+  it("still asks for bulk confirmation when one of three arrivals is syncing", async () => {
+    const files = [1, 2, 3].map(index => audio(`Inbox/${index}.mp4`));
+    files.forEach(file => emit("create", file));
+    files[0].stat.size += 1024;
+    await flushInbox();
+    expect(confirmations).toHaveBeenCalledTimes(1);
+    expect(confirmation().pendingFiles.map(pending => pending.file)).toEqual(files);
+    expect(mockTranscribeFile).not.toHaveBeenCalled();
+  });
+
+  it("rechecks files modified while bulk confirmation is open", async () => {
+    const files = await queueBulk(3);
+    files[0].stat.size += 1024;
+    emit("modify", files[0]);
+    confirmation().onConfirm(files.map(file => ({ file })));
+    await settle();
+    expect(mockTranscribeFile).not.toHaveBeenCalled();
+    await flushInbox();
+    expect(mockTranscribeFile.mock.calls.map(([file]) => file)).toEqual(files);
+  });
+
+  it("does not auto-send deferred files when sync modifies them", async () => {
+    const files = await queueBulk(3);
+    confirmation().onDefer();
+    await settle();
+    files[0].stat.mtime += 1;
+    emit("modify", files[0]);
+    await flushInbox();
+    expect(mockTranscribeFile).not.toHaveBeenCalled();
+    expect(confirmations).toHaveBeenCalledTimes(1);
+    const resumed = service.resumeDeferredFiles();
+    await settle();
+    await resumed;
+    expect(mockTranscribeFile.mock.calls.map(([file]) => file)).toEqual(files);
+  });
+
+  it("does not let an empty syncing arrival block later ready files", async () => {
+    const empty = audio("Inbox/empty.mp4");
+    empty.stat.size = 0;
+    emit("create", empty);
+    await flushInbox();
+    const ready = audio("Inbox/ready.mp4");
+    emit("create", ready);
+    await flushInbox();
+    expect(mockTranscribeFile.mock.calls.map(([file]) => file)).toEqual([ready]);
+    empty.stat.size = 1024;
+    await flushInbox();
+    await flushInbox();
+    expect(mockTranscribeFile.mock.calls.map(([file]) => file)).toEqual([ready, empty]);
+  });
+
+  it("keeps a renamed deferred file waiting for explicit Resume", async () => {
+    const files = await queueBulk(3);
+    confirmation().onDefer();
+    await settle();
+    const oldPath = files[0].path;
+    files[0].path = "Inbox/renamed.mp3";
+    vaultFiles.delete(oldPath);
+    emit("rename", files[0], oldPath);
+    await flushInbox();
+    expect(mockTranscribeFile).not.toHaveBeenCalled();
+    await service.resumeDeferredFiles();
+    expect(mockTranscribeFile.mock.calls.map(([file]) => file)).toEqual(files);
+    expect(service.canResumeDeferredFiles()).toBe(false);
+  });
+
+  it("destroy cancels the delay between batches", async () => {
+    const files = await queueBulk(4);
+    confirmation().onConfirm(files.map(file => ({ file })));
+    await settle();
+    expect(mockTranscribeFile).toHaveBeenCalledTimes(3);
+    service.destroy();
+    await settle();
+    expect(jest.getTimerCount()).toBe(0);
+    expect(mockTranscribeFile).toHaveBeenCalledTimes(3);
+  });
+
+  it("waits through unavailable filesystem stats before observing a quiet interval", async () => {
+    const file = audio();
+    emit("create", file);
+    (app.vault.adapter.stat as jest.Mock).mockRejectedValueOnce(new Error("Still syncing"));
+    await flushInbox();
+    expect(mockTranscribeFile).not.toHaveBeenCalled();
+    await flushInbox();
+    expect(mockTranscribeFile).not.toHaveBeenCalled();
+    await flushInbox();
+    expect(mockTranscribeFile).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores a stale stat read when modify arrives before it resolves", async () => {
+    const file = audio();
+    emit("create", file);
+    let finishStat!: (stat: unknown) => void;
+    (app.vault.adapter.stat as jest.Mock).mockImplementationOnce(() => new Promise(resolve => { finishStat = resolve; }));
+    await flushInbox();
+    emit("modify", file);
+    finishStat({ type: "file", ...file.stat });
+    await settle();
+    expect(mockTranscribeFile).not.toHaveBeenCalled();
+    await flushInbox();
+    expect(mockTranscribeFile).toHaveBeenCalledTimes(1);
+  });
+
+  it("Stop cancels a bulk file still syncing before any upload", async () => {
+    const files = await queueBulk(3);
+    files[0].stat.size += 1024;
+    emit("modify", files[0]);
+    confirmation().onConfirm(files.map(file => ({ file })));
+    await settle();
+    stop();
+    await settle();
+    expect(mockTranscribeFile).not.toHaveBeenCalled();
+    expect(widget().markStopped).toHaveBeenCalledWith({ status: "Stopped by you", detailLines: ["Skipped 3 remaining files."] });
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it("destroy aborts stability waits without uploading or leaving timers", async () => {
+    const file = audio();
+    emit("create", file);
+    file.stat.size += 1;
+    await flushInbox();
+    expect(mockTranscribeFile).not.toHaveBeenCalled();
+    service.destroy();
+    await settle();
+    expect(jest.getTimerCount()).toBe(0);
+    expect(mockTranscribeFile).not.toHaveBeenCalled();
   });
 
   it("transcribes files moved into a nested inbox and preserves source links", async () => {
@@ -154,7 +352,7 @@ describe("InboxTranscriptionService through its host interface", () => {
   });
 
   it("writes the durable operation marker and chooses a non-overwriting note path", async () => {
-    (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValueOnce(audio("Inbox/audio.md")).mockReturnValue(null);
+    vaultFiles.set("Inbox/audio.md", audio("Inbox/audio.md"));
     emit("create", audio());
     await flushInbox();
     expect(app.vault.create).toHaveBeenCalledTimes(1);
@@ -277,6 +475,7 @@ describe("InboxTranscriptionService through its host interface", () => {
     const resumed = service.resumeDeferredFiles();
     await settle();
     const next = audio("Inbox/during-resume.mp3");
+    vaultFiles.set(next.path, next);
     emit("create", next);
     await flushInbox();
     expect(mockTranscribeFile).toHaveBeenCalledTimes(1);
