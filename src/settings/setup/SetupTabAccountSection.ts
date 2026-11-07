@@ -16,8 +16,8 @@ import { UpgradePlanModal } from "../../modals/UpgradePlanModal";
 import {
   CONNECT_ERROR_COPY,
   LICENSE_CONFIRMING_COPY,
-  START_CHAT_LABEL,
   canStartHostedChat,
+  firstChatAction,
   creditsReadyLine,
   signedInLine,
 } from "../../modals/AccountConnectOutcome";
@@ -102,11 +102,12 @@ export function renderAccountSection(
   };
   renderStatus(null);
   if (tabInstance.accountConnectOutcome && canStartHostedChat(tabInstance.accountConnectOutcome)) {
+    const first = firstChatAction(plugin);
     statusSetting.addButton((button) => {
       button
-        .setButtonText(START_CHAT_LABEL)
+        .setButtonText(first.label)
         .setCta()
-        .onClick(() => void plugin.startHostedChat());
+        .onClick(first.onSelect);
       button.buttonEl.setAttribute("data-testid", "settings.account.start-chat");
     });
   }

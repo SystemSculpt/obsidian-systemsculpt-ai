@@ -93,6 +93,8 @@ export type AgentWorkspaceOptions = Readonly<{
   buildMoreMenu?: (menu: Menu) => void;
   onViewPlans?: (error?: ManagedAgentError) => void | Promise<void>;
   showPlanOffer?: boolean;
+  /** The account may go straight to the $9 Monthly checkout (a starter balance). */
+  showMonthlyOffer?: () => boolean;
   /** Opens Monthly checkout from the low-credits offer line. */
   onCreditsOffer?: () => void | Promise<void>;
   onCancelQueued?: (id: string) => void | Promise<void>;
@@ -323,6 +325,8 @@ export class AgentWorkspace extends Component {
       onCopyArtifactPath: options.onCopyArtifactPath,
       showPlanOffer: () => this.showPlanOffer,
       onViewPlans: options.onViewPlans,
+      onMonthlyOffer: options.onCreditsOffer,
+      showMonthlyOffer: options.showMonthlyOffer,
       onRetryFailedTurn: options.onRetryFailedTurn,
       onPrepareIncidentReport: options.onPrepareIncidentReport,
       onCopyIncidentReport: options.onCopyIncidentReport,

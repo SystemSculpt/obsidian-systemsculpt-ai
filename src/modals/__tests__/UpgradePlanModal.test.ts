@@ -134,6 +134,7 @@ function createPlugin(settings: Record<string, unknown> = {}) {
     getSettingsManager: () => ({ updateSettings }),
     openNewChat: jest.fn(),
     startHostedChat: jest.fn().mockResolvedValue(undefined),
+    readyPrompt: jest.fn((): string | null => null),
     openSettingsTab: jest.fn(),
     begin,
     reopen,
@@ -391,6 +392,21 @@ describe("UpgradePlanModal", () => {
     expect(modal.modalEl.textContent).not.toContain("Signed in as");
     findButtonByText(modal.modalEl, "Start a chat").click();
     expect(plugin.startHostedChat).toHaveBeenCalledTimes(1);
+    expect(plugin.startHostedChat).toHaveBeenCalledWith({});
+    expect(document.querySelector(".ss-upgrade-plan-modal")).toBeNull();
+  });
+
+  it("runs the ready prompt on the latest note in one tap after sign-in (T-5302)", () => {
+    const plugin = createPlugin();
+    plugin.readyPrompt.mockReturnValue("Summarize [[Trip plan]]");
+    const modal = UpgradePlanModal.openOnce(plugin);
+    UpgradePlanModal.showConnectOutcome({
+      kind: "signed-in", name: null, email: "user@example.test", licenseValid: true, starterCredits: 500,
+    });
+    expect(Array.from(modal["footerEl"].querySelectorAll("button")).map((button) => button.textContent))
+      .toEqual(["Summarize my latest note", "Done"]);
+    findButtonByText(modal.modalEl, "Summarize my latest note").click();
+    expect(plugin.startHostedChat).toHaveBeenCalledWith({ prompt: "Summarize [[Trip plan]]" });
     expect(document.querySelector(".ss-upgrade-plan-modal")).toBeNull();
   });
 

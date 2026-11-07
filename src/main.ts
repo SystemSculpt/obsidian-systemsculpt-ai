@@ -6,7 +6,7 @@
 /**
  * SystemSculpt AI Plugin for Obsidian
  */
-import { Plugin, Notice, apiVersion, requireApiVersion } from "obsidian";
+import { MarkdownView, Plugin, Notice, apiVersion, requireApiVersion } from "obsidian";
 import { setClientPluginVersion } from "./services/api/clientIdentity";
 import { checkObsidianCompatibility, MINIMUM_OBSIDIAN_VERSION } from "./core/plugin/lifecycle/ObsidianCompat";
 import { SystemSculptSettings, DEFAULT_SETTINGS, LogLevel, LICENSE_URL } from "./types";
@@ -38,6 +38,9 @@ import { AgentIncidentRecorder } from "./core/diagnostics/AgentIncidentRecorder"
 import { AgentIncidentStore } from "./core/diagnostics/AgentIncidentStore";
 import { DiagnosticsSessionLifecycle } from "./core/diagnostics/DiagnosticsSessionLifecycle";
 import { DiagnosticsFacade } from "./core/diagnostics/DiagnosticsFacade";
+import { insideFolder, readyPrompt } from "./chat/ReadyPrompt";
+import { searchVaultExclusions } from "./services/search/VaultExclusions";
+import { resolveKnownChatsDirectories } from "./views/chatview/storage/ChatTranscriptLocations";
 import { SettingsNavigator, type SettingsNavigationApi } from "./core/settings/SettingsNavigator";
 import {
   getHostDeviceType,
@@ -1453,10 +1456,31 @@ export default class SystemSculptPlugin extends Plugin {
   /**
    * After sign-in: closes settings and shows a chat on SystemSculpt hosted AI
    * with its composer focused. The saved default backend stays as it is.
+   * With `prompt`, a fresh hosted chat sends it at once (the ready prompt).
    */
-  public async startHostedChat(): Promise<void> {
+  public async startHostedChat(options: Readonly<{ prompt?: string }> = {}): Promise<void> {
     (this.app as typeof this.app & { setting?: { close?: () => void } }).setting?.close?.();
-    await this.getViewManager().startHostedChat();
+    await this.getViewManager().startHostedChat(options);
+  }
+
+  /** "Summarize [[latest note]]" for this vault (T-5302), or null when it has no notes yet. */
+  public readyPrompt(): string | null {
+    const settings = this.settings;
+    const search = searchVaultExclusions(this);
+    const templates = (this.app as typeof this.app & {
+      internalPlugins?: { getPluginById?: (id: string) => { instance?: { options?: { folder?: unknown } } } | null };
+    }).internalPlugins?.getPluginById?.("templates")?.instance?.options?.folder;
+    const ownFolders = [
+      "SystemSculpt",
+      settings.studioDefaultProjectsFolder,
+      ...resolveKnownChatsDirectories(settings),
+      typeof templates === "string" ? templates : "",
+    ];
+    const leaf = this.app.workspace.getMostRecentLeaf?.(this.app.workspace.rootSplit);
+    return readyPrompt(this.app, {
+      isExcluded: (path) => search.isExcluded(path) || ownFolders.some((folder) => insideFolder(path, folder ?? "")),
+      openNote: leaf?.view instanceof MarkdownView ? leaf.view.file : null,
+    });
   }
 
   public async openCreditsBalanceModal(options?: {

@@ -29,6 +29,7 @@ import type { ChatMessage } from "../../types";
 import type { ChatExportOptions } from "../../types/chatExport";
 import { isMutatingTool, type ToolApprovalPolicy } from "../../utils/toolPolicy";
 import { isPlanAccessError, planRequiredError, PLAN_REQUIRED_MESSAGE } from "../../utils/errors";
+import { isStarterBalance } from "../../utils/licenseUtils";
 import { hasActivePlan, UpgradePlanModal } from "../../modals/UpgradePlanModal";
 import { SYSTEMSCULPT_WEBSITE, withPluginAttribution } from "../../constants/externalServices";
 import { openExternalUrl } from "../../utils/externalUrl";
@@ -680,10 +681,8 @@ export class AgentChatView extends ItemView {
       onRename: (title) => this.renameFromHeader(title),
       buildMoreMenu: (menu) => this.addChatMenuItems(menu),
       showPlanOffer: this.shouldOfferPlan(),
-      onCreditsOffer: () => openExternalUrl(
-        withPluginAttribution(SYSTEMSCULPT_WEBSITE.MONTHLY_LOW_CREDITS, "chat"),
-        this.containerEl.ownerDocument.defaultView ?? undefined,
-      ).then(() => undefined),
+      showMonthlyOffer: () => isStarterBalance(this.creditsBalance),
+      onCreditsOffer: () => this.openMonthlyCheckout(),
       onViewPlans: (error) => {
         if (isPlanAccessError(error)) {
           UpgradePlanModal.openOnce(this.plugin, { feature: "Chat" });
@@ -702,6 +701,7 @@ export class AgentChatView extends ItemView {
         onAction: (action) => {
           if (action === "sign-in") this.beginAccountConnect("sign-in");
           else if (action === "see-plans") void this.viewPlans();
+          else if (action === "monthly") void this.openMonthlyCheckout();
           else void this.openCreditsBalanceModal();
         },
         onModelMenuOpen: () => this.loadCodexCatalog(),
@@ -1457,6 +1457,15 @@ export class AgentChatView extends ItemView {
     } satisfies ManagedAgentError, retryable, this.creditsBalance?.includedCreditsEntitled === false);
     if (presented.action === "see-plans") {
       this.workspace?.setBanner(presented.message, "error", true);
+    } else if (presented.action === "monthly" && !isStarterBalance(this.creditsBalance)) {
+      // Only a starter account gets the direct Monthly checkout; others compare plans.
+      this.workspace?.setBanner(presented.message, "error", true);
+    } else if (presented.action === "monthly") {
+      this.workspace?.setBanner(presented.message, "error", {
+        label: "Subscribe",
+        testId: "chat.banner.subscribe",
+        onSelect: () => void this.openMonthlyCheckout(),
+      });
     } else {
       this.workspace?.setBanner(presented.message, "error");
     }
@@ -3714,6 +3723,14 @@ export class AgentChatView extends ItemView {
     const path = this.getChatHistoryFilePath();
     const file = path ? this.app.vault.getAbstractFileByPath(path) : null;
     if (file instanceof TFile) await this.app.workspace.getLeaf("tab").openFile(file);
+  }
+
+  /** The $9 Monthly checkout, one tap from every low or out-of-credits surface (T-5302). */
+  private openMonthlyCheckout(): Promise<void> {
+    return openExternalUrl(
+      withPluginAttribution(SYSTEMSCULPT_WEBSITE.MONTHLY_LOW_CREDITS, "chat"),
+      this.containerEl.ownerDocument.defaultView ?? undefined,
+    ).then(() => undefined);
   }
 
   private viewPlans(): Promise<void> {

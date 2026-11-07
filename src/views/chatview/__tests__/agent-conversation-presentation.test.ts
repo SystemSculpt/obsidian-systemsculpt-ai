@@ -199,7 +199,7 @@ describe("AgentConversationPresentation product-copy boundary", () => {
       expect(presentAgentError({ code, message: "Remote billing detail." }, false, true)).toEqual({
         heading: "Out of credits",
         message: "$9 a month for 10,000 credits.",
-        action: "see-plans",
+        action: "monthly",
       });
     },
   );

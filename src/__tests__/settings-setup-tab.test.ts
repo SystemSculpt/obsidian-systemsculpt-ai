@@ -67,6 +67,8 @@ const createPluginStub = () => {
     modelService: {
       refreshModels: jest.fn().mockResolvedValue(undefined),
     },
+    startHostedChat: jest.fn().mockResolvedValue(undefined),
+    readyPrompt: jest.fn(() => null),
   } as any;
 };
 
@@ -202,7 +204,6 @@ describe("Setup tab SystemSculpt-only layout", () => {
 
   it("offers Start a chat with the starter credits after a valid sign-in, and not while the license confirms", () => {
     const plugin = createPluginStub();
-    plugin.startHostedChat = jest.fn().mockResolvedValue(undefined);
     const tab = new SystemSculptSettingTab(app, plugin);
     tab.accountConnectOutcome = {
       kind: "signed-in", name: null, email: "user@example.test", licenseValid: true, starterCredits: 500,

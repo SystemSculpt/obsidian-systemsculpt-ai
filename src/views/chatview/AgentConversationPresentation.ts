@@ -16,7 +16,7 @@ const NOT_STARTED_ERROR =
 export type PresentedAgentError = Readonly<{
   heading: string;
   message: string;
-  action?: "see-plans" | "add-credits" | "detect" | "sign-in" | "use-hosted";
+  action?: "see-plans" | "monthly" | "add-credits" | "detect" | "sign-in" | "use-hosted";
   details?: string;
   /** Local report id, or a legacy server incident id while capture settles. */
   reportId?: string;
@@ -74,7 +74,8 @@ export function presentAgentError(
     return {
       heading: "Out of credits",
       message: "$9 a month for 10,000 credits.",
-      action: "see-plans",
+      // One tap to the Monthly checkout, not the pricing page (T-5302).
+      action: "monthly",
     };
   }
   if (error.code === "out_of_credits") {

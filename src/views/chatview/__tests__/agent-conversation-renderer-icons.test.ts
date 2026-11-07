@@ -2652,9 +2652,40 @@ describe("AgentConversationRenderer tail status", () => {
     renderer.unload();
   });
 
-  it.each([true, false])("renders a billing receipt with a plan action only when offered (%s)", async (showPlanOffer) => {
+  it("sends a non-starter account to plans, not straight to Monthly checkout (T-5302)", async () => {
     const parent = document.body.createDiv();
     const onViewPlans = jest.fn();
+    const onMonthlyOffer = jest.fn();
+    const renderer = new AgentConversationRenderer(parent, {
+      app: new App(),
+      sourcePath: () => "",
+      onApprove: jest.fn(),
+      onOpenArtifact: jest.fn(),
+      onCopyArtifactPath: jest.fn(),
+      showPlanOffer: () => true,
+      showMonthlyOffer: () => false,
+      onViewPlans,
+      onMonthlyOffer,
+    });
+    renderer.load();
+    await renderer.renderHistory([{
+      role: "user", message_id: "question", content: "Hello",
+    }, {
+      role: "assistant", message_id: "failure", content: "",
+      terminalOutcome: "failed", terminalFailureCode: "out_of_credits", terminalRetryable: false,
+      terminalReportId: `report_${"b".repeat(32)}`,
+    }]);
+    expect(parent.querySelector('[data-testid="chat.turn.subscribe"]')).toBeNull();
+    parent.querySelector<HTMLButtonElement>('[data-testid="chat.turn.see-plans"]')!.click();
+    expect(onViewPlans).toHaveBeenCalledTimes(1);
+    expect(onMonthlyOffer).not.toHaveBeenCalled();
+    renderer.unload();
+    parent.remove();
+  });
+
+  it.each([true, false])("renders a billing receipt with a plan action only when offered (%s)", async (showPlanOffer) => {
+    const parent = document.body.createDiv();
+    const onMonthlyOffer = jest.fn();
     const renderer = new AgentConversationRenderer(parent, {
       app: new App(),
       sourcePath: () => "",
@@ -2662,7 +2693,8 @@ describe("AgentConversationRenderer tail status", () => {
       onOpenArtifact: jest.fn(),
       onCopyArtifactPath: jest.fn(),
       showPlanOffer: () => showPlanOffer,
-      onViewPlans,
+      onViewPlans: jest.fn(),
+      onMonthlyOffer,
     });
     renderer.load();
     await renderer.renderHistory([{
@@ -2673,12 +2705,13 @@ describe("AgentConversationRenderer tail status", () => {
       terminalReportId: `report_${"a".repeat(32)}`,
     }]);
     expect(parent.querySelector(".systemsculpt-agent-error-heading")?.textContent).toBe("Out of credits");
-    const action = parent.querySelector<HTMLButtonElement>('[data-testid="chat.turn.see-plans"]');
+    const action = parent.querySelector<HTMLButtonElement>('[data-testid="chat.turn.subscribe"]');
     if (showPlanOffer) {
       expect(parent.textContent).toContain("$9 a month for 10,000 credits.");
-      expect(action?.textContent).toBe("See plans");
+      // One tap to the $9 Monthly checkout (T-5302).
+      expect(action?.textContent).toBe("Subscribe");
       action!.click();
-      expect(onViewPlans).toHaveBeenCalledTimes(1);
+      expect(onMonthlyOffer).toHaveBeenCalledTimes(1);
     } else {
       expect(parent.textContent).toContain("Add more to keep chatting.");
       expect(action).toBeNull();

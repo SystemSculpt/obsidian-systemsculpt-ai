@@ -84,6 +84,10 @@ export type AgentConversationRendererOptions = Readonly<{
   onUseHosted?: () => void | Promise<void>;
   onOpenCredits?: () => void | Promise<void>;
   onViewPlans?: (error?: ManagedAgentError) => void | Promise<void>;
+  /** Opens the $9 Monthly checkout. */
+  onMonthlyOffer?: () => void | Promise<void>;
+  /** Only a starter account gets Subscribe; any other account sees plans instead. */
+  showMonthlyOffer?: () => boolean;
   onRetryFailedTurn?: (messageId: string) => void | Promise<void>;
   onPrepareIncidentReport?: (reportId: string, retry?: boolean) => Promise<boolean>;
   onCopyIncidentReport?: (
@@ -2587,7 +2591,7 @@ export class AgentConversationRenderer extends Component {
             text: "Preparing report…",
           }) : null;
         const canRetry = part.retryable && part.retryMessageId && this.options.onRetryFailedTurn
-          && !presented.action?.match(/^(see-plans|add-credits|detect|use-hosted)$/)
+          && !presented.action?.match(/^(see-plans|monthly|add-credits|detect|use-hosted)$/)
           && part.error.code !== "content_filter";
         const actions = canRetry || presented.action || presented.reportId && this.options.onCopyIncidentReport
           ? copy.createDiv({ cls: "systemsculpt-agent-error-actions" }) : null;
@@ -2600,6 +2604,13 @@ export class AgentConversationRenderer extends Component {
           });
           retry.addClass("systemsculpt-agent-error-retry");
           retry.onclick = () => void this.options.onRetryFailedTurn?.(part.retryMessageId!);
+        }
+        const monthlyOffer = presented.action === "monthly"
+          && this.options.onMonthlyOffer
+          && (this.options.showMonthlyOffer?.() ?? true);
+        if (actions && monthlyOffer) {
+          const monthly = createUiAction(actions, { label: "Subscribe", testId: "chat.turn.subscribe", tone: "primary", size: "small" });
+          monthly.onclick = () => void this.options.onMonthlyOffer?.();
         }
         if (actions && presented.action === "add-credits" && this.options.onOpenCredits) {
           const credits = createUiAction(actions, { label: "Add credits", testId: "chat.turn.add-credits", tone: "primary", size: "small" });
@@ -2625,7 +2636,7 @@ export class AgentConversationRenderer extends Component {
           details.createEl("summary", { text: "Details", attr: { "data-testid": "chat.turn.error-details" } });
           details.createEl("pre", { attr: { tabindex: "0" } }).createEl("code", { text: presented.details });
         }
-        if (actions && presented.action === "see-plans" && this.options.onViewPlans) {
+        if (actions && (presented.action === "see-plans" || presented.action === "monthly" && !monthlyOffer) && this.options.onViewPlans) {
           const plans = createUiAction(actions, {
             label: "See plans",
             testId: "chat.turn.see-plans",
