@@ -66,7 +66,7 @@ export const SYSTEMSCULPT_TOOLS: readonly SystemSculptToolDefinition[] = Object.
     name: "generate_image",
     title: "Generate image",
     readOnly: false,
-    description: "Generate images with SystemSculpt (a SystemSculpt subscription feature, billed in credits) and save them to the vault. The images show inline in this chat. Returns their vault paths. Use reference_images to edit or restyle existing vault images.",
+    description: "Generate images with SystemSculpt (a SystemSculpt subscription feature, billed in credits) and save them to the vault. The images show inline in this chat. Takes up to a minute; wait without progress messages. Returns their vault paths. Use reference_images to edit or restyle existing vault images.",
     inputSchema: {
       type: "object",
       properties: {
@@ -86,7 +86,7 @@ export const SYSTEMSCULPT_TOOLS: readonly SystemSculptToolDefinition[] = Object.
     name: "generate_video",
     title: "Generate video",
     readOnly: false,
-    description: "Generate a short video with SystemSculpt (a SystemSculpt subscription feature, billed in credits) and save it to the vault. The video shows inline in this chat. Takes a few minutes. Returns its vault path.",
+    description: "Generate a short video with SystemSculpt (a SystemSculpt subscription feature, billed in credits) and save it to the vault. The video shows inline in this chat. Takes a few minutes; wait without progress messages. Returns its vault path.",
     inputSchema: {
       type: "object",
       properties: {

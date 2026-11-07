@@ -1851,10 +1851,11 @@ export class AgentConversationRenderer extends Component {
     if (!state) return;
     const count = Number(element.dataset.hiddenCount);
     const expanded = this.activityOverflowExpanded(element);
-    const label = element.dataset.activitySummary ?? this.activityOverflowLabel(
+    // Same as the turn summary: "· 2 failed" never strands its dot at a line end.
+    const label = (element.dataset.activitySummary ?? this.activityOverflowLabel(
       Number.isFinite(count) ? count : 0,
       state.latestNode,
-    );
+    )).replace(/ · /gu, " ·\u00a0");
     if (state.label.textContent !== label) state.label.setText(label);
     if (Number(element.dataset.failedCount) > 0) {
       setIcon(state.icon, "circle-alert");
