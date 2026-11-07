@@ -19,7 +19,7 @@ import type SystemSculptPlugin from "../main";
 import type { AccountConnectMode, ConnectOutcome } from "../services/AccountConnectService";
 
 export type UpgradePlanOptions = Readonly<{
-  /** Feature name shown in the description, e.g. "Chat" or "Transcription". */
+  /** Request context; all features share the same Pro positioning in this prompt. */
   feature?: string;
 }>;
 
