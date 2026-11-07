@@ -236,8 +236,9 @@
   color: var(--ss-ink);
 }
 
+/* Status green alone reads under AA as small text on the light toolbar. */
 .ss-studio-graph-workspace-control-button.is-run {
-  color: var(--ss-success);
+  color: color-mix(in srgb, var(--ss-success) 70%, var(--ss-ink));
 }
 
 .ss-studio-graph-workspace-control-button.is-run:hover {

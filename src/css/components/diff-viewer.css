@@ -108,6 +108,7 @@
 }
 
 .systemsculpt-diff-lines {
+  --ss-diff-number-digits: 3;
   display: flex;
   flex-direction: column;
 }
@@ -141,7 +142,8 @@
 /* Base class covers the -old/-new variants DiffViewer.ts co-applies */
 .systemsculpt-diff-line-number {
   flex-shrink: 0;
-  min-width: 3.5ch;
+  box-sizing: content-box;
+  width: calc(var(--ss-diff-number-digits) * 1ch);
   padding: 0 var(--ss-space-1);
   color: var(--ss-ink-muted);
   text-align: right;
@@ -204,8 +206,15 @@
   }
 }
 
+/* A narrow pane wraps long lines instead of hiding the end of each one
+ * behind a sideways scroll. */
 @container ss-surface (max-width: 600px) {
-  .systemsculpt-diff-line-number {
-    min-width: 2.5ch;
+  .systemsculpt-diff-line {
+    min-width: 0;
+  }
+
+  .systemsculpt-diff-line-content {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
   }
 }

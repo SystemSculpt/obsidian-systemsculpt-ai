@@ -627,6 +627,19 @@ describe("SystemSculptSearchModal", () => {
       expect(((modal as any).listEl as HTMLElement).querySelectorAll("mark.ss-hl").length).toBeGreaterThan(0);
     });
 
+    it("fades the list edge only while more rows sit below", () => {
+      modal.onOpen();
+      const list = (modal as any).listEl as HTMLElement;
+      Object.defineProperty(list, "clientHeight", { configurable: true, value: 300 });
+      Object.defineProperty(list, "scrollHeight", { configurable: true, value: 900 });
+      list.scrollTop = 0;
+      list.dispatchEvent(new Event("scroll"));
+      expect(list.classList.contains("has-more-below")).toBe(true);
+      list.scrollTop = 600;
+      list.dispatchEvent(new Event("scroll"));
+      expect(list.classList.contains("has-more-below")).toBe(false);
+    });
+
     it("drops lone-letter fragments and marks unspaced scripts anywhere", () => {
       expect(highlightTerms("what's the plan")).toEqual(["plan"]);
       expect(highlightTerms("e-mail setup")).toEqual(["setup", "mail"]);

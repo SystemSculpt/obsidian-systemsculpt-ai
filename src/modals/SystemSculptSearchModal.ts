@@ -69,6 +69,7 @@ export class SystemSculptSearchModal extends StandardModal {
 
     this.listEl = shell.createDiv({ cls: "ss-search__list" });
     this.listEl.id = this.listId;
+    this.registerDomEvent(this.listEl, "scroll", () => this.syncListFade());
     this.registerDomEvent(this.listEl, "pointermove", () => {
       this.pointerOverResults = true;
     });
@@ -406,6 +407,14 @@ export class SystemSculptSearchModal extends StandardModal {
       this.combobox?.clearActive();
       this.focusSearchInput();
     }
+    this.syncListFade();
+  }
+
+  /** Rows below the fold fade out at the edge instead of being cut through. */
+  private syncListFade() {
+    const list = this.listEl;
+    if (!list) return;
+    list.classList.toggle("has-more-below", list.scrollTop + list.clientHeight < list.scrollHeight - 1);
   }
 
   private renderResult(result: SearchHit, query: string): HTMLElement {

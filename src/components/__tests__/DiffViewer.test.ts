@@ -24,6 +24,18 @@ describe("DiffViewer", () => {
       .toEqual(["−", "+"]);
   });
 
+  it("sizes every number column in a hunk to its longest number", () => {
+    const host = document.body.createDiv();
+    new DiffViewer({
+      container: host,
+      diffResult: parseUnifiedDiff("@@ -98,2 +98,3 @@\n line 98\n line 99\n+line 100")!,
+      fileName: "Plan.md",
+      showLineNumbers: true,
+    }).render();
+    const lines = host.querySelector<HTMLElement>(".systemsculpt-diff-lines");
+    expect(lines?.style.getPropertyValue("--ss-diff-number-digits")).toBe("3");
+  });
+
   it("hides duplicate file headers without hiding an unmatched-edit warning", () => {
     const host = document.body.createDiv();
     new DiffViewer({

@@ -1,6 +1,13 @@
 /* ------------------------------------------------------------------ *
  * Text editor (markdown surface)
  * ------------------------------------------------------------------ */
+/* A text node's text box fills the rest of the card instead of stopping at
+ * its last raw-editor height above a band of empty card. */
+.ss-studio-node-card.is-expanded-text-node {
+  display: flex;
+  flex-direction: column;
+}
+
 .ss-studio-node-text-editor-wrap {
   display: flex;
   flex-direction: column;
@@ -25,7 +32,12 @@
 
 .ss-studio-node-text-display-mode {
   display: inline-flex;
+  align-items: center;
   gap: var(--ss-space-0);
+}
+
+.ss-studio-node-text-display-mode-label {
+  margin-inline-end: var(--ss-space-1);
 }
 
 /* Raw and Rendered show one surface at a time; note cards have no mode toggle. */

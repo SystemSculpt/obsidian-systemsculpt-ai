@@ -281,6 +281,14 @@ export class DiffViewer {
     const linesContainer = hunkEl.createDiv({
       cls: 'systemsculpt-diff-lines'
     });
+    // Every number column in a hunk is as wide as its longest number, so a
+    // line with no old (or new) number keeps its text in line with the rest.
+    const digits = hunk.reduce((widest, line) => Math.max(
+      widest,
+      String(line.oldLineNumber ?? '').length,
+      String(line.newLineNumber ?? '').length,
+    ), 1);
+    linesContainer.setCssProps({ '--ss-diff-number-digits': String(digits) });
 
     // Render each line in the hunk
     hunk.forEach(line => {
