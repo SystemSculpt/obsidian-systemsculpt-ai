@@ -551,7 +551,7 @@ function parseCapabilityList(value: unknown): readonly ThinAgentCapability[] {
       );
     }
     seen.add(key);
-    capabilities.push(Object.freeze({ id: item.id as ThinAgentCapability["id"], version: item.version as 1 }));
+    capabilities.push(Object.freeze({ id: item.id as ThinAgentCapability["id"], version: item.version }));
   }
   return Object.freeze(capabilities.sort((left, right) =>
     left.id.localeCompare(right.id) || left.version - right.version));
