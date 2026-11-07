@@ -361,6 +361,7 @@ video.systemsculpt-agent-media-frame {
   font-family: var(--font-interface);
   font-size: var(--ss-text-xs);
   overflow-wrap: anywhere;
+  text-wrap: pretty;
 }
 
 .systemsculpt-agent-media-caption a { color: var(--ss-ink-muted); }
