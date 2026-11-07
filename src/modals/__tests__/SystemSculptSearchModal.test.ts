@@ -560,6 +560,29 @@ describe("SystemSculptSearchModal", () => {
       expect(listEl.querySelectorAll("mark.ss-hl")).toHaveLength(2);
     });
 
+    it("marks the question's content words at word starts, not every 'the'", async () => {
+      modal.onOpen();
+      plugin._testEngine.search.mockResolvedValue(
+        createMockSearchResponse({
+          results: [
+            {
+              path: "notes/ferry.md",
+              title: "Old ferry crossing",
+              excerpt: "Then the ferry stopped at the landing.",
+              score: 0.9,
+              origin: "semantic",
+              updatedAt: Date.now(),
+            },
+          ],
+        })
+      );
+
+      await (modal as any).executeSearch("when did the ferry stop");
+
+      const marks = [...((modal as any).listEl as HTMLElement).querySelectorAll("mark.ss-hl")].map((mark) => mark.textContent);
+      expect(marks).toEqual(["ferry", "ferry", "stop"]);
+    });
+
     it("does not show a missing-preview placeholder for metadata-only recents", async () => {
       modal.onOpen();
       await flush();
