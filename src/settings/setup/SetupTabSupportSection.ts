@@ -32,4 +32,11 @@ export function renderSupportSection(
     href: SYSTEMSCULPT_WEBSITE.FEEDBACK,
     ariaLabel: "Open the feedback form on GitHub (opens in new tab)",
   });
+
+  const supportSetting = createCatalogSetting(root, "account.patreon");
+  createExternalHelpLink(supportSetting.controlEl, {
+    text: "Support us on Patreon",
+    href: SYSTEMSCULPT_WEBSITE.PATREON_SETTINGS,
+    datasetTestId: "settings.patreon",
+  });
 }

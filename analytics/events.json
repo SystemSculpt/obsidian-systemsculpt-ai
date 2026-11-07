@@ -8,6 +8,15 @@
   },
   "events": [
     {
+      "name": "patreon_support_referral",
+      "kind": "attribution-only",
+      "description": "Direct Patreon support links carry utm_campaign=patreon_everywhere and utm_source=plugin_settings, plugin_upgrade_modal or plugin_funding. Patreon may use these campaign tags; plugin clicks are not measured and no client telemetry or redirect is sent. Patreon support does not activate SystemSculpt Pro.",
+      "endpoints": ["patreon.com/SystemSculpt"],
+      "where": ["src/constants/externalServices.ts", "manifest.json"],
+      "owner": "engineer",
+      "added": "2026-11-07"
+    },
+    {
       "name": "plugin_feedback.queued",
       "kind": "server",
       "description": "Explicit feedback durably queued for support; operational count only, without message text or account identity. No client telemetry or form-open tracking.",

@@ -17,6 +17,10 @@ Source of truth: `src/settings/SettingsTabRegistry.ts`.
 | `Advanced` | Quick actions, reset defaults, diagnostics recording (off by default), and diagnostics tools |
 | `Send feedback` | One message sent to SystemSculpt support, with plugin version and your account when signed in |
 
+## Support
+
+In **Account → Support**, choose **Support us on Patreon** to help fund SystemSculpt. Patreon support does not activate Pro.
+
 ## Chat execution and automatic detection
 
 On desktop, choose **SystemSculpt**, **Claude Code** or **Codex**. An explicit choice wins over automatic detection, and existing paid hosted

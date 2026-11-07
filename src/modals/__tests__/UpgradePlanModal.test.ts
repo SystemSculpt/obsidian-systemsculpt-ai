@@ -163,6 +163,31 @@ describe("UpgradePlanModal", () => {
     jest.clearAllMocks();
   });
 
+  it.each([{}, { userEmail: "user@example.test" }, { userEmail: "user@example.test", licenseKey: "lapsed-key" }])(
+    "keeps Patreon support external, attributed and separate from plan activation: %j",
+    (settings) => {
+      const plugin = createPlugin(settings);
+      const before = { ...plugin.settings };
+      const modal = new UpgradePlanModal(plugin);
+      modal.onOpen();
+      const { hrefs, spy } = spyOnAnchorClicks();
+      try {
+        const link = modal.modalEl.querySelector<HTMLButtonElement>('[data-testid="upgrade-plan.patreon"]')!;
+        expect(link.textContent).toBe("Support us on Patreon");
+        link.click();
+        expect(hrefs).toEqual([
+          "https://www.patreon.com/SystemSculpt?utm_source=plugin_upgrade_modal&utm_campaign=patreon_everywhere",
+        ]);
+        expect(plugin.settings).toEqual(before);
+        expect(plugin.begin).not.toHaveBeenCalled();
+        expect(plugin.updateSettings).not.toHaveBeenCalled();
+        expect(modal.modalEl.textContent).not.toContain("Finish your purchase");
+      } finally {
+        spy.mockRestore();
+      }
+    },
+  );
+
   it("leads a signed-out vault with free starter credits and sign-up", async () => {
     const plugin = createPlugin();
     const modal = new UpgradePlanModal(plugin, { feature: "Chat" });

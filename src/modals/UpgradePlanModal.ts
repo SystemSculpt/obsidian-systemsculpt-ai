@@ -210,6 +210,7 @@ export class UpgradePlanModal extends StandardModal {
       this.close();
       this.plugin.openSettingsTab("account");
     });
+    this.addLink("upgrade-plan.patreon", "Support us on Patreon", SYSTEMSCULPT_WEBSITE.PATREON_UPGRADE);
     this.addActionButton("upgrade-plan.create-account", "Start free", () => this.beginConnect("sign-up"), true);
     this.addActionButton("upgrade-plan.sign-in", "Sign in", () => this.beginConnect("sign-in"), false, "log-in");
   }
@@ -232,6 +233,7 @@ export class UpgradePlanModal extends StandardModal {
       }, true, "credit-card");
     }
     this.addLink("upgrade-plan.sync", "Already paid? Sync", () => this.beginConnect("sign-in"));
+    this.addLink("upgrade-plan.patreon", "Support us on Patreon", SYSTEMSCULPT_WEBSITE.PATREON_UPGRADE);
     this.addActionButton(
       "upgrade-plan.yearly",
       "Subscribe yearly",
