@@ -177,7 +177,7 @@
 .ss-surface .ss-button.systemsculpt-agent-attachment-suggestion.is-reserved {
   opacity: 0;
   visibility: hidden;
-  transition: opacity 120ms ease, visibility 0s linear 120ms;
+  transition: opacity var(--ss-dur-fast) var(--ss-ease), visibility var(--ss-dur-fast) var(--ss-ease);
 }
 
 @media (prefers-reduced-motion: reduce) {
