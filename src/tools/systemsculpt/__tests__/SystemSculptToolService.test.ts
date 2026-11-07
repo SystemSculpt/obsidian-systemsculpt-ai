@@ -7,6 +7,8 @@ import { decodeSystemSculptToolOutput, encodeSystemSculptToolResult } from "../S
 import { answerClaudeToolBridgeMessage } from "../../../services/claude/ClaudeToolBridge";
 import { presentTurnMedia } from "../../../views/chatview/TurnMedia";
 import type { AgentToolPart } from "../../../chat/ChatConversation";
+import { claudeToolBridgeArgs } from "../../../services/claude/ClaudeToolBridge";
+import { requiresUserApproval } from "../../../utils/toolPolicy";
 
 const SUBSCRIBE = "https://systemsculpt.com/checkout?resourceId=monthly&cta=plugin_chat_tools_monthly";
 const CREDITS = "https://systemsculpt.com/buy-credits";
@@ -116,6 +118,52 @@ describe("SystemSculpt chat tools", () => {
   });
 });
 
+describe("billing and approval", () => {
+  it("keys a generation on the agent's call ID, so a replayed call never buys a second job", async () => {
+    const { host: fake, images } = host();
+    await new SystemSculptToolService(fake).call("generate_image", { prompt: "A fox" }, signal(), "call_ABC:1/x");
+    expect((images.generate.mock.calls[0] as unknown as [{ operationId: string }])[0].operationId).toBe("chat-image-call_ABC1x");
+    images.generate.mockRejectedValueOnce(new Error("Operation already exists."));
+    const replay = await new SystemSculptToolService(fake).call("generate_image", { prompt: "A fox" }, signal(), "call_ABC:1/x");
+    expect(replay).toMatchObject({ ok: false, message: expect.stringMatching(/not run twice/u) });
+  });
+
+  it("asks in Ask mode before tools that change files or spend credits, never for reads", () => {
+    for (const name of ["generate_image", "generate_video", "studio_create_workflow", "studio_edit_workflow", "studio_run_workflow"]) {
+      expect(requiresUserApproval(name, { mode: "ask" })).toBe(true);
+      expect(requiresUserApproval(name, { mode: "auto" })).toBe(false);
+    }
+    for (const name of ["studio_list_workflows", "studio_open_workflow", "studio_list_outputs"]) expect(requiresUserApproval(name, { mode: "ask" })).toBe(false);
+  });
+
+  it("lets Claude Code's Ask before edits question cover every tool that changes something", () => {
+    const allowed = (mode: string) => { const args = claudeToolBridgeArgs(mode); const at = args.indexOf("--allowedTools"); return at < 0 ? [] : args[at + 1].split(","); };
+    expect(allowed("manual")).toEqual(["mcp__systemsculpt__studio_list_workflows", "mcp__systemsculpt__studio_open_workflow", "mcp__systemsculpt__studio_list_outputs"]);
+    expect(allowed("acceptEdits")).toEqual(["mcp__systemsculpt"]);
+    expect(allowed("plan")).toEqual([]);
+  });
+
+  it("gates Studio tools behind the subscription too", async () => {
+    const studio = { listProjects: jest.fn() };
+    const { host: fake } = host({ hasLicenseKey: () => false, studio: () => studio as never });
+    const result = await new SystemSculptToolService(fake).call("studio_list_workflows", {}, signal());
+    expect(result).toMatchObject({ ok: false, link: { label: "Subscribe" }, message: expect.stringMatching(/^SystemSculpt Studio comes with a SystemSculpt subscription\./u) });
+  });
+
+  it("stops a Studio run with the chat and shows only files made by this run", async () => {
+    const runProject = jest.fn(async () => ({ runId: "run_2", status: "success", startedAt: "", finishedAt: "", error: null, executedNodeIds: ["new"], cachedNodeIds: ["old"] }));
+    const entry = (nodeId: string) => ({ nodeId, nodeKind: "studio.image_generation", nodeVersion: "1", inputFingerprint: "", outputs: {}, updatedAt: "", runId: "r",
+      artifacts: [{ hash: nodeId, mimeType: "image/png", sizeBytes: 4, path: `SystemSculpt/Studio/P/assets/${nodeId}.png` }] });
+    const studio = { runProject, getProjectNodeCache: jest.fn(async () => ({ schema: "studio.node-cache.v1", projectId: "p", updatedAt: "", entries: { new: entry("new"), old: entry("old") } })) };
+    const { host: fake } = host({ studio: () => studio as never });
+    const stop = new AbortController();
+    const result = await new SystemSculptToolService(fake).call("studio_run_workflow", { path: "SystemSculpt/Studio/P.systemsculpt" }, stop.signal);
+    expect((runProject.mock.calls[0] as unknown[])[1]).toEqual({ signal: stop.signal });
+    expect(result.media).toEqual([{ kind: "image", path: "SystemSculpt/Studio/P/assets/new.png", mimeType: "image/png" }]);
+    expect((result.data as { nodes: unknown[] }).nodes).toHaveLength(2);
+  });
+});
+
 describe("tool results in chat", () => {
   const encoded = encodeSystemSculptToolResult({ ok: true, message: "Saved", media: [{ kind: "image", path: "SystemSculpt/Images/a.png" }] });
   it.each([
@@ -177,6 +225,11 @@ describe("hosted chat capability", () => {
     expect(contract.parseThinAgentDataPart(request({ id: "systemsculpt.tools", version: 1 }))).toMatchObject({ kind: "known", data: { target: { id: "systemsculpt.tools", version: 1 } } });
     expect(contract.parseThinAgentDataPart(request({ id: "obsidian.vault", version: 1 }, "read"))).toMatchObject({ kind: "known" });
     expect(contract.parseThinAgentDataPart(request({ id: "systemsculpt.other", version: 1 }))).toMatchObject({ kind: "invalid" });
+  });
+
+  it("refuses a tool request aimed at the other capability", () => {
+    expect(contract.parseThinAgentDataPart(request({ id: "obsidian.vault", version: 1 }))).toMatchObject({ kind: "invalid" });
+    expect(contract.parseThinAgentDataPart(request({ id: "systemsculpt.tools", version: 1 }, "read"))).toMatchObject({ kind: "invalid" });
   });
 });
 

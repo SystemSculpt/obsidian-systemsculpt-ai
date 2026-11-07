@@ -62,7 +62,7 @@ export class FirstPartyToolService {
       throw new Error(`Unknown first-party tool: ${requestedName}`);
     }
     const mappedArgs = this.mapVaultArgs(requestedName, args);
-    const execution = this.dispatch(requestedName, mappedArgs, options?.chatView, options?.signal);
+    const execution = this.dispatch(requestedName, mappedArgs, options?.chatView, options?.signal, options?.callId);
     return await this.awaitStartedExecution(execution, options);
   }
 
@@ -86,9 +86,10 @@ export class FirstPartyToolService {
     args: unknown,
     chatView?: FirstPartyToolChatTarget,
     signal?: AbortSignal,
+    callId?: string,
   ): Promise<unknown> {
     if (systemSculptToolName(toolName)) {
-      const result = await systemSculptToolService(this.plugin).call(toolName, args, signal ?? new AbortController().signal);
+      const result = await systemSculptToolService(this.plugin).call(toolName, args, signal ?? new AbortController().signal, callId);
       // The hosted result keeps the same marker Chat reads back from native tool output.
       return JSON.parse(encodeSystemSculptToolResult(result)) as unknown;
     }

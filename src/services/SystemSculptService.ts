@@ -627,6 +627,7 @@ export class SystemSculptService {
     try {
       const data = await this.toolService.executeTool(functionName, parsedArgs, {
         timeoutMs: options.timeoutMs,
+        ...(typeof request?.id === "string" && request.id ? { callId: request.id } : {}),
         signal: options.signal,
         chatView: options.chatView,
       });

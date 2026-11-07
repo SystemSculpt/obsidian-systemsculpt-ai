@@ -86,22 +86,32 @@ export class SystemSculptToolService {
   constructor(private readonly host: SystemSculptToolHost) {}
 
   toolset(): SystemSculptToolset {
-    return { definitions: SYSTEMSCULPT_TOOLS, call: (name, args, signal) => this.call(name, args, signal) };
+    return { definitions: SYSTEMSCULPT_TOOLS, call: (name, args, signal, callId) => this.call(name, args, signal, callId) };
   }
 
-  async call(nativeName: string, rawArgs: unknown, signal: AbortSignal): Promise<SystemSculptToolResult> {
+  /**
+   * callId: the agent's stable ID for this tool call. Generation keys its job
+   * on it, so a call replayed after a reload attaches to the same job instead
+   * of buying a second one.
+   */
+  async call(nativeName: string, rawArgs: unknown, signal: AbortSignal, callId?: string): Promise<SystemSculptToolResult> {
     const name = systemSculptToolName(nativeName);
     if (!name) return { ok: false, message: `Unknown SystemSculpt tool: ${String(nativeName).slice(0, 80)}.` };
     const args = record(rawArgs);
     try {
+      // Every tool is a subscriber feature; Studio's share one line.
+      if (name.startsWith("studio_")) {
+        const denied = await this.admit("SystemSculpt Studio", signal);
+        if (denied) return denied;
+      }
       switch (name) {
-        case "generate_image": return await this.generateImage(args, signal);
-        case "generate_video": return await this.generateVideo(args, signal);
+        case "generate_image": return await this.generateImage(args, signal, callId);
+        case "generate_video": return await this.generateVideo(args, signal, callId);
         case "studio_list_workflows": return await this.listWorkflows();
         case "studio_create_workflow": return await this.createWorkflow(args);
         case "studio_open_workflow": return await this.openWorkflow(args);
         case "studio_edit_workflow": return await this.editWorkflow(args);
-        case "studio_run_workflow": return await this.runWorkflow(args);
+        case "studio_run_workflow": return await this.runWorkflow(args, signal);
         case "studio_list_outputs": return await this.listOutputs(args);
       }
     } catch (error) {
@@ -122,6 +132,9 @@ export class SystemSculptToolService {
     const code = errorCode(error), message = errorText(error);
     if (code === "payment_required" || /insufficient_credits|not enough credits/i.test(message)) {
       return { ok: false, message: `Not enough SystemSculpt credits for this. Buy credits: ${this.host.links.credits} ${LINK_SHOWN}`, link: { label: "Buy credits", url: this.host.links.credits } };
+    }
+    if (/Operation already exists/.test(message)) {
+      return { ok: false, message: "This request already generated, or is generating, its result; it is not run twice. Look in SystemSculpt/Images or SystemSculpt/Videos." };
     }
     if (code === "license_required" || code === "license_rejected" || /license_required|license_rejected/.test(message)) {
       return this.subscribe("This");
@@ -165,12 +178,13 @@ export class SystemSculptToolService {
     return path;
   }
 
-  private operationId(kind: "image" | "video"): string {
-    const id = (this.host.randomId ?? (() => window.crypto.randomUUID()))().replace(/[^A-Za-z0-9-]/g, "").slice(0, 64);
+  private operationId(kind: "image" | "video", callId?: string): string {
+    const stable = callId?.replace(/[^A-Za-z0-9._-]/g, "").slice(0, 100);
+    const id = stable || (this.host.randomId ?? (() => window.crypto.randomUUID()))().replace(/[^A-Za-z0-9-]/g, "").slice(0, 64);
     return `chat-${kind}-${id}`;
   }
 
-  private async generateImage(args: Record<string, unknown>, signal: AbortSignal): Promise<SystemSculptToolResult> {
+  private async generateImage(args: Record<string, unknown>, signal: AbortSignal, callId?: string): Promise<SystemSculptToolResult> {
     const prompt = requiredString(args, "prompt", 8_000);
     const count = optionalInteger(args, "count", 1, 4);
     const referencePaths = Array.isArray(args.reference_images) ? args.reference_images : args.reference_images === undefined ? [] : null;
@@ -180,7 +194,7 @@ export class SystemSculptToolService {
     const denied = await this.admit("Image generation", signal);
     if (denied) return denied;
     const references = await Promise.all((referencePaths as string[]).map(path => this.readImage(path)));
-    const operationId = this.operationId("image");
+    const operationId = this.operationId("image", callId);
     const model = optionalString(args, "model", 160), aspectRatio = optionalString(args, "aspect_ratio", 32);
     const quality = optionalString(args, "quality", 32), background = optionalString(args, "background", 32);
     const result = await this.host.images.generate({
@@ -215,7 +229,7 @@ export class SystemSculptToolService {
     };
   }
 
-  private async generateVideo(args: Record<string, unknown>, signal: AbortSignal): Promise<SystemSculptToolResult> {
+  private async generateVideo(args: Record<string, unknown>, signal: AbortSignal, callId?: string): Promise<SystemSculptToolResult> {
     const prompt = requiredString(args, "prompt", 8_000);
     const durationSeconds = optionalInteger(args, "duration_seconds", 1, 60);
     const generateAudio = typeof args.generate_audio === "boolean" ? args.generate_audio : undefined;
@@ -234,7 +248,7 @@ export class SystemSculptToolService {
     }
     const options = { durationSeconds, resolution: optionalString(args, "resolution", 16), aspectRatio: optionalString(args, "aspect_ratio", 32), generateAudio };
     const snapped = model ? snapManagedVideoRequestToModel(model, options) : options;
-    const operationId = this.operationId("video");
+    const operationId = this.operationId("video", callId);
     const result = await this.host.videos.generate({
       operationId,
       sourceIdentity: `chat:${operationId}`,
@@ -335,13 +349,16 @@ export class SystemSculptToolService {
     return { nodes, media };
   }
 
-  private async runWorkflow(args: Record<string, unknown>): Promise<SystemSculptToolResult> {
+  private async runWorkflow(args: Record<string, unknown>, signal: AbortSignal): Promise<SystemSculptToolResult> {
     const path = requiredString(args, "path", 1_000);
     const nodeId = optionalString(args, "node_id", 200);
     const studio = this.host.studio();
-    const summary = nodeId ? await studio.runProjectFromNode(path, nodeId) : await studio.runProject(path);
-    const ran = [...(summary.executedNodeIds ?? []), ...(summary.cachedNodeIds ?? [])];
-    const { nodes, media } = await this.nodeOutputs(path, ran.length ? ran : undefined);
+    const summary = nodeId ? await studio.runProjectFromNode(path, nodeId, { signal }) : await studio.runProject(path, { signal });
+    const executed = summary.executedNodeIds ?? [];
+    const ran = [...executed, ...(summary.cachedNodeIds ?? [])];
+    const { nodes } = await this.nodeOutputs(path, ran.length ? ran : undefined);
+    // Only nodes that ran now show inline; cached outputs are earlier work.
+    const { media } = await this.nodeOutputs(path, executed);
     if (summary.error) {
       const failure = this.failure(new Error(summary.error));
       return { ...failure, message: failure.link ? failure.message : `The run ${summary.status}: ${summary.error.slice(0, 1_500)}`, ...(media.length ? { media } : {}), data: { runId: summary.runId, status: summary.status, nodes } };

@@ -8,6 +8,8 @@ export interface FirstPartyToolChatTarget {
 
 export interface FirstPartyToolExecutionOptions {
   timeoutMs?: number;
+  /** The agent's stable tool call ID; SystemSculpt generation keys its job on it. */
+  callId?: string;
   signal?: AbortSignal;
   chatView?: FirstPartyToolChatTarget;
 }

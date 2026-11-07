@@ -6,7 +6,10 @@ import { codexToolActivity } from './CodexActivity';
 import { codexClientRequestKind, codexClientResponse } from './CodexClientRequests';
 import type { CodexExecutionOptions } from './CodexExecutionSettings';
 import { LocalAgentChatSession } from './LocalAgentChatSession';
-import { encodeSystemSculptToolResult, type SystemSculptToolset } from '../../tools/systemsculpt/SystemSculptTools';
+import { encodeSystemSculptToolResult, type SystemSculptToolResult, type SystemSculptToolset } from '../../tools/systemsculpt/SystemSculptTools';
+import { isChangingSystemSculptTool } from '../../utils/toolPolicy';
+
+const toolReply = (result: SystemSculptToolResult) => ({ success: result.ok || Boolean(result.link), contentItems: [{ type: 'inputText', text: encodeSystemSculptToolResult(result) }] });
 
 /** Codex receives SystemSculpt tools as dynamic tools on a new native thread. */
 function codexDynamicTools(toolset: SystemSculptToolset | undefined): Record<string, unknown>[] | undefined {
@@ -24,8 +27,18 @@ export class CodexChatSession extends LocalAgentChatSession {
       activity: (activity, item) => { const update = codexToolActivity(activity, item, turn.workingDirectory); if (update) events.tool(update); },
       request: async (method, params, requestSignal, requestId) => {
         if (method === 'item/tool/call' && toolset) {
-          const result = await toolset.call(String(params.tool ?? ''), params.arguments ?? {}, requestSignal);
-          return { success: result.ok || Boolean(result.link), contentItems: [{ type: 'inputText', text: encodeSystemSculptToolResult(result) }] };
+          const tool = String(params.tool ?? ''), callId = typeof params.callId === 'string' ? params.callId : undefined;
+          // Dynamic tools skip Codex's own approvals, so Chat applies the chosen mode itself.
+          const mode = executionOptions().approvalMode ?? 'auto';
+          if (isChangingSystemSculptTool(tool) && mode === 'read-only') return toolReply({ ok: false, message: 'Read only: this would change vault files or spend credits, so it did not run.' });
+          if (isChangingSystemSculptTool(tool) && mode !== 'auto') {
+            const decision = await events.approval({
+              callId: callId ?? String(requestId ?? tool), name: tool, input: isRecord(params.arguments) ? params.arguments : {}, state: 'approval-required',
+              native: { agent: 'codex', workingDirectory: turn.workingDirectory, requestMethod: method, requestId },
+            }, requestSignal, false);
+            if (!decision.approved) return toolReply({ ok: false, message: 'The person declined this action.' });
+          }
+          return toolReply(await toolset.call(tool, params.arguments ?? {}, requestSignal, callId));
         }
         const kind = codexClientRequestKind(method);
         if (!kind) throw new Error(`Chat does not support the Codex client request ${method}.`);

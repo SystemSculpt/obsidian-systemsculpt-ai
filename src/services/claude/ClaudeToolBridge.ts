@@ -1,5 +1,5 @@
 import { isRecord } from '../../utils/jsonRecord';
-import { encodeSystemSculptToolResult, SYSTEMSCULPT_TOOL_SERVER, type SystemSculptToolset } from '../../tools/systemsculpt/SystemSculptTools';
+import { encodeSystemSculptToolResult, SYSTEMSCULPT_TOOL_SERVER, SYSTEMSCULPT_TOOLS, type SystemSculptToolset } from '../../tools/systemsculpt/SystemSculptTools';
 
 /**
  * SystemSculpt tools reach Claude Code as an in-process tool server over the
@@ -9,8 +9,11 @@ import { encodeSystemSculptToolResult, SYSTEMSCULPT_TOOL_SERVER, type SystemScul
  */
 export function claudeToolBridgeArgs(permissionMode: string | undefined): string[] {
   const config = JSON.stringify({ mcpServers: { [SYSTEMSCULPT_TOOL_SERVER]: { type: 'sdk', name: SYSTEMSCULPT_TOOL_SERVER } } });
-  // Plan only keeps every action behind Claude Code's question; other modes run SystemSculpt tools directly.
-  return ['--mcp-config', config, ...(permissionMode === 'plan' ? [] : ['--allowedTools', `mcp__${SYSTEMSCULPT_TOOL_SERVER}`])];
+  // Plan asks for every tool. Ask before edits (and Claude Code's own settings) pre-allows only
+  // the reads, so generating, creating, editing and running go through Claude Code's question.
+  const reads = SYSTEMSCULPT_TOOLS.filter(tool => tool.readOnly).map(tool => `mcp__${SYSTEMSCULPT_TOOL_SERVER}__${tool.name}`);
+  const allowed = permissionMode === 'plan' ? [] : permissionMode === 'manual' || permissionMode === 'settings' ? reads : [`mcp__${SYSTEMSCULPT_TOOL_SERVER}`];
+  return ['--mcp-config', config, ...(allowed.length ? ['--allowedTools', allowed.join(',')] : [])];
 }
 
 /** Sent once per process before the first message so Claude Code connects the tool server. */

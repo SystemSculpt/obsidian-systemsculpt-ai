@@ -1,4 +1,5 @@
 import { isBase64 } from "../../utils/base64";
+import { systemSculptToolName } from "../../tools/systemsculpt/SystemSculptTools";
 
 export const THIN_AGENT_CONTRACT_VERSION = "thin-agent-v1" as const;
 export const THIN_AGENT_CAPABILITY_CONTRACT_VERSION =
@@ -831,7 +832,9 @@ function parseClientToolRequest(
     || !isRecord(data.target)
     || typeof data.target.id !== "string"
     || !CAPABILITY_IDS.has(data.target.id)
-    || data.target.version !== 1) {
+    || data.target.version !== 1
+    // Each tool belongs to one capability.
+    || (data.target.id === "systemsculpt.tools") !== Boolean(systemSculptToolName(data.tool_name))) {
     return { kind: "invalid", type };
   }
   const input = parseClientToolInput(data.input);

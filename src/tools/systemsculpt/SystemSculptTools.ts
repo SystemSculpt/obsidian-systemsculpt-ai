@@ -48,7 +48,8 @@ export type SystemSculptToolResult = Readonly<{
 /** The call bridge each execution backend uses. */
 export type SystemSculptToolset = Readonly<{
   definitions: readonly SystemSculptToolDefinition[];
-  call: (name: string, args: unknown, signal: AbortSignal) => Promise<SystemSculptToolResult>;
+  /** callId: the agent's stable ID for this call, when it has one. */
+  call: (name: string, args: unknown, signal: AbortSignal, callId?: string) => Promise<SystemSculptToolResult>;
 }>;
 
 /** Claude Code names a bridged tool `mcp__<server>__<tool>`; this is the server part. */

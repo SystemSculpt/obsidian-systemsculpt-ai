@@ -251,6 +251,16 @@ function previewDetails(part: AgentToolPart): Detail[] {
   if (text(network.host)) add("Access", `Connect to ${network.host as string}`);
   if (text(input.grantRoot)) add("Access", `Change files in ${displayPath(part, input.grantRoot as string)}`);
   details.push(...permissionDetails(part, input.permissions));
+  const own = systemSculptToolName(part.name);
+  if (own) {
+    // What the person is agreeing to: the prompt or workflow, and whether it spends credits.
+    add("Prompt", input.prompt);
+    const workflow = text(input.path);
+    if (workflow) details.push({ label: "Workflow", value: displayPath(part, workflow), path: resolvedPath(part, workflow).vaultPath ?? undefined });
+    if (own === "studio_create_workflow") add("Name", input.name);
+    if (own === "generate_image" || own === "generate_video") add("Cost", "Uses SystemSculpt credits");
+    if (own === "studio_run_workflow") add("Cost", "Hosted steps use SystemSculpt credits");
+  }
   return details;
 }
 function renderOutput(container: HTMLElement, output: unknown): void {
