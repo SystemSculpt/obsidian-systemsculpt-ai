@@ -38,6 +38,44 @@
   color: var(--ss-warning);
 }
 
+/* Status icon leading the title ("You're in"); the auto margin keeps the
+ * close button at the far end of the space-between title row. */
+.ss-upgrade-plan__title-icon {
+  display: flex;
+  flex-shrink: 0;
+  color: var(--ss-success);
+}
+
+.ss-upgrade-plan__title-icon svg {
+  width: 22px;
+  height: 22px;
+}
+
+.ss-upgrade-plan__title-icon + .ss-modal__title {
+  margin-right: auto;
+}
+
+/* Compact result: header and actions with no body, so neither divider
+ * frames an empty band. */
+.ss-upgrade-plan-modal.is-compact .ss-modal__content {
+  display: none;
+}
+
+.ss-upgrade-plan-modal.is-compact .ss-modal__header {
+  border-bottom: none;
+  padding-bottom: var(--ss-space-2);
+}
+
+.ss-upgrade-plan-modal.is-compact .ss-modal__footer {
+  border-top: none;
+}
+
+/* Desktop: match the header's top inset below the buttons. The mobile
+ * sheet keeps its safe-area bottom padding. */
+body:not(.ss-mobile-layout) .ss-upgrade-plan-modal.is-compact .ss-modal__footer {
+  padding-bottom: var(--ss-space-5);
+}
+
 .ss-upgrade-plan__detail {
   color: var(--ss-ink-muted);
   font-size: var(--ss-text-base);

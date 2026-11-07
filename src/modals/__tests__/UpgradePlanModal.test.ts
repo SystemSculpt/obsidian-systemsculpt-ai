@@ -390,6 +390,11 @@ describe("UpgradePlanModal", () => {
     expect(modal.modalEl.textContent).toContain("You're in");
     expect(modal.modalEl.textContent).toContain("500 credits ready.");
     expect(modal.modalEl.textContent).not.toContain("Signed in as");
+    // One tight block: the check leads the title and no empty body band remains.
+    expect(modal["headerEl"].querySelector(".ss-modal__title-container > .ss-upgrade-plan__title-icon + .ss-modal__title"))
+      .not.toBeNull();
+    expect(modal.contentEl.childElementCount).toBe(0);
+    expect(modal.modalEl.classList.contains("is-compact")).toBe(true);
     findButtonByText(modal.modalEl, "Start a chat").click();
     expect(plugin.startHostedChat).toHaveBeenCalledTimes(1);
     expect(plugin.startHostedChat).toHaveBeenCalledWith({});

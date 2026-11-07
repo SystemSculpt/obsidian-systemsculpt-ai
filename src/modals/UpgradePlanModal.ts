@@ -150,7 +150,9 @@ export class UpgradePlanModal extends StandardModal {
     this.resetSections();
     if (outcome.kind === "signed-in" && canStartHostedChat(outcome)) {
       this.addTitle("You're in", creditsReadyLine(outcome) ?? signedInLine(outcome.email));
-      this.renderIcon("check-circle-2", "is-success");
+      this.renderTitleIcon("check-circle-2", "is-success");
+      // Title, credits line and actions read as one block: no empty body band.
+      this.modalEl.addClass("is-compact");
       const first = firstChatAction(this.plugin);
       this.addActionButton("upgrade-plan.start-chat", first.label, () => {
         this.close();
@@ -161,7 +163,7 @@ export class UpgradePlanModal extends StandardModal {
     }
     if (outcome.kind === "signed-in") {
       this.addTitle("You're signed in", signedInLine(outcome.email));
-      this.renderIcon("check-circle-2", "is-success");
+      this.renderTitleIcon("check-circle-2", "is-success");
       this.addDetail(LICENSE_CONFIRMING_COPY);
       this.addActionButton("upgrade-plan.done", "Done", () => this.close(), true);
       return;
@@ -369,7 +371,21 @@ export class UpgradePlanModal extends StandardModal {
     setIcon(iconEl, icon);
   }
 
+  /** A small status icon leading the title, in place of a body icon. */
+  private renderTitleIcon(icon: string, toneClass: string): void {
+    const titleEl = this.headerEl.querySelector(".ss-modal__title");
+    const rowEl = titleEl?.parentElement;
+    if (!titleEl || !rowEl) return;
+    const iconEl = rowEl.createDiv({
+      cls: `ss-upgrade-plan__title-icon ${toneClass}`,
+      attr: { "aria-hidden": "true" },
+    });
+    setIcon(iconEl, icon);
+    titleEl.before(iconEl);
+  }
+
   private resetSections(): void {
+    this.modalEl.removeClass("is-compact");
     this.headerEl.empty();
     this.contentEl.empty();
     this.footerEl.empty();
