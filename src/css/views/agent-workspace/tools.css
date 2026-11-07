@@ -492,6 +492,7 @@
 .ss-native-tool-preview .ss-agent-tool-details dd {
   margin: 0 0 var(--ss-space-2);
   overflow-wrap: anywhere;
+  text-wrap: pretty;
 }
 .ss-native-tool-preview pre,
 .ss-hosted-tool-preview pre {

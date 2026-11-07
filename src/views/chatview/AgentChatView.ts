@@ -3075,6 +3075,17 @@ export class AgentChatView extends ItemView {
   }
 
   private showApprovalNotice(part: AgentToolPart): void {
+    // A theme switch or resize can hide the chat for a frame; only a chat that
+    // stays hidden needs the notice.
+    const view = this.containerEl.ownerDocument.defaultView;
+    if (!view) return this.openApprovalNotice(part);
+    view.setTimeout(() => {
+      const pending = this.agent.getSnapshot().parts.some(candidate => candidate.kind === "tool" && candidate.state === "approval-required");
+      if (pending && !this.containerEl.isShown()) this.openApprovalNotice(part);
+    }, 400);
+  }
+
+  private openApprovalNotice(part: AgentToolPart): void {
     if (this.closing || this.approvalNoticeSurface?.isConnected) return;
     const owner = this.containerEl.ownerDocument;
     const surface = createSurfaceElement(owner, "div");

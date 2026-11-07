@@ -191,9 +191,10 @@
   margin-bottom: 0;
 }
 
-/* No one-word last lines in finished replies; streaming text keeps plain wrap
- * so lines already read never reflow. */
-.systemsculpt-agent-part.is-text:not(.is-streaming) :is(p, li) {
+/* No one-word last lines in finished replies, or in text a later step already
+ * follows; only the text still growing keeps plain wrap so read lines never reflow. */
+.systemsculpt-agent-part.is-text:not(.is-streaming) :is(p, li),
+.systemsculpt-agent-part.is-text.is-streaming:not(:last-child) :is(p, li) {
   text-wrap: pretty;
 }
 
