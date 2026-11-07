@@ -672,11 +672,15 @@ const HIGHLIGHT_STOP_WORDS = new Set([
   "you", "your",
 ]);
 
-/** The query's content words, longest first; its own words when it has no others. */
+/**
+ * The query's content words, longest first. A one-word query keeps its word
+ * even when it is a common one; a half-typed question ("when did the") marks
+ * nothing rather than every "the".
+ */
 export function highlightTerms(query: string): string[] {
   const words = [...new Set(query.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [])];
   const content = words.filter((word) => !HIGHLIGHT_STOP_WORDS.has(word));
-  return (content.length > 0 ? content : words).sort((a, b) => b.length - a.length);
+  return (content.length > 0 || words.length !== 1 ? content : words).sort((a, b) => b.length - a.length);
 }
 
 function escapeRegExp(value: string): string {
