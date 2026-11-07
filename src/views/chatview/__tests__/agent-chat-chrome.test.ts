@@ -422,6 +422,12 @@ describe("chromeAccount", () => {
     expect(chromeAccount({ licenseKey: "key" }, credits({ includedCreditsEntitled: true }))).toBe("paid");
     expect(chromeAccount({ licenseKey: "key", subscriptionStatus: "lifetime" }, null)).toBe("paid");
   });
+
+  it("keeps a failed renewal on its plan, never the plan offer (T-5348)", () => {
+    const pastDue = credits({ includedCreditsEntitled: false, totalRemaining: 0, subscriptionStatus: "past_due" });
+    expect(chromeAccount({ licenseKey: "key" }, pastDue)).toBe("paid");
+    expect(chromeAccount({ licenseKey: "key" }, credits({ includedCreditsEntitled: false, totalRemaining: 0, subscriptionStatus: null }))).toBe("no-plan");
+  });
 });
 
 describe("presentCreditsOffer", () => {

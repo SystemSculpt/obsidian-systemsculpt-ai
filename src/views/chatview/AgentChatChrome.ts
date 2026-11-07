@@ -137,6 +137,8 @@ export function chromeAccount(
     credits?.includedCreditsEntitled === true
     || settings.subscriptionStatus === "active"
     || settings.subscriptionStatus === "lifetime"
+    // A failed renewal still holds its plan: it fixes its card, never re-buys (T-5348).
+    || (credits !== null && needsPaymentFix(credits))
   ) return "paid";
   if (credits?.includedCreditsEntitled === false && credits.totalRemaining <= 0) return "no-plan";
   return "signed-in";

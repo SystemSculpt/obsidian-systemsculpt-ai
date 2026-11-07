@@ -278,6 +278,7 @@
     "transcription.progress.retry",
     "transcription.progress.stop-waiting",
     "upgrade-plan.back",
+    "upgrade-plan.billing",
     "upgrade-plan.code",
     "upgrade-plan.complete-code",
     "upgrade-plan.create-account",

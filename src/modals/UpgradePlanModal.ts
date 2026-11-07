@@ -210,15 +210,21 @@ export class UpgradePlanModal extends StandardModal {
       this.addDetail(`Signed in as ${email}.`);
     }
     this.addDetail(PLAN_REQUIRED_MESSAGE);
-    if (hasActivePlan(this.plugin)) {
-      this.addDetail("Your license isn't active. Renew, then sync below.");
+    // A key the server rejects may be a renewal whose card failed: Billing
+    // fixes it; a second subscription would bill twice (T-5348).
+    const lapsed = hasActivePlan(this.plugin);
+    if (lapsed) {
+      this.addDetail("Your license isn't active. If a payment failed, update your card in Billing, then sync below.");
+      this.addActionButton("upgrade-plan.billing", "Open billing", () => {
+        void openExternalUrl(SYSTEMSCULPT_WEBSITE.BILLING, getSurfaceOwnerWindow(this.modalEl));
+      }, true, "credit-card");
     }
     this.addLink("upgrade-plan.sync", "Already paid? Sync", () => this.beginConnect("sign-in"));
     this.addActionButton(
       "upgrade-plan.yearly",
       "Subscribe yearly",
       () => this.openPurchase(SYSTEMSCULPT_WEBSITE.YEARLY),
-      true,
+      !lapsed,
       "external-link",
     );
     this.addActionButton(
