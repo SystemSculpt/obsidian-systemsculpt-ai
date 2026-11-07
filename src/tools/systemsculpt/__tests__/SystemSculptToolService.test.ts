@@ -190,3 +190,18 @@ describe("saved chats", () => {
     expect(presentTurnMedia([{ id: "a", order: 0, kind: "tool", messageId: "m", callId: "a", name: "generate_image", state: "succeeded", input: {}, location: "server", output: { data: refused.data } } as unknown as AgentToolPart]).notices).toHaveLength(1);
   });
 });
+
+describe("one copy of each image", () => {
+  const part = { id: "a", order: 0, kind: "tool", messageId: "m", callId: "a", name: "generate_image", state: "succeeded", input: {}, location: "server",
+    output: { data: { systemsculpt_tool: 1, ok: true, message: "Saved", media: [{ kind: "image", path: "SystemSculpt/Images/a b.png" }] } } } as unknown as AgentToolPart;
+  it.each([
+    "![Stone](<SystemSculpt/Images/a b.png>)",
+    "![Stone](SystemSculpt/Images/a%20b.png)",
+    "![[a b.png]]",
+  ])("shows a file the reply embeds only in the reply: %s", answer => {
+    expect(presentTurnMedia([part], `Here it is:\n\n${answer}`).media).toEqual([]);
+  });
+  it("still shows it when the reply only names or links it", () => {
+    expect(presentTurnMedia([part], "Saved [a b.png](<SystemSculpt/Images/a b.png>).").media).toHaveLength(1);
+  });
+});

@@ -8,15 +8,30 @@ export type TurnMedia = Readonly<{
   notices: readonly Readonly<{ text: string; label: string; url: string }>[];
 }>;
 
-/** Generated images and videos (and Subscribe lines) from this turn's SystemSculpt tool results. */
-export function presentTurnMedia(parts: readonly AgentToolPart[]): TurnMedia {
+/** Whether the reply already embeds this file (`![](path)`, `![](<path>)` or `![[path]]`). */
+function embeddedInAnswer(answer: string, path: string): boolean {
+  if (!answer.includes("![")) return false;
+  const name = path.split("/").pop() ?? path;
+  for (const match of answer.matchAll(/!\[\[([^\]|#]+)|!\[[^\]]*\]\(\s*<?([^>)]+?)>?\s*\)/gu)) {
+    const target = decodeURI((match[1] ?? match[2] ?? "").trim()).replace(/^\.?\//u, "");
+    if (target === path || target.endsWith(`/${path}`) || target === name) return true;
+  }
+  return false;
+}
+
+/**
+ * Generated images and videos (and Subscribe lines) from this turn's
+ * SystemSculpt tool results. A file the reply already embeds shows once, in
+ * the reply.
+ */
+export function presentTurnMedia(parts: readonly AgentToolPart[], answer = ""): TurnMedia {
   const media = new Map<string, SystemSculptMedia>();
   const notices = new Map<string, { text: string; label: string; url: string }>();
   for (const part of parts) {
     if (!systemSculptToolName(part.name) || (part.state !== "succeeded" && part.state !== "failed")) continue;
     const result = decodeSystemSculptToolOutput(part.output?.data);
     if (!result) continue;
-    for (const item of result.media ?? []) media.set(item.path, item);
+    for (const item of result.media ?? []) if (!embeddedInAnswer(answer, item.path)) media.set(item.path, item);
     if (result.link) {
       const text = result.message.replace(new RegExp(`\\s*${result.link.label}:\\s*\\S+\\s*$`, "u"), "").trim();
       notices.set(`${result.link.url}\n${text}`, { text, label: result.link.label, url: result.link.url });
@@ -34,9 +49,9 @@ type TurnMediaActions = Readonly<{
  * Keeps one media block per turn, rebuilt only when its content changes, so a
  * playing video or a focused link survives later renders.
  */
-export function renderTurnMedia(app: App, parent: HTMLElement, parts: readonly AgentToolPart[], actions: TurnMediaActions): HTMLElement | null {
+export function renderTurnMedia(app: App, parent: HTMLElement, parts: readonly AgentToolPart[], actions: TurnMediaActions, answer = ""): HTMLElement | null {
   const existing = parent.querySelector<HTMLElement>(":scope > .systemsculpt-agent-turn-media");
-  const presented = presentTurnMedia(parts);
+  const presented = presentTurnMedia(parts, answer);
   if (!presented.media.length && !presented.notices.length) {
     existing?.remove();
     return null;

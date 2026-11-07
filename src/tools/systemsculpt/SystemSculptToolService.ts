@@ -16,6 +16,9 @@ import {
   type SystemSculptToolset,
 } from "./SystemSculptTools";
 
+/** The chat shows generated files under the reply; an embed in the reply would show them twice. */
+const SHOWN_IN_CHAT = "The chat already shows generated files under your reply, so don't embed them again.";
+
 export const GENERATED_IMAGES_FOLDER = "SystemSculpt/Images";
 export const GENERATED_VIDEOS_FOLDER = "SystemSculpt/Videos";
 
@@ -203,7 +206,7 @@ export class SystemSculptToolService {
     } catch { /* Recovery retries the receipt. */ }
     return {
       ok: true,
-      message: `Saved ${media.length === 1 ? "1 image" : `${media.length} images`} to the vault: ${media.map(item => item.path).join(", ")}. They are shown in the chat.`,
+      message: `Saved ${media.length === 1 ? "1 image" : `${media.length} images`} to the vault: ${media.map(item => item.path).join(", ")}. ${SHOWN_IN_CHAT}`,
       media,
       data: { model: result.model },
     };
@@ -256,7 +259,7 @@ export class SystemSculptToolService {
     } catch { /* Recovery retries the receipt. */ }
     return {
       ok: true,
-      message: `Saved the video to the vault: ${media.map(item => item.path).join(", ")}. It is shown in the chat.`,
+      message: `Saved the video to the vault: ${media.map(item => item.path).join(", ")}. ${SHOWN_IN_CHAT}`,
       media,
       data: { model: model?.id ?? requested },
     };
@@ -339,7 +342,7 @@ export class SystemSculptToolService {
     }
     return {
       ok: true,
-      message: `Run ${summary.status}.${media.length ? ` ${media.length} generated ${media.length === 1 ? "file is" : "files are"} shown in the chat.` : ""}`,
+      message: `Run ${summary.status}.${media.length ? ` Generated: ${media.map(item => item.path).join(", ")}. ${SHOWN_IN_CHAT}` : ""}`,
       ...(media.length ? { media } : {}),
       data: { runId: summary.runId, status: summary.status, nodes },
     };

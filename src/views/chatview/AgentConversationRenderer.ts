@@ -724,7 +724,8 @@ export class AgentConversationRenderer extends Component {
         }
         const historicalTools = turnParts.flatMap((part) => part.type === "tool_call"
           ? [historicalToolPart(part.data)] : []);
-        this.renderTurnMediaBlock(body, historicalTools);
+        this.renderTurnMediaBlock(body, historicalTools,
+          turnParts.flatMap((part) => part.type === "content" && typeof part.data === "string" ? [part.data] : []).join("\n"));
         this.renderTurnChanges(body, historicalTools);
       } else {
         const { content } = presented[0];
@@ -1460,7 +1461,11 @@ export class AgentConversationRenderer extends Component {
     const receipt = presentation.busy ? null
       : body.querySelector<HTMLElement>(":scope > .systemsculpt-agent-turn-changes");
     // Generated media shows as soon as a tool saves it, above the working status.
-    const media = this.renderTurnMediaBlock(body, orderedParts.filter((part): part is AgentToolPart => part.kind === "tool"));
+    const media = this.renderTurnMediaBlock(
+      body,
+      orderedParts.filter((part): part is AgentToolPart => part.kind === "tool"),
+      orderedParts.flatMap((part) => part.kind === "text" ? [part.markdown] : []).join("\n"),
+    );
     const laneNodes = visibleLanes.map((lane) => lane.node);
     if (media) laneNodes.splice(tailStatus ? laneNodes.length - 1 : laneNodes.length, 0, media);
     this.reconcileChildren(body, [...laneNodes, ...(receipt ? [receipt] : [])]);
@@ -2864,11 +2869,11 @@ export class AgentConversationRenderer extends Component {
     if (!details.open || state.revision !== revision) state.dirty = true;
   }
 
-  private renderTurnMediaBlock(parent: HTMLElement, parts: readonly AgentToolPart[]): HTMLElement | null {
+  private renderTurnMediaBlock(parent: HTMLElement, parts: readonly AgentToolPart[], answer: string): HTMLElement | null {
     return renderTurnMedia(this.options.app, parent, parts, {
       openFile: (path) => void this.options.onOpenArtifact({ id: path, kind: "generated_file", title: path.split("/").pop() ?? path, path }),
       openLink: (url) => void openExternalUrl(url, parent.ownerDocument.defaultView ?? undefined),
-    });
+    }, answer);
   }
 
   private renderTurnChanges(parent: HTMLElement, parts: readonly AgentToolPart[]): void {
