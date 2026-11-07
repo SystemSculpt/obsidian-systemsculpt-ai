@@ -29,7 +29,7 @@ import type { ChatMessage } from "../../types";
 import type { ChatExportOptions } from "../../types/chatExport";
 import { isMutatingTool, type ToolApprovalPolicy } from "../../utils/toolPolicy";
 import { isPlanAccessError, planRequiredError, PLAN_REQUIRED_MESSAGE } from "../../utils/errors";
-import { isStarterBalance } from "../../utils/licenseUtils";
+import { isStarterBalance, starterOfferLead } from "../../utils/licenseUtils";
 import { hasActivePlan, UpgradePlanModal } from "../../modals/UpgradePlanModal";
 import { SYSTEMSCULPT_WEBSITE, withPluginAttribution } from "../../constants/externalServices";
 import { openExternalUrl } from "../../utils/externalUrl";
@@ -3725,12 +3725,23 @@ export class AgentChatView extends ItemView {
     if (file instanceof TFile) await this.app.workspace.getLeaf("tab").openFile(file);
   }
 
-  /** The $9 Monthly checkout, one tap from every low or out-of-credits surface (T-5302). */
-  private openMonthlyCheckout(): Promise<void> {
-    return openExternalUrl(
+  /**
+   * The $9 Monthly checkout, one tap from every low or out-of-credits surface
+   * (T-5302). The balance is read fresh first: an account that already bought
+   * Monthly or credits since the offer appeared gets the credits view instead
+   * of a second checkout.
+   */
+  private async openMonthlyCheckout(): Promise<void> {
+    await this.refreshCreditsBalance({ requireFresh: true, reason: "view_open" }).catch(() => undefined);
+    const balance = this.creditsBalance;
+    if (balance && !(isStarterBalance(balance) && starterOfferLead(balance) !== null)) {
+      await this.openCreditsBalanceModal();
+      return;
+    }
+    await openExternalUrl(
       withPluginAttribution(SYSTEMSCULPT_WEBSITE.MONTHLY_LOW_CREDITS, "chat"),
       this.containerEl.ownerDocument.defaultView ?? undefined,
-    ).then(() => undefined);
+    );
   }
 
   private viewPlans(): Promise<void> {
