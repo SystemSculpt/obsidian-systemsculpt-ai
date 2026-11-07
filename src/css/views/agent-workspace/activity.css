@@ -184,10 +184,7 @@ strong.systemsculpt-agent-activity-overflow-label {
   font-size: var(--ss-text-sm);
   font-weight: 400;
   line-height: 20px;
-  /* Narrow panes wrap to a second line instead of cutting off the outcome. */
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  /* Narrow panes wrap instead of cutting off the outcome (at most 3 clauses plus counts). */
   text-wrap: pretty;
   overflow-wrap: anywhere;
 }

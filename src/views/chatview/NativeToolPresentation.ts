@@ -96,6 +96,12 @@ function realReason(part: AgentToolPart, target: string, title: string): string 
   return candidates.find(candidate => candidate && !repeated.some(value => candidate.toLowerCase() === value.toLowerCase()));
 }
 
+/** A Codex dynamic call stores its whole item; the tool's own arguments sit inside it. */
+function systemSculptArguments(part: AgentToolPart): Record<string, unknown> {
+  const input = record(part.input);
+  return input.type === "dynamicToolCall" ? { ...input, ...record(input.arguments) } : input;
+}
+
 /** Native metadata stays separate from hosted-tool names, policy, and summaries. */
 export function nativeToolPresentation(part: AgentToolPart): NativeToolPresentation | null {
   if (!part.native) return null;
@@ -119,6 +125,7 @@ export function nativeToolPresentation(part: AgentToolPart): NativeToolPresentat
   };
   const systemsculpt = systemSculptToolName(part.name);
   if (systemsculpt) {
+    const input = systemSculptArguments(part);
     const workflow = text(input.path) ? basename(text(input.path)!).replace(/\.systemsculpt$/iu, "") : text(input.name) ?? "workflow";
     const [verb, completed, running, target, icon] = ({
       generate_image: ["Generate", "Generated", "Generating", typeof input.count === "number" && input.count > 1 ? "images" : "image", "image"],
@@ -257,6 +264,7 @@ function previewDetails(part: AgentToolPart): Detail[] {
   details.push(...permissionDetails(part, input.permissions));
   const own = systemSculptToolName(part.name);
   if (own) {
+    const input = systemSculptArguments(part);
     // What the person is agreeing to: the prompt or workflow, and whether it spends credits.
     add("Prompt", input.prompt);
     const workflow = text(input.path);

@@ -605,4 +605,10 @@ describe("native preview rendering", () => {
     await renderNativeToolPreview(app, host, part("Bash", { command: "pwd" }));
     expect(Array.from(host.querySelectorAll("*")).every(node => node.ownerDocument === other)).toBe(true);
   });
+
+  it("names the workflow of a completed Codex dynamic call from its own arguments", () => {
+    const item = { type: "dynamicToolCall", id: "call", tool: "studio_list_outputs", arguments: { path: "SystemSculpt/Studio/Garden cards.systemsculpt" }, status: "completed" };
+    const presented = nativeToolPresentation(codex("studio_list_outputs", item, undefined));
+    expect(presented?.completedTitle).toBe("Listed outputs of Garden cards");
+  });
 });
