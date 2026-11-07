@@ -3,6 +3,7 @@
 **Put Claude Code, Codex or hosted AI to work on your Obsidian notes.**
 
 - **Chat with your vault.** Ask about your notes, attach files and images, and let the agent search, create and edit notes. Approval modes decide which changes ask first.
+- **Make media and run Studio from chat.** With a SystemSculpt subscription, any chat agent can make images and videos or create, edit and run Studio workflows. Generation uses hosted SystemSculpt credits, even with your own Claude Code or Codex.
 - **Turn audio into notes.** Record or import audio, or paste a YouTube link, and get a Markdown transcript or a note with a summary and action items.
 - **Find related notes.** Similar Notes shows the notes closest in meaning to the one you are reading.
 
@@ -37,7 +38,8 @@ SystemSculpt 6's managed backend no longer supports your own API keys, custom en
 - Find related notes with a portable semantic index.
 - Record or import audio and transcribe it to Markdown or SRT.
 - Process long audio and YouTube videos into transcripts and structured summaries.
-- Build text, video, document, media, and vault workflows in Studio.
+- Make images and videos from SystemSculpt, Claude Code or Codex chats; results appear in chat and save to `SystemSculpt/Images` and `SystemSculpt/Videos`.
+- Build text, video, document, media, and vault workflows in Studio; list, create, open, edit and run workflows from chat. In Ask modes, confirm generation and workflow changes/runs; Stop also stops a running workflow.
 
 ![The finished action items next to the chat summary](https://raw.githubusercontent.com/SystemSculpt/obsidian-systemsculpt-ai/main/docs/images/readme-chat-result.png)
 
@@ -55,7 +57,7 @@ SystemSculpt checks its first-party release endpoint in the background. On deskt
 
 ## Privacy, network, and local access
 
-- Built-in account, release, and hosted-feature control requests use the first-party SystemSculpt API at `https://systemsculpt.com/api/plugin`. This covers license validation, credits, release checks, and hosted AI, embeddings, transcription, document, audio, and video work, including image attachments. Audio uploads and result downloads can also use signed storage URLs returned by the service. Production builds reject hosted endpoint overrides. Update checks, account checks, and enabled iPhone capture or handoff sync can make network requests without sending a chat message. Native agents and user-configured Studio commands use their own network access.
+- Built-in account, release, and hosted-feature control requests use the first-party SystemSculpt API at `https://systemsculpt.com/api/plugin`. This covers license validation, credits, release checks, and hosted AI, embeddings, transcription, document, audio, image generation, and video work, including image attachments. Audio uploads and result downloads can also use signed storage URLs returned by the service. Production builds reject hosted endpoint overrides. Update checks, account checks, and enabled iPhone capture or handoff sync can make network requests without sending a chat message. Native agents and user-configured Studio commands use their own network access.
 - Hosted requests send the prompts, selected notes, files, images, audio, YouTube URLs, conversation context, and local tool results needed for the feature. SystemSculpt processes that data on its servers and through model-routing, AI model, transcription, video-transcript and cloud storage providers, as described in the [privacy policy](https://systemsculpt.com/privacy?utm_source=github&utm_medium=readme&utm_campaign=evergreen&utm_content=obsidian-plugin). SystemSculpt orchestrates the AI and processing providers; the plugin does not hold their credentials. Hosted chat keeps server-side conversation state as well as the transcript saved in your vault.
 - Enabling Similar Notes sends the Markdown text of included notes to SystemSculpt for hosted indexing; semantic searches also send their query text. Exclusions control background indexing and search discovery, not a blanket restriction on explicitly attached or requested file reads. The returned index is stored locally.
 - The plugin contains no client-side telemetry or third-party advertising. The SystemSculpt service records limited account, usage, billing, and diagnostic metadata for hosted requests as described in the privacy policy. Requests to the SystemSculpt API carry the plugin version, Obsidian version and operating system so that server-side usage statistics can be split by them; no note content is used for analytics.
