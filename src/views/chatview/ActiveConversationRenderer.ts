@@ -231,6 +231,7 @@ export class ActiveConversationRenderer {
       if (presentation.phase === "cancelled") this.options.onAnnounce?.("Stopped");
     }
     this.activeTurn?.toggleClass("is-active", presentation.busy);
+    this.activeTurn?.setAttribute("data-active", String(presentation.busy));
     const hasCommittedFailedProjection = presentation.phase === "failed"
       && snapshot.messages.some((message) =>
         this.options.hasFailedMessage(message.id));
@@ -471,6 +472,8 @@ export class ActiveConversationRenderer {
     if (!node) {
       node = createSurfaceElement(this.root.ownerDocument, "div");
       node.addClass("systemsculpt-agent-part", `is-${part.kind}`);
+      node.dataset.testid = "chat.part";
+      node.dataset.kind = part.kind;
       node.dataset.partKey = key;
       if (isAgentActivityPart(part)) {
         node.dataset.agentActivityRow = "";
@@ -562,6 +565,9 @@ export class ActiveConversationRenderer {
     this.activeTurn = this.root.createDiv({
       cls: "systemsculpt-agent-turn is-assistant is-active",
       attr: {
+        "data-testid": "chat.turn",
+        "data-role": "assistant",
+        "data-active": "true",
         ...(turnId ? { "data-turn-id": turnId } : {}),
       },
     });
@@ -578,13 +584,15 @@ export class ActiveConversationRenderer {
     if (!status) {
       status = this.root.createDiv({
         cls: "systemsculpt-agent-tail-status",
+        attr: { "data-testid": "chat.tail-status" },
       });
       status.createSpan({ cls: "systemsculpt-agent-tail-status-icon" });
-      status.createSpan({ cls: "systemsculpt-agent-tail-status-label" });
+      status.createSpan({ cls: "systemsculpt-agent-tail-status-label", attr: { "data-testid": "chat.tail-status.label" } });
       this.activeTailStatus = status;
     }
     status.className =
       `systemsculpt-agent-tail-status is-${presentation.phase}`;
+    status.dataset.phase = presentation.phase;
     const timed = presentation.progressActive && presentation.phase !== "awaiting-approval";
     const backend = this.options.backendName?.() ?? "SystemSculpt";
     const latestActivity = [...presentation.visibleParts].reverse().find((part) =>

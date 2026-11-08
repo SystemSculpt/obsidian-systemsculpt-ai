@@ -339,7 +339,7 @@ export class SystemSculptSettingTab extends PluginSettingTab {
       results: [],
     };
 
-    const surfaceRoot = containerEl.createDiv({ cls: "ss-settings-surface" });
+    const surfaceRoot = containerEl.createDiv({ cls: "ss-settings-surface", attr: { "data-testid": "settings.surface" } });
     applyPluginSurface(surfaceRoot, "view");
     const settingsModal = containerEl.closest<HTMLElement>(".modal");
     settingsModal?.addClass("ss-settings-host");
@@ -385,7 +385,7 @@ export class SystemSculptSettingTab extends PluginSettingTab {
       attr: { "aria-live": "polite" },
     });
     const layout = surfaceRoot.createDiv({ cls: "ss-settings-layout" });
-    const tabBar = layout.createDiv({ cls: "ss-settings-tab-bar" });
+    const tabBar = layout.createDiv({ cls: "ss-settings-tab-bar", attr: { "data-testid": "settings.tab-bar" } });
     const contentContainer = layout.createDiv({ cls: "ss-settings-panels" });
 
     this.tabContainerEl = tabBar;
@@ -442,6 +442,7 @@ export class SystemSculptSettingTab extends PluginSettingTab {
 
       const panel = contentContainer.createDiv({
         cls: ["ss-tab-panel", "systemsculpt-tab-content"],
+        attr: { "data-testid": `settings.panel.${cfg.id}` },
       });
       panel.dataset.tab = cfg.id;
       tabBindings.push({ id: cfg.id, button, panel });

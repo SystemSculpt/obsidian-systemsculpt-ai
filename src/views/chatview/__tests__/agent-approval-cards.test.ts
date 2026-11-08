@@ -43,6 +43,7 @@ describe("inline approval keyboard ownership", () => {
     ui.cards.sync([part]);
     expect(document.activeElement).toBe(primary(card));
     expect(card.getAttribute("role")).toBe("group");
+    expect(card.querySelector<HTMLElement>('[data-testid="chat.approval.preview"]')?.hidden).toBe(true);
     expect(document.getElementById(card.getAttribute("aria-labelledby")!)?.textContent).toBe("Claude Code wants to edit Plan.md");
     expect(document.getElementById(card.getAttribute("aria-describedby")!)?.textContent).toBe("Notes");
     expect(ui.root.querySelector('[role="status"]')?.textContent).toBe("Claude Code wants to edit Plan.md. Enter to approve, Escape to deny.");

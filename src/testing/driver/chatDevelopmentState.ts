@@ -150,7 +150,7 @@ function chatContainsDevelopmentMarker(
   marker: string,
 ): boolean {
   if (containsExactDevelopmentMarker(composerDraft(input), marker)) return true;
-  return [...container.querySelectorAll(".systemsculpt-agent-turn")]
+  return [...container.querySelectorAll("[data-testid='chat.turn']")]
     .some((turn) => containsExactDevelopmentMarker(turn.textContent ?? "", marker));
 }
 
@@ -320,7 +320,7 @@ async function waitForBlankDevelopmentChat(
       && isVisible(input)
       && composerDraft(input).length === 0
       && (!stop || !isVisible(stop))
-      && container.querySelectorAll(".systemsculpt-agent-turn").length === 0
+      && container.querySelectorAll("[data-testid='chat.turn']").length === 0
       && container.querySelector(
         '[data-testid="chat.composer.attachment.remove"], '
           + '[data-testid="chat.composer.attachment.unpin"]',
@@ -406,7 +406,7 @@ async function beginDevelopmentChat(
       "Refusing to start a development test while the current chat has attachments.",
     );
   }
-  if (!previousChatId && container.querySelectorAll(".systemsculpt-agent-turn").length > 0) {
+  if (!previousChatId && container.querySelectorAll("[data-testid='chat.turn']").length > 0) {
     throw new DriverActionError(
       "Refusing to replace an unsaved chat that already contains messages.",
     );
@@ -1109,7 +1109,7 @@ async function resetDevelopmentChatState(
         + '[data-testid="chat.composer.attachment.unpin"]',
     ) !== null;
     const untouched = composerDraft(input).length === 0
-      && container.querySelectorAll(".systemsculpt-agent-turn").length === 0
+      && container.querySelectorAll("[data-testid='chat.turn']").length === 0
       && (!stop || !isVisible(stop))
       && !hasAttachments;
     const marked = input !== null
@@ -1627,14 +1627,17 @@ function assertAllowedApproval(
   allowedText?: unknown,
 ): string {
   const expectedPath = developmentMarkerFromPath(allowedPath).path;
-  const tool = approvalButton.closest(".systemsculpt-agent-part.is-tool");
-  const label = tool?.querySelector(".systemsculpt-agent-tool-label")?.textContent?.trim();
-  const summary = tool?.querySelector(".systemsculpt-agent-tool-summary")?.textContent?.trim();
-  const previewPath = tool
-    ?.querySelector(".systemsculpt-agent-approval-preview .systemsculpt-diff-filename")
-    ?.textContent
-    ?.trim();
-  if (label !== "Write file" || summary !== expectedPath || previewPath !== expectedPath) {
+  const tool = approvalButton.closest<HTMLElement>("[data-testid='chat.part'][data-kind='tool']");
+  const previews = tool?.querySelectorAll<HTMLElement>(
+    "[data-testid='chat.approval.preview'] [data-testid='chat.diff.file']",
+  );
+  if (
+    tool?.dataset.toolName !== "write"
+    || tool.dataset.toolPath !== expectedPath
+    || tool.dataset.state !== "approval-required"
+    || previews?.length !== 1
+    || previews[0]?.dataset.path !== expectedPath
+  ) {
     throw new DriverActionError(
       "Refusing an approval that is not the exact owned development-test write.",
     );
@@ -1643,8 +1646,8 @@ function assertAllowedApproval(
     throw new DriverActionError("An exact development-test write preview is required.");
   }
   const added = tool?.querySelectorAll(
-    ".systemsculpt-agent-approval-preview "
-      + ".systemsculpt-diff-line-added .systemsculpt-diff-line-content",
+    "[data-testid='chat.approval.preview'] "
+      + "[data-testid='chat.diff.line'][data-change='added'] [data-testid='chat.diff.content']",
   ) ?? [];
   if (added.length !== 1 || added[0]?.textContent !== allowedText) {
     throw new DriverActionError(
@@ -1842,8 +1845,8 @@ async function approveDevelopmentMutationOnce(
   const toolName = expected.toolName as DevelopmentMutationToolName;
   revealActivityTarget(ctx, "chat.approval.allow-once");
   const pendingTools = [...container.querySelectorAll<HTMLElement>(
-    ".systemsculpt-agent-turn.is-assistant.is-active "
-      + ".systemsculpt-agent-part.is-tool.is-approval-required",
+    "[data-testid='chat.turn'][data-role='assistant'][data-active='true'] "
+      + "[data-testid='chat.part'][data-kind='tool'][data-state='approval-required']",
   )].filter(isVisible);
   const approvals = [...container.querySelectorAll<HTMLElement>(
     '[data-testid="chat.approval.allow-once"]',
@@ -1855,10 +1858,10 @@ async function approveDevelopmentMutationOnce(
   }
   const approval = approvals[0];
   const tool = approval?.closest<HTMLElement>(
-    ".systemsculpt-agent-part.is-tool.is-approval-required",
+    "[data-testid='chat.part'][data-kind='tool'][data-state='approval-required']",
   ) ?? null;
   const activeTurn = tool?.closest<HTMLElement>(
-    ".systemsculpt-agent-turn.is-assistant.is-active",
+    "[data-testid='chat.turn'][data-role='assistant'][data-active='true']",
   ) ?? null;
   const toolCallId = tool ? canonicalToolCallId(tool.dataset.partKey ?? "") : null;
   if (

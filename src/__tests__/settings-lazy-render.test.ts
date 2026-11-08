@@ -58,6 +58,29 @@ describe("lazy settings with the production registry", () => {
     return input;
   };
 
+  it("exposes canonical settings structure and ARIA selection state", async () => {
+    tab.display();
+    const surface = tab.containerEl.querySelector<HTMLElement>('[data-testid="settings.surface"]')!;
+    const bar = surface.querySelector<HTMLElement>('[data-testid="settings.tab-bar"]')!;
+    const chat = bar.querySelector<HTMLButtonElement>('[data-testid="settings.tab.chat"]')!;
+    const studio = bar.querySelector<HTMLButtonElement>('[data-testid="settings.tab.studio"]')!;
+    const chatPanel = surface.querySelector<HTMLElement>('[data-testid="settings.panel.chat"]')!;
+    const studioPanel = surface.querySelector<HTMLElement>('[data-testid="settings.panel.studio"]')!;
+    expect(bar.getAttribute("role")).toBe("tablist");
+    expect(chat.getAttribute("role")).toBe("tab");
+    expect(chatPanel.getAttribute("role")).toBe("tabpanel");
+    expect(chat.getAttribute("aria-controls")).toBe(chatPanel.id);
+    expect(chat.getAttribute("aria-selected")).toBe("true");
+    expect(chatPanel.hidden).toBe(false);
+    expect(studioPanel.hidden).toBe(true);
+    studio.click();
+    await flush();
+    expect(chat.getAttribute("aria-selected")).toBe("false");
+    expect(studio.getAttribute("aria-selected")).toBe("true");
+    expect(chatPanel.hidden).toBe(true);
+    expect(studioPanel.hidden).toBe(false);
+  });
+
   it("renders only the shown tab and does no vault walk, credits read, or microphone enumeration", async () => {
     tab.display();
     await flush();

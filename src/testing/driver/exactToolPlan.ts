@@ -284,7 +284,7 @@ function exactTerminalGroupedToolSurface(
     if (collapsedOverflows.some((overflow) =>
       overflow.getAttribute("aria-expanded") !== "true")) return false;
     const rows = [...turn.querySelectorAll<HTMLElement>(
-      ".systemsculpt-agent-part.is-tool",
+      "[data-testid='chat.part'][data-kind='tool']",
     )];
     if (rows.length === 0) return false;
     let logicalIndex = 0;
@@ -317,21 +317,21 @@ function toolsPrecedeTextOnExactSurface(
   exactGrouping: boolean,
 ): boolean {
   const relevant = [...turn.querySelectorAll<HTMLElement>(
-    ".systemsculpt-agent-part.is-tool, .systemsculpt-agent-part.is-text",
+    "[data-testid='chat.part'][data-kind='tool'], [data-testid='chat.part'][data-kind='text']",
   )];
-  const toolRowCount = relevant.filter((part) => part.classList.contains("is-tool")).length;
+  const toolRowCount = relevant.filter((part) => part.dataset.kind === "tool").length;
   if (toolRowCount === 0) return false;
   if (exactGrouping) {
-    return relevant.slice(0, toolRowCount).every((part) => part.classList.contains("is-tool"))
-      && relevant.slice(toolRowCount).every((part) => part.classList.contains("is-text"));
+    return relevant.slice(0, toolRowCount).every((part) => part.dataset.kind === "tool")
+      && relevant.slice(toolRowCount).every((part) => part.dataset.kind === "text");
   }
   const lastToolIndex = relevant.reduce(
-    (latest, part, index) => (part.classList.contains("is-tool") ? index : latest),
+    (latest, part, index) => (part.dataset.kind === "tool" ? index : latest),
     -1,
   );
   const finalPart = relevant[relevant.length - 1];
   return finalPart !== undefined
-    && finalPart.classList.contains("is-text")
+    && finalPart.dataset.kind === "text"
     && lastToolIndex < relevant.length - 1;
 }
 
@@ -557,7 +557,7 @@ export async function assertExactSequentialToolPlan(
         }
         exactSequentialRegistrationProof(records, finalDeliveryScope);
         const assistantTurn = continuationPart.closest<HTMLElement>(
-          ".systemsculpt-agent-turn.is-assistant",
+          "[data-testid='chat.turn'][data-role='assistant']",
         );
         const partKeys = records.map((record) => record.partKey);
         if (
@@ -570,14 +570,14 @@ export async function assertExactSequentialToolPlan(
           );
         }
         const responseErrorCount = sameTurnResponseErrorCount(capture, turnId)
-          + (assistantTurn?.querySelectorAll(".systemsculpt-agent-part.is-error").length ?? 0);
+          + (assistantTurn?.querySelectorAll("[data-testid='chat.part'][data-kind='error']").length ?? 0);
         if (responseErrorCount > 0) {
           throw new DriverActionError(
             "The exact tool-plan turn observed a response-wide error part.",
           );
         }
         const stop = resolveTarget(ctx, "chat.composer.stop");
-        const runStillActive = assistantTurn?.classList.contains("is-active") === true
+        const runStillActive = assistantTurn?.getAttribute("data-active") === "true"
           || (stop !== null && isVisible(stop));
         if (!runStillActive) {
           if (quiescedTurnId !== turnId) {
@@ -662,19 +662,19 @@ export async function assertExactToolPlanCleanClose(
   flushToolLifecycleCapture(capture);
   const view = activeChatView(ctx);
   const matchingTurns = [...container.querySelectorAll<HTMLElement>(
-    ".systemsculpt-agent-turn.is-assistant",
+    "[data-testid='chat.turn'][data-role='assistant']",
   )].filter((turn) => turn.dataset.turnId === proof.turnId);
   const turn = matchingTurns[0] ?? null;
   const responseErrorCount = sameTurnResponseErrorCount(capture, proof.turnId)
     + matchingTurns.reduce(
       (count, turn) => count
-        + turn.querySelectorAll(".systemsculpt-agent-part.is-error").length,
+        + turn.querySelectorAll("[data-testid='chat.part'][data-kind='error']").length,
       0,
     );
   const stop = resolveTarget(ctx, "chat.composer.stop");
   if (
     responseErrorCount !== 0
-    || turn?.classList.contains("is-active") === true
+    || turn?.getAttribute("data-active") === "true"
     || (stop !== null && isVisible(stop))
   ) {
     throw new DriverActionError(
@@ -689,7 +689,7 @@ export async function assertExactToolPlanCleanClose(
 
   const capturedTextParts = capturedExactTextParts(capture, proof.turnId);
   const visibleTextMetadata = [...turn.querySelectorAll<HTMLElement>(
-    ".systemsculpt-agent-part.is-text",
+    "[data-testid='chat.part'][data-kind='text']",
   )]
     .filter((part) => (part.textContent ?? "").trim().length > 0)
     .map((part) => continuationContentMetadata(part.textContent ?? ""));

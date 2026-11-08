@@ -33,15 +33,16 @@ describe("test driver locators", () => {
     settingsDocument.body.append(container);
 
     const surface = settingsDocument.createElement("div");
-    surface.className = "ss-settings-surface";
+    surface.dataset.testid = "settings.surface";
     container.append(surface);
 
     const tabs = settingsDocument.createElement("div");
-    tabs.className = "ss-settings-tab-bar";
+    tabs.dataset.testid = "settings.tab-bar";
     surface.append(tabs);
     const chatTab = settingsDocument.createElement("button");
     chatTab.textContent = "Chat";
     chatTab.dataset.testid = "settings.tab.chat";
+    chatTab.setAttribute("role", "tab");
     chatTab.setAttribute("aria-label", "Chat settings tab");
     tabs.append(chatTab);
 
@@ -53,8 +54,20 @@ describe("test driver locators", () => {
     ].join("");
     surface.append(row);
 
+    const decoySurface = settingsDocument.createElement("div");
+    decoySurface.className = "ss-settings-surface";
+    const decoyTabs = settingsDocument.createElement("div");
+    decoyTabs.className = "ss-settings-tab-bar";
+    decoyTabs.innerHTML = '<button role="tab">Chat</button>';
+    decoySurface.append(decoyTabs);
+    container.prepend(decoySurface);
+    const unmarkedTab = settingsDocument.createElement("button");
+    unmarkedTab.textContent = "Chat";
+    tabs.prepend(unmarkedTab);
+
     const ctx = makeContext(() => container);
     expect(resolveTarget(ctx, "settings.surface")).toBe(surface);
+    expect(resolveTarget(ctx, "settings.tab-bar")).toBe(tabs);
     expect(resolveTarget(ctx, "settings.tab:Chat")).toBe(chatTab);
     expect(resolveTarget(ctx, "settings.tab.chat")).toBe(chatTab);
     expect(resolveTarget(ctx, "label:Chat settings tab")).toBe(chatTab);

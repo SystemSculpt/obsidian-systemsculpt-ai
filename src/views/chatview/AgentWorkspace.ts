@@ -290,7 +290,7 @@ export class AgentWorkspace extends Component {
 
     this.banner = this.element.createDiv({
       cls: "systemsculpt-agent-banner",
-      attr: { "aria-atomic": "true" },
+      attr: { "aria-atomic": "true", "data-testid": "chat.banner" },
     });
     this.banner.toggleAttribute("hidden", true);
 
