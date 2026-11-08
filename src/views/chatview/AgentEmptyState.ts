@@ -1,8 +1,11 @@
+import { setIcon } from "obsidian";
 import { createUiAction } from "../../core/ui/surface";
 import type {
   ChromeStarter,
   EmptyStateNote,
   EmptyStatePresentation,
+  EmptyStatePro,
+  ProCapability,
 } from "./AgentChatChrome";
 
 export type AgentEmptyStateAction =
@@ -10,6 +13,8 @@ export type AgentEmptyStateAction =
   | "sign-in"
   | "see-plans"
   | "detect-again"
+  | "subscribe-pro"
+  | `try-${ProCapability}`
   | NonNullable<EmptyStateNote["action"]>["id"];
 
 export type AgentEmptyStateOptions = Readonly<{
@@ -31,6 +36,9 @@ function appendWithCode(parent: HTMLElement, text: string): void {
     else parent.appendText(part);
   });
 }
+
+/** Each chat view's Pro heading needs its own id for aria-labelledby. */
+let proTitleSequence = 0;
 
 const NOTE_ACTIONS = {
   "switch-below": { testId: "chat.empty.switch-below" },
@@ -113,8 +121,48 @@ export class AgentEmptyState {
         button.onclick = () => this.options.onStarter(starter);
       }
     }
+    if (presentation.pro) this.renderPro(body, presentation.pro);
     if (focused) {
       this.element.querySelector<HTMLElement>(`[data-testid="${focused}"]`)?.focus();
+    }
+  }
+
+  /** What a subscription adds: one line each, then one Subscribe tap; a subscriber gets one tap into each. */
+  private renderPro(parent: HTMLElement, pro: EmptyStatePro): void {
+    const section = parent.createDiv({
+      cls: "systemsculpt-agent-pro",
+      attr: { "data-testid": "chat.empty.pro", "data-kind": pro.kind },
+    });
+    const titleId = `systemsculpt-agent-pro-${++proTitleSequence}`;
+    section.createEl("p", { cls: "systemsculpt-agent-pro-title", text: pro.title, attr: { id: titleId } });
+    const list = section.createEl(pro.kind === "offer" ? "ul" : "div", {
+      cls: "systemsculpt-agent-pro-rows",
+      attr: pro.kind === "offer" ? { "aria-labelledby": titleId } : { role: "group", "aria-labelledby": titleId },
+    });
+    for (const row of pro.rows) {
+      if (pro.kind === "offer") {
+        const item = list.createEl("li", { cls: "systemsculpt-agent-pro-row", attr: { "data-capability": row.id } });
+        setIcon(item.createSpan({ cls: "systemsculpt-agent-pro-icon", attr: { "aria-hidden": "true" } }), row.icon);
+        item.createSpan({ cls: "systemsculpt-agent-pro-label", text: row.label });
+        continue;
+      }
+      const button = createUiAction(list, {
+        label: row.label,
+        icon: row.icon,
+        testId: `chat.empty.pro.${row.id}`,
+        size: "small",
+      });
+      button.addClass("systemsculpt-agent-starter", "systemsculpt-agent-pro-try");
+      button.dataset.capability = row.id;
+      button.onclick = () => this.options.onAction(`try-${row.id}`);
+    }
+    if (pro.subscribe) {
+      const subscribe = section.createEl("button", {
+        cls: "systemsculpt-agent-empty-link systemsculpt-agent-pro-subscribe",
+        text: pro.subscribe,
+        attr: { type: "button", "data-testid": "chat.empty.pro.subscribe" },
+      });
+      subscribe.onclick = () => this.options.onAction("subscribe-pro");
     }
   }
 

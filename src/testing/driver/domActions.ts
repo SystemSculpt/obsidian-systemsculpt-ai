@@ -118,7 +118,7 @@ async function clickTarget(
   const isFailedTurnRetry = element === resolveTarget(ctx, "chat.turn.retry-failed");
   const retryContainer = isFailedTurnRetry ? chatContainer(ctx.app) : null;
   const retryUserTurns = retryContainer?.querySelectorAll<HTMLElement>(
-    ".systemsculpt-agent-turn.is-user",
+    "[data-testid='chat.turn'][data-role='user']",
   );
   const priorRetryUserTurn = retryUserTurns?.[retryUserTurns.length - 1] ?? null;
   const priorRetryMessageId = priorRetryUserTurn?.dataset.messageId ?? "";

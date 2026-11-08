@@ -95,6 +95,15 @@ describe("Chat tab native layout", () => {
     expect(container.querySelector(".ss-favorites-manager")).toBeNull();
   });
 
+  it("groups execution controls before client preferences without changing saved settings", async () => {
+    const { container, updateSettings } = await render();
+    const execution = container.querySelector<HTMLElement>(".ss-chat-execution-settings")!;
+    expect(execution.querySelector(".ss-codex-controls")).not.toBeNull();
+    expect(execution.nextElementSibling?.querySelector(".setting-item-name")?.textContent)
+      .toBe("Default chat tag");
+    expect(updateSettings).not.toHaveBeenCalled();
+  });
+
   it("starts Reduce chat motion off and saves the explicit opt-in", async () => {
     const { container, updateSettings } = await render();
     document.body.append(container);

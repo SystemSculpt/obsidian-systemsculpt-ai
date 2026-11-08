@@ -101,14 +101,14 @@ function registrationObservation(
 
 function registerCapturedTools(capture: ToolLifecycleCapture): void {
   for (const element of capture.container.querySelectorAll<HTMLElement>(
-    ".systemsculpt-agent-part.is-tool",
+    "[data-testid='chat.part'][data-kind='tool']",
   )) {
     if (capture.ignoredToolElements.has(element)) continue;
     const renderedPartKey = element.dataset.partKey;
     if (renderedPartKey && capture.ignoredPartKeys.has(renderedPartKey)) continue;
     const partKey = capturedPartKey(capture, element);
     const assistantTurn = element.closest<HTMLElement>(
-      ".systemsculpt-agent-turn.is-assistant",
+      "[data-testid='chat.turn'][data-role='assistant']",
     );
     const existing = capture.records.get(partKey);
     if (existing) {
@@ -116,7 +116,7 @@ function registerCapturedTools(capture: ToolLifecycleCapture): void {
         && capture.container.contains(existing.element);
       if (!existingIsCurrent) {
         existing.element = element;
-        existing.label = element.querySelector(".systemsculpt-agent-tool-label")
+        existing.label = element.querySelector("[data-testid='chat.tool.label']")
           ?.textContent?.trim() ?? existing.label;
         const replacementTurnId = capturedTurnId(capture, assistantTurn);
         if (!existing.turnId || existing.turnId.startsWith("rendered-turn:")) {
@@ -133,7 +133,7 @@ function registerCapturedTools(capture: ToolLifecycleCapture): void {
       element,
       identityConflict: false,
       partKey,
-      label: element.querySelector(".systemsculpt-agent-tool-label")?.textContent?.trim() ?? null,
+      label: element.querySelector("[data-testid='chat.tool.label']")?.textContent?.trim() ?? null,
       registeredAt: null,
       toolName: null,
       transitions: [],
@@ -161,14 +161,14 @@ function mutationAssistantTurn(
   candidate: HTMLElement,
 ): HTMLElement | null {
   const candidateTurn = candidate.closest<HTMLElement>(
-    ".systemsculpt-agent-turn.is-assistant",
+    "[data-testid='chat.turn'][data-role='assistant']",
   );
   if (candidateTurn) return candidateTurn;
   const target = mutationElement(mutation.target);
-  if (target?.matches(".systemsculpt-agent-turn.is-assistant")) {
+  if (target?.matches("[data-testid='chat.turn'][data-role='assistant']")) {
     return target as HTMLElement;
   }
-  return target?.closest<HTMLElement>(".systemsculpt-agent-turn.is-assistant") ?? null;
+  return target?.closest<HTMLElement>("[data-testid='chat.turn'][data-role='assistant']") ?? null;
 }
 
 function mutationTouchesTool(mutation: MutationRecord, tool: HTMLElement): boolean {
@@ -185,9 +185,9 @@ function mutationTouchesTailStatus(mutation: MutationRecord): boolean {
   const candidates = [mutation.target, ...mutation.addedNodes, ...mutation.removedNodes];
   return candidates.some((node) => {
     const element = mutationElement(node);
-    return element?.matches(".systemsculpt-agent-tail-status") === true
-      || (element?.closest(".systemsculpt-agent-tail-status") ?? null) !== null
-      || (element?.querySelector(".systemsculpt-agent-tail-status") ?? null) !== null;
+    return element?.matches("[data-testid='chat.tail-status']") === true
+      || (element?.closest("[data-testid='chat.tail-status']") ?? null) !== null
+      || (element?.querySelector("[data-testid='chat.tail-status']") ?? null) !== null;
   });
 }
 
@@ -275,13 +275,13 @@ function continuationCandidatesForMutation(mutation: MutationRecord): Set<HTMLEl
   const candidates = new Set<HTMLElement>();
   const collect = (node: Node): void => {
     const element = mutationElement(node);
-    const closest = element?.closest<HTMLElement>(".systemsculpt-agent-part.is-text");
+    const closest = element?.closest<HTMLElement>("[data-testid='chat.part'][data-kind='text']");
     if (closest) candidates.add(closest);
-    if (element?.matches(".systemsculpt-agent-part.is-text")) {
+    if (element?.matches("[data-testid='chat.part'][data-kind='text']")) {
       candidates.add(element as HTMLElement);
     }
     for (const textPart of element?.querySelectorAll<HTMLElement>(
-      ".systemsculpt-agent-part.is-text",
+      "[data-testid='chat.part'][data-kind='text']",
     ) ?? []) {
       candidates.add(textPart);
     }
@@ -330,7 +330,7 @@ function recordContinuationMutations(
   }
   for (const [textPart, candidate] of candidates) {
     const assistantTurn = textPart.closest<HTMLElement>(
-      ".systemsculpt-agent-turn.is-assistant",
+      "[data-testid='chat.turn'][data-role='assistant']",
     );
     const supportEvidence = currentRunSupportEvidence(capture);
     capture.continuationObservations.set(textPart, {
@@ -347,11 +347,11 @@ function responseErrorCandidatesForMutation(mutation: MutationRecord): Set<HTMLE
   const collect = (node: Node): void => {
     const element = mutationElement(node);
     const closest = element?.closest<HTMLElement>(
-      ".systemsculpt-agent-part.is-error",
+      "[data-testid='chat.part'][data-kind='error']",
     );
     if (closest) candidates.add(closest);
     for (const errorPart of element?.querySelectorAll<HTMLElement>(
-      ".systemsculpt-agent-part.is-error",
+      "[data-testid='chat.part'][data-kind='error']",
     ) ?? []) {
       candidates.add(errorPart);
     }
@@ -383,7 +383,7 @@ function recordResponseErrorMutations(
   }
   for (const [errorPart, candidate] of candidates) {
     const assistantTurn = errorPart.closest<HTMLElement>(
-      ".systemsculpt-agent-turn.is-assistant",
+      "[data-testid='chat.turn'][data-role='assistant']",
     );
     capture.responseErrorObservations.set(errorPart, {
       ...candidate.observation,
@@ -397,14 +397,14 @@ function registerCurrentResponseErrors(
   fallback?: ToolDomObservation,
 ): void {
   for (const errorPart of capture.container.querySelectorAll<HTMLElement>(
-    ".systemsculpt-agent-part.is-error",
+    "[data-testid='chat.part'][data-kind='error']",
   )) {
     if (
       capture.ignoredResponseErrorElements.has(errorPart)
       || capture.responseErrorObservations.has(errorPart)
     ) continue;
     const assistantTurn = errorPart.closest<HTMLElement>(
-      ".systemsculpt-agent-turn.is-assistant",
+      "[data-testid='chat.turn'][data-role='assistant']",
     );
     capture.responseErrorObservations.set(errorPart, {
       ...(fallback ?? nextToolObservation(capture)),
@@ -626,10 +626,10 @@ export function startToolLifecycleCapture(ctx: ActionContext): Record<string, un
   const container = chatContainer(ctx.app);
   if (!container) throw new DriverActionError("Chat must be open before capturing tool lifecycle.");
   const existingToolElements = [
-    ...container.querySelectorAll<HTMLElement>(".systemsculpt-agent-part.is-tool"),
+    ...container.querySelectorAll<HTMLElement>("[data-testid='chat.part'][data-kind='tool']"),
   ];
   const existingResponseErrorElements = [
-    ...container.querySelectorAll<HTMLElement>(".systemsculpt-agent-part.is-error"),
+    ...container.querySelectorAll<HTMLElement>("[data-testid='chat.part'][data-kind='error']"),
   ];
   const ignoredPartKeys = new Set(
     existingToolElements
@@ -670,7 +670,11 @@ export function startToolLifecycleCapture(ctx: ActionContext): Record<string, un
   };
   capture.observer.observe(container, {
     attributes: true,
-    attributeFilter: ["class", "data-part-key", "data-status", "data-tool-count"],
+    attributeFilter: [
+      "data-testid", "data-role", "data-active", "data-kind", "data-state",
+      "data-tool-grouped", "data-part-key", "data-status", "data-phase",
+      "data-tool-count", "data-icon-state",
+    ],
     childList: true,
     characterData: true,
     characterDataOldValue: true,

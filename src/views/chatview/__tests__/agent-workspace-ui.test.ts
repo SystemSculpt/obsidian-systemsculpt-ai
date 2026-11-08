@@ -510,7 +510,7 @@ describe("AgentWorkspace", () => {
     expect(onViewPlans).toHaveBeenCalledTimes(1);
     workspace.setBanner("Connection failed", "error");
     expect(parent.querySelector('[data-testid="chat.banner.see-plans"]')).toBeNull();
-    expect(parent.querySelector(".systemsculpt-agent-banner")?.getAttribute("role"))
+    expect(parent.querySelector('[data-testid="chat.banner"]')?.getAttribute("role"))
       .toBe("alert");
     workspace.setQueue([
       {

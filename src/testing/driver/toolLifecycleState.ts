@@ -169,7 +169,7 @@ export interface ToolLifecycleCapture {
 export const toolLifecycleCaptures = new WeakMap<App, ToolLifecycleCapture>();
 
 export function toolLifecycleState(element: HTMLElement): ToolLifecycleState | null {
-  return TOOL_LIFECYCLE_STATES.find((state) => element.classList.contains(`is-${state}`)) ?? null;
+  return TOOL_LIFECYCLE_STATES.find((state) => element.dataset.state === state) ?? null;
 }
 
 export function toolCallCount(element: HTMLElement): number {
@@ -179,7 +179,7 @@ export function toolCallCount(element: HTMLElement): number {
 
 export function exactTerminalRowCallCount(element: HTMLElement): number | null {
   const rawCount = element.getAttribute("data-tool-count");
-  const grouped = element.classList.contains("is-grouped");
+  const grouped = element.dataset.toolGrouped === "true";
   if (rawCount === null) return grouped ? null : 1;
   if (!grouped || !/^[1-9]\d*$/u.test(rawCount)) return null;
   const count = Number(rawCount);
@@ -189,11 +189,11 @@ export function exactTerminalRowCallCount(element: HTMLElement): number | null {
 }
 
 export function toolRowSnapshot(element: HTMLElement): Record<string, unknown> {
-  const stateIcon = element.querySelector<HTMLElement>(".systemsculpt-agent-tool-state-icon");
+  const stateIcon = element.querySelector<HTMLElement>("[data-testid='chat.tool.state']");
   return {
     partKey: element.dataset.partKey ?? null,
     callCount: toolCallCount(element),
-    label: element.querySelector(".systemsculpt-agent-tool-label")?.textContent?.trim() ?? null,
+    label: element.querySelector("[data-testid='chat.tool.label']")?.textContent?.trim() ?? null,
     state: toolLifecycleState(element),
     stateIcon: stateIcon?.dataset.iconState ?? null,
   };
@@ -231,7 +231,7 @@ export function toolRowIsVisuallyTerminal(element: HTMLElement): boolean {
 }
 
 export function toolIsVisuallySettled(element: HTMLElement, container: HTMLElement): boolean {
-  const agentStatus = container.querySelector(".systemsculpt-agent-tail-status")
+  const agentStatus = container.querySelector("[data-testid='chat.tail-status']")
     ?.getAttribute("data-status") ?? null;
   return toolRowIsVisuallyTerminal(element) && agentStatus !== "Working in vault";
 }

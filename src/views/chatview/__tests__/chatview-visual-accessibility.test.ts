@@ -245,6 +245,39 @@ describe("ChatView narrow run-line readability", () => {
   });
 });
 
+describe("ChatView error typography", () => {
+  test("rebalances narrow error text without single-word ending lines", () => {
+    expect(rule(readCss("views/agent-workspace/tools.css"), ".systemsculpt-agent-error-message"))
+      .toMatch(/text-wrap:\s*pretty/);
+  });
+});
+
+describe("ChatView activity alignment", () => {
+  test("keeps live, restored and tail-status labels on the same columns", () => {
+    const activity = readCss("views/agent-workspace/activity.css");
+    const tools = readCss("views/agent-workspace/tools.css");
+    for (const [css, selector] of [
+      [activity, "summary.systemsculpt-agent-activity-header"],
+      [activity, ".systemsculpt-agent-tail-status"],
+      [tools, ".systemsculpt-agent-conversation .systemsculpt-agent-tool-header"],
+    ]) {
+      const header = rule(css, selector);
+      expect(header).toMatch(/gap:\s*var\(--ss-space-1\)/);
+      expect(header).toMatch(/padding:\s*0 var\(--ss-space-1\)/);
+    }
+    expect(rule(activity, ".systemsculpt-agent-tail-status-icon")).toMatch(/width:\s*20px/);
+    expect(rule(tools, ".systemsculpt-agent-conversation .systemsculpt-agent-tool-icon"))
+      .toMatch(/width:\s*20px/);
+    expect(rule(activity, ".systemsculpt-agent-activity-body"))
+      .toMatch(/padding:\s*var\(--ss-space-0\) 0 var\(--ss-space-1\)/);
+  });
+
+  test("matches Provider card padding to the native preference cards", () => {
+    expect(rule(readCss("views/settings.css"), ".ss-settings-surface .ss-codex-controls"))
+      .toMatch(/padding:\s*calc\(var\(--ss-space-4\) - 1px\)/);
+  });
+});
+
 describe("ChatView touch input and disclosure targets", () => {
   test.each([
     ["views/agent-workspace/composer.css", ".systemsculpt-agent-prompt > .systemsculpt-agent-prompt-input"],

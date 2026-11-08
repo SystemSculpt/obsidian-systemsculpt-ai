@@ -663,6 +663,9 @@ export class AgentConversationRenderer extends Component {
         semantics.isToolOnly ? "is-tool-only" : "",
         inlineEdit ? "is-editing" : "",
       ].filter(Boolean).join(" ");
+      row.dataset.testid = "chat.turn";
+      row.dataset.role = message.role;
+      row.dataset.active = "false";
       this.addTurnHeading(row, message.role === "user");
       row.dataset.messageId = anchorMessage.message_id;
       if (turnMessages.length > 1) {
@@ -915,6 +918,8 @@ export class AgentConversationRenderer extends Component {
       const node = parent.createDiv({
         cls: "systemsculpt-agent-part is-reasoning",
         attr: {
+          "data-testid": "chat.part",
+          "data-kind": "reasoning",
           "data-part-key": part.id,
           "data-agent-activity-row": "",
           "data-activity-kind": "reasoning",
@@ -928,6 +933,8 @@ export class AgentConversationRenderer extends Component {
       const node = parent.createDiv({
         cls: "systemsculpt-agent-part is-tool",
         attr: {
+          "data-testid": "chat.part",
+          "data-kind": "tool",
           "data-part-key": toolPartKey(tool.callId),
           "data-agent-activity-row": "",
           "data-activity-kind": "tool",
@@ -941,7 +948,7 @@ export class AgentConversationRenderer extends Component {
     if (content.markdown.trim()) {
       const node = parent.createDiv({
         cls: "systemsculpt-agent-part is-text",
-        attr: { "data-part-key": part.id },
+        attr: { "data-testid": "chat.part", "data-kind": "text", "data-part-key": part.id },
       });
       await this.renderMarkdown(content.markdown, node);
     }
@@ -1150,6 +1157,7 @@ export class AgentConversationRenderer extends Component {
     const body = parent.createDiv({
       cls: "systemsculpt-agent-activity-overflow-body",
       attr: {
+        "data-testid": "chat.activity.body",
         hidden: "",
         role: "group",
         "aria-label": "Tool calls",
@@ -1294,13 +1302,15 @@ export class AgentConversationRenderer extends Component {
     const status = body.createDiv({
       cls: "systemsculpt-agent-tail-status is-cancelled",
       attr: {
+        "data-testid": "chat.tail-status",
+        "data-phase": "cancelled",
         "data-status": "Stopped",
       },
     });
     const icon = status.createSpan({ cls: "systemsculpt-agent-tail-status-icon" });
     setIcon(icon, "square");
     icon.dataset.iconState = "square";
-    status.createSpan({ cls: "systemsculpt-agent-tail-status-label", text: "Stopped" });
+    status.createSpan({ cls: "systemsculpt-agent-tail-status-label", text: "Stopped", attr: { "data-testid": "chat.tail-status.label" } });
   }
 
   private failedTailPart(
@@ -1626,6 +1636,7 @@ export class AgentConversationRenderer extends Component {
       cls: "systemsculpt-agent-render-fallback systemsculpt-agent-banner is-error",
       text: "Part of this chat couldn't display. Reopen it.",
       attr: {
+        "data-testid": "chat.banner",
         role: "alert",
         "aria-live": "assertive",
       },
@@ -1643,6 +1654,8 @@ export class AgentConversationRenderer extends Component {
     suppressToolError = false,
     progressActive = true,
   ): Promise<boolean> {
+    node.dataset.testid = "chat.part";
+    node.dataset.kind = part.kind;
     if (part.kind === "text") {
       const streaming = progressActive && part.state === "streaming";
       node.className = "systemsculpt-agent-part is-text";

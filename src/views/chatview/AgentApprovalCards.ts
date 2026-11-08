@@ -162,7 +162,7 @@ export class AgentApprovalCards extends Component {
     const metaId = `${titleId}-meta`;
     card.createDiv({ cls: "systemsculpt-agent-approval-meta", text: meta ?? "", attr: { id: metaId, ...(!meta ? { hidden: "" } : {}) } });
     card.setAttribute("aria-describedby", metaId);
-    card.createDiv({ cls: "systemsculpt-agent-approval-preview", attr: { hidden: "" } });
+    card.createDiv({ cls: "systemsculpt-agent-approval-preview", attr: { hidden: "", "data-testid": "chat.approval.preview" } });
     card.dataset.questionCount = String(questionList.length);
     const answers: Record<string, string[]> = {};
     for (const question of questionList) {
