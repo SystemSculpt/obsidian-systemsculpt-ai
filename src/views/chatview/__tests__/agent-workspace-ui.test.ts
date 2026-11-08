@@ -10,6 +10,7 @@ import {
 } from "../../../chat/ChatConversation";
 import { AgentWorkspace } from "../AgentWorkspace";
 import { AgentConversationRenderer } from "../AgentConversationRenderer";
+import { historyHydrationFor } from "./fixtures/conversation-rendering";
 import { historicalToolPart } from "../ConversationPartPresentation";
 import { ChatMarkdownSerializer } from "../storage/ChatMarkdownSerializer";
 import type { ChatMessage } from "../../../types";
@@ -28,20 +29,12 @@ async function hydrateRestoredWorked(
   worked: HTMLDetailsElement,
   leaveOpen = false,
 ): Promise<void> {
-  const states = (renderer as unknown as {
-    historicalActivityHydrationStates: Map<
-      HTMLDetailsElement,
-      { hydration: Promise<void> | null }
-    >;
-  }).historicalActivityHydrationStates;
-  const state = states.get(worked);
-  if (!state) return;
   const wasOpen = worked.open;
   if (!worked.open) {
     worked.open = true;
     worked.dispatchEvent(new Event("toggle"));
   }
-  await state.hydration;
+  await historyHydrationFor(renderer).hydrate(worked);
   if (!leaveOpen && !wasOpen) {
     worked.open = false;
     worked.dispatchEvent(new Event("toggle"));
@@ -53,13 +46,7 @@ async function expandHistoricalOverflow(
   overflow: HTMLButtonElement,
 ): Promise<void> {
   overflow.click();
-  const state = (renderer as unknown as {
-    historicalOverflowHydrationStates: Map<
-      HTMLButtonElement,
-      { hydration: Promise<void> | null }
-    >;
-  }).historicalOverflowHydrationStates.get(overflow);
-  await state?.hydration;
+  await historyHydrationFor(renderer).hydrate(overflow);
 }
 
 /**
@@ -5615,6 +5602,10 @@ describe("AgentWorkspace", () => {
         { id: "content-history", type: "content", timestamp: 2, data: "Done." },
       ],
     }]);
+    const restoredWorked = parent.querySelector<HTMLDetailsElement>(
+      '[data-message-id="assistant-history-reasoning"] details[data-agent-turn-fold]',
+    )!;
+    await hydrateRestoredWorked(workspace.renderer, restoredWorked);
     const historical = parent.querySelector<HTMLDetailsElement>(
       '[data-message-id="assistant-history-reasoning"] .systemsculpt-agent-reasoning-details',
     )!;

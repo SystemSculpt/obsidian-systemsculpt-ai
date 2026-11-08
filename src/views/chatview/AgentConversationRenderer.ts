@@ -43,6 +43,16 @@ import {
 } from "./ChatMessagePresentation";
 import { InlineMessageEditor, type AgentInlineMessageEdit } from "./InlineMessageEditor";
 import { LiveMarkdownRenderer } from "./LiveMarkdownRenderer";
+import { ConversationHistoryHydration } from "./ConversationHistoryHydration";
+import {
+  captureDetailsState,
+  captureDomSelection,
+  findFocusKey,
+  focusedElementWithin,
+  restoreDetailsState,
+  restoreDomSelection,
+  type PreservedDomSelection,
+} from "./ConversationDomState";
 import { AgentApprovalCards, type ApprovalAnswer } from "./AgentApprovalCards";
 import { MessagePartNormalizer } from "./utils/MessagePartNormalizer";
 
@@ -147,25 +157,6 @@ type IncidentDisclosureState = {
   open: boolean;
 };
 
-type HistoricalActivityHydrationState = {
-  element: HTMLDetailsElement;
-  summary: HTMLElement;
-  body: HTMLElement;
-  parts: readonly MessagePart[];
-  status: HistoricalHydrationStatus;
-  staging: HTMLElement | null;
-  hydration: Promise<void> | null;
-};
-
-type HistoricalOverflowHydrationState = {
-  parts: readonly MessagePart[];
-  status: HistoricalHydrationStatus;
-  staging: HTMLElement | null;
-  hydration: Promise<void> | null;
-};
-
-type HistoricalHydrationStatus = "cold" | "hydrating" | "hydrated" | "disposed";
-
 /*
  * What a rendered history row was built from. Frozen transcript messages
  * stand for themselves, so an unchanged row costs identity checks rather than
@@ -209,13 +200,6 @@ type HistoricalFocusLocator =
   | Readonly<{ kind: "overflow"; key: string; focusKey: string | null }>
   | Readonly<{ kind: "worked"; focusKey: string | null }>;
 
-type PreservedDomSelection = Readonly<{
-  anchorNode: Node;
-  anchorOffset: number;
-  focusNode: Node;
-  focusOffset: number;
-}>;
-
 type HistoricalReplacementInteraction = Readonly<{
   focusElement: HTMLElement | null;
   focusLocator: HistoricalFocusLocator | null;
@@ -246,10 +230,6 @@ export class AgentConversationRenderer extends Component {
     latestNode: HTMLElement | null;
     previousNodes: HTMLElement[];
   }>();
-  private readonly historicalOverflowHydrationStates = new Map<
-    HTMLButtonElement,
-    HistoricalOverflowHydrationState
-  >();
   private readonly reasoningDisclosureStates = new WeakMap<HTMLDetailsElement, {
     body: HTMLElement;
     summary: string;
@@ -257,10 +237,6 @@ export class AgentConversationRenderer extends Component {
     dirty: boolean;
     revision: number;
   }>();
-  private readonly historicalActivityHydrationStates = new Map<
-    HTMLDetailsElement,
-    HistoricalActivityHydrationState
-  >();
   private readonly activePartRefs = new Map<string, AgentPart>();
   private readonly activePartProgressStates = new WeakMap<HTMLElement, boolean>();
   private readonly activeToolDisplayFingerprints = new Map<string, string>();
@@ -288,17 +264,16 @@ export class AgentConversationRenderer extends Component {
   private readonly liveMarkdown: LiveMarkdownRenderer;
   private readonly approvals: AgentApprovalCards;
   private readonly tools: AgentToolRenderer;
+  private readonly historyHydration: ConversationHistoryHydration;
   private renderGeneration = 0;
   private lifecycleGeneration = 0;
   private renderingEnabled = true;
-  private adoptingTurnId: string | null = null;
   private incidentMetricsGeneration = 0;
   private incidentRenderPassCount = 0;
   private incidentPendingRenderPassCount = 0;
   private incidentLastRenderDurationMs = 0;
   private incidentMaxRenderDurationMs = 0;
   private incidentHistoricalPartCount = 0;
-  private incidentPendingHydrationCount = 0;
   private loadingTimer: number | null = null;
   private loadingTimerWindow: Window | null = null;
   private loadingSkeleton: HTMLElement | null = null;
@@ -376,6 +351,19 @@ export class AgentConversationRenderer extends Component {
       trackDisclosure: (element, available, open) => this.trackIncidentDisclosure(element, "tool", available, open),
       updateDisclosure: (element, available, open) => this.updateIncidentDisclosure(element, available, open),
       untrackDisclosures: (target) => this.untrackIncidentDisclosuresWithin(target),
+    });
+    this.historyHydration = new ConversationHistoryHydration({
+      renderPart: (parent, part) => this.renderHistoricalPart(parent, part),
+      renderTimeline: (parent, parts, isCurrent) => this.renderHistoricalTimeline(parent, parts, isCurrent),
+      commitOverflow: (element, nodes) => {
+        const overflow = this.activityOverflowStates.get(element);
+        if (!overflow) return false;
+        overflow.previousNodes = nodes;
+        this.applyActivityOverflowLayout(element);
+        return true;
+      },
+      forgetMarkdown: (target) => this.forgetMarkdown(target),
+      beginLayoutMutation: (control, target) => this.options.beginLayoutMutation?.(control, target),
     });
   }
 
@@ -498,7 +486,7 @@ export class AgentConversationRenderer extends Component {
       reasoningDisclosureCount: boundedIncidentRenderCount(reasoningDisclosureCount),
       toolDisclosureCount: boundedIncidentRenderCount(toolDisclosureCount),
       overflowDisclosureCount: boundedIncidentRenderCount(overflowDisclosureCount),
-      pendingHydrationCount: boundedIncidentRenderCount(this.incidentPendingHydrationCount),
+      pendingHydrationCount: boundedIncidentRenderCount(this.historyHydration.pendingCount),
       renderingEnabled: this.renderingEnabled,
     });
   }
@@ -543,13 +531,19 @@ export class AgentConversationRenderer extends Component {
     }
   }
 
-  public renderHistory(messages: readonly ChatMessage[]): Promise<void> {
-    return this.measureIncidentRenderPass(() => this.renderHistoryPass(messages));
+  public renderHistory(
+    messages: readonly ChatMessage[],
+    adoptingTurnId: string | null = null,
+  ): Promise<void> {
+    return this.measureIncidentRenderPass(() => this.renderHistoryPass(messages, adoptingTurnId));
   }
 
-  private async renderHistoryPass(messages: readonly ChatMessage[]): Promise<void> {
+  private async renderHistoryPass(
+    messages: readonly ChatMessage[],
+    adoptingTurnId: string | null = null,
+  ): Promise<void> {
     if (!this.renderingEnabled) return;
-    const adoptionState = this.captureActiveAdoptionState();
+    const adoptionState = this.captureActiveAdoptionState(adoptingTurnId);
     const lifecycleGeneration = this.lifecycleGeneration;
     const generation = ++this.renderGeneration;
     const isCurrent = (): boolean =>
@@ -656,8 +650,10 @@ export class AgentConversationRenderer extends Component {
         desiredRows.push(existing.node);
         continue;
       }
-      const adoptActive = message.role === "assistant"
-        && turnId === this.adoptingTurnId
+      const adoptActive = adoptingTurnId !== null
+        && message.role === "assistant"
+        && turnId === adoptingTurnId
+        && this.activeTurnId === adoptingTurnId
         && this.activeTurn !== null
         && this.activeBody !== null;
       const row = adoptActive ? this.activeTurn! : nextHistory.createDiv();
@@ -817,7 +813,7 @@ export class AgentConversationRenderer extends Component {
     if (restoredHistoricalFocus) restoredHistoricalFocus.focus({ preventScroll: true });
     else if (preservedFocus?.isConnected) preservedFocus.focus({ preventScroll: true });
     else focusReplacement?.focus({ preventScroll: true });
-    this.restoreDomSelection(
+    restoreDomSelection(
       historicalInteraction?.selection ?? adoptionState?.selection ?? null,
     );
     this.historyRows = nextRows;
@@ -840,71 +836,18 @@ export class AgentConversationRenderer extends Component {
       if (this.renderingEnabled && generation === this.lifecycleGeneration) this.clearActive();
       return;
     }
-    this.adoptingTurnId = turnId;
-    try {
-      await this.renderHistory(messages);
-    } finally {
-      this.adoptingTurnId = null;
-    }
+    await this.renderHistory(messages, turnId);
   }
 
-  private captureActiveAdoptionState(): Readonly<{
+  private captureActiveAdoptionState(adoptingTurnId: string | null): Readonly<{
     focusElement: HTMLElement | null;
-    selection: Readonly<{
-      anchorNode: Node;
-      anchorOffset: number;
-      focusNode: Node;
-      focusOffset: number;
-    }> | null;
+    selection: PreservedDomSelection | null;
   }> | null {
-    if (!this.adoptingTurnId || !this.activeTurn) return null;
-    const activeElement = this.activeTurn.ownerDocument.activeElement;
-    const focusElement = activeElement?.nodeType === 1
-      && this.activeTurn.contains(activeElement)
-      ? activeElement as HTMLElement
-      : null;
-    const selection = this.activeTurn.ownerDocument.getSelection();
-    const preservedSelection = selection?.anchorNode
-      && selection.focusNode
-      && this.activeTurn.contains(selection.anchorNode)
-      && this.activeTurn.contains(selection.focusNode)
-      ? {
-          anchorNode: selection.anchorNode,
-          anchorOffset: selection.anchorOffset,
-          focusNode: selection.focusNode,
-          focusOffset: selection.focusOffset,
-        }
-      : null;
-    return { focusElement, selection: preservedSelection };
-  }
-
-  private restoreDomSelection(selection: PreservedDomSelection | null): void {
-    if (!selection || !selection.anchorNode.isConnected || !selection.focusNode.isConnected) return;
-    const current = this.element.ownerDocument.getSelection();
-    if (!current) return;
-    const maximumOffset = (node: Node): number => node.nodeType === Node.TEXT_NODE
-      ? node.nodeValue?.length ?? 0
-      : node.childNodes.length;
-    const anchorOffset = Math.min(selection.anchorOffset, maximumOffset(selection.anchorNode));
-    const focusOffset = Math.min(selection.focusOffset, maximumOffset(selection.focusNode));
-    try {
-      current.removeAllRanges();
-      if (typeof current.setBaseAndExtent === "function") {
-        current.setBaseAndExtent(
-          selection.anchorNode,
-          anchorOffset,
-          selection.focusNode,
-          focusOffset,
-        );
-        return;
-      }
-      const range = this.element.ownerDocument.createRange();
-      range.setStart(selection.anchorNode, anchorOffset);
-      range.setEnd(selection.focusNode, focusOffset);
-      current.addRange(range);
-    } catch {
-      current.removeAllRanges();
-    }
+    if (!adoptingTurnId || !this.activeTurn || this.activeTurnId !== adoptingTurnId) return null;
+    return {
+      focusElement: focusedElementWithin(this.activeTurn),
+      selection: captureDomSelection(this.activeTurn),
+    };
   }
 
   public setInlineMessageEdit(edit: AgentInlineMessageEdit | null): void {
@@ -1016,7 +959,7 @@ export class AgentConversationRenderer extends Component {
       if (workParts.some((part) => this.hasActiveHistoricalPart(part))) {
         await this.renderHistoricalTimeline(activity.body, workParts);
       } else {
-        this.deferHistoricalActivityHydration(activity, workParts);
+        this.historyHydration.deferActivity(activity, workParts);
       }
     } else {
       for (const part of workParts) await this.renderHistoricalPart(parent, part);
@@ -1068,7 +1011,7 @@ export class AgentConversationRenderer extends Component {
           latestNode,
           [],
         );
-        this.deferHistoricalOverflowHydration(overflow.element, split.previous);
+        this.historyHydration.deferOverflow(overflow.element, split.previous);
         continue;
       }
       if (split.latest) {
@@ -1077,155 +1020,6 @@ export class AgentConversationRenderer extends Component {
       }
     }
     return true;
-  }
-
-  private deferHistoricalOverflowHydration(
-    element: HTMLButtonElement,
-    parts: readonly MessagePart[],
-  ): void {
-    this.historicalOverflowHydrationStates.set(element, {
-      parts,
-      status: "cold",
-      staging: null,
-      hydration: null,
-    });
-  }
-
-  private startHistoricalOverflowHydration(
-    element: HTMLButtonElement,
-  ): Promise<void> | null {
-    const state = this.historicalOverflowHydrationStates.get(element);
-    if (!state || state.status === "hydrated" || state.status === "disposed") return null;
-    if (state.hydration) return state.hydration;
-
-    this.setHistoricalHydrationStatus(state, "hydrating");
-    const lifecycleGeneration = this.lifecycleGeneration;
-    const staging = createSurfaceElement(element.ownerDocument, "div");
-    state.staging = staging;
-    const isCurrent = (): boolean =>
-      this.renderingEnabled
-      && lifecycleGeneration === this.lifecycleGeneration
-      && state.status !== "disposed"
-      && this.historicalOverflowHydrationStates.get(element) === state;
-    const discardStaging = (): void => {
-      this.forgetMarkdown(staging);
-      if (
-        state.status !== "disposed"
-        && this.historicalOverflowHydrationStates.get(element) === state
-      ) {
-        this.setHistoricalHydrationStatus(state, "cold");
-      }
-    };
-    let hydration!: Promise<void>;
-    hydration = (async (): Promise<void> => {
-      try {
-        for (const part of state.parts) {
-          if (!isCurrent()) {
-            discardStaging();
-            return;
-          }
-          await this.renderHistoricalPart(staging, part);
-        }
-        if (!isCurrent()) {
-          discardStaging();
-          return;
-        }
-        const overflow = this.activityOverflowStates.get(element);
-        if (!overflow) {
-          this.disposeHistoricalOverflowHydration(element);
-          return;
-        }
-        overflow.previousNodes = Array.from(staging.children) as HTMLElement[];
-        state.staging = null;
-        this.setHistoricalHydrationStatus(state, "hydrated");
-        this.applyActivityOverflowLayout(element);
-      } catch (error) {
-        discardStaging();
-        throw error;
-      } finally {
-        if (state.staging === staging) state.staging = null;
-        if (state.hydration === hydration) state.hydration = null;
-      }
-    })();
-    state.hydration = hydration;
-    return hydration;
-  }
-
-  private deferHistoricalActivityHydration(
-    activity: Readonly<{
-      element: HTMLDetailsElement;
-      summary: HTMLElement;
-      body: HTMLElement;
-    }>,
-    parts: readonly MessagePart[],
-  ): void {
-    const state: HistoricalActivityHydrationState = {
-      ...activity,
-      parts,
-      status: "cold",
-      staging: null,
-      hydration: null,
-    };
-    this.historicalActivityHydrationStates.set(activity.element, state);
-    activity.element.addEventListener("toggle", () => {
-      if (!activity.element.open) return;
-      void this.hydrateHistoricalActivity(state).catch(() => undefined);
-    });
-  }
-
-  private hydrateHistoricalActivity(
-    state: HistoricalActivityHydrationState,
-  ): Promise<void> {
-    if (state.status === "hydrated" || state.status === "disposed") {
-      return Promise.resolve();
-    }
-    if (state.hydration) return state.hydration;
-    this.setHistoricalHydrationStatus(state, "hydrating");
-    const lifecycleGeneration = this.lifecycleGeneration;
-    const staging = createSurfaceElement(state.body.ownerDocument, "div");
-    state.staging = staging;
-    const isCurrent = (): boolean =>
-      this.renderingEnabled
-      && lifecycleGeneration === this.lifecycleGeneration
-      && state.status !== "disposed"
-      && this.historicalActivityHydrationStates.get(state.element) === state;
-    let hydration!: Promise<void>;
-    hydration = (async (): Promise<void> => {
-      try {
-        const rendered = await this.renderHistoricalTimeline(staging, state.parts, isCurrent);
-        if (!rendered || !isCurrent()) {
-          this.forgetMarkdown(staging);
-          return;
-        }
-        const finishLayoutMutation = this.options.beginLayoutMutation?.(
-          state.summary.isConnected ? state.summary : undefined,
-          state.body,
-        );
-        try {
-          if (!isCurrent()) {
-            this.forgetMarkdown(staging);
-            return;
-          }
-          state.body.replaceChildren(...Array.from(staging.childNodes));
-          state.staging = null;
-          this.setHistoricalHydrationStatus(state, "hydrated");
-        } finally {
-          finishLayoutMutation?.();
-        }
-      } catch (error) {
-        this.forgetMarkdown(staging);
-        if (isCurrent()) this.setHistoricalHydrationStatus(state, "cold");
-        throw error;
-      } finally {
-        if (state.status === "hydrating") {
-          this.setHistoricalHydrationStatus(state, "cold");
-        }
-        if (state.staging === staging) state.staging = null;
-        if (state.hydration === hydration) state.hydration = null;
-      }
-    })();
-    state.hydration = hydration;
-    return hydration;
   }
 
   private async adoptHistoricalParts(
@@ -1510,8 +1304,7 @@ export class AgentConversationRenderer extends Component {
     const workParts = parts.filter((part) => !finalAnswerPartIds.has(part.id));
     const hasActivity = workParts.some(isAgentActivityPart);
     if (!hasActivity) return lanes;
-    const focused = body.ownerDocument.activeElement;
-    const focusedElement = focused?.nodeType === 1 ? focused as HTMLElement : null;
+    const focusedElement = focusedElementWithin(body);
     const moveFocusToFold = focusedElement !== null
       && workLanes.some(({ node }) => node.contains(focusedElement));
     if (!this.activeCompletedFold || !this.activeCompletedFoldBody) {
@@ -1614,9 +1407,8 @@ export class AgentConversationRenderer extends Component {
       this.activeNodes.set(key, node);
     }
     const needsInsertion = node.parentElement === null;
-    const candidate = node.ownerDocument.activeElement;
-    const activeElement = candidate?.nodeType === 1 ? candidate as HTMLElement : null;
-    const preservedFocusKey = activeElement && node.contains(activeElement)
+    const activeElement = focusedElementWithin(node);
+    const preservedFocusKey = activeElement
       ? activeElement.dataset.focusKey
       : undefined;
     const incomingToolFingerprint = part.kind === "tool"
@@ -1676,7 +1468,7 @@ export class AgentConversationRenderer extends Component {
       }
     }
     if (preservedFocusKey) {
-      node.querySelector<HTMLElement>(`[data-focus-key="${preservedFocusKey}"]`)?.focus();
+      findFocusKey(node, preservedFocusKey)?.focus();
     }
     return node;
   }
@@ -1819,7 +1611,7 @@ export class AgentConversationRenderer extends Component {
       this.updateIncidentDisclosure(element, true, expanded);
       this.applyActivityOverflowLayout(element);
       const hydration = expanded
-        ? this.startHistoricalOverflowHydration(element)
+        ? this.historyHydration.hydrate(element)
         : null;
       if (!hydration) {
         finishLayoutMutation?.();
@@ -2141,6 +1933,7 @@ export class AgentConversationRenderer extends Component {
     this.renderingEnabled = visible;
     this.lifecycleGeneration += 1;
     this.liveMarkdown.setVisible(visible);
+    this.historyHydration.setVisible(visible);
     if (!visible) {
       // Cached parts may own hydration invalidated by this visibility epoch.
       // Revisit them on show without replacing their keyed DOM nodes.
@@ -2170,40 +1963,12 @@ export class AgentConversationRenderer extends Component {
     }
   }
 
-  private disposeHistoricalActivityHydrationWithin(target: HTMLElement): void {
-    for (const [element, state] of this.historicalActivityHydrationStates) {
-      if (element !== target && !target.contains(element)) continue;
-      this.setHistoricalHydrationStatus(state, "disposed");
-      if (state.staging) this.forgetMarkdown(state.staging);
-      state.staging = null;
-      this.historicalActivityHydrationStates.delete(element);
-    }
-  }
-
-  private disposeHistoricalOverflowHydration(element: HTMLButtonElement): void {
-    const state = this.historicalOverflowHydrationStates.get(element);
-    if (!state) return;
-    this.setHistoricalHydrationStatus(state, "disposed");
-    if (state.staging) this.forgetMarkdown(state.staging);
-    state.staging = null;
-    this.historicalOverflowHydrationStates.delete(element);
-  }
-
-  private disposeHistoricalOverflowHydrationWithin(target: HTMLElement): void {
-    for (const element of this.historicalOverflowHydrationStates.keys()) {
-      if (element !== target && !target.contains(element)) continue;
-      this.disposeHistoricalOverflowHydration(element);
-    }
-  }
-
   private captureHistoricalDisclosureState(row: HTMLElement): HistoricalDisclosureSnapshot {
     const worked = row.querySelector<HTMLDetailsElement>("details[data-agent-turn-fold]");
     const workedBody = worked?.querySelector<HTMLElement>(
       ":scope > .systemsculpt-agent-activity-body",
     ) ?? null;
-    const hydration = worked
-      ? this.historicalActivityHydrationStates.get(worked)
-      : undefined;
+    const wasHydrated = worked ? this.historyHydration.wasHydrated(worked) : false;
     const overflowOpen = new Map<string, boolean>();
     for (const overflow of row.querySelectorAll<HTMLButtonElement>(
       "button[data-agent-activity-overflow-key]",
@@ -2229,7 +1994,7 @@ export class AgentConversationRenderer extends Component {
         worked
         && (
           worked.open
-          || hydration?.status === "hydrated"
+          || wasHydrated
           || (workedBody?.childElementCount ?? 0) > 0
         )
       ),
@@ -2246,8 +2011,7 @@ export class AgentConversationRenderer extends Component {
       "details[data-agent-turn-fold]",
     );
     if (replacement.disclosure.hydrateWorked && nextWorked) {
-      const hydration = this.historicalActivityHydrationStates.get(nextWorked);
-      if (hydration) await this.hydrateHistoricalActivity(hydration);
+      await this.historyHydration.hydrate(nextWorked);
     }
     if (nextWorked) {
       nextWorked.open = replacement.disclosure.workedOpen;
@@ -2274,7 +2038,7 @@ export class AgentConversationRenderer extends Component {
       if (!expanded && !previousWasHydrated) continue;
       overflow.setAttribute("aria-expanded", String(expanded));
       this.updateIncidentDisclosureOpen(overflow, expanded);
-      const hydration = this.startHistoricalOverflowHydration(overflow);
+      const hydration = this.historyHydration.hydrate(overflow);
       if (hydration) await hydration;
     }
 
@@ -2305,23 +2069,8 @@ export class AgentConversationRenderer extends Component {
     previousRow: HTMLElement,
     nextRow: HTMLElement,
   ): HistoricalReplacementInteraction | null {
-    const candidate = previousRow.ownerDocument.activeElement;
-    const focusElement = candidate?.nodeType === 1
-      && previousRow.contains(candidate)
-      ? candidate as HTMLElement
-      : null;
-    const selection = previousRow.ownerDocument.getSelection();
-    const preservedSelection = selection?.anchorNode
-      && selection.focusNode
-      && previousRow.contains(selection.anchorNode)
-      && previousRow.contains(selection.focusNode)
-      ? {
-          anchorNode: selection.anchorNode,
-          anchorOffset: selection.anchorOffset,
-          focusNode: selection.focusNode,
-          focusOffset: selection.focusOffset,
-        }
-      : null;
+    const focusElement = focusedElementWithin(previousRow);
+    const preservedSelection = captureDomSelection(previousRow);
     if (!focusElement && !preservedSelection) return null;
 
     const keyedFocus = focusElement?.closest<HTMLElement>("[data-focus-key]") ?? null;
@@ -2473,9 +2222,7 @@ export class AgentConversationRenderer extends Component {
       root = row.querySelector<HTMLElement>("details[data-agent-turn-fold]");
     }
     if (!root || !locator.focusKey) return root;
-    if (root.dataset.focusKey === locator.focusKey) return root;
-    return Array.from(root.querySelectorAll<HTMLElement>("[data-focus-key]"))
-      .find((candidate) => candidate.dataset.focusKey === locator.focusKey) ?? root;
+    return findFocusKey(root, locator.focusKey) ?? root;
   }
 
   /**
@@ -2486,8 +2233,7 @@ export class AgentConversationRenderer extends Component {
   private transferActivePresentationState(
     desiredRows: readonly HTMLElement[],
   ): HTMLElement | null {
-    const focused = this.element.ownerDocument.activeElement;
-    const focusedElement = focused?.nodeType === 1 ? focused as HTMLElement : null;
+    const focusedElement = focusedElementWithin(this.element);
     let focusReplacement: HTMLElement | null = null;
     for (const row of desiredRows) {
       for (const historical of row.querySelectorAll<HTMLElement>(
@@ -2499,23 +2245,17 @@ export class AgentConversationRenderer extends Component {
         const active = this.activeNodes.get(historical.dataset.partKey!);
         if (!active || active === historical) continue;
 
-        const activeDetails = Array.from(active.querySelectorAll<HTMLDetailsElement>("details"));
-        const historicalDetails = Array.from(
-          historical.querySelectorAll<HTMLDetailsElement>("details"),
+        restoreDetailsState(
+          historical,
+          captureDetailsState(active.querySelectorAll<HTMLDetailsElement>("details")),
+          Array.from(historical.querySelectorAll<HTMLDetailsElement>("details")),
+          (element, open) => this.updateIncidentDisclosureOpen(element, open),
         );
-        activeDetails.forEach((details, index) => {
-          const replacement = historicalDetails[index];
-          if (replacement) {
-            replacement.open = details.open;
-            this.updateIncidentDisclosureOpen(replacement, replacement.open);
-          }
-        });
 
         if (!focusedElement || !active.contains(focusedElement)) continue;
         const focusKey = focusedElement.dataset.focusKey;
         focusReplacement = focusKey
-          ? Array.from(historical.querySelectorAll<HTMLElement>("[data-focus-key]"))
-            .find((candidate) => candidate.dataset.focusKey === focusKey) ?? null
+          ? findFocusKey(historical, focusKey)
           : historical;
       }
     }
@@ -2700,10 +2440,7 @@ export class AgentConversationRenderer extends Component {
     this.lifecycleGeneration += 1;
     this.renderGeneration += 1;
     this.toolRenderEpoch += 1;
-    this.disposeHistoricalActivityHydrationWithin(this.element);
-    for (const element of Array.from(this.historicalOverflowHydrationStates.keys())) {
-      this.disposeHistoricalOverflowHydration(element);
-    }
+    this.historyHydration.clear();
     this.liveMarkdown.clear();
     const ownerWindow = getSurfaceOwnerWindow(this.element);
     this.stopWorkingTimer();
@@ -2716,7 +2453,6 @@ export class AgentConversationRenderer extends Component {
     this.committedFailedMessageIds = new Set<string>();
     this.committedFailedTurnIds = new Set<string>();
     this.incidentDisclosureStates.clear();
-    this.incidentPendingHydrationCount = 0;
     this.inlineEditor.dispose();
   }
 
@@ -3031,8 +2767,7 @@ export class AgentConversationRenderer extends Component {
 
   private forgetMarkdown(target: HTMLElement): void {
     this.untrackIncidentDisclosuresWithin(target);
-    this.disposeHistoricalActivityHydrationWithin(target);
-    this.disposeHistoricalOverflowHydrationWithin(target);
+    this.historyHydration.forgetWithin(target);
     const overflows = target.matches("button[data-agent-activity-overflow]")
       ? [target as HTMLButtonElement]
       : Array.from(target.querySelectorAll<HTMLButtonElement>(
@@ -3095,24 +2830,6 @@ export class AgentConversationRenderer extends Component {
       if (element === target || target.contains(element)) {
         this.incidentDisclosureStates.delete(element);
       }
-    }
-  }
-
-  private setHistoricalHydrationStatus(
-    state: HistoricalActivityHydrationState | HistoricalOverflowHydrationState,
-    status: HistoricalHydrationStatus,
-  ): void {
-    if (state.status === status) return;
-    if (state.status === "hydrating") {
-      this.incidentPendingHydrationCount = boundedIncidentRenderCount(
-        this.incidentPendingHydrationCount - 1,
-      );
-    }
-    state.status = status;
-    if (status === "hydrating") {
-      this.incidentPendingHydrationCount = boundedIncidentRenderCount(
-        this.incidentPendingHydrationCount + 1,
-      );
     }
   }
 

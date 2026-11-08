@@ -87,6 +87,14 @@ session implementation. Native Codex adapts to that contract without importing
 a view. `src/views/chatview/` owns the Obsidian workspace and readable local
 transcripts. Do not add an agent continuation loop to either module.
 
+`ConversationHistoryHydration` owns deferred activity and overflow rendering for
+restored history: staging, coalescing, visibility invalidation, disposal and pending
+counts. Active part rendering and keyed turn adoption remain in
+`AgentConversationRenderer`; only explicit settlement can adopt its live row.
+`ConversationDomState` shares owner-document focus, exact-node selection and
+disclosure restoration with `LiveMarkdownRenderer`. Markdown replacement alone
+remaps selection by text offset when an exact node cannot survive.
+
 Shared native text projection lives in `services/codex/NativeTurnText.ts`;
 backend mode definitions and Codex request codecs stay outside transport and
 presentation. Managed bootstrap exchange belongs to `chat/managed/Bootstrap.ts`;
