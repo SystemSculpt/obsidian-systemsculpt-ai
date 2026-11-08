@@ -2,6 +2,7 @@ import type { App, PluginManifest } from "obsidian";
 import { TEST_DRIVER_ARTIFACT_ID } from "virtual:systemsculpt-test-driver-artifact";
 
 import { runDriverAction, type ActionContext } from "./actions";
+import { isDetachableDriverAction } from "./actionCatalog.js";
 import { DriverDiagnostics } from "./diagnostics";
 import type { SupportDiagnosticEvent } from "../../utils/PluginLogger";
 import { toError } from "../../utils/errors";
@@ -16,31 +17,6 @@ import {
   type TestDriverHandshake,
   type TestDriverHello,
 } from "./protocol";
-
-const DETACHABLE_ACTIONS = new Set([
-  "status",
-  "read",
-  "vault.assertText",
-  "logs",
-  "notices",
-  "catalog",
-  "query",
-  "snapshot",
-  "waitFor",
-  "chat.toolLifecycle",
-  "chat.assertToolLifecycle",
-  "chat.waitForDevelopmentRun",
-  "chat.assertLatestToolSettledAfterContinuation",
-  "chat.assertNoClientToolsBeforeContinuation",
-  "chat.readCopiedIncidentReport",
-]);
-
-function isDetachableAction(request: TestDriverActionRequest): boolean {
-  if (request.action === "waitForRun") {
-    return request.params?.approve === false || request.params?.returnOnApproval === true;
-  }
-  return DETACHABLE_ACTIONS.has(request.action);
-}
 
 function waitForActionOrAbort<T>(task: Promise<T>, signal: AbortSignal): Promise<T> {
   if (signal.aborted) return Promise.reject(new Error("Driver action cancelled."));
@@ -216,7 +192,7 @@ export class TestDriverClient {
       return;
     }
     const request: TestDriverActionRequest = message;
-    const detachable = isDetachableAction(request);
+    const detachable = isDetachableDriverAction(request.action, request.params);
     if (!detachable) this.pendingNonDetachableActions += 1;
     const queued = this.actionChain.then(async () => {
       try {

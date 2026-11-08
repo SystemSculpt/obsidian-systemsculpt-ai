@@ -3,7 +3,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
+import {
+  DRIVER_CLI_COMMANDS,
+  driverActionForVerb,
+} from "../../src/testing/driver/actionCatalog.js";
 
 import {
   DriverSession,
@@ -89,22 +94,23 @@ function parseArgs(argv) {
   return { positional, flags };
 }
 
-function stepsForVerb(positional, flags) {
+export function stepsForVerb(positional, flags) {
   const [verb, ...rest] = positional;
+  const action = driverActionForVerb(verb);
   const target = flags.target;
   switch (verb) {
     case "status":
-      return [{ action: "status" }];
+      return [{ action }];
     case "open-chat":
-      return [{ action: "chat.open" }];
+      return [{ action }];
     case "click": {
       if (!rest[0]) throw new Error("click requires a target, e.g. click chat.header.new");
-      return [{ action: "click", params: { target: rest[0] } }];
+      return [{ action, params: { target: rest[0] } }];
     }
     case "type": {
       if (rest.length === 0) throw new Error('type requires text, e.g. type "Hello"');
       return [{
-        action: "type",
+        action,
         params: {
           text: rest.join(" "),
           target,
@@ -116,7 +122,7 @@ function stepsForVerb(positional, flags) {
     case "press": {
       if (!rest[0]) throw new Error("press requires a key, e.g. press Enter");
       return [{
-        action: "press",
+        action,
         params: {
           key: rest[0],
           target,
@@ -133,7 +139,7 @@ function stepsForVerb(positional, flags) {
       const data = fs.readFileSync(filePath);
       const extension = path.extname(filePath).toLowerCase();
       return [{
-        action: "attach",
+        action,
         params: {
           name: flags.name ?? path.basename(filePath),
           mimeType: flags.mime ?? MIME_BY_EXTENSION[extension] ?? "application/octet-stream",
@@ -147,25 +153,25 @@ function stepsForVerb(positional, flags) {
       const params = { target };
       if (to === "top" || to === "bottom") params.to = to;
       else params.deltaY = Number(to);
-      return [{ action: "scroll", params }];
+      return [{ action, params }];
     }
     case "read": {
       if (!rest[0]) throw new Error("read requires a target.");
-      return [{ action: "read", params: { target: rest[0] } }];
+      return [{ action, params: { target: rest[0] } }];
     }
     case "query": {
       if (!rest[0]) throw new Error("query requires a css selector.");
       const css = rest[0].startsWith("css:") ? rest[0].slice(4) : rest[0];
-      return [{ action: "query", params: { css, limit: flags.limit ? Number(flags.limit) : undefined } }];
+      return [{ action, params: { css, limit: flags.limit ? Number(flags.limit) : undefined } }];
     }
     case "snapshot":
-      return [{ action: "snapshot", params: { scope: rest[0] ?? "chat" } }];
+      return [{ action, params: { scope: rest[0] ?? "chat" } }];
     case "wait": {
       if (!rest[0] || !rest[1]) {
         throw new Error("wait requires a target and state, e.g. wait chat.composer.send enabled");
       }
       return [{
-        action: "waitFor",
+        action,
         params: {
           target: rest[0],
           state: rest[1],
@@ -176,7 +182,7 @@ function stepsForVerb(positional, flags) {
     }
     case "wait-run": {
       return [{
-        action: "waitForRun",
+        action,
         params: {
           timeoutMs: flags.timeout ? Number(flags.timeout) : undefined,
           stallMs: flags.stall ? Number(flags.stall) : undefined,
@@ -184,11 +190,11 @@ function stepsForVerb(positional, flags) {
       }];
     }
     case "tool-lifecycle-start":
-      return [{ action: "chat.beginToolLifecycleCapture" }];
+      return [{ action }];
     case "tool-lifecycle":
-      return [{ action: "chat.toolLifecycle" }];
+      return [{ action }];
     case "tool-lifecycle-end":
-      return [{ action: "chat.endToolLifecycleCapture" }];
+      return [{ action }];
     case "assert-tool-settled":
       if (!flags["tool-label"] || !flags.text) {
         throw new Error("assert-tool-settled requires --tool-label and --text.");
@@ -210,7 +216,7 @@ function stepsForVerb(positional, flags) {
         );
       }
       return [{
-        action: "chat.assertLatestToolSettledAfterContinuation",
+        action,
         params: {
           toolLabel: flags["tool-label"],
           text: flags.text,
@@ -235,7 +241,7 @@ function stepsForVerb(positional, flags) {
         throw new Error('--text-mode must be "contains" or "equals".');
       }
       return [{
-        action: "chat.assertAllToolResultSendsCompleted",
+        action,
         params: {
           toolLabel: flags["tool-label"],
           text: flags.text,
@@ -248,7 +254,7 @@ function stepsForVerb(positional, flags) {
         throw new Error("assert-no-client-tools requires --text.");
       }
       return [{
-        action: "chat.assertNoClientToolsBeforeContinuation",
+        action,
         params: {
           text: flags.text,
           timeoutMs: flags.timeout ? Number(flags.timeout) : undefined,
@@ -256,23 +262,23 @@ function stepsForVerb(positional, flags) {
       }];
     case "command": {
       if (!rest[0]) throw new Error("command requires an Obsidian command id.");
-      return [{ action: "command", params: { id: rest[0] } }];
+      return [{ action, params: { id: rest[0] } }];
     }
     case "settings":
-      return [{ action: "settings.open", params: { tab: flags.tab } }];
+      return [{ action, params: { tab: flags.tab } }];
     case "settings-close":
-      return [{ action: "settings.close" }];
+      return [{ action }];
     case "targets":
-      return [{ action: "catalog" }];
+      return [{ action }];
     case "logs":
-      return [{ action: "logs", params: {
+      return [{ action, params: {
         level: flags.level,
         pattern: flags.pattern,
         sinceSeq: flags.since ? Number(flags.since) : undefined,
         limit: flags.limit ? Number(flags.limit) : undefined,
       } }];
     case "notices":
-      return [{ action: "notices", params: {
+      return [{ action, params: {
         sinceSeq: flags.since ? Number(flags.since) : undefined,
         limit: flags.limit ? Number(flags.limit) : undefined,
       } }];
@@ -280,16 +286,11 @@ function stepsForVerb(positional, flags) {
       if (!rest[0] || rest[1] === undefined) {
         throw new Error('select requires a target and value, e.g. select "setting:Default chat font size" large');
       }
-      return [{ action: "select", params: { target: rest[0], value: rest[1] } }];
+      return [{ action, params: { target: rest[0], value: rest[1] } }];
     }
     default:
       throw new Error(
-        `Unknown verb "${verb ?? ""}". Verbs: status, open-chat, click, type, press, attach, ` +
-          "scroll, select, read, query, logs, notices, snapshot, wait, wait-run, command, " +
-          "tool-lifecycle-start, tool-lifecycle, tool-lifecycle-end, assert-tool-settled, " +
-          "assert-tool-results-completed, " +
-          "assert-no-client-tools, " +
-          "settings, settings-close, targets, script.",
+        `Unknown verb "${verb ?? ""}". Verbs: ${DRIVER_CLI_COMMANDS.map(({ verb }) => verb).join(", ")}.`,
       );
   }
 }
@@ -308,12 +309,7 @@ async function main() {
   const { positional, flags } = parseArgs(process.argv.slice(2));
   if (positional.length === 0 || flags.help) {
     console.log("Usage: npm run e2e -- <verb> [args] [--vault name] [--plugin-dir path] [--expected-build id] [--expected-api url] [--json]");
-    console.log("Verbs: status, open-chat, click, type, press, attach, scroll, select, read,");
-    console.log("       query, logs, notices, snapshot, wait, wait-run, command, settings,");
-    console.log("       settings-close, tool-lifecycle-start, tool-lifecycle,");
-    console.log("       tool-lifecycle-end, assert-tool-settled, assert-tool-results-completed,");
-    console.log("       assert-no-client-tools,");
-    console.log("       targets [--live], script <file>");
+    console.log(`Verbs: ${DRIVER_CLI_COMMANDS.map(({ usage }) => usage).join(", ")}`);
     console.log("Targets are data-testid values (npm run e2e -- targets), plus css:, chat:,");
     console.log("label:, setting:, and settings.tab: prefixes.");
     process.exit(positional.length === 0 ? 1 : 0);
@@ -399,7 +395,11 @@ async function main() {
   process.exit(outcome.ok ? 0 : 1);
 }
 
-main().catch((error) => {
-  console.error(`[e2e] ${error instanceof Error ? error.message : String(error)}`);
-  process.exit(1);
-});
+const invokedDirectly = process.argv[1]
+  && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (invokedDirectly) {
+  main().catch((error) => {
+    console.error(`[e2e] ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(1);
+  });
+}
