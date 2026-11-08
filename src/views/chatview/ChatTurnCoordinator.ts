@@ -8,7 +8,7 @@ import { isAgentBillingFailure } from "../../chat/managed/AgentFailurePolicy";
 import { toThinAgentUserMessage } from "../../chat/managed/MessageAdapter";
 import type { CreditsRefreshReason } from "../../chat/managed/Lifecycle";
 import { LocalAgentChatSession } from "../../services/codex/LocalAgentChatSession";
-import type { CreditsBalanceSnapshot } from "../../services/SystemSculptService";
+import type { CreditsBalanceSnapshot } from "../../services/credits/HostedCreditsClient";
 import { THIN_AGENT_CAPABILITIES, THIN_AGENT_CAPABILITY_CONTRACT_VERSION, THIN_AGENT_CONTRACT_VERSION, type MeasuredThinAgentContext, type ThinAgentBootstrapRequest } from "../../services/managed/ThinAgentV1Contract";
 import type { ToolApprovalPolicy } from "../../utils/toolPolicy";
 import { planRequiredError } from "../../utils/errors";

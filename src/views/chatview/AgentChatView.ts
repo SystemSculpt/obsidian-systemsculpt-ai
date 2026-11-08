@@ -202,6 +202,7 @@ export class AgentChatView extends ItemView {
 
   private get turns(): ChatTurnCoordinator {
     if (!this.turnCoordinator) {
+      // eslint-disable-next-line @typescript-eslint/no-this-alias -- Live getters follow navigation's replacement session and transcript.
       const view = this;
       this.turnCoordinator = new ChatTurnCoordinator({
         viewer: view,
