@@ -28,11 +28,12 @@
   cursor: grabbing;
 }
 
-/* A running card disables its fields, and Obsidian fades disabled fields to
- * half opacity: a prompt or text body dropped to about 3:1 on the light
- * theme. The lock shows in the not-allowed cursor and the card's run
- * activity; what the run is reading stays at full contrast. */
-.ss-studio-node-card :is(textarea, input:not([type="checkbox"], [type="radio"], [type="range"])):disabled {
+/* A running card disables its fields, and Obsidian fades disabled fields and
+ * buttons (0.5 and 0.7 opacity): a prompt or text body dropped to about 3:1
+ * on the light theme. Fields and the dropdowns that show a chosen value stay
+ * at full contrast; action buttons still fade, which with the not-allowed
+ * cursor and the card's run activity shows the lock. */
+.ss-studio-node-card :is(textarea, select, input:not([type="checkbox"], [type="radio"], [type="range"]), button.ss-studio-searchable-select-trigger):disabled {
   opacity: 1;
 }
 
