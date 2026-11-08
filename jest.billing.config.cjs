@@ -4,6 +4,7 @@ module.exports = {
   roots: ['<rootDir>/src'],
   testMatch: [
     '**/__tests__/{LicenseManager,LicenseService,licenseUtils,CreditsBalance*,SystemSculptService*,AccountConnect*,UpgradePlan*,settings-setup-tab,commands-credits,PlatformRequestClient,StreamingErrorHandler,SystemSculptEnvironment,PluginCapabilityAvailability,ManagedTextGenerationAdapter,AudioProcessorAvailability,VideoGenerationAvailability}.test.ts',
+    '<rootDir>/src/services/credits/__tests__/**/*.test.ts',
     '<rootDir>/src/services/managed/**/__tests__/**/*.test.ts',
     '<rootDir>/src/chat/managed/__tests__/**/*.test.ts',
     '<rootDir>/src/constants/__tests__/**/*.test.ts',
@@ -19,7 +20,7 @@ module.exports = {
     'src/services/AccountConnectService.ts',
     'src/services/PlatformRequestClient.ts',
     'src/services/StreamingErrorHandler.ts',
-    'src/services/credits/CreditsBalanceCache.ts',
+    'src/services/credits/*.ts',
     'src/utils/licenseUtils.ts',
     'src/modals/CreditsBalanceModal.ts',
     'src/modals/UpgradePlanModal.ts',

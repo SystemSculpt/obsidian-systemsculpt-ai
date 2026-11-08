@@ -10,7 +10,7 @@ import {
   type ChromeMenuEntry,
 } from "../AgentChatChrome";
 import type { LocalAgentAvailability, LocalAgentDetection } from "../../../services/codex/LocalAgentDetection";
-import type { CreditsBalanceSnapshot } from "../../../services/SystemSculptService";
+import type { CreditsBalanceSnapshot } from "../../../services/credits/HostedCreditsClient";
 
 const ready: LocalAgentAvailability = { installed: true, signedIn: true, recentSessionCount: 4, lastUsed: 1_000 };
 const unused: LocalAgentAvailability = { installed: true, signedIn: true, recentSessionCount: 0, lastUsed: null };

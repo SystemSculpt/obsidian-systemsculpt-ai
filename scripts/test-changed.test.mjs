@@ -11,7 +11,8 @@ test("every PR runs the license and credits suites even for documentation-only c
   assert.ok(command.includes("--passWithNoTests"));
   for (const file of money) assert.ok(command.includes(file), file);
   assert.equal(new Set(money).size, money.length);
-  assert.ok(money.includes("src/services/__tests__/SystemSculptService.credits-requests.test.ts"));
+  assert.ok(money.includes("src/services/credits/__tests__/HostedCreditsClient.requests.test.ts"));
+  assert.ok(money.includes("src/services/credits/__tests__/HostedCreditsClient.balance.test.ts"));
 });
 
 test("source changes select related tests without duplicating money inputs", () => {

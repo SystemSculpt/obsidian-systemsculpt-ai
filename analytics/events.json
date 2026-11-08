@@ -230,7 +230,7 @@
         "CREDITS.USAGE"
       ],
       "where": [
-        "src/services/SystemSculptService.ts"
+        "src/services/credits/HostedCreditsClient.ts"
       ],
       "owner": "engineer",
       "added": "2026-11-03"

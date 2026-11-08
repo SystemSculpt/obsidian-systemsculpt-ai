@@ -891,7 +891,7 @@ describe("AgentChatView composer admission", () => {
       plugin: {
         settings: { licenseKey: "test-license" },
       },
-      aiService: { readCreditsBalance: getCreditsBalance },
+      aiService: { credits: { readBalance: getCreditsBalance } },
       workspace: { setPlanOfferVisible: jest.fn(), setCreditsBalance },
       creditsPromise: null,
       creditsBalance: null,
@@ -938,7 +938,7 @@ describe("AgentChatView composer admission", () => {
     const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
     Object.assign(view, {
       plugin: { settings: { licenseKey: "test-license" } },
-      aiService: { readCreditsBalance: getCreditsBalance },
+      aiService: { credits: { readBalance: getCreditsBalance } },
       agent: { recordClientRequestLifecycle },
       workspace: { setPlanOfferVisible: jest.fn(), setCreditsBalance: jest.fn() },
       creditsPromise: null,
@@ -1218,7 +1218,7 @@ describe("AgentChatView composer admission", () => {
     const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
     Object.assign(view, {
       plugin: { settings: { licenseKey: "test-license" } },
-      aiService: { readCreditsBalance: getCreditsBalance },
+      aiService: { credits: { readBalance: getCreditsBalance } },
       agent: { recordLifecycle },
       workspace: { setPlanOfferVisible: jest.fn(), setCreditsBalance },
       creditsPromise: null,
@@ -1261,7 +1261,7 @@ describe("AgentChatView composer admission", () => {
     const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
     Object.assign(view, {
       plugin: { settings: { licenseKey: "test-license" } },
-      aiService: { readCreditsBalance: getCreditsBalance },
+      aiService: { credits: { readBalance: getCreditsBalance } },
       agent: { recordLifecycle },
       workspace: { setPlanOfferVisible: jest.fn(), setCreditsBalance: jest.fn() },
       creditsPromise: null,

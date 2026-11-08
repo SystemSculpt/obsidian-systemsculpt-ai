@@ -1,9 +1,9 @@
 /**
  * @jest-environment node
  */
-import { ERROR_CODES } from "../../utils/errors";
-import { PlatformRequestClient } from "../PlatformRequestClient";
-import { SystemSculptService } from "../SystemSculptService";
+import { ERROR_CODES } from "../../../utils/errors";
+import type { PlatformRequestClient } from "../../PlatformRequestClient";
+import { HostedCreditsClient } from "../HostedCreditsClient";
 
 const balancePayload = {
   included_remaining: 10,
@@ -21,29 +21,30 @@ function jsonResponse(payload: unknown, init?: ResponseInit): Response {
   return new Response(JSON.stringify(payload), init);
 }
 
-function createService(licenseKey = " license_for_test ") {
-  const plugin = { settings: { licenseKey }, app: {} };
-  return { plugin, service: SystemSculptService.getInstance(plugin as never) };
-}
+const baseUrl = "https://systemsculpt.com/api/plugin";
 
-describe("SystemSculptService credits requests", () => {
-  let request: jest.SpiedFunction<PlatformRequestClient["request"]>;
+describe("HostedCreditsClient requests", () => {
+  let request: jest.MockedFunction<PlatformRequestClient["request"]>;
+
+  function createClient(licenseKey = " license_for_test ") {
+    const plugin = { settings: { licenseKey } };
+    const credits = new HostedCreditsClient({
+      baseUrl,
+      licenseKey: () => plugin.settings.licenseKey,
+      requestClient: { request },
+    });
+    return { plugin, credits };
+  }
 
   beforeEach(() => {
-    SystemSculptService.clearInstance();
-    request = jest.spyOn(PlatformRequestClient.prototype, "request").mockImplementation(async () => {
+    request = jest.fn<Promise<Response>, Parameters<PlatformRequestClient["request"]>>(async () => {
       throw new Error("Unexpected credits request");
     });
   });
 
-  afterEach(() => {
-    jest.restoreAllMocks();
-    SystemSculptService.clearInstance();
-  });
-
   it.each(["", " \t "])("does not send usage requests without a license (%j)", async (licenseKey) => {
-    const { service } = createService(licenseKey);
-    await expect(service.getCreditsUsage()).rejects.toMatchObject({
+    const { credits } = createClient(licenseKey);
+    await expect(credits.readUsage()).rejects.toMatchObject({
       code: ERROR_CODES.INVALID_LICENSE,
       statusCode: 401,
     });
@@ -51,7 +52,7 @@ describe("SystemSculptService credits requests", () => {
   });
 
   it("encodes usage filters, forwards cancellation and decodes billed activity", async () => {
-    const { service } = createService();
+    const { credits } = createClient();
     const controller = new AbortController();
     request.mockResolvedValue(jsonResponse({
       items: [{
@@ -68,7 +69,7 @@ describe("SystemSculptService credits requests", () => {
       next_before: " cursor+/= ",
     }));
 
-    await expect(service.getCreditsUsage({
+    await expect(credits.readUsage({
       limit: 5.9, before: " cursor+/= ", endpoints: [" /chat ", "", "  ", "/audio"],
       signal: controller.signal,
     })).resolves.toEqual({
@@ -97,9 +98,9 @@ describe("SystemSculptService credits requests", () => {
   });
 
   it.each([0, -1, NaN, Infinity])("omits invalid usage limits (%s) and blank cursors", async (limit) => {
-    const { service } = createService();
+    const { credits } = createClient();
     request.mockResolvedValue(jsonResponse({ items: [], next_before: null }));
-    await expect(service.getCreditsUsage({ limit, before: " " })).resolves.toEqual({
+    await expect(credits.readUsage({ limit, before: " " })).resolves.toEqual({
       items: [], nextBefore: null,
     });
     expect(new URL(request.mock.calls[0][0].url).search).toBe("");
@@ -107,14 +108,14 @@ describe("SystemSculptService credits requests", () => {
 
   it.each([null, [], "invalid", { items: "invalid", next_before: 42 }])(
     "handles missing usage-page fields without crashing (%j)", async (payload) => {
-      const { service } = createService();
+      const { credits } = createClient();
       request.mockResolvedValue(jsonResponse(payload));
-      await expect(service.getCreditsUsage()).resolves.toEqual({ items: [], nextBefore: null });
+      await expect(credits.readUsage()).resolves.toEqual({ items: [], nextBefore: null });
     },
   );
 
   it("keeps supported activity types and safely defaults unknown or malformed legacy fields", async () => {
-    const { service } = createService();
+    const { credits } = createClient();
     const kinds = ["audio_transcription", "embeddings", "document_processing", "agent_turn", "request"];
     request.mockResolvedValue(jsonResponse({
       items: [
@@ -123,7 +124,7 @@ describe("SystemSculptService credits requests", () => {
         null, [],
       ],
     }));
-    const page = await service.getCreditsUsage();
+    const page = await credits.readUsage();
     expect(page.items.map((item) => item.usageKind)).toEqual([...kinds, "request", "request", "request"]);
     expect(page.items[5]).toMatchObject({
       creditsCharged: 0, totalTokens: 0, fileFormat: null, fileSizeBytes: null,
@@ -135,99 +136,99 @@ describe("SystemSculptService credits requests", () => {
   });
 
   it.each(["balance", "usage"] as const)("preserves account-recovery errors from the %s endpoint", async (kind) => {
-    const { service } = createService();
+    const { credits } = createClient();
     request.mockResolvedValue(jsonResponse({
       error: { code: "invalid_license", message: "Sign in again." },
     }, { status: 401 }));
-    await expect(kind === "balance" ? service.getCreditsBalance() : service.getCreditsUsage())
+    await expect(kind === "balance" ? credits.readBalance() : credits.readUsage())
       .rejects.toMatchObject({
         code: ERROR_CODES.INVALID_LICENSE, statusCode: 401, message: "Sign in again.",
-        metadata: { licenseFailure: true, endpoint: `${service.baseUrl}/credits/${kind}` },
+        metadata: { licenseFailure: true, endpoint: `${baseUrl}/credits/${kind}` },
       });
   });
 
   it("observes status and server timing without letting a diagnostics failure break the balance", async () => {
-    const { service } = createService();
+    const { credits } = createClient();
     const observer = jest.fn(() => { throw new Error("Diagnostics unavailable"); });
     request.mockImplementation(async (input) => {
       input.onTransportSelected?.("requestUrl");
       return jsonResponse(balancePayload, { headers: { "server-timing": "auth;dur=4, total;dur=12" } });
     });
-    await expect(service.getCreditsBalance({ onObservation: observer })).resolves.toMatchObject({ totalRemaining: 15 });
+    await expect(credits.readBalance({ onObservation: observer })).resolves.toMatchObject({ totalRemaining: 15 });
     expect(observer).toHaveBeenCalledWith({
       transport: "requestUrl", status: 200, serverTiming: { authMs: 4, totalMs: 12 },
     });
   });
 
   it("reports the selected transport and preserves the original network failure", async () => {
-    const { service } = createService();
+    const { credits } = createClient();
     const error = new Error("Network disconnected");
     const observer = jest.fn(() => { throw new Error("Diagnostics unavailable"); });
     request.mockImplementation(async (input) => {
       input.onTransportSelected?.("fetch");
       throw error;
     });
-    await expect(service.getCreditsBalance({ onObservation: observer })).rejects.toBe(error);
+    await expect(credits.readBalance({ onObservation: observer })).rejects.toBe(error);
     expect(observer).toHaveBeenCalledWith({ transport: "fetch" });
   });
 
   it.each(["{truncated", JSON.stringify({ ...balancePayload, total_remaining: 999 })])(
     "rejects unreadable balances instead of displaying zero or an invented total (%s)", async (body) => {
-      const { service } = createService();
+      const { credits } = createClient();
       request.mockResolvedValue(new Response(body));
-      await expect(service.getCreditsBalance()).rejects.toMatchObject({
+      await expect(credits.readBalance()).rejects.toMatchObject({
         code: ERROR_CODES.INVALID_RESPONSE, statusCode: 502, message: "Unable to read credits balance.",
       });
     },
   );
 
   it.each(["balance", "usage"] as const)("preserves a payment-required response from %s without changing local credit state", async (kind) => {
-    const { service, plugin } = createService();
+    const { credits, plugin } = createClient();
     request.mockResolvedValue(jsonResponse({ error: { code: "payment_required", message: "Add credits to continue." } }, { status: 402 }));
-    await expect(kind === "balance" ? service.getCreditsBalance() : service.getCreditsUsage())
+    await expect(kind === "balance" ? credits.readBalance() : credits.readUsage())
       .rejects.toMatchObject({ code: ERROR_CODES.INSUFFICIENT_CREDITS, statusCode: 402 });
     expect(plugin.settings).toEqual({ licenseKey: " license_for_test " });
     expect(request).toHaveBeenCalledTimes(1);
   });
 
   it("ignores non-string endpoint filters rather than serializing them into billing queries", async () => {
-    const { service } = createService();
+    const { credits } = createClient();
     request.mockResolvedValue(jsonResponse({ items: [] }));
-    await service.getCreditsUsage({ endpoints: [null, 42, "/chat"] as unknown as string[] });
+    await credits.readUsage({ endpoints: [null, 42, "/chat"] as unknown as string[] });
     expect(new URL(request.mock.calls[0][0].url).searchParams.getAll("endpoint")).toEqual(["/chat"]);
   });
 
   it("does not reuse a cached balance after the license is removed", async () => {
-    const { service, plugin } = createService();
+    const { credits, plugin } = createClient();
     request.mockResolvedValue(jsonResponse(balancePayload));
-    await service.readCreditsBalance();
+    await credits.readBalance();
     plugin.settings.licenseKey = "";
-    await expect(service.readCreditsBalance()).rejects.toMatchObject({
+    await expect(credits.readBalance()).rejects.toMatchObject({
       code: ERROR_CODES.INVALID_LICENSE, statusCode: 401, metadata: { licenseFailure: true },
     });
     expect(request).toHaveBeenCalledTimes(1);
   });
 
   it("shares displayed balances, refreshes after purchases and never reuses another account's balance", async () => {
-    const { service, plugin } = createService();
+    const { credits, plugin } = createClient();
     request.mockImplementation(async () => jsonResponse(balancePayload));
     const listener = jest.fn();
-    const unsubscribe = service.onCreditsBalance(listener);
+    const unsubscribe = credits.subscribe(listener);
 
-    const first = await service.readCreditsBalance();
-    expect(await service.readCreditsBalance()).toEqual(first);
+    const first = await credits.readBalance();
+    expect(await credits.readBalance()).toEqual(first);
     expect(request).toHaveBeenCalledTimes(1);
     expect(listener).toHaveBeenCalledTimes(1);
     expect(listener).toHaveBeenLastCalledWith(first);
 
     request.mockResolvedValueOnce(jsonResponse({ ...balancePayload, add_on_remaining: 25, total_remaining: 35 }));
-    await expect(service.readCreditsBalance({ fresh: true })).resolves.toMatchObject({ totalRemaining: 35 });
+    await expect(credits.readBalance({ fresh: true })).resolves.toMatchObject({ totalRemaining: 35 });
     expect(listener).toHaveBeenCalledTimes(2);
     expect(listener).toHaveBeenLastCalledWith(expect.objectContaining({ totalRemaining: 35 }));
 
     unsubscribe();
     plugin.settings = { licenseKey: "other_account" };
-    await expect(service.readCreditsBalance()).resolves.toMatchObject({ totalRemaining: 15 });
+    await expect(credits.readBalance()).resolves.toMatchObject({ totalRemaining: 15 });
     expect(request).toHaveBeenCalledTimes(3);
     expect(request.mock.calls[2][0].headers).toMatchObject({ "x-license-key": "other_account" });
     expect(listener).toHaveBeenCalledTimes(2);

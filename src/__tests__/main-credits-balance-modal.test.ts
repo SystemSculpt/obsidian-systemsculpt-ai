@@ -71,8 +71,7 @@ describe("SystemSculptPlugin.openCreditsBalanceModal", () => {
       .mockRejectedValueOnce(new Error("Transient network failure"));
 
     (plugin as any)._aiService = {
-      readCreditsBalance: getCreditsBalanceMock,
-      getCreditsUsage: jest.fn(),
+      credits: { readBalance: getCreditsBalanceMock, readUsage: jest.fn() },
     };
 
     const onBalanceUpdated = jest.fn().mockResolvedValue(undefined);
@@ -123,8 +122,7 @@ describe("SystemSculptPlugin.openCreditsBalanceModal", () => {
       purchaseUrl: null,
     };
     (plugin as any)._aiService = {
-      readCreditsBalance: jest.fn(async () => balance),
-      getCreditsUsage: jest.fn(),
+      credits: { readBalance: jest.fn(async () => balance), readUsage: jest.fn() },
     };
     const resumeProcessing = jest.fn();
     (plugin as any).embeddingsManager = {

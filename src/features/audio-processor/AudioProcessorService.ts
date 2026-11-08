@@ -621,7 +621,7 @@ export class AudioProcessorService {
     if (typeof document !== "undefined") document.addEventListener("visibilitychange", wakeWhenVisible);
     signal.addEventListener("abort", wake, { once: true });
     const aiService = (this.plugin as Partial<Pick<SystemSculptPlugin, "aiService">>).aiService;
-    const unsubscribe = aiService?.onCreditsBalance?.((balance) => {
+    const unsubscribe = aiService?.credits?.subscribe((balance) => {
       if (balance.usageClass === "master_auth" || (balance.availableUnreserved ?? balance.totalRemaining) > 0) wake();
     });
     try {

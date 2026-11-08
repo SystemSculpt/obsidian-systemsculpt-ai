@@ -28,7 +28,7 @@ import {
 import type { ConnectOutcome } from "../../services/AccountConnectService";
 import { openExternalUrl } from "../../utils/externalUrl";
 import type { LicenseValidationResult } from "../../services/LicenseService";
-import type { CreditsBalanceSnapshot } from "../../services/SystemSculptService";
+import type { CreditsBalanceSnapshot } from "../../services/credits/HostedCreditsClient";
 
 export function renderAccountSection(
   root: HTMLElement,
@@ -372,7 +372,7 @@ export function renderAccountSection(
       try {
         creditsSetting.setDesc("Fetching credits balance…");
         tabInstance.invalidateSearchIndex();
-        const balance = await aiService.readCreditsBalance();
+        const balance = await aiService.credits.readBalance();
         if (
           (
             balance.usageClass === "master_auth"

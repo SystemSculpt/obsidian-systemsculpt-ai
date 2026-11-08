@@ -10,7 +10,7 @@ import type {
   CreditsBalanceSnapshot,
   CreditsUsageHistoryPage,
   CreditsUsageSnapshot,
-} from "../services/SystemSculptService";
+} from "../services/credits/HostedCreditsClient";
 import { LICENSE_URL } from "../types";
 import { withPluginAttribution } from "../constants/externalServices";
 import { openExternalUrl } from "../utils/externalUrl";

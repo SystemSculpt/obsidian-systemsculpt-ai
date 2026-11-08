@@ -62,7 +62,7 @@ function creditsView() {
   current.agent = prototype.createAgentSession.call(current);
   current.bindAgentSession = jest.fn();
   current.agentSessionBinding = { replace: async (create: () => unknown) => create() };
-  current.aiService = { readCreditsBalance: jest.fn() };
+  current.aiService = { credits: { readBalance: jest.fn() } };
   current.loadCodexCatalog = jest.fn();
   current.recordCreditsRefreshLifecycle = jest.fn();
   return current;
@@ -76,14 +76,14 @@ it('clears already displayed managed credits when restoring a native chat', asyn
 
   expect(current.creditsBalance).toBeNull();
   expect(shownCredits(current).at(-1)).toEqual(null);
-  expect(current.aiService.readCreditsBalance).not.toHaveBeenCalled();
+  expect(current.aiService.credits.readBalance).not.toHaveBeenCalled();
 });
 
 it.each([false, true])('ignores managed balance settlement after native restore and skips queued native refreshes (failure=%s)', async (failure) => {
   const current = creditsView();
   let resolveBalance!: (value: unknown) => void;
   let rejectBalance!: (error: Error) => void;
-  current.aiService.readCreditsBalance.mockReturnValue(new Promise((resolve, reject) => {
+  current.aiService.credits.readBalance.mockReturnValue(new Promise((resolve, reject) => {
     resolveBalance = resolve;
     rejectBalance = reject;
   }));
@@ -97,14 +97,14 @@ it.each([false, true])('ignores managed balance settlement after native restore 
 
   expect(current.creditsBalance).toBeNull();
   expect(shownCredits(current).at(-1)).toEqual(null);
-  expect(current.aiService.readCreditsBalance).toHaveBeenCalledTimes(1);
+  expect(current.aiService.credits.readBalance).toHaveBeenCalledTimes(1);
 });
 
 it('refreshes managed credits after returning from native without publishing the pre-switch result', async () => {
   const current = creditsView();
   let resolveBalance!: (value: unknown) => void;
   const fresh = { totalRemaining: 42, availableUnreserved: 42 };
-  current.aiService.readCreditsBalance
+  current.aiService.credits.readBalance
     .mockReturnValueOnce(new Promise(resolve => { resolveBalance = resolve; }))
     .mockResolvedValueOnce(fresh);
   const pending = current.refreshCreditsBalance();
@@ -116,7 +116,7 @@ it('refreshes managed credits after returning from native without publishing the
   await pending;
   await current.creditsFreshTail;
 
-  expect(current.aiService.readCreditsBalance).toHaveBeenCalledTimes(2);
+  expect(current.aiService.credits.readBalance).toHaveBeenCalledTimes(2);
   expect(current.creditsBalance).toEqual(fresh);
   expect(shownCredits(current)).not.toContainEqual(expect.objectContaining({ totalRemaining: 70840 }));
   expect(shownCredits(current).at(-1)).toEqual(fresh);
@@ -129,7 +129,7 @@ it.each([false, true])('clears the previous account balance and serializes a fre
   let resolveOld!: (value: unknown) => void;
   let rejectOld!: (error: Error) => void;
   const requestedKeys: string[] = [];
-  current.aiService.readCreditsBalance
+  current.aiService.credits.readBalance
     .mockImplementationOnce(async () => {
       requestedKeys.push(current.plugin.settings.licenseKey);
       return oldBalance;
@@ -150,7 +150,7 @@ it.each([false, true])('clears the previous account balance and serializes a fre
 
   expect(current.creditsBalance).toBeNull();
   expect(shownCredits(current).at(-1)).toEqual(null);
-  expect(current.aiService.readCreditsBalance).toHaveBeenCalledTimes(2);
+  expect(current.aiService.credits.readBalance).toHaveBeenCalledTimes(2);
   if (failure) rejectOld(new Error('Old account request failed'));
   else resolveOld({ totalRemaining: 99, availableUnreserved: 99 });
   await Promise.all([oldRefresh, newRefresh]);

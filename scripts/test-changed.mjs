@@ -13,10 +13,10 @@ export function moneySuites(repoRoot = root) {
     "src/core/license/__tests__/LicenseManager.test.ts",
     "src/services/__tests__/LicenseService.test.ts",
     "src/services/credits/__tests__/CreditsBalanceCache.test.ts",
-    ...fs.readdirSync(path.join(repoRoot, "src/services/__tests__"))
-      .filter((name) => /^SystemSculptService\.credits-.*\.test\.ts$/.test(name))
+    ...fs.readdirSync(path.join(repoRoot, "src/services/credits/__tests__"))
+      .filter((name) => /^HostedCreditsClient\..*\.test\.ts$/.test(name))
       .sort()
-      .map((name) => `src/services/__tests__/${name}`),
+      .map((name) => `src/services/credits/__tests__/${name}`),
     "src/modals/__tests__/CreditsBalanceModal.test.ts",
     "src/modals/__tests__/UpgradePlanModal.test.ts",
     "src/core/plugin/__tests__/commands-credits.test.ts",
@@ -24,8 +24,8 @@ export function moneySuites(repoRoot = root) {
     "src/views/chatview/__tests__/agent-chat-view-credits-cache.test.ts",
     "src/utils/__tests__/licenseUtils.test.ts",
   ];
-  if (!suites.some((file) => file.includes("SystemSculptService.credits-"))) {
-    throw new Error("Missing SystemSculptService credits suites");
+  if (!suites.some((file) => file.includes("HostedCreditsClient."))) {
+    throw new Error("Missing HostedCreditsClient suites");
   }
   for (const file of suites) {
     if (!fs.existsSync(path.join(repoRoot, file))) throw new Error(`Missing money suite: ${file}`);

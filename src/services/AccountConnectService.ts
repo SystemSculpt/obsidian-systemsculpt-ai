@@ -578,7 +578,7 @@ export class AccountConnectService {
   private async readStarterCredits(): Promise<number | null> {
     try {
       const balance = await this.waitFor(
-        this.plugin.aiService.readCreditsBalance({ fresh: true }).catch(() => null),
+        this.plugin.aiService.credits.readBalance({ fresh: true }).catch(() => null),
         CONNECT_CREDITS_WAIT_MS,
       );
       if (!balance || !isStarterBalance(balance)) return null;

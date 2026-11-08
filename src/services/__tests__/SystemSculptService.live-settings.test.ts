@@ -2,6 +2,7 @@
  * @jest-environment node
  */
 import { SystemSculptService } from "../SystemSculptService";
+import { PlatformRequestClient } from "../PlatformRequestClient";
 import { ERROR_CODES } from "../../utils/errors";
 
 jest.mock("../../tools/FirstPartyToolService", () => ({
@@ -25,6 +26,7 @@ const creditsBalancePayload = {
 
 describe("SystemSculptService settings", () => {
   afterEach(() => {
+    jest.restoreAllMocks();
     SystemSculptService.clearInstance();
   });
 
@@ -35,9 +37,9 @@ describe("SystemSculptService settings", () => {
       status: 200,
       headers: { "content-type": "application/json" },
     }));
-    (service as any).requestClient = { request };
+    jest.spyOn(PlatformRequestClient.prototype, "request").mockImplementation(request);
 
-    await expect(service.getCreditsBalance()).rejects.toMatchObject({
+    await expect(service.credits.readBalance()).rejects.toMatchObject({
       code: ERROR_CODES.INVALID_LICENSE,
     });
     expect(request).not.toHaveBeenCalled();
@@ -45,7 +47,7 @@ describe("SystemSculptService settings", () => {
     // SettingsManager replaces the whole object rather than mutating it.
     plugin.settings = { ...plugin.settings, licenseKey: " license_after_save " };
 
-    await expect(service.getCreditsBalance()).resolves.toMatchObject({ totalRemaining: 5 });
+    await expect(service.credits.readBalance()).resolves.toMatchObject({ totalRemaining: 5 });
     expect(request).toHaveBeenCalledTimes(1);
     expect(JSON.stringify((request.mock.calls[0] as unknown[])[0])).toContain("license_after_save");
     expect(SystemSculptService.getInstance(plugin)).toBe(service);

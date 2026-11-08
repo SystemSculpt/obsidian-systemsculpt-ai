@@ -2,9 +2,9 @@
 
 import { AgentChatView } from "../AgentChatView";
 import type { AgentWorkspace } from "../AgentWorkspace";
-import type { CreditsBalanceSnapshot, SystemSculptService } from "../../../services/SystemSculptService";
+import type { CreditsBalanceSnapshot, HostedCreditsClient } from "../../../services/credits/HostedCreditsClient";
 
-type ReadCreditsBalance = SystemSculptService["readCreditsBalance"];
+type ReadCreditsBalance = HostedCreditsClient["readBalance"];
 type SyncChrome = AgentChatView["syncChrome"];
 type RefreshCreditsBalance = AgentChatView["refreshCreditsBalance"];
 type SetPlanOfferVisible = AgentWorkspace["setPlanOfferVisible"];
@@ -22,7 +22,7 @@ function createView(readCreditsBalance: jest.Mock<ReturnType<ReadCreditsBalance>
   };
   Object.assign(view, {
     plugin: { settings: { licenseKey: "test-license" } },
-    aiService: { readCreditsBalance },
+    aiService: { credits: { readBalance: readCreditsBalance } },
     workspace,
     creditsPromise: null,
     creditsBalance: null,

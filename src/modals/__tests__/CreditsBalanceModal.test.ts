@@ -2,7 +2,7 @@ import { Notice } from "obsidian";
 import { CreditsBalanceModal } from "../CreditsBalanceModal";
 import { JSDOM } from "jsdom";
 import { LICENSE_URL } from "../../types";
-import type { CreditsUsageSnapshot } from "../../services/SystemSculptService";
+import type { CreditsUsageSnapshot } from "../../services/credits/HostedCreditsClient";
 
 jest.mock("obsidian", () => ({ ...jest.requireActual("obsidian"), Notice: jest.fn() }));
 
