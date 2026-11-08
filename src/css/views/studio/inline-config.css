@@ -171,8 +171,9 @@ input.ss-studio-node-inline-config-input,
   white-space: nowrap;
 }
 
-/* Placeholders carry the field's only guidance; faint ink was ~2:1. */
+/* Placeholders carry the field's only guidance, so they take muted ink:
+ * about 6:1 on the sunken field in Obsidian's light and dark themes. */
 .ss-studio-node-inline-config-textarea::placeholder,
 input.ss-studio-node-inline-config-input::placeholder {
-  color: color-mix(in srgb, var(--ss-ink-muted) 60%, var(--ss-ink-faint));
+  color: var(--ss-ink-muted);
 }
