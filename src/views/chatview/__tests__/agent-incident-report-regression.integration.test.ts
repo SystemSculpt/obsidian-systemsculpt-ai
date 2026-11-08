@@ -1143,7 +1143,6 @@ describe("ChatView incident report regression integration", () => {
       Object.assign(closeView, {
         contextManager: { dispose: jest.fn() },
         transcript,
-        pendingLocalReportIds: new Map([[REQUEST_ID, localReportId]]),
         plugin: { getLogger: () => logger },
         chatId,
         chatTitle: "Failed local run",
@@ -1152,21 +1151,24 @@ describe("ChatView incident report regression integration", () => {
         closing: false,
         closed: false,
         closeBarrier: null,
-        activeSubmissionOperation: null,
         conversationOriginToken: "origin-before-close",
-        queueDrainSuppressionDepth: 0,
         agentSessionBinding: null,
         agent: { detach: jest.fn(async () => undefined) },
-        beginConversationTransition: jest.fn(() => closeTransition),
-        finishSubmissionOperation: jest.fn(),
-        queuedFollowUps: [],
-        queueHydrated: false,
-        queuePersistence: Promise.resolve(),
         workspace: {
           setRunPending: jest.fn(),
           setBanner: jest.fn(),
           setTitle: jest.fn(),
         },
+      });
+      Object.assign(closeView["turns"], {
+        pendingLocalReportIds: new Map([[REQUEST_ID, localReportId]]),
+        activeSubmissionOperation: null,
+        queueDrainSuppressionDepth: 0,
+        beginConversationTransition: jest.fn(() => closeTransition),
+        finishSubmissionOperation: jest.fn(),
+        queuedFollowUps: [],
+        queueHydrated: false,
+        queuePersistence: Promise.resolve(),
       });
       const failedResult = {
         kind: "failed" as const,
@@ -1187,14 +1189,14 @@ describe("ChatView incident report regression integration", () => {
 
       jest.useFakeTimers({ now: CREATED_AT_MS });
       try {
-        (closeView as any).scheduleLocalFailedReceiptPersistence(failedResult);
+        (closeView as any)["turns"].scheduleLocalFailedReceiptPersistence(failedResult);
         await firstReceiptWriteRejected;
         for (let index = 0; index < 20 && jest.getTimerCount() === 0; index += 1) {
           await Promise.resolve();
         }
         expect(transcriptStorage.saveChat).toHaveBeenCalledTimes(1);
         expect(jest.getTimerCount()).toBe(1);
-        expect((closeView as any).pendingLocalReportIds.get(REQUEST_ID))
+        expect((closeView as any)["turns"].pendingLocalReportIds.get(REQUEST_ID))
           .toBe(localReportId);
         expect(durableTranscript).not.toContain(localReportId);
 
@@ -1212,7 +1214,7 @@ describe("ChatView incident report regression integration", () => {
             }),
           ]));
         }
-        expect((closeView as any).pendingLocalReportIds.has(REQUEST_ID))
+        expect((closeView as any)["turns"].pendingLocalReportIds.has(REQUEST_ID))
           .toBe(false);
         expect(durableTranscript).toContain(localReportId);
         expect(jest.getTimerCount()).toBe(0);

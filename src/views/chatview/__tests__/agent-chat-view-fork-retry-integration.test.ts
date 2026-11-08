@@ -376,13 +376,8 @@ describe("AgentChatView historical Retry integration", () => {
       automationApprovalMode: "interactive",
       approvalMode: "ask",
       sessionTrustedToolNames: new Set<string>(),
-      activeSubmissionOperation: null,
-      queuedFollowUps: [],
-      queueDrainSuppressionDepth: 0,
       conversationOriginToken: "origin-fork-retry",
       runConversationOrigins: new Map<string, string>(),
-      pendingRetry: null,
-      pendingRejectedRetry: null,
       pendingForkHistory: null,
       pendingThinConversationId: SOURCE_CONVERSATION_ID,
       thinClientId: CLIENT_ID,
@@ -398,7 +393,6 @@ describe("AgentChatView historical Retry integration", () => {
       },
       chatId: "chat-fork-retry",
       chatTitle: "Fork Retry",
-      messageEditGeneration: 0,
       legacyHistoryViewOnly: false,
       // A non-empty pinned set keeps the staging round trip (and its
       // context_ref on the forked replacement) part of this scenario: an
@@ -419,8 +413,16 @@ describe("AgentChatView historical Retry integration", () => {
         },
       })),
       applyTranscriptIdentity: jest.fn(),
-      bindQueueToChat: jest.fn(async () => undefined),
       updateViewState: jest.fn(),
+    });
+    Object.assign(view["turns"], {
+      activeSubmissionOperation: null,
+      queuedFollowUps: [],
+      queueDrainSuppressionDepth: 0,
+      pendingRetry: null,
+      pendingRejectedRetry: null,
+      messageEditGeneration: 0,
+      bindQueueToChat: jest.fn(async () => undefined),
     });
     const unsubscribe = agent.subscribe((agentSnapshot) => {
       (view as any).renderAgentSnapshot(agentSnapshot);
@@ -457,7 +459,7 @@ describe("AgentChatView historical Retry integration", () => {
       ]);
       const reconciliationsBeforeFork = transcript.reconcileServerHistory.mock.calls.length;
 
-      const retry = (view as any).retryFailedTurn(ORIGINAL_USER_ID) as Promise<void>;
+      const retry = (view as any)["turns"].retryFailedTurn(ORIGINAL_USER_ID) as Promise<void>;
       await eventually(() => expect(servers).toHaveLength(2));
 
       expect(transcript.commitUser).not.toHaveBeenCalled();
