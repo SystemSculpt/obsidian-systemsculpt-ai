@@ -296,3 +296,26 @@ export function historicalToolPart(tool: ToolCall): AgentToolPart {
     } : {}),
   };
 }
+
+export function historicalAgentPart(part: MessagePart): AgentPart | null {
+  if (part.type === "reasoning") {
+    return {
+      id: part.id,
+      order: part.timestamp,
+      kind: "reasoning",
+      messageId: "",
+      state: "complete",
+      summary: part.data,
+    };
+  }
+  if (part.type === "tool_call") return historicalToolPart(part.data);
+  const content = presentMessageContent(part.data);
+  return {
+    id: part.id,
+    order: part.timestamp,
+    kind: "text",
+    messageId: "",
+    state: "complete",
+    markdown: content.markdown,
+  };
+}

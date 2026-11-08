@@ -361,14 +361,17 @@ export type StudioAssetRef = {
   path: string;
 };
 
-export type StudioRunSnapshotV1 = {
-  schema: "studio.run.v1";
+export type StudioRunProvenanceV1 = {
+  schema: "studio.run-provenance.v1";
   runId: string;
   projectPath: string;
   projectId: string;
   createdAt: string;
-  project: StudioProjectV1;
-  policy: StudioPermissionPolicyV1;
+  /** SHA-256 of the scoped graph and effective permission policy admitted for this run. */
+  graphHash: string;
+  policyHash: string;
+  executeNodeIds: string[];
+  providedNodeIds: string[];
 };
 
 export type StudioRunEvent =

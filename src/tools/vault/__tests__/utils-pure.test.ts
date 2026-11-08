@@ -8,7 +8,6 @@ import {
   createSimpleDiff,
   runWithConcurrency,
   createLineCalculator,
-  wouldExceedCharLimit,
 } from "../utils";
 import { fuzzyMatchScore } from "../searchUtils";
 import { desktopHost } from "../../../platform/desktopOnly";
@@ -252,35 +251,6 @@ describe("createLineCalculator", () => {
   });
 });
 
-
-
-describe("wouldExceedCharLimit", () => {
-  it("returns false when within limit", () => {
-    expect(wouldExceedCharLimit(10, "hello", 100)).toBe(false);
-  });
-
-  it("returns true when would exceed limit", () => {
-    // "hello" has length 5, so 96 + 5 = 101 > 100
-    expect(wouldExceedCharLimit(96, "hello", 100)).toBe(true);
-  });
-
-  it("handles objects by stringifying", () => {
-    const obj = { key: "value" };
-    expect(wouldExceedCharLimit(0, obj, 100)).toBe(false);
-    expect(wouldExceedCharLimit(90, obj, 100)).toBe(true);
-  });
-
-  it("handles exactly at limit", () => {
-    expect(wouldExceedCharLimit(95, "12345", 100)).toBe(false);
-    expect(wouldExceedCharLimit(96, "12345", 100)).toBe(true);
-  });
-
-  it("returns true for circular objects that fail stringify", () => {
-    const circular: any = { a: 1 };
-    circular.self = circular;
-    expect(wouldExceedCharLimit(0, circular, 1000)).toBe(true);
-  });
-});
 
 describe("fuzzyMatchScore", () => {
   it("returns 0 for exact substring match at start", () => {

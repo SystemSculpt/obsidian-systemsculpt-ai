@@ -8,7 +8,6 @@ import { MANAGED_MEDIA_DELIVERY_MAX_OFFSET_MS as MEDIA_DELIVERY_MAX_OFFSET_MS } 
  * (typical_duration_ms). Audio and documents retain their strict
  * managed-job-protocol-v1 parser in ManagedJobClient; media never shares
  * parsing state with it.
- * @internal Tests assert against this value.
  */
 export const MANAGED_MEDIA_JOB_PROTOCOL = "managed-job-protocol-v2" as const;
 

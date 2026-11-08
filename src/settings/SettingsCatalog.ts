@@ -263,11 +263,6 @@ const SETTINGS_CATALOG = {
     title: "Run retention",
     description: "Maximum completed runs kept per project.",
   },
-  "studio.artifact-retention": {
-    tabId: "studio",
-    title: "Artifact retention (mb)",
-    description: "Oldest run files are pruned past this size.",
-  },
   "advanced.quick-actions": {
     tabId: "advanced",
     title: "Quick actions",

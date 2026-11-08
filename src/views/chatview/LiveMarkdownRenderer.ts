@@ -4,6 +4,14 @@ import {
   getSurfaceOwnerWindow,
 } from "../../core/ui/surface";
 import { setMarkdownCodeExpanded } from "./MarkdownCodeBlocks";
+import {
+  captureDetailsState,
+  captureDomSelection,
+  focusedElementWithin,
+  restoreDetailsState,
+  restoreDomSelection,
+  type PreservedDetailsState,
+} from "./ConversationDomState";
 
 const DEFAULT_STREAM_RENDER_INTERVAL_MS = 48;
 const TEXT_NODE_FILTER = 4;
@@ -70,10 +78,7 @@ type PreservedDomState = Readonly<{
     top: number;
     left: number;
   }>[];
-  details: readonly Readonly<{
-    element: HTMLDetailsElement;
-    open: boolean;
-  }>[];
+  details: PreservedDetailsState;
   callouts: readonly Readonly<{
     element: HTMLElement;
     collapsed: boolean;
@@ -459,15 +464,8 @@ function pointOffset(
 
 function captureSelection(region: DomRegion): PreservedSelection | null {
   const root = region.root;
-  const selection = root.ownerDocument.getSelection();
-  if (
-    !selection?.anchorNode
-    || !selection.focusNode
-    || !root.contains(selection.anchorNode)
-    || !root.contains(selection.focusNode)
-  ) {
-    return null;
-  }
+  const selection = captureDomSelection(root);
+  if (!selection) return null;
   const anchor = pointOffset(region, selection.anchorNode, selection.anchorOffset);
   const focus = pointOffset(region, selection.focusNode, selection.focusOffset);
   return anchor === null || focus === null
@@ -517,42 +515,22 @@ function restoreSelection(
 ): void {
   if (!preserved) return;
   const root = region.root;
-  const selection = root.ownerDocument.getSelection();
-  if (!selection) return;
   const restorePoint = (
     point: SelectionPoint,
   ): Readonly<{ node: Node; offset: number }> => {
     if (point.node.isConnected && root.contains(point.node)) {
-      const maximumOffset = point.node.nodeType === Node.TEXT_NODE
-        ? point.node.nodeValue?.length ?? 0
-        : point.node.childNodes.length;
-      return {
-        node: point.node,
-        offset: Math.min(point.nodeOffset, maximumOffset),
-      };
+      return { node: point.node, offset: point.nodeOffset };
     }
     return textPoint(region, point.textOffset);
   };
   const anchor = restorePoint(preserved.anchor);
   const focus = restorePoint(preserved.focus);
-  try {
-    selection.removeAllRanges();
-    if (typeof selection.setBaseAndExtent === "function") {
-      selection.setBaseAndExtent(
-        anchor.node,
-        anchor.offset,
-        focus.node,
-        focus.offset,
-      );
-      return;
-    }
-    const range = root.ownerDocument.createRange();
-    range.setStart(anchor.node, anchor.offset);
-    range.setEnd(focus.node, focus.offset);
-    selection.addRange(range);
-  } catch {
-    selection.removeAllRanges();
-  }
+  restoreDomSelection({
+    anchorNode: anchor.node,
+    anchorOffset: anchor.offset,
+    focusNode: focus.node,
+    focusOffset: focus.offset,
+  });
 }
 
 function childPath(region: DomRegion, target: HTMLElement): number[] {
@@ -583,7 +561,7 @@ function nodeAtPath(region: DomRegion, path: readonly number[]): Node | null {
 
 function captureFocus(region: DomRegion): PreservedFocus | null {
   const root = region.root;
-  const active = root.ownerDocument.activeElement;
+  const active = focusedElementWithin(root);
   if (
     !active
     || !isDomInstance(active, getDomRealm(root).HTMLElement)
@@ -655,8 +633,7 @@ function captureDomState(region: DomRegion): PreservedDomState {
       top: element.scrollTop,
       left: element.scrollLeft,
     })),
-    details: regionQueryAll<HTMLDetailsElement>(region, "details")
-      .map((element) => ({ element, open: element.open })),
+    details: captureDetailsState(regionQueryAll<HTMLDetailsElement>(region, "details")),
     callouts: regionQueryAll<HTMLElement>(region, ".callout")
       .map((element) => ({
         element,
@@ -697,13 +674,7 @@ function restoreDomState(region: DomRegion, state: PreservedDomState): void {
     target.scrollLeft = entry.left;
   });
 
-  const details = regionQueryAll<HTMLDetailsElement>(region, "details");
-  state.details.forEach((entry, index) => {
-    const target = entry.element.isConnected && root.contains(entry.element)
-      ? entry.element
-      : details[index];
-    if (target) target.open = entry.open;
-  });
+  restoreDetailsState(root, state.details, regionQueryAll<HTMLDetailsElement>(region, "details"));
 
   const callouts = regionQueryAll<HTMLElement>(region, ".callout");
   state.callouts.forEach((entry, index) => {

@@ -182,8 +182,8 @@ describe("StudioRuntime session snapshot runs", () => {
         throw new Error("runProjectSnapshot should not reload the project from disk");
       }),
       supportRelativePath: jest.fn((_projectPath: string, path: string) => path),
-      publishRun: jest.fn(async (_projectPath: string, command: { runId: string; snapshotDocument: Uint8Array; eventsDocument: Uint8Array; runIndexDocument: Uint8Array; cacheDocument: Uint8Array }) => {
-        generationFiles.set(`runs/${command.runId}/snapshot.json`, command.snapshotDocument);
+      publishRun: jest.fn(async (_projectPath: string, command: { runId: string; provenanceDocument: Uint8Array; eventsDocument: Uint8Array; runIndexDocument: Uint8Array; cacheDocument: Uint8Array }) => {
+        generationFiles.set(`runs/${command.runId}/provenance.json`, command.provenanceDocument);
         generationFiles.set(`runs/${command.runId}/events.ndjson`, command.eventsDocument);
         generationFiles.set("runs/index.json", command.runIndexDocument);
         generationFiles.set("cache/node-results.json", command.cacheDocument);
@@ -247,14 +247,23 @@ describe("StudioRuntime session snapshot runs", () => {
       expect.objectContaining({ metadata: expect.objectContaining({ error: "cleanup unavailable" }) }),
     );
     const publication = projectStore.publishRun.mock.calls[0][1];
-    expect(new TextDecoder().decode(publication.snapshotDocument)).toContain("Live Session Snapshot");
+    const provenance = JSON.parse(new TextDecoder().decode(publication.provenanceDocument));
+    expect(provenance).toEqual({
+      schema: "studio.run-provenance.v1", runId: summary.runId,
+      projectPath: "Studio/Test.systemsculpt", projectId: project.projectId, createdAt: summary.startedAt,
+      graphHash: createHash("sha256").update(JSON.stringify(project.graph)).digest("hex"),
+      policyHash: createHash("sha256").update(JSON.stringify(await projectStore.loadPolicy())).digest("hex"),
+      executeNodeIds: [], providedNodeIds: [],
+    });
+    expect(publication.provenanceDocument.byteLength).toBeLessThan(600);
+    expect(provenance).not.toHaveProperty("project");
+    expect(provenance).not.toHaveProperty("policy");
     expect(new TextDecoder().decode(publication.eventsDocument)).toContain("run.completed");
     expect(new TextDecoder().decode(publication.runIndexDocument)).toContain("success");
     expect(new TextDecoder().decode(publication.cacheDocument)).toContain("proj_live_runtime");
     expect(projectStore.loadPolicy).toHaveBeenCalledWith(project.permissionsRef.policyPath);
-    const snapshotBytes = [...generationFiles].find(([path]) => path.endsWith("/snapshot.json"))?.[1];
-    expect(snapshotBytes).toBeDefined();
-    expect(new TextDecoder().decode(snapshotBytes)).toContain("Live Session Snapshot");
+    expect([...generationFiles.keys()].some(path => path.endsWith("/snapshot.json"))).toBe(false);
+    expect(generationFiles.get(`runs/${summary.runId}/provenance.json`)).toEqual(publication.provenanceDocument);
     expect(compiler.compileRun).toHaveBeenCalledWith(
       expect.objectContaining({ name: "Live Session Snapshot" }),
       expect.anything(),

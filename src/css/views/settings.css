@@ -71,6 +71,16 @@
   display: block;
 }
 
+/* The Studio launcher has no detail; center its label with the taller button. */
+.ss-settings-surface .setting-item[data-ss-setting="studio.open"] {
+  align-items: center;
+}
+
+/* Empty native descriptions must not add height above a row's control. */
+.ss-settings-surface .setting-item-description:empty {
+  display: none;
+}
+
 /* Feedback uses native setting controls, stacked at every pane width. */
 .ss-feedback-form .setting-item {
   flex-direction: column;
@@ -194,6 +204,11 @@
 
 .ss-settings-search-shell.is-search-active {
   border-color: var(--ss-line-accent);
+}
+
+/* An uninitialized meta bar must not leave an extra flex gap below search. */
+.ss-settings-search-meta:empty {
+  display: none;
 }
 
 /* Meta bar */

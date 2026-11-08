@@ -36,6 +36,11 @@
       "events": [],
       "not_measured": "Opening a cited source note stays in the vault through Obsidian openLinkText. No server call or client telemetry is sent.",
       "where": ["src/views/chatview/AgentConversationRenderer.ts"]
+    },
+    "studio-storage-settings": {
+      "events": [],
+      "not_measured": "Studio run retention and support storage are vault-local. The ineffective artifact-size control was removed; compatibility fields remain, with no quota or client telemetry. Settings row and search spacing changes are local presentation only.",
+      "where": ["src/settings/ImageGenerationTabContent.ts", "src/studio/StudioProjectStore.ts", "src/css/views/settings.css"]
     }
   },
   "events": [

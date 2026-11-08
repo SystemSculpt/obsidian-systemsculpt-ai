@@ -518,18 +518,3 @@ export function getFilesFromFolder(folder: TFolder): TFile[] {
   processFolder(folder);
   return files;
 }
-
-/**
- * Determine whether adding `addition` (after stringifying) would exceed the
- * supplied character limit. Useful for building responses that must stay
- * under our model-safe threshold.
- */
-export function wouldExceedCharLimit(currentSize: number, addition: unknown, limit: number): boolean {
-  try {
-    const additionSize = typeof addition === 'string' ? addition.length : JSON.stringify(addition).length;
-    return currentSize + additionSize > limit;
-  } catch {
-    // Fallback in the odd case stringify fails – assume it would exceed.
-    return true;
-  }
-}

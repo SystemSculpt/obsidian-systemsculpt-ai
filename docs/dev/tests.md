@@ -70,6 +70,13 @@ npm run check:compat
 
 ## Release rules
 
+- Fixes merge source only: no per-fix version bumps, tags or publication.
+  Trellis `tools/plugin-daily-release.mjs` owns one combined release per Pacific
+  day when main changed. It requires full CI on the exact release revision, a
+  real isolated Obsidian smoke and three-asset SHA-256 comparison.
+- Unpublished tags 6.19.6–6.19.8 stay immutable and unpublished. The next daily
+  version exceeds every existing semantic version tag and supersedes them.
+
 - Release validation records the SHA-256 and size of manifest.json, main.js, and styles.css plus the source revision and build environment identity. The published-release workflow rebuilds the tag, requires exact asset bytes, and attests those published bytes before announcing the release through first-party metadata.
 
 ## Failures

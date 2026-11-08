@@ -1,47 +1,11 @@
-class LruCache<K, V> {
-  private readonly map = new Map<K, V>();
-
-  constructor(private readonly maxEntries: number) {}
-
-  get(key: K): V | undefined {
-    const value = this.map.get(key);
-    if (value !== undefined) {
-      this.map.delete(key);
-      this.map.set(key, value);
-    }
-    return value;
-  }
-
-  set(key: K, value: V): void {
-    if (this.map.has(key)) this.map.delete(key);
-    this.map.set(key, value);
-    if (this.map.size <= this.maxEntries) return;
-
-    const oldest = this.map.keys().next().value;
-    if (oldest !== undefined) this.map.delete(oldest);
-  }
-}
-
 const CHARS_PER_TOKEN = 4;
-const tokenCache = new LruCache<string, number>(1000);
 
 /**
- * Approximate text size for local display and response-budget diagnostics.
+ * Approximate text size for local display and response-budget diagnostics,
+ * without retaining disposable strings such as trial tool pages.
  * This estimate never controls managed request admission, batching, or content;
  * the SystemSculpt API remains authoritative for those decisions.
  */
-export function countTextTokens(text: string): number {
-  if (!text) return 0;
-
-  const cached = tokenCache.get(text);
-  if (cached !== undefined) return cached;
-
-  const estimate = estimateTextTokens(text);
-  tokenCache.set(text, estimate);
-  return estimate;
-}
-
-/** Same estimate without retaining disposable strings such as trial tool pages. */
 export function estimateTextTokens(text: string): number {
   if (!text) return 0;
   const words = text.trim().split(/\s+/).filter((word) => word.length > 0);

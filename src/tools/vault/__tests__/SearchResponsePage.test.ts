@@ -6,7 +6,7 @@ import * as tokenCounting from "../../../utils/tokenCounting";
 
 jest.mock("../../../utils/tokenCounting", () => {
   const actual = jest.requireActual<typeof import("../../../utils/tokenCounting")>("../../../utils/tokenCounting");
-  return { ...actual, countTextTokens: jest.fn(actual.countTextTokens), estimateTextTokens: jest.fn(actual.estimateTextTokens) };
+  return { ...actual, estimateTextTokens: jest.fn(actual.estimateTextTokens) };
 });
 const realTokenCounting = jest.requireActual<typeof import("../../../utils/tokenCounting")>("../../../utils/tokenCounting");
 
@@ -60,20 +60,7 @@ function pages(kept: Scan, budget: number, paths: string[] | null = null, queryI
 
 describe("SearchResponsePage", () => {
   afterEach(() => {
-    jest.mocked(tokenCounting.countTextTokens).mockImplementation(realTokenCounting.countTextTokens);
     jest.mocked(tokenCounting.estimateTextTokens).mockImplementation(realTokenCounting.estimateTextTokens);
-  });
-
-  it("never memoizes disposable trial pages or remaining snippet text", () => {
-    const kept = scan(["needle words ".repeat(4000)]);
-    jest.mocked(tokenCounting.countTextTokens).mockClear().mockImplementation(() => {
-      throw new Error("Disposable page text must not enter the shared token cache");
-    });
-    const first = new SearchResponsePage({ queryId: "needle", pageTokens: 512 }).build(kept, null);
-    const next = new SearchResponsePage({ queryId: "needle", pageTokens: 512, cursor: first.page.next_cursor }).build(kept, null);
-    expectBudget(first, 512);
-    expectBudget(next, 512);
-    expect(tokenCounting.countTextTokens).not.toHaveBeenCalled();
   });
 
   it.each([512, 2048, 4096])("counts the whole serialized response within %i tokens", (budget) => {
