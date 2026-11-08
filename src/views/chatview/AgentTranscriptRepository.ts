@@ -595,9 +595,16 @@ export class AgentTranscriptRepository {
 
   public reconcileServerHistory(
     messages: readonly ChatMessage[],
+    agentConversationId?: string,
   ): Promise<AgentTranscriptSnapshot> {
     const generation = this.generation;
     return this.serializeForGeneration(generation, async () => {
+      const normalizedConversationId = agentConversationId
+        ? parseAgentConversationId(agentConversationId)
+        : undefined;
+      if (agentConversationId && !normalizedConversationId) {
+        throw new Error("Invalid agent conversation identifier.");
+      }
       const incoming = ownedMessages(messages);
       const ids = incoming.map((message) => message.message_id);
       if (ids.some((id) => !id) || new Set(ids).size !== ids.length) {
@@ -633,13 +640,17 @@ export class AgentTranscriptRepository {
         // fast path instead of reading every message back again.
         this.messages = Object.freeze(next);
       }
-      if (match !== "changed") return this.snapshot();
-      await this.persist(
-        next,
-        true,
-        generation,
-        "authoritative-server-history",
-      );
+      const previousConversationId = this.agentConversationId;
+      const conversationChanged = normalizedConversationId !== undefined
+        && normalizedConversationId !== previousConversationId;
+      if (match !== "changed" && !conversationChanged) return this.snapshot();
+      if (normalizedConversationId) this.agentConversationId = normalizedConversationId;
+      try {
+        await this.persist(next, true, generation, "authoritative-server-history");
+      } catch (error) {
+        if (generation === this.generation) this.agentConversationId = previousConversationId;
+        throw error;
+      }
       return this.snapshot();
     });
   }

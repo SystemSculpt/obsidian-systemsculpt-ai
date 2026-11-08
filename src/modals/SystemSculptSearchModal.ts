@@ -713,6 +713,7 @@ const HIGHLIGHT_STOP_WORDS = new Set([
  * The query's content words, longest first. A one-word query keeps its word
  * even when it is a common one; a half-typed question ("when did the") marks
  * nothing rather than every "the".
+ * @internal Exported for focused query tests, not a public plugin API.
  */
 export function highlightTerms(query: string): string[] {
   const typed = query.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];

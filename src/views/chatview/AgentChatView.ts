@@ -318,6 +318,12 @@ export class AgentChatView extends ItemView {
   private chatInputLimits: ThinAgentInputLimits = DEFAULT_THIN_AGENT_INPUT_LIMITS;
   private thinBootstrapRequest: ThinAgentBootstrapRequest | null = null;
   private pendingThinConversationId: string | null = null;
+  private unsavedCompletedHistory: Readonly<{
+    originToken: string;
+    conversationId: string;
+    turnId: string;
+    messages: readonly ChatMessage[];
+  }> | null = null;
   private readonly thinClientId: string;
   private pendingForkHistory: PendingForkHistory | null = null;
   private deferredRecoveredCompletion: DeferredRecoveredCompletion | null = null;
@@ -2127,9 +2133,10 @@ export class AgentChatView extends ItemView {
       // the cleared projection can never duplicate the previous answer once
       // the next run publishes. Later isCurrentSubmissionOperation guards
       // still fence conversation switches.
-      void this.workspace?.setHistory(
-        this.transcript.snapshot().messages,
-      ).catch(() => {});
+      const unsavedConversation = this.unsavedCompletedHistory?.originToken === expectedConversationOriginToken
+        ? this.unsavedCompletedHistory.conversationId : undefined;
+      const displayHistory = this.historyForDisplay(undefined, unsavedConversation);
+      void this.workspace?.setHistory(displayHistory).catch(() => {});
       void this.workspace?.setAgentSnapshot(null).catch(() => {});
 
       const attachmentMetadata = composeAttachmentMetadata(
@@ -2179,7 +2186,7 @@ export class AgentChatView extends ItemView {
       if (!(this.agent instanceof LocalAgentChatSession) && !hasActivePlan(this.plugin)) {
         throw planRequiredError("Chat");
       }
-      const previousConversationId = this.transcript.snapshot().agentConversationId;
+      const previousConversationId = unsavedConversation ?? this.transcript.snapshot().agentConversationId;
       const conversationId = historicalResubmit
         ? protocolId("conversation")
         : previousConversationId
@@ -2205,7 +2212,7 @@ export class AgentChatView extends ItemView {
             admittedUserMessage,
           ]
         : [
-            ...this.transcript.snapshot().messages as readonly ChatMessage[],
+            ...displayHistory,
             admittedUserMessage,
           ];
       await this.workspace?.setHistory(optimisticHistory);
@@ -2315,9 +2322,7 @@ export class AgentChatView extends ItemView {
         this.restoreSubmissionDraft(operation);
         // The optimistic bubble is withdrawn with the restored draft so the
         // same words never sit in the transcript and the composer at once.
-        await this.workspace?.setHistory(
-          this.transcript.snapshot().messages,
-        );
+        await this.workspace?.setHistory(displayHistory);
         if (result.kind === "failed") {
           this.pendingRejectedRetry = {
             turnId: admittedUserMessage.message_id,
@@ -2348,12 +2353,25 @@ export class AgentChatView extends ItemView {
       if (result.kind === "completed") {
         try {
           const cachedMessages = this.transcript.snapshot().messages as readonly ChatMessage[];
+          // A local save can fail while hosted execution still succeeds.
+          // Keep the submitted turn and its prefix on screen in that case;
+          // an empty or older cache must not replace the optimistic history.
+          const userHistory = userWasCommitted ? this.historyForDisplay(cachedMessages, conversationId) : optimisticHistory;
           const completedMessage = result.message;
+          const settlementMessages = !completedMessage || userHistory.some((message) =>
+            message.message_id === completedMessage.message_id)
+            ? userHistory
+            : [...userHistory, completedMessage];
+          if (!userWasCommitted || this.unsavedCompletedHistory?.originToken === expectedConversationOriginToken) {
+            this.unsavedCompletedHistory = {
+              originToken: expectedConversationOriginToken,
+              conversationId,
+              turnId: admittedUserMessage.message_id,
+              messages: settlementMessages,
+            };
+            this.workspace?.setBanner("Chat couldn't be saved. Check the chats folder in Settings.", "error");
+          }
           if (completedMessage) {
-            const settlementMessages = cachedMessages.some((message) =>
-              message.message_id === completedMessage.message_id)
-              ? cachedMessages
-              : [...cachedMessages, completedMessage];
             await this.workspace?.settleCompletedRun(settlementMessages);
           }
           // If no cacheable assistant could be derived, keep the bridge's
@@ -2368,9 +2386,7 @@ export class AgentChatView extends ItemView {
         // turn would otherwise repeat the same content. Settle the live turn
         // down to what history cannot carry: the error and its Retry.
         try {
-          await this.workspace?.settleUnfinishedRun(
-            this.transcript.snapshot().messages,
-          );
+          await this.workspace?.settleUnfinishedRun(this.historyForDisplay());
         } catch (error) {
           this.logAgentError(error, "unfinishedRunSettlement");
         }
@@ -2429,6 +2445,12 @@ export class AgentChatView extends ItemView {
       throw new Error("This chat changed before the request was admitted.");
     }
     this.applyTranscriptIdentity(snapshot);
+    if (this.unsavedCompletedHistory?.originToken === expectedConversationOriginToken
+      && this.unsavedCompletedHistory.conversationId !== conversationId) {
+      // A durably admitted fork intentionally replaces the outgoing branch.
+      this.unsavedCompletedHistory = null;
+      this.workspace?.setBanner(null);
+    }
     if (
       this.pendingRetry
       && this.pendingRetry.targetMessageId === (
@@ -2448,7 +2470,7 @@ export class AgentChatView extends ItemView {
     ) {
       throw new Error("This chat changed before the request was admitted.");
     }
-    await this.workspace?.setHistory(snapshot.messages);
+    await this.workspace?.setHistory(this.historyForDisplay(snapshot.messages));
     if (
       !this.isCurrentConversationOrigin(expectedConversationOriginToken)
       || (operation && this.activeSubmissionOperation !== operation)
@@ -4023,6 +4045,21 @@ export class AgentChatView extends ItemView {
     );
   }
 
+  /** Display-only fallback; unsaved rows never become execution authority. */
+  private historyForDisplay(
+    messages = this.transcript.snapshot().messages as readonly ChatMessage[],
+    conversationId = this.transcript.snapshot().agentConversationId ?? this.pendingThinConversationId,
+  ): readonly ChatMessage[] {
+    const unsaved = this.unsavedCompletedHistory;
+    if (!unsaved || unsaved.originToken !== this.conversationOriginToken || unsaved.conversationId !== conversationId) return messages;
+    const savedById = new Map(messages.map((message) => [message.message_id, message]));
+    const unsavedIds = new Set(unsaved.messages.map((message) => message.message_id));
+    return [
+      ...unsaved.messages.map((message) => savedById.get(message.message_id) ?? message),
+      ...messages.filter((message) => !unsavedIds.has(message.message_id)),
+    ];
+  }
+
   private async reconcileAgentHistory(
     messages: readonly ChatMessage[],
   ): Promise<void> {
@@ -4052,13 +4089,33 @@ export class AgentChatView extends ItemView {
     }
 
     const previousSnapshot = this.transcript.snapshot();
-    const snapshot = await this.transcript.reconcileServerHistory(candidate);
+    // A failed first write can leave no locator, or a fork's old locator.
+    // Bind a replacement only once server history includes its user turn.
+    const unsaved = this.unsavedCompletedHistory;
+    const recoveryTurnId = pendingFork?.turnId
+      ?? (unsaved && unsaved.originToken === this.conversationOriginToken ? unsaved.turnId : undefined);
+    const includesRecoveryTurn = recoveryTurnId && messages.some((message) =>
+      message.role === "user" && message.message_id === recoveryTurnId);
+    const recoveryConversationId = (!previousSnapshot.agentConversationId || includesRecoveryTurn)
+      && this.pendingThinConversationId !== previousSnapshot.agentConversationId
+      ? this.pendingThinConversationId : null;
+    const snapshot = recoveryConversationId
+      ? await this.transcript.reconcileServerHistory(candidate, recoveryConversationId)
+      : await this.transcript.reconcileServerHistory(candidate);
     this.applyTranscriptIdentity(snapshot);
+    const forkWasSaved = pendingFork && includesForkTurn
+      && snapshot.agentConversationId === this.pendingThinConversationId
+      && unsaved?.conversationId !== snapshot.agentConversationId;
+    if (unsaved && unsaved.originToken === this.conversationOriginToken && (forkWasSaved || unsaved.messages.every((message) =>
+      snapshot.messages.some((saved) => saved.message_id === message.message_id)))) {
+      this.unsavedCompletedHistory = null;
+      this.workspace?.setBanner(null);
+    }
     if (
       snapshot.chatId !== previousSnapshot.chatId
       || snapshot.version !== previousSnapshot.version
     ) {
-      await this.workspace?.setHistory(snapshot.messages);
+      await this.workspace?.setHistory(this.historyForDisplay(snapshot.messages));
     }
 
     if (
