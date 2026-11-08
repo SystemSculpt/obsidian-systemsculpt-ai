@@ -201,6 +201,11 @@
   transform: translate(calc(-100% - var(--ss-space-2)), -50%);
 }
 
+.ss-studio-distance-badge.is-positioned {
+  transform: none;
+  margin: 0;
+}
+
 /* Workspace controls (floating toolbar) — row one drives the graph, row two
  * holds the icon-only diagram tools (one per shape kind, plus the arrow). */
 .ss-studio-graph-workspace-controls {

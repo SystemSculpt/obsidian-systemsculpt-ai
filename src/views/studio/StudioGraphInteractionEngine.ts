@@ -109,6 +109,10 @@ export class StudioGraphInteractionEngine {
     this.selectionController.clearAlignmentGuides();
   }
 
+  refreshAlignmentGuides(): void {
+    this.selectionController.refreshAlignmentGuides();
+  }
+
   getGraphZoom(): number {
     return this.selectionController.getGraphZoom();
   }

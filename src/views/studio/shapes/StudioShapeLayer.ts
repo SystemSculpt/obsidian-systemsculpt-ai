@@ -11,6 +11,7 @@ import {
   type StudioArrowAnchor,
 } from "./StudioShapeGeometry";
 import { buildStudioShapeOutline } from "./StudioShapeOutline";
+import type { StudioCanvasGeometry, StudioCanvasLabelBinding } from "../canvas/StudioCanvasGeometry";
 
 /**
  * The diagram layer: shapes and visual arrows between canvas items. Node card
@@ -46,6 +47,8 @@ export type StudioShapeLayerOptions = {
   getSelection?: () => StudioShapeSelection;
   getGraphZoom: () => number;
   getNodeAnchor?: (nodeId: string) => StudioArrowAnchor | null;
+  geometry?: Pick<StudioCanvasGeometry, "registerArrowLabelElement">;
+  onArrowGeometryChanged?: () => void;
   onSelect: (target: StudioShapeTarget, options: { additive: boolean }) => void;
   /**
    * A drag started on a shape. The delta applies to the whole canvas selection
@@ -82,6 +85,7 @@ type ArrowElements = {
   head: SVGPathElement;
   /** HTML div at the arrow's midpoint; empty labels are hidden by CSS. */
   label: HTMLElement;
+  labelBinding?: StudioCanvasLabelBinding;
 };
 
 /** A shape is drawn as its own SVG outline, so every kind gets a true border. */
@@ -178,6 +182,7 @@ export function renderStudioShapeLayer(options: StudioShapeLayerOptions): Studio
 
   const removeArrow = (arrowId: string): void => {
     const elements = arrowElements.get(arrowId);
+    elements?.labelBinding?.dispose();
     elements?.group.remove();
     elements?.label.remove();
     arrowElements.delete(arrowId);
@@ -203,6 +208,7 @@ export function renderStudioShapeLayer(options: StudioShapeLayerOptions): Studio
       if (!elements) {
         const created = createArrowElements(arrowsLayer, layerEl, arrow.id);
         elements = created;
+        created.labelBinding = options.geometry?.registerArrowLabelElement(arrow.id, created.label, options.onArrowGeometryChanged);
         arrowElements.set(arrow.id, created);
         arrowsLayer.appendChild(created.group);
         created.hit.addEventListener("pointerdown", (event) => {
@@ -246,7 +252,9 @@ export function renderStudioShapeLayer(options: StudioShapeLayerOptions): Studio
       if (!elements.label.classList.contains("is-editing")) {
         elements.label.textContent = arrow.label || "";
       }
+      elements.labelBinding?.updatePosition(path.mid);
     }
+    options.onArrowGeometryChanged?.();
   };
 
   const cancelArrowFrame = (): void => {
@@ -548,6 +556,7 @@ export function renderStudioShapeLayer(options: StudioShapeLayerOptions): Studio
       cancelArrowGesture();
       disposed = true;
       cancelArrowFrame();
+      for (const elements of arrowElements.values()) elements.labelBinding?.dispose();
     },
     startArrowGesture,
     cancelArrowGesture: () => cancelArrowGesture(),

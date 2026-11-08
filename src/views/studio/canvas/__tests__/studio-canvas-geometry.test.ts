@@ -69,6 +69,62 @@ describe("StudioCanvasGeometry", () => {
     geometry.clearNodeElements();
   });
 
+  it("caches arrow label boxes in their owner window without peer layout reads and ignores stale bindings", () => {
+    const frame = document.createElement("iframe");
+    document.body.appendChild(frame);
+    const ownerWindow = frame.contentWindow!;
+    const callbacks: Array<() => void> = [];
+    const disconnects: jest.Mock[] = [];
+    (ownerWindow as unknown as { ResizeObserver: typeof ResizeObserver }).ResizeObserver = class {
+      constructor(callback: () => void) { callbacks.push(callback); disconnects.push(this.disconnect); }
+      observe = jest.fn();
+      disconnect = jest.fn();
+    } as unknown as typeof ResizeObserver;
+    const current = project([]);
+    const geometry = new StudioCanvasGeometry(() => current);
+    const first = card(ownerWindow.document), peer = card(ownerWindow.document), replacement = card(ownerWindow.document);
+    first.element.textContent = "outline"; first.size.width = 42; first.size.height = 18;
+    peer.element.textContent = "peer";
+    replacement.element.textContent = "replacement"; replacement.size.width = 30; replacement.size.height = 12;
+    const changed = jest.fn();
+    const binding = geometry.registerArrowLabelElement("a", first.element, changed);
+    const peerBinding = geometry.registerArrowLabelElement("b", peer.element);
+    let replacementBinding: ReturnType<StudioCanvasGeometry["registerArrowLabelElement"]> | undefined;
+    try {
+      binding.updatePosition({ x: 200, y: 300 });
+      peerBinding.updatePosition({ x: 1000, y: 1000 });
+      expect(geometry.getArrowLabelRects().get("a")).toEqual({ left: 179, top: 291, right: 221, bottom: 309 });
+      const revision = geometry.revision;
+      for (const read of [first.width, first.height, peer.width, peer.height]) read.mockClear();
+      for (let frame = 0; frame < 20; frame++) {
+        binding.updatePosition({ x: 200 + frame, y: 300 });
+        expect(geometry.getArrowLabelRects().size).toBe(2);
+      }
+      for (const read of [first.width, first.height, peer.width, peer.height]) expect(read).not.toHaveBeenCalled();
+      first.size.width = 80;
+      callbacks[0]();
+      expect(geometry.getArrowLabelRects().get("a")).toEqual({ left: 179, top: 291, right: 259, bottom: 309 });
+      expect(changed).toHaveBeenCalledTimes(1);
+      expect(geometry.revision).toBe(revision);
+
+      replacementBinding = geometry.registerArrowLabelElement("a", replacement.element);
+      replacementBinding.updatePosition({ x: 600, y: 400 });
+      const latest = geometry.getArrowLabelRects().get("a");
+      callbacks[0](); binding.dispose(); binding.updatePosition({ x: 0, y: 0 });
+      expect(geometry.getArrowLabelRects().get("a")).toBe(latest);
+      expect(disconnects[0]).toHaveBeenCalledTimes(1);
+      replacement.element.textContent = "";
+      replacementBinding.updatePosition({ x: 600, y: 400 });
+      expect(geometry.getArrowLabelRects().has("a")).toBe(false);
+      replacementBinding.dispose();
+      callbacks[2]();
+      expect(geometry.getArrowLabelRects().has("a")).toBe(false);
+    } finally {
+      binding.dispose(); peerBinding.dispose(); replacementBinding?.dispose();
+      frame.remove();
+    }
+  });
+
   it("resolves cloned mutation drafts without writing to live nodes, including reordered drafts", () => {
     const current = project([node("a", 10, 20), node("b", 400, 300)]);
     const geometry = new StudioCanvasGeometry(() => current);

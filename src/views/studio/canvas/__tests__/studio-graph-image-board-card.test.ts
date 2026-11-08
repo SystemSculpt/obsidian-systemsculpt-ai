@@ -83,6 +83,7 @@ function harness(node: StudioNodeInstance, initial: { previewReady?: boolean } =
     registerViewportElement: no, handleGraphViewportWheel: no, startMarqueeSelection: no, startCanvasPan: no,
     getGraphZoom: () => 1, registerSurfaceElement: no, registerCanvasElement: no, registerMarqueeElement: no,
     registerAlignmentGuidesElement: no, registerZoomLabelElement: no, registerEdgesLayerElement: no,
+    refreshAlignmentGuides: no,
     clearGraphElementMaps: no, registerNodeElement: no, registerPortElement: no, renderGroupLayer: no,
     refreshNodeSelectionClasses: no, applyGraphZoom: no, refreshSelectionResizeFrame: no,
     isNodeSelected: () => false, onNodeRemoved: no, notifyNodePositionsChanged: no,

@@ -493,6 +493,8 @@ export function renderStudioGraphWorkspace(
   const { registerLayerHandle, ...shapeLayerOptions } = shapeLayer;
   const shapeHandle = renderStudioShapeLayer({
       canvasEl: world,
+      geometry: graphInteraction.geometry,
+      onArrowGeometryChanged: () => graphInteraction.refreshAlignmentGuides(),
       diagram: readStudioDiagramFromProject(currentProject),
       busy,
       activeCanvasTool,

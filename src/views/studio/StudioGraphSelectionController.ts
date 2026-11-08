@@ -109,6 +109,8 @@ export class StudioGraphSelectionController {
   private graphSurfaceEl: HTMLElement | null = null;
   private graphMarqueeEl: HTMLElement | null = null;
   private alignmentGuidesEl: HTMLElement | null = null;
+  private alignmentGuideResult: StudioAlignmentGuides | null = null;
+  private alignmentGuideMovingRect: StudioGuideRect | null = null;
   private graphZoomLabelEl: HTMLElement | null = null;
   private graphCanvasEl: HTMLElement | null = null;
   private graphEdgesLayerEl: SVGSVGElement | null = null;
@@ -229,6 +231,8 @@ export class StudioGraphSelectionController {
     this.graphSurfaceEl = null;
     this.graphMarqueeEl = null;
     this.alignmentGuidesEl = null;
+    this.alignmentGuideResult = null;
+    this.alignmentGuideMovingRect = null;
     this.graphZoomLabelEl = null;
     this.graphCanvasEl = null;
     this.graphWorldEl = null;
@@ -1236,7 +1240,7 @@ export class StudioGraphSelectionController {
       threshold: STUDIO_GUIDE_THRESHOLD_PX / resolveStudioGraphSafeZoom(this.graphZoom),
       edges,
     });
-    this.renderAlignmentGuides(guides.guides.length > 0 ? guides : null);
+    this.renderAlignmentGuides(guides.guides.length > 0 ? guides : null, moving);
   }
 
   clearAlignmentGuides(): void {
@@ -1309,12 +1313,21 @@ export class StudioGraphSelectionController {
       threshold: STUDIO_GUIDE_THRESHOLD_PX / resolveStudioGraphSafeZoom(this.graphZoom) }));
   }
 
-  private renderAlignmentGuides(result: StudioAlignmentGuides | null): void {
+  /** Arrow geometry flushes after the drag preview; use its current cached label boxes. */
+  refreshAlignmentGuides(): void {
+    if (this.alignmentGuideResult) this.renderAlignmentGuides(this.alignmentGuideResult, this.alignmentGuideMovingRect);
+  }
+
+  private renderAlignmentGuides(result: StudioAlignmentGuides | null, moving: StudioGuideRect | null = null): void {
+    this.alignmentGuideResult = result;
+    this.alignmentGuideMovingRect = moving;
     if (!this.alignmentGuidesEl) {
       return;
     }
     try {
-      renderStudioGraphAlignmentGuidesLayer(this.alignmentGuidesEl, result, this.graphZoom, this.getWorldOrigin());
+      renderStudioGraphAlignmentGuidesLayer(this.alignmentGuidesEl, result, this.graphZoom, this.getWorldOrigin(), [
+        this.geometry.getNodeRects(), this.geometry.getShapeRects(), this.geometry.getArrowLabelRects(), moving ? [moving] : [],
+      ]);
     } catch {
       // Guide rendering must never break an in-flight drag.
     }

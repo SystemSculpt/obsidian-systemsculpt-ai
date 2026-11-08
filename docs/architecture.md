@@ -111,10 +111,11 @@ scan. Shared menu dismissal and focus behavior belongs to `core/ui/surface/Surfa
 Studio view; controllers and layers project that store rather than synchronize
 separate selections. `StudioGraphSelectionController` owns viewport zoom and
 mode across render bindings. `canvas/StudioCanvasGeometry` indexes current
-project items and caches card sizes in world coordinates. Render/external edit
-notifications refresh the index; card ResizeObservers refresh measured sizes;
-continuous moves report touched IDs without remeasuring stationary cards.
-Groups and diagram arrows consume the same geometry. `StudioPointerGesture`
+project items and caches card sizes and arrow-label boxes in world coordinates.
+Render/external edit notifications refresh the index; owner-window ResizeObservers
+refresh measured sizes. Continuous moves report touched IDs without remeasuring
+stationary cards or labels. Groups, diagram arrows and smart-guide occlusion
+consume the same geometry. Labels flush their positions before guide placement. `StudioPointerGesture`
 owns one active captured gesture per owner window and releases listeners on
 finish, cancellation, Escape, blur, capture loss and supersession.
 

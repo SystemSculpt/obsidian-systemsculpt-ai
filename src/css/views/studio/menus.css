@@ -90,7 +90,7 @@
     transform var(--ss-dur-fast) var(--ss-ease);
 }
 
-.ss-studio-node-context-menu.is-mobile-width {
+.ss-studio-node-context-menu.is-compact-width {
   min-width: 0;
 }
 
@@ -218,7 +218,6 @@ input.ss-studio-node-context-menu-search-input::placeholder {
 @container ss-surface (max-width: 480px) {
   .ss-studio-node-context-menu {
     max-width: calc(100% - var(--ss-space-4));
-    max-height: calc(100% - var(--ss-mobile-bottom-clearance) - var(--ss-space-4));
   }
 
   .ss-studio-simple-context-menu {

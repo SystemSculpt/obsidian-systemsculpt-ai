@@ -16,6 +16,8 @@ const CONTEXT_MENU_WIDTH = 360;
 const CONTEXT_MENU_MIN_HEIGHT = 120;
 const CONTEXT_MENU_FALLBACK_HEIGHT = 280;
 const CONTEXT_MENU_MOBILE_EDGE_GAP = 8;
+// Match the existing compact-pane CSS breakpoint on desktop as well as mobile.
+const CONTEXT_MENU_COMPACT_WIDTH = 480;
 let nodeContextMenuInstanceId = 0;
 
 export type StudioNodeContextMenuItem = {
@@ -294,12 +296,12 @@ export class StudioNodeContextMenuOverlay {
     }
 
     const scale = normalizeStudioMenuScale(this.graphZoom);
-    const mobile = isMobileLayout(this.rootEl);
-    const width = mobile
+    const compact = isMobileLayout(this.rootEl) || this.viewportEl.clientWidth <= CONTEXT_MENU_COMPACT_WIDTH;
+    const width = compact
       ? Math.min(CONTEXT_MENU_WIDTH, Math.max(0, this.viewportEl.clientWidth - CONTEXT_MENU_MOBILE_EDGE_GAP * 2) / scale)
       : CONTEXT_MENU_WIDTH;
     this.rootEl.style.width = `${width}px`;
-    this.rootEl.classList.toggle("is-mobile-width", mobile);
+    this.rootEl.classList.toggle("is-compact-width", compact);
     this.rootEl.style.setProperty("--ss-studio-node-context-menu-scale", String(scale));
 
     const height = Math.max(
@@ -317,7 +319,7 @@ export class StudioNodeContextMenuOverlay {
     });
     let resolvedY = position.y;
 
-    if (mobile) {
+    if (compact) {
       const viewportRect = this.viewportEl.getBoundingClientRect();
       const viewportScrollTop = this.viewportEl.scrollTop;
       const controls = this.viewportEl.parentElement?.querySelector<HTMLElement>(
@@ -337,7 +339,7 @@ export class StudioNodeContextMenuOverlay {
       );
       const contentBottom = visualBottom - viewportRect.top + viewportScrollTop;
       const availableVisualHeight = Math.max(
-        CONTEXT_MENU_MIN_HEIGHT,
+        0,
         contentBottom - resolvedY - CONTEXT_MENU_MOBILE_EDGE_GAP,
       );
       this.rootEl.style.maxHeight = `${availableVisualHeight / scale}px`;

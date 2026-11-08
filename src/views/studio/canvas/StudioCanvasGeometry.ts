@@ -9,6 +9,11 @@ import type { StudioGuideRect } from "./StudioGraphAlignmentGuides";
 type NodeSize = { width: number; height: number };
 type NodeMeasurement = { width: number | undefined; height: number | undefined };
 
+export type StudioCanvasLabelBinding = {
+  updatePosition: (center: { x: number; y: number }) => void;
+  dispose: () => void;
+};
+
 /**
  * Canvas-space geometry, independent of scroll and zoom. Project/render changes
  * refresh the index once; pointer frames read cached sizes and update only the
@@ -30,6 +35,8 @@ export class StudioCanvasGeometry {
   private readonly nodeSizes = new Map<string, NodeSize>();
   private readonly nodeRects = new Map<string, StudioGuideRect>();
   private readonly shapeRects = new Map<string, StudioGuideRect>();
+  private readonly arrowLabels = new Map<string, { element: HTMLElement; observer: ResizeObserver | null }>();
+  private readonly arrowLabelRects = new Map<string, StudioGuideRect>();
   private nodeBounds: StudioGuideRect | null = null;
   private nodeBoundsDirty = true;
   private geometryRevision = 0;
@@ -150,6 +157,62 @@ export class StudioCanvasGeometry {
   getShapeRects(): ReadonlyMap<string, StudioGuideRect> {
     this.ensureProject();
     return this.shapeRects;
+  }
+
+  /** Arrow labels share the geometry owner; pointer frames never measure peer labels. */
+  registerArrowLabelElement(arrowId: string, element: HTMLElement, onResize?: () => void): StudioCanvasLabelBinding {
+    this.arrowLabels.get(arrowId)?.observer?.disconnect();
+    this.arrowLabelRects.delete(arrowId);
+    const entry = { element, observer: null as ResizeObserver | null };
+    this.arrowLabels.set(arrowId, entry);
+    let center: { x: number; y: number } | null = null;
+    let text: string | undefined;
+    let width = 0, height = 0;
+    const updateRect = (): void => {
+      if (!center || !width || !height || !text?.trim()) {
+        this.arrowLabelRects.delete(arrowId);
+        return;
+      }
+      const rect = { left: center.x - width / 2, top: center.y - height / 2,
+        right: center.x + width / 2, bottom: center.y + height / 2 };
+      const previous = this.arrowLabelRects.get(arrowId);
+      if (!previous || previous.left !== rect.left || previous.top !== rect.top ||
+        previous.right !== rect.right || previous.bottom !== rect.bottom) this.arrowLabelRects.set(arrowId, rect);
+    };
+    const measure = (): void => {
+      width = element.offsetWidth; height = element.offsetHeight;
+      updateRect();
+    };
+    const Observer = (getStudioOwnerWindow(element) as Window & { ResizeObserver?: typeof ResizeObserver }).ResizeObserver;
+    if (Observer) {
+      entry.observer = new Observer(() => {
+        if (this.arrowLabels.get(arrowId) !== entry) return;
+        const previous = this.arrowLabelRects.get(arrowId);
+        text = element.textContent ?? "";
+        measure();
+        if (previous !== this.arrowLabelRects.get(arrowId)) onResize?.();
+      });
+      entry.observer.observe(element);
+    }
+    return {
+      updatePosition: (next) => {
+        if (this.arrowLabels.get(arrowId) !== entry) return;
+        center = { ...next };
+        const nextText = element.textContent ?? "";
+        if (text !== nextText) { text = nextText; measure(); }
+        else updateRect();
+      },
+      dispose: () => {
+        if (this.arrowLabels.get(arrowId) !== entry) return;
+        entry.observer?.disconnect();
+        this.arrowLabels.delete(arrowId);
+        this.arrowLabelRects.delete(arrowId);
+      },
+    };
+  }
+
+  getArrowLabelRects(): ReadonlyMap<string, StudioGuideRect> {
+    return this.arrowLabelRects;
   }
 
   getNodeBounds(nodeIds?: Iterable<string>): StudioGuideRect | null {

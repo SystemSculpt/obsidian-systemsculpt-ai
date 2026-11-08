@@ -192,12 +192,69 @@ describe("Studio context menu accessibility", () => {
       onSelectDefinition: jest.fn(),
     });
     expect(root?.style.width).toBe("306px");
-    expect(root?.classList.contains("is-mobile-width")).toBe(true);
+    expect(root?.classList.contains("is-compact-width")).toBe(true);
     expect(root?.style.left).toBe("8px");
     expect(root?.style.top).toBe("612px");
     expect(focus).not.toHaveBeenCalled();
 
     overlay.destroy();
+  });
+
+  it("bounds a compact desktop popup below the toolbar and lets its list use the remaining height", () => {
+    const viewportHeight = jest.replaceProperty(window, "innerHeight", 844);
+    const workspace = document.body.createDiv();
+    const controls = workspace.createDiv({ cls: "ss-studio-graph-workspace-controls" });
+    const viewport = workspace.createDiv();
+    Object.defineProperties(viewport, {
+      clientWidth: { configurable: true, value: 322 },
+      clientHeight: { configurable: true, value: 722 },
+      scrollTop: { configurable: true, value: 500, writable: true },
+      getBoundingClientRect: { configurable: true, value: () => ({ top: 90, bottom: 812 }) },
+    });
+    Object.defineProperty(controls, "getBoundingClientRect", {
+      configurable: true, value: () => ({ bottom: 207 }),
+    });
+    const overlay = new StudioNodeContextMenuOverlay();
+    overlay.mount(viewport);
+    overlay.open({
+      anchorX: 200,
+      anchorY: 900,
+      items: Array.from({ length: 30 }, (_, index) => ({
+        definition: definition("studio.item" + index), title: "Node " + index, summary: "A long node description",
+      })),
+      onSelectDefinition: jest.fn(),
+    });
+    const root = viewport.querySelector<HTMLElement>(".ss-studio-node-context-menu")!;
+    try {
+      expect(document.body.classList.contains("is-mobile")).toBe(false);
+      expect(root.classList.contains("is-compact-width")).toBe(true);
+      expect(root.style.width).toBe("306px");
+      expect(root.style.top).toBe("625px");
+      expect(root.style.maxHeight).toBe("589px");
+      // The entire border box, not just the list, must stay above the bottom edge.
+      expect(Number.parseFloat(root.style.top) - viewport.scrollTop + 90
+        + Number.parseFloat(root.style.maxHeight)).toBe(804);
+      expect(root.querySelectorAll('[role="option"]')).toHaveLength(30);
+
+      // Zoom changes keep the screen-pixel height budget; a narrow keyboard
+      // boundary must not be overridden by the menu's 120px measurement floor.
+      Object.defineProperty(viewport, "getBoundingClientRect", {
+        configurable: true, value: () => ({ top: 90, bottom: 287 }),
+      });
+      overlay.setGraphZoom(0.5);
+      expect(root.style.maxHeight).toBe("128px");
+      expect(Number.parseFloat(root.style.top) - viewport.scrollTop + 90
+        + Number.parseFloat(root.style.maxHeight) * 0.5).toBe(279);
+
+      Object.defineProperty(viewport, "clientWidth", { configurable: true, value: 900 });
+      overlay.setGraphZoom(1);
+      expect(root.classList.contains("is-compact-width")).toBe(false);
+      expect(root.style.width).toBe("360px");
+      expect(root.style.maxHeight).toBe("");
+    } finally {
+      overlay.destroy();
+      viewportHeight.restore();
+    }
   });
 
   it("uses roving focus for keyboard navigation in action menus", () => {
