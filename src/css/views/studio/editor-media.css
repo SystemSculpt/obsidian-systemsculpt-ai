@@ -49,16 +49,16 @@
 .ss-studio-node-pending-preview {
   display: flex;
   flex-direction: column;
-  gap: var(--ss-space-1);
+  gap: var(--ss-space-2);
   padding: var(--ss-space-2);
 }
 
+/* The title is words ("Generating image…"), not a skeleton bar: plain muted
+ * text, steady so it keeps its contrast; the lines and frame below shimmer. */
 .ss-studio-node-pending-title {
-  height: 12px;
-  width: 50%;
-  border-radius: var(--ss-radius-xs);
-  background-color: var(--ss-line);
-  animation: ss-studio-pending-shimmer 1.4s var(--ss-ease) infinite;
+  font-size: var(--ss-text-sm);
+  line-height: var(--ss-leading-tight);
+  color: var(--ss-ink-muted);
 }
 
 .ss-studio-node-pending-line {
