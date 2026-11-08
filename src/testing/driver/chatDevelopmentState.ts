@@ -638,10 +638,9 @@ async function waitForOwnedHistoryEntry(
   const startedAt = Date.now();
   for (;;) {
     throwIfActionCancelled(ctx);
-    // The modal has no row test ID; history.row belongs to the separate history panel.
     const rows = queryElements(
       ctx,
-      '.systemsculpt-history-item[data-kind="chat"]',
+      '[data-testid="history.row"][data-kind="chat"]',
     ).filter(isVisible);
     if (rows.length === 1 && rows[0]?.dataset.entryId === expectedEntryId) {
       return rows[0];
@@ -658,7 +657,7 @@ async function waitForOwnedHistoryEntry(
 /**
  * Reopens the exact marker-owned chat by clicking its visible history row.
  * The history provider owns leaf selection and disk-backed resume behavior,
- * matching the path a person exercises from the modal.
+ * matching the path a person exercises from the history panel.
  */
 async function reopenOwnedDevelopmentHistory(
   ctx: ActionContext,
