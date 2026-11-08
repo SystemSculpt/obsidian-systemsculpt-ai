@@ -40,7 +40,7 @@ const STORAGE_NAME = /adapter|vault|fileManager/i;
 
 function referencesStorage(node: ts.Node, aliases: ReadonlySet<string>): boolean {
   if (ts.isIdentifier(node)) return STORAGE_NAME.test(node.text) || aliases.has(node.text);
-  if (ts.isElementAccessExpression(node) && ts.isStringLiteral(node.argumentExpression) && STORAGE_NAME.test(node.argumentExpression.text)) return true;
+  if (ts.isElementAccessExpression(node) && ts.isStringLiteralLike(node.argumentExpression) && STORAGE_NAME.test(node.argumentExpression.text)) return true;
   return ts.forEachChild(node, child => referencesStorage(child, aliases) || undefined) ?? false;
 }
 
@@ -50,6 +50,9 @@ describe("Studio persistence architecture lint", () => {
     ["(() => vault.adapter)()", true],
     ["app.vault.adapter", true],
     ["app['vault']['adapter']", true],
+    ["app[`vault`]", true],
+    ["app[`adapter`]", true],
+    ["app[`fileManager`]", true],
     ["storage", true],
     ["adapter.remove.bind(adapter)", true],
   ])("classifies storage references in %s without treating prose as a receiver", (initializer, expected) => {
