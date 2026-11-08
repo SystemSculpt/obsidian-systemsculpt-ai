@@ -140,18 +140,22 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Spec 3.4: muted meta sits at the right. On a narrow pane it gives way first,
+   so the verb and target stay readable. */
 .systemsculpt-agent-conversation .systemsculpt-agent-tool-summary {
-  flex: 1 1 auto;
+  flex: 1 1000 auto;
   min-width: 0;
   overflow: hidden;
   color: var(--ss-ink-muted);
   font-size: var(--ss-text-sm);
   line-height: 20px;
+  text-align: end;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .systemsculpt-agent-conversation .systemsculpt-agent-tool-summary.is-compact {
   flex: 0 0 auto;
+  margin-inline-start: auto;
 }
 .systemsculpt-agent-conversation .systemsculpt-agent-tool-controls {
   display: inline-flex;
@@ -189,7 +193,6 @@
 }
 .systemsculpt-agent-part.is-tool.is-failed,
 .systemsculpt-agent-part.is-tool.is-cancelled,
-.systemsculpt-agent-part.is-tool.is-outcome-unknown,
 .systemsculpt-agent-part.is-error {
   color: var(--ss-danger);
 }
@@ -219,12 +222,12 @@
   overflow-wrap: anywhere;
 }
 .systemsculpt-agent-conversation .systemsculpt-agent-part.is-tool.is-partial .systemsculpt-agent-tool-icon,
+.systemsculpt-agent-conversation .systemsculpt-agent-part.is-tool.is-outcome-unknown .systemsculpt-agent-tool-icon,
 .systemsculpt-agent-conversation .systemsculpt-agent-part.is-tool.is-approval-required .systemsculpt-agent-tool-icon {
   color: var(--ss-warning);
 }
 .systemsculpt-agent-conversation .systemsculpt-agent-part.is-tool.is-failed .systemsculpt-agent-tool-icon,
-.systemsculpt-agent-conversation .systemsculpt-agent-part.is-tool.is-denied .systemsculpt-agent-tool-icon,
-.systemsculpt-agent-conversation .systemsculpt-agent-part.is-tool.is-outcome-unknown .systemsculpt-agent-tool-icon {
+.systemsculpt-agent-conversation .systemsculpt-agent-part.is-tool.is-denied .systemsculpt-agent-tool-icon {
   color: var(--ss-danger);
 }
 .systemsculpt-agent-error-actions {
@@ -862,6 +865,15 @@
   }
 }
 
+.ss-tool-folder-link {
+  color: var(--ss-ink-accent);
+  text-decoration: none;
+}
+.ss-tool-folder-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 /* The reply below shows these full size: the card keeps only their links. */
 .ss-tool-media-files,
 .ss-tool-media.is-shown-in-reply {
@@ -937,6 +949,9 @@
   font-size: var(--ss-text-base);
   font-weight: var(--ss-weight-semibold);
   line-height: var(--ss-leading-tight);
+}
+.ss-native-plan-preview li::marker {
+  color: var(--ss-ink-muted);
 }
 .ss-native-plan-preview :is(ul, ol) {
   margin-block: var(--ss-space-1);

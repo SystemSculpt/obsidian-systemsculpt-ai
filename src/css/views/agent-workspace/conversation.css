@@ -385,6 +385,10 @@ video.systemsculpt-agent-media-frame {
   font-size: var(--ss-text-sm);
 }
 
+.systemsculpt-agent-media-notice a {
+  white-space: nowrap;
+}
+
 .systemsculpt-agent-media-notice {
   color: var(--ss-ink-muted);
   font-family: var(--font-interface);
@@ -721,4 +725,10 @@ video.systemsculpt-agent-media-frame {
 .ss-embed-source-icon svg {
   width: 12px;
   height: 12px;
+}
+
+/* Obsidian's PDF viewer keeps a 350px minimum; in a phone-width answer that
+   clips the page's right edge. The page fits the answer instead. */
+.systemsculpt-agent-conversation .pdf-embed :is(.pdf-container, .pdf-content-container) {
+  min-width: 0;
 }

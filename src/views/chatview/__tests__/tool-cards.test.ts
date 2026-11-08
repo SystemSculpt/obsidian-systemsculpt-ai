@@ -7,6 +7,7 @@ import { renderNativeToolPreview } from "../NativeToolPresentation";
 import { presentAgentTool, presentAgentToolFailure, agentToolNoticeTone } from "../AgentToolPresentation";
 import { mediaDisplayName, renderMedia } from "../ToolCardBlocks";
 import { renderTurnMedia } from "../TurnMedia";
+import { presentTurnChanges } from "../TurnChangeSummary";
 
 jest.mock("../../../platform/hostCapabilities", () => ({ hasHostCapability: jest.fn(() => true) }));
 jest.mock("../../../platform/desktopOnly", () => ({ desktopHost: { fs: jest.fn(async () => ({ realpath: async (path: string) => path })) } }));
@@ -131,7 +132,7 @@ describe("one card for every tool result", () => {
     renderHostedToolPreview(app, host, hosted("context", { action: "add", paths: ["Notes/Garden.md"] }, {
       results: [{ path: "Notes/Garden.md", success: true }], summary: "Pinned 1 file.",
     }));
-    expect(host.querySelector(".ss-tool-paths li")?.textContent).toBe("Notes/Garden.md · Pinned");
+    expect(host.querySelector(".ss-tool-paths li")?.textContent).toBe("Notes/Garden.md ·\u00a0Pinned");
     const opened = setup();
     renderHostedToolPreview(opened.app, opened.host, hosted("open", { files: [{ path: "Notes/Garden.md" }] }, { opened: ["Notes/Garden.md"], errors: ["Failed to open file: Missing.md"] }));
     expect(opened.host.querySelector("a.internal-link")?.textContent).toBe("Notes/Garden.md");
@@ -160,5 +161,16 @@ describe("media shown once per turn", () => {
     expect(media.classList.contains("is-shown-in-reply")).toBe(true);
     expect(card.querySelector(".ss-tool-media-files dd a")?.textContent).toBe("Lighthouse");
     expect(body.querySelector("[data-testid='chat.turn.media.path']")?.textContent).toBe("Lighthouse");
+  });
+});
+
+describe("turn change summary", () => {
+  it("lists a note created and then moved once, where it ended up", () => {
+    const changes = presentTurnChanges([
+      hosted("write", { path: "Notes/Ideas.md", content: "x" }, { path: "Notes/Ideas.md", success: true, created: true }),
+      hosted("move", { items: [{ source: "Notes/Ideas.md", destination: "Notes/Archive/Ideas.md" }] }, { results: [{ source: "Notes/Ideas.md", destination: "Notes/Archive/Ideas.md", success: true }] }),
+    ]);
+    expect(changes.map(change => change.path)).toEqual(["Notes/Archive/Ideas.md"]);
+    expect(changes[0].meta).toBe("new");
   });
 });

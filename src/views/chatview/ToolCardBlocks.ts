@@ -1,4 +1,4 @@
-import { setIcon, TFile, type App } from "obsidian";
+import { setIcon, TFile, TFolder, type App } from "obsidian";
 import { createUiAction } from "../../core/ui/surface";
 import { openExternalUrl } from "../../utils/externalUrl";
 
@@ -62,6 +62,27 @@ export function vaultLink(app: App, parent: HTMLElement, path: string, text = pa
   return link;
 }
 
+/** A vault folder, shown where it lives in the file explorer. */
+export function folderLink(app: App, parent: HTMLElement, path: string, text = path): HTMLElement {
+  const folder = app.vault.getAbstractFileByPath(path);
+  if (!(folder instanceof TFolder)) return parent.createSpan({ cls: "ss-tool-path", text });
+  const link = parent.createEl("a", {
+    text,
+    cls: "ss-tool-path ss-tool-folder-link",
+    attr: { href: "#", title: `Show ${path} in the file explorer`, "data-folder": path },
+  });
+  link.onclick = event => {
+    event.preventDefault();
+    event.stopPropagation();
+    const leaf = app.workspace.getLeavesOfType("file-explorer")[0];
+    const explorer = leaf?.view as { revealInFolder?: (file: TFolder) => void } | undefined;
+    if (!leaf || typeof explorer?.revealInFolder !== "function") return;
+    void app.workspace.revealLeaf(leaf);
+    explorer.revealInFolder(folder);
+  };
+  return link;
+}
+
 export function externalLink(parent: HTMLElement, url: string, text = url): HTMLAnchorElement {
   const link = parent.createEl("a", {
     text,
@@ -105,7 +126,7 @@ export function renderPathList(
       const item = list.createEl("li");
       if (row.link === false) item.createSpan({ cls: "ss-tool-path", text: row.text ?? row.path });
       else vaultLink(app, item, row.path, row.text ?? row.path).addClass("ss-tool-path");
-      if (row.note) item.createSpan({ cls: "ss-tool-path-note", text: ` · ${row.note}` });
+      if (row.note) item.createSpan({ cls: "ss-tool-path-note", text: ` ·\u00a0${row.note}` });
     }
   };
   append(rows.slice(0, limit));
@@ -183,7 +204,6 @@ export function renderNotice(card: HTMLElement, notice: ToolCardNotice): HTMLEle
   return line;
 }
 
-/** Thumbnails of generated or viewed media; each opens its vault file. */
 /**
  * A media file's name as people read it: chat names generated files by time
  * and prompt words, so the time stamp and extension drop off.
@@ -211,6 +231,7 @@ export function syncToolMediaWithReply(turnBody: Element | null): void {
   }
 }
 
+/** Thumbnails of generated or viewed media; each opens its vault file. */
 export function renderMedia(app: App, card: HTMLElement, media: readonly ToolCardMedia[]): void {
   if (!media.length) return;
   const strip = card.createDiv({ cls: "ss-tool-media", attr: { "data-testid": "chat.tool.media" } });
