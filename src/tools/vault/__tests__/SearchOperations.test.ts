@@ -857,7 +857,14 @@ Body content here`;
         const result = await searchOps.grepVault({ patterns: ["launch"] });
 
         expect(readPaths()[0]).toBe(titled.path);
-        expect(resultPaths(result)).toContain(titled.path);
+        const paths = [...resultPaths(result)];
+        let cursor = field(field(result, "page"), "next_cursor");
+        while (typeof cursor === "string") {
+          const next = await searchOps.grepVault({ patterns: ["launch"], cursor });
+          paths.push(...resultPaths(next));
+          cursor = field(field(next, "page"), "next_cursor");
+        }
+        expect(paths).toContain(titled.path);
       });
 
       it("ranks a title hit, then a folder hit, then recency, then path", async () => {
@@ -949,7 +956,17 @@ Body content here`;
         expect(first.page.next_cursor).toEqual(expect.any(String));
         expect(app.vault.on).toHaveBeenCalledTimes(4);
 
-        const seen = [...first.snippets];
+        const seen: string[] = [];
+        let continuing = false;
+        const collect = (response: any) => {
+          for (const snippet of response.snippets) {
+            if (continuing) seen[seen.length - 1] += snippet;
+            else seen.push(snippet);
+            continuing = false;
+          }
+          if (response.snippets.length > 0) continuing = response.page.snippet_continues ?? false;
+        };
+        collect(first);
         let cursor: string | null = first.page.next_cursor;
         let pages = 1;
         (app.vault.cachedRead as jest.Mock).mockClear();
@@ -960,7 +977,7 @@ Body content here`;
           expect(next.metaInfo ?? []).not.toEqual(expect.arrayContaining([
             expect.objectContaining({ file: "_new_search" }),
           ]));
-          seen.push(...next.snippets);
+          collect(next);
           cursor = next.page.next_cursor;
           pages++;
         }

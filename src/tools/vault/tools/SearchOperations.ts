@@ -2,7 +2,7 @@ import { App, TFile, TFolder, normalizePath } from "obsidian";
 import { FindFilesParams, GrepVaultParams } from "../types";
 import { FILESYSTEM_LIMITS } from "../constants";
 import { countTextTokens } from "../../../utils/tokenCounting";
-import { base64ToUtf8, utf8ToBase64 } from "../../../utils/base64";
+import { SearchResponsePage } from "../SearchResponsePage";
 import {
   createLineCalculator,
   validatePath,
@@ -75,7 +75,6 @@ type GrepScan = Readonly<{
   /** Every snippet, already in page order. */
   snippets: readonly GrepSnippet[];
 }>;
-type SearchCursor = Readonly<{ q: string; o: number; s?: string }>;
 
 const MAX_SEARCH_SCOPE_PATHS = 64;
 const MAX_SEARCH_SCOPE_PATH_LENGTH = 1024;
@@ -105,29 +104,6 @@ function titleOf(path: string): string {
   const name = path.slice(path.lastIndexOf("/") + 1);
   const extension = name.lastIndexOf(".");
   return extension > 0 ? name.slice(0, extension) : name;
-}
-
-function encodeCursor(state: SearchCursor): string {
-  try {
-    return utf8ToBase64(JSON.stringify(state));
-  } catch {
-    return "";
-  }
-}
-
-function decodeCursor(cursor?: string): SearchCursor | null {
-  if (!cursor || typeof cursor !== 'string') return null;
-  try {
-    const decoded: unknown = JSON.parse(base64ToUtf8(cursor));
-    if (!decoded || typeof decoded !== "object" || Array.isArray(decoded)) return null;
-    const candidate = decoded as Record<string, unknown>;
-    if (typeof candidate.q !== "string" || typeof candidate.o !== "number") return null;
-    return typeof candidate.s === "string"
-      ? { q: candidate.q, o: candidate.o, s: candidate.s }
-      : { q: candidate.q, o: candidate.o };
-  } catch {
-    return null;
-  }
 }
 
 /**
@@ -407,12 +383,6 @@ export class SearchOperations {
       throw new Error("patternMode must be either 'literal' or 'regex'.");
     }
     const patternMode: "literal" | "regex" = requestedPatternMode ?? "literal";
-    const requestedCursor = params.cursor;
-    if (requestedCursor != null && (typeof requestedCursor !== "string" || requestedCursor.length > 4096)) {
-      throw new Error("Search cursor must be a string no longer than 4096 characters.");
-    }
-    const requestedPageTokens = Math.max(512, Math.min(4096, Number(params.pageTokens || FILESYSTEM_LIMITS.MAX_TOOL_RESULT_TOKENS)));
-    const bodyTokenBudget = Math.max(256, requestedPageTokens - FILESYSTEM_LIMITS.GREP_FOOTER_TOKENS);
     if (patterns.length === 0) {
       throw new Error("Missing required 'patterns'. Add one or more words or regex patterns, e.g., [\"systemsculpt\", \"api key\"].");
     }
@@ -421,11 +391,7 @@ export class SearchOperations {
     const qId = `${searchIn}|${patternMode}|${patterns.join('\u0001')}${
       searchPaths === null ? "" : `|paths:${searchPaths.join("\u0001")}`
     }`;
-    const rawCursor = requestedCursor;
-    const cursorState = decodeCursor(rawCursor ?? undefined);
-    if (rawCursor && (!cursorState || cursorState.q !== qId || !Number.isFinite(cursorState.o))) {
-      throw new Error("Invalid search cursor for this query.");
-    }
+    const pager = new SearchResponsePage({ queryId: qId, cursor: params.cursor, pageTokens: params.pageTokens });
 
     const revision = this.plugin.getSearchEngine().getRevision();
     if (this.scanRevision !== revision) {
@@ -442,97 +408,7 @@ export class SearchOperations {
       exclusions,
       signal,
     });
-    const snippets = scan.snippets;
-    const startOffset = cursorState ? Math.max(0, Math.min(snippets.length, cursorState.o)) : 0;
-
-    let usedTokens = 0;
-    let end = startOffset;
-    while (end < snippets.length && usedTokens + snippets[end].tokens <= bodyTokenBudget) {
-      usedTokens += snippets[end].tokens;
-      end++;
-    }
-
-    // A single large match must not strand the cursor on an empty page. Keep
-    // its scan entry intact, return a marked preview, and advance past it.
-    let shortenedSnippet: GrepSnippet | undefined;
-    if (end === startOffset && end < snippets.length) {
-      const suffix = "… [preview shortened; read the note for the full match]";
-      const original = snippets[end].text;
-      let low = 0, high = original.length;
-      while (low < high) {
-        const middle = Math.ceil((low + high) / 2);
-        if (countTextTokens(original.slice(0, middle) + suffix) <= bodyTokenBudget) low = middle;
-        else high = middle - 1;
-      }
-      const text = original.slice(0, low) + suffix;
-      shortenedSnippet = { text, tokens: countTextTokens(text) };
-      usedTokens = shortenedSnippet.tokens;
-      end++;
-    }
-
-    // Each response trims its own copy; the kept scan serves every page.
-    const MAX_CHARS = FILESYSTEM_LIMITS.MAX_RESPONSE_CHARS;
-    const formattedResults: FormattedScoredResults = { ...scan.results, results: [...scan.results.results] };
-    if (shortenedSnippet) {
-      formattedResults.truncated = true;
-      formattedResults.notice = "An oversized match preview was shortened to fit this page. Read its note for the full match.";
-    }
-    const metaResults = cursorState !== null && cursorState.s !== scan.id
-      ? [...scan.metaResults, {
-        file: "_new_search",
-        notice: "The search behind this cursor was no longer kept, so this page comes from a new search. Some matches may repeat or be missing; search again without a cursor for a fresh list.",
-        totalMatches: 0,
-        contexts: []
-      }]
-      : scan.metaResults;
-    if (metaResults.length > 0) formattedResults.metaInfo = metaResults;
-    if (scan.truncated) {
-      formattedResults.truncated = true;
-      formattedResults.notice = `Results were truncated to stay within the ${MAX_CHARS} character response cap.`;
-    }
-
-    const buildResponse = () => {
-      const remainingCount = snippets.length - end;
-      let omittedTokens = 0;
-      for (let j = end; j < snippets.length; j++) {
-        omittedTokens += snippets[j].tokens;
-      }
-      return {
-        ...formattedResults,
-        ...(searchPaths === null
-          ? {}
-          : { scope: { paths: searchPaths.map((path) => path || ".") } }),
-        page: {
-          tokensBudget: requestedPageTokens,
-          tokensUsed: usedTokens,
-          bodyTokenBudget,
-          next_cursor: end < snippets.length ? encodeCursor({ q: qId, o: end, s: scan.id }) : null,
-          total_matches: snippets.length,
-          returned_matches: end - startOffset,
-          omitted_matches: remainingCount,
-          omitted_tokens: omittedTokens
-        },
-        snippets: snippets.slice(startOffset, end).map((snippet, index) =>
-          index === 0 && shortenedSnippet ? shortenedSnippet.text : snippet.text),
-        footer: remainingCount > 0 ? `...[omitted ${omittedTokens} tokens across ${remainingCount} matches]` : ''
-      };
-    };
-
-    let response = buildResponse();
-    // Retain at least one match before trimming duplicate ranking metadata.
-    while (end > startOffset + 1 && JSON.stringify(response).length > MAX_CHARS) {
-      end -= 1;
-      usedTokens -= snippets[end].tokens;
-      response = buildResponse();
-    }
-    while (formattedResults.results.length > 0 && JSON.stringify(response).length > MAX_CHARS) {
-      formattedResults.results.pop();
-      formattedResults.truncated = true;
-      response = buildResponse();
-    }
-    if (JSON.stringify(response).length > MAX_CHARS) {
-      throw new Error("Search response metadata exceeds the response character budget. Narrow the paths or search pattern.");
-    }
+    const response = pager.build(scan, searchPaths);
     // Keep the scan only while a cursor can still reach it, and never one the
     // vault changed under while it ran.
     if (response.page.next_cursor !== null && scan.revision === this.plugin.getSearchEngine().getRevision()) {
