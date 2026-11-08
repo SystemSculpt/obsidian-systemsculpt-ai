@@ -231,6 +231,16 @@ describe("ChatView activity alignment", () => {
       .toMatch(/padding:\s*var\(--ss-space-0\) 0 var\(--ss-space-1\)/);
   });
 
+  test("start-aligns Provider values and keeps detection in the provider grid", () => {
+    const settings = readCss("views/settings.css");
+    const provider = rule(settings, ".ss-settings-surface .ss-codex-control select");
+    expect(provider).toMatch(/text-align:\s*start/);
+    expect(provider).toMatch(/text-align-last:\s*start/);
+    const detect = rule(settings, ".ss-settings-surface .ss-agent-detection-action");
+    expect(detect).toMatch(/grid-column:\s*1 \/ -1/);
+    expect(detect).toMatch(/justify-self:\s*start/);
+  });
+
   test("matches Provider card padding to the native preference cards", () => {
     expect(rule(readCss("views/settings.css"), ".ss-settings-surface .ss-codex-controls"))
       .toMatch(/padding:\s*calc\(var\(--ss-space-4\) - 1px\)/);

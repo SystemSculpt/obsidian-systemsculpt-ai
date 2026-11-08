@@ -76,6 +76,28 @@ it('preserves execution controls on unrelated settings notifications', async () 
   dispose();
 });
 
+it('keeps detection and feedback inside the provider group without changing the default', async () => {
+  const parent = document.createElement('div');
+  const settings = { textExecutionBackend: 'systemsculpt', textExecutionBackendExplicit: false };
+  const updateSettings = jest.fn();
+  const plugin = { settings, app: { workspace: { on: jest.fn(), offref: jest.fn() } }, getSettingsManager: () => ({ updateSettings }) };
+  const dispose = mountCodexExecutionControls(parent, plugin as never, {});
+  const group = parent.querySelector('.ss-codex-controls')!;
+  const provider = group.querySelector<HTMLSelectElement>('[data-testid="codex.execution.provider"]')!;
+  const detect = parent.querySelector<HTMLButtonElement>('[data-testid="chat.execution.detect"]')!;
+  const status = parent.querySelector<HTMLElement>('.ss-agent-detection-status')!;
+  expect(provider.value).toBe('systemsculpt');
+  expect(group.contains(detect)).toBe(true);
+  expect(group.contains(status)).toBe(true);
+  expect(provider.compareDocumentPosition(detect) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  detect.click(); await flush();
+  expect(status.hidden).toBe(false);
+  expect(updateSettings).not.toHaveBeenCalled();
+  expect(settings).toEqual({ textExecutionBackend: 'systemsculpt', textExecutionBackendExplicit: false });
+  dispose();
+  expect(parent.children).toHaveLength(0);
+});
+
 it('re-detects from settings without changing an explicit choice', async () => {
   const parent = document.createElement('div'); document.body.append(parent);
   const settings = { textExecutionBackend: 'claude', textExecutionBackendExplicit: true, claudePermissionMode: 'auto' };

@@ -71,9 +71,19 @@
   display: block;
 }
 
-/* Keep provider detection grouped with execution, not the next preference. */
-.ss-settings-surface .ss-chat-execution-settings {
-  margin-bottom: var(--ss-space-2);
+/* Detection is an action within the provider card, not a separate preference. */
+.ss-settings-surface .ss-agent-detection-action {
+  grid-column: 1 / -1;
+  justify-self: start;
+}
+
+.ss-settings-surface .ss-agent-detection-status {
+  grid-column: 1 / -1;
+}
+
+.ss-settings-surface .ss-codex-control select {
+  text-align: start;
+  text-align-last: start;
 }
 
 /* Match native preference-card insets, including the execution group's border. */
