@@ -186,3 +186,26 @@ describe("turn change summary", () => {
     expect(changes[0].meta).toBe("new");
   });
 });
+
+describe("generation titles", () => {
+  it("counts a batch of saved images", () => {
+    const part = hosted("generate_image", { prompt: "Lighthouse", count: 2 }, encodeSystemSculptToolResult({
+      ok: true, message: "Saved.", media: [{ kind: "image", path: IMAGE }, { kind: "image", path: "SystemSculpt/Images/Two.png" }],
+    }));
+    expect(presentAgentTool(part).label).toBe("Generated 2 images");
+    expect(presentAgentTool(hosted("generate_image", { prompt: "One" }, encodeSystemSculptToolResult({ ok: true, message: "Saved.", media: [{ kind: "image", path: IMAGE }] }))).label).toBe("Generated image");
+  });
+});
+
+describe("empty results", () => {
+  it("says a search found nothing and a folder is empty, in words", () => {
+    const { app } = setup();
+    const search = document.createElement("div");
+    renderHostedToolPreview(app, search, hosted("search", { patterns: ["zucchini"] }, { results: [], snippets: [], totalFound: 0 }));
+    expect(search.textContent).toContain("No matches.");
+    const list = document.createElement("div");
+    renderHostedToolPreview(app, list, hosted("list_items", { path: "Notes/Archive" }, { results: [{ path: "Notes/Archive", directories: [], files: [], totalItems: 0, offset: 0, nextOffset: null }] }));
+    expect(list.textContent).toContain("This folder is empty.");
+    expect(list.textContent).not.toContain("0 returned");
+  });
+});

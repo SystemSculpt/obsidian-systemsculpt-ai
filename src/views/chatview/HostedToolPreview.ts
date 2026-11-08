@@ -170,7 +170,9 @@ function renderDirectory(app: App, host: HTMLElement, input: RecordValue, output
     });
     const total = count(result.totalItems);
     const offset = count(result.offset) ?? 0;
-    if (total !== undefined) caption(section, `${entries.length} returned of ${total} items${offset ? ` · Starting at item ${offset + 1}` : ""}.`);
+    // Counts say only what the list itself can't: an empty folder or a part of a longer one.
+    if (total === 0 && !entries.length) caption(section, "This folder is empty.");
+    else if (total !== undefined && (total !== entries.length || offset)) caption(section, `${entries.length} returned of ${total} items${offset ? ` · Starting at item ${offset + 1}` : ""}.`);
     if (count(result.nextOffset) !== undefined) caption(section, "More items are available in another tool result.");
   }
 }
@@ -200,7 +202,8 @@ function renderSearch(app: App, host: HTMLElement, output: RecordValue, options:
     });
   }
   const total = count(output.totalFound);
-  if (total !== undefined) caption(host, `${total} file${total === 1 ? "" : "s"} found · ${results.length} returned.`);
+  if (total === 0 && !results.length) caption(host, "No matches.");
+  else if (total !== undefined && total !== results.length) caption(host, `${total} file${total === 1 ? "" : "s"} found · ${results.length} returned.`);
   const page = record(output.page);
   const omitted = count(page.omitted_matches);
   if (omitted) caption(host, `${omitted} more matches were not included in this tool result.`);

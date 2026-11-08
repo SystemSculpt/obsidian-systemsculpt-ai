@@ -141,6 +141,12 @@ describe("AgentActivityPresentation", () => {
         error: { code: "CLAUDE_AUTO_BLOCKED", message: "Blocked" },
       } as Partial<AgentToolPart>),
     ]).label).toMatch(/ · 1 blocked$/u);
+    expect(summarizeAgentActivity([
+      tool("edit", { path: "Notes/A.md" }, { id: "denied", callId: "denied", state: "denied" }),
+      tool("read", { paths: ["One.md"] }, { id: "r", callId: "r" }),
+      tool("search", { patterns: ["x"] }, { id: "s", callId: "s" }),
+      tool("write", { path: "Notes/B.md" }, { id: "u", callId: "u", state: "outcome-unknown" }),
+    ]).label).toMatch(/ · 1 more · 1 uncertain$/u);
     const native = { location: "server" as const, native: { agent: "claude" as const, workingDirectory: "/vault" } };
     expect(summarizeAgentActivity([
       tool("Edit", { file_path: "/vault/A.md" }, { ...native, approvalDecision: "approved" }),

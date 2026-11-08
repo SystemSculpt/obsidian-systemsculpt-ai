@@ -5,7 +5,7 @@ import {
 } from "../../tools/LocalToolOutcome";
 import type { AgentToolPart } from "../../chat/ChatConversation";
 import { isActiveAgentToolState } from "./AgentConversationPresentation";
-import { nativeToolPresentation } from "./NativeToolPresentation";
+import { imageCountTarget, nativeToolPresentation } from "./NativeToolPresentation";
 import { decodeSystemSculptToolOutput, systemSculptToolName } from "../../tools/systemsculpt/SystemSculptTools";
 
 type AgentToolDisplayState = AgentToolPart["state"] | "partial";
@@ -628,6 +628,7 @@ export function presentAgentTool(part: AgentToolPart): AgentToolPresentation {
                   })()
                   : canonicalName === "find" || canonicalName === "search"
                     ? counted && counted.items.length > 1 ? countedLabel(counted, "base") : `Search “${firstString(input.patterns) ?? firstString(input.query) ?? firstString(input.pattern) ?? "your vault"}”`
+                    : canonicalName === "generate_image" ? `Generate ${imageCountTarget(part, input)}`
                     : counted ? countedLabel(counted, "base") : TOOL_LABELS[canonicalName] ?? `Use ${canonicalName || "tool"}`;
   const query = webSearchQuery(part);
   const label = serverTool ? actionLabel(query ? `Search the web for “${query}”` : serverLabel ?? UNKNOWN_SERVER_TOOL_LABEL, labelState)

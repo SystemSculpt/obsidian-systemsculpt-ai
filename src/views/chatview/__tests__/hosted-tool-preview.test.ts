@@ -95,7 +95,7 @@ it("uses actual find results and search snippets, leaving scoring and pagination
   const { host, render } = setup();
   render(part("find", { patterns: ["plan"] }, { results: [{ path: "Notes/Plan.md", score: 99, reasoning: "PRIVATE SCORE" }], totalFound: 1 }));
   expect(host.textContent).toContain("Notes/Plan.md");
-  expect(host.textContent).toContain("1 file found · 1 returned");
+  expect(host.textContent).not.toContain("returned"); // A complete list needs no count.
   expect(host.textContent).not.toContain("PRIVATE SCORE");
   render(part("search", {}, {
     results: [{ path: "Notes/Plan.md", reasoning: "PRIVATE SCORE" }], totalFound: 1,
