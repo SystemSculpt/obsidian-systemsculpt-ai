@@ -34,7 +34,7 @@ describe("AgentActivityPresentation", () => {
     const summary = summarizeAgentActivity([partial]);
     expect(summary.label).toMatch(/^Moved 1 of 2 notes to trash$/u);
     expect(summary.failedCount).toBe(1);
-    const forecast = (agent: "claude" | "codex", id: string) => tool(agent === "claude" ? "mcp__weather__forecast" : "forecast",
+    const forecast = (agent: "claude" | "codex", id: string) => tool(agent === "claude" ? ["mcp", "weather", "forecast"].join("__") : "forecast",
       agent === "claude" ? { city: "Portland" } : { type: "mcpToolCall", server: "weather", tool: "forecast", arguments: { city: "Portland" } },
       { id, callId: id, location: "server", native: { agent, workingDirectory: "/vault" } } as Partial<AgentToolPart>);
     expect(summarizeAgentActivity([forecast("claude", "a"), forecast("codex", "b")]).label).toBe("Used forecast");
