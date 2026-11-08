@@ -74,6 +74,9 @@ input.ss-studio-node-inline-config-input,
   /* Whole lines: three of them plus the inset, so the field never opens on a
    * line cut through its middle. */
   min-height: calc(3lh + 2 * (var(--ss-space-2) - 1px));
+  /* Grow with what is written, so a prompt is read whole; long ones scroll. */
+  field-sizing: content;
+  max-height: calc(10lh + 2 * (var(--ss-space-2) - 1px));
   padding: 0;
   background-color: var(--ss-surface-sunken);
   border: calc(var(--ss-space-2) - 1px) solid transparent;

@@ -478,10 +478,14 @@
   padding-left: 0;
   list-style: none;
 }
+/* Both paths sit in a flex row, so their chips get the same height. */
+.systemsculpt-inline-ops__move-from,
 .systemsculpt-inline-ops__move-to {
   display: flex;
   align-items: baseline;
   gap: var(--ss-space-1);
+}
+.systemsculpt-inline-ops__move-to {
   margin-top: var(--ss-space-0);
 }
 .systemsculpt-inline-ops__arrow {
