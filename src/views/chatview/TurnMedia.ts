@@ -2,6 +2,7 @@ import { TFile, type App } from "obsidian";
 import type { AgentToolPart } from "../../chat/ChatConversation";
 import { decodeSystemSculptToolOutput, systemSculptToolName, type SystemSculptMedia } from "../../tools/systemsculpt/SystemSculptTools";
 import { codexImageMedia, rememberCodexImage } from "../../services/codex/CodexImages";
+import { mediaDisplayName, syncToolMediaWithReply } from "./ToolCardBlocks";
 
 type TurnMedia = Readonly<{
   media: readonly SystemSculptMedia[];
@@ -70,11 +71,21 @@ export function renderTurnMedia(app: App, parent: HTMLElement, parts: readonly A
   const presented = presentTurnMedia(parts, answer);
   if (!presented.media.length && !presented.notices.length) {
     existing?.remove();
+    syncToolMediaWithReply(parent);
     return null;
   }
   const fingerprint = JSON.stringify(presented);
-  if (existing?.dataset.media === fingerprint) return existing;
+  if (existing?.dataset.media === fingerprint) {
+    syncToolMediaWithReply(parent);
+    return existing;
+  }
   existing?.remove();
+  const block = buildTurnMedia(app, parent, presented, actions, fingerprint);
+  syncToolMediaWithReply(parent);
+  return block;
+}
+
+function buildTurnMedia(app: App, parent: HTMLElement, presented: ReturnType<typeof presentTurnMedia>, actions: TurnMediaActions, fingerprint: string): HTMLElement {
   const block = parent.createDiv({ cls: "systemsculpt-agent-turn-media", attr: { "data-testid": "chat.turn.media" } });
   block.dataset.media = fingerprint;
   if (presented.media.length) {
@@ -82,8 +93,8 @@ export function renderTurnMedia(app: App, parent: HTMLElement, parts: readonly A
     if (presented.media.length > 1) grid.addClass("is-multiple");
     for (const item of presented.media) {
       const file = app.vault.getAbstractFileByPath(item.path);
-      const name = item.label ?? item.path.split("/").pop() ?? item.path;
-      const figure = grid.createEl("figure", { cls: "systemsculpt-agent-media", attr: { "data-kind": item.kind } });
+      const name = mediaDisplayName(item.path, item.label);
+      const figure = grid.createEl("figure", { cls: "systemsculpt-agent-media", attr: { "data-kind": item.kind, "data-media-path": item.path } });
       if (!(file instanceof TFile)) {
         figure.addClass("is-missing");
         figure.createDiv({ cls: "systemsculpt-agent-media-missing", text: `${name} was moved or deleted.` });

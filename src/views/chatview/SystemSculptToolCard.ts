@@ -10,6 +10,7 @@ import {
   renderFields,
   renderMedia,
   renderNotice,
+  mediaDisplayName,
   renderPathList,
   type ToolCardField,
 } from "./ToolCardBlocks";
@@ -94,7 +95,7 @@ export function renderSystemSculptToolCard(app: App, host: HTMLElement, part: Ag
   }
   if (name === "studio_list_outputs" && Array.isArray(data.nodes)) {
     const files = data.nodes.map(record).flatMap(node => Array.isArray(node.files) ? node.files.map(record) : []);
-    renderPathList(app, card, files.flatMap(file => text(file.path) ? [{ path: text(file.path)!, text: text(file.path)!.split("/").pop() }] : []));
+    renderPathList(app, card, files.flatMap(file => text(file.path) ? [{ path: text(file.path)!, text: mediaDisplayName(text(file.path)!) }] : []));
   }
 
   if (result && !result.ok) {

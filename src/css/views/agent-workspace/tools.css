@@ -862,6 +862,21 @@
   }
 }
 
+/* The reply below shows these full size: the card keeps only their links. */
+.ss-tool-media-files,
+.ss-tool-media.is-shown-in-reply {
+  display: none;
+}
+.ss-tool-media.is-shown-in-reply + .ss-tool-media-files {
+  display: grid;
+}
+.ss-tool-media-files dd {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--ss-space-1);
+}
+
 /* Raw request and result, last and quiet. */
 .systemsculpt-agent-conversation .systemsculpt-agent-tool-raw > summary {
   display: inline-flex;

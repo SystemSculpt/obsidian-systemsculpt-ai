@@ -8,7 +8,7 @@ import { agentToolNoticeTone, gatedSystemSculptTurn, presentAgentTool, presentAg
 import type { AgentApprovalCards } from "./AgentApprovalCards";
 import { renderNativeToolPreview } from "./NativeToolPresentation";
 import { renderHostedToolPreview } from "./HostedToolPreview";
-import { renderNotice, renderRawDetails } from "./ToolCardBlocks";
+import { renderNotice, renderRawDetails, syncToolMediaWithReply } from "./ToolCardBlocks";
 import { ACTIONABLE_ARTIFACT_TOOLS, toolCallForPart, visibleToolError } from "./ConversationPartPresentation";
 
 type ToolApprovalPreviewHydrationState = {
@@ -360,6 +360,7 @@ export class AgentToolRenderer {
           try {
             if (hasPreview) currentSupport.querySelector(":scope > .systemsculpt-agent-tool-details")?.remove();
             previewHost.replaceChildren(...Array.from(staging.childNodes));
+            syncToolMediaWithReply(previewHost.closest(".systemsculpt-agent-turn-body"));
             // A SystemSculpt card already says why it stopped, with its action; one notice is enough.
             if (previewHost.querySelector('[data-card^="systemsculpt:"] .ss-tool-notice')) {
               currentSupport.querySelector(":scope > .systemsculpt-agent-tool-error")?.remove();

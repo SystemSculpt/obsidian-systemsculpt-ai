@@ -5,6 +5,8 @@ import { encodeSystemSculptToolResult } from "../../../tools/systemsculpt/System
 import { renderHostedToolPreview } from "../HostedToolPreview";
 import { renderNativeToolPreview } from "../NativeToolPresentation";
 import { presentAgentTool, presentAgentToolFailure, agentToolNoticeTone } from "../AgentToolPresentation";
+import { mediaDisplayName, renderMedia } from "../ToolCardBlocks";
+import { renderTurnMedia } from "../TurnMedia";
 
 jest.mock("../../../platform/hostCapabilities", () => ({ hasHostCapability: jest.fn(() => true) }));
 jest.mock("../../../platform/desktopOnly", () => ({ desktopHost: { fs: jest.fn(async () => ({ realpath: async (path: string) => path })) } }));
@@ -53,7 +55,7 @@ describe("one card for every tool result", () => {
     expect(tiles[1].querySelector("video")?.getAttribute("src")).toBe(`app://local/vault/${VIDEO}#t=0.1`);
     tiles[1].click();
     expect(openLinkText).toHaveBeenCalledWith(VIDEO, "", false);
-    expect(host.querySelector(".ss-tool-fields dd")?.textContent).toBe("A lighthouse at dusk");
+    expect(host.querySelector(".ss-tool-fields:not(.ss-tool-media-files) dd")?.textContent).toBe("A lighthouse at dusk");
     expect(host.textContent).not.toContain("systemsculpt_tool");
   });
 
@@ -134,5 +136,29 @@ describe("one card for every tool result", () => {
     renderHostedToolPreview(opened.app, opened.host, hosted("open", { files: [{ path: "Notes/Garden.md" }] }, { opened: ["Notes/Garden.md"], errors: ["Failed to open file: Missing.md"] }));
     expect(opened.host.querySelector("a.internal-link")?.textContent).toBe("Notes/Garden.md");
     expect(opened.host.querySelector(".ss-tool-notice")?.textContent).toBe("Failed to open file: Missing.md");
+  });
+});
+
+describe("media shown once per turn", () => {
+  it("names generated files without their time stamp or extension", () => {
+    expect(mediaDisplayName("SystemSculpt/Images/2026-11-08 093755 Use case style-transfer.png")).toBe("Use case style-transfer");
+    expect(mediaDisplayName("Photos/old.png")).toBe("old");
+    expect(mediaDisplayName("SystemSculpt/Images/2026-11-08 093755.png")).toBe("2026-11-08 093755");
+    expect(mediaDisplayName(IMAGE, "Poster art")).toBe("Poster art");
+  });
+
+  it("keeps only the file link in a card when the reply shows the same image", () => {
+    const { app } = setup();
+    const body = document.createElement("div");
+    body.className = "systemsculpt-agent-turn-body";
+    const card = body.appendChild(document.createElement("div"));
+    renderMedia(app, card, [{ kind: "image", path: IMAGE }]);
+    const media = card.querySelector(".ss-tool-media")!;
+    expect(media.classList.contains("is-shown-in-reply")).toBe(false);
+    const generated = hosted("generate_image", { prompt: "Lighthouse" }, encodeSystemSculptToolResult({ ok: true, message: "Saved.", media: [{ kind: "image", path: IMAGE }] }));
+    renderTurnMedia(app, body, [generated], { openFile: jest.fn(), openLink: jest.fn() });
+    expect(media.classList.contains("is-shown-in-reply")).toBe(true);
+    expect(card.querySelector(".ss-tool-media-files dd a")?.textContent).toBe("Lighthouse");
+    expect(body.querySelector("[data-testid='chat.turn.media.path']")?.textContent).toBe("Lighthouse");
   });
 });
