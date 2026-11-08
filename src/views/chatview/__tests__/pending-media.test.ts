@@ -3,11 +3,21 @@ import { TFile, type App } from "obsidian";
 import type { AgentToolPart } from "../../../chat/ChatConversation";
 import { beginGeneration, generationKey, updateGeneration } from "../../../tools/systemsculpt/GenerationProgress";
 import { encodeSystemSculptToolResult } from "../../../tools/systemsculpt/SystemSculptTools";
-import { parseAspectRatio, pendingStatus, presentPendingMedia, retryHint } from "../PendingMedia";
+import { presentPendingMedia, renderPendingMedia, requestedMediaRatio, type PendingMedia } from "../PendingMedia";
 import { renderTurnMedia } from "../TurnMedia";
 
 function tool(overrides: Partial<AgentToolPart> & Pick<AgentToolPart, "name" | "state">): AgentToolPart {
   return { id: "p", callId: "call-1", order: 0, kind: "tool", messageId: "m", location: "server", input: {}, ...overrides } as AgentToolPart;
+}
+
+/** The tile's live line and bar fill at a given clock time. */
+function pendingStatus(tile: PendingMedia, now: number): { meta: string; fraction: number | null } {
+  const clock = jest.spyOn(Date, "now").mockReturnValue(now);
+  try {
+    const figure = renderPendingMedia(document.createElement("div"), tile);
+    const progress = figure.style.getPropertyValue("--ss-media-progress");
+    return { meta: figure.querySelector(".ss-media-pending-meta")!.textContent ?? "", fraction: progress ? Number(progress) : null };
+  } finally { clock.mockRestore(); }
 }
 
 function app(paths: string[]): App {
@@ -24,10 +34,11 @@ const PATH = "SystemSculpt/Images/2026-11-08 101500 A lighthouse at dusk.png";
 
 describe("live generation placeholders", () => {
   it("reads the requested shape, defaulting to square images and wide videos", () => {
-    expect(parseAspectRatio("16:9")).toBeCloseTo(16 / 9);
-    expect(parseAspectRatio("1024x1536")).toBeCloseTo(2 / 3);
-    expect(parseAspectRatio("portrait")).toBeCloseTo(2 / 3);
-    expect(parseAspectRatio("wide")).toBeNull();
+    const shape = (aspect_ratio: string) => requestedMediaRatio("generate_image", { aspect_ratio });
+    expect(shape("16:9")).toBeCloseTo(16 / 9);
+    expect(shape("1024x1536")).toBeCloseTo(2 / 3);
+    expect(shape("portrait")).toBeCloseTo(2 / 3);
+    expect(shape("wide")).toBe(1);
     const [video] = presentPendingMedia([tool({ name: "generate_video", state: "running", input: { prompt: "Waves" } })], true);
     expect(video).toMatchObject({ kind: "video", label: "Generating video", caption: "Waves" });
     expect(video.ratio).toBeCloseTo(16 / 9);
@@ -139,6 +150,7 @@ describe("live generation placeholders", () => {
     expect(tile.textContent).toContain("The video model timed out.");
     expect(tile.textContent).toContain("Ask again to retry.");
     expect(tile.hasAttribute("aria-busy")).toBe(false);
-    expect(retryHint("The prompt was flagged by the provider's safety system.")).toBe("Change the prompt and ask again.");
+    const refused = tool({ name: "generate_image", state: "failed", input: { prompt: "Owls" }, output: { data: encodeSystemSculptToolResult({ ok: false, message: "The prompt was flagged by the provider's safety system." }) } });
+    expect(renderTurnMedia(app([]), document.createElement("div"), [refused], actions, "", false)!.textContent).toContain("Change the prompt and ask again.");
   });
 });

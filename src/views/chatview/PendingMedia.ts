@@ -45,7 +45,7 @@ export function generationArguments(part: AgentToolPart): RecordValue {
 }
 
 /** Width over height for "16:9", "9:16", "1024x1536" and the like; null when unreadable. */
-export function parseAspectRatio(value: unknown): number | null {
+function parseAspectRatio(value: unknown): number | null {
   const match = typeof value === "string" ? /^\s*(\d+(?:\.\d+)?)\s*[:x×/]\s*(\d+(?:\.\d+)?)\s*$/u.exec(value) : null;
   if (!match) {
     const word = typeof value === "string" ? value.trim().toLowerCase() : "";
@@ -186,7 +186,7 @@ function roughly(ms: number): string {
 }
 
 /** The live line under the label and the bar's fill, from what the job reports. */
-export function pendingStatus(tile: PendingMedia, now: number): Readonly<{ meta: string; fraction: number | null }> {
+function pendingStatus(tile: PendingMedia, now: number): Readonly<{ meta: string; fraction: number | null }> {
   const elapsed = Math.max(0, now - startedAt(tile, now));
   const duration = formatAgentWorkingDuration(elapsed) ?? "0s";
   const progress = generationProgress(tile.progressKey);
@@ -207,7 +207,7 @@ const ICONS: Readonly<Record<PendingMedia["kind"], string>> = { image: "image", 
 const FAILED_ICONS: Readonly<Record<PendingMedia["kind"], string>> = { image: "image-off", video: "video-off", workflow: "workflow" };
 
 /** What to do next: a refused prompt needs new words, anything else another try. */
-export function retryHint(error: string): string {
+function retryHint(error: string): string {
   if (/\b(safety|flagged|moderation|content policy|not allowed)\b/iu.test(error)) return "Change the prompt and ask again.";
   return /\blimit reached\b/iu.test(error) ? "Try again once it resets." : "Ask again to retry.";
 }
@@ -216,7 +216,7 @@ export function retryHint(error: string): string {
  * Cuts text at a word so it fits its one line, ending in "…"; the full text
  * stays in the title. CSS ellipsis remains the fallback after a resize.
  */
-export function fitToLine(element: HTMLElement, full: string): void {
+function fitToLine(element: HTMLElement, full: string): void {
   element.textContent = full;
   if (!element.isConnected || element.scrollWidth <= element.clientWidth) return;
   const words = full.split(" ");
