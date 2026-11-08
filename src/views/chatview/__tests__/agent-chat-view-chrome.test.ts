@@ -409,7 +409,7 @@ describe("AgentChatView chrome wiring", () => {
     const { view } = harness({ agent: null });
     mockOpenedUrls.length = 0;
     const setInputText = jest.spyOn(view as any, "setInputText").mockImplementation(() => undefined);
-    const execute = jest.fn(() => true);
+    const execute = jest.fn((_id: string) => true);
     Object.assign(view.app, { commands: { executeCommandById: execute } });
     view.plugin.openSettingsTab = jest.fn();
     Object.assign(view.plugin, { manifest: { id: "systemsculpt-ai" } });
