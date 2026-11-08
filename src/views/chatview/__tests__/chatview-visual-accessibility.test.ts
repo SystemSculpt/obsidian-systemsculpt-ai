@@ -204,6 +204,13 @@ describe("ChatView narrow run-line readability", () => {
   });
 });
 
+describe("ChatView error typography", () => {
+  test("rebalances narrow error text without single-word ending lines", () => {
+    expect(rule(readCss("views/agent-workspace/tools.css"), ".systemsculpt-agent-error-message"))
+      .toMatch(/text-wrap:\s*pretty/);
+  });
+});
+
 describe("ChatView settled activity alignment", () => {
   test("insets restored activity rows to align with the summary columns", () => {
     const activity = readCss("views/agent-workspace/activity.css");

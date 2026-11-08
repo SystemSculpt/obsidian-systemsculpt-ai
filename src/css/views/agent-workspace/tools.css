@@ -40,6 +40,7 @@
   line-height: 1.5;
 }
 .systemsculpt-agent-error-message {
+  text-wrap: pretty;
   overflow-wrap: anywhere;
   color: var(--ss-ink-muted);
   font-size: var(--ss-text-sm);

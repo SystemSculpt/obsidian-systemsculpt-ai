@@ -96,7 +96,7 @@ const CODEX_AUTO_UNAVAILABLE =
 const MODE_APPLIES_NEXT = "Applies from your next message.";
 const SWITCH_STARTS_NEW_CHAT = "Switching starts a new chat. This one stays in your history.";
 const DETECTING_AGENTS = "Finding Claude Code or Codex…";
-const EMPTY_TITLE = "What should we work on?";
+const EMPTY_TITLE = "AI chat for your Obsidian vault";
 /** T-36 free-start copy, read by the Nov 6 experiment: do not edit. */
 const FREE_START_OFFER = "500 free credits. No card needed.";
 
