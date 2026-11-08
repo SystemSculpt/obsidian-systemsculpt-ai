@@ -375,21 +375,17 @@ describe("dispatchManagedJob", () => {
     expect(attempts).toBe(4);
   });
 
-  it("never replays a rejection the server called permanent", async () => {
-    let attempts = 0;
+  it.each([402, 500, 502, 503])("never replays an explicitly permanent HTTP %s rejection", async status => {
+    const send = jest.fn().mockRejectedValue(Object.assign(new Error("Permanent rejection"), { status, retryable: false }));
+    const wait = jest.fn().mockResolvedValue(undefined);
     await expect(dispatchManagedJob({
-      send: async () => {
-        attempts += 1;
-        throw Object.assign(new Error("payment required"), {
-          status: 402,
-          retryable: false,
-        });
-      },
+      send,
       signal: new AbortController().signal,
-      wait: async () => {},
-    })).rejects.toThrow("payment required");
+      wait,
+    })).rejects.toThrow("Permanent rejection");
 
-    expect(attempts).toBe(1);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(wait).not.toHaveBeenCalled();
   });
 
   it("stops replaying once the caller aborts", async () => {
