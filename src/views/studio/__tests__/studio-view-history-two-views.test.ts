@@ -7,7 +7,7 @@ import { reconcileStudioProject } from "../../../studio/StudioProjectReconciliat
 import { SystemSculptStudioView } from "../SystemSculptStudioView";
 import { installObsidianKeymap } from "./studio-obsidian-keymap-test-helpers";
 
-it.each(["local edits", "untouched peer", "independent peer edit"])("preserves %s across two views and persisted undo/redo", async mode => {
+it.each(["local edits", "untouched peer", "independent peer edit", "grouped field edits"])("preserves %s across two views and persisted undo/redo", async mode => {
   const app = new App();
   app.scope = new Scope();
   Object.assign(app.workspace, { requestSaveLayout: jest.fn() });
@@ -46,6 +46,33 @@ it.each(["local edits", "untouched peer", "independent peer edit"])("preserves %
       await view.setState({ file: "Studio/Test.systemsculpt" }, {} as any);
     }
     const title = (view: SystemSculptStudioView) => view.contentEl.querySelector<HTMLInputElement>(".ss-studio-node-title-input")!;
+    if (mode === "grouped field edits") {
+      const field = () => views[0].contentEl.querySelector<HTMLTextAreaElement>(".ss-studio-node-inline-config-field--value textarea")!;
+      const input = (value: string) => {
+        field().focus();
+        field().value = value;
+        field().dispatchEvent(new Event("input", { bubbles: true }));
+      };
+      input("One");
+      const peerTitle = views[1].contentEl.querySelectorAll<HTMLInputElement>(".ss-studio-node-title-input")[1];
+      peerTitle.value = "Peer edit";
+      peerTitle.dispatchEvent(new Event("input", { bubbles: true }));
+      input("Two");
+      field().blur();
+      input("Three");
+      field().blur();
+      const undo = () => document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "z", metaKey: true, bubbles: true, cancelable: true }));
+      undo();
+      expect(field().value).toBe("Two");
+      undo();
+      expect(field().value).toBe("Value");
+      document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "z", metaKey: true, shiftKey: true, bubbles: true, cancelable: true }));
+      expect(field().value).toBe("Two");
+      await session.flushPendingSaveWork();
+      expect(disk.graph.nodes[0].config.value).toBe("Two");
+      expect(disk.graph.nodes[1].title).toBe("Peer edit");
+      return;
+    }
     for (const value of ["3", "4"]) {
       const editingTitle = title(views[0]);
       editingTitle.focus();

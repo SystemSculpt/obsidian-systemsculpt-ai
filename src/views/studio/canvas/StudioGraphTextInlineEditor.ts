@@ -215,10 +215,13 @@ export function renderTextNodeInlineEditor(options: RenderStudioTextNodeInlineEd
   });
   textEditorEl.value = readEditableNodeText(node, nodeRunState);
   textEditorEl.disabled = false;
+  const newFieldGroup = () => Symbol(`field:${node.id}:value`);
+  let historyGroup = newFieldGroup();
+  textEditorEl.addEventListener("blur", () => { historyGroup = newFieldGroup(); });
   if (!isNoteNode) {
     textEditorEl.addEventListener("input", (event) => {
       const nextValue = (event.target as HTMLTextAreaElement).value;
-      onNodeConfigValueChange(node.id, "value", nextValue, { mode: "continuous" });
+      onNodeConfigValueChange(node.id, "value", nextValue, { mode: "continuous", historyGroup });
     });
   }
 
@@ -236,6 +239,7 @@ export function renderTextNodeInlineEditor(options: RenderStudioTextNodeInlineEd
   });
 
   const commitPresentationMutation = (nextMode: StudioTextDisplayMode): void => {
+    historyGroup = newFieldGroup();
     onNodeConfigValueChange(node.id, TEXT_DISPLAY_MODE_CONFIG_KEY, nextMode, { mode: "discrete" });
   };
 

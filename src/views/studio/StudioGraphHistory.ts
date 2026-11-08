@@ -1,16 +1,19 @@
 import type { StudioProjectV1 } from "../../studio/types";
-import { cloneStudioProjectSnapshot, serializeStudioProjectSnapshot } from "../../studio/StudioProjectSnapshots";
+import { captureStudioProjectSnapshot, cloneStudioProjectSnapshot } from "../../studio/StudioProjectSnapshots";
 import { reconcileStudioProject } from "../../studio/StudioProjectReconciliation";
 
 type RestoreSnapshot = (candidate: StudioGraphHistorySnapshot) => StudioGraphHistorySnapshot | null;
 export type StudioGraphHistorySnapshot = { project: StudioProjectV1; selectedNodeIds: string[] };
 type Edit = { before: StudioGraphHistorySnapshot; after: StudioGraphHistorySnapshot };
 
-function snapshot(project: StudioProjectV1, selectedNodeIds: string[]): StudioGraphHistorySnapshot {
-  return { project: cloneStudioProjectSnapshot(project), selectedNodeIds: [...new Set(selectedNodeIds.map(id => String(id || "").trim()).filter(Boolean))] };
+function snapshot(project: StudioProjectV1, selectedNodeIds: string[], previous?: StudioProjectV1): StudioGraphHistorySnapshot {
+  return { project: captureStudioProjectSnapshot(project, previous), selectedNodeIds: [...new Set(selectedNodeIds.map(id => String(id || "").trim()).filter(Boolean))] };
 }
 function equal(left: StudioGraphHistorySnapshot, right: StudioGraphHistorySnapshot): boolean {
-  return serializeStudioProjectSnapshot(left.project) === serializeStudioProjectSnapshot(right.project);
+  return captureStudioProjectSnapshot(right.project, left.project) === left.project;
+}
+function detached(value: StudioGraphHistorySnapshot): StudioGraphHistorySnapshot {
+  return { project: cloneStudioProjectSnapshot(value.project), selectedNodeIds: [...value.selectedNodeIds] };
 }
 
 function rebase(base: StudioGraphHistorySnapshot, target: StudioGraphHistorySnapshot, canvas: StudioGraphHistorySnapshot): StudioProjectV1 {
@@ -31,7 +34,7 @@ export class StudioGraphHistory {
   private undoEdits: Edit[] = [];
   private redoEdits: Edit[] = [];
   private latestEdit: Edit | null = null;
-  private latestEditGroup: string | null = null;
+  private latestEditGroup: string | symbol | null = null;
   private redoBeforeLatestEdit: Edit[] = [];
 
   constructor(private readonly capacity = 120) {
@@ -49,22 +52,29 @@ export class StudioGraphHistory {
   /** Synchronize an externally adopted project without recording it as a local edit. */
   synchronize(project: StudioProjectV1, selectedNodeIds: string[]): void {
     this.assertNotApplying();
-    this.current = snapshot(project, selectedNodeIds);
+    this.current = snapshot(project, selectedNodeIds, this.current?.project);
   }
 
   /** Called only for an actual local mutation; unrelated peer edits are not history. */
-  recordEdit(before: StudioGraphHistorySnapshot, after: StudioGraphHistorySnapshot, group?: string): void {
+  recordEdit(before: StudioGraphHistorySnapshot, after: StudioGraphHistorySnapshot, group?: string | symbol): void {
     this.assertNotApplying();
-    if (equal(before, after)) return;
+    const previous = snapshot(before.project, before.selectedNodeIds, this.current?.project);
+    const next = snapshot(after.project, after.selectedNodeIds, previous.project);
+    if (previous.project === next.project) return;
     const grouped = group && this.latestEditGroup === group && this.latestEdit === this.undoEdits[this.undoEdits.length - 1] ? this.latestEdit : null;
-    // A continued text edit inherits peer changes on both sides, so grouping
-    // never accidentally claims those changes as part of this view's edit.
+    // Rebase only when another writer intervened. Ordinary continued input
+    // shares the first before snapshot and copies only changed JSON branches.
     const prior = grouped
-      ? { project: rebase(grouped.after, grouped.before, before), selectedNodeIds: grouped.before.selectedNodeIds }
-      : before;
-    const previous = this.current && equal(this.current, prior) ? this.current : snapshot(prior.project, prior.selectedNodeIds);
-    const next = snapshot(after.project, after.selectedNodeIds);
-    const edit = { before: previous, after: next };
+      ? snapshot(rebase(grouped.after, grouped.before, previous), grouped.before.selectedNodeIds, grouped.before.project)
+      : previous;
+    if (grouped && equal(prior, next)) {
+      this.undoEdits.pop();
+      this.redoEdits = this.redoBeforeLatestEdit;
+      this.current = next;
+      this.clearLatestEdit();
+      return;
+    }
+    const edit = { before: prior, after: next };
     if (grouped) this.undoEdits.pop();
     else this.redoBeforeLatestEdit = this.redoEdits;
     this.push(this.undoEdits, edit);
@@ -74,9 +84,9 @@ export class StudioGraphHistory {
     this.current = next;
   }
 
-  finishGroup(group: string): void {
+  finishGroup(group?: string | symbol): void {
     this.assertNotApplying();
-    if (this.latestEditGroup === group) this.latestEditGroup = null;
+    if (group === undefined || this.latestEditGroup === group) this.latestEditGroup = null;
   }
 
   /** Finish a deferred local edit, such as an active text editing session. */
@@ -102,7 +112,7 @@ export class StudioGraphHistory {
 
   /** Apply empty-node cleanup without a nested checkpoint, canceling a net-zero creation. */
   completeRemoval(remove: () => StudioGraphHistorySnapshot | null, canvas?: StudioGraphHistorySnapshot, group?: string): boolean {
-    const before = canvas ? snapshot(canvas.project, canvas.selectedNodeIds) : this.current;
+    const before = canvas ? snapshot(canvas.project, canvas.selectedNodeIds, this.current?.project) : this.current;
     const removed = this.apply(remove);
     if (!removed) return false;
     const latest = this.undoEdits[this.undoEdits.length - 1];
@@ -126,22 +136,22 @@ export class StudioGraphHistory {
     // Restoring now patches the shared project identity in place so mounted
     // cards keep stable entity handles. Freeze the inverse before restore;
     // otherwise that in-place patch also mutates the redo snapshot.
-    const current = snapshot(liveCurrent.project, liveCurrent.selectedNodeIds);
+    const current = snapshot(liveCurrent.project, liveCurrent.selectedNodeIds, this.current?.project);
     const target = direction === "undo" ? edit.before : edit.after;
     const base = direction === "undo" ? edit.after : edit.before;
     const candidate = rebase(base, target, current);
-    const restored = this.apply(() => restore(snapshot(candidate, target.selectedNodeIds)));
+    const restored = this.apply(() => restore(detached({ project: candidate, selectedNodeIds: target.selectedNodeIds })));
     if (!restored) return null;
-    const accepted = snapshot(restored.project, restored.selectedNodeIds);
+    const accepted = snapshot(restored.project, restored.selectedNodeIds, target.project);
     // Record the actual applied transition for its inverse, including any
     // normalization by the host, while retaining independent peer changes.
     this.push(to, direction === "undo"
-      ? { before: accepted, after: snapshot(current.project, current.selectedNodeIds) }
-      : { before: snapshot(current.project, current.selectedNodeIds), after: accepted });
+      ? { before: accepted, after: current }
+      : { before: current, after: accepted });
     from.pop();
     this.current = accepted;
     this.clearLatestEdit();
-    return snapshot(accepted.project, accepted.selectedNodeIds);
+    return detached(accepted);
   }
 
   private clearLatestEdit(): void { this.latestEdit = null; this.latestEditGroup = null; this.redoBeforeLatestEdit = []; }

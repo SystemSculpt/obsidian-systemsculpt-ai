@@ -55,6 +55,9 @@ export type StudioProjectSessionMutateOptions = {
   notifyListeners?: boolean;
   /** Identifies the initiating editor without suppressing other subscribers. */
   origin?: symbol;
+  /** Observe the accepted transition before its live identity is patched.
+   * Async observers see the final rebased delta, never the pre-await canvas. */
+  onCommit?: (before: StudioProjectV1, after: StudioProjectV1) => void;
 };
 
 export type StudioProjectSessionReplaceProjectOptions = {
@@ -228,6 +231,7 @@ export class StudioProjectSession {
     if (!changed) {
       return false;
     }
+    options?.onCommit?.(this.project, draft);
     updateStudioProjectIdentity(this.project, draft);
     this.schedulePersist({ mode: options?.mode || "discrete", reason });
     if (options?.notifyListeners !== false) {
@@ -259,6 +263,7 @@ export class StudioProjectSession {
       // Rebase again after yielding: a newer editor transaction still takes precedence.
       reconciled = reconcileStudioProject(before, draft, this.project);
     }
+    options?.onCommit?.(this.project, reconciled.project);
     updateStudioProjectIdentity(this.project, reconciled.project);
     this.schedulePersist({ mode: options?.mode || "discrete", reason });
     if (options?.notifyListeners !== false) {

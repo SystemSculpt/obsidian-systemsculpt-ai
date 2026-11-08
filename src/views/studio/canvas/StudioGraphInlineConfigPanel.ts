@@ -878,12 +878,21 @@ export function renderInlineConfigPanel(options: InlineConfigPanelOptions): bool
 
     const renderField = FIELD_RENDERERS[field.type];
     if (!renderField) continue;
+    const newFieldGroup = () => Symbol(`field:${node.id}:${field.key}`);
+    let historyGroup = newFieldGroup();
+    // Capture blur, which does not bubble, including individual note paths.
+    // A new mount also gets a fresh token; groups never leak across remounts.
+    fieldEl.addEventListener("blur", () => { historyGroup = newFieldGroup(); }, true);
     renderField({
       node, definition, field, fieldEl, interactionLocked,
       pathBrowseOptions, resolveDynamicSelectOptions, openMediaModelPicker,
       compactSingleRow: compactTextareaFieldKeys?.has(field.key) === true,
       setValue: (value, mutationOptions) => {
-        onNodeConfigValueChange(node.id, field.key, value, mutationOptions);
+        const continuous = mutationOptions?.mode === "continuous";
+        if (!continuous) historyGroup = newFieldGroup();
+        onNodeConfigValueChange(node.id, field.key, value, continuous
+          ? { ...mutationOptions, historyGroup }
+          : mutationOptions);
         refreshVisibilityState();
       },
     });
