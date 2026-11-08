@@ -47,6 +47,14 @@ describe("Studio context menu accessibility", () => {
     }
     const viewport = document.createElement("div");
     ownerDocument.body.appendChild(viewport);
+    const observe = jest.fn(), disconnect = jest.fn();
+    Object.defineProperty(ownerWindow, "ResizeObserver", {
+      configurable: true, value: class { observe = observe; disconnect = disconnect; },
+    });
+    const visualViewport = new ownerWindow.EventTarget();
+    Object.defineProperty(ownerWindow, "visualViewport", { configurable: true, value: visualViewport });
+    const visualAdd = jest.spyOn(visualViewport, "addEventListener");
+    const visualRemove = jest.spyOn(visualViewport, "removeEventListener");
     const frames = new Map<number, FrameRequestCallback>();
     let next = 0;
     const raf = jest.spyOn(ownerWindow, "requestAnimationFrame").mockImplementation(callback => { frames.set(++next, callback); return next; });
@@ -67,8 +75,154 @@ describe("Studio context menu accessibility", () => {
     for (const [type, listener, capture] of add.mock.calls.filter(([type, , capture]) => capture === true && ["pointerdown", "keydown", "contextmenu"].includes(type))) {
       expect(remove).toHaveBeenCalledWith(type, listener, capture);
     }
+    for (const [, listener] of add.mock.calls.filter(([type]) => type === "resize")) {
+      expect(remove).toHaveBeenCalledWith("resize", listener);
+    }
+    for (const [, listener] of visualAdd.mock.calls) {
+      expect(visualRemove).toHaveBeenCalledWith("resize", listener);
+    }
+    expect(observe).toHaveBeenCalledTimes(2);
+    expect(observe).toHaveBeenCalledWith(viewport);
+    expect(disconnect).toHaveBeenCalledTimes(2);
     expect(viewport.children.length).toBe(0);
     raf.mockRestore(); caf.mockRestore(); add.mockRestore(); remove.mockRestore();
+    visualAdd.mockRestore(); visualRemove.mockRestore();
+  });
+
+  it.each(["window", "visualViewport", "pane", "pane-before-initial"] as const)("relayouts a focused node popup on %s resize without losing its query", target => {
+    const originalObserver = Object.getOwnPropertyDescriptor(window, "ResizeObserver");
+    const originalVisualViewport = Object.getOwnPropertyDescriptor(window, "visualViewport");
+    const viewportHeight = jest.replaceProperty(window, "innerHeight", 844);
+    const callbacks: Array<() => void> = [];
+    const disconnect = jest.fn();
+    Object.defineProperty(window, "ResizeObserver", {
+      configurable: true,
+      value: class {
+        constructor(callback: () => void) { callbacks.push(callback); }
+        observe = jest.fn();
+        disconnect = disconnect;
+      },
+    });
+    const visualViewport = Object.assign(new EventTarget(), { height: 844, offsetTop: 0 });
+    Object.defineProperty(window, "visualViewport", { configurable: true, value: visualViewport });
+    const workspace = document.body.createDiv();
+    const controls = workspace.createDiv({ cls: "ss-studio-graph-workspace-controls" });
+    const viewport = workspace.createDiv();
+    let bottom = 812;
+    Object.defineProperties(viewport, {
+      clientWidth: { configurable: true, value: 322 },
+      clientHeight: { configurable: true, get: () => bottom - 90 },
+      scrollTop: { configurable: true, value: 500 },
+      getBoundingClientRect: { configurable: true, value: () => ({ top: 90, bottom }) },
+    });
+    Object.defineProperty(controls, "getBoundingClientRect", {
+      configurable: true, value: () => ({ bottom: 207 }),
+    });
+    const overlay = new StudioNodeContextMenuOverlay();
+    const hide = jest.spyOn(overlay, "hide");
+    try {
+      overlay.mount(viewport);
+      overlay.open({
+        anchorX: 200, anchorY: 900,
+        items: [
+          { definition: definition("studio.alpha"), title: "Alpha", summary: "First node" },
+          { definition: definition("studio.beta"), title: "Beta", summary: "Second node" },
+        ],
+        onSelectDefinition: jest.fn(),
+      });
+      const root = viewport.querySelector<HTMLElement>(".ss-studio-node-context-menu")!;
+      const search = root.querySelector<HTMLInputElement>("input")!;
+      search.value = "alpha";
+      search.dispatchEvent(new Event("input", { bubbles: true }));
+      search.focus();
+      expect(root.style.maxHeight).toBe("589px");
+      // Initial and unchanged ResizeObserver deliveries must leave the menu open.
+      if (target !== "pane-before-initial") { callbacks[0](); callbacks[0](); }
+      expect(root.getAttribute("aria-hidden")).toBe("false");
+      expect(hide).not.toHaveBeenCalled();
+
+      if (target === "visualViewport") {
+        // Opening the on-screen keyboard changes only the visual viewport.
+        visualViewport.offsetTop = 100;
+        visualViewport.height = 400;
+      } else {
+        bottom = 500;
+      }
+      if (target.startsWith("pane")) callbacks[0]();
+      else (target === "window" ? window : visualViewport).dispatchEvent(new Event("resize"));
+      expect(root.getAttribute("aria-hidden")).toBe("false");
+      expect(root.hasAttribute("inert")).toBe(false);
+      expect(root.style.maxHeight).toBe("277px");
+      expect(document.activeElement).toBe(search);
+      expect(search.value).toBe("alpha");
+      expect(root.querySelectorAll('[role="option"]')).toHaveLength(1);
+      expect(root.querySelector('[role="option"]')?.textContent).toContain("Alpha");
+      expect(hide).not.toHaveBeenCalled();
+      expect(disconnect).not.toHaveBeenCalled();
+
+      // Hide releases listeners and ignores an already-queued observer callback.
+      overlay.hide();
+      root.style.maxHeight = "1px";
+      bottom = 400;
+      callbacks[0]();
+      window.dispatchEvent(new Event("resize"));
+      visualViewport.dispatchEvent(new Event("resize"));
+      expect(root.getAttribute("aria-hidden")).toBe("true");
+      expect(root.style.maxHeight).toBe("1px");
+      expect(hide).toHaveBeenCalledTimes(1);
+      expect(disconnect).toHaveBeenCalledTimes(1);
+    } finally {
+      overlay.destroy();
+      viewportHeight.restore();
+      if (originalObserver) Object.defineProperty(window, "ResizeObserver", originalObserver);
+      else Reflect.deleteProperty(window, "ResizeObserver");
+      if (originalVisualViewport) Object.defineProperty(window, "visualViewport", originalVisualViewport);
+      else Reflect.deleteProperty(window, "visualViewport");
+    }
+  });
+
+  it("keeps simple menus' default dismissal on window, keyboard, and pane resize", () => {
+    const originalObserver = Object.getOwnPropertyDescriptor(window, "ResizeObserver");
+    const originalVisualViewport = Object.getOwnPropertyDescriptor(window, "visualViewport");
+    const callbacks: Array<() => void> = [];
+    Object.defineProperty(window, "ResizeObserver", {
+      configurable: true,
+      value: class {
+        constructor(callback: () => void) { callbacks.push(callback); }
+        observe = jest.fn();
+        disconnect = jest.fn();
+      },
+    });
+    const visualViewport = new EventTarget();
+    Object.defineProperty(window, "visualViewport", { configurable: true, value: visualViewport });
+    const viewport = document.body.createDiv();
+    let height = 700;
+    Object.defineProperties(viewport, {
+      clientWidth: { configurable: true, value: 322 },
+      clientHeight: { configurable: true, get: () => height },
+    });
+    const overlay = new StudioSimpleContextMenuOverlay();
+    try {
+      overlay.mount(viewport);
+      for (const target of ["window", "visualViewport", "pane"] as const) {
+        overlay.open({ anchorX: 0, anchorY: 0, items: [{ id: "run", title: "Run", onSelect: jest.fn() }] });
+        const root = viewport.querySelector<HTMLElement>(".ss-studio-simple-context-menu")!;
+        expect(root.getAttribute("aria-hidden")).toBe("false");
+        if (target === "pane") {
+          height -= 100;
+          callbacks.at(-1)!();
+        } else {
+          (target === "window" ? window : visualViewport).dispatchEvent(new Event("resize"));
+        }
+        expect(root.getAttribute("aria-hidden")).toBe("true");
+      }
+    } finally {
+      overlay.destroy();
+      if (originalObserver) Object.defineProperty(window, "ResizeObserver", originalObserver);
+      else Reflect.deleteProperty(window, "ResizeObserver");
+      if (originalVisualViewport) Object.defineProperty(window, "visualViewport", originalVisualViewport);
+      else Reflect.deleteProperty(window, "visualViewport");
+    }
   });
 
   it("exposes add-node search as a dialog with a combobox-owned listbox", () => {

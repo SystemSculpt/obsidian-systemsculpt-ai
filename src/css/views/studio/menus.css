@@ -206,6 +206,7 @@ input.ss-studio-node-context-menu-search-input::placeholder {
 .ss-studio-node-context-menu-item-summary {
   font-size: var(--ss-text-xs);
   color: var(--ss-ink-muted);
+  text-wrap: balance;
 }
 
 .ss-studio-node-context-menu-empty {

@@ -135,11 +135,16 @@ describe("StudioShapeController canvas-wide selection", () => {
     expect(controller.getSelectedShapeIds()).toEqual(["s1"]);
   });
 
-  it("moves every selected shape from its own origin", () => {
-    const { controller, project } = createHarness();
+  it("preserves a picked multi-selection and moves every shape from its own origin", () => {
+    const { controller, project, selection } = createHarness();
 
     controller.select({ type: "shape", id: "s1" });
     controller.select({ type: "shape", id: "s2" }, { additive: true });
+    selection.replace("node", ["n1"]);
+    // The production layer selects on plain pointerdown before starting a drag.
+    controller.layerOptions().onSelect({ type: "shape", id: "s1" }, { additive: false });
+    expect(controller.getSelectedShapeIds()).toEqual(["s1", "s2"]);
+    expect([...selection.ids("node")]).toEqual(["n1"]);
     controller.beginTranslation();
     controller.applyTranslation(project, { x: 40, y: 25 });
 

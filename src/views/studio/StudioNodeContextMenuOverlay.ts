@@ -183,7 +183,7 @@ export class StudioNodeContextMenuOverlay {
     });
 
     this.rootEl = root;
-    this.lifecycle = new StudioMenuLifecycle(root, () => this.hide());
+    this.lifecycle = new StudioMenuLifecycle(root, () => this.hide(), () => this.applyLayout());
     this.searchInputEl = searchInput;
     this.listEl = list;
     this.actionsEl = actions;

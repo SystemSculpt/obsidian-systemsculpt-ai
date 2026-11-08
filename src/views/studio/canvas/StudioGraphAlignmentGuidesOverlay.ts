@@ -21,14 +21,15 @@ function mergeIntervals(intervals: Interval[]): Interval[] {
 }
 
 /** Only the exposed portions of a smart guide paint; transparent text cards stay readable. */
-function exposedGuideSegments(guide: StudioAlignmentGuideLine, occlusions: Occlusions, padding: number): Interval[] {
+function exposedGuideSegments(guide: StudioAlignmentGuideLine, occlusions: Occlusions, padding: number, endInset = 0): Interval[] {
   const blocked: Interval[] = [];
   for (const rect of rectangles(occlusions)) {
     const min = guide.axis === "x" ? rect.left : rect.top;
     const max = guide.axis === "x" ? rect.right : rect.bottom;
     if (guide.position < min - padding || guide.position > max + padding) continue;
-    blocked.push({ start: (guide.axis === "x" ? rect.top : rect.left) - padding,
-      end: (guide.axis === "x" ? rect.bottom : rect.right) + padding });
+    const start = Math.max((guide.axis === "x" ? rect.top : rect.left) - padding, guide.start + endInset);
+    const end = Math.min((guide.axis === "x" ? rect.bottom : rect.right) + padding, guide.end - endInset);
+    if (end > start) blocked.push({ start, end });
   }
   const segments: Interval[] = [];
   let cursor = guide.start;
@@ -41,6 +42,16 @@ function exposedGuideSegments(guide: StudioAlignmentGuideLine, occlusions: Occlu
   }
   if (cursor < guide.end) segments.push({ start: cursor, end: guide.end });
   return segments;
+}
+
+/** A paint mask keeps DOM size constant even when a guide crosses many cards. */
+function maskSegments(element: HTMLElement, guide: StudioAlignmentGuideLine, segments: Interval[], scale: number): void {
+  const stops = segments.flatMap(segment => {
+    const start = (segment.start - guide.start) * scale, end = (segment.end - guide.start) * scale;
+    return [`transparent ${start}px`, `#000 ${start}px`, `#000 ${end}px`, `transparent ${end}px`];
+  });
+  const colors = ["transparent 0px", ...stops, `transparent ${(guide.end - guide.start) * scale}px`];
+  element.style.maskImage = `linear-gradient(to ${guide.axis === "x" ? "bottom" : "right"}, ${colors.join(", ")})`;
 }
 
 /** Find the nearest free point on one axis using cached world boxes, not peer DOM reads. */
@@ -103,20 +114,22 @@ export function renderStudioGraphAlignmentGuidesLayer(
   };
 
   for (const guide of result.guides) {
-    for (const segment of exposedGuideSegments(guide, occlusions, 2 / scale)) {
+    const segments = exposedGuideSegments(guide, occlusions, 2 / scale);
+    if (segments.length) {
       const line = layer.createDiv();
       line.className = `ss-studio-alignment-guide ${guide.axis === "x" ? "is-vertical" : "is-horizontal"}`;
       if (guide.offset !== undefined) line.classList.add("is-near");
-      const length = Math.max(0, (segment.end - segment.start) * scale);
+      const length = Math.max(0, (guide.end - guide.start) * scale);
       if (guide.axis === "x") {
         line.style.left = `${(guide.position + origin.x) * scale}px`;
-        line.style.top = `${(segment.start + origin.y) * scale}px`;
+        line.style.top = `${(guide.start + origin.y) * scale}px`;
         line.style.height = `${length}px`;
       } else {
-        line.style.left = `${(segment.start + origin.x) * scale}px`;
+        line.style.left = `${(guide.start + origin.x) * scale}px`;
         line.style.top = `${(guide.position + origin.y) * scale}px`;
         line.style.width = `${length}px`;
       }
+      maskSegments(line, guide, segments, scale);
     }
     if (guide.offset !== undefined) {
       const badge = layer.createDiv();
@@ -143,6 +156,11 @@ export function renderStudioGraphAlignmentGuidesLayer(
       span.style.left = `${(gap.cross + origin.x) * scale}px`;
       span.style.top = `${(gap.start + origin.y) * scale}px`;
       span.style.height = `${length}px`;
+    }
+    if (length > 0) {
+      const guide: StudioAlignmentGuideLine = { axis: gap.axis === "x" ? "y" : "x", position: gap.cross, start: gap.start, end: gap.end };
+      // Preserve the existing 3px end ticks; hide strokes behind interior labels.
+      maskSegments(span, guide, exposedGuideSegments(guide, occlusions, 2 / scale, 3 / scale), scale);
     }
     const badge = layer.createDiv();
     badge.className = `ss-studio-distance-badge ${gap.axis === "x" ? "is-horizontal-gap" : "is-vertical-gap"}`;

@@ -220,6 +220,47 @@ describe("mobile host layout adapter", () => {
     });
   });
 
+  it.each([
+    { offsetTop: 0, height: 500, expectedBottom: 500 },
+    { offsetTop: 100, height: 400, expectedBottom: 500 },
+    { offsetTop: 100, height: 900, expectedBottom: 844 },
+  ])("clamps the usable boundary to the visual viewport and layout height: %j", ({ offsetTop, height, expectedBottom }) => {
+    const original = Object.getOwnPropertyDescriptor(window, "visualViewport");
+    const layoutHeight = jest.replaceProperty(window, "innerHeight", 844);
+    const visualViewport = Object.assign(new EventTarget(), { offsetTop, height });
+    Object.defineProperty(window, "visualViewport", { configurable: true, value: visualViewport });
+    try {
+      expect(readMobileHostLayout(document).viewportBottom).toBe(expectedBottom);
+      const navbar = document.createElement("nav");
+      navbar.className = "mobile-navbar-action";
+      navbar.getBoundingClientRect = () => ({ top: 720, height: 80 } as DOMRect);
+      document.body.appendChild(navbar);
+      expect(readMobileHostLayout(navbar).viewportBottom).toBe(Math.min(expectedBottom, 720));
+    } finally {
+      disposeMobileHostLayoutStates();
+      layoutHeight.restore();
+      if (original) Object.defineProperty(window, "visualViewport", original);
+      else Reflect.deleteProperty(window, "visualViewport");
+    }
+  });
+
+  it("reads the visual viewport from the surface's own pop-out window", () => {
+    const frame = document.createElement("iframe");
+    document.body.appendChild(frame);
+    const ownerWindow = frame.contentWindow as Window & typeof globalThis;
+    Object.defineProperty(ownerWindow, "innerHeight", { configurable: true, value: 700 });
+    Object.defineProperty(ownerWindow, "visualViewport", {
+      configurable: true,
+      value: Object.assign(new ownerWindow.EventTarget(), { offsetTop: 50, height: 400 }),
+    });
+    try {
+      expect(readMobileHostLayout(frame.contentDocument!.body).viewportBottom).toBe(450);
+    } finally {
+      disposeMobileHostLayoutStates();
+      frame.remove();
+    }
+  });
+
   it("removes owned body state and observers during plugin teardown", () => {
     ensureMobileHostLayoutState(document);
 

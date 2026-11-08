@@ -141,6 +141,7 @@
 .ss-studio-distance-span {
   position: absolute;
   background-color: color-mix(in srgb, var(--ss-accent) 55%, transparent);
+  mask-clip: no-clip;
 }
 
 .ss-studio-distance-span.is-horizontal {
@@ -180,6 +181,7 @@
 
 .ss-studio-distance-badge {
   position: absolute;
+  z-index: 1;
   transform: translate(-50%, -50%);
   padding: 1px var(--ss-space-1);
   background-color: var(--ss-surface-0);
