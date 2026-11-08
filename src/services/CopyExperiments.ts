@@ -16,7 +16,8 @@ type Variant = Readonly<{ key: string; weight?: number }>;
 const UNIT_KEY = "systemsculpt-experiment-unit";
 const units = new WeakMap<object, string | null>();
 
-/** FNV-1a 32-bit over UTF-8; the same hash as @trellisbyte/analytics/experiment 0.5.0. */
+/** FNV-1a 32-bit over UTF-8; the same hash as @trellisbyte/analytics/experiment 0.5.0.
+ * @internal Unit-tested directly. */
 export function fnv1a(text: string): number {
   let hash = 0x811c9dc5;
   for (const byte of new TextEncoder().encode(text)) {
@@ -26,7 +27,8 @@ export function fnv1a(text: string): number {
   return hash >>> 0;
 }
 
-/** Same key and unit always give the same arm; equal weights by default. */
+/** Same key and unit always give the same arm; equal weights by default.
+ * @internal Unit-tested directly. */
 export function variantFor(key: string, unit: string, variants: readonly Variant[]): string {
   const total = variants.reduce((sum, variant) => sum + (variant.weight ?? 1), 0);
   let point = (fnv1a(`${key}:${unit}`) / 2 ** 32) * total;
@@ -64,7 +66,8 @@ function experimentUnit(app: App): string | null {
 }
 
 /** The upgrade prompt's title and subtitle (UpgradePlanModal), control first; copy picked by CMO T-5831.
- * A no-break space keeps "SystemSculpt Pro" on one line. */
+ * A no-break space keeps "SystemSculpt Pro" on one line.
+ * @internal Tests assert against this value. */
 export const UPGRADE_PROMPT_EXPERIMENT = {
   key: "ss-plugin-upgrade-pro-2026-11",
   variants: [
