@@ -204,6 +204,14 @@ describe("ChatView narrow run-line readability", () => {
   });
 });
 
+describe("ChatView settled activity alignment", () => {
+  test("insets restored activity rows to align with the summary columns", () => {
+    const activity = readCss("views/agent-workspace/activity.css");
+    expect(rule(activity, ".systemsculpt-agent-activity-body"))
+      .toMatch(/padding:\s*var\(--ss-space-0\) var\(--ss-space-1\) var\(--ss-space-1\)/);
+  });
+});
+
 describe("ChatView touch input and disclosure targets", () => {
   test.each([
     ["views/agent-workspace/composer.css", ".systemsculpt-agent-prompt > .systemsculpt-agent-prompt-input"],

@@ -204,7 +204,8 @@ strong.systemsculpt-agent-activity-overflow-label {
   gap: 2px;
   min-width: 0;
   margin: 0;
-  padding: var(--ss-space-0) 0 var(--ss-space-1);
+  /* Match the summary's icon, label and disclosure columns. */
+  padding: var(--ss-space-0) var(--ss-space-1) var(--ss-space-1);
 }
 
 details.systemsculpt-agent-activity:not([open]) > .systemsculpt-agent-activity-body {
