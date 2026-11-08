@@ -7,6 +7,11 @@
     "x-systemsculpt-platform": "macos | windows | linux | ios | android"
   },
   "local_interactions": {
+    "studio-storage-settings": {
+      "events": [],
+      "not_measured": "Studio run retention and support storage are vault-local. The ineffective artifact-size control was removed; compatibility fields remain, with no quota or client telemetry.",
+      "where": ["src/settings/ImageGenerationTabContent.ts", "src/studio/StudioProjectStore.ts"]
+    },
     "chat-source-citation-open": {
       "events": [],
       "not_measured": "Opening a cited source note stays in the vault through Obsidian openLinkText. No server call or client telemetry is sent.",

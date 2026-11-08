@@ -7,6 +7,7 @@ import { StudioProjectSession } from "../StudioProjectSession";
 import { createEmptyStudioProject, serializeStudioProject } from "../schema";
 import { cloneStudioProjectSnapshot } from "../StudioProjectSnapshots";
 import { StudioProjectStore } from "../StudioProjectStore";
+import { StudioAssetStore } from "../StudioAssetStore";
 import { StudioService } from "../StudioService";
 import { createManagedCapabilityGraphStub, getManagedStudioTestVaultName } from "./managed-capability-graph.stub";
 import { deriveStudioAssetsDir, deriveStudioNodeCachePath, deriveStudioPolicyPath, deriveStudioRunsDir, sanitizeStudioProjectName } from "../paths";
@@ -28,6 +29,7 @@ type InMemoryApp = {
       copy: (source: string, destination: string) => Promise<void>;
       list: (path: string) => Promise<{ files: string[]; folders: string[] }>;
       remove: (path: string) => Promise<void>;
+      rmdir: (path: string, recursive: boolean) => Promise<void>;
       rename: (source: string, destination: string) => Promise<void>;
     };
     getAbstractFileByPath?: (path: string) => unknown;
@@ -115,6 +117,10 @@ function createStore(options?: { existingFiles?: string[]; existingDirs?: string
     }),
     remove: jest.fn(async (path: string) => {
       files.delete(path);
+      for (const file of [...files.keys()]) if (file.startsWith(`${path}/`)) files.delete(file);
+      for (const dir of [...dirs]) if (dir === path || dir.startsWith(`${path}/`)) dirs.delete(dir);
+    }),
+    rmdir: jest.fn(async (path: string, _recursive: boolean) => {
       for (const file of [...files.keys()]) if (file.startsWith(`${path}/`)) files.delete(file);
       for (const dir of [...dirs]) if (dir === path || dir.startsWith(`${path}/`)) dirs.delete(dir);
     }),
@@ -229,14 +235,90 @@ describe("StudioProjectStore", () => {
   it("serializes concurrent support publications for one project", async () => {
     const { store } = createStore();
     const created = await store.createProject({ name: "Concurrent", minPluginVersion: "4.13.0", maxRuns: 100, maxArtifactsMb: 512 });
-    await Promise.all([0, 1, 2].map((index) => store.putAsset(created.path, created.project.projectId, {
+    await Promise.all([0, 1, 2].map((index) => store.putAsset(created.path, {
       contentAddressedPath: `0${index}/${String(index).repeat(64)}.bin`,
       bytes: new Uint8Array([index]),
-    })));
+    }, created.project.projectId)));
     for (let index = 0; index < 3; index += 1) {
       const absolute = `${deriveStudioAssetsDir(created.path)}/assets/sha256/0${index}/${String(index).repeat(64)}.bin`;
       expect(await store.readSupportFile(created.path, absolute)).toEqual(new Uint8Array([index]));
     }
+  });
+
+  it("reads path-less assets directly without scanning projects, including files not indexed yet", async () => {
+    const { store, app, files, adapter } = createStore();
+    const created = await store.createProject({ name: "Direct assets", minPluginVersion: "6.19.5", maxRuns: 2, maxArtifactsMb: 1 });
+    const path = `${deriveStudioAssetsDir(created.path)}/assets/sha256/aa/${"a".repeat(64)}.png`;
+    files.set(path, "media");
+    app.vault.getFiles = jest.fn(() => { throw new Error("No vault scan for an asset read"); });
+    app.vault.getAbstractFileByPath = jest.fn(() => null);
+    expect(await store.readSupportFileByAbsolutePath(path)).toEqual(new TextEncoder().encode("media"));
+    expect(app.vault.getAbstractFileByPath).toHaveBeenCalledWith(created.path);
+    adapter.readBinary.mockClear();
+    for (const invalid of ["notes/private.md", `/${path}`, path.replace("/assets/", "/../assets/"), path.replace("/assets/", "/./assets/"), path.replace("/assets/", "//assets/"), path.replace("/assets/", "\\\\assets/"), `Missing.systemsculpt-assets/assets/sha256/aa/${"a".repeat(64)}.png`]) {
+      expect(await store.readSupportFileByAbsolutePath(invalid)).toBeNull();
+    }
+    expect(adapter.readBinary).not.toHaveBeenCalled();
+  });
+
+  it("stores assets and reads accepted source without refreshing the document again", async () => {
+    const { store, adapter, files } = createStore();
+    const created = await store.createProject({ name: "Accepted identity", minPluginVersion: "6.19.5", maxRuns: 2, maxArtifactsMb: 1 });
+    adapter.read.mockClear();
+    const assetStore = new StudioAssetStore(store);
+    const asset = await assetStore.storeArrayBuffer(created.path, new TextEncoder().encode("media").buffer, "image/png");
+    expect(await store.readProjectRawText(created.path)).toBe(files.get(created.path));
+    expect(adapter.read).not.toHaveBeenCalled();
+    expect(await assetStore.readArrayBuffer(asset)).toEqual(new TextEncoder().encode("media").buffer);
+    const before = new Map(files);
+    await expect(store.putSupportFile(created.path, "another-project", { supportRelativePath: "imports/wrong.txt", bytes: new Uint8Array([1]) })).rejects.toThrow("identity mismatch");
+    expect(files).toEqual(before);
+  });
+
+  it("publishes lean provenance once without sweeping graph, cache, retained-run or unsynced assets", async () => {
+    const { store, adapter, files, dirs } = createStore();
+    const created = await store.createProject({ name: "Retain media", minPluginVersion: "6.19.5", maxRuns: 2, maxArtifactsMb: 1 });
+    const root = deriveStudioAssetsDir(created.path);
+    const assetPaths = ["graph", "cache", "retained", "unsynced"].map((_, index) => `${root}/assets/sha256/0${index}/${String(index).repeat(64)}.png`);
+    created.project.graph.nodes.push({ id: "image", kind: "studio.text", version: "1.0.0", title: "Asset path", position: { x: 0, y: 0 }, config: { value: assetPaths[0] } });
+    await store.saveProject(created.path, created.project);
+    assetPaths.forEach((path, index) => files.set(path, `preserve-${index}`));
+    const historical = `${root}/runs/retained/snapshot.json`;
+    files.set(historical, "Historical snapshot kept byte-for-byte");
+    dirs.add(`${root}/runs/old`);
+    files.set(`${root}/runs/old/snapshot.json`, "Expired by existing run retention");
+    files.set(`${root}/runs/retained/events.ndjson`, JSON.stringify({ outputs: { path: assetPaths[2] } }));
+    const cache = new TextEncoder().encode(JSON.stringify({ schema: "studio.node-cache.v1", projectId: created.project.projectId, entries: { image: { outputs: { path: assetPaths[1] } } } }));
+    adapter.read.mockClear();
+    const publication = {
+      projectId: created.project.projectId, runId: "new",
+      provenanceDocument: new TextEncoder().encode('{"schema":"studio.run-provenance.v1"}\n'),
+      eventsDocument: new TextEncoder().encode('{"type":"run.completed"}\n'),
+      runIndexDocument: new TextEncoder().encode('[{"runId":"retained"},{"runId":"new"}]'),
+      cacheDocument: cache,
+      assets: [4, 5].map(index => ({ contentAddressedPath: `0${index}/${String(index).repeat(64)}.png`, bytes: new TextEncoder().encode(`new-${index}`) })),
+      removeRunIds: ["old"],
+    };
+    await store.publishRun(created.path, publication);
+    expect(adapter.read).not.toHaveBeenCalled();
+    expect(files.has(`${root}/runs/new/snapshot.json`)).toBe(false);
+    expect(files.get(`${root}/runs/new/provenance.json`)).toBe(new TextDecoder().decode(publication.provenanceDocument));
+    expect(files.get(historical)).toBe("Historical snapshot kept byte-for-byte");
+    expect(files.has(`${root}/runs/old/snapshot.json`)).toBe(false);
+    assetPaths.forEach((path, index) => expect(files.get(path)).toBe(`preserve-${index}`));
+    expect(adapter.remove).not.toHaveBeenCalled();
+    const before = new Map(files);
+    await expect(store.publishRun(created.path, { ...publication, removeRunIds: ["../unsafe"] })).rejects.toThrow("Invalid retained run selection");
+    expect(files).toEqual(before);
+  });
+
+  it("serializes conflicting immutable asset writes without replacing the first bytes", async () => {
+    const { store, files } = createStore();
+    const created = await store.createProject({ name: "Immutable", minPluginVersion: "6.19.5", maxRuns: 2, maxArtifactsMb: 1 });
+    const contentAddressedPath = `aa/${"a".repeat(64)}.png`;
+    const results = await Promise.allSettled(["first", "second"].map(text => store.putAsset(created.path, { contentAddressedPath, bytes: new TextEncoder().encode(text) })));
+    expect(results.map(result => result.status)).toEqual(["fulfilled", "rejected"]);
+    expect(files.get(`${deriveStudioAssetsDir(created.path)}/assets/sha256/${contentAddressedPath}`)).toBe("first");
   });
 
   it("refreshes document authority on every load and ingests a causal file edit", async () => {
@@ -288,10 +370,10 @@ describe("StudioProjectStore", () => {
       maxArtifactsMb: 512,
     });
     const oldAssetsDir = deriveStudioAssetsDir(created.path);
-    await store.putAsset(created.path, created.project.projectId, {
+    await store.putAsset(created.path, {
       contentAddressedPath: `aa/${"a".repeat(64)}.txt`,
       bytes: new TextEncoder().encode("blob"),
-    });
+    }, created.project.projectId);
 
     const renamed = await store.renameProject(created.path, "Renamed", {
       project: created.project,

@@ -22,7 +22,7 @@ import type {
   StudioProjectV1,
   StudioRunEvent,
   StudioRunOptions,
-  StudioRunSnapshotV1,
+  StudioRunProvenanceV1,
   StudioRunSummary,
 } from "./types";
 import { deriveStudioRunsDir } from "./paths";
@@ -30,6 +30,7 @@ import { cloneStudioProjectSnapshot } from "./StudioProjectSnapshots";
 import { nowIso, randomId } from "./utils";
 import { StudioRunObserver } from "./StudioRunObserver";
 import { assertStudioNodeHostAvailable } from "./StudioHostCapabilities";
+import { sha256HexFromArrayBuffer } from "../utils/sha256";
 
 type RunResult = { summary: StudioRunSummary; inputs?: StudioNodeInputMap };
 type PendingRun = {
@@ -455,14 +456,16 @@ export class StudioRuntime {
     const permissions = new StudioPermissionManager(policy);
     const sandbox = new StudioSandboxRunner(permissions);
 
-    const snapshot: StudioRunSnapshotV1 = {
-      schema: "studio.run.v1",
+    const provenance: StudioRunProvenanceV1 = {
+      schema: "studio.run-provenance.v1",
       runId,
       projectPath,
       projectId: project.projectId,
       createdAt: startedAt,
-      project,
-      policy,
+      graphHash: await sha256HexFromArrayBuffer(new TextEncoder().encode(JSON.stringify(project.graph)).buffer),
+      policyHash: await sha256HexFromArrayBuffer(new TextEncoder().encode(JSON.stringify(policy)).buffer),
+      executeNodeIds: [...compiled.executeNodeIds],
+      providedNodeIds: [...providedNodeIds],
     };
 
     const persistedEvents: string[] = [];
@@ -1063,7 +1066,7 @@ export class StudioRuntime {
     await this.projectStore.publishRun(projectPath, {
       projectId: project.projectId,
       runId,
-      snapshotDocument: new TextEncoder().encode(`${JSON.stringify(snapshot, null, 2)}\n`),
+      provenanceDocument: new TextEncoder().encode(`${JSON.stringify(provenance)}\n`),
       eventsDocument: new TextEncoder().encode(persistedEvents.join("")),
       runIndexDocument: new TextEncoder().encode(`${JSON.stringify(retainedRuns, null, 2)}\n`),
       cacheDocument: new TextEncoder().encode(`${JSON.stringify(nodeCacheSnapshot, null, 2)}\n`),

@@ -104,7 +104,9 @@ My Project.systemsculpt-assets/
   project.manifest.json
   policy/grants.json
   assets/sha256/
-  runs/
+  runs/<run-id>/provenance.json
+  runs/<run-id>/events.ndjson
+  runs/index.json
   cache/node-results.json
   legacy/
 ~~~
@@ -138,6 +140,20 @@ requires the support tree to match an older snapshot and never prunes files
 created by another writer. Cache and run indexes combine independent results.
 Missing local media displays a waiting state and refreshes on vault events;
 available archived assets can be restored without rerunning a paid operation.
+
+New runs save compact provenance: project and run identity, execution scope,
+and SHA-256 hashes of the admitted graph and permission policy. Events retain
+node results; Studio no longer writes a full project and policy snapshot for
+every run. Existing snapshots stay unchanged until their run expires under
+Run retention. Support publications use the accepted project identity, without
+reloading the canvas for every asset.
+
+Run retention removes expired run folders, not media blobs. A locally
+unreferenced blob can still belong to unsaved edits, Undo, or a canvas arriving
+from another device. Studio therefore does not automatically sweep those
+assets. The old `maxArtifactsMb` fields remain readable for compatibility but
+do not impose a storage quota; the ineffective artifact-size setting is no
+longer shown.
 
 Plugin reload preserves Studio leaves, project paths, viewport state, and
 pending editing snapshots in a process-local handoff. The next plugin instance

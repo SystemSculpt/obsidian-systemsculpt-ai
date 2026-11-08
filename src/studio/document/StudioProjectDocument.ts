@@ -332,9 +332,15 @@ export class StudioProjectDocument {
       return {project: cloneStudioProjectSnapshot(value.project), conflicts, source: value.source, readOnlyReason: value.readOnlyReason};
     });
   }
-  /** The file bytes of the current document, as a watcher reports them. */
+  /** Support files belong to the accepted project, independently of later canvas arrivals. */
+  async assertIdentity(id?: string): Promise<void> {
+    const value = this.cache.get(this.path) || (await this.exclusive(() => this.refreshLocked())).value;
+    this.assertWritable();
+    if (id !== undefined && value.project.projectId !== id) throw new Error("Studio project identity mismatch.");
+  }
+  /** Last accepted or published bytes, used to recognize this document's watcher events. */
   async source(): Promise<string> {
-    return this.exclusive(async () => (await this.refreshLocked()).value.source);
+    return this.cache.get(this.path)?.source ?? this.exclusive(async () => (await this.refreshLocked()).value.source);
   }
   /** The current document and its agent revision. */
   async read(): Promise<StudioProjectReconciliation & {revision: string}> {
