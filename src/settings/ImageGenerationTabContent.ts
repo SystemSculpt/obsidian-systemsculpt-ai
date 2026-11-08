@@ -62,19 +62,4 @@ export function displayImageGenerationTabContent(
       });
       text.inputEl.inputMode = "numeric";
     });
-
-  createCatalogSetting(containerEl, "studio.artifact-retention")
-    .addText((text) => {
-      text
-        .setPlaceholder("1024")
-        .setValue(String(plugin.settings.studioRunRetentionMaxArtifactsMb ?? 1024));
-      bindTextSetting("studioRunRetentionMaxArtifactsMb", text.inputEl, async (value) => {
-        const parsed = Number.parseInt(value, 10);
-        if (!Number.isFinite(parsed)) return;
-        return plugin.getSettingsManager().updateSettings({
-          studioRunRetentionMaxArtifactsMb: Math.max(1, Math.min(200_000, parsed)),
-        });
-      });
-      text.inputEl.inputMode = "numeric";
-    });
 }

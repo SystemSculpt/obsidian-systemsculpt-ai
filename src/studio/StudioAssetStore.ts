@@ -32,9 +32,8 @@ export class StudioAssetStore {
   }
 
   async storeArrayBuffer(projectPath: string, bytes: ArrayBuffer, mimeType: string): Promise<StudioAssetRef> {
-    const project = await this.projectStore.loadProject(projectPath);
     const staged = await this.stageArrayBuffer(projectPath, bytes, mimeType);
-    await this.projectStore.putAsset(projectPath, project.projectId, staged.generationFile);
+    await this.projectStore.putAsset(projectPath, staged.generationFile);
     return staged.asset;
   }
 

@@ -13,11 +13,11 @@ import { studioDevice } from "./StudioDevice";
 export type StudioAssetFile = { contentAddressedPath: string; bytes: Uint8Array };
 /** Any other support file addressed relative to the project's support tree. */
 export type StudioSupportFile = { supportRelativePath: string; bytes: Uint8Array };
-/** One completed run: its snapshot, events, produced assets and the retained run index. */
+/** One completed run: its provenance, events, produced assets and the retained run index. */
 export type StudioRunPublication = {
   projectId: string;
   runId: string;
-  snapshotDocument: Uint8Array;
+  provenanceDocument: Uint8Array;
   eventsDocument: Uint8Array;
   runIndexDocument: Uint8Array;
   cacheDocument: Uint8Array;
@@ -143,8 +143,13 @@ export class StudioProjectStore {
     catch { return null; }
   }
   async readSupportFileByAbsolutePath(path: string): Promise<Uint8Array | null> {
-    for (const projectPath of await this.listProjects()) if (path.startsWith(`${deriveStudioAssetsDir(projectPath)}/`)) return this.readSupportFile(projectPath, path);
-    return null;
+    if (path.startsWith("/") || path.includes("\\") || path.split("/").some(part => !part || part === "." || part === "..")) return null;
+    const rootEnd = path.lastIndexOf(".systemsculpt-assets/");
+    if (rootEnd <= 0) return null;
+    const projectPath = `${path.slice(0, rootEnd)}.systemsculpt`;
+    // Sync may deliver a project before Obsidian indexes it. Neither case needs a vault-wide scan.
+    if (!this.app.vault.getAbstractFileByPath(projectPath) && !await this.app.vault.adapter.exists(projectPath)) return null;
+    return this.readSupportFile(projectPath, path);
   }
   async restoreAssetFile(projectPath: string, path: string): Promise<boolean> {
     this.supportRelativePath(projectPath, path);
@@ -162,21 +167,24 @@ export class StudioProjectStore {
     if (!relative || relative.startsWith("/") || relative.includes("\\") || relative.split("/").some(part => !part || part === "." || part === "..")) throw new Error("Invalid Studio support path.");
     return `${deriveStudioAssetsDir(projectPath)}/${relative.replace(/^support\//, "")}`;
   }
-  private async checkIdentity(path: string, id: string): Promise<void> {
-    this.assertWritable(path);
-    if ((await this.loadProject(path)).projectId !== id) throw new Error("Studio project identity mismatch.");
-    this.assertWritable(path);
+  private async checkIdentity(path: string, id?: string): Promise<void> {
+    await this.document(path).assertIdentity(id);
   }
-  async putAsset(path: string, id: string, asset: StudioAssetFile): Promise<void> {
+  async putAsset(path: string, asset: StudioAssetFile, id?: string): Promise<void> {
     await this.checkIdentity(path, id);
+    await this.writeAsset(path, asset);
+  }
+  private async writeAsset(path: string, asset: StudioAssetFile): Promise<void> {
     if (!/^[0-9a-f]{2}\/[0-9a-f]{64}\.[a-z0-9]+$/.test(asset.contentAddressedPath)) throw new Error("Invalid content-addressed asset path.");
     const destination = this.supportPath(path, `assets/sha256/${asset.contentAddressedPath}`);
-    if (await this.app.vault.adapter.exists(destination)) {
-      const previous = new Uint8Array(await this.app.vault.adapter.readBinary(destination));
-      if (previous.length !== asset.bytes.length || previous.some((byte, index) => byte !== asset.bytes[index])) throw new Error("An immutable Studio asset has different bytes.");
-      return;
-    }
-    await this.write(destination, asset.bytes);
+    await this.exclusive(destination, async () => {
+      if (await this.app.vault.adapter.exists(destination)) {
+        const previous = new Uint8Array(await this.app.vault.adapter.readBinary(destination));
+        if (previous.length !== asset.bytes.length || previous.some((byte, index) => byte !== asset.bytes[index])) throw new Error("An immutable Studio asset has different bytes.");
+        return;
+      }
+      await this.write(destination, asset.bytes);
+    });
   }
   async putSupportFile(path: string, id: string, file: StudioSupportFile): Promise<void> { await this.checkIdentity(path, id); await this.write(this.supportPath(path, file.supportRelativePath), file.bytes); }
   private async mergeSupport(path: string, relative: string, bytes: Uint8Array): Promise<void> {
@@ -191,13 +199,15 @@ export class StudioProjectStore {
     await this.checkIdentity(path, command.projectId);
     const run = command.runId;
     if (!/^[A-Za-z0-9_-]+$/.test(run)) throw new Error("Invalid Studio run ID.");
-    for (const asset of command.assets) await this.putAsset(path, command.projectId, asset);
-    await this.write(this.supportPath(path, `runs/${run}/snapshot.json`), command.snapshotDocument);
+    if (command.removeRunIds.some(id => !/^[A-Za-z0-9_-]+$/.test(id) || id === run)) throw new Error("Invalid retained run selection.");
+    for (const asset of command.assets) await this.writeAsset(path, asset);
+    await this.write(this.supportPath(path, `runs/${run}/provenance.json`), command.provenanceDocument);
     await this.write(this.supportPath(path, `runs/${run}/events.ndjson`), command.eventsDocument);
     await this.mergeSupport(path, "cache/node-results.json", command.cacheDocument);
     // Publish the index last. Orphan files after a crash do not claim a completed run.
     await this.mergeSupport(path, "runs/index.json", command.runIndexDocument);
-    if (command.removeRunIds.some(id => !/^[A-Za-z0-9_-]+$/.test(id) || id === run)) throw new Error("Invalid retained run selection.");
+    // Do not infer blob ownership from local reachability. A graph, cache or run on
+    // another device may still reference an asset that arrived before its canvas.
     if (command.removeRunIds.length) {
       const indexPath = this.supportPath(path, "runs/index.json");
       await this.exclusive(indexPath, () => this.app.vault.adapter.process(indexPath, raw => {
