@@ -29,6 +29,7 @@ type WireStatus = "uploading" | "queued" | "processing" | "succeeded" | "complet
 // multipart parts and must report delivery timing after local commit.
 const mediaCapabilities: ManagedRecoveryCapability[] = ["image_generation", "video_generation"];
 const isMediaCapability = (c: ManagedRecoveryCapability): c is "image_generation" | "video_generation" => mediaCapabilities.includes(c);
+/** @internal Compatibility export used by recovery contract tests. */
 export { MANAGED_MULTIPART_PART_LIMITS } from "./ManagedRecoveryRecordDecoder";
 const domainLocks = new Map<string, Map<string, Promise<void>>>();
 const dispatchLegality: Record<ManagedRecoveryCapability, Partial<Record<ManagedRecoveryPhase, ManagedPendingDispatch["operation"][]>>> = {

@@ -28,6 +28,7 @@ import type {
   ManagedVideoDeliveryBody,
   ManagedMediaDeliveryAcknowledgment,
 } from "./ManagedMediaJobContract";
+/** @internal Compatibility export used by the managed media contract tests. */
 export { MANAGED_MEDIA_JOB_PROTOCOL } from "./ManagedMediaJobContract";
 export type {
   ManagedMediaKind,
