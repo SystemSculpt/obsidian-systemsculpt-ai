@@ -2,6 +2,7 @@
  * @jest-environment jsdom
  */
 import type { StudioDiagram } from "../../../../studio/types";
+import { startStudioPointerGesture } from "../../StudioPointerGesture";
 import {
   clearStudioShapeSelectionVisuals,
   EMPTY_STUDIO_SHAPE_SELECTION,
@@ -10,9 +11,9 @@ import {
   type StudioShapeSelection,
 } from "../StudioShapeLayer";
 
-function pointerEvent(type: string, clientX: number, clientY: number): PointerEvent {
+function pointerEvent(type: string, clientX: number, clientY: number, pointerId = 1): PointerEvent {
   const event = new MouseEvent(type, { bubbles: true, cancelable: true, clientX, clientY });
-  Object.defineProperty(event, "pointerId", { value: 1 });
+  Object.defineProperty(event, "pointerId", { value: pointerId });
   Object.defineProperty(event, "button", { value: 0 });
   return event as PointerEvent;
 }
@@ -364,6 +365,108 @@ describe("studio shape layer", () => {
     window.dispatchEvent(pointerEvent("pointerup", 60, 50));
 
     expect(onResizeShape).toHaveBeenCalledWith("s1", { x: 60, y: 50, width: 140, height: 150 });
+  });
+
+  it.each(["blur", "capture loss", "supersession", "disposal", "escape"])(
+    "restores the latest shape and releases resize ownership on %s",
+    (reason) => {
+      const selection: StudioShapeSelection = { shapeIds: ["s1"], arrowIds: [] };
+      const { canvas, handle, onResizeShape } = mount({ selection });
+      const first = shapeEl(canvas, "s1");
+      const capture = jest.fn();
+      const release = jest.fn();
+      first.setPointerCapture = capture;
+      first.releasePointerCapture = release;
+      first.querySelector<HTMLElement>('.ss-studio-shape-handle[data-corner="nw"]')
+        ?.dispatchEvent(pointerEvent("pointerdown", 100, 100));
+      window.dispatchEvent(pointerEvent("pointermove", 60, 50));
+      expect(first.style.width).toBe("140px");
+      expect(capture).toHaveBeenCalledWith(1);
+
+      const refreshed = diagramFixture();
+      refreshed.shapes[0].position = { x: 220, y: 240 };
+      refreshed.shapes[0].size = { width: 180, height: 160 };
+      handle.update({ diagram: refreshed, busy: false, activeCanvasTool: "select", selection });
+      let cancelOtherGesture: (() => void) | undefined;
+      if (reason === "blur") window.dispatchEvent(new Event("blur"));
+      if (reason === "capture loss") first.dispatchEvent(pointerEvent("lostpointercapture", 60, 50));
+      if (reason === "disposal") handle.dispose?.();
+      if (reason === "escape") window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+      if (reason === "supersession") {
+        cancelOtherGesture = startStudioPointerGesture({
+          element: canvas,
+          event: pointerEvent("pointerdown", 300, 300),
+          onMove: jest.fn(),
+          onFinish: jest.fn(),
+          onCancel: jest.fn(),
+        });
+      }
+      cancelOtherGesture?.();
+
+      expect(release).toHaveBeenCalledWith(1);
+      expect(shapeEl(canvas, "s1")).toBe(first);
+      expect(first.style.left).toBe("220px");
+      expect(first.style.top).toBe("240px");
+      expect(first.style.width).toBe("180px");
+      expect(first.style.height).toBe("160px");
+      expect(first.querySelectorAll(".ss-studio-shape-handle")).toHaveLength(4);
+      window.dispatchEvent(pointerEvent("pointermove", 20, 20));
+      window.dispatchEvent(pointerEvent("pointerup", 20, 20));
+      expect(onResizeShape).not.toHaveBeenCalled();
+      expect(first.style.width).toBe("180px");
+
+      refreshed.shapes[0].position.x = 260;
+      handle.update({ diagram: refreshed, busy: false, activeCanvasTool: "select", selection });
+      expect(first.style.left).toBe("260px");
+      handle.dispose?.();
+    }
+  );
+
+  it("starts a superseding move from restored resize geometry and protects it from refreshes", () => {
+    const selection: StudioShapeSelection = { shapeIds: ["s1"], arrowIds: [] };
+    const { canvas, handle, onResizeShape, onMoveSelection } = mount({ selection });
+    const first = shapeEl(canvas, "s1");
+    first.querySelector<HTMLElement>('.ss-studio-shape-handle[data-corner="nw"]')
+      ?.dispatchEvent(pointerEvent("pointerdown", 100, 100));
+    window.dispatchEvent(pointerEvent("pointermove", 60, 50));
+    first.dispatchEvent(pointerEvent("pointerdown", 80, 80, 2));
+    expect(first.style.left).toBe("100px");
+    expect(first.style.width).toBe("100px");
+    window.dispatchEvent(pointerEvent("pointermove", 90, 90, 2));
+    expect(first.style.left).toBe("110px");
+    expect(first.style.top).toBe("110px");
+
+    const refreshed = diagramFixture();
+    refreshed.shapes[0].position = { x: 500, y: 500 };
+    handle.update({ diagram: refreshed, busy: false, activeCanvasTool: "select", selection });
+    expect(first.style.left).toBe("110px");
+    window.dispatchEvent(pointerEvent("pointerup", 20, 20));
+    expect(onResizeShape).not.toHaveBeenCalled();
+    window.dispatchEvent(pointerEvent("pointerup", 90, 90, 2));
+    expect(onMoveSelection).toHaveBeenLastCalledWith({ x: 10, y: 10 }, { first: false, final: true });
+    handle.dispose?.();
+  });
+
+  it("starts a superseding resize from restored move geometry", () => {
+    const selection: StudioShapeSelection = { shapeIds: ["s1"], arrowIds: [] };
+    const { canvas, handle, onResizeShape, onMoveSelection } = mount({ selection });
+    const first = shapeEl(canvas, "s1");
+    first.dispatchEvent(pointerEvent("pointerdown", 120, 120));
+    window.dispatchEvent(pointerEvent("pointermove", 160, 140));
+    expect(first.style.left).toBe("140px");
+    first.querySelector<HTMLElement>('.ss-studio-shape-handle[data-corner="nw"]')
+      ?.dispatchEvent(pointerEvent("pointerdown", 140, 120, 2));
+    expect(first.style.left).toBe("100px");
+    expect(onMoveSelection).toHaveBeenLastCalledWith({ x: 0, y: 0 },
+      { first: false, final: true, cancelled: true });
+    window.dispatchEvent(pointerEvent("pointermove", 130, 100, 2));
+    expect(first.style.left).toBe("90px");
+    expect(first.style.width).toBe("110px");
+    window.dispatchEvent(pointerEvent("pointerup", 160, 140));
+    expect(onResizeShape).not.toHaveBeenCalled();
+    window.dispatchEvent(pointerEvent("pointerup", 130, 100, 2));
+    expect(onResizeShape).toHaveBeenCalledWith("s1", { x: 90, y: 80, width: 110, height: 120 });
+    handle.dispose?.();
   });
 
   it("cancels a shape resize without committing and restores document refreshes", () => {
