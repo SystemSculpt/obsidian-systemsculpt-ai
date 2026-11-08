@@ -4,7 +4,7 @@ import type { ManagedVideoGenerationAdapter } from "../../services/videos/Manage
 import { snapManagedVideoRequestToModel, type ManagedVideoModel } from "../../services/videos/ManagedVideoModelCatalog";
 import type { StudioService } from "../../studio/StudioService";
 import type { StudioDocumentEdit } from "../../studio/document/StudioProjectDocument";
-import { STUDIO_AGENT_DOCS_PATH } from "../../studio/types";
+import { STUDIO_AGENT_DOCS_PATH, type StudioRunEvent } from "../../studio/types";
 import { GENERATED_IMAGES_FOLDER, GENERATED_VIDEOS_FOLDER, saveGeneratedMedia } from "../../utils/generatedMedia";
 import { sha256HexFromArrayBuffer } from "../../utils/sha256";
 import {
@@ -14,6 +14,7 @@ import {
   type SystemSculptToolResult,
   type SystemSculptToolset,
 } from "./SystemSculptTools";
+import { beginGeneration, generationKey, updateGeneration } from "./GenerationProgress";
 
 /** The chat shows generated files under the reply; an embed in the reply would show them twice. */
 /** The chat shows the link as its own line; the reply repeating it would say it twice. */
@@ -91,6 +92,9 @@ export class SystemSculptToolService {
     const name = systemSculptToolName(nativeName);
     if (!name) return { ok: false, message: `Unknown SystemSculpt tool: ${String(nativeName).slice(0, 80)}.` };
     const args = record(rawArgs);
+    // Chat reads this while the call runs, to show its live progress.
+    const progressKey = generationKey(name, args);
+    const endProgress = beginGeneration(progressKey);
     try {
       // Every tool is a subscriber feature; Studio's share one line.
       if (name.startsWith("studio_")) {
@@ -98,18 +102,20 @@ export class SystemSculptToolService {
         if (denied) return denied;
       }
       switch (name) {
-        case "generate_image": return await this.generateImage(args, signal, callId);
-        case "generate_video": return await this.generateVideo(args, signal, callId);
+        case "generate_image": return await this.generateImage(args, signal, callId, progressKey);
+        case "generate_video": return await this.generateVideo(args, signal, callId, progressKey);
         case "studio_list_workflows": return await this.listWorkflows();
         case "studio_create_workflow": return await this.createWorkflow(args);
         case "studio_open_workflow": return await this.openWorkflow(args);
         case "studio_edit_workflow": return await this.editWorkflow(args);
-        case "studio_run_workflow": return await this.runWorkflow(args, signal);
+        case "studio_run_workflow": return await this.runWorkflow(args, signal, progressKey);
         case "studio_list_outputs": return await this.listOutputs(args);
       }
     } catch (error) {
       if (signal.aborted) return { ok: false, message: "Stopped." };
       return this.failure(error);
+    } finally {
+      endProgress();
     }
   }
 
@@ -165,7 +171,7 @@ export class SystemSculptToolService {
     return `chat-${kind}-${id}`;
   }
 
-  private async generateImage(args: Record<string, unknown>, signal: AbortSignal, callId?: string): Promise<SystemSculptToolResult> {
+  private async generateImage(args: Record<string, unknown>, signal: AbortSignal, callId?: string, progressKey: string | null = null): Promise<SystemSculptToolResult> {
     const prompt = requiredString(args, "prompt", 8_000);
     const count = optionalInteger(args, "count", 1, 4);
     const referencePaths = Array.isArray(args.reference_images) ? args.reference_images : args.reference_images === undefined ? [] : null;
@@ -182,6 +188,7 @@ export class SystemSculptToolService {
       operationId,
       sourceIdentity: `chat:${operationId}`,
       signal,
+      onProgress: progress => updateGeneration(progressKey, progress),
       buildPayload: () => ({
         ...(model ? { model } : {}),
         prompt,
@@ -210,7 +217,7 @@ export class SystemSculptToolService {
     };
   }
 
-  private async generateVideo(args: Record<string, unknown>, signal: AbortSignal, callId?: string): Promise<SystemSculptToolResult> {
+  private async generateVideo(args: Record<string, unknown>, signal: AbortSignal, callId?: string, progressKey: string | null = null): Promise<SystemSculptToolResult> {
     const prompt = requiredString(args, "prompt", 8_000);
     const durationSeconds = optionalInteger(args, "duration_seconds", 1, 60);
     const generateAudio = typeof args.generate_audio === "boolean" ? args.generate_audio : undefined;
@@ -234,6 +241,7 @@ export class SystemSculptToolService {
       operationId,
       sourceIdentity: `chat:${operationId}`,
       signal,
+      onProgress: progress => updateGeneration(progressKey, progress),
       buildPayload: () => ({
         model: model?.id ?? requested ?? "",
         prompt,
@@ -354,11 +362,16 @@ export class SystemSculptToolService {
     return { nodes, media };
   }
 
-  private async runWorkflow(args: Record<string, unknown>, signal: AbortSignal): Promise<SystemSculptToolResult> {
+  private async runWorkflow(args: Record<string, unknown>, signal: AbortSignal, progressKey: string | null = null): Promise<SystemSculptToolResult> {
     const path = requiredString(args, "path", 1_000);
     const nodeId = optionalString(args, "node_id", 200);
     const studio = this.host.studio();
-    const summary = nodeId ? await studio.runProjectFromNode(path, nodeId, { signal }) : await studio.runProject(path, { signal });
+    // Chat names the step that is running; a node without a title shows none.
+    const titles = progressKey ? await this.nodeTitles(path) : new Map<string, string>();
+    const onEvent = (event: StudioRunEvent) => {
+      if (event.type === "node.started") updateGeneration(progressKey, { step: titles.get(event.nodeId) ?? "" });
+    };
+    const summary = nodeId ? await studio.runProjectFromNode(path, nodeId, { signal, onEvent }) : await studio.runProject(path, { signal, onEvent });
     const executed = summary.executedNodeIds ?? [];
     const ran = [...executed, ...(summary.cachedNodeIds ?? [])];
     const { nodes } = await this.nodeOutputs(path, ran.length ? ran : undefined);

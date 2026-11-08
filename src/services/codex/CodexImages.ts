@@ -89,7 +89,10 @@ export class CodexImageImporter {
     if (update.state !== 'succeeded') return update;
     try {
       const found = item.type === 'imageGeneration' ? await this.generated(item) : await this.viewed(item, workingDirectory);
-      if (!found) return update;
+      if (!found) {
+        // A generation with no file must still end, or Chat would wait on "Saving image" all turn.
+        return item.type === 'imageGeneration' ? { ...update, output: { summary: 'Codex returned no image file.' } } : update;
+      }
       const media: SystemSculptMedia = { kind: 'image', path: found.path, mimeType: found.mimeType };
       const message = `Saved to the vault: ${found.path}`;
       return { ...update, output: { summary: message, data: { [MARKER]: 1, ok: true, message, media: [media], ...(found.sourcePath ? { sourcePath: found.sourcePath } : {}) } } };

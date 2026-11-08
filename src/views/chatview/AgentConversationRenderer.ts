@@ -361,7 +361,7 @@ export class AgentConversationRenderer extends Component {
       renderPart: (node, part, previous, suppressError, progress) => this.renderPart(node, part, previous, suppressError, progress),
       forgetMarkdown: (target) => this.forgetMarkdown(target),
       renderMessageAttachments: (parent, attachments) => this.renderMessageAttachments(parent, attachments),
-      renderTurnMediaBlock: (parent, parts, answer) => this.renderTurnMediaBlock(parent, parts, answer),
+      renderTurnMediaBlock: (parent, parts, answer, live) => this.renderTurnMediaBlock(parent, parts, answer, live),
       renderTurnChanges: (parent, parts) => this.renderTurnChanges(parent, parts),
       addTurnHeading: (row, user) => this.addTurnHeading(row, user),
       createCompletedActivity: (parent, elapsed, cancelled) => this.createCompletedActivity(parent, elapsed, cancelled),
@@ -746,8 +746,11 @@ export class AgentConversationRenderer extends Component {
         }
         const historicalTools = turnParts.flatMap((part) => part.type === "tool_call"
           ? [historicalToolPart(part.data)] : []);
-        this.renderTurnMediaBlock(body, historicalTools,
+        const media = this.renderTurnMediaBlock(body, historicalTools,
           turnParts.flatMap((part) => part.type === "content" && typeof part.data === "string" ? [part.data] : []).join("\n"));
+        // Same place as the live turn settled it: under the folded work, above the reply.
+        const fold = body.querySelector<HTMLElement>(":scope > details[data-agent-turn-fold]");
+        if (media && fold && fold.nextElementSibling !== media) fold.after(media);
         this.renderTurnChanges(body, historicalTools);
       } else {
         const { content } = presented[0];
@@ -1966,11 +1969,11 @@ export class AgentConversationRenderer extends Component {
     if (!details.open || state.revision !== revision) state.dirty = true;
   }
 
-  private renderTurnMediaBlock(parent: HTMLElement, parts: readonly AgentToolPart[], answer: string): HTMLElement | null {
+  private renderTurnMediaBlock(parent: HTMLElement, parts: readonly AgentToolPart[], answer: string, live = false): HTMLElement | null {
     return renderTurnMedia(this.options.app, parent, parts, {
       openFile: (path) => void this.options.onOpenArtifact({ id: path, kind: "generated_file", title: path.split("/").pop() ?? path, path }),
       openLink: (url) => void openExternalUrl(url, parent.ownerDocument.defaultView ?? undefined),
-    }, answer);
+    }, answer, live);
   }
 
   private renderTurnChanges(parent: HTMLElement, parts: readonly AgentToolPart[]): void {

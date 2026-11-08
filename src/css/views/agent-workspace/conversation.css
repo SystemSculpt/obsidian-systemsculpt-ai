@@ -382,6 +382,251 @@ video.systemsculpt-agent-media-frame {
   font-size: var(--ss-text-base);
 }
 
+/* A generation and its result share one frame at the requested shape, so the
+   image or video lands in place (T-5955). TS writes --ss-media-ratio (width
+   over height) and --ss-media-progress (0-1, only with a server estimate). */
+.systemsculpt-agent-media.has-ratio {
+  width: min(100%, calc(28rem * var(--ss-media-ratio)));
+  min-width: 0;
+}
+
+.systemsculpt-agent-media.has-ratio .systemsculpt-agent-media-open,
+.systemsculpt-agent-media.has-ratio video.systemsculpt-agent-media-frame,
+.ss-media-pending-frame {
+  position: relative;
+  width: 100%;
+  aspect-ratio: var(--ss-media-ratio);
+}
+
+.systemsculpt-agent-media.has-ratio .systemsculpt-agent-media-frame {
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  object-fit: cover;
+}
+
+.systemsculpt-agent-media.has-ratio video.systemsculpt-agent-media-frame {
+  height: auto;
+  object-fit: contain;
+}
+
+/* An asked-for shape holds even if the file comes back another one: shown whole, never cropped. */
+.systemsculpt-agent-media.has-ratio[data-ratio="fixed"] .systemsculpt-agent-media-frame {
+  height: 100%;
+  object-fit: contain;
+}
+
+.systemsculpt-agent-media.has-ratio .systemsculpt-agent-media-open img {
+  position: relative;
+  opacity: 0;
+  transition: opacity var(--ss-dur-slow) var(--ss-ease-out);
+}
+
+.systemsculpt-agent-media.has-ratio.is-loaded .systemsculpt-agent-media-open img {
+  opacity: 1;
+}
+
+.systemsculpt-agent-media.is-loaded .ss-media-pending-sheen {
+  display: none;
+}
+
+.ss-media-pending-frame {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  box-sizing: border-box;
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-md);
+  background: var(--ss-surface-sunken);
+  overflow: hidden;
+  isolation: isolate;
+}
+
+/* A soft band of light that sweeps across while the file is made. */
+.ss-media-pending-sheen {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.ss-media-pending-sheen::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -100%;
+  width: 100%;
+  background: linear-gradient(
+    100deg,
+    transparent 20%,
+    color-mix(in srgb, var(--ss-accent) 10%, transparent) 50%,
+    transparent 80%
+  );
+  animation: ss-shimmer calc(var(--ss-dur-slow) * 7) var(--ss-ease) infinite;
+}
+
+/* Tiles in a grid sweep one after another, not in lockstep. */
+.systemsculpt-agent-media.is-pending:nth-child(2n) .ss-media-pending-sheen::before {
+  animation-delay: calc(var(--ss-dur-slow) * 1);
+}
+
+.systemsculpt-agent-media.is-pending:nth-child(3n) .ss-media-pending-sheen::before {
+  animation-delay: calc(var(--ss-dur-slow) * 2);
+}
+
+.ss-media-pending-icon {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: inline-flex;
+  color: var(--ss-ink-muted);
+  transform: translate(-50%, -50%);
+  animation: ss-pulse calc(var(--ss-dur-slow) * 8) var(--ss-ease) infinite;
+}
+
+.systemsculpt-agent-media.is-failed .ss-media-pending-icon {
+  animation: none;
+}
+
+/* Decorative glyph: quieter than the label, so the tile reads as a frame first. */
+.ss-media-pending-icon svg {
+  width: var(--ss-space-8);
+  height: var(--ss-space-8);
+  stroke-width: 1.5;
+  opacity: 0.6;
+}
+
+.ss-media-pending-status {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-0);
+  min-width: 0;
+  padding: var(--ss-space-3) var(--ss-space-3) calc(var(--ss-space-3) + var(--ss-space-1));
+  font-family: var(--font-interface);
+}
+
+.ss-media-pending-label,
+.ss-media-pending-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ss-media-pending-label {
+  color: var(--ss-ink);
+  font-size: var(--ss-text-sm);
+  font-weight: var(--ss-weight-medium);
+}
+
+.ss-media-pending-meta {
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Thin progress line on the frame's bottom edge: the server's usual time
+   when it gives one, otherwise a travelling sliver. */
+.ss-media-pending-bar {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  background: color-mix(in srgb, var(--ss-accent) 16%, transparent);
+  overflow: hidden;
+}
+
+.ss-media-pending-fill {
+  display: block;
+  width: 34%;
+  height: 100%;
+  background: var(--ss-accent);
+  animation: ss-shimmer calc(var(--ss-dur-slow) * 5) var(--ss-ease) infinite;
+}
+
+.systemsculpt-agent-media.is-estimated .ss-media-pending-fill {
+  width: calc(var(--ss-media-progress) * 100%);
+  animation: none;
+  transition: width var(--ss-dur-slow) var(--ss-ease-out);
+}
+
+/* Without motion an unknown-length bar would sit still and read as a percentage. */
+.systemsculpt-agent-workspace.is-reduced-motion .systemsculpt-agent-media:not(.is-estimated) .ss-media-pending-fill {
+  visibility: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .systemsculpt-agent-media:not(.is-estimated) .ss-media-pending-fill { visibility: hidden; }
+}
+
+.systemsculpt-agent-media-caption.is-single-line {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The failure keeps the frame; the reason is the headline. */
+.systemsculpt-agent-media.is-failed .ss-media-pending-frame {
+  justify-content: center;
+  align-items: center;
+  border-style: dashed;
+  text-align: center;
+}
+
+.systemsculpt-agent-media.is-failed .ss-media-pending-icon {
+  position: static;
+  color: var(--ss-ink-muted);
+  transform: none;
+}
+
+.systemsculpt-agent-media.is-failed .ss-media-pending-status {
+  align-items: center;
+  max-width: 100%;
+  padding: var(--ss-space-2) var(--ss-space-4) var(--ss-space-3);
+}
+
+.systemsculpt-agent-media.is-failed .ss-media-pending-label {
+  max-width: 100%;
+}
+
+.systemsculpt-agent-media.is-failed[data-kind="workflow"] .ss-media-pending-label {
+  text-align: start;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* A Studio run has no known shape: one slim row across the grid. */
+.systemsculpt-agent-media.is-pending[data-kind="workflow"] {
+  grid-column: 1 / -1;
+  width: 100%;
+}
+
+.systemsculpt-agent-media[data-kind="workflow"] .ss-media-pending-frame {
+  flex-direction: row;
+  justify-content: flex-start;
+  align-items: center;
+  gap: var(--ss-space-3);
+  padding-left: var(--ss-space-3);
+}
+
+.systemsculpt-agent-media[data-kind="workflow"] .ss-media-pending-icon {
+  position: static;
+  transform: none;
+}
+
+.systemsculpt-agent-media[data-kind="workflow"] .ss-media-pending-icon svg {
+  width: var(--ss-space-5);
+  height: var(--ss-space-5);
+}
+
+.systemsculpt-agent-media[data-kind="workflow"] .ss-media-pending-status {
+  flex: 1;
+  align-items: flex-start;
+  padding: var(--ss-space-3) var(--ss-space-3) var(--ss-space-3) 0;
+}
+
 .systemsculpt-agent-message-attachment.is-file {
   min-height: var(--ss-control-height-sm);
   padding: 0 var(--ss-space-2);

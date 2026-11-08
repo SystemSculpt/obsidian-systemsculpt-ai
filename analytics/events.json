@@ -42,6 +42,11 @@
       "not_measured": "Local run teardown and unload-safe resume admission send no telemetry. Existing audio_processing API events measure only requests that are actually sent.",
       "where": ["src/features/audio-processor/AudioProcessorModal.ts", "src/features/audio-processor/AudioProcessorResume.ts"]
     },
+    "chat-live-media-generation": {
+      "events": [],
+      "not_measured": "Chat's live image, video and Studio run placeholders and their failure state draw from the tool call and the job status the plugin already polls. No client telemetry or extra server call is sent; the hosted image and video job events measure generation server-side.",
+      "where": ["src/views/chatview/PendingMedia.ts", "src/views/chatview/TurnMedia.ts", "src/tools/systemsculpt/GenerationProgress.ts"]
+    },
     "chat-source-citation-open": {
       "events": [],
       "not_measured": "Opening a cited source note stays in the vault through Obsidian openLinkText. No server call or client telemetry is sent.",

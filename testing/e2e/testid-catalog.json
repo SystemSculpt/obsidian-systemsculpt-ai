@@ -133,6 +133,8 @@
     "chat.turn.media.notice",
     "chat.turn.media.open",
     "chat.turn.media.path",
+    "chat.turn.media.pending",
+    "chat.turn.media.pending.meta",
     "chat.turn.media.subscribe",
     "chat.turn.retry",
     "chat.turn.retry-failed",
