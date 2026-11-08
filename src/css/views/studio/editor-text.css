@@ -81,6 +81,11 @@
   transition: var(--ss-transition-colors);
 }
 
+/* Obsidian's default placeholder is faint ink, under 3:1 on the sunken field. */
+.ss-studio-node-text-editor::placeholder {
+  color: var(--ss-ink-muted);
+}
+
 .ss-studio-node-text-editor:focus {
   border-color: var(--ss-accent);
   box-shadow: var(--ss-ring);

@@ -62,7 +62,7 @@
 }
 
 .ss-studio-text-node-display.is-placeholder {
-  color: var(--ss-ink-faint);
+  color: var(--ss-ink-muted);
 }
 
 /* The editor blends into the canvas: same box and font metrics as the
@@ -80,7 +80,7 @@
 }
 
 .ss-studio-text-node-editor::placeholder {
-  color: var(--ss-ink-faint);
+  color: var(--ss-ink-muted);
 }
 
 .ss-studio-text-node-editor:focus,
