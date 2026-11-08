@@ -215,11 +215,12 @@ describe("studio shape layer", () => {
     expect(onSelect).toHaveBeenCalledWith({ type: "shape", id: "s1" }, { additive: true });
   });
 
-  it("redraws arrows live while a connected shape moves", () => {
+  it("redraws arrows live while a connected shape moves", async () => {
     const { canvas } = mount();
 
     shapeEl(canvas, "s1").dispatchEvent(pointerEvent("pointerdown", 150, 150));
     window.dispatchEvent(pointerEvent("pointermove", 150, 350));
+    await new Promise<void>(resolve => window.requestAnimationFrame(() => resolve()));
 
     const line = canvas.querySelector(".ss-studio-shape-arrow-line")?.getAttribute("d");
     expect(line).not.toBe("M 200.00 150.00 L 397.00 150.00");

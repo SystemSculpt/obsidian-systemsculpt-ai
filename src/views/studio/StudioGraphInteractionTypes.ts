@@ -71,7 +71,7 @@ export type StudioGraphInteractionHost = {
   ) => boolean;
   requestRender: () => void;
   onNodeDragStateChange?: (isDragging: boolean) => void;
-  onNodePositionsChanged?: () => void;
+  onNodePositionsChanged?: (options?: NotifyNodePositionsChangedOptions) => void;
   /**
    * Atomic multi-node geometry commit from the multi-select resize frame:
    * the host applies EVERY patch inside one project mutation so a group

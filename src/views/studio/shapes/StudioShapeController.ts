@@ -189,8 +189,8 @@ export class StudioShapeController {
     this.cancelDraw = null;
   }
 
-  refreshArrows(): void {
-    this.layerHandle?.refreshArrows();
+  refreshArrows(itemIds?: readonly string[]): void {
+    this.layerHandle?.refreshArrows(itemIds);
   }
 
   /**
