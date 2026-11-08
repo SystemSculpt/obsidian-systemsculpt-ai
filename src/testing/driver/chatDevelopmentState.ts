@@ -638,9 +638,10 @@ async function waitForOwnedHistoryEntry(
   const startedAt = Date.now();
   for (;;) {
     throwIfActionCancelled(ctx);
+    // The modal has no row test ID; history.row belongs to the separate history panel.
     const rows = queryElements(
       ctx,
-      '[data-testid="history.row"][data-kind="chat"]',
+      '.systemsculpt-history-item[data-kind="chat"]',
     ).filter(isVisible);
     if (rows.length === 1 && rows[0]?.dataset.entryId === expectedEntryId) {
       return rows[0];

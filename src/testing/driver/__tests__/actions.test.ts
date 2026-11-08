@@ -595,7 +595,7 @@ function installHistoryEntry(
   close.dataset.testid = "history.close";
   close.getBoundingClientRect = () => rect();
   const row = document.createElement("div");
-  row.dataset.testid = "history.row";
+  row.className = "systemsculpt-history-item";
   row.dataset.kind = "chat";
   row.dataset.entryId = entryId;
   row.getBoundingClientRect = () => rect();
