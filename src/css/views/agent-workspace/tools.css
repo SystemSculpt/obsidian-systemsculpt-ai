@@ -167,7 +167,7 @@
     transform var(--ss-dur-fast) var(--ss-ease);
 }
 .systemsculpt-agent-conversation .systemsculpt-agent-tool.is-disclosure[open] > .systemsculpt-agent-tool-header .systemsculpt-agent-tool-disclosure {
-  transform: rotate(180deg);
+  transform: rotate(90deg);
 }
 .systemsculpt-agent-conversation .systemsculpt-agent-tool-header:hover .systemsculpt-agent-tool-disclosure {
   opacity: 1;
@@ -209,6 +209,12 @@
   overflow-wrap: anywhere;
   user-select: text;
   white-space: pre-wrap;
+}
+.systemsculpt-agent-conversation .systemsculpt-agent-tool-raw pre,
+.systemsculpt-agent-conversation .systemsculpt-agent-tool-raw code {
+  max-width: 100%;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .systemsculpt-agent-conversation .systemsculpt-agent-tool-detail {
   display: block;
@@ -520,6 +526,10 @@
   word-break: normal;
   font-family: var(--ss-font-mono);
   font-size: calc(1em * 0.9);
+}
+.ss-native-tool-preview .systemsculpt-diff-prefix:first-child,
+.ss-hosted-tool-preview .systemsculpt-diff-prefix:first-child {
+  margin-inline-start: var(--ss-space-2);
 }
 .ss-native-tool-output {
   max-height: var(--ss-agent-tool-details-height);

@@ -166,11 +166,12 @@
   white-space: nowrap;
 }
 
-/* The Latest overlay belongs to the transcript, above the variable-height
- * composer and outside the scrolling content. */
+/* Latest gets its own row above the variable-height composer, never on top
+ * of the transcript text. */
 .systemsculpt-agent-transcript {
   position: relative;
   display: flex;
+  flex-direction: column;
   flex: 1 1 auto;
   min-height: 0;
 }

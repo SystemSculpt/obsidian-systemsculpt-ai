@@ -275,9 +275,9 @@ export class AgentToolRenderer {
       hasDetail && (shell as HTMLDetailsElement).open,
     );
     if (hasDetail) {
-      if (disclosureIcon.dataset.iconName !== "chevron-down") {
-        setIcon(disclosureIcon, "chevron-down");
-        disclosureIcon.dataset.iconName = "chevron-down";
+      if (disclosureIcon.dataset.iconName !== "chevron-right") {
+        setIcon(disclosureIcon, "chevron-right");
+        disclosureIcon.dataset.iconName = "chevron-right";
       }
     } else if (disclosureIcon.hasChildNodes()) {
       disclosureIcon.empty();
