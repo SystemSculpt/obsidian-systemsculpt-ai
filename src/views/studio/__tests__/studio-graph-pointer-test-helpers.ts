@@ -7,7 +7,11 @@ type PointerListenerWindow = {
 export function createElementStub(): HTMLElement {
   const classes = new Set<string>();
   const style: Record<string, string> = {};
+  const events = new EventTarget();
   const stub = {
+    addEventListener: events.addEventListener.bind(events),
+    removeEventListener: events.removeEventListener.bind(events),
+    dispatchEvent: events.dispatchEvent.bind(events),
     ...(typeof document !== "undefined" ? { ownerDocument: document } : {}),
     style,
     setCssStyles: (styles: Record<string, string>) => {

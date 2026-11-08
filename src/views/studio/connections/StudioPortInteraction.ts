@@ -1,3 +1,4 @@
+import { startStudioPointerGesture } from "../StudioPointerGesture";
 import { isStudioRetiredNodeKind } from "../../../studio/StudioNodeKinds";
 import type {
   ConnectionAutoCreateRequest,
@@ -188,7 +189,7 @@ export class StudioPortInteraction {
     sourcePinEl: HTMLElement
   ): void {
     if (this.host.isBusy() || startEvent.button !== 0) return;
-    const ownerWindow = getStudioOwnerWindow(sourcePinEl);
+    this.teardownPointerListeners();
     startEvent.preventDefault();
 
     const { sourceType, candidates, compatible, incompatible } =
@@ -213,14 +214,6 @@ export class StudioPortInteraction {
       sourceKey,
     };
     this.callbacks.onDragStateChange(this.drag);
-
-    if (typeof sourcePinEl.setPointerCapture === "function") {
-      try {
-        sourcePinEl.setPointerCapture(startEvent.pointerId);
-      } catch {
-        // ignore
-      }
-    }
 
     const onMove = (event: PointerEvent) => {
       if (!this.drag || event.pointerId !== startEvent.pointerId) return;
@@ -312,29 +305,22 @@ export class StudioPortInteraction {
       this.clearDragState();
     };
 
-    this.pointerListenerTeardown = () => {
-      ownerWindow.removeEventListener("pointermove", onMove);
-      ownerWindow.removeEventListener("pointerup", onEnd);
-      ownerWindow.removeEventListener("pointercancel", onEnd);
-      if (typeof sourcePinEl.releasePointerCapture === "function") {
-        try {
-          sourcePinEl.releasePointerCapture(startEvent.pointerId);
-        } catch {
-          // ignore
-        }
-      }
-    };
-
-    ownerWindow.addEventListener("pointermove", onMove);
-    ownerWindow.addEventListener("pointerup", onEnd);
-    ownerWindow.addEventListener("pointercancel", onEnd);
+    this.pointerListenerTeardown = startStudioPointerGesture({
+      element: sourcePinEl,
+      event: startEvent,
+      onMove,
+      onFinish: event => {
+        if (event?.type === "pointerup") onEnd(event);
+        else this.cancel();
+      },
+      onCancel: () => { this.pointerListenerTeardown = null; this.cancel(); },
+    });
   }
 
   private teardownPointerListeners(): void {
-    if (this.pointerListenerTeardown) {
-      this.pointerListenerTeardown();
-      this.pointerListenerTeardown = null;
-    }
+    const teardown = this.pointerListenerTeardown;
+    this.pointerListenerTeardown = null;
+    teardown?.();
   }
 
   private updateDragStoreSnapshot(): void {

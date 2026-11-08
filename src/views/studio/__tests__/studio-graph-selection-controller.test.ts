@@ -26,6 +26,7 @@ function createHost(): TestHost {
 
 function createViewport(): HTMLElement {
   return {
+    ...createElementStub(),
     ownerDocument: document,
     scrollLeft: 120,
     scrollTop: 240,

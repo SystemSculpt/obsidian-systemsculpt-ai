@@ -52,6 +52,29 @@ function makePin(
 }
 
 describe("StudioPortInteraction drag-to-connect", () => {
+  it.each(["pointercancel", "blur", "escape", "lostpointercapture"])("cancels interrupted port drags on %s without committing a connection", reason => {
+    const canvas = document.createElement("div");
+    canvas.getBoundingClientRect = () => rectOf({ left: 0, top: 0, width: 1000, height: 1000 });
+    const source = makePin("ss-studio-port-pin is-output", "src", "out", { left: 0, top: 50, width: 12, height: 12 });
+    const target = makePin("ss-studio-port-pin is-input", "dst", "in", { left: 200, top: 200, width: 12, height: 12 });
+    document.body.append(canvas, source, target);
+    const commits = jest.fn();
+    const interaction = new StudioPortInteraction({ getCurrentProject: () => null, isBusy: () => false, getGraphZoom: () => 1, getPortType: () => "text", portTypeCompatible: () => true, describeConnectionAutoCreate: () => null } as never, new StudioLinkStore(), { onConnectionCommit: commits, onAutoCreateHint: () => {}, onAutoCreateRelease: () => false, onDragStateChange: () => {} });
+    interaction.registerCanvas(canvas);
+    interaction.registerPortElement("dst", "in", "in", target);
+    interaction.startDrag("src", "out", new FakePointerEvent("pointerdown", { button: 0, clientX: 6, clientY: 56, pointerId: 1 }) as unknown as PointerEvent, source);
+    window.dispatchEvent(new FakePointerEvent("pointermove", { clientX: 206, clientY: 206, pointerId: 1 }));
+    if (reason === "pointercancel") window.dispatchEvent(new FakePointerEvent("pointercancel", { pointerId: 1 }));
+    if (reason === "blur") window.dispatchEvent(new Event("blur"));
+    if (reason === "escape") window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    if (reason === "lostpointercapture") source.dispatchEvent(new FakePointerEvent("lostpointercapture", { pointerId: 1 }));
+    window.dispatchEvent(new FakePointerEvent("pointerup", { clientX: 206, clientY: 206, pointerId: 1 }));
+    expect(commits).not.toHaveBeenCalled();
+    expect(interaction.getPendingConnectionSourceKey()).toBeNull();
+    interaction.clearRenderBindings();
+    canvas.remove(); source.remove(); target.remove();
+  });
+
   it("still knows the source port when the commit callback fires", () => {
     const store = new StudioLinkStore();
 

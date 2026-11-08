@@ -50,6 +50,14 @@ export type StudioGraphProjectMutationOptions = {
   captureHistory?: boolean;
 };
 
+export type NotifyNodePositionsChangedOptions = {
+  nodeIds?: readonly string[];
+  shapeIds?: readonly string[];
+  recomputeCanvasBounds?: boolean;
+  /** A drag frame: nodes only moved, so edges reuse their measured port offsets. */
+  translating?: boolean;
+};
+
 type StudioGraphProjectMutator = (project: StudioProjectV1) => boolean | void;
 
 export type StudioGraphInteractionHost = {
@@ -81,8 +89,6 @@ export type StudioGraphInteractionHost = {
    * Diagram half of the one canvas selection. The graph owns the marquee and
    * the node drag; these carry the selected shapes through the same gesture.
    */
-  getSelectedShapeIds?: () => string[];
-  clearDiagramSelection?: () => void;
   beginDiagramMarquee?: () => void;
   selectDiagramInBounds?: (
     bounds: { left: number; top: number; right: number; bottom: number },

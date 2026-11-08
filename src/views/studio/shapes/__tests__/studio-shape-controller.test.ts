@@ -1,5 +1,6 @@
 /** @jest-environment jsdom */
 
+import { StudioCanvasSelection } from "../../StudioCanvasSelection";
 import type { StudioDiagram, StudioProjectV1 } from "../../../../studio/types";
 import {
   StudioShapeController,
@@ -41,13 +42,13 @@ function shape(id: string, x: number, y: number) {
 
 type Harness = {
   controller: StudioShapeController;
+  selection: StudioCanvasSelection;
   host: StudioShapeControllerHost & {
     commitMutation: jest.Mock;
     translateNodes: jest.Mock;
     beginNodeTranslation: jest.Mock;
     previewNodeTranslation: jest.Mock;
     finishNodeTranslation: jest.Mock;
-    clearNodeSelection: jest.Mock;
     requestRender: jest.Mock;
   };
   project: StudioProjectV1;
@@ -72,14 +73,14 @@ function createHarness(diagram?: StudioDiagram): Harness {
       return mutator(project) !== false;
     }),
     getCurrentProject: () => project,
-    clearNodeSelection: jest.fn(),
     requestRender: jest.fn(),
     beginNodeTranslation: jest.fn(),
     translateNodes: jest.fn(() => false),
     previewNodeTranslation: jest.fn(),
     finishNodeTranslation: jest.fn(),
   };
-  return { controller: new StudioShapeController(host), host, project, commitOptions };
+  const selection = new StudioCanvasSelection();
+  return { controller: new StudioShapeController(host, selection), selection, host, project, commitOptions };
 }
 
 describe("StudioShapeController canvas-wide selection", () => {
@@ -119,13 +120,16 @@ describe("StudioShapeController canvas-wide selection", () => {
   });
 
   it("adds to the selection when a pick is additive and toggles a second pick off", () => {
-    const { controller, host } = createHarness();
+    const { controller, selection } = createHarness();
 
+    selection.replace("node", ["n1"]);
     controller.select({ type: "shape", id: "s1" });
+    expect([...selection.ids("node")]).toEqual([]);
+    selection.replace("node", ["n2"]);
     controller.select({ type: "shape", id: "s2" }, { additive: true });
     expect(controller.getSelectedShapeIds()).toEqual(["s1", "s2"]);
     // Additive picks never touch the node half of the selection.
-    expect(host.clearNodeSelection).toHaveBeenCalledTimes(1);
+    expect([...selection.ids("node")]).toEqual(["n2"]);
 
     controller.select({ type: "shape", id: "s2" }, { additive: true });
     expect(controller.getSelectedShapeIds()).toEqual(["s1"]);

@@ -1,9 +1,11 @@
+import { StudioCanvasSelection } from "./StudioCanvasSelection";
 import { StudioGraphConnectionEngine } from "./connections/StudioGraphConnectionEngine";
 import { StudioGraphGroupController } from "./StudioGraphGroupController";
 import { StudioGraphSelectionController } from "./StudioGraphSelectionController";
 import { StudioGraphSelectionResizeController } from "./StudioGraphSelectionResizeController";
 import type { StudioProjectV1 } from "../../studio/types";
 import type {
+  NotifyNodePositionsChangedOptions,
   PendingConnection,
   StudioGraphInteractionHost,
   StudioGraphZoomMode,
@@ -15,15 +17,18 @@ export class StudioGraphInteractionEngine {
   private readonly connectionEngine: StudioGraphConnectionEngine;
   private readonly groupController: StudioGraphGroupController;
   private readonly selectionResizeController: StudioGraphSelectionResizeController;
-  private externalSelectionChangeListener: (() => void) | null = null;
-
-  constructor(private readonly host: StudioGraphInteractionHost) {
+  constructor(
+    private readonly host: StudioGraphInteractionHost,
+    private readonly selection = new StudioCanvasSelection()
+  ) {
     this.selectionController = new StudioGraphSelectionController({
       isBusy: () => this.host.isBusy(),
       getCurrentProject: () => this.host.getCurrentProject(),
       renderEdgeLayer: (options) => this.connectionEngine.renderEdgeLayer(options),
-      onNodePositionsChanged: () => {
-        this.groupController.refreshGroupBounds();
+      onNodePositionsChanged: options => {
+        this.groupController.refreshGroupBounds(options?.nodeIds || options?.shapeIds
+          ? { nodeIds: options.nodeIds ?? [], shapeIds: options.shapeIds ?? [] }
+          : undefined);
         this.selectionResizeController.refreshSelectionFrame();
         this.host.onNodePositionsChanged?.();
       },
@@ -41,7 +46,7 @@ export class StudioGraphInteractionEngine {
         this.host.onNodeDropToGroup?.(groupId, draggedNodeIds);
       },
       onGraphZoomChanged: (zoom, context) => this.host.onGraphZoomChanged?.(zoom, context),
-      getSelectedShapeIds: () => this.host.getSelectedShapeIds?.() || [],
+      getSelectedShapeIds: () => [...this.selection.ids("shape")],
       beginDiagramMarquee: () => this.host.beginDiagramMarquee?.(),
       selectDiagramInBounds: (bounds, additive) =>
         this.host.selectDiagramInBounds?.(bounds, additive),
@@ -50,13 +55,12 @@ export class StudioGraphInteractionEngine {
         this.host.translateDiagramSelection?.(project, delta) === true,
       previewDiagramTranslation: () => this.host.previewDiagramTranslation?.(),
       finishDiagramTranslation: () => this.host.finishDiagramTranslation?.(),
-    });
+    }, this.selection);
 
     this.groupController = new StudioGraphGroupController({
       isBusy: () => this.host.isBusy(),
       getCurrentProject: () => this.host.getCurrentProject(),
       getGraphZoom: () => this.selectionController.getGraphZoom(),
-      onGroupSelected: () => { this.selectionController.setSelectedNodeIds([]); this.host.clearDiagramSelection?.(); },
       getNodeElement: (nodeId) => this.selectionController.getNodeElement(nodeId),
       notifyNodePositionsChanged: (options) => this.selectionController.notifyNodePositionsChanged(options),
       onNodeDragStateChange: (isDragging) => this.host.onNodeDragStateChange?.(isDragging),
@@ -71,7 +75,7 @@ export class StudioGraphInteractionEngine {
         this.host.translateDiagramSelection?.(project, delta) === true,
       previewShapeTranslation: () => this.host.previewDiagramTranslation?.(),
       finishShapeTranslation: () => this.host.finishDiagramTranslation?.(),
-    });
+    }, this.selectionController.geometry, this.selection);
 
     this.connectionEngine = new StudioGraphConnectionEngine({
       ...this.host,
@@ -85,16 +89,12 @@ export class StudioGraphInteractionEngine {
       getSelectedNodeIds: () => this.selectionController.getSelectedNodeIds(),
       getNodeElement: (nodeId) => this.selectionController.getNodeElement(nodeId),
       onSelectionResize: (patches, options) => this.host.onSelectionResize?.(patches, options),
-    });
+    }, this.selectionController.geometry);
 
-    // The engine multiplexes selection changes: the multi-select resize
-    // frame re-derives first, then the host's own listener runs.
-    this.selectionController.setSelectionChangeListener(() => {
-      this.groupController.clearSelection();
-      this.selectionResizeController.refreshSelectionFrame();
-      this.externalSelectionChangeListener?.();
-    });
+    this.selection.subscribe(() => this.selectionResizeController.refreshSelectionFrame());
   }
+
+  get geometry() { return this.selectionController.geometry; }
 
   createMovementSnap(nodeIds: readonly string[], shapeIds: readonly string[]) {
     return this.selectionController.createMovementSnap(nodeIds, shapeIds);
@@ -147,10 +147,6 @@ export class StudioGraphInteractionEngine {
     return this.selectionController.getSingleSelectedNodeId();
   }
 
-  setSelectionChangeListener(listener: (() => void) | null): void {
-    this.externalSelectionChangeListener = listener;
-  }
-
   isPendingConnectionSource(nodeId: string, portId: string): boolean {
     return this.connectionEngine.isPendingConnectionSource(nodeId, portId);
   }
@@ -161,6 +157,7 @@ export class StudioGraphInteractionEngine {
 
   clearProjectState(): void {
     this.groupController.clearSelection();
+    this.selection.clear();
     this.selectionController.clearProjectState();
     this.connectionEngine.clearProjectState();
   }
@@ -405,7 +402,7 @@ export class StudioGraphInteractionEngine {
     this.connectionEngine.setEdgeActivity(edges);
   }
 
-  notifyNodePositionsChanged(options?: { recomputeCanvasBounds?: boolean; translating?: boolean }): void {
+  notifyNodePositionsChanged(options?: NotifyNodePositionsChangedOptions): void {
     this.selectionController.notifyNodePositionsChanged(options);
   }
 }

@@ -1,6 +1,7 @@
 /**
  * @jest-environment jsdom
  */
+import { StudioCanvasGeometry } from "../StudioCanvasGeometry";
 import type { StudioProjectV1 } from "../../../../studio/types";
 import { renderStudioGraphWorkspace } from "../StudioGraphWorkspaceRenderer";
 
@@ -70,15 +71,17 @@ describe("StudioGraphWorkspaceRenderer controls", () => {
     const zoomOverviewSpy = jest.fn();
     const toggleDetailSpy = jest.fn();
     const zoomLabel = { value: "" };
+    const currentProject = projectFixture();
 
     const options = {
       root,
       busy: false,
       readOnly,
-      currentProject: projectFixture(),
+      currentProject,
       currentProjectPath: "SystemSculpt/Studio/Controls.systemsculpt",
       nodeDetailMode: "expanded",
       graphInteraction: {
+        geometry: new StudioCanvasGeometry(() => currentProject),
         registerViewportElement: jest.fn(),
         handleGraphViewportWheel: jest.fn(),
         startMarqueeSelection: jest.fn(),

@@ -116,6 +116,7 @@ import {
   STUDIO_TEXT_NODE_LAYOUT_KEY,
 } from "../../studio/StudioNodeGeometry";
 import { computeStudioNewNodePosition } from "./canvas/StudioGraphNodePlacement";
+import { StudioCanvasSelection } from "./StudioCanvasSelection";
 import { StudioGraphInteractionEngine } from "./StudioGraphInteractionEngine";
 import {
   STUDIO_GRAPH_DEFAULT_ZOOM,
@@ -241,7 +242,8 @@ export class SystemSculptStudioView extends ItemView {
   private readonly assetPreviews: StudioAssetPreviewController;
   private closePromise: Promise<void> | null = null;
   private closed = false;
-  /** Diagram layer: shapes and arrows, with its own selection and edits. */
+  private readonly canvasSelection = new StudioCanvasSelection();
+  /** Diagram edits share the canvas selection with nodes and groups. */
   private readonly shapeController: StudioShapeController = new StudioShapeController({
     isBusy: () => this.busy,
     getCanvasEl: () => this.graphCanvasEl,
@@ -249,7 +251,6 @@ export class SystemSculptStudioView extends ItemView {
     commitMutation: (reason, mutator, options) =>
       this.projectSessionController.commitMutation(reason, mutator, options),
     getCurrentProject: () => this.currentProject,
-    clearNodeSelection: () => this.graphInteraction.setSelectedNodeIds([]),
     requestRender: () => this.render(),
     createMovementSnap: () => this.graphInteraction.createMovementSnap(
       this.graphInteraction.getSelectedNodeIds(), this.shapeController.getSelectedShapeIds()),
@@ -264,8 +265,7 @@ export class SystemSculptStudioView extends ItemView {
       this.graphInteraction.finishSelectionTranslation();
       this.graphInteraction.clearMovementGuides();
     },
-  });
-  private graphZoomMode: StudioGraphZoomMode = "interactive";
+  }, this.canvasSelection);
   private graphZoomGestureInFlight = false;
   private disposeVaultEvents: (() => void) | null = null;
   private readonly historyState = new StudioGraphHistory();
@@ -331,8 +331,6 @@ export class SystemSculptStudioView extends ItemView {
       portTypeCompatible: areStudioPortTypesCompatible,
       describeConnectionAutoCreate: (sourceType) => describeConnectionAutoCreate(sourceType),
       onConnectionAutoCreateRequested: (request) => this.handleConnectionAutoCreateRequested(request),
-      getSelectedShapeIds: () => this.shapeController.getSelectedShapeIds(),
-      clearDiagramSelection: () => this.shapeController.clearSelectionInPlace(),
       beginDiagramMarquee: () => this.shapeController.beginMarquee(),
       selectDiagramInBounds: (bounds, additive) =>
         this.shapeController.selectInBounds(bounds, { additive }),
@@ -342,14 +340,13 @@ export class SystemSculptStudioView extends ItemView {
         this.shapeController.applyTranslation(project, delta),
       previewDiagramTranslation: () => this.shapeController.previewTranslation(),
       finishDiagramTranslation: () => this.shapeController.finishTranslation(),
-    });
+    }, this.canvasSelection);
     this.projectSessionController = new StudioProjectSessionController({
       app: this.app,
       plugin: this.plugin,
       graphInteraction: this.graphInteraction,
-      getGraphZoomMode: () => this.graphZoomMode,
+      getGraphZoomMode: () => this.graphInteraction.getGraphZoomMode(),
       resetGraphZoomInteractionState: () => {
-        this.graphZoomMode = "interactive";
         this.graphZoomGestureInFlight = false;
       },
       scheduleLayoutSave: () => this.scheduleLayoutSave(),
@@ -1569,7 +1566,10 @@ export class SystemSculptStudioView extends ItemView {
     if (!changed) {
       return;
     }
-    this.graphInteraction.notifyNodePositionsChanged();
+    this.graphInteraction.notifyNodePositionsChanged({
+      recomputeCanvasBounds: options?.mode !== "continuous",
+      nodeIds: patches.map(({ nodeId }) => nodeId),
+    });
   }
 
   private handleNoteNodeConfigMutated(node: StudioNodeInstance): void {
@@ -1608,7 +1608,7 @@ export class SystemSculptStudioView extends ItemView {
       return;
     }
     const zoom = normalizeGraphZoom(zoomOverride ?? this.graphInteraction.getGraphZoom());
-    const mode = modeOverride ?? this.graphZoomMode;
+    const mode = modeOverride ?? this.graphInteraction.getGraphZoomMode();
     this.graphViewportEl.classList.toggle("is-zoomed-far", zoom <= 0.5);
     this.graphViewportEl.classList.toggle("is-zoomed-extreme", zoom <= 0.2);
     this.graphViewportEl.classList.toggle("is-zoomed-micro", zoom <= 0.08);
@@ -2435,7 +2435,6 @@ export class SystemSculptStudioView extends ItemView {
   }
 
   private handleGraphZoomChanged(zoom: number, context: StudioGraphZoomChangeContext): void {
-    this.graphZoomMode = context.mode;
     this.graphZoomGestureInFlight = !context.settled;
     this.syncGraphZoomVisualState(zoom, context.mode);
     this.nodeContextMenuOverlay?.hide();
@@ -2456,7 +2455,7 @@ export class SystemSculptStudioView extends ItemView {
     this.nodeContextMenuOverlay?.hide();
     this.nodeActionContextMenuOverlay?.hide();
     this.markViewportScrolling();
-    if (this.graphZoomGestureInFlight || this.graphZoomMode === "overview") {
+    if (this.graphZoomGestureInFlight || this.graphInteraction.getGraphZoomMode() === "overview") {
       return;
     }
     if (this.viewportScrollCaptureFrame !== null) {

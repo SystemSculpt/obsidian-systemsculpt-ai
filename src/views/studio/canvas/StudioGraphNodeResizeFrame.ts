@@ -7,15 +7,14 @@ import {
   clampStudioNodeDimension,
   isStudioFillTextNode,
   resolveStudioCanvasDelta,
-  resolveStudioGraphNodeMinHeight,
   resolveStudioGraphNodeResizeBounds,
-  resolveStudioGraphNodeWidth,
   resolveStudioNodeResizeSemantics,
   resolveStudioTextNodeFontSize,
   STUDIO_GRAPH_TEXT_NODE_MAX_FONT_SIZE,
   STUDIO_GRAPH_TEXT_NODE_MIN_FONT_SIZE,
   type StudioNodeResizeMode,
 } from "../../../studio/StudioNodeGeometry";
+import { startStudioPointerGesture } from "../StudioPointerGesture";
 import { getStudioOwnerWindow } from "../StudioDomContext";
 import { isStudioCardLocked, watchStudioCardLock, type StudioCardLockState } from "./StudioCardLock";
 
@@ -169,7 +168,7 @@ type MountStudioGraphNodeResizeFrameOptions = {
   applySize: (size: StudioGraphResizeFrameSize) => void;
   /** Live fontSize preview while a text drag is in flight. */
   applyFontSize?: (fontSizePx: number) => void;
-  readInitialSize?: () => { width: number; height: number };
+  readInitialSize: () => { width: number; height: number };
   readFontSize?: () => number;
 };
 
@@ -184,19 +183,6 @@ type ResizeTargetState = {
   writesFontSize: boolean;
   writesPosition: boolean;
 };
-
-function readInitialSizeFromNode(
-  node: StudioNodeInstance,
-  nodeEl: HTMLElement
-): { width: number; height: number } {
-  const measuredWidth = nodeEl.offsetWidth;
-  const measuredHeight = nodeEl.offsetHeight;
-  return {
-    width: measuredWidth > 0 ? measuredWidth : resolveStudioGraphNodeWidth(node),
-    height:
-      measuredHeight > 0 ? measuredHeight : Math.max(resolveStudioGraphNodeMinHeight(node), 1),
-  };
-}
 
 export function mountStudioGraphNodeResizeFrame(
   options: MountStudioGraphNodeResizeFrameOptions
@@ -242,6 +228,7 @@ export function mountStudioGraphNodeResizeFrame(
   });
 
   let activePointerId: number | null = null;
+  let cancelPointerGesture: (() => void) | null = null;
   let activeZoneEl: HTMLElement | null = null;
   let activeDirection: ZoneDirection = { x: 0, y: 0 };
   let dragMode: StudioNodeResizeMode = semanticsMode;
@@ -503,23 +490,10 @@ export function mountStudioGraphNodeResizeFrame(
       frameId = null;
       if (commit) applyPendingFrame();
     }
-    ownerWindow.removeEventListener("pointermove", onPointerMove);
-    ownerWindow.removeEventListener("pointerup", onPointerFinish);
-    ownerWindow.removeEventListener("pointercancel", onPointerFinish);
     const zoneEl = activeZoneEl;
-    const pointerId = activePointerId;
     activePointerId = null;
     activeZoneEl = null;
-    if (zoneEl) {
-      zoneEl.classList.remove("is-active");
-      if (typeof zoneEl.releasePointerCapture === "function") {
-        try {
-          zoneEl.releasePointerCapture(pointerId);
-        } catch {
-          // Ignore release errors from detached pointers.
-        }
-      }
-    }
+    zoneEl?.classList.remove("is-active");
     if (commit && didMutateDuringDrag && lastApplied) {
       commitTarget(lastApplied, "discrete");
     }
@@ -543,13 +517,6 @@ export function mountStudioGraphNodeResizeFrame(
     scheduleApply();
   };
 
-  const onPointerFinish = (event: PointerEvent): void => {
-    if (activePointerId === null || event.pointerId !== activePointerId) {
-      return;
-    }
-    stopTracking();
-  };
-
   const startDrag = (zone: StudioGraphResizeZone, zoneEl: HTMLElement, event: PointerEvent): void => {
     // A locked card's zones stay inert: the press goes on to the card as if they weren't there.
     if (isStudioCardLocked(options.interactionLocked) || event.button !== 0 || activePointerId !== null) {
@@ -568,9 +535,7 @@ export function mountStudioGraphNodeResizeFrame(
     pendingDeltaX = 0;
     pendingDeltaY = 0;
 
-    const initialSize = options.readInitialSize
-      ? options.readInitialSize()
-      : readInitialSizeFromNode(node, nodeEl);
+    const initialSize = options.readInitialSize();
     const bounds = resolveStudioGraphNodeResizeBounds(node);
     startWidth = clampStudioNodeDimension(initialSize.width, bounds.minWidth, bounds.maxWidth);
     startHeight = clampStudioNodeDimension(initialSize.height, bounds.minHeight, bounds.maxHeight);
@@ -609,17 +574,13 @@ export function mountStudioGraphNodeResizeFrame(
       writesPosition: false,
     };
     zoneEl.classList.add("is-active");
-    if (typeof zoneEl.setPointerCapture === "function") {
-      try {
-        zoneEl.setPointerCapture(activePointerId);
-      } catch {
-        // Ignore capture errors; window listeners are fallback.
-      }
-    }
-
-    ownerWindow.addEventListener("pointermove", onPointerMove);
-    ownerWindow.addEventListener("pointerup", onPointerFinish);
-    ownerWindow.addEventListener("pointercancel", onPointerFinish);
+    cancelPointerGesture = startStudioPointerGesture({
+      element: zoneEl,
+      event,
+      onMove: onPointerMove,
+      onFinish: () => { cancelPointerGesture = null; stopTracking(); },
+      onCancel: reason => { cancelPointerGesture = null; stopTracking(reason === "pointercancel"); },
+    });
   };
 
   const onPointerDown = (event: PointerEvent): void => {
@@ -636,6 +597,7 @@ export function mountStudioGraphNodeResizeFrame(
   return () => {
     nodeEl.removeEventListener("pointerdown", onPointerDown);
     // Teardown must not replay stale geometry over the replacement card.
+    cancelPointerGesture?.();
     stopTracking(false);
     removeFrame();
   };

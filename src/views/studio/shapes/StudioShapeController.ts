@@ -1,3 +1,4 @@
+import { StudioCanvasSelection } from "../StudioCanvasSelection";
 import type { StudioMovementSnap } from "../canvas/StudioGraphAlignmentGuides";
 import type { StudioProjectSessionMutationReason } from "../../../studio/StudioProjectSession";
 import type { StudioProjectV1, StudioShapeKind } from "../../../studio/types";
@@ -49,7 +50,6 @@ export type StudioShapeControllerHost = {
     options?: { captureHistory?: boolean; mode?: "continuous" }
   ) => boolean;
   getCurrentProject: () => StudioProjectV1 | null;
-  clearNodeSelection: () => void;
   requestRender: () => void;
   /** Node side of a drag that started on a shape. */
   createMovementSnap?: () => StudioMovementSnap;
@@ -62,15 +62,20 @@ export type StudioShapeControllerHost = {
 type ShapeOrigin = { shapeId: string; x: number; y: number };
 
 export class StudioShapeController {
-  private shapeIds = new Set<string>();
-  private arrowIds = new Set<string>();
+  private get shapeIds(): ReadonlySet<string> { return this.selection.ids("shape"); }
+  private get arrowIds(): ReadonlySet<string> { return this.selection.ids("arrow"); }
   private layerHandle: StudioShapeLayerHandle | null = null;
   private cancelDraw: (() => void) | null = null;
   private snapMovement: StudioMovementSnap = delta => delta;
   private translationOrigins: ShapeOrigin[] = [];
   private marqueeBaseline: StudioShapeSelection = EMPTY_STUDIO_SHAPE_SELECTION;
 
-  constructor(private readonly host: StudioShapeControllerHost) {}
+  constructor(
+    private readonly host: StudioShapeControllerHost,
+    private readonly selection = new StudioCanvasSelection()
+  ) {
+    this.selection.subscribe(() => this.refreshSelectionVisuals());
+  }
 
   getSelection(): StudioShapeSelection {
     return { shapeIds: [...this.shapeIds], arrowIds: [...this.arrowIds] };
@@ -85,8 +90,8 @@ export class StudioShapeController {
   }
 
   clearSelection(): void {
-    this.shapeIds.clear();
-    this.arrowIds.clear();
+    this.selection.clear("shape");
+    this.selection.clear("arrow");
   }
 
   /**
@@ -94,8 +99,8 @@ export class StudioShapeController {
    * already owns the node selection and the render that follows.
    */
   setSelectedShapeIds(shapeIds: readonly string[]): void {
-    this.shapeIds = new Set(shapeIds);
-    this.arrowIds.clear();
+    this.selection.replace("shape", shapeIds);
+    this.selection.clear("arrow");
     this.refreshSelectionVisuals();
   }
 
@@ -117,23 +122,11 @@ export class StudioShapeController {
 
   select(target: StudioShapeTarget, options?: { additive?: boolean }): void {
     const additive = options?.additive === true;
-    const set = target.type === "shape" ? this.shapeIds : this.arrowIds;
     if (additive) {
-      if (set.has(target.id)) {
-        set.delete(target.id);
-      } else {
-        set.add(target.id);
-      }
+      this.selection.toggle(target.type, target.id);
     } else {
-      if (this.shapeIds.size === 1 && this.shapeIds.has(target.id) && this.arrowIds.size === 0) {
-        return;
-      }
-      if (this.arrowIds.size === 1 && this.arrowIds.has(target.id) && this.shapeIds.size === 0) {
-        return;
-      }
-      this.clearSelection();
-      set.add(target.id);
-      this.host.clearNodeSelection();
+      if (this.selection.ids(target.type).has(target.id) && this.shapeIds.size + this.arrowIds.size === 1) return;
+      this.selection.selectOnly(target.type, target.id);
     }
     this.host.requestRender();
   }
@@ -165,14 +158,13 @@ export class StudioShapeController {
         inside.add(shape.id);
       }
     }
-    this.shapeIds = options.additive
-      ? new Set([...this.marqueeBaseline.shapeIds, ...inside])
-      : inside;
-    this.arrowIds = new Set(options.additive ? this.marqueeBaseline.arrowIds : []);
+    this.selection.replace("shape", options.additive ? [...this.marqueeBaseline.shapeIds, ...inside] : inside);
+    this.selection.replace("arrow", options.additive ? this.marqueeBaseline.arrowIds : []);
     this.refreshSelectionVisuals();
   }
 
   registerLayerHandle(handle: StudioShapeLayerHandle | null): void {
+    if (this.layerHandle !== handle) this.layerHandle?.dispose?.();
     this.cancelArrowGesture();
     this.layerHandle = handle;
   }
@@ -287,8 +279,7 @@ export class StudioShapeController {
             diagram.shapes.push(created);
           })
         );
-        this.clearSelection();
-        this.shapeIds.add(created.id);
+        this.selection.selectOnly("shape", created.id);
         onSettled();
       },
       onCancel: () => { this.cancelDraw = null; onSettled(); },
@@ -323,6 +314,7 @@ export class StudioShapeController {
   layerOptions(): Pick<
     StudioShapeLayerOptions,
     | "selection"
+    | "getSelection"
     | "onSelect"
     | "onMoveSelection"
     | "onResizeShape"
@@ -332,6 +324,7 @@ export class StudioShapeController {
   > & { registerLayerHandle: (handle: StudioShapeLayerHandle | null) => void } {
     return {
       selection: this.getSelection(),
+      getSelection: () => this.getSelection(),
       onSelect: (target, options) => this.select(target, options),
       onMoveSelection: (delta, phase) => this.moveSelection(delta, phase),
       onResizeShape: (shapeId, rect) => this.resizeShape(shapeId, rect),
@@ -417,6 +410,7 @@ export class StudioShapeController {
     if (!canvasEl) {
       return;
     }
+    if (!this.hasSelection()) clearStudioShapeSelectionVisuals(canvasEl);
     canvasEl.querySelectorAll<HTMLElement>(".ss-studio-shape").forEach((element) => {
       const shapeId = element.dataset.shapeId || "";
       element.classList.toggle("is-selected", this.shapeIds.has(shapeId));

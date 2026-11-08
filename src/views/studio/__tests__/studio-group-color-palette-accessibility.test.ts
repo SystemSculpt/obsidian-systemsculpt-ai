@@ -2,6 +2,7 @@
  * @jest-environment jsdom
  */
 import type { StudioProjectV1 } from "../../../studio/types";
+import { StudioCanvasGeometry } from "../canvas/StudioCanvasGeometry";
 import { StudioGraphGroupController } from "../StudioGraphGroupController";
 
 function createProject(): StudioProjectV1 {
@@ -44,7 +45,7 @@ describe("Studio group color palette accessibility", () => {
       notifyNodePositionsChanged: () => undefined,
       requestRender: () => undefined,
       commitProjectMutation: (_reason, mutator) => mutator(project) !== false,
-    });
+    }, new StudioCanvasGeometry(() => project));
     const canvas = document.body.createDiv();
     controller.registerCanvasElement(canvas);
     controller.renderGroupLayer();

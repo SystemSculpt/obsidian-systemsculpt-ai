@@ -138,6 +138,20 @@ describe("mountStudioGraphNodeResizeFrame", () => {
     return { nodeEl, onCommittedResize, onContinuousResize, applySize, unmount };
   }
 
+  it.each(["blur", "lostpointercapture"])("settles resizing on %s and accepts the next gesture", reason => {
+    const { nodeEl, onCommittedResize, unmount } = mountFrame(createNode());
+    dragZone(nodeEl, "e", { to: { x: 80, y: 0 }, release: false });
+    if (reason === "blur") window.dispatchEvent(new Event("blur"));
+    else queryZone(nodeEl, "e").dispatchEvent(createPointerEvent("lostpointercapture", { pointerId: 7, clientX: 80, clientY: 0 }));
+    expect(onCommittedResize).toHaveBeenCalledTimes(1);
+    window.dispatchEvent(createPointerEvent("pointermove", { pointerId: 7, clientX: 160, clientY: 0 }));
+    window.dispatchEvent(createPointerEvent("pointerup", { pointerId: 7, clientX: 160, clientY: 0 }));
+    expect(onCommittedResize).toHaveBeenCalledTimes(1);
+    dragZone(nodeEl, "e", { to: { x: 80, y: 0 } });
+    expect(onCommittedResize).toHaveBeenCalledTimes(2);
+    unmount();
+  });
+
   describe("frame structure", () => {
     it("mounts all eight zones with edge/corner classes and carved edge layout", () => {
       const { nodeEl } = mountFrame(createNode());
