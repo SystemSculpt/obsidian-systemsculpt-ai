@@ -1,9 +1,8 @@
 import type SystemSculptPlugin from "../../main";
 import { sha256HexFromArrayBuffer } from "../../utils/sha256";
-import { normalizeVaultRelativePath } from "../../utils/vaultPathUtils";
+import { throwIfManagedAborted } from "./ManagedAbort";
+import { ManagedLocalStaging } from "./ManagedLocalStaging";
 
-const STAGING_DIRECTORY = ".managed-document-staging";
-const MANIFEST_PATTERN = /\/manifest-(\d{6})\.json$/;
 const HASH_PATTERN = /^[a-f0-9]{64}$/;
 
 export type ManagedDocumentStagedArtifactKind = "markdown" | "image";
@@ -38,26 +37,22 @@ export class ManagedDocumentLocalStagingError extends Error {
   }
 }
 
-/**
- * Adapter-only opaque staging. Immutable manifest generations provide logical
- * crash recovery; this module deliberately makes no physical flush guarantee.
- */
+/** Owns the historical document staging format and recovery metadata. */
 export class ManagedDocumentLocalStaging {
-  private readonly adapter: SystemSculptPlugin["app"]["vault"]["adapter"];
-  private readonly root: string;
+  private readonly storage: ManagedLocalStaging<ManagedDocumentStagingManifest>;
   private readonly digest: (bytes: ArrayBuffer) => Promise<string>;
 
   constructor(plugin: SystemSculptPlugin, testSeam: ManagedDocumentStagingTestSeam = {}) {
-    const configDirectory = requireStagingDirectory(plugin?.app?.vault?.configDir);
-    const pluginId = normalizePluginId(plugin?.manifest?.id);
-    if (pluginId !== "systemsculpt-ai") invalidRequest();
-    const derivedDirectory = `${configDirectory}/plugins/${pluginId}`;
-    if (plugin.manifest.dir !== undefined && requireStagingDirectory(plugin.manifest.dir) !== derivedDirectory) {
-      throw new ManagedDocumentLocalStagingError("invalid_staging_request", "Plugin manifest directory does not match the installed plugin location.");
-    }
-    this.adapter = plugin.app.vault.adapter;
     this.digest = testSeam.digest ?? sha256HexFromArrayBuffer;
-    this.root = `${derivedDirectory}/${STAGING_DIRECTORY}`;
+    this.storage = new ManagedLocalStaging(plugin, {
+      directory: ".managed-document-staging",
+      isManifest,
+      digest: this.digest,
+      error: (code, message) => new ManagedDocumentLocalStagingError(
+        code === "staging_corrupt" ? "local_staging_corrupt" : code,
+        message ?? "Invalid document staging request.",
+      ),
+    });
   }
 
   async stage(
@@ -65,49 +60,16 @@ export class ManagedDocumentLocalStaging {
     artifacts: ReadonlyArray<{ kind: ManagedDocumentStagedArtifactKind; bytes: ArrayBuffer }>,
     signal?: AbortSignal
   ): Promise<ManagedDocumentStagedArtifact[]> {
-    throwIfAborted(signal);
+    throwIfManagedAborted(signal);
     if (!operationId || artifacts.length === 0) invalidRequest();
-
-    const operationHash = await this.digest(new TextEncoder().encode(operationId).buffer);
-    throwIfAborted(signal);
-    const directory = `${this.root}/${operationHash}`;
-    await this.ensureDirectory(this.root, signal);
-    await this.ensureDirectory(directory, signal);
-
-    const staged: ManagedDocumentStagedArtifact[] = [];
-    let sequence = await this.nextManifestSequence(directory, signal);
-    await this.writeManifest(directory, { schemaVersion: 1, operationHash, sequence, phase: "staging", artifacts: [] }, signal);
-
-    for (let index = 0; index < artifacts.length; index += 1) {
-      throwIfAborted(signal);
-      const artifact = artifacts[index];
-      const digest = await this.digest(artifact.bytes);
-      throwIfAborted(signal);
-      const id = await this.digest(new TextEncoder().encode(
-        `managed-document-artifact-v1\0${index}\0${artifact.kind}\0${digest}`
-      ).buffer);
-      throwIfAborted(signal);
-      const metadata = { id, kind: artifact.kind, byteLength: artifact.bytes.byteLength, sha256: digest };
-      const path = `${directory}/${id}`;
-      const temporaryPath = `${path}.tmp`;
-      await this.adapter.writeBinary(temporaryPath, artifact.bytes);
-      throwIfAborted(signal);
-      await this.adapter.rename(temporaryPath, path);
-      throwIfAborted(signal);
-      const verified = await this.adapter.readBinary(path);
-      throwIfAborted(signal);
-      const verifiedHash = await this.digest(verified);
-      throwIfAborted(signal);
-      if (verified.byteLength !== metadata.byteLength || verifiedHash !== digest) corrupt("Staged document artifact failed verification.");
-      staged.push(metadata);
-      sequence += 1;
-      await this.writeManifest(directory, { schemaVersion: 1, operationHash, sequence, phase: "staging", artifacts: [...staged] }, signal);
-    }
-
-    sequence += 1;
-    await this.writeManifest(directory, { schemaVersion: 1, operationHash, sequence, phase: "ready", artifacts: [...staged] }, signal);
-    throwIfAborted(signal);
-    return staged;
+    const operationHash = await this.operationHash(operationId, signal);
+    const manifest = await this.storage.stage(
+      operationHash,
+      this.artifacts(artifacts, signal),
+      (sequence, phase, metadata) => ({ schemaVersion: 1, operationHash, sequence, phase, artifacts: metadata }),
+      { signal },
+    );
+    return manifest.artifacts;
   }
 
   async readVerified(
@@ -115,124 +77,77 @@ export class ManagedDocumentLocalStaging {
     expected: ReadonlyArray<ManagedDocumentStagedArtifact>,
     signal?: AbortSignal
   ): Promise<ArrayBuffer[]> {
-    throwIfAborted(signal);
-    const operationHash = await this.digest(new TextEncoder().encode(operationId).buffer);
-    throwIfAborted(signal);
-    const directory = `${this.root}/${operationHash}`;
-    const manifests = await this.readManifests(directory, operationHash, signal);
-    const manifest = manifests.find((candidate) =>
-      candidate.phase === "ready" && JSON.stringify(candidate.artifacts) === JSON.stringify(expected)
-    );
+    const operationHash = await this.operationHash(operationId, signal);
+    if (expected.length === 0 || !expected.every(isArtifact)) corrupt("Document staging metadata is invalid.");
+    let manifest: ManagedDocumentStagingManifest | null;
+    try {
+      manifest = await this.storage.findManifest(operationHash, candidate =>
+        candidate.phase === "ready" && JSON.stringify(candidate.artifacts) === JSON.stringify(expected), signal);
+    } catch (error) {
+      throwIfManagedAborted(signal);
+      if (error instanceof DOMException && error.name === "AbortError") throw error;
+      corrupt("Document staging manifest is missing or corrupt.");
+    }
     if (!manifest) corrupt("Document staging manifest does not match recovery metadata.");
 
     const bytes: ArrayBuffer[] = [];
     for (const artifact of expected) {
-      throwIfAborted(signal);
-      if (!HASH_PATTERN.test(artifact.id) || !HASH_PATTERN.test(artifact.sha256)) corrupt("Document staging metadata is invalid.");
-      const value = await this.adapter.readBinary(`${directory}/${artifact.id}`);
-      throwIfAborted(signal);
-      const digest = await this.digest(value);
-      throwIfAborted(signal);
-      if (value.byteLength !== artifact.byteLength || digest !== artifact.sha256) corrupt("Staged document artifact failed verification.");
-      bytes.push(value);
+      bytes.push(await this.storage.readVerified(operationHash, artifact.id, artifact, signal));
     }
     return bytes;
   }
 
   async cleanup(operationId: string, signal?: AbortSignal): Promise<void> {
-    throwIfAborted(signal);
+    const operationHash = await this.operationHash(operationId, signal);
+    await this.storage.cleanup(operationHash, signal);
+  }
+
+  private async operationHash(operationId: string, signal?: AbortSignal): Promise<string> {
+    throwIfManagedAborted(signal);
     const operationHash = await this.digest(new TextEncoder().encode(operationId).buffer);
-    throwIfAborted(signal);
-    const directory = `${this.root}/${operationHash}`;
-    const exists = await this.adapter.exists(directory);
-    throwIfAborted(signal);
-    if (exists) {
-      await this.adapter.rmdir(directory, true);
-      throwIfAborted(signal);
-    }
+    throwIfManagedAborted(signal);
+    return operationHash;
   }
 
-  private async ensureDirectory(path: string, signal?: AbortSignal): Promise<void> {
-    const exists = await this.adapter.exists(path);
-    throwIfAborted(signal);
-    if (!exists) {
-      await this.adapter.mkdir(path);
-      throwIfAborted(signal);
-    }
-  }
-
-  private async nextManifestSequence(directory: string, signal?: AbortSignal): Promise<number> {
-    const listing = await this.adapter.list(directory);
-    throwIfAborted(signal);
-    const maximum = listing.files.reduce((current, path) => {
-      const match = path.match(MANIFEST_PATTERN);
-      return match ? Math.max(current, Number(match[1])) : current;
-    }, 0);
-    return maximum + 1;
-  }
-
-  private async writeManifest(
-    directory: string,
-    manifest: ManagedDocumentStagingManifest,
-    signal?: AbortSignal
-  ): Promise<void> {
-    const suffix = String(manifest.sequence).padStart(6, "0");
-    const path = `${directory}/manifest-${suffix}.json`;
-    const temporaryPath = `${path}.tmp`;
-    await this.adapter.write(temporaryPath, JSON.stringify(manifest));
-    throwIfAborted(signal);
-    await this.adapter.rename(temporaryPath, path);
-    throwIfAborted(signal);
-  }
-
-  private async readManifests(
-    directory: string,
-    operationHash: string,
-    signal?: AbortSignal
-  ): Promise<ManagedDocumentStagingManifest[]> {
-    try {
-      const listing = await this.adapter.list(directory);
-      throwIfAborted(signal);
-      const paths = listing.files.filter((path) => MANIFEST_PATTERN.test(path)).sort().reverse();
-      const manifests: ManagedDocumentStagingManifest[] = [];
-      for (const path of paths) {
-        const raw = await this.adapter.read(path);
-        throwIfAborted(signal);
-        try {
-          const value = JSON.parse(raw) as ManagedDocumentStagingManifest;
-          if (
-            value.schemaVersion === 1 && value.operationHash === operationHash &&
-            Number.isInteger(value.sequence) && value.sequence > 0 && Array.isArray(value.artifacts) &&
-            (value.phase === "staging" || value.phase === "ready")
-          ) manifests.push(value);
-        } catch {
-          // An incomplete immutable generation is ignored; older valid generations remain selectable.
-        }
-      }
-      return manifests;
-    } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") throw error;
-      corrupt("Document staging manifest is missing or corrupt.");
+  private async *artifacts(
+    artifacts: ReadonlyArray<{ kind: ManagedDocumentStagedArtifactKind; bytes: ArrayBuffer }>,
+    signal?: AbortSignal,
+  ) {
+    for (let index = 0; index < artifacts.length; index += 1) {
+      throwIfManagedAborted(signal);
+      const artifact = artifacts[index];
+      if (artifact.kind !== "markdown" && artifact.kind !== "image") invalidRequest();
+      const sha256 = await this.digest(artifact.bytes);
+      throwIfManagedAborted(signal);
+      const id = await this.digest(new TextEncoder().encode(
+        `managed-document-artifact-v1\0${index}\0${artifact.kind}\0${sha256}`
+      ).buffer);
+      throwIfManagedAborted(signal);
+      const metadata = { id, kind: artifact.kind, byteLength: artifact.bytes.byteLength, sha256 };
+      yield { name: id, bytes: artifact.bytes, metadata };
     }
   }
 }
 
-function requireStagingDirectory(value: unknown): string {
-  if (typeof value !== "string") invalidRequest();
-  try {
-    return normalizeVaultRelativePath(value, {
-      trim: false,
-      preserveCharacters: true,
-      validateRelative: { allowLeadingDot: true },
-    });
-  } catch {
-    invalidRequest();
-  }
+function isManifest(value: unknown, operationHash: string): value is ManagedDocumentStagingManifest {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const manifest = value as Partial<ManagedDocumentStagingManifest>;
+  return manifest.schemaVersion === 1
+    && manifest.operationHash === operationHash
+    && Number.isInteger(manifest.sequence)
+    && (manifest.sequence as number) > 0
+    && (manifest.phase === "staging" || manifest.phase === "ready")
+    && Array.isArray(manifest.artifacts)
+    && manifest.artifacts.every(isArtifact);
 }
 
-function normalizePluginId(value: unknown): string {
-  if (typeof value !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value)) invalidRequest();
-  return value;
+function isArtifact(value: unknown): value is ManagedDocumentStagedArtifact {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const artifact = value as Partial<ManagedDocumentStagedArtifact>;
+  return typeof artifact.id === "string" && HASH_PATTERN.test(artifact.id)
+    && typeof artifact.sha256 === "string" && HASH_PATTERN.test(artifact.sha256)
+    && (artifact.kind === "markdown" || artifact.kind === "image")
+    && Number.isInteger(artifact.byteLength) && (artifact.byteLength as number) >= 0;
 }
 
 function invalidRequest(): never {
@@ -241,8 +156,4 @@ function invalidRequest(): never {
 
 function corrupt(message: string): never {
   throw new ManagedDocumentLocalStagingError("local_staging_corrupt", message);
-}
-
-function throwIfAborted(signal?: AbortSignal): void {
-  if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
 }

@@ -1,3 +1,6 @@
+import { throwIfManagedAborted } from "../managed/ManagedAbort";
+import { ManagedJobDispatch } from "../managed/ManagedJobDispatch";
+import { uploadManagedRecoveryParts } from "../managed/ManagedMultipartUpload";
 import type { ManagedFileContent, ManagedFileSource } from "../managed/ManagedFileSource";
 import type { ManagedAdmission } from "../managed/ManagedAdmission";
 import { ManagedJobClient, ManagedJobError } from "../managed/ManagedJobClient";
@@ -8,7 +11,6 @@ import type {
   ManagedLocalCommitReceipt,
   ManagedMultipartCreateRequest,
   ManagedMultipartUploadDescriptor,
-  ManagedPendingDispatch,
 } from "../managed/ManagedTypes";
 import {
   dispatchManagedJob,
@@ -73,16 +75,8 @@ function defaultOperationId(): string {
   return `transcription-${random}`.slice(0, 128);
 }
 
-function defaultRequestId(): string {
-  return window.crypto?.randomUUID?.() ?? `dispatch-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
-
-function abortError(): DOMException {
-  return new DOMException("Transcription was cancelled locally.", "AbortError");
-}
-
 function throwIfAborted(signal: AbortSignal): void {
-  if (signal.aborted) throw abortError();
+  throwIfManagedAborted(signal, "Transcription was cancelled locally.");
 }
 
 function isAbortError(error: unknown): boolean {
@@ -163,15 +157,13 @@ function readUpload(value: unknown): { partSize: number; totalParts: number } {
 export class ManagedTranscriptionAdapter {
   private static readonly activeSourceClaims = new Set<string>();
   private readonly createOperationId: () => string;
-  private readonly createRequestId: () => string;
-  private readonly now: () => string;
+  private readonly dispatch: ManagedJobDispatch;
   private readonly wait: (milliseconds: number, signal: AbortSignal) => Promise<void>;
   private initialization: Promise<void> | null = null;
 
   constructor(private readonly dependencies: ManagedTranscriptionDependencies) {
     this.createOperationId = dependencies.createOperationId ?? defaultOperationId;
-    this.createRequestId = dependencies.createRequestId ?? defaultRequestId;
-    this.now = dependencies.now ?? (() => new Date().toISOString());
+    this.dispatch = new ManagedJobDispatch(dependencies.recovery, dependencies.createRequestId, dependencies.now);
     this.wait = dependencies.wait ?? waitForManagedJob;
   }
 
@@ -366,22 +358,6 @@ export class ManagedTranscriptionAdapter {
     await this.dependencies.recovery.delete(CAPABILITY, operationId, record.revision);
   }
 
-  private async beginDispatch(
-    record: ManagedJobRecoveryRecord,
-    operation: ManagedPendingDispatch["operation"],
-    partNumber?: number,
-    createRequest?: ManagedMultipartCreateRequest,
-  ): Promise<ManagedJobRecoveryRecord> {
-    return this.dependencies.recovery.beginDispatch(CAPABILITY, record.operationId, record.revision, {
-      operation,
-      requestId: this.createRequestId(),
-      ...(partNumber === undefined ? {} : { partNumber }),
-      ...(createRequest === undefined ? {} : { createRequest }),
-      ...(["create", "complete", "start"].includes(operation) ? { idempotencyKey: `${record.operationId}:${operation}` } : {}),
-      dispatchedAt: this.now(),
-    });
-  }
-
   private async interruption(
     operationId: string,
     record: ManagedJobRecoveryRecord | null,
@@ -412,7 +388,7 @@ export class ManagedTranscriptionAdapter {
       && ["created", "part_dispatching", "uploading", "complete_dispatching"].includes(record.phase)
     ) {
       try {
-        let aborted = await this.beginDispatch(record, "abort");
+        let aborted = await this.dispatch.begin(record, "abort");
         await this.dependencies.jobs.abortUpload(record.jobId);
         aborted = await this.dependencies.recovery.applyReconciliation(
           CAPABILITY,
@@ -731,7 +707,7 @@ export class ManagedTranscriptionAdapter {
     const jobId = record.jobId;
     if (record.phase === "upload_completed") {
       context.onProgress?.(72, "Resuming transcription…");
-      record = await this.beginDispatch(record, "start");
+      record = await this.dispatch.begin(record, "start");
       throwIfAborted(signal);
     }
     if (record.phase === "start_dispatching") {
@@ -784,7 +760,7 @@ export class ManagedTranscriptionAdapter {
         ?? this.buildCreateRequest(source.identity, loaded, context);
       if (record.phase === "content_ready") {
         context.onProgress?.(2, "Preparing upload…");
-        record = await this.beginDispatch(record, "create", undefined, createRequest);
+        record = await this.dispatch.begin(record, "create", undefined, createRequest);
         throwIfAborted(signal);
       } else {
         context.onProgress?.(2, "Resuming preserved upload…");
@@ -813,37 +789,22 @@ export class ManagedTranscriptionAdapter {
       const multipartUpload = await this.requireMultipartUpload(record, loaded.sizeBytes);
       const jobId = record.jobId;
       if (!jobId) throw new Error("Managed transcription recovery record has no acknowledged job ID.");
-      const completedParts = new Map(
-        (record.completedParts ?? []).map((part) => [part.partNumber, part] as const),
-      );
-      for (let partNumber = 1; partNumber <= multipartUpload.totalParts; partNumber += 1) {
-        if (completedParts.has(partNumber)) continue;
-        throwIfAborted(signal);
-        const offset = (partNumber - 1) * multipartUpload.partSizeBytes;
-        const length = Math.min(multipartUpload.partSizeBytes, loaded.sizeBytes - offset);
-        const bytes = await loaded.readSlice(offset, offset + length);
-        throwIfAborted(signal);
-        if (bytes.byteLength !== length) throw new Error("The selected audio changed while it was being read.");
-        const replayingPendingPart = record.phase === "part_dispatching"
-          && record.pendingDispatch?.partNumber === partNumber;
-        if (!replayingPendingPart) {
-          record = await this.beginDispatch(record, "part", partNumber);
-          throwIfAborted(signal);
-        }
-        const part = await dispatchManagedJob({
-          send: () => this.dependencies.jobs.uploadPart(jobId, partNumber, bytes, signal),
-          signal,
-          wait: this.wait,
-        });
-        throwIfAborted(signal);
-        record = await this.dependencies.recovery.acknowledgePart(CAPABILITY, record.operationId, record.revision, part);
-        throwIfAborted(signal);
-        completedParts.set(part.partNumber, part);
-        context.onProgress?.(
-          5 + Math.floor((partNumber / multipartUpload.totalParts) * 60),
-          `Uploading audio (${partNumber}/${multipartUpload.totalParts})…`,
-        );
-      }
+      record = await uploadManagedRecoveryParts({
+        record,
+        source: loaded,
+        dispatch: this.dispatch,
+        recovery: this.dependencies.recovery,
+        sendPart: (partNumber, bytes) => this.dependencies.jobs.uploadPart(jobId, partNumber, bytes, signal),
+        signal,
+        wait: this.wait,
+        sourceChangedMessage: "The selected audio changed while it was being read.",
+        onProgress: (partNumber, state) => {
+          if (state === "uploaded") context.onProgress?.(
+            5 + Math.floor((partNumber / multipartUpload.totalParts) * 60),
+            `Uploading audio (${partNumber}/${multipartUpload.totalParts})…`,
+          );
+        },
+      });
     }
 
     if (["complete_dispatching", "created", "part_dispatching", "uploading"].includes(record.phase)) {
@@ -856,7 +817,7 @@ export class ManagedTranscriptionAdapter {
         context.onProgress?.(68, "Finalizing preserved upload…");
       } else {
         throwIfAborted(signal);
-        record = await this.beginDispatch(record, "complete");
+        record = await this.dispatch.begin(record, "complete");
         throwIfAborted(signal);
       }
       await dispatchManagedJob({
@@ -1023,7 +984,7 @@ export class ManagedTranscriptionAdapter {
     try {
       let aborted = record;
       if (record.phase !== "abort_dispatching") {
-        aborted = await this.beginDispatch(record, "abort");
+        aborted = await this.dispatch.begin(record, "abort");
       }
       await this.dependencies.jobs.abortUpload(record.jobId);
       aborted = await this.dependencies.recovery.applyReconciliation(

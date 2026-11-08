@@ -129,6 +129,10 @@ export interface ManagedMultipartCreateRequest {
   timestamped?: boolean;
   language?: string;
 }
+export interface ManagedMultipartPart {
+  partNumber: number;
+  etag: string;
+}
 export interface ManagedMultipartUploadDescriptor {
   createRequest: ManagedMultipartCreateRequest;
   partSizeBytes: number;
@@ -165,7 +169,7 @@ export interface ManagedJobRecoveryRecord {
   schemaVersion: 1; revision: number; capability: ManagedRecoveryCapability; operationId: string;
   source: { identity: string; fingerprint: string }; jobId?: string;
   multipartUpload?: ManagedMultipartUploadDescriptor;
-  completedParts?: Array<{ partNumber: number; etag: string }>;
+  completedParts?: ManagedMultipartPart[];
   phase: ManagedRecoveryPhase; pendingDispatch?: ManagedPendingDispatch;
   localCommitReceipt?: ManagedLocalCommitReceipt;
   mediaDelivery?: ManagedMediaDeliveryState;

@@ -1,8 +1,7 @@
 import type SystemSculptPlugin from "../../main";
 import type { PendingAudioProcessorUpload } from "../../types";
 import type { AudioProcessorAudioSource } from "./types";
-
-type UploadedPart = Readonly<{ part_number: number; etag: string }>;
+import type { AudioProcessorUploadedPart } from "./AudioProcessorApiClient";
 
 const MAX_PENDING_UPLOADS = 10;
 const persistenceByPlugin = new WeakMap<SystemSculptPlugin, Promise<void>>();
@@ -39,7 +38,7 @@ export class AudioProcessorUploadRecovery {
     ]);
   }
 
-  async rememberPart(jobId: string, part: UploadedPart): Promise<void> {
+  async rememberPart(jobId: string, part: AudioProcessorUploadedPart): Promise<void> {
     const normalizedJobId = normalizeJobId(jobId);
     await this.mutate((current) => current.map((entry) => {
       if (entry.jobId !== normalizedJobId) return entry;
@@ -66,7 +65,7 @@ export class AudioProcessorUploadRecovery {
     upload: Readonly<{
       partSizeBytes: number;
       totalParts: number;
-      parts: readonly UploadedPart[];
+      parts: readonly AudioProcessorUploadedPart[];
     }>,
   ): Promise<void> {
     const normalizedJobId = normalizeJobId(jobId);

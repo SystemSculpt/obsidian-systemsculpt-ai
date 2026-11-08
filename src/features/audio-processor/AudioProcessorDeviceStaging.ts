@@ -1,15 +1,13 @@
-import type { DataAdapter } from "obsidian";
 import type SystemSculptPlugin from "../../main";
 import type { PendingAudioProcessorUploadSource } from "../../types";
 import { sha256HexFromArrayBuffer } from "../../utils/sha256";
-import { normalizeVaultRelativePath } from "../../utils/vaultPathUtils";
+import { throwIfManagedAborted } from "../../services/managed/ManagedAbort";
+import { ManagedLocalStaging } from "../../services/managed/ManagedLocalStaging";
 import {
   AUDIO_PROCESSOR_MAX_AUDIO_BYTES,
   type AudioProcessorAudioSource,
 } from "./types";
 
-const STAGING_DIRECTORY = ".audio-processor-staging";
-const MANIFEST_PATTERN = /\/manifest-(\d{6})\.json$/;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const JOB_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$/;
 const DEFAULT_CHUNK_SIZE_BYTES = 8 * 1024 * 1024;
@@ -61,8 +59,7 @@ export class AudioProcessorDeviceStagingError extends Error {
  * complete source in memory.
  */
 export class AudioProcessorDeviceStaging {
-  private readonly adapter: DataAdapter;
-  private readonly root: string;
+  private readonly storage: ManagedLocalStaging<StagingManifest>;
   private readonly chunkSizeBytes: number;
   private readonly digest: (bytes: ArrayBuffer) => Promise<string>;
   private readonly now: () => number;
@@ -71,28 +68,22 @@ export class AudioProcessorDeviceStaging {
     plugin: SystemSculptPlugin,
     testSeam: AudioProcessorDeviceStagingTestSeam = {},
   ) {
-    const configDirectory = requireStagingDirectory(plugin?.app?.vault?.configDir);
-    const pluginId = normalizePluginId(plugin?.manifest?.id);
-    if (pluginId !== "systemsculpt-ai") invalidRequest();
-    const pluginDirectory = `${configDirectory}/plugins/${pluginId}`;
-    if (
-      plugin.manifest.dir !== undefined
-      && requireStagingDirectory(plugin.manifest.dir) !== pluginDirectory
-    ) {
-      throw new AudioProcessorDeviceStagingError(
-        "invalid_staging_request",
-        "Plugin manifest directory does not match the installed plugin location.",
-      );
-    }
     const chunkSizeBytes = testSeam.chunkSizeBytes ?? DEFAULT_CHUNK_SIZE_BYTES;
     if (!Number.isInteger(chunkSizeBytes) || chunkSizeBytes <= 0 || chunkSizeBytes > 32 * 1024 * 1024) {
       invalidRequest();
     }
-    this.adapter = plugin.app.vault.adapter;
-    this.root = `${pluginDirectory}/${STAGING_DIRECTORY}`;
     this.chunkSizeBytes = chunkSizeBytes;
     this.digest = testSeam.digest ?? sha256HexFromArrayBuffer;
     this.now = testSeam.now ?? Date.now;
+    this.storage = new ManagedLocalStaging(plugin, {
+      directory: ".audio-processor-staging",
+      isManifest,
+      digest: this.digest,
+      error: (code, message) => new AudioProcessorDeviceStagingError(
+        code,
+        message ?? "Invalid audio staging request.",
+      ),
+    });
   }
 
   async stage(
@@ -117,69 +108,28 @@ export class AudioProcessorDeviceStaging {
       && existing.sizeBytes === source.sizeBytes
     ) return existing;
 
-    await this.cleanupStagingId(stagingId, signal);
-    await this.ensureDirectory(this.root, signal);
-    const directory = this.directory(stagingId);
-    await this.ensureDirectory(directory, signal);
     const createdAt = this.now();
     const totalChunks = Math.ceil(source.sizeBytes / this.chunkSizeBytes);
-    const stagingManifest: StagingManifest = {
-      schemaVersion: 1,
-      sequence: 1,
-      phase: "staging",
+    const readyManifest = await this.storage.stage(
       stagingId,
-      createdAt,
-      filename: source.filename,
-      contentType: source.contentType,
-      sizeBytes: source.sizeBytes,
-      chunkSizeBytes: this.chunkSizeBytes,
-      chunks: [],
-    };
-    await this.writeManifest(directory, stagingManifest, signal);
-
-    const chunks: StagedChunk[] = [];
-    for (let index = 0; index < totalChunks; index += 1) {
-      throwIfAborted(signal);
-      const start = index * this.chunkSizeBytes;
-      const end = Math.min(source.sizeBytes, start + this.chunkSizeBytes);
-      const bytes = await source.readSlice(start, end);
-      throwIfAborted(signal);
-      if (bytes.byteLength !== end - start) corrupt("Device staging source changed while it was read.");
-      const digest = await this.digest(bytes);
-      throwIfAborted(signal);
-      const path = this.chunkPath(directory, index);
-      const temporaryPath = `${path}.tmp`;
-      await this.adapter.writeBinary(temporaryPath, bytes);
-      throwIfAborted(signal);
-      await this.adapter.rename(temporaryPath, path);
-      throwIfAborted(signal);
-      const verified = await this.adapter.readBinary(path);
-      throwIfAborted(signal);
-      const verifiedDigest = await this.digest(verified);
-      throwIfAborted(signal);
-      if (verified.byteLength !== bytes.byteLength || verifiedDigest !== digest) {
-        corrupt("Staged audio failed verification.");
-      }
-      chunks.push({ index, byteLength: bytes.byteLength, sha256: digest });
-      onProgress?.(index + 1, totalChunks);
-    }
-
-    const readyManifest: StagingManifest = {
-      ...stagingManifest,
-      sequence: 2,
-      phase: "ready",
-      chunks,
-    };
-    const manifestText = JSON.stringify(readyManifest);
-    const manifestSha256 = await this.digest(new TextEncoder().encode(manifestText).buffer);
-    throwIfAborted(signal);
-    await this.writeManifest(directory, readyManifest, signal);
-    const persistedText = await this.adapter.read(this.manifestPath(directory, readyManifest.sequence));
-    throwIfAborted(signal);
-    if (await this.digest(new TextEncoder().encode(persistedText).buffer) !== manifestSha256) {
-      corrupt("Audio staging manifest failed verification.");
-    }
-    return this.buildSource(readyManifest, { kind: "staged", stagingId, manifestSha256 });
+      this.chunks(source, signal),
+      (sequence, phase, chunks) => ({
+        schemaVersion: 1,
+        sequence,
+        phase,
+        stagingId,
+        createdAt,
+        filename: source.filename,
+        contentType: source.contentType,
+        sizeBytes: source.sizeBytes,
+        chunkSizeBytes: this.chunkSizeBytes,
+        chunks,
+      }),
+      { replace: true, signal, onProgress: completed => onProgress?.(completed, totalChunks) },
+    );
+    const manifestSha256 = await this.digest(new TextEncoder().encode(JSON.stringify(readyManifest)).buffer);
+    throwIfManagedAborted(signal);
+    return this.buildSource(readyManifest, { kind: "staged", stagingId, manifestSha256 }, signal);
   }
 
   async open(
@@ -212,7 +162,7 @@ export class AudioProcessorDeviceStaging {
 
   async cleanupForJob(jobId: string, signal?: AbortSignal): Promise<void> {
     const stagingId = await this.stagingIdForJob(jobId, signal);
-    await this.cleanupStagingId(stagingId, signal);
+    await this.storage.cleanup(stagingId, signal);
   }
 
   async cleanupDescriptor(
@@ -221,29 +171,20 @@ export class AudioProcessorDeviceStaging {
   ): Promise<void> {
     if (descriptor.kind !== "staged") return;
     validateDescriptor(descriptor);
-    await this.cleanupStagingId(descriptor.stagingId, signal);
+    await this.storage.cleanup(descriptor.stagingId, signal);
   }
 
   async cleanupStale(activeJobIds: readonly string[], signal?: AbortSignal): Promise<void> {
-    throwIfAborted(signal);
-    if (!await this.adapter.exists(this.root)) return;
-    throwIfAborted(signal);
+    throwIfManagedAborted(signal);
     const activeStagingIds = new Set<string>();
     for (const jobId of activeJobIds) {
       activeStagingIds.add(await this.stagingIdForJob(jobId, signal));
     }
-    const listing = await this.adapter.list(this.root);
-    throwIfAborted(signal);
-    for (const folder of listing.folders) {
-      const stagingId = folder.slice(folder.lastIndexOf("/") + 1);
-      if (!SHA256_PATTERN.test(stagingId) || activeStagingIds.has(stagingId)) continue;
-      const manifest = await this.readLatestManifest(stagingId, signal).catch(() => null);
-      const stat = manifest ? null : await this.adapter.stat(folder);
-      throwIfAborted(signal);
-      const createdAt = manifest?.createdAt ?? stat?.mtime ?? this.now();
+    await this.storage.cleanupStale(activeStagingIds, (manifest, modifiedAt) => {
+      const createdAt = manifest?.createdAt ?? modifiedAt ?? this.now();
       const ttl = manifest?.phase === "ready" ? READY_STAGING_TTL_MS : INCOMPLETE_STAGING_TTL_MS;
-      if (this.now() - createdAt >= ttl) await this.cleanupStagingId(stagingId, signal);
-    }
+      return this.now() - createdAt >= ttl;
+    }, signal);
   }
 
   private async openForStagingId(
@@ -252,39 +193,40 @@ export class AudioProcessorDeviceStaging {
     signal?: AbortSignal,
   ): Promise<AudioProcessorAudioSource | null> {
     if (!SHA256_PATTERN.test(stagingId)) invalidRequest();
-    const manifest = await this.readLatestManifest(stagingId, signal);
+    const manifest = await this.storage.findManifest(stagingId, undefined, signal);
     if (!manifest || manifest.phase !== "ready") return null;
     const manifestText = JSON.stringify(manifest);
     const manifestSha256 = await this.digest(new TextEncoder().encode(manifestText).buffer);
-    throwIfAborted(signal);
+    throwIfManagedAborted(signal);
     if (expectedManifestSha256 && manifestSha256 !== expectedManifestSha256) {
       corrupt("Audio staging manifest did not match its recovery descriptor.");
     }
-    return this.buildSource(manifest, { kind: "staged", stagingId, manifestSha256 });
+    return this.buildSource(manifest, { kind: "staged", stagingId, manifestSha256 }, signal);
   }
 
   private buildSource(
     manifest: StagingManifest,
     descriptor: StagedSourceDescriptor,
+    signal?: AbortSignal,
   ): AudioProcessorAudioSource {
     validateReadyManifest(manifest);
-    const directory = this.directory(manifest.stagingId);
     return {
       filename: manifest.filename,
       contentType: manifest.contentType,
       sizeBytes: manifest.sizeBytes,
       resumeDescriptor: descriptor,
-      readSlice: async (start, end) => await this.readSlice(directory, manifest, start, end),
+      readSlice: async (start, end) => await this.readSlice(manifest, start, end, signal),
       release: () => undefined,
     };
   }
 
   private async readSlice(
-    directory: string,
     manifest: StagingManifest,
     start: number,
     end: number,
+    signal?: AbortSignal,
   ): Promise<ArrayBuffer> {
+    throwIfManagedAborted(signal);
     if (
       !Number.isInteger(start)
       || !Number.isInteger(end)
@@ -299,11 +241,7 @@ export class AudioProcessorDeviceStaging {
     for (let index = firstChunk; index <= lastChunk; index += 1) {
       const metadata = manifest.chunks[index];
       if (!metadata || metadata.index !== index) corrupt("Audio staging chunk metadata is incomplete.");
-      const bytes = await this.adapter.readBinary(this.chunkPath(directory, index));
-      const digest = await this.digest(bytes);
-      if (bytes.byteLength !== metadata.byteLength || digest !== metadata.sha256) {
-        corrupt("Staged audio chunk failed verification.");
-      }
+      const bytes = await this.storage.readVerified(manifest.stagingId, chunkName(index), metadata, signal);
       const chunkStart = index * manifest.chunkSizeBytes;
       const copyStart = Math.max(start, chunkStart) - chunkStart;
       const copyEnd = Math.min(end, chunkStart + bytes.byteLength) - chunkStart;
@@ -315,82 +253,30 @@ export class AudioProcessorDeviceStaging {
     return output.buffer;
   }
 
-  private async readLatestManifest(
-    stagingId: string,
-    signal?: AbortSignal,
-  ): Promise<StagingManifest | null> {
-    const directory = this.directory(stagingId);
-    if (!await this.adapter.exists(directory)) return null;
-    throwIfAborted(signal);
-    const listing = await this.adapter.list(directory);
-    throwIfAborted(signal);
-    const paths = listing.files.filter((path) => MANIFEST_PATTERN.test(path)).sort().reverse();
-    for (const path of paths) {
-      const raw = await this.adapter.read(path);
-      throwIfAborted(signal);
-      try {
-        const value = JSON.parse(raw) as unknown;
-        if (isManifest(value, stagingId)) return value;
-      } catch {
-        // Ignore an incomplete newest immutable generation and try an older one.
-      }
+  private async *chunks(source: AudioProcessorAudioSource, signal?: AbortSignal) {
+    const totalChunks = Math.ceil(source.sizeBytes / this.chunkSizeBytes);
+    for (let index = 0; index < totalChunks; index += 1) {
+      throwIfManagedAborted(signal);
+      const start = index * this.chunkSizeBytes;
+      const end = Math.min(source.sizeBytes, start + this.chunkSizeBytes);
+      const bytes = await source.readSlice(start, end);
+      throwIfManagedAborted(signal);
+      if (bytes.byteLength !== end - start) corrupt("Device staging source changed while it was read.");
+      const sha256 = await this.digest(bytes);
+      throwIfManagedAborted(signal);
+      yield { name: chunkName(index), bytes, metadata: { index, byteLength: bytes.byteLength, sha256 } };
     }
-    return null;
   }
 
   private async stagingIdForJob(jobId: string, signal?: AbortSignal): Promise<string> {
+    throwIfManagedAborted(signal);
     if (!JOB_ID_PATTERN.test(jobId)) invalidRequest();
     const stagingId = await this.digest(
       new TextEncoder().encode(`audio-processor-device-staging-v1\0${jobId}`).buffer,
     );
-    throwIfAborted(signal);
+    throwIfManagedAborted(signal);
     if (!SHA256_PATTERN.test(stagingId)) corrupt("Audio staging digest was invalid.");
     return stagingId;
-  }
-
-  private async ensureDirectory(path: string, signal?: AbortSignal): Promise<void> {
-    if (await this.adapter.exists(path)) return;
-    throwIfAborted(signal);
-    try {
-      await this.adapter.mkdir(path);
-    } catch (error) {
-      if (!await this.adapter.exists(path)) throw error;
-    }
-    throwIfAborted(signal);
-  }
-
-  private async cleanupStagingId(stagingId: string, signal?: AbortSignal): Promise<void> {
-    if (!SHA256_PATTERN.test(stagingId)) invalidRequest();
-    const directory = this.directory(stagingId);
-    if (!await this.adapter.exists(directory)) return;
-    throwIfAborted(signal);
-    await this.adapter.rmdir(directory, true);
-    throwIfAborted(signal);
-  }
-
-  private async writeManifest(
-    directory: string,
-    manifest: StagingManifest,
-    signal?: AbortSignal,
-  ): Promise<void> {
-    const path = this.manifestPath(directory, manifest.sequence);
-    const temporaryPath = `${path}.tmp`;
-    await this.adapter.write(temporaryPath, JSON.stringify(manifest));
-    throwIfAborted(signal);
-    await this.adapter.rename(temporaryPath, path);
-    throwIfAborted(signal);
-  }
-
-  private manifestPath(directory: string, sequence: number): string {
-    return `${directory}/manifest-${String(sequence).padStart(6, "0")}.json`;
-  }
-
-  private chunkPath(directory: string, index: number): string {
-    return `${directory}/chunk-${String(index + 1).padStart(6, "0")}.bin`;
-  }
-
-  private directory(stagingId: string): string {
-    return `${this.root}/${stagingId}`;
   }
 }
 
@@ -471,24 +357,8 @@ function validateReadyManifest(manifest: StagingManifest): void {
   }
 }
 
-function requireStagingDirectory(value: unknown): string {
-  if (typeof value !== "string") invalidRequest();
-  try {
-    return normalizeVaultRelativePath(value, {
-      trim: false,
-      preserveCharacters: true,
-      validateRelative: { allowLeadingDot: true },
-    });
-  } catch {
-    invalidRequest();
-  }
-}
-
-function normalizePluginId(value: unknown): string {
-  if (typeof value !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value)) {
-    invalidRequest();
-  }
-  return value;
+function chunkName(index: number): string {
+  return `chunk-${String(index + 1).padStart(6, "0")}.bin`;
 }
 
 function invalidRequest(): never {
@@ -500,10 +370,6 @@ function invalidRequest(): never {
 
 function corrupt(message: string): never {
   throw new AudioProcessorDeviceStagingError("staging_corrupt", message);
-}
-
-function throwIfAborted(signal?: AbortSignal): void {
-  if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
 }
 
 function isAbortError(error: unknown): boolean {
