@@ -474,7 +474,7 @@ video.systemsculpt-agent-media-frame {
   top: 50%;
   left: 50%;
   display: inline-flex;
-  color: var(--ss-ink-faint);
+  color: var(--ss-ink-muted);
   transform: translate(-50%, -50%);
   animation: ss-pulse calc(var(--ss-dur-slow) * 8) var(--ss-ease) infinite;
 }
@@ -483,10 +483,12 @@ video.systemsculpt-agent-media-frame {
   animation: none;
 }
 
+/* Decorative glyph: quieter than the label, so the tile reads as a frame first. */
 .ss-media-pending-icon svg {
   width: var(--ss-space-8);
   height: var(--ss-space-8);
   stroke-width: 1.5;
+  opacity: 0.6;
 }
 
 .ss-media-pending-status {
@@ -542,6 +544,15 @@ video.systemsculpt-agent-media-frame {
   width: calc(var(--ss-media-progress) * 100%);
   animation: none;
   transition: width var(--ss-dur-slow) var(--ss-ease-out);
+}
+
+/* Without motion an unknown-length bar would sit still and read as a percentage. */
+.systemsculpt-agent-workspace.is-reduced-motion .systemsculpt-agent-media:not(.is-estimated) .ss-media-pending-fill {
+  visibility: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .systemsculpt-agent-media:not(.is-estimated) .ss-media-pending-fill { visibility: hidden; }
 }
 
 .systemsculpt-agent-media-caption.is-single-line {

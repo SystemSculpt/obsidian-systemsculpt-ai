@@ -182,7 +182,7 @@ export function pendingStatus(tile: PendingMedia, now: number): Readonly<{ meta:
   const fraction = share < 1 ? 0.9 * share : 0.9 + 0.08 * (1 - Math.exp(-(share - 1) * 2));
   const left = typical - elapsed;
   const meta = left >= 10_000 ? `${duration} · about ${roughly(left)} left`
-    : share < 1.5 ? `${duration} · almost done` : duration;
+    : share < 1.15 ? `${duration} · almost done` : duration;
   return { meta, fraction };
 }
 
