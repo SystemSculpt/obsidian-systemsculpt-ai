@@ -91,6 +91,8 @@ const storage = {
     "systemsculpt:managed:semantic-v1:v3:2",
     "systemsculpt:managed:semantic-v2.1:v17:2",
   ]),
+  peekLatestManagedNamespace: jest.fn(() => "systemsculpt:managed:semantic-v1:v3:2"),
+  retainNamespaces: jest.fn(async () => 0),
   readState: jest.fn(async () => committedNamespaceState),
   writeState: jest.fn(async () => undefined),
   deleteState: jest.fn(async () => {

@@ -48,10 +48,7 @@ export const BULK_INDEX_CONCURRENCY = 3;
 const MAX_INDEX_CONCURRENCY = 4;
 
 type IndexGateway = Pick<ManagedEmbeddingsIndexAdapter, "index">;
-type AtomicStorage = Pick<EmbeddingsStorage, "publishPath" | "replacePath"> & Partial<Pick<
-  EmbeddingsStorage,
-  "getVectorSync" | "touchPath"
->>;
+type AtomicStorage = Pick<EmbeddingsStorage, "publishPath" | "replacePath" | "getVectorSync" | "touchPath">;
 
 function sha256Hex(markdown: string): Promise<string> {
   return sha256HexFromArrayBuffer(new TextEncoder().encode(markdown).buffer);
@@ -216,9 +213,6 @@ export class EmbeddingsProcessor {
     sourceSha256: string,
     namespace: string | null | undefined,
   ): Promise<boolean> {
-    if (typeof this.storage.getVectorSync !== "function" || typeof this.storage.touchPath !== "function") {
-      return false;
-    }
     const marker = this.storage.getVectorSync(localEmptyEmbeddingMarkerId(revision.path));
     const identity = parseManagedNamespace(namespace);
     const root = namespace && identity

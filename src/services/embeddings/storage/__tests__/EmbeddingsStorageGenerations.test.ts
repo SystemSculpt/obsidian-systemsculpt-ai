@@ -42,6 +42,15 @@ function openDatabase(
   });
 }
 
+function deleteDatabase(name: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.deleteDatabase(name);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+    request.onblocked = () => reject(new Error("Test database deletion was blocked."));
+  });
+}
+
 function indexNames(db: IDBDatabase): string[] {
   const names = db.transaction("embeddings", "readonly").objectStore("embeddings").indexNames;
   return ["by_path", "by_namespace", "by_mtime", "by_contentHash"].filter((name) => names.contains(name));
@@ -99,7 +108,7 @@ describe("EmbeddingsStorage schema", () => {
       expect(await storage.countVectors()).toBe(2);
     } finally {
       previous.close();
-      await storage.reset();
+      storage.close();
     }
   });
 
@@ -113,7 +122,7 @@ describe("EmbeddingsStorage schema", () => {
       expect(indexNames(db)).toEqual(["by_path", "by_namespace"]);
     } finally {
       db.close();
-      await storage.reset();
+      storage.close();
     }
   });
 });
@@ -189,16 +198,20 @@ describe("EmbeddingsStorage connections", () => {
     }
   });
 
-  it("lets another connection reset the database while this one is open", async () => {
+  it("closes its connection when IndexedDB deletes the database", async () => {
     const name = "SystemSculptEmbeddings::versionchange-delete";
     const held = new EmbeddingsStorage(name);
     await held.initialize();
     await held.storeVectors([record(V3, "A.md", 0)]);
 
-    await new EmbeddingsStorage(name).reset();
+    await deleteDatabase(name);
 
     expect(fake.factory.databases.has(name)).toBe(false);
     expect(fake.factory.openConnections(name).size).toBe(0);
+    await expect(held.countVectors()).rejects.toThrow("Database not initialized");
+    await held.initialize();
+    expect(await held.countVectors()).toBe(0);
+    held.close();
   });
 
   it("settles a blocked open with a restart error and keeps the late connection once the blocker goes", async () => {
@@ -210,11 +223,10 @@ describe("EmbeddingsStorage connections", () => {
     const opening = storage.initialize();
     await expect(opening).rejects.toBeInstanceOf(EmbeddingsStorageBlockedError);
     await expect(opening).rejects.toThrow("Restart Obsidian to finish updating the semantic index.");
-    // A second open or a delete would queue behind the blocked open with no
-    // blocked event of its own; both settle with the same error instead.
+    // A second open would queue behind the blocked open with no blocked
+    // event of its own; initialize settles with the same error instead.
     await expect(storage.initialize()).rejects.toBeInstanceOf(EmbeddingsStorageBlockedError);
-    await expect(storage.reset()).rejects.toBeInstanceOf(EmbeddingsStorageBlockedError);
-    expect(storage.size()).toBe(0);
+    expect(storage.getDistinctPaths()).toEqual([]);
 
     // When the blocker finally closes, the pending upgrade completes and its connection is kept.
     blocker.close();

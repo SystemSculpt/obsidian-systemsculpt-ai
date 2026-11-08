@@ -22,7 +22,7 @@ const createMockManager = (overrides: Record<string, any> = {}) => {
   const manager: Record<string, any> = {
     awaitReady: jest.fn().mockResolvedValue(undefined),
     hasAnyEmbeddings: jest.fn().mockReturnValue(true),
-    hasVector: jest.fn().mockReturnValue(true),
+    getFileIndexSnapshot: jest.fn().mockReturnValue({ state: "ready", ready: true, indexedAt: 1, generation: null }),
     findSimilar: jest.fn().mockResolvedValue([]),
     searchSimilar: jest.fn().mockResolvedValue([]),
     getStats: jest.fn().mockReturnValue({ total: 100, processed: 80, present: 80, needsProcessing: 20, failed: 0 }),
@@ -38,9 +38,6 @@ const createMockManager = (overrides: Record<string, any> = {}) => {
     resumeProcessing: jest.fn(),
     processVault: jest.fn().mockResolvedValue({ status: "complete" }),
   };
-  manager.getFileIndexSnapshot = jest.fn(() => manager.hasVector()
-    ? { state: "ready", ready: true, indexedAt: 1, generation: null }
-    : { state: "missing", ready: false, indexedAt: null, generation: null });
   return Object.assign(manager, overrides);
 };
 
@@ -187,7 +184,6 @@ describe("EmbeddingsView", () => {
 
     it("calls manager.findSimilar() when file has vector", async () => {
       const mockFile = new TFile({ path: "notes/test.md", stat: { mtime: Date.now(), size: 100 } });
-      mockManager.hasVector.mockReturnValue(true);
       mockManager.findSimilar.mockResolvedValue([
         { path: "notes/similar.md", score: 0.9, metadata: { title: "Similar" } },
       ]);
@@ -204,7 +200,7 @@ describe("EmbeddingsView", () => {
 
     it("falls back to searchSimilar() when file has no vector", async () => {
       const mockFile = new TFile({ path: "notes/new.md", stat: { mtime: Date.now(), size: 100 } });
-      mockManager.hasVector.mockReturnValue(false);
+      mockManager.getFileIndexSnapshot.mockReturnValue({ state: "missing", ready: false, indexedAt: null, generation: null });
       mockManager.hasAnyEmbeddings.mockReturnValue(true);
       mockPlugin.app.vault.read.mockResolvedValue("This is new file content");
 
@@ -220,7 +216,7 @@ describe("EmbeddingsView", () => {
 
     it("bounds a long unindexed note before sending the semantic query", async () => {
       const mockFile = new TFile({ path: "notes/long.md", stat: { mtime: Date.now(), size: 20_000 } });
-      mockManager.hasVector.mockReturnValue(false);
+      mockManager.getFileIndexSnapshot.mockReturnValue({ state: "missing", ready: false, indexedAt: null, generation: null });
       mockManager.hasAnyEmbeddings.mockReturnValue(true);
       mockPlugin.app.vault.read.mockResolvedValue(`HEAD ${"x".repeat(12_000)} TAIL`);
 
@@ -315,7 +311,7 @@ describe("EmbeddingsView", () => {
 
     it("shows empty content state for empty files", async () => {
       const mockFile = new TFile({ path: "notes/empty.md", stat: { mtime: Date.now(), size: 0 } });
-      mockManager.hasVector.mockReturnValue(false);
+      mockManager.getFileIndexSnapshot.mockReturnValue({ state: "missing", ready: false, indexedAt: null, generation: null });
       mockManager.hasAnyEmbeddings.mockReturnValue(true);
       mockPlugin.app.vault.read.mockResolvedValue("   ");
 

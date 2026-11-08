@@ -54,6 +54,8 @@ function restartHarness(options: {
     listManagedRootNamespaces: jest.fn(() => [
       ...new Set(options.vectors.map((vector) => vector.metadata.namespace)),
     ]),
+    peekLatestManagedNamespace: jest.fn(() => options.inferred),
+    retainNamespaces: jest.fn(async () => 0),
     getVectorSync: jest.fn((id: string) => vectors.get(id) ?? null),
     readState: jest.fn(async () => options.committed
       ? { version: 1, namespace: options.committed, committedAt: 1 }

@@ -9,7 +9,12 @@ function processorFailure(code: ManagedEmbeddingsErrorCode) {
   const app = new App();
   app.vault.read = jest.fn(async () => "# Note");
   const index = jest.fn().mockRejectedValue(new ManagedEmbeddingsError(code, "Indexing failed.", 402));
-  const storage = { publishPath: jest.fn(), replacePath: jest.fn() };
+  const storage = {
+    publishPath: jest.fn(),
+    replacePath: jest.fn(),
+    getVectorSync: jest.fn(() => null),
+    touchPath: jest.fn(async () => false),
+  };
   const processor = new EmbeddingsProcessor({ index }, storage);
   const files = ["A.md", "B.md"].map(path => new TFile({ path, stat: { mtime: 1, size: 6 } }));
   return { app, index, processor, files };

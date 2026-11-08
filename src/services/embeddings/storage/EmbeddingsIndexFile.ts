@@ -44,18 +44,6 @@ export class EmbeddingsIndexFile {
     this.shardDir = `${this.dir}/${SHARD_DIR_NAME}`;
   }
 
-  public getPath(): string {
-    return this.filePath;
-  }
-
-  public async exists(): Promise<boolean> {
-    try {
-      return await this.adapter.exists(this.filePath);
-    } catch {
-      return false;
-    }
-  }
-
   /**
    * Read and JSON-parse the snapshot. Falls back to the `.previous` checkpoint
    * that an interrupted replace leaves behind. Returns null when neither is

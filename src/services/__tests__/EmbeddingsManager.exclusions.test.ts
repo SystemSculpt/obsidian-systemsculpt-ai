@@ -6,7 +6,7 @@ jest.mock("../embeddings/storage/EmbeddingsStorage", () => {
     getAllVectors: jest.fn(() => []),
     getVectorsByPath: jest.fn(() => []),
     peekCurrentManagedNamespace: jest.fn(() => null),
-    size: jest.fn(() => 0),
+
     storeVectors: jest.fn(),
     removeCurrentManagedGeneration: jest.fn(),
     removeByPath: jest.fn(),

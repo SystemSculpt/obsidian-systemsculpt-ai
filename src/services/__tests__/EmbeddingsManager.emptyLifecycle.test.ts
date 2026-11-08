@@ -61,7 +61,12 @@ const mockStorage = {
     mockState.delete(key);
   }),
   getDistinctPaths: jest.fn(() => [...new Set([...mockVectors.values()].map((vector) => vector.path))]),
-  size: jest.fn(() => mockVectors.size),
+  getRevision: jest.fn(() => 0),
+  close: jest.fn(),
+  listRootNamespaces: jest.fn(() => [...new Set([...mockVectors.values()].map((vector) => vector.metadata.namespace))]),
+  listManagedRootNamespaces: jest.fn((): string[] => mockStorage.listRootNamespaces().filter((namespace) => namespace.startsWith("systemsculpt:managed:"))),
+  peekLatestManagedNamespace: jest.fn((): string | null => mockStorage.peekCurrentManagedNamespace()),
+  retainNamespaces: jest.fn(async () => 0),
 };
 
 jest.mock("../embeddings/storage/EmbeddingsStorage", () => {
