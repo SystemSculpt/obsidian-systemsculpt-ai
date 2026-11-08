@@ -10,7 +10,7 @@
 .systemsculpt-agent-tail-status {
   display: flex;
   align-items: center;
-  gap: var(--ss-space-2);
+  gap: var(--ss-space-1);
   min-height: var(--ss-control-height-sm);
   padding: 0 var(--ss-space-1);
   color: var(--ss-ink-muted);
@@ -24,7 +24,7 @@
   flex: 0 0 auto;
   align-items: center;
   justify-content: center;
-  width: 18px;
+  width: 20px;
   height: var(--ss-icon-size-sm);
   color: var(--ss-ink-muted);
 }
@@ -204,8 +204,8 @@ strong.systemsculpt-agent-activity-overflow-label {
   gap: 2px;
   min-width: 0;
   margin: 0;
-  /* Match the summary's icon, label and disclosure columns. */
-  padding: var(--ss-space-0) var(--ss-space-1) var(--ss-space-1);
+  /* Each row owns the same icon, label and disclosure columns as the summary. */
+  padding: var(--ss-space-0) 0 var(--ss-space-1);
 }
 
 details.systemsculpt-agent-activity:not([open]) > .systemsculpt-agent-activity-body {

@@ -67,11 +67,11 @@
   box-sizing: border-box;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--ss-space-1);
   width: 100%;
   min-width: 0;
   min-height: var(--ss-control-height-sm);
-  padding: 0 var(--ss-space-0);
+  padding: 0 var(--ss-space-1);
   border-radius: var(--ss-radius-sm);
   cursor: default;
   line-height: 20px;
@@ -108,17 +108,8 @@
   height: 20px;
   color: var(--ss-ink-muted);
 }
-.systemsculpt-agent-conversation .systemsculpt-agent-tool-icon {
-  flex-basis: 16px;
-  width: 16px;
-}
 .systemsculpt-agent-conversation .systemsculpt-agent-tool-controls .systemsculpt-agent-tool-state-icon {
   display: none;
-}
-.systemsculpt-agent-conversation .systemsculpt-agent-tool-disclosure,
-.systemsculpt-agent-conversation .systemsculpt-agent-tool-state-icon {
-  flex-basis: 16px;
-  width: 16px;
 }
 .systemsculpt-agent-conversation .systemsculpt-agent-tool-header svg {
   width: var(--ss-icon-size-sm);

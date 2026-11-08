@@ -76,6 +76,11 @@
   margin-bottom: var(--ss-space-2);
 }
 
+/* Match native preference-card insets, including the execution group's border. */
+.ss-settings-surface .ss-codex-controls {
+  padding: calc(var(--ss-space-4) - 1px);
+}
+
 /* The Studio launcher has no detail; center its label with the taller button. */
 .ss-settings-surface .setting-item[data-ss-setting="studio.open"] {
   align-items: center;
