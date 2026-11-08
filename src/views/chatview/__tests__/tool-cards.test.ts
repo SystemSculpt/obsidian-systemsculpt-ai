@@ -162,6 +162,18 @@ describe("media shown once per turn", () => {
     expect(card.querySelector(".ss-tool-media-files dd a")?.textContent).toBe("Lighthouse");
     expect(body.querySelector("[data-testid='chat.turn.media.path']")?.textContent).toBe("Lighthouse");
   });
+
+  it("does not repeat an image the answer itself embeds", () => {
+    const { app } = setup();
+    const body = document.createElement("div");
+    body.className = "systemsculpt-agent-turn-body";
+    const card = body.appendChild(document.createElement("div"));
+    renderMedia(app, card, [{ kind: "image", path: IMAGE }]);
+    const generated = hosted("generate_image", { prompt: "Lighthouse" }, encodeSystemSculptToolResult({ ok: true, message: "Saved.", media: [{ kind: "image", path: IMAGE }] }));
+    renderTurnMedia(app, body, [generated], { openFile: jest.fn(), openLink: jest.fn() }, `View the edited image: ![[${IMAGE}]]`);
+    expect(body.querySelector(".systemsculpt-agent-turn-media")).toBeNull();
+    expect(card.querySelector(".ss-tool-media")?.classList.contains("is-shown-in-reply")).toBe(true);
+  });
 });
 
 describe("turn change summary", () => {

@@ -12,7 +12,7 @@ const groupSize = (group: ActivityGroup): number => group.items.size + group.unc
 /** Count adjacent activity by action without repeating payloads or full paths. */
 export function summarizeAgentActivity(parts: readonly AgentPart[]): AgentActivitySummary {
   const groups = new Map<string, ActivityGroup>();
-  let failedCount = 0, refused = false, gated = false, denied = false;
+  let failedCount = 0, blockedCount = 0, uncertainCount = 0, refused = false, gated = false, denied = false;
   const add = (kind: string, label: string, items: readonly string[] = [], count = 1): void => {
     const group = groups.get(kind) ?? { label, items: new Set<string>(), uncounted: 0 };
     group.label = label;
@@ -35,7 +35,12 @@ export function summarizeAgentActivity(parts: readonly AgentPart[]): AgentActivi
       else if (tool.displayState === "cancelled" || part.approvalDecision === "withdrawn") add("withdrawn", `${tool.label} · Withdrawn`);
       else if (tool.displayState === "failed" || tool.displayState === "outcome-unknown") add("failed", tool.label);
       else add(tool.groupKind, tool.label.replace(/…$/u, ""), tool.groupItems, tool.groupCount);
-      if (part.approvalDecision !== "withdrawn" && ["failed", "partial", "outcome-unknown"].includes(tool.displayState)) failedCount += 1;
+      if (part.approvalDecision !== "withdrawn" && ["failed", "partial", "outcome-unknown"].includes(tool.displayState)) {
+        failedCount += 1;
+        // A guard's block and an uncertain result are not known failures: each keeps its own word.
+        if (tool.icon === "shield-x") blockedCount += 1;
+        else if (tool.displayState === "outcome-unknown") uncertainCount += 1;
+      }
     }
   }
   const labels = Array.from(groups, ([kind, group]) => {
@@ -57,8 +62,11 @@ export function summarizeAgentActivity(parts: readonly AgentPart[]): AgentActivi
   });
   const visible = labels.slice(0, 3).map((label, index) => index ? label.charAt(0).toLowerCase() + label.slice(1) : label).join(", ");
   const more = Array.from(groups.values()).slice(3).reduce((count, group) => count + groupSize(group), 0);
+  const failed = failedCount - blockedCount - uncertainCount;
+  const outcomes = [[failed, "failed"], [blockedCount, "blocked"], [uncertainCount, "uncertain"]]
+    .filter(([count]) => count).map(([count, word]) => ` · ${count} ${word}`).join("");
   return {
-    label: `${visible || "Activity"}${more ? ` · ${more} more` : ""}${failedCount ? ` · ${failedCount} failed` : ""}`,
+    label: `${visible || "Activity"}${more ? ` · ${more} more` : ""}${outcomes}`,
     failedCount,
     ...(refused ? { refused: true as const } : {}),
     ...(gated ? { gated: true as const } : {}),

@@ -130,7 +130,10 @@
   overflow: hidden;
 }
 .systemsculpt-agent-conversation .systemsculpt-agent-tool-header .systemsculpt-agent-tool-label {
-  flex: 0 1 auto;
+  /* The verb and target keep their full width; the muted meta beside them
+     yields first. Only a label wider than the row ellipses. */
+  flex: 0 0 auto;
+  max-width: 100%;
   min-width: 0;
   overflow: hidden;
   color: var(--ss-ink);
