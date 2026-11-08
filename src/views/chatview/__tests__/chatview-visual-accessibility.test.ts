@@ -83,6 +83,22 @@ const textPairs = [
 ];
 
 describe("ChatView text contrast (WCAG AA, default Obsidian themes)", () => {
+  test("lone activity rows share the turn-summary gutter", () => {
+    const css = readCss("views/agent-workspace/activity.css");
+    for (const kind of ["tool", "reasoning"]) {
+      expect(rule(css, `.systemsculpt-agent-activity-body > .systemsculpt-agent-part.is-${kind}`))
+        .toMatch(/padding-inline-start:\s*var\(--ss-space-1\)/);
+    }
+  });
+
+  test("replayed edit diff prefixes have an inset when no number gutter precedes them", () => {
+    const css = readCss("views/agent-workspace/tools.css");
+    for (const preview of ["native", "hosted"]) {
+      expect(rule(css, `.ss-${preview}-tool-preview .systemsculpt-diff-prefix:first-child`))
+        .toMatch(/margin-inline-start:\s*var\(--ss-space-2\)/);
+    }
+  });
+
   test("raw tool Details wraps long values instead of clipping paths", () => {
     const css = readCss("views/agent-workspace/tools.css");
     for (const selector of [".systemsculpt-agent-conversation .systemsculpt-agent-tool-raw pre", ".systemsculpt-agent-conversation .systemsculpt-agent-tool-raw code"]) {

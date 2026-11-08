@@ -535,6 +535,10 @@
   font-family: var(--ss-font-mono);
   font-size: calc(1em * 0.9);
 }
+.ss-native-tool-preview .systemsculpt-diff-prefix:first-child,
+.ss-hosted-tool-preview .systemsculpt-diff-prefix:first-child {
+  margin-inline-start: var(--ss-space-2);
+}
 .ss-native-tool-output {
   max-height: var(--ss-agent-tool-details-height);
 }
