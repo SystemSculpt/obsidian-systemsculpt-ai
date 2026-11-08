@@ -40,7 +40,6 @@ export const MANAGED_RECOVERY_CAPABILITIES: ManagedRecoveryCapability[] = [
   "transcription", "document_processing", "image_generation", "video_generation",
 ];
 
-/** @internal Retained by ManagedJobRecoveryStore's compatibility export. */
 export const MANAGED_MULTIPART_PART_LIMITS: Readonly<Record<ManagedRecoveryCapability, number>> = {
   transcription: 50,
   document_processing: 3,
