@@ -82,7 +82,8 @@ describe("AgentActivityPresentation", () => {
       tool("list_items", { paths: ["Notes"] }),
       tool("edit", { path: "Plan.md" }),
       tool("edit", { path: "Plan.md" }, { id: "again", callId: "again" }),
-    ])).toEqual({ label: "Searched 1 pattern, read One.md, listed Notes · 1 more", failedCount: 0 });
+    // "More" counts the rows behind it: two edits of one note are two rows.
+    ])).toEqual({ label: "Searched 1 pattern, read One.md, listed Notes · 2 more", failedCount: 0 });
   });
 
   it("matches the resolved approval fixture: repeated approvals, two denials and a withdrawn edit", () => {
@@ -134,7 +135,19 @@ describe("AgentActivityPresentation", () => {
     expect(summarizeAgentActivity([
       tool("edit", { path: "Notes/A.md" }, { state: "failed" }),
       tool("write", { path: "Notes/B.md" }, { id: "uncertain", callId: "uncertain", state: "outcome-unknown" }),
-    ])).toEqual({ label: "Couldn't complete 2 actions · 2 failed", failedCount: 2 });
+    ])).toEqual({ label: "Couldn't edit A.md, create B.md · Uncertain · 1 failed", failedCount: 2 });
+    expect(summarizeAgentActivity([
+      tool("Bash", { command: "rm -rf build" }, {
+        location: "server", state: "failed", native: { agent: "claude", workingDirectory: "/vault" },
+        error: { code: "CLAUDE_AUTO_BLOCKED", message: "Blocked" },
+      } as Partial<AgentToolPart>),
+    ]).label).toMatch(/ · 1 blocked$/u);
+    expect(summarizeAgentActivity([
+      tool("edit", { path: "Notes/A.md" }, { id: "denied", callId: "denied", state: "denied" }),
+      tool("read", { paths: ["One.md"] }, { id: "r", callId: "r" }),
+      tool("search", { patterns: ["x"] }, { id: "s", callId: "s" }),
+      tool("write", { path: "Notes/B.md" }, { id: "u", callId: "u", state: "outcome-unknown" }),
+    ]).label).toMatch(/ · 1 more · 1 uncertain$/u);
     const native = { location: "server" as const, native: { agent: "claude" as const, workingDirectory: "/vault" } };
     expect(summarizeAgentActivity([
       tool("Edit", { file_path: "/vault/A.md" }, { ...native, approvalDecision: "approved" }),

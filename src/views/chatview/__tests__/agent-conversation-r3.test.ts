@@ -203,10 +203,10 @@ describe("R3 conversation semantics", () => {
     expect(shell.querySelector('.ss-hosted-tool-preview')).toBeNull();
     shell.open = true; shell.dispatchEvent(new Event('toggle'));
     await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
-    expect(shell.querySelectorAll('.ss-hosted-tool-list > li')).toHaveLength(50);
+    expect(shell.querySelectorAll('.ss-tool-paths > li')).toHaveLength(50);
     expect(shell.querySelector('.systemsculpt-agent-tool-details')).toBeNull();
     shell.querySelector<HTMLButtonElement>('[data-testid="chat.tool.show-items"]')!.click();
-    expect(shell.querySelectorAll('.ss-hosted-tool-list > li')).toHaveLength(55);
+    expect(shell.querySelectorAll('.ss-tool-paths > li')).toHaveLength(55);
     expect(shell.querySelector('.systemsculpt-agent-tool-raw code')!.textContent).toBe("");
     renderer.unload();
   });

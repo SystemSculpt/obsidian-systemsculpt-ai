@@ -3,6 +3,7 @@ import type { AgentToolPart } from "../../chat/ChatConversation";
 import { decodeSystemSculptToolOutput, systemSculptToolName, type SystemSculptMedia } from "../../tools/systemsculpt/SystemSculptTools";
 import { codexImageMedia, rememberCodexImage } from "../../services/codex/CodexImages";
 import { fitPendingText, generationArguments, presentPendingMedia, renderPendingMedia, requestedMediaRatio, syncPendingClock, type PendingMedia } from "./PendingMedia";
+import { mediaDisplayName, syncToolMediaWithReply } from "./ToolCardBlocks";
 
 /** A file to show, with where its call sits in the turn and the frame its call asked for. */
 /** `fixed`: the ratio was asked for, so the file keeps that frame even if it comes back another shape. */
@@ -80,16 +81,28 @@ export function renderTurnMedia(app: App, parent: HTMLElement, parts: readonly A
     if (image?.sourcePath) rememberCodexImage(image.sourcePath, image.media.path);
   }
   const presented = presentTurnMedia(parts, answer, live);
+  // Everything the reply shows, in the strip below or embedded in the answer itself.
+  parent.setAttribute("data-reply-media", JSON.stringify(presentTurnMedia(parts).media.map(item => item.path)));
   if (!presented.media.length && !presented.pending.length && !presented.notices.length) {
     existing?.remove();
+    syncToolMediaWithReply(parent);
     return null;
   }
   const fingerprint = JSON.stringify(presented);
-  if (existing?.dataset.media === fingerprint) return existing;
+  if (existing?.dataset.media === fingerprint) {
+    syncToolMediaWithReply(parent);
+    return existing;
+  }
   // Landed media moves into the new block as is: no reload, blink or restarted video.
   const landed = new Map<string, HTMLElement>();
   existing?.querySelectorAll<HTMLElement>("figure.is-loaded[data-media-path]").forEach(figure => landed.set(figure.dataset.mediaPath ?? "", figure));
   existing?.remove();
+  const block = buildTurnMedia(app, parent, presented, actions, fingerprint, landed);
+  syncToolMediaWithReply(parent);
+  return block;
+}
+
+function buildTurnMedia(app: App, parent: HTMLElement, presented: ReturnType<typeof presentTurnMedia>, actions: TurnMediaActions, fingerprint: string, landed: ReadonlyMap<string, HTMLElement>): HTMLElement {
   const block = parent.createDiv({ cls: "systemsculpt-agent-turn-media", attr: { "data-testid": "chat.turn.media" } });
   block.dataset.media = fingerprint;
   // The first tool call this block shows; a live turn keeps the block right after it.
@@ -114,7 +127,7 @@ export function renderTurnMedia(app: App, parent: HTMLElement, parts: readonly A
         continue;
       }
       const file = app.vault.getAbstractFileByPath(item.path);
-      const name = item.label ?? item.path.split("/").pop() ?? item.path;
+      const name = mediaDisplayName(item.path, item.label);
       const figure = grid.createEl("figure", { cls: "systemsculpt-agent-media", attr: { "data-kind": item.kind, "data-media-path": item.path } });
       if (!(file instanceof TFile)) {
         figure.addClass("is-missing");

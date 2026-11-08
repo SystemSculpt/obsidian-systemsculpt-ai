@@ -117,6 +117,8 @@ const RUNTIME_CUSTOM_PROPERTIES = new Set([
   "--ss-studio-chip-color",
   "--ss-studio-swatch-color",
   "--ss-studio-text-node-font-size",
+  "--ss-tool-media-columns",
+  "--ss-tool-text-lines",
 ]);
 
 /**

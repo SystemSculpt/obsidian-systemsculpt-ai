@@ -356,17 +356,26 @@ video.systemsculpt-agent-media-frame {
 }
 
 .systemsculpt-agent-media-caption {
-  /* Follows the frame's width instead of widening it; long names wrap whole. */
+  /* Follows the frame's width instead of widening it; a long name ends in an ellipsis on one line. */
   width: 0;
   min-width: 100%;
+  overflow: hidden;
   color: var(--ss-ink-muted);
   font-family: var(--font-interface);
   font-size: var(--ss-text-xs);
-  overflow-wrap: anywhere;
-  text-wrap: pretty;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.systemsculpt-agent-media-caption a { color: var(--ss-ink-muted); }
+.systemsculpt-agent-media-caption a {
+  color: var(--ss-ink-muted);
+  text-decoration: none;
+}
+.systemsculpt-agent-media-caption a:hover {
+  color: var(--ss-ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
 
 .systemsculpt-agent-media-missing {
   padding: var(--ss-space-2) var(--ss-space-3);
@@ -374,6 +383,10 @@ video.systemsculpt-agent-media-frame {
   border-radius: var(--ss-radius-md);
   color: var(--ss-ink-muted);
   font-size: var(--ss-text-sm);
+}
+
+.systemsculpt-agent-media-notice a {
+  white-space: nowrap;
 }
 
 .systemsculpt-agent-media-notice {
@@ -676,4 +689,50 @@ video.systemsculpt-agent-media-frame {
 .ss-mobile-layout .systemsculpt-agent-turn.is-user.is-editing {
   width: 100%;
   max-width: 100%;
+}
+
+/* Embedded files in an answer open in the vault (T-5956): images on click,
+   PDFs, audio and video through the file name under their player. */
+.systemsculpt-agent-conversation .internal-embed.image-embed img {
+  cursor: zoom-in;
+}
+.systemsculpt-agent-conversation a.ss-embed-source {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-1);
+  width: fit-content;
+  max-width: 100%;
+  margin: var(--ss-space-1) 0 var(--ss-space-2);
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+.systemsculpt-agent-conversation a.ss-embed-source:hover {
+  color: var(--ss-ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.systemsculpt-agent-conversation a.ss-embed-source:focus-visible {
+  outline: 2px solid var(--ss-line-accent);
+  outline-offset: 2px;
+  border-radius: var(--ss-radius-xs);
+}
+.ss-embed-source-icon {
+  display: inline-flex;
+  flex: none;
+}
+.ss-embed-source-icon svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* Obsidian's PDF viewer keeps a 350px minimum; in a phone-width answer that
+   clips the page's right edge. The page fits the answer instead. */
+.systemsculpt-agent-conversation .pdf-embed :is(.pdf-container, .pdf-content-container) {
+  min-width: 0;
+}
+.systemsculpt-agent-conversation .pdf-embed .pdf-toolbar {
+  /* The viewer's column would otherwise squeeze the toolbar and cut its icons. */
+  flex-shrink: 0;
 }

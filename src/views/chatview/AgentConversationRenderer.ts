@@ -22,12 +22,15 @@ import {
   groupAdjacentAgentActivity,
   splitPreviousAgentActivity,
   summarizeAgentActivity,
+  setActivityLabelText,
+  unbreakableActivityLabel,
 } from "./AgentActivityPresentation";
 import { presentTurnChanges } from "./TurnChangeSummary";
 import { renderTurnMedia } from "./TurnMedia";
 import { codexImageVaultPath } from "../../services/codex/CodexImages";
 import { openExternalUrl } from "../../utils/externalUrl";
 import { enhanceMarkdownCodeBlocks } from "./MarkdownCodeBlocks";
+import { embedTarget, enhanceMarkdownEmbeds } from "./MarkdownEmbeds";
 import {
   presentAgentError,
   type AgentConversationPresentation,
@@ -278,8 +281,11 @@ export class AgentConversationRenderer extends Component {
     // Delegate from the stable root: streamed Markdown reconciliation clones links.
     const openSourceLink = (event: MouseEvent): void => {
       if (event.defaultPrevented || (event.type === "click" ? event.button !== 0 : event.button !== 1)) return;
-      const link = (event.target as Element | null)?.closest?.("a.internal-link");
-      const linked = link?.getAttribute("data-href") ?? link?.getAttribute("href");
+      const target = event.target as Element | null;
+      const link = target?.closest?.("a.internal-link");
+      // An embedded image in an answer opens its vault file, like a link to it.
+      const image = !link && target?.tagName === "IMG" ? target.closest?.(".internal-embed.image-embed") : null;
+      const linked = link?.getAttribute("data-href") ?? link?.getAttribute("href") ?? (image ? embedTarget(image) : null);
       if (!linked) return;
       event.preventDefault();
       event.stopPropagation();
@@ -306,6 +312,7 @@ export class AgentConversationRenderer extends Component {
           component,
         );
         this.enhanceCodeBlocks(staging);
+        enhanceMarkdownEmbeds(staging);
       },
     });
     this.addChild(this.liveMarkdown);
@@ -1110,7 +1117,7 @@ export class AgentConversationRenderer extends Component {
     const label = cancelled ? this.workedLabel(elapsedMs, true) : summary.label;
     // Keep the action summary while closed; once open, name the whole-turn
     // container instead of repeating the activity labels below it.
-    header.dataset.closedLabel = label.replace(/ · /gu, " ·\u00a0");
+    header.dataset.closedLabel = unbreakableActivityLabel(label);
     header.dataset.openLabel = cancelled ? header.dataset.closedLabel : "Activity";
     this.syncCompletedActivityLabel(element);
     let icon = header.querySelector<HTMLElement>(".systemsculpt-agent-activity-state");
@@ -1127,7 +1134,8 @@ export class AgentConversationRenderer extends Component {
   private syncCompletedActivityLabel(element: HTMLDetailsElement): void {
     const header = element.querySelector<HTMLElement>(":scope > summary");
     const label = element.open ? header?.dataset.openLabel : header?.dataset.closedLabel;
-    if (label) header?.querySelector(".systemsculpt-agent-activity-label")?.setText(label);
+    const target = header?.querySelector<HTMLElement>(".systemsculpt-agent-activity-label");
+    if (label && target) setActivityLabelText(target, label);
   }
 
   private createActivityOverflow(
@@ -1232,11 +1240,11 @@ export class AgentConversationRenderer extends Component {
     const count = Number(element.dataset.hiddenCount);
     const expanded = this.activityOverflowExpanded(element);
     // Same as the turn summary: "· 2 failed" never strands its dot at a line end.
-    const label = (element.dataset.activitySummary ?? this.activityOverflowLabel(
+    const label = unbreakableActivityLabel((element.dataset.activitySummary ?? this.activityOverflowLabel(
       Number.isFinite(count) ? count : 0,
       state.latestNode,
-    )).replace(/ · /gu, " ·\u00a0");
-    if (state.label.textContent !== label) state.label.setText(label);
+    )));
+    setActivityLabelText(state.label, label);
     if (Number(element.dataset.failedCount) > 0) {
       setIcon(state.icon, "circle-alert");
       state.icon.dataset.iconName = "circle-alert";
