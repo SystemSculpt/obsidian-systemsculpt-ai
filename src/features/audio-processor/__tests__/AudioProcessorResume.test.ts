@@ -48,7 +48,11 @@ const mockGetAudioProcessorAvailability = getAudioProcessorAvailability as jest.
 
 /** A loaded plugin component: unloading it runs what live runs registered. */
 const loadedPlugin = (extra: Record<string, unknown>): SystemSculptPlugin => {
-  const plugin = Object.assign(new Component(), extra);
+  let unloading = false;
+  const plugin = Object.assign(new Component(), {
+    isPluginUnloading: () => unloading,
+    onunload: () => { unloading = true; },
+  }, extra);
   plugin.load();
   return plugin as unknown as SystemSculptPlugin;
 };
@@ -379,6 +383,104 @@ describe("resumeAudioProcessorJobs", () => {
 
     expect(watcherSignal?.aborted).toBe(true);
     expect(mockPanelInstances[1].fail).not.toHaveBeenCalled();
+  });
+
+  it.each(["processing", "succeeded"] as const)("does not start queued %s jobs while unload drains keep the plugin flag false", async (status) => {
+    mockListActiveJobs.mockResolvedValue([
+      activeJob("audio_one", status, status === "succeeded" ? "complete" : "transcribing", "2026-07-18T11:59:00.000Z"),
+      activeJob("audio_two", status, status === "succeeded" ? "complete" : "transcribing", "2026-07-18T11:58:00.000Z"),
+      activeJob("audio_three", status, status === "succeeded" ? "complete" : "transcribing", "2026-07-18T11:57:00.000Z"),
+    ]);
+    const started = createDeferred<void>();
+    const signals: AbortSignal[] = [];
+    mockResume.mockImplementation((job: AudioProcessorJob, options: { signal: AbortSignal }) => {
+      signals.push(options.signal);
+      if (signals.length === 2) started.resolve();
+      // A wrongly started queued job must settle too, so a regression cannot hang the test.
+      if (signals.length > 2) return Promise.resolve({ jobId: job.id, notePath: "done.md", open: jest.fn() });
+      return new Promise((_resolve, reject) => {
+        options.signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")));
+      });
+    });
+    const drain = createDeferred<void>();
+    let unloading = false;
+    const plugin = loadedPlugin({
+      settings: { licenseKey: "license" },
+      getLogger: () => ({ warn: jest.fn() }),
+      isPluginUnloading: () => unloading,
+      onunload: async () => { await drain.promise; unloading = true; },
+    });
+
+    const discovery = resumeAudioProcessorJobs(plugin);
+    await started.promise;
+    let work = discovery;
+    if (status === "processing") {
+      await discovery;
+      work = resumeAudioProcessorJobs(plugin);
+    }
+    plugin.unload();
+    // Real Component teardown runs while main.onunload awaits its producer/logger drains.
+    expect(plugin.isPluginUnloading()).toBe(false);
+    expect(signals.every((signal) => signal.aborted)).toBe(true);
+    await work;
+
+    expect(mockResume.mock.calls.map(([job]) => job.id)).toEqual(["audio_one", "audio_two"]);
+    expect(signals.every((signal) => signal.aborted)).toBe(true);
+    expect(mockPanelInstances).toHaveLength(2);
+    expect(registeredRuns(plugin)).toBe(0);
+    const discoveryCount = mockGetAudioProcessorAvailability.mock.calls.length;
+    await resumeAudioProcessorJobs(plugin);
+    expect(mockGetAudioProcessorAvailability).toHaveBeenCalledTimes(discoveryCount);
+    if (status === "succeeded") expect(mockClearUploadRecovery).not.toHaveBeenCalled();
+    drain.resolve();
+    await drain.promise;
+  });
+
+  it("does not resume an upload whose checkpoint read settles while unload keeps the plugin flag false", async () => {
+    mockListActiveJobs.mockResolvedValue([
+      activeJob("upload_interrupted", "uploading", "uploading", "2026-07-18T11:59:00.000Z"),
+    ]);
+    const checkpoint = createDeferred<boolean>();
+    mockHasUploadRecovery.mockReturnValueOnce(checkpoint.promise);
+    const drain = createDeferred<void>();
+    let unloading = false;
+    const plugin = loadedPlugin({
+      settings: { licenseKey: "license" },
+      getLogger: () => ({ warn: jest.fn() }),
+      isPluginUnloading: () => unloading,
+      onunload: async () => { await drain.promise; unloading = true; },
+    });
+
+    await resumeAudioProcessorJobs(plugin);
+    expect(mockHasUploadRecovery).toHaveBeenCalledTimes(1);
+    const work = resumeAudioProcessorJobs(plugin);
+    plugin.unload();
+    expect(plugin.isPluginUnloading()).toBe(false);
+    checkpoint.resolve(true);
+    await work;
+
+    expect(mockResumeUpload).not.toHaveBeenCalled();
+    expect(mockPanelInstances).toHaveLength(0);
+    expect(registeredRuns(plugin)).toBe(0);
+    drain.resolve();
+    await drain.promise;
+  });
+
+  it("registers one plugin-lifetime shutdown hook across completed discoveries", async () => {
+    mockListActiveJobs.mockResolvedValue([]);
+    const plugin = loadedPlugin({
+      settings: { licenseKey: "license" },
+      getLogger: () => ({ warn: jest.fn() }),
+    });
+    const register = jest.spyOn(plugin, "register");
+
+    await resumeAudioProcessorJobs(plugin);
+    await resumeAudioProcessorJobs(plugin);
+
+    expect(mockListActiveJobs).toHaveBeenCalledTimes(2);
+    expect(register).toHaveBeenCalledTimes(1);
+    expect(registeredRuns(plugin)).toBe(0);
+    plugin.unload();
   });
 
   it("aborts discovery when the plugin unloads first", async () => {

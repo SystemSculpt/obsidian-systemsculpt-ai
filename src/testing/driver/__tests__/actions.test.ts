@@ -595,7 +595,7 @@ function installHistoryEntry(
   close.dataset.testid = "history.close";
   close.getBoundingClientRect = () => rect();
   const row = document.createElement("div");
-  row.className = "systemsculpt-history-item";
+  row.dataset.testid = "history.row";
   row.dataset.kind = "chat";
   row.dataset.entryId = entryId;
   row.getBoundingClientRect = () => rect();
@@ -677,6 +677,60 @@ describe("test driver actions", () => {
       }
     },
   );
+
+  it("snapshots canonical chat controls and attachments without their CSS classes", async () => {
+    const harness = makeDevelopmentHarness({ draft: "Current draft" });
+    harness.input.className = "";
+    harness.stop.className = "";
+    harness.send.disabled = true;
+    harness.setRunning(true);
+    const title = harness.container.createEl("button", {
+      text: "Current chat",
+      attr: { "data-testid": "chat.header.title" },
+    });
+    const attachments = harness.container.createDiv();
+    for (const [label, action] of [["Pinned note", "unpin"], ["photo.png", "remove"]]) {
+      const item = attachments.createDiv({ attr: { role: "listitem" } });
+      item.createEl("button", {
+        text: label,
+        attr: { "data-testid": "chat.composer.attachment.open" },
+      });
+      item.createEl("button", {
+        attr: { "data-testid": `chat.composer.attachment.${action}` },
+      });
+    }
+    // Old CSS alone must not win over the supported identities.
+    harness.container.createEl("textarea", { cls: "systemsculpt-agent-prompt-input" });
+    harness.container.createEl("button", { cls: "systemsculpt-agent-send" });
+    harness.container.createEl("button", { cls: "systemsculpt-agent-stop" });
+    harness.container.createDiv({ cls: "systemsculpt-agent-header-title", text: "Wrong chat" });
+    harness.container.prepend(title);
+
+    await expect(runDriverAction(harness.ctx, "snapshot", { scope: "chat" }))
+      .resolves.toMatchObject({
+        open: true,
+        title: "Current chat",
+        composer: {
+          value: "Current draft",
+          sendDisabled: true,
+          stopVisible: true,
+          approvalMode: "full-access",
+          attachments: ["Pinned note", "photo.png"],
+        },
+      });
+  });
+
+  it("waits for a running canonical stop control after its CSS classes change", async () => {
+    const harness = makeDevelopmentHarness();
+    harness.stop.className = "";
+    harness.setRunning(true);
+    window.setTimeout(() => harness.setRunning(false), 100);
+    await expect(runDriverAction(harness.ctx, "waitForRun", {
+      startMs: 0,
+      timeoutMs: 1000,
+      stallMs: 500,
+    })).resolves.toMatchObject({ finished: true, snapshot: { composer: { stopVisible: false } } });
+  });
 
   it("requires one exact trimmed text match", async () => {
     const { ctx } = makeContext();

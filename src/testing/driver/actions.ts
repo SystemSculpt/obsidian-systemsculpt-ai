@@ -4,6 +4,7 @@ import {
   type DriverActionHandlers,
   throwIfActionCancelled,
 } from "./actionCore";
+import { SUPPORTED_DRIVER_ACTIONS } from "./actionCatalog.js";
 import { CHAT_DEVELOPMENT_STATE_ACTIONS } from "./chatDevelopmentState";
 import { CHAT_TOOL_LIFECYCLE_ACTIONS } from "./chatToolLifecycle";
 import { DIAGNOSTICS_EXPORT_ACTIONS } from "./diagnosticsExports";
@@ -18,8 +19,8 @@ export type { ActionContext } from "./actionCore";
  * Every action operates on the real rendered UI through synthesized user
  * events (pointer, keyboard, input, change, drop), never through service
  * shortcuts, so a scripted run exercises the same code paths as a human.
- * Each area module registers its actions by name; this registry is the only
- * list of what the driver accepts.
+ * Each area module provides handlers by name. The shared action catalog owns
+ * supported names and metadata; tests require exact registry coverage.
  * @internal Tests assert against this value.
  */
 export const DRIVER_ACTIONS: DriverActionHandlers = {
@@ -36,9 +37,9 @@ export async function runDriverAction(
   params: Record<string, unknown>,
 ): Promise<unknown> {
   throwIfActionCancelled(ctx);
-  if (!Object.prototype.hasOwnProperty.call(DRIVER_ACTIONS, action)) {
+  if (!Object.prototype.hasOwnProperty.call(SUPPORTED_DRIVER_ACTIONS, action)) {
     throw new DriverActionError(
-      `Unknown driver action "${action}". Available: ${Object.keys(DRIVER_ACTIONS).join(", ")}.`,
+      `Unknown driver action "${action}". Available: ${Object.keys(SUPPORTED_DRIVER_ACTIONS).join(", ")}.`,
     );
   }
   return DRIVER_ACTIONS[action](ctx, params);

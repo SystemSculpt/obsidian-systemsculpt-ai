@@ -283,11 +283,12 @@ results. The CLI resolves the vault from systemsculpt-sync.config.json; use
 --vault or --plugin-dir to override.
 
 Script steps name driver actions (`waitFor`, `click`,
-`chat.waitForDevelopmentRun`, ...). Each area module in src/testing/driver
-(domActions, snapshotsAndWaits, chatToolLifecycle, chatDevelopmentState,
-diagnosticsExports) exports a record of its actions by name; actions.ts merges
-them into the one registry the driver dispatches from, and an unknown action's
-error lists every registered name.
+`chat.waitForDevelopmentRun`, ...). The shared src/testing/driver/actionCatalog.js
+catalog owns supported names, public CLI aliases, and cancellation detachability.
+The plugin and CLI import it directly: help and unknown-action/verb errors use
+the same catalog. Each area module supplies handlers; actions.ts merges them,
+and catalog tests require exact handler coverage. Observation-only waits may
+detach on cancellation; waits that can approve UI actions retain queue ownership.
 
 The guarded live ChatView lanes drive the visible UI, use synthetic
 `SS-DEV-TEST-*` ownership markers, stay in Ask Approval, and trash only the

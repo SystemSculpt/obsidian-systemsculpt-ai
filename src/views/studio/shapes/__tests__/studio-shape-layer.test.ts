@@ -366,6 +366,105 @@ describe("studio shape layer", () => {
     expect(onResizeShape).toHaveBeenCalledWith("s1", { x: 60, y: 50, width: 140, height: 150 });
   });
 
+  it("cancels a shape resize without committing and restores document refreshes", () => {
+    const selection: StudioShapeSelection = { shapeIds: ["s1"], arrowIds: [] };
+    const diagram = diagramFixture();
+    const { canvas, handle, onResizeShape } = mount({ diagram, selection });
+    const addListener = jest.spyOn(window, "addEventListener");
+    const removeListener = jest.spyOn(window, "removeEventListener");
+    try {
+      const first = shapeEl(canvas, "s1");
+      first.querySelector<HTMLElement>('.ss-studio-shape-handle[data-corner="nw"]')
+        ?.dispatchEvent(pointerEvent("pointerdown", 100, 100));
+      const listeners = addListener.mock.calls.filter(([type]) =>
+        ["pointermove", "pointerup", "pointercancel"].includes(type));
+      expect(listeners.map(([type]) => type)).toEqual(["pointermove", "pointerup", "pointercancel"]);
+      window.dispatchEvent(pointerEvent("pointermove", 60, 50));
+      expect(first.style.width).toBe("140px");
+
+      window.dispatchEvent(pointerEvent("pointercancel", 60, 50));
+      expect(first.style.left).toBe("100px");
+      expect(first.style.top).toBe("100px");
+      expect(first.style.width).toBe("100px");
+      expect(first.style.height).toBe("100px");
+      expect(diagram.shapes[0]).toMatchObject({ position: { x: 100, y: 100 }, size: { width: 100, height: 100 } });
+      for (const [type, listener] of listeners) {
+        expect(removeListener).toHaveBeenCalledWith(type, listener);
+      }
+
+      const refreshed = diagramFixture();
+      refreshed.shapes[0].position = { x: 220, y: 240 };
+      refreshed.shapes[0].size = { width: 180, height: 160 };
+      handle.update({ diagram: refreshed, busy: false, activeCanvasTool: "select", selection });
+      expect(shapeEl(canvas, "s1")).toBe(first);
+      expect(first.style.left).toBe("220px");
+      expect(first.style.width).toBe("180px");
+      expect(first.querySelectorAll(".ss-studio-shape-handle")).toHaveLength(4);
+
+      window.dispatchEvent(pointerEvent("pointermove", 20, 20));
+      window.dispatchEvent(pointerEvent("pointerup", 20, 20));
+      window.dispatchEvent(pointerEvent("pointercancel", 20, 20));
+      expect(first.style.left).toBe("220px");
+      expect(first.style.width).toBe("180px");
+      expect(onResizeShape).not.toHaveBeenCalled();
+    } finally {
+      addListener.mockRestore();
+      removeListener.mockRestore();
+    }
+  });
+
+  it.each(["geometry", "deletion"])("adopts peer %s received during a cancelled shape resize", (change) => {
+    const selection: StudioShapeSelection = { shapeIds: ["s1"], arrowIds: [] };
+    const { canvas, handle, onResizeShape } = mount({ selection });
+    const first = shapeEl(canvas, "s1");
+    first.querySelector<HTMLElement>('.ss-studio-shape-handle[data-corner="nw"]')
+      ?.dispatchEvent(pointerEvent("pointerdown", 100, 100));
+    window.dispatchEvent(pointerEvent("pointermove", 60, 50));
+
+    const refreshed = diagramFixture();
+    if (change === "geometry") {
+      refreshed.shapes[0].position = { x: 220, y: 240 };
+      refreshed.shapes[0].size = { width: 180, height: 160 };
+    } else {
+      refreshed.shapes = refreshed.shapes.filter(shape => shape.id !== "s1");
+      refreshed.arrows = [];
+    }
+    handle.update({ diagram: refreshed, busy: false, activeCanvasTool: "select", selection });
+    expect(first.style.width).toBe("140px");
+    expect(first.querySelectorAll(".ss-studio-shape-handle")).toHaveLength(0);
+
+    window.dispatchEvent(pointerEvent("pointercancel", 60, 50));
+    window.dispatchEvent(pointerEvent("pointermove", 20, 20));
+    window.dispatchEvent(pointerEvent("pointerup", 20, 20));
+    expect(onResizeShape).not.toHaveBeenCalled();
+    if (change === "geometry") {
+      expect(shapeEl(canvas, "s1")).toBe(first);
+      expect(first.style.left).toBe("220px");
+      expect(first.style.top).toBe("240px");
+      expect(first.style.width).toBe("180px");
+      expect(first.style.height).toBe("160px");
+      expect(first.querySelectorAll(".ss-studio-shape-handle")).toHaveLength(4);
+    } else {
+      expect(canvas.querySelector('[data-shape-id="s1"]')).toBeNull();
+      expect(first.isConnected).toBe(false);
+      expect(canvas.querySelector(".ss-studio-shape-arrow-line")).toBeNull();
+    }
+  });
+
+  it("ignores another pointer's cancellation during a shape resize", () => {
+    const selection: StudioShapeSelection = { shapeIds: ["s1"], arrowIds: [] };
+    const { canvas, onResizeShape } = mount({ selection });
+    shapeEl(canvas, "s1").querySelector<HTMLElement>('.ss-studio-shape-handle[data-corner="nw"]')
+      ?.dispatchEvent(pointerEvent("pointerdown", 100, 100));
+    const otherPointer = new MouseEvent("pointercancel");
+    Object.defineProperty(otherPointer, "pointerId", { value: 2 });
+    window.dispatchEvent(otherPointer);
+    window.dispatchEvent(pointerEvent("pointermove", 60, 50));
+    window.dispatchEvent(pointerEvent("pointerup", 60, 50));
+    expect(onResizeShape).toHaveBeenCalledTimes(1);
+    expect(onResizeShape).toHaveBeenCalledWith("s1", { x: 60, y: 50, width: 140, height: 150 });
+  });
+
   it("edits the label in place and commits multiline text on blur", () => {
     const { canvas, onLabelChange } = mount();
 

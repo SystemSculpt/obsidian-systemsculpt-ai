@@ -1,7 +1,8 @@
 /** @jest-environment jsdom */
 
-import { App, Platform, TFile } from "obsidian";
+import { App, Component, Platform, TFile } from "obsidian";
 import { AudioProcessorModal } from "../AudioProcessorModal";
+import { AudioProcessorPanel } from "../AudioProcessorPanel";
 
 const audioFile = (
   path: string,
@@ -24,7 +25,7 @@ function createPlugin(
   (app.vault as any).adapter = {
     getFullPath: jest.fn((path: string) => `/vault/${path}`),
   };
-  return {
+  const plugin = Object.assign(new Component(), {
     app,
     manifest: { version: "6.1.0" },
     settings: {
@@ -33,10 +34,9 @@ function createPlugin(
       ...settings,
     },
     directoryManager: { ensureDirectoryByPath: jest.fn() },
-    register: jest.fn(),
-    addChild: jest.fn((child) => child),
-    removeChild: jest.fn(),
-  } as any;
+  });
+  plugin.load();
+  return plugin as any;
 }
 
 function buttonWithText(root: HTMLElement, text: string): HTMLButtonElement {
@@ -170,6 +170,46 @@ describe("AudioProcessorModal", () => {
         onProgress: expect.any(Function),
       }),
     );
+  });
+
+  it.each(["succeeded", "failed"] as const)("releases a %s job's unload teardown", async (outcome) => {
+    const plugin = createPlugin();
+    let signal: AbortSignal | undefined;
+    let finish!: (value: unknown) => void;
+    let fail!: (reason: unknown) => void;
+    const pending = new Promise((resolve, reject) => { finish = resolve; fail = reject; });
+    let settled!: () => void;
+    const completed = new Promise<void>((resolve) => { settled = resolve; });
+    const settlePanel = function (this: AudioProcessorPanel): void {
+      this.close();
+      settled();
+    };
+    jest.spyOn(AudioProcessorPanel.prototype, "succeed").mockImplementation(settlePanel);
+    jest.spyOn(AudioProcessorPanel.prototype, "fail").mockImplementation(settlePanel);
+    const process = jest.fn((_source: unknown, options: { signal: AbortSignal }) => {
+      signal = options.signal;
+      return pending;
+    });
+    const modal = new AudioProcessorModal(plugin, {
+      initialTab: "youtube",
+      createService: () => ({ process }) as any,
+    });
+    document.body.appendChild(modal.modalEl);
+    modal.onOpen();
+    const input = modal.modalEl.querySelector<HTMLInputElement>(".ss-audio-processor__youtube-input")!;
+    input.value = "https://youtu.be/dQw4w9WgXcQ";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    buttonWithText(modal.modalEl, "Process video").click();
+
+    expect(process).toHaveBeenCalledTimes(1);
+    expect(signal?.aborted).toBe(false);
+    if (outcome === "succeeded") finish({ jobId: "audio_done", notePath: "done.md" });
+    else fail(new Error("Processing failed"));
+    await completed;
+
+    expect(plugin.children).toHaveLength(0);
+    plugin.unload();
+    expect(signal?.aborted).toBe(false);
   });
 
   it("uses bounded, searchable, keyboard-selectable vault audio and a native device picker", () => {

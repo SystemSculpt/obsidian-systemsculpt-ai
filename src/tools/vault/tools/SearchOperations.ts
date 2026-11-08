@@ -468,9 +468,31 @@ export class SearchOperations {
       end++;
     }
 
+    // A single large match must not strand the cursor on an empty page. Keep
+    // its scan entry intact, return a marked preview, and advance past it.
+    let shortenedSnippet: GrepSnippet | undefined;
+    if (end === startOffset && end < snippets.length) {
+      const suffix = "… [preview shortened; read the note for the full match]";
+      const original = snippets[end].text;
+      let low = 0, high = original.length;
+      while (low < high) {
+        const middle = Math.ceil((low + high) / 2);
+        if (countTextTokens(original.slice(0, middle) + suffix) <= bodyTokenBudget) low = middle;
+        else high = middle - 1;
+      }
+      const text = original.slice(0, low) + suffix;
+      shortenedSnippet = { text, tokens: countTextTokens(text) };
+      usedTokens = shortenedSnippet.tokens;
+      end++;
+    }
+
     // Each response trims its own copy; the kept scan serves every page.
     const MAX_CHARS = FILESYSTEM_LIMITS.MAX_RESPONSE_CHARS;
     const formattedResults: FormattedScoredResults = { ...scan.results, results: [...scan.results.results] };
+    if (shortenedSnippet) {
+      formattedResults.truncated = true;
+      formattedResults.notice = "An oversized match preview was shortened to fit this page. Read its note for the full match.";
+    }
     const metaResults = cursorState !== null && cursorState.s !== scan.id
       ? [...scan.metaResults, {
         file: "_new_search",
@@ -506,13 +528,15 @@ export class SearchOperations {
           omitted_matches: remainingCount,
           omitted_tokens: omittedTokens
         },
-        snippets: snippets.slice(startOffset, end).map((snippet) => snippet.text),
+        snippets: snippets.slice(startOffset, end).map((snippet, index) =>
+          index === 0 && shortenedSnippet ? shortenedSnippet.text : snippet.text),
         footer: remainingCount > 0 ? `...[omitted ${omittedTokens} tokens across ${remainingCount} matches]` : ''
       };
     };
 
     let response = buildResponse();
-    while (end > startOffset && JSON.stringify(response).length > MAX_CHARS) {
+    // Retain at least one match before trimming duplicate ranking metadata.
+    while (end > startOffset + 1 && JSON.stringify(response).length > MAX_CHARS) {
       end -= 1;
       usedTokens -= snippets[end].tokens;
       response = buildResponse();
@@ -521,6 +545,9 @@ export class SearchOperations {
       formattedResults.results.pop();
       formattedResults.truncated = true;
       response = buildResponse();
+    }
+    if (JSON.stringify(response).length > MAX_CHARS) {
+      throw new Error("Search response metadata exceeds the response character budget. Narrow the paths or search pattern.");
     }
     // Keep the scan only while a cursor can still reach it, and never one the
     // vault changed under while it ran.

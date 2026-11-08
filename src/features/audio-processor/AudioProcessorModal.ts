@@ -3,6 +3,7 @@ import type SystemSculptPlugin from "../../main";
 import { AudioSourcePicker, type AudioSourceSelection } from "../../components/AudioSourcePicker";
 import { SYSTEMSCULPT_LEGAL_URLS } from "../../constants/externalServices";
 import { StandardModal } from "../../core/ui/modals/standard/StandardModal";
+import { registerRunTeardown } from "../../core/plugin/lifecycle/RunTeardown";
 import {
   createUiAction,
   createUiRadioGroup,
@@ -345,7 +346,7 @@ export class AudioProcessorModal extends StandardModal {
     this.launching = true;
     this.syncProcessButton();
     const controller = new AbortController();
-    this.plugin.register(() => controller.abort());
+    const releaseUnload = registerRunTeardown(this.plugin, () => controller.abort());
     const panel = new AudioProcessorPanel(
       this.plugin,
       sourceLabel,
@@ -364,6 +365,8 @@ export class AudioProcessorModal extends StandardModal {
       panel.succeed(note);
     } catch (error) {
       panel.fail(error);
+    } finally {
+      releaseUnload();
     }
   }
 
