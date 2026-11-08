@@ -71,6 +71,11 @@
   display: block;
 }
 
+/* Keep provider detection grouped with execution, not the next preference. */
+.ss-settings-surface .ss-chat-execution-settings {
+  margin-bottom: var(--ss-space-2);
+}
+
 /* The Studio launcher has no detail; center its label with the taller button. */
 .ss-settings-surface .setting-item[data-ss-setting="studio.open"] {
   align-items: center;

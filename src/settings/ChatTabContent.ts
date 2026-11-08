@@ -15,7 +15,7 @@ export async function displayChatTabContent(containerEl: HTMLElement, tabInstanc
 
     containerEl.createEl("h3", { text: "Chat settings" });
 
-    const execution = containerEl.createDiv();
+    const execution = containerEl.createDiv({ cls: "ss-chat-execution-settings" });
     const cleanup = mountCodexExecutionControls(execution, plugin, {});
     const unregister = tabInstance.registerRenderCleanup(cleanup);
     codexSettingsCleanup.set(containerEl, () => { cleanup(); unregister(); });
