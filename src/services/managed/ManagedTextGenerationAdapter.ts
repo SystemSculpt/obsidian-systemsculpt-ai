@@ -106,7 +106,9 @@ const MAX_MESSAGE_BYTES = 524_288;
 const MAX_AGGREGATE_BYTES = 1_048_576;
 const MAX_ERROR_MESSAGE_LENGTH = 2_048;
 const PURPOSES: readonly ManagedTextGenerationPurpose[] = ["transcript_postprocess", "workflow_automation"];
-const STATUS_CODES: Readonly<Record<number, Readonly<{ code: ManagedTextGenerationErrorCode; retryable: boolean }>>> = Object.freeze({
+// This is the pinned text-generation wire contract, not HTTP fallback policy.
+// In particular, 500/502 cannot replay a completion whose result is not retained.
+const WIRE_ERROR_STATUSES: Readonly<Record<number, Readonly<{ code: ManagedTextGenerationErrorCode; retryable: boolean }>>> = Object.freeze({
   400: { code: "invalid_request", retryable: false },
   401: { code: "license_required", retryable: false },
   402: { code: "insufficient_credits", retryable: false },
@@ -318,7 +320,7 @@ function errorKeysForStatus(status: number, value: JsonRecord): readonly string[
   if (status === 409) return [...common, "disposition", "retry_after_ms"];
   if (status === 426) return [...common, "minimum_version", "current_version"];
   if (status === 429) return [...common, "retry_after_ms"];
-  return STATUS_CODES[status] ? common : null;
+  return WIRE_ERROR_STATUSES[status] ? common : null;
 }
 
 function parseError(value: unknown, status: number, operationId: string, requestId: string): ManagedTextGenerationError {
@@ -353,7 +355,7 @@ function parseError(value: unknown, status: number, operationId: string, request
     });
   }
 
-  const descriptor = STATUS_CODES[status];
+  const descriptor = WIRE_ERROR_STATUSES[status];
   if (!descriptor || error.code !== descriptor.code || error.retryable !== descriptor.retryable) {
     throw invalidResponse(operationId, requestId);
   }

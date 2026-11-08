@@ -1,6 +1,7 @@
 import { ManagedMediaJobClient, ManagedMediaJobError, MANAGED_MEDIA_JOB_PROTOCOL } from "../ManagedMediaJobClient";
 import { HostedTransportAdapter } from "../adapters/HostedTransportAdapter";
 import retryFixture from "../../../../testing/fixtures/retry-after.json";
+import { isRetryableManagedJobObservationError } from "../ManagedJobObservation";
 
 const JOB_ID = "123e4567-e89b-42d3-a456-426614174000";
 const SHA_1_2 = "a12871fee210fb8619291eaea194581cbd2531e4b23759d225f6806923f63222";
@@ -208,10 +209,14 @@ describe("ManagedMediaJobClient managed-job-protocol-v2 wire contract", () => {
   });
 
   it.each([
-    [400, "invalid_request", false], [401, "license_required", false], [402, "payment_required", false], [403, "license_rejected", false], [404, "not_found", false], [409, "operation_conflict", false], [413, "invalid_request", false], [426, "upgrade_required", false], [429, "rate_limited", true], [502, "temporarily_unavailable", true], [503, "temporarily_unavailable", true],
+    [400, "invalid_request", false], [401, "license_required", false], [402, "payment_required", false], [403, "license_rejected", false], [404, "not_found", false], [409, "operation_conflict", false], [413, "invalid_request", false], [422, "invalid_request", false], [426, "upgrade_required", false], [429, "rate_limited", true], [500, "temporarily_unavailable", true], [502, "temporarily_unavailable", true], [503, "temporarily_unavailable", true], [504, "temporarily_unavailable", true], [599, "temporarily_unavailable", true],
   ] as const)("falls back to the HTTP %s taxonomy when the envelope is not exact", async (status, code, retryable) => {
-    request.mockResolvedValue(json({ contract_version: MANAGED_MEDIA_JOB_PROTOCOL, code: "server_code", message: "detail", request_id: "req-1", storage: "secret" }, status, { ...v2Headers(), "retry-after": "5" }));
-    await expect(client.images.status(JOB_ID)).rejects.toMatchObject({ code, status, requestId: "req-1", retryable, retryAfterMs: 5_000, message: expect.not.stringContaining("secret") });
+    for (const kind of ["images", "videos"] as const) {
+      request.mockResolvedValueOnce(json({ contract_version: MANAGED_MEDIA_JOB_PROTOCOL, code: "server_code", message: "detail", request_id: "req-1", storage: "secret" }, status, { ...v2Headers(), "retry-after": "5" }));
+      const failure = await client[kind].status(JOB_ID).catch(error => error);
+      expect(failure).toMatchObject({ code, status, requestId: "req-1", retryable, retryAfterMs: 5_000, message: expect.not.stringContaining("secret") });
+      expect(isRetryableManagedJobObservationError(failure)).toBe(retryable);
+    }
   });
 
   it("ignores an envelope whose request ID does not echo and non-JSON error bodies", async () => {
@@ -424,6 +429,12 @@ describe("ManagedMediaJobClient managed-job-protocol-v2 wire contract", () => {
     const controller = new AbortController();
     request.mockResolvedValue(new Response(new ReadableStream({ pull(stream) { controller.abort(); stream.error(new DOMException("Aborted", "AbortError")); } }), { status: 200, headers: imageDownloadHeaders() }));
     await expect(client.images.downloadOutput(JOB_ID, 0, imageOutput, controller.signal)).rejects.toMatchObject({ name: "AbortError" });
+  });
+
+  it.each(["bad request id", "x".repeat(129), "injected\r\nheader"])("rejects unsafe generated request IDs before transport (%s)", async requestId => {
+    const invalidIdClient = new ManagedMediaJobClient(transport, undefined, () => requestId);
+    await expect(invalidIdClient.images.status(JOB_ID)).rejects.toThrow("Invalid generated request ID.");
+    expect(request).not.toHaveBeenCalled();
   });
 
   it("pre-aborts before dispatch and exposes the typed error class", async () => {

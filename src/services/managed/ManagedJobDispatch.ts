@@ -1,3 +1,4 @@
+import { createManagedRequestId } from "./ManagedRequestId";
 import type { ManagedJobRecoveryStore } from "./ManagedJobRecoveryStore";
 import type { ManagedJobRecoveryRecord, ManagedMultipartCreateRequest, ManagedPendingDispatch } from "./ManagedTypes";
 
@@ -5,8 +6,7 @@ import type { ManagedJobRecoveryRecord, ManagedMultipartCreateRequest, ManagedPe
 export class ManagedJobDispatch {
   constructor(
     private readonly recovery: Pick<ManagedJobRecoveryStore, "beginDispatch">,
-    private readonly createRequestId: () => string = () => window.crypto?.randomUUID?.()
-      ?? `dispatch-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    private readonly createRequestId: () => string = () => createManagedRequestId("dispatch"),
     private readonly now: () => string = () => new Date().toISOString(),
   ) {}
 

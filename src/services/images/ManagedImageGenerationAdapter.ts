@@ -1,3 +1,6 @@
+import { throwIfManagedAborted } from "../managed/ManagedAbort";
+import { ManagedJobDispatch } from "../managed/ManagedJobDispatch";
+import { createManagedRequestId } from "../managed/ManagedRequestId";
 import { managedMediaDeliveryOffset, type ManagedMediaDeliveryClock } from "../managed/ManagedMediaDeliveryTiming";
 import type { ManagedJobRecoveryStore } from "../managed/ManagedJobRecoveryStore";
 import type {
@@ -6,7 +9,6 @@ import type {
   ManagedImageOutputMetadata,
   ManagedJobRecoveryRecord,
   ManagedMediaUsage,
-  ManagedPendingDispatch,
 } from "../managed/ManagedTypes";
 import {
   dispatchManagedJob,
@@ -118,16 +120,8 @@ export type ManagedImageGenerationDependencies = Readonly<{
   wait?: (milliseconds: number, signal: AbortSignal) => Promise<void>;
 }>;
 
-function abortError(): DOMException {
-  return new DOMException("Image generation was cancelled locally.", "AbortError");
-}
-
 function throwIfAborted(signal: AbortSignal): void {
-  if (signal.aborted) throw abortError();
-}
-
-function defaultRequestId(): string {
-  return window.crypto?.randomUUID?.() ?? `image-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  throwIfManagedAborted(signal, "Image generation was cancelled locally.");
 }
 
 function normalizePayload(payload: ManagedImageGenerationPayload): {
@@ -199,16 +193,16 @@ function terminalStatusFromError(error: unknown): "failed" | "expired" | null {
  * receipt after the vault write. The provider key never leaves the server.
  */
 export class ManagedImageGenerationAdapter {
-  private readonly createRequestId: () => string;
-  private readonly now: () => string;
+  private readonly dispatch: ManagedJobDispatch;
   private readonly nowMs: () => number;
   private readonly elapsedNow: () => number;
   private readonly wait: (milliseconds: number, signal: AbortSignal) => Promise<void>;
   private readonly deliveryClocks = new Map<string, ManagedMediaDeliveryClock>();
 
   constructor(private readonly dependencies: ManagedImageGenerationDependencies) {
-    this.createRequestId = dependencies.createRequestId ?? defaultRequestId;
-    this.now = dependencies.now ?? (() => new Date().toISOString());
+    this.dispatch = new ManagedJobDispatch(
+      dependencies.recovery, dependencies.createRequestId ?? (() => createManagedRequestId("image")), dependencies.now,
+    );
     this.nowMs = dependencies.nowMs ?? (() => Date.now());
     this.elapsedNow = dependencies.elapsedNow ?? (() => window.performance?.now?.() ?? Date.now());
     this.wait = dependencies.wait ?? waitForManagedJob;
@@ -242,7 +236,7 @@ export class ManagedImageGenerationAdapter {
 
     let uploaded: ManagedUploadedImageInput[] | undefined;
     if (payload.inputs.length > 0) {
-      record = await this.beginDispatch(record, "prepare");
+      record = await this.dispatch.begin(record, "prepare");
       const prepared = await this.dependencies.prepareInputs(
         payload.inputs.map(input => ({ mime_type: input.mimeType, size_bytes: input.sizeBytes, sha256: input.sha256 })),
         index => payload.inputs[index].load(),
@@ -254,7 +248,7 @@ export class ManagedImageGenerationAdapter {
       record = await this.dependencies.recovery.acknowledgePrepared(operation.operationId, record.revision);
     }
 
-    record = await this.beginDispatch(record, "create");
+    record = await this.dispatch.begin(record, "create");
     const created = await dispatchManagedJob({
       send: () => this.dependencies.jobs.create({
         ...(payload.model ? { model: payload.model } : {}),
@@ -316,18 +310,6 @@ export class ManagedImageGenerationAdapter {
     if (!delivery) throw new Error("Managed image delivery timing is unavailable.");
     const clock = this.deliveryClocks.get(record.operationId);
     return managedMediaDeliveryOffset(delivery, clock, clock ? this.elapsedNow() : this.nowMs());
-  }
-
-  private beginDispatch(
-    record: ManagedJobRecoveryRecord,
-    operation: Extract<ManagedPendingDispatch["operation"], "prepare" | "create">,
-  ): Promise<ManagedJobRecoveryRecord> {
-    return this.dependencies.recovery.beginDispatch(CAPABILITY, record.operationId, record.revision, {
-      operation,
-      requestId: this.createRequestId(),
-      ...(operation === "create" ? { idempotencyKey: `${record.operationId}:create` } : {}),
-      dispatchedAt: this.now(),
-    });
   }
 
   private async pollAndDownload(

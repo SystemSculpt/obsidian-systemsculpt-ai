@@ -218,6 +218,28 @@ describe("ManagedJobObservation", () => {
     }
   });
 
+  it.each([
+    Object.assign(new Error("Cancelled"), { name: "AbortError", status: 503, retryable: true }),
+    Object.assign(new TypeError("Cancelled"), { name: "AbortError" }),
+    { name: "AbortError", retryable: true },
+    { status: 500, retryable: false },
+    { status: 502, retryable: false, code: "upstream_failed" },
+    Object.assign(new TypeError("Invalid response"), { retryable: false }),
+    { code: "job_expired", status: 200, retryable: false },
+  ])("does not override cancellation or a typed permanent failure (%j)", error => {
+    expect(isRetryableManagedJobObservationError(error)).toBe(false);
+  });
+
+  it("uses the same retry and Retry-After defaults for observation and dispatch", async () => {
+    const wait = jest.fn().mockResolvedValue(undefined);
+    const read = jest.fn().mockRejectedValueOnce({ status: 500, retryable: true, retryAfterMs: 7_000 }).mockResolvedValue("done");
+    const observation = observeManagedJob({ read, signal: new AbortController().signal, wait });
+    await expect(observation.next()).resolves.toMatchObject({ value: "done" });
+    await observation.return(undefined as never);
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(wait).toHaveBeenCalledWith(7_000, expect.any(AbortSignal));
+  });
+
   it("retries a request that hit its client deadline but never a local cancel", () => {
     expect(isRetryableManagedJobObservationError(new PlatformRequestTimeoutError(30_000))).toBe(true);
     expect(isRetryableManagedJobObservationError(new DOMException("Aborted", "AbortError"))).toBe(false);

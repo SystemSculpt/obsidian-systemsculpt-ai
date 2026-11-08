@@ -2,6 +2,7 @@ import fixture from "../../../../testing/fixtures/managed/managed-job-protocol-v
 import imageOutputFixture from "../../../../testing/fixtures/managed/managed-image-output-v1.json";
 import { ManagedJobClient, MANAGED_JOB_DESCRIPTORS, MANAGED_JOB_OPERATION_STATUSES, MANAGED_JOB_PROTOCOL } from "../ManagedJobClient";
 import { HostedTransportAdapter } from "../adapters/HostedTransportAdapter";
+import { dispatchManagedJob, isRetryableManagedJobObservationError } from "../ManagedJobObservation";
 import retryFixture from "../../../../testing/fixtures/retry-after.json";
 
 const json = (value: unknown, status = 200, headers: Record<string, string> = {}) => new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json", "x-request-id": "req-1", ...headers } });
@@ -66,6 +67,20 @@ describe("ManagedJobClient exact wire contract", () => {
   it.each([["2025-12-31T23:59:59Z", false], ["2026-01-01T00:00:00Z", false], ["2026-01-01T00:00:01Z", true]] as const)("validates document upload expiry %s future=%s", async (expires_at, accepted) => {
     const deterministic = new ManagedJobClient(transport, () => Date.parse("2026-01-01T00:00:00Z")); request.mockResolvedValue(json({ document: { id: "doc", status: "uploading" }, upload: { part_size_bytes: 5, total_parts: 1, part_url_expires_in_seconds: 900, expires_at } }));
     const result = deterministic.documents.create({ filename: "a.pdf", contentType: "application/pdf", contentLengthBytes: 5 }, "op"); if (accepted) await expect(result).resolves.toBeDefined(); else await expect(result).rejects.toMatchObject({ code: "malformed_response" });
+  });
+
+  it("keeps the same idempotency key and bytes across an HTTP 500 dispatch replay", async () => {
+    request.mockResolvedValueOnce(json({}, 500, { "retry-after": "5" }))
+      .mockResolvedValueOnce(json({ job: txJob(), upload: { part_size_bytes: 5, total_parts: 1, part_url_expires_in_seconds: 900 } }));
+    const wait = jest.fn().mockResolvedValue(undefined);
+    await expect(dispatchManagedJob({
+      send: () => client.transcription.create({ filename: "a.wav", contentType: "audio/wav", contentLengthBytes: 5 }, "operation-1"),
+      signal: new AbortController().signal, wait,
+    })).resolves.toMatchObject({ job: { id: "job-1" } });
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(request.mock.calls[1][0]).toEqual(request.mock.calls[0][0]);
+    expect(request.mock.calls[0][0].headers["idempotency-key"]).toBe("operation-1:create");
+    expect(wait).toHaveBeenCalledWith(5_000, expect.any(AbortSignal));
   });
 
   it("sends exact transcription create body/headers and returns only durable public fields", async () => {
@@ -156,16 +171,12 @@ describe("ManagedJobClient exact wire contract", () => {
   ] as const)("rejects malformed actual %s parser", async (_name, invoke, payload) => { request.mockResolvedValue(json(payload)); await expect(invoke()).rejects.toMatchObject({ code: "malformed_response" }); });
 
   it.each([
-    [400, "invalid_request", false], [401, "license_required", false], [402, "payment_required", false], [403, "license_rejected", false], [409, "operation_conflict", false], [426, "upgrade_required", false], [429, "rate_limited", true], [502, "temporarily_unavailable", true], [503, "temporarily_unavailable", true],
+    [400, "invalid_request", false], [401, "license_required", false], [402, "payment_required", false], [403, "license_rejected", false], [404, "not_found", false], [409, "operation_conflict", false], [413, "invalid_request", false], [422, "invalid_request", false], [426, "upgrade_required", false], [429, "rate_limited", true], [500, "temporarily_unavailable", true], [502, "temporarily_unavailable", true], [503, "temporarily_unavailable", true], [504, "temporarily_unavailable", true], [599, "temporarily_unavailable", true],
   ])("maps HTTP %s exactly with request ID/retryability", async (status, code, retryable) => {
     request.mockResolvedValue(json({ code }, status, { "retry-after": "5" }));
-    await expect(client.transcription.status("job")).rejects.toMatchObject({
-      code,
-      status,
-      requestId: "req-1",
-      retryable,
-      retryAfterMs: 5_000,
-    });
+    const failure = await client.transcription.status("job").catch(error => error);
+    expect(failure).toMatchObject({ code, status, requestId: "req-1", retryable, retryAfterMs: 5_000 });
+    expect(isRetryableManagedJobObservationError(failure)).toBe(retryable);
   });
 
   it.each([
@@ -206,7 +217,7 @@ describe("ManagedJobClient exact wire contract", () => {
 
   it.each([500, 502, 503])("does not expose HTTP %s server internals", async status => {
     request.mockResolvedValue(json({ error: "upstream secret internal detail" }, status));
-    const message = status === 500 ? "Managed job request failed (500)." : "SystemSculpt processing is temporarily unavailable.";
+    const message = "SystemSculpt processing is temporarily unavailable.";
     await expect(client.transcription.status("job")).rejects.toMatchObject({ message, status });
   });
 

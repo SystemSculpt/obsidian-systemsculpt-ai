@@ -1,9 +1,11 @@
+import { throwIfManagedAborted } from "../managed/ManagedAbort";
+import { ManagedJobDispatch } from "../managed/ManagedJobDispatch";
+import { createManagedRequestId } from "../managed/ManagedRequestId";
 import { managedMediaDeliveryOffset, type ManagedMediaDeliveryClock } from "../managed/ManagedMediaDeliveryTiming";
 import type { ManagedJobRecoveryStore } from "../managed/ManagedJobRecoveryStore";
 import type {
   ManagedUploadedImageInput,
   ManagedJobRecoveryRecord,
-  ManagedPendingDispatch,
   ManagedDeliveredVideoOutputBytes,
   ManagedVideoOutputMetadata,
 } from "../managed/ManagedTypes";
@@ -201,10 +203,6 @@ async function probeVideoOutputMetadata(output: ManagedDeliveredVideoOutputBytes
   }
 }
 
-function abortError(): DOMException {
-  return new DOMException("Video generation was cancelled locally.", "AbortError");
-}
-
 /** Phases where the server holds work this vault has not yet saved locally. */
 function isResumablePhase(phase: ManagedJobRecoveryRecord["phase"]): boolean {
   return phase === "created" || phase === "processing" || phase === "result_ready" || phase === "local_commit_pending";
@@ -223,11 +221,7 @@ function isReconcilable(phase: ManagedJobRecoveryRecord["phase"]): boolean {
 }
 
 function throwIfAborted(signal: AbortSignal): void {
-  if (signal.aborted) throw abortError();
-}
-
-function defaultRequestId(): string {
-  return window.crypto?.randomUUID?.() ?? `video-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  throwIfManagedAborted(signal, "Video generation was cancelled locally.");
 }
 
 function normalizePayload(payload: ManagedVideoGenerationPayload): {
@@ -305,8 +299,7 @@ function terminalStatusFromError(error: unknown): "failed" | "expired" | null {
 }
 
 export class ManagedVideoGenerationAdapter {
-  private readonly createRequestId: () => string;
-  private readonly now: () => string;
+  private readonly dispatch: ManagedJobDispatch;
   private readonly nowMs: () => number;
   private readonly elapsedNow: () => number;
   private readonly probeOutputMetadata: (output: ManagedDeliveredVideoOutputBytes) => Promise<VideoOutputMeasurement>;
@@ -315,8 +308,9 @@ export class ManagedVideoGenerationAdapter {
   private readonly outputMeasurementTasks = new Map<string, Promise<VideoOutputMeasurement[]>>();
 
   constructor(private readonly dependencies: ManagedVideoGenerationDependencies) {
-    this.createRequestId = dependencies.createRequestId ?? defaultRequestId;
-    this.now = dependencies.now ?? (() => new Date().toISOString());
+    this.dispatch = new ManagedJobDispatch(
+      dependencies.recovery, dependencies.createRequestId ?? (() => createManagedRequestId("video")), dependencies.now,
+    );
     this.nowMs = dependencies.nowMs ?? (() => Date.now());
     this.elapsedNow = dependencies.elapsedNow ?? (() => window.performance?.now?.() ?? Date.now());
     this.probeOutputMetadata = dependencies.probeOutputMetadata ?? probeVideoOutputMetadata;
@@ -356,7 +350,7 @@ export class ManagedVideoGenerationAdapter {
 
     let uploadedFrames: ManagedVideoFrameImage[] | undefined;
     if (payload.frames.length > 0) {
-      record = await this.beginDispatch(record, "prepare");
+      record = await this.dispatch.begin(record, "prepare");
       const prepared = await this.dependencies.prepareFrames(
         payload.frames.map(frame => ({
           mime_type: frame.mimeType,
@@ -372,7 +366,7 @@ export class ManagedVideoGenerationAdapter {
       record = await this.dependencies.recovery.acknowledgeVideoPrepared(operation.operationId, record.revision);
     }
 
-    record = await this.beginDispatch(record, "create");
+    record = await this.dispatch.begin(record, "create");
     const created = await dispatchManagedJob({
       send: () => this.dependencies.jobs.create({
         model: payload.model,
@@ -475,18 +469,6 @@ export class ManagedVideoGenerationAdapter {
     if (!delivery) throw new Error("Managed video delivery timing is unavailable.");
     const clock = this.deliveryClocks.get(record.operationId);
     return managedMediaDeliveryOffset(delivery, clock, clock ? this.elapsedNow() : this.nowMs());
-  }
-
-  private beginDispatch(
-    record: ManagedJobRecoveryRecord,
-    operation: Extract<ManagedPendingDispatch["operation"], "prepare" | "create">,
-  ): Promise<ManagedJobRecoveryRecord> {
-    return this.dependencies.recovery.beginDispatch(CAPABILITY, record.operationId, record.revision, {
-      operation,
-      requestId: this.createRequestId(),
-      ...(operation === "create" ? { idempotencyKey: `${record.operationId}:create` } : {}),
-      dispatchedAt: this.now(),
-    });
   }
 
   private async pollAndDownload(
