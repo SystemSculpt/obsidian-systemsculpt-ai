@@ -199,7 +199,7 @@ describe("tool results in chat", () => {
       part("c", "Bash", encoded),
       part("d", "generate_image", encoded, "running"),
     ]);
-    expect(presented.media).toEqual([{ kind: "image", path: "SystemSculpt/Images/a.png", order: 0, ratio: 1 }]);
+    expect(presented.media).toEqual([{ kind: "image", path: "SystemSculpt/Images/a.png", order: 0, ratio: 1, fixed: true }]);
     expect(presented.notices).toEqual([{ text: "Image generation comes with a SystemSculpt subscription.", label: "Subscribe", url: SUBSCRIBE }]);
   });
 });
