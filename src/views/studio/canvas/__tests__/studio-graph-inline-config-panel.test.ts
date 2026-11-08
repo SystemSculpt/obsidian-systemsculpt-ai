@@ -2,6 +2,9 @@
 
 import type { StudioNodeDefinition, StudioNodeInstance } from "../../../../studio/types";
 import { renderInlineConfigPanel } from "../StudioGraphInlineConfigPanel";
+import { createEmptyStudioProject } from "../../../../studio/schema";
+import { StudioGraphHistory } from "../../StudioGraphHistory";
+import { serializeStudioNoteItems } from "../../../../studio/StudioNoteConfig";
 
 function createNode(overrides?: Partial<StudioNodeInstance>): StudioNodeInstance {
   return {
@@ -35,6 +38,54 @@ function createDefinition(
     }),
   };
 }
+
+it.each(["text", "textarea", "string_list", "file_path", "directory_path", "media_path", "note_selector"] as const)("groups %s input until blur and separates discrete and remounted edits", type => {
+  const root = document.createElement("div");
+  const project = createEmptyStudioProject({ name: "Fields", policyPath: "p", minPluginVersion: "6", maxRuns: 10, maxArtifactsMb: 10 });
+  const stored = (value: string) => type === "note_selector" ? serializeStudioNoteItems([{ path: value, enabled: true }]) : type === "string_list" ? [value] : value;
+  const initial = stored("Before.md");
+  const node = createNode({ config: { setting: initial, other: false } });
+  project.graph.nodes.push(node);
+  const history = new StudioGraphHistory();
+  history.reset(project);
+  const mount = () => renderInlineConfigPanel({ nodeEl: root, node,
+    definition: createDefinition([{ key: "setting", label: "Setting", type }, { key: "other", label: "Other", type: "boolean" }]),
+    orderedFieldKeys: ["setting", "other"], interactionLocked: false,
+    onNodeConfigValueChange: (_id, key, value, options) => {
+      const before = JSON.parse(JSON.stringify(project));
+      node.config[key] = value;
+      history.recordEdit({ project: before, selectedNodeIds: [] }, { project, selectedNodeIds: [] }, options?.historyGroup);
+    },
+  });
+  mount();
+  const field = () => root.querySelector<HTMLInputElement | HTMLTextAreaElement>("input.ss-studio-node-inline-config-input,textarea")!;
+  const input = (value: string) => {
+    field().value = value;
+    field().dispatchEvent(new Event("input", { bubbles: true }));
+  };
+  input("First");
+  input("Second");
+  const edited = JSON.parse(JSON.stringify(node.config.setting));
+  field().dispatchEvent(new Event("blur"));
+  input("Third");
+  expect(history.undo()?.project.graph.nodes[0].config.setting).toEqual(edited);
+  expect(history.undo()?.project.graph.nodes[0].config.setting).toEqual(initial);
+  expect(history.undo()).toBeNull();
+  history.reset(project);
+  input("Fourth");
+  const discrete = root.querySelector<HTMLInputElement>(".ss-studio-node-inline-config-field--other input")!;
+  discrete.checked = true;
+  discrete.dispatchEvent(new Event("change", { bubbles: true }));
+  input("Fifth");
+  expect(history.undo()?.project.graph.nodes[0].config.setting).toEqual(stored("Fourth"));
+  expect(history.undo()?.project.graph.nodes[0].config.other).toBe(false);
+  history.reset(project);
+  input("Sixth");
+  root.replaceChildren();
+  mount();
+  input("Seventh");
+  expect(history.undo()?.project.graph.nodes[0].config.setting).toEqual(stored("Sixth"));
+});
 
 describe("renderInlineConfigPanel", () => {
   it("renders a text field and mutates node config on input", () => {
@@ -227,7 +278,9 @@ it.each([
   if (field instanceof HTMLInputElement && type === "boolean") field.checked = true;
   field.dispatchEvent(new Event(event, { bubbles: true }));
   expect(committed).toHaveBeenCalledTimes(1);
-  expect(committed).toHaveBeenCalledWith(node.id, "setting", expected, { mode });
+  expect(committed).toHaveBeenCalledWith(node.id, "setting", expected, mode === "continuous"
+    ? { mode, historyGroup: expect.any(Symbol) }
+    : { mode });
 
   expect(node.config).toEqual({ unrelated: "preserved" });
 });

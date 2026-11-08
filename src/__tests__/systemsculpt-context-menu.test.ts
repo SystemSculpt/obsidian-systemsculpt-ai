@@ -1,6 +1,5 @@
 import { Notice } from "obsidian";
 import type { App, Menu, TAbstractFile, TFile, TFolder, WorkspaceLeaf } from "obsidian";
-import type SystemSculptPlugin from "../main";
 import { FileContextMenuService } from "../context-menu/FileContextMenuService";
 import { errorLogger } from "../utils/errorLogger";
 import { tryCopyImageFileToClipboard } from "../utils/clipboard";
@@ -132,6 +131,7 @@ const createPluginStub = () => {
     project: { name: "New Studio Project" },
   }));
   const activateSystemSculptStudioView = jest.fn().mockResolvedValue(undefined);
+  const pluginLogger = { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() };
   const plugin = {
     registerEvent: jest.fn((ref) => ref),
     register: jest.fn((unload: () => void) => {
@@ -142,18 +142,11 @@ const createPluginStub = () => {
       licenseValid: true,
       cleanTranscriptionOutput: true,
     },
-    pluginLogger: {
-      debug: jest.fn(),
-      info: jest.fn(),
-      warn: jest.fn(),
-      error: jest.fn(),
-    },
-    getPluginLogger: jest.fn(function () {
-      return this.pluginLogger;
-    }),
+    pluginLogger,
+    getPluginLogger: jest.fn(() => pluginLogger),
     getStudioService: jest.fn(() => ({ createProjectFile })),
     getViewManager: jest.fn(() => ({ activateSystemSculptStudioView })),
-  } as unknown as SystemSculptPlugin & { pluginLogger: any };
+  };
 
   return {
     plugin,
@@ -165,7 +158,7 @@ const createPluginStub = () => {
 
 describe("FileContextMenuService", () => {
 const bootstrap = (
-  options: { autoStart?: boolean; workspaceOptions?: { layoutReady?: boolean } } = {}
+  options: { autoStart?: boolean; withoutPluginLogger?: boolean; workspaceOptions?: { layoutReady?: boolean } } = {}
 ) => {
   const { workspace, handlers, triggerLayoutReady } = createWorkspaceMock(
     options.workspaceOptions
@@ -177,6 +170,9 @@ const bootstrap = (
   };
   const app = { workspace, vault } as unknown as App;
   const { plugin, createProjectFile, activateSystemSculptStudioView } = createPluginStub();
+  if (options.withoutPluginLogger) {
+    (plugin.getPluginLogger as jest.Mock).mockReturnValue(null);
+  }
   const documentProcessor = {
     processDocument: jest.fn(async () => "site/extracted.md"),
   } as any;
@@ -286,9 +282,10 @@ const bootstrap = (
   });
 
   it("reports a created Studio project truthfully when opening its view fails", async () => {
-    const errorSpy = jest.spyOn(console, "error").mockImplementation(() => undefined);
+    const errorSpy = jest.spyOn(errorLogger, "error");
     const {
       handlers,
+      plugin,
       createProjectFile,
       activateSystemSculptStudioView,
     } = bootstrap();
@@ -305,24 +302,28 @@ const bootstrap = (
     expect(Notice).toHaveBeenCalledWith(
       "Created Studio project, but couldn't open it: Projects/Client/New Studio Project.systemsculpt",
     );
-    expect(errorSpy).toHaveBeenCalledWith(
-      "[SystemSculpt][ERROR] Opening new Studio project failed",
+    expect(plugin.pluginLogger.error).toHaveBeenCalledTimes(1);
+    expect(plugin.pluginLogger.error).toHaveBeenCalledWith(
+      "Opening new Studio project failed",
+      undefined,
       {
         source: "FileContextMenuService",
         metadata: {
           folderPath: "Projects/Client",
           projectPath: "Projects/Client/New Studio Project.systemsculpt",
           source: "file-explorer",
+          error: "view unavailable",
         },
       },
-      expect.any(Error),
     );
+    expect(errorSpy).not.toHaveBeenCalled();
   });
 
   it("reports Studio project creation failures without opening a view", async () => {
-    const errorSpy = jest.spyOn(console, "error").mockImplementation(() => undefined);
+    const errorSpy = jest.spyOn(errorLogger, "error");
     const {
       handlers,
+      plugin,
       createProjectFile,
       activateSystemSculptStudioView,
     } = bootstrap();
@@ -337,18 +338,21 @@ const bootstrap = (
     expect(Notice).toHaveBeenCalledWith(
       "Unable to create Studio project: vault write failed",
     );
-    expect(errorSpy).toHaveBeenCalledWith(
-      "[SystemSculpt][ERROR] New Studio project failed",
+    expect(plugin.pluginLogger.error).toHaveBeenCalledTimes(1);
+    expect(plugin.pluginLogger.error).toHaveBeenCalledWith(
+      "New Studio project failed",
+      undefined,
       {
         source: "FileContextMenuService",
         metadata: {
           folderPath: "Projects/Client",
           projectPath: "Projects/Client/New Studio Project.systemsculpt",
           source: "file-explorer",
+          error: "vault write failed",
         },
       },
-      expect.any(Error),
     );
+    expect(errorSpy).not.toHaveBeenCalled();
   });
 
   it("adds Convert to Markdown for supported documents", () => {
@@ -439,8 +443,8 @@ const bootstrap = (
   });
 
   it("marks the progress panel as failed when conversion errors", async () => {
-    const errorSpy = jest.spyOn(console, "error").mockImplementation(() => undefined);
-    const { handlers, documentProcessor, processingPanelLauncher, progressPanel } = bootstrap();
+    const errorSpy = jest.spyOn(errorLogger, "error");
+    const { handlers, plugin, documentProcessor, processingPanelLauncher, progressPanel } = bootstrap();
     const menu = createMenuStub();
     const file = createFile("pdf");
 
@@ -460,14 +464,16 @@ const bootstrap = (
         error,
       })
     );
-    expect(errorSpy).toHaveBeenCalledWith(
-      "[SystemSculpt][ERROR] Document conversion failed",
+    expect(plugin.pluginLogger.error).toHaveBeenCalledTimes(1);
+    expect(plugin.pluginLogger.error).toHaveBeenCalledWith(
+      "Document conversion failed",
+      undefined,
       {
         source: "FileContextMenuService",
-        metadata: { filePath: file.path },
+        metadata: { filePath: file.path, error: error.message },
       },
-      error,
     );
+    expect(errorSpy).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -565,15 +571,18 @@ const bootstrap = (
     expect(handlers.get("files-menu")?.length ?? 0).toBeGreaterThan(0);
   });
 
-  it("logs menu openings even when no actions are available", () => {
-    const { handlers } = bootstrap();
+  it("logs menu openings and debug details through the plugin logger without console fanout", () => {
+    const { handlers, plugin } = bootstrap();
     const menu = createMenuStub();
     const file = createFile("png");
     const infoSpy = jest.spyOn(errorLogger, "info");
+    const debugSpy = jest.spyOn(errorLogger, "debug");
+    plugin.pluginLogger.info.mockClear();
 
     emitFileMenu(handlers, menu, file, "file-explorer");
 
-    expect(infoSpy).toHaveBeenCalledWith(
+    expect(plugin.pluginLogger.info).toHaveBeenCalledTimes(1);
+    expect(plugin.pluginLogger.info).toHaveBeenCalledWith(
       "File menu opened",
       expect.objectContaining({
         source: "FileContextMenuService",
@@ -585,7 +594,38 @@ const bootstrap = (
       })
     );
 
-    infoSpy.mockRestore();
+    expect(plugin.pluginLogger.debug).toHaveBeenCalledTimes(1);
+    expect(infoSpy).not.toHaveBeenCalled();
+    expect(debugSpy).not.toHaveBeenCalled();
+  });
+
+  it("falls back to compatibility logging when the plugin logger is unavailable", async () => {
+    const infoSpy = jest.spyOn(errorLogger, "info");
+    const debugSpy = jest.spyOn(errorLogger, "debug");
+    const errorSpy = jest.spyOn(errorLogger, "error");
+    jest.spyOn(console, "error").mockImplementation(() => undefined);
+    const { handlers, plugin, chatLauncher } = bootstrap({ withoutPluginLogger: true });
+    const menu = createMenuStub();
+    const file = createFile("md");
+    const error = new Error("chat unavailable");
+    chatLauncher.open.mockRejectedValueOnce(error);
+    infoSpy.mockClear();
+
+    emitFileMenu(handlers, menu, file, "file-explorer");
+    await menu.recordedItems.find((item) => item.title === "Chat with file")!.onClick?.();
+
+    expect(infoSpy).toHaveBeenCalledWith("File menu opened", expect.objectContaining({
+      source: "FileContextMenuService",
+    }));
+    expect(debugSpy).toHaveBeenCalledTimes(1);
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    expect(errorSpy).toHaveBeenCalledWith("Chat with file failed", error, {
+      source: "FileContextMenuService",
+      metadata: { filePath: file.path },
+    });
+    expect(plugin.pluginLogger.info).not.toHaveBeenCalled();
+    expect(plugin.pluginLogger.debug).not.toHaveBeenCalled();
+    expect(plugin.pluginLogger.error).not.toHaveBeenCalled();
   });
 
   it("defers handler registration until layout is ready", () => {

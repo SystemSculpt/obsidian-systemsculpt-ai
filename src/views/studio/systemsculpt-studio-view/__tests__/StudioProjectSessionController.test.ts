@@ -259,6 +259,40 @@ describe("StudioProjectSessionController", () => {
     }
   });
 
+  it("records only the accepted async transaction, not edits committed while it awaited", async () => {
+    const project = projectFixture(noteNodeFixture("Notes/Shared.md"));
+    const session = new StudioProjectSession({ projectPath: "Studio/Test.systemsculpt", project, saveProject: async () => {} });
+    const { controller, host } = createControllerHarness(project);
+    Object.assign(controller, { currentProject: session.getProject(), currentProjectSession: session });
+    host.history.reset(session.getProject());
+    let release!: () => void;
+    const waiting = new Promise<void>(resolve => { release = resolve; });
+    try {
+      const pending = controller.commitMutationAsync("node.config", async draft => {
+        await waiting;
+        draft.graph.nodes[0].config.preface = "Generated text";
+      });
+      controller.commitMutation("node.title", draft => { draft.graph.nodes[0].title = "Local typing"; });
+      session.mutate("node.config", draft => { draft.graph.nodes[0].config.peer = "Peer typing"; });
+      release();
+      expect(await pending).toBe(true);
+      const undo = () => host.history.undo((candidate: { project: StudioProjectV1 }) => {
+        session.applyHistorySnapshot(candidate.project);
+        return { project: session.getProject(), selectedNodeIds: [] };
+      }, { project: session.getProject(), selectedNodeIds: [] });
+      undo();
+      expect(session.getProject().graph.nodes[0].config.preface).toBeUndefined();
+      expect(session.getProject().graph.nodes[0].title).toBe("Local typing");
+      expect(session.getProject().graph.nodes[0].config.peer).toBe("Peer typing");
+      undo();
+      expect(session.getProject().graph.nodes[0].title).toBe("Old");
+      expect(session.getProject().graph.nodes[0].config.peer).toBe("Peer typing");
+    } finally {
+      release();
+      await session.close();
+    }
+  });
+
   it("commits note path renames through the session mutation seam", async () => {
     const node = noteNodeFixture("Notes/Old.md");
     const { controller, host, project } = createControllerHarness(projectFixture(node));

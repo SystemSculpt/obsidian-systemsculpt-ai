@@ -3,6 +3,7 @@ import { hasHostCapability, openLocalFolder } from "../../platform/hostCapabilit
 import type { ResourceMonitorService } from "../../services/ResourceMonitorService";
 import type { PluginLogger } from "../../utils/PluginLogger";
 import { sanitizePublicDiagnosticsVersion } from "./DiagnosticsSessionLifecycle";
+import { formatFileTimestamp } from "../../utils/fileTimestamp";
 
 type PublicSupportResourceSample = Readonly<{
   captured_at?: string;
@@ -148,7 +149,7 @@ export class DiagnosticsFacade {
       throw new Error("Secure diagnostics export identifier is invalid.");
     }
     const fileName =
-      `diagnostics-${this.formatDiagnosticsFileTimestamp(new Date())}-${nonce}.txt`;
+      `diagnostics-${formatFileTimestamp(new Date())}-${nonce}.txt`;
     const result = await storage.writeFile("diagnostics", fileName, snapshot);
     return {
       text: snapshot,
@@ -183,18 +184,5 @@ export class DiagnosticsFacade {
     const bytes = new Uint8Array(16);
     runtimeCrypto.getRandomValues(bytes);
     return [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-  }
-
-  private formatDiagnosticsFileTimestamp(date: Date): string {
-    const pad = (value: number) => value.toString().padStart(2, "0");
-    return [
-      date.getFullYear(),
-      pad(date.getMonth() + 1),
-      pad(date.getDate()),
-      "-",
-      pad(date.getHours()),
-      pad(date.getMinutes()),
-      pad(date.getSeconds()),
-    ].join("");
   }
 }

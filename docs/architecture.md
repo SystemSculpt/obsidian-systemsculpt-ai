@@ -24,7 +24,7 @@ public operations and behavioral tests before following private helpers.
 | Studio legacy history | `src/studio/StudioLegacyGenerations.ts` | The one-time offer to delete pre-6.10 per-save snapshots in `.systemsculpt/studio/projects/` for projects that pass the same open gate as an import; the answer is recorded beside them. |
 | Studio execution | `src/studio/StudioService.ts`, `StudioRuntime.ts`, `StudioGraphCompiler.ts`, `nodes/` | User-requested scopes, typed dependency plans, immutable run snapshots, execution gates, and node results. |
 | Studio interaction | `src/views/studio/SystemSculptStudioView.ts`, `PendingStudioView.ts`, `canvas/`, `connections/` | Obsidian leaf, canvas cards, visual connections, editors, and pointer/keyboard interaction. The view's code is evaluated when Studio first opens (`ViewManager.loadStudioView`); until then `PendingStudioView` holds a tab Obsidian opens and hands it to the real view. The source editor's language packs load with the first source card. |
-| Studio edit history | `src/views/studio/StudioGraphHistory.ts` | Each view's local edit transactions, rebased onto the shared canvas for undo/redo. Restoration preserves unrelated peer edits and the accepted disk baseline. |
+| Studio edit history | `src/views/studio/StudioGraphHistory.ts` | Each view's local edit transactions capture the session's accepted before/after transition, with unchanged snapshot branches shared. Continuous config input groups by field until blur or a discrete action; undo/redo rebases onto the shared canvas, preserving unrelated peer edits and the accepted disk baseline. |
 | Vault operations | `src/tools/FirstPartyToolService.ts`, `src/tools/vault/` | Advertised local actions, validated vault paths, execution, and typed results. `VaultMutationPreparation.ts` owns read-only target resolution, reads, document admission and batch preflight shared with hosted approval previews. Execution retains authorization and commit-time conflict checks. |
 | Audio Processor | `src/features/audio-processor/AudioProcessorService.ts`, `AudioProcessorDelivery.ts` | Input/job workflow and durable local output delivery respectively. |
 | Choosing audio | `src/components/AudioSourcePicker.ts` | The vault audio list, device dropzone, keyboard navigation and selected-audio preview shared by Transcribe audio and Audio Processor. Each modal keeps only its output options and submit. |
@@ -55,7 +55,12 @@ immutable snapshot provenance. `AgentLifecycle` normalizes once; the logger
 reuses that metadata rather than validating another copy. Its frozen support
 event passes unchanged through the incident coordinator into the recorder.
 Only a failed report projects retained events into the exported timeline and
-canonicalizes them. During recording, exact scalar-byte arithmetic (no JSON,
+canonicalizes them. The incident store owns atomic commit and exact-byte
+read-back. Retention reuses validation only when freshly read bytes match a
+validated report; timestamps alone never establish validity. Session recording
+writes one timestamped metadata file, pruned with automatic archives. Session
+and export filename dates share `utils/fileTimestamp.ts`.
+During recording, exact scalar-byte arithmetic (no JSON,
 key sorting, or UTF-8 allocation) preserves the existing arrival-order byte and
 event eviction policy and counters. Arbitrary public events, even frozen ones,
 still cross the full admission allowlist; freezing alone is not provenance.

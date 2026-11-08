@@ -135,7 +135,7 @@ describe("DiagnosticsSessionLifecycle", () => {
   it.each([
     { name: "Android", isAndroidApp: true, isIosApp: false, operatingSystem: "Android" },
     { name: "iOS", isAndroidApp: false, isIosApp: true, operatingSystem: "iOS" },
-  ])("records exact allowlisted metadata for $name to both session files", async ({ isAndroidApp, isIosApp, operatingSystem }) => {
+  ])("records exact allowlisted metadata for $name to one retained session file", async ({ isAndroidApp, isIosApp, operatingSystem }) => {
     platform.isDesktopApp = false;
     platform.isAndroidApp = isAndroidApp;
     platform.isIosApp = isIosApp;
@@ -169,7 +169,6 @@ describe("DiagnosticsSessionLifecycle", () => {
     await lifecycle.recordSession();
 
     expect(writeFile.mock.calls).toEqual([
-      ["diagnostics", "session-latest.json", expectedMetadata],
       ["diagnostics", `session-${session.sessionId}.json`, expectedMetadata],
     ]);
     const serialized = JSON.stringify(writeFile.mock.calls);
@@ -259,7 +258,6 @@ describe("DiagnosticsSessionLifecycle", () => {
       ["diagnostics", lifecycle.logFileName, "SystemSculpt diagnostics session 20260813-160000 (plugin v6.6.0)\n"],
     ]);
     expect(storage.writeFile.mock.calls.map(([, name]) => name)).toEqual([
-      "session-latest.json",
       "session-20260813-160000.json",
     ]);
   });

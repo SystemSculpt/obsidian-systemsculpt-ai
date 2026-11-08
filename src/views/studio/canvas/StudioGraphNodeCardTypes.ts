@@ -28,6 +28,8 @@ import type { StudioTextNodeFocusTarget } from "./StudioGraphTextNodeFocus";
 export type StudioGraphNodeMutationOptions = {
   mode?: StudioProjectSessionAutosaveMode;
   captureHistory?: boolean;
+  /** One continuous field edit; blur or a discrete action starts a new token. */
+  historyGroup?: string | symbol;
 };
 
 /**
