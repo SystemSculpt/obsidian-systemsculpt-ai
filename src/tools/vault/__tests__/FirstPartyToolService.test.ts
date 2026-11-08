@@ -294,13 +294,21 @@ describe("FirstPartyToolService", () => {
     });
 
     describe("search tool", () => {
+      it("passes cancellation to the shared vault search", async () => {
+        const signal = new AbortController().signal;
+        const params = { patterns: ["needle"] };
+        mockGrepVault.mockResolvedValue({ results: [] });
+        await server.executeTool("search", params, { signal });
+        expect(mockGrepVault).toHaveBeenCalledWith(params, signal);
+      });
+
       it("calls grepVault with correct params", async () => {
         const params = { query: "test", path: "/" };
         mockGrepVault.mockResolvedValue({ matches: [{ file: "test.md", line: 1 }] });
 
         const result = await server.executeTool("search", params);
 
-        expect(mockGrepVault).toHaveBeenCalledWith(params);
+        expect(mockGrepVault).toHaveBeenCalledWith(params, undefined);
         expect(result).toEqual({ matches: [{ file: "test.md", line: 1 }] });
       });
     });

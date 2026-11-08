@@ -50,6 +50,17 @@ commit for cooperating file-tool instances sharing a vault adapter. Indexed
 writes retain `Vault.process` conflict checks. Adapter serialization is not
 compare-and-swap against sync, native processes or other adapter writers.
 
+`services/search/SystemSculptSearchEngine.ts` owns the shared vault revision,
+index lifetime and authorized candidate preparation. `SearchTextIndex` owns
+integer postings and conservative literal candidates. Only complete raw-text
+coverage proves a negative; long notes, frontmatter, transformed documents,
+unindexed files and general regexes still receive direct confirmation. Tool
+search scans every scoped candidate before ranking and paging, rather than
+stopping at the first matching files. `tools/vault/SearchResponsePage.ts` owns
+whole-response token/character budgets and cursor progress. Lexical scoring and
+semantic refinement live in `services/search/`; identifier, indexed fuzzy and
+semantic modes retain their distinct established weights.
+
 `src/utils/SupportDiagnosticEvent.ts` owns the lifecycle scalar inventory and
 immutable snapshot provenance. `AgentLifecycle` normalizes once; the logger
 reuses that metadata rather than validating another copy. Its frozen support

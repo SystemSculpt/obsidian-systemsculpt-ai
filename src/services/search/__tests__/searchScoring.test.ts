@@ -210,6 +210,18 @@ describe("searchScoring", () => {
       expect(result.matchDetails.reasoning).toBeTruthy();
     });
 
+    it.each([
+      ["alpha.md", "", "alpha", ["alpha"], 60],
+      ["alpha/main.md", "", "alpha", ["alpha"], 20],
+      ["main.md", "alpha", "alpha", ["alpha"], 30],
+      ["main.md", "alpha and beta", "alpha beta", ["alpha", "beta"], 50],
+      ["main.md", "alpha beta", "alpha beta", ["alpha", "beta"], 70],
+      ["main.md", "alpha", " alpha ", ["alpha"], 10],
+      ["main.md", "alpha", "alpha alpha", ["alpha"], 40],
+    ])("preserves find weights for %s, content %j and query %j", (path, content, query, terms, score) => {
+      expect(calculateScore(path, content, { searchTerms: terms, originalQuery: query }).score).toBe(score);
+    });
+
     it("handles undefined content", () => {
       const result = calculateScore("main.ts", undefined, context);
       expect(result).toBeDefined();

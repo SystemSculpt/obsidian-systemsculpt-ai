@@ -1,6 +1,5 @@
-/**
- * Intelligent scoring system for search results
- */
+/** Find result scoring and formatting, including compound identifier queries. */
+import { normalizeSearchQuery, presentSearchTerms } from "./SearchLexicalSignals";
 
 interface ScoringContext {
   searchTerms: string[];
@@ -57,7 +56,7 @@ export interface FormattedScoredResults {
  */
 export function extractSearchTerms(query: string): string[] {
   // Basic extraction - split by common delimiters
-  const terms = query.toLowerCase()
+  const terms = normalizeSearchQuery(query)
     .split(/[\s\-_]+/)
     .filter(term => term.length > 0);
   
@@ -102,6 +101,7 @@ export function calculateScore(
   context: ScoringContext
 ): ScoredResult {
   const filename = filePath.split('/').pop() || '';
+  const lowerFilename = filename.toLowerCase();
   const pathParts = filePath.toLowerCase().split('/');
   const lowerContent = content?.toLowerCase() || '';
   
@@ -116,7 +116,7 @@ export function calculateScore(
     let termFound = false;
     
     // Filename match (highest weight)
-    if (filename.toLowerCase().includes(lowerTerm)) {
+    if (lowerFilename.includes(lowerTerm)) {
       score += 40;
       termFound = true;
       if (!matchLocations.includes('filename')) {
@@ -151,15 +151,11 @@ export function calculateScore(
   }
   
   // Bonus for having all original query terms
-  const originalTerms = context.originalQuery.toLowerCase()
+  const originalTerms = normalizeSearchQuery(context.originalQuery)
     .split(/[\s\-_]+/)
     .filter(t => t.length > 0);
   
-  const foundOriginalTerms = originalTerms.filter(term =>
-    filename.toLowerCase().includes(term) ||
-    pathParts.some(part => part.includes(term)) ||
-    lowerContent.includes(term)
-  );
+  const foundOriginalTerms = presentSearchTerms(originalTerms, [lowerFilename, ...pathParts, lowerContent]);
   
   if (foundOriginalTerms.length === originalTerms.length && originalTerms.length > 1) {
     score += 30;
