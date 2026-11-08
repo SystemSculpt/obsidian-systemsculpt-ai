@@ -5,7 +5,8 @@ import type { StudioRunPresentationState } from "../StudioRunPresentationState";
 import type { StudioProjectSessionController } from "./StudioProjectSessionController";
 import type { StudioGraphNodeImageBoardOptions } from "../canvas/StudioGraphNodeCardTypes";
 import type { StudioImageBoardEditorHandle } from "../canvas/image-board/StudioImageBoardEditor";
-import { composeStudioImageBoardAsset } from "../../../studio/StudioImageBoardRenderer";
+import { composeStudioImageBoardAsset, decodeStudioImageBoardImage } from "../../../studio/StudioImageBoardRenderer";
+import { encodeStudioImageBoard } from "../../../studio/StudioImageBoardEncoding";
 import { resolveStudioImageBoardBaseAsset } from "../canvas/image-board/StudioImageBoardImages";
 import {
   normalizeStudioAssetRef,
@@ -15,7 +16,7 @@ import {
   studioImageBoardWithRender,
   writeStudioImageBoard,
 } from "../../../studio/StudioImageBoard";
-import { tryCopyImageBytesToClipboard, tryCopyImageFileToClipboard } from "../../../utils/clipboard";
+import { tryCopyImageBytesToClipboard } from "../../../utils/clipboard";
 import { resolveNodeMediaPreview } from "../canvas/StudioGraphMediaPreview";
 
 type StudioImageEditingDependencies = {
@@ -171,18 +172,41 @@ export class StudioImageEditingController {
     return renderedAsset;
   }
 
+  /** WebP is a storage format, not a portable ClipboardItem image type. */
+  private async clipboardPicture(asset: StudioAssetRef): Promise<{ bytes: ArrayBuffer; mimeType: string } | null> {
+    const { app, containerEl } = this.dependencies;
+    const file = app.vault.getAbstractFileByPath(asset.path);
+    if (!(file instanceof TFile)) return null;
+    const bytes = await app.vault.readBinary(file);
+    if (asset.mimeType !== "image/webp") return { bytes, mimeType: asset.mimeType };
+    const image = await decodeStudioImageBoardImage(bytes, asset.mimeType);
+    let canvas: HTMLCanvasElement | null = null;
+    try {
+      canvas = containerEl.ownerDocument.defaultView?.createEl("canvas") ?? null;
+      if (!canvas) return null;
+      canvas.width = image.width;
+      canvas.height = image.height;
+      const context = canvas.getContext("2d");
+      if (!context) return null;
+      context.drawImage(image.source, 0, 0);
+      return await encodeStudioImageBoard(context);
+    } finally {
+      image.close();
+      if (canvas) {
+        canvas.width = 0;
+        canvas.height = 0;
+      }
+    }
+  }
+
   async copyImageForNodeToClipboard(node: StudioNodeInstance): Promise<void> {
     const asset = await this.ensureRenderedImageAssetForNode(node).catch(() => null);
     if (!asset) {
       new Notice("Run this image node once before copying the image.");
       return;
     }
-    const file = this.dependencies.app.vault.getAbstractFileByPath(asset.path);
-    if (!(file instanceof TFile)) {
-      new Notice("Unable to copy image to clipboard.");
-      return;
-    }
-    if (!await tryCopyImageFileToClipboard(this.dependencies.app, file, this.dependencies.containerEl)) {
+    const picture = await this.clipboardPicture(asset).catch(() => null);
+    if (!picture || !await tryCopyImageBytesToClipboard(picture.bytes, picture.mimeType, this.dependencies.containerEl)) {
       new Notice("Unable to copy image to clipboard.");
     }
   }
@@ -203,13 +227,10 @@ export class StudioImageEditingController {
     }
     return (async () => {
       const asset = await this.ensureRenderedImageAssetForNode(node);
-      const file = asset ? this.dependencies.app.vault.getAbstractFileByPath(asset.path) : null;
-      if (!asset || !(file instanceof TFile)) {
-        return null;
-      }
-      const bytes = await this.dependencies.app.vault.readBinary(file);
-      const copied = await tryCopyImageBytesToClipboard(bytes, asset.mimeType, this.dependencies.containerEl);
-      return copied ? new Blob([bytes], { type: asset.mimeType }) : null;
+      const picture = asset ? await this.clipboardPicture(asset) : null;
+      if (!picture) return null;
+      const copied = await tryCopyImageBytesToClipboard(picture.bytes, picture.mimeType, this.dependencies.containerEl);
+      return copied ? new Blob([picture.bytes], { type: picture.mimeType }) : null;
     })();
   }
 

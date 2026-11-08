@@ -1,5 +1,18 @@
 /** @jest-environment jsdom */
 
+import { TFile } from "obsidian";
+import * as Renderer from "../../../studio/StudioImageBoardRenderer";
+import * as Encoding from "../../../studio/StudioImageBoardEncoding";
+
+jest.mock("../../../studio/StudioImageBoardEncoding", () => ({
+  encodeStudioImageBoard: jest.fn(jest.requireActual("../../../studio/StudioImageBoardEncoding").encodeStudioImageBoard),
+}));
+beforeEach(() => {
+  jest.mocked(Encoding.encodeStudioImageBoard).mockReset().mockImplementation(
+    jest.requireActual("../../../studio/StudioImageBoardEncoding").encodeStudioImageBoard
+  );
+});
+import { tryCopyImageBytesToClipboard } from "../../../utils/clipboard";
 import {
   createEmptyStudioImageBoard,
   createStudioImageBoardLayer,
@@ -19,11 +32,16 @@ import type { StudioImageBoardEditorHandle } from "../canvas/image-board/StudioI
 jest.mock("../../../studio/StudioImageBoardRenderer", () => ({
   ...jest.requireActual("../../../studio/StudioImageBoardRenderer"),
   composeStudioImageBoardAsset: jest.fn(),
+  decodeStudioImageBoardImage: jest.fn(),
 }));
 jest.mock("../canvas/image-board/StudioImageBoardImages", () => ({
   ...jest.requireActual("../canvas/image-board/StudioImageBoardImages"),
   resolveStudioImageBoardBaseAsset: jest.fn(),
 }));
+
+jest.mock("../../../utils/clipboard", () => ({ tryCopyImageBytesToClipboard: jest.fn(async () => true) }));
+
+afterEach(() => jest.restoreAllMocks());
 
 const asset = (name: string): StudioAssetRef => ({
   hash: name.padEnd(64, "0"),
@@ -162,6 +180,55 @@ describe("StudioImageEditingController: the picture an image node shows", () => 
     // The second time it is simply read back.
     await expect(h.picture()).resolves.toEqual(FLATTENED);
     expect(composeStudioImageBoardAsset).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps an existing saved PNG artifact unchanged without re-encoding or migrating its cache", async () => {
+    const board = blurred();
+    const h = harness({ [STUDIO_IMAGE_BOARD_CONFIG_KEY]: serializeStudioImageBoard(
+      studioImageBoardWithRender(board, board, SOURCE.path, FLATTENED)
+    ) });
+    const before = JSON.stringify(h.node.config);
+    await expect(h.picture()).resolves.toEqual(FLATTENED);
+    expect(JSON.stringify(h.node.config)).toBe(before);
+    expect(composeStudioImageBoardAsset).not.toHaveBeenCalled();
+    expect(h.context.commitCurrentProjectMutationAsync).not.toHaveBeenCalled();
+  });
+
+  it.each(["card", "action"])("copies cached WebP as PNG through the %s clipboard path without changing storage", async (path) => {
+    const board = blurred();
+    const webp = { ...asset("flattened"), path: "Studio/assets/flattened.webp", mimeType: "image/webp" };
+    const h = harness({ [STUDIO_IMAGE_BOARD_CONFIG_KEY]: serializeStudioImageBoard(
+      studioImageBoardWithRender(board, board, SOURCE.path, webp)
+    ) });
+    const bytes = new ArrayBuffer(7);
+    const png = new ArrayBuffer(9);
+    h.context.app.vault = {
+      getAbstractFileByPath: () => Object.assign(new TFile(), { path: webp.path, extension: "webp" }),
+      readBinary: jest.fn(async () => bytes),
+    };
+    const close = jest.fn();
+    const image = { source: {} as CanvasImageSource, width: 3, height: 2, close };
+    jest.mocked(Renderer.decodeStudioImageBoardImage).mockResolvedValue(image);
+    const drawImage = jest.fn();
+    jest.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(function (this: HTMLCanvasElement) {
+      return { canvas: this, drawImage } as unknown as CanvasRenderingContext2D;
+    });
+    const encode = jest.mocked(Encoding.encodeStudioImageBoard).mockResolvedValue({ bytes: png, mimeType: "image/png" });
+    const before = JSON.stringify(h.node.config);
+    if (path === "card") {
+      const copied = await h.images.copyNodePictureToClipboard(h.node.id);
+      expect(copied?.type).toBe("image/png");
+      expect(copied?.size).toBe(9);
+    } else {
+      await h.images.copyImageForNodeToClipboard(h.node);
+    }
+    expect(encode).toHaveBeenCalledWith(expect.objectContaining({ drawImage }));
+    expect(drawImage).toHaveBeenCalledWith(image.source, 0, 0);
+    expect(tryCopyImageBytesToClipboard).toHaveBeenLastCalledWith(png, "image/png", expect.any(HTMLElement));
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(encode.mock.calls[0][0].canvas.width).toBe(0);
+    expect(JSON.stringify(h.node.config)).toBe(before);
+    expect(composeStudioImageBoardAsset).not.toHaveBeenCalled();
   });
 
   it("is flattened again when the picture on record is of other layers", async () => {

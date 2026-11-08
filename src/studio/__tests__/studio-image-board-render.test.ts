@@ -11,6 +11,16 @@ import {
   STUDIO_IMAGE_BOARD_MAX_OUTPUT_SIDE,
 } from "../StudioImageBoardRenderer";
 import type { StudioAssetRef } from "../types";
+import * as Encoding from "../StudioImageBoardEncoding";
+
+jest.mock("../StudioImageBoardEncoding", () => ({
+  encodeStudioImageBoard: jest.fn(jest.requireActual("../StudioImageBoardEncoding").encodeStudioImageBoard),
+}));
+beforeEach(() => {
+  jest.mocked(Encoding.encodeStudioImageBoard).mockReset().mockImplementation(
+    jest.requireActual("../StudioImageBoardEncoding").encodeStudioImageBoard
+  );
+});
 
 const sourceBytes = new TextEncoder().encode("private original image").buffer;
 const source = { path: "assets/original.png", hash: "a".repeat(64), sizeBytes: sourceBytes.byteLength, mimeType: "image/png" };
@@ -132,6 +142,20 @@ describe("image board export", () => {
       composeStudioImageBoardAsset({ baseImage: source, board: boardWith({ kind: "redact" }), readAsset: async () => sourceBytes, storeAsset })
     ).rejects.toThrow("decode failed");
     expect(storeAsset).not.toHaveBeenCalled();
+  });
+
+  it.each(["image/jpeg", "image/webp"])("passes %s source identity and actual output MIME through composition", async (mimeType) => {
+    recordCanvases();
+    const bytes = new ArrayBuffer(12);
+    const encode = jest.mocked(Encoding.encodeStudioImageBoard).mockResolvedValue({ bytes, mimeType: "image/webp" });
+    const photo = { ...source, mimeType };
+    const stored = { ...source, mimeType: "image/webp", path: "assets/edited.webp" };
+    const storeAsset = jest.fn(async () => stored);
+    await expect(composeStudioImageBoardAsset({
+      baseImage: photo, board: boardWith({ kind: "text", text: "caption" }), readAsset: async () => sourceBytes, storeAsset,
+    })).resolves.toBe(stored);
+    expect(encode).toHaveBeenCalledWith(expect.anything(), mimeType);
+    expect(storeAsset).toHaveBeenCalledWith(bytes, "image/webp");
   });
 
   it("stores the flattened PNG and releases every decoded image", async () => {
