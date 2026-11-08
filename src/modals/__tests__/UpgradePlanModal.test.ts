@@ -1,5 +1,5 @@
 import { JSDOM } from "jsdom";
-import { Notice } from "obsidian";
+import { Notice, requireApiVersion } from "obsidian";
 import { UpgradePlanModal, hasActivePlan, presentAccountConnectOutcome, requireActivePlan } from "../UpgradePlanModal";
 
 jest.mock("../../platform/hostCapabilities", () => ({
@@ -203,6 +203,40 @@ describe("UpgradePlanModal", () => {
     await flushPromises();
     expect(plugin.begin).toHaveBeenCalledWith("sign-up", expect.anything());
     modal.onClose();
+  });
+
+  it("shows a vault's copy-test arm and tags the links it opens with that arm (T-5852)", async () => {
+    const plugin = createPlugin({ userEmail: "user@example.com" });
+    const store: Record<string, unknown> = { "systemsculpt-experiment-unit": "0123456789abcdef" };
+    plugin.app = { loadLocalStorage: (key: string) => store[key] ?? null, saveLocalStorage: jest.fn() };
+    const hostVersionCheck = jest.mocked(requireApiVersion).getMockImplementation()!;
+    jest.mocked(requireApiVersion).mockImplementation(() => true);
+    const { hrefs, spy } = spyOnAnchorClicks();
+    try {
+      const modal = new UpgradePlanModal(plugin);
+      modal.onOpen();
+      expect(modal.modalEl.textContent).toContain("Get SystemSculpt Pro");
+      expect(modal.modalEl.textContent).toContain("Image and video generation, smart search and Studio for $9 a month.");
+      expect(modal.modalEl.textContent).not.toContain("Use your own AI");
+      findButtonByText(modal.modalEl, "Compare plans").click();
+      findButtonByText(modal.modalEl, "Subscribe yearly").click();
+      const tags = hrefs.map((href) => {
+        const url = new URL(href);
+        return [url.pathname, url.searchParams.get("utm_campaign"), url.searchParams.get("utm_content")];
+      });
+      expect(tags).toEqual([
+        ["/pricing", "ss-plugin-upgrade-2026-11", "b"],
+        ["/checkout", "ss-plugin-upgrade-2026-11", "b"],
+      ]);
+      findButtonByText(modal.modalEl, "Back").click();
+      findButtonByText(modal.modalEl, "Already paid? Sync").click();
+      await flushPromises();
+      expect(plugin.begin).toHaveBeenCalledWith("sign-in", expect.anything(), { experiment: "ss-plugin-upgrade-2026-11", variant: "b" });
+      modal.onClose();
+    } finally {
+      spy.mockRestore();
+      jest.mocked(requireApiVersion).mockImplementation(hostVersionCheck);
+    }
   });
 
   it("opens Account settings for an existing license key", () => {

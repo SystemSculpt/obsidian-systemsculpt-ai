@@ -6,6 +6,7 @@ import { bytesToBase64 } from "../utils/base64";
 import { sha256HexFromBytes } from "../utils/sha256";
 import { isStarterBalance } from "../utils/licenseUtils";
 import { requireApiVersion } from "obsidian";
+import { withExperimentArm, type CopyExperimentArm } from "./CopyExperiments";
 
 export type AccountConnectMode = "sign-in" | "sign-up";
 
@@ -17,6 +18,8 @@ type PendingConnectRequest = {
   readonly verifier: string;
   readonly mode: AccountConnectMode;
   readonly createdAt: number;
+  /** The copy-test arm whose prompt started this sign-in; its page link carries it. */
+  readonly arm?: CopyExperimentArm;
   /** Aborts this sign-in's requests still in flight once it ends. */
   readonly controller: AbortController;
   /** This sign-in's requests whose answer has not been handled yet. */
@@ -224,7 +227,7 @@ export class AccountConnectService {
    * Resolves false when the browser could not be opened so callers can show
    * the manual path instead of failing silently.
    */
-  public async begin(mode: AccountConnectMode, ownerWindow?: Window): Promise<boolean> {
+  public async begin(mode: AccountConnectMode, ownerWindow?: Window, arm?: CopyExperimentArm): Promise<boolean> {
     const state = base64UrlEncode(this.randomBytes());
     const verifier = base64UrlEncode(this.randomBytes());
     // A superseded sign-in's requests must neither hold the slot nor complete this one.
@@ -236,6 +239,7 @@ export class AccountConnectService {
       verifier,
       mode,
       createdAt: Date.now(),
+      ...(arm ? { arm } : {}),
       controller: new AbortController(),
       unsettled: new Set(),
       unanswered: false,
@@ -267,7 +271,9 @@ export class AccountConnectService {
     const origin = new URL(API_BASE_URL).origin;
     const path = pending.mode === "sign-up" ? "/sign-up" : "/sign-in";
     const redirect = `/plugin/connect?state=${pending.state}&challenge=${challenge}`;
-    return `${origin}${path}?redirect_url=${encodeURIComponent(redirect)}`;
+    const url = `${origin}${path}?redirect_url=${encodeURIComponent(redirect)}`;
+    if (!pending.arm) return url;
+    return withExperimentArm(`${url}&utm_source=obsidian-plugin&utm_medium=modal`, pending.arm);
   }
 
   private startPolling(): void {
