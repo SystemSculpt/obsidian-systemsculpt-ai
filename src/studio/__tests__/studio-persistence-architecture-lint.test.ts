@@ -36,17 +36,19 @@ function listSourceFiles(): string[] {
   return files.sort();
 }
 
-const STORAGE_NAME = /adapter|vault|fileManager/i;
+const CODE_PRINTER = ts.createPrinter({ removeComments: true });
 
 function referencesStorage(node: ts.Node, aliases: ReadonlySet<string>): boolean {
-  if (ts.isIdentifier(node)) return STORAGE_NAME.test(node.text) || aliases.has(node.text);
-  if (ts.isElementAccessExpression(node) && ts.isStringLiteralLike(node.argumentExpression) && STORAGE_NAME.test(node.argumentExpression.text)) return true;
-  return ts.forEachChild(node, child => referencesStorage(child, aliases) || undefined) ?? false;
+  // Ignore comments, but retain conservative matching of strings and computed access.
+  const text = CODE_PRINTER.printNode(ts.EmitHint.Unspecified, node, node.getSourceFile());
+  return /adapter|vault|fileManager/i.test(text) || [...aliases].some(alias => new RegExp(`\\b${alias}\\b`).test(text));
 }
 
 describe("Studio persistence architecture lint", () => {
   it.each([
-    ["canvas.createDiv(/* host adapters */ { text: 'vault' })", false],
+    ["canvas.createDiv(/* host adapters */ { text: 'Label' })", false],
+    ["canvas.createDiv({ text: 'vault' })", true],
+    ["app.get('vault')", true],
     ["(() => vault.adapter)()", true],
     ["app.vault.adapter", true],
     ["app['vault']['adapter']", true],
@@ -55,7 +57,7 @@ describe("Studio persistence architecture lint", () => {
     ["app[`fileManager`]", true],
     ["storage", true],
     ["adapter.remove.bind(adapter)", true],
-  ])("classifies storage references in %s without treating prose as a receiver", (initializer, expected) => {
+  ])("classifies storage references in %s without treating comments as a receiver", (initializer, expected) => {
     const source = ts.createSourceFile("fixture.ts", `const value = ${initializer};`, ts.ScriptTarget.Latest, true);
     const statement = source.statements[0] as ts.VariableStatement;
     expect(referencesStorage(statement.declarationList.declarations[0].initializer!, new Set(["storage"]))).toBe(expected);
