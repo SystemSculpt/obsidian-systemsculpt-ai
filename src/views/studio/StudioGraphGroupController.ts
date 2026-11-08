@@ -1,3 +1,5 @@
+import type { StudioCanvasGeometry } from "./canvas/StudioCanvasGeometry";
+import { StudioCanvasSelection } from "./StudioCanvasSelection";
 import type { StudioMovementSnap } from "./canvas/StudioGraphAlignmentGuides";
 import { latestStudioPointerEvent, startStudioPointerGesture } from "./StudioPointerGesture";
 import type { StudioProjectSessionMutationReason } from "../../studio/StudioProjectSession";
@@ -8,17 +10,12 @@ import {
   type StudioGraphGroupBounds,
 } from "./canvas/StudioGraphGroupBounds";
 import {
-  resolveMeasuredStudioNodeHeight,
-  resolveMeasuredStudioNodeWidth,
-} from "../../studio/StudioNodeGeometry";
-import {
   assignNodesToGroup,
   nextDefaultGroupName,
   normalizeGroupColor,
   renameGroup,
   setGroupColor,
 } from "../../studio/StudioGraphGroupModel";
-import { readStudioDiagramFromProject } from "../../studio/StudioShapes";
 import { createStudioAction } from "./StudioAction";
 import { getStudioOwnerWindow, requestStudioAnimationFrame } from "./StudioDomContext";
 import {
@@ -74,13 +71,12 @@ type StudioGraphGroupControllerHost = {
   getCurrentProject: () => StudioProjectV1 | null;
   getGraphZoom: () => number;
   getNodeElement: (nodeId: string) => HTMLElement | null;
-  notifyNodePositionsChanged: (options?: { recomputeCanvasBounds?: boolean; translating?: boolean }) => void;
+  notifyNodePositionsChanged: (options?: { recomputeCanvasBounds?: boolean; translating?: boolean; nodeIds?: readonly string[]; shapeIds?: readonly string[] }) => void;
   onNodeDragStateChange?: (isDragging: boolean) => void;
   requestRender: () => void;
   createMovementSnap?: (nodes: readonly string[], shapes: readonly string[]) => StudioMovementSnap;
   showMovementGuides?: (nodes: readonly string[], shapes: readonly string[]) => void;
   clearMovementGuides?: () => void;
-  onGroupSelected?: () => void;
   commitProjectMutation: (
     reason: StudioProjectSessionMutationReason,
     mutator: (project: StudioProjectV1) => boolean | void,
@@ -100,10 +96,6 @@ function normalizeGroupName(value: string): string {
   return String(value || "").trim();
 }
 
-function buildNodeMap(project: StudioProjectV1): Map<string, StudioProjectV1["graph"]["nodes"][number]> {
-  return new Map(project.graph.nodes.map((node) => [node.id, node] as const));
-}
-
 function resolveGroupColor(group: StudioNodeGroup): string {
   return normalizeGroupColor(group.color) || DEFAULT_GROUP_COLOR;
 }
@@ -120,7 +112,9 @@ export class StudioGraphGroupController {
   private openColorPaletteGroupId: string | null = null;
   private colorPaletteRadioGroup: UiRadioGroupHandle<string> | null = null;
   private dropTargetGroupId: string | null = null;
-  private selectedGroupId: string | null = null;
+  private readonly boundsByGroupId = new Map<string, StudioGraphGroupBounds | null>();
+  private boundsRevision = -1;
+  private get selectedGroupId(): string | null { return [...this.selection.ids("group")][0] ?? null; }
   private listenerWindow: Window | null = null;
   private cancelPointerGesture: (() => void) | null = null;
 
@@ -148,7 +142,16 @@ export class StudioGraphGroupController {
     this.closeColorPalette();
   };
 
-  constructor(private readonly host: StudioGraphGroupControllerHost) {}
+  constructor(
+    private readonly host: StudioGraphGroupControllerHost,
+    private readonly geometry: StudioCanvasGeometry,
+    private readonly selection = new StudioCanvasSelection()
+  ) {
+    this.selection.subscribe(() => {
+      this.refreshSelectionClasses();
+      this.syncWindowListeners();
+    });
+  }
 
   registerCanvasElement(canvas: HTMLElement): void {
     this.canvasEl = canvas;
@@ -167,6 +170,7 @@ export class StudioGraphGroupController {
     this.cancelPointerGesture?.();
     this.destroyColorPaletteRadioGroup();
     this.groupElsById.clear();
+    this.boundsByGroupId.clear();
     this.previewColorByGroupId.clear();
     this.editingGroupId = null;
     this.openColorPaletteGroupId = null;
@@ -200,15 +204,13 @@ export class StudioGraphGroupController {
       return;
     }
 
-    const nodeMap = buildNodeMap(project);
-    const shapeIdSet = new Set(readStudioDiagramFromProject(project).shapes.map((shape) => shape.id));
     const groups = (project.graph.groups || []).filter(
       (group) =>
-        group.nodeIds.some((nodeId) => nodeMap.has(nodeId)) ||
-        (group.shapeIds || []).some((shapeId) => shapeIdSet.has(shapeId))
+        group.nodeIds.some((nodeId) => this.geometry.getNode(nodeId)) ||
+        (group.shapeIds || []).some((shapeId) => this.geometry.getShape(shapeId))
     );
     const visibleGroupIds = new Set(groups.map((group) => group.id));
-    if (this.selectedGroupId && !visibleGroupIds.has(this.selectedGroupId)) this.selectedGroupId = null;
+    if (this.selectedGroupId && !visibleGroupIds.has(this.selectedGroupId)) this.selection.clear("group");
     if (this.openColorPaletteGroupId && !visibleGroupIds.has(this.openColorPaletteGroupId)) {
       this.openColorPaletteGroupId = null;
       this.previewColorByGroupId.clear();
@@ -299,13 +301,18 @@ export class StudioGraphGroupController {
     }
   }
 
-  refreshGroupBounds(): void {
+  refreshGroupBounds(moved?: { nodeIds: readonly string[]; shapeIds: readonly string[] }): void {
     const project = this.host.getCurrentProject();
     if (!project || !this.frameLayerEl || !this.tagLayerEl) {
       return;
     }
 
+    if (!moved) this.boundsByGroupId.clear();
+    const movedNodes = new Set(moved?.nodeIds);
+    const movedShapes = new Set(moved?.shapeIds);
     for (const group of project.graph.groups || []) {
+      if (moved && !group.nodeIds.some(id => movedNodes.has(id)) && !group.shapeIds?.some(id => movedShapes.has(id))) continue;
+      this.boundsByGroupId.delete(group.id);
       const elements = this.groupElsById.get(group.id);
       if (!elements) {
         continue;
@@ -330,25 +337,21 @@ export class StudioGraphGroupController {
       elements.colorChipEl.style.setProperty("--ss-studio-chip-color", displayedColor);
 
       if (this.editingGroupId !== group.id && elements.nameButtonEl) {
-        elements.nameButtonEl.setText(normalizeGroupName(group.name) || nextDefaultGroupName(project));
+        const name = normalizeGroupName(group.name) || nextDefaultGroupName(project);
+        if (elements.nameButtonEl.textContent !== name) elements.nameButtonEl.setText(name);
       }
     }
   }
 
   /** Group focus is distinct from selecting its members: fit includes the entire colored frame. */
   private selectGroup(groupId: string): void {
-    this.host.onGroupSelected?.();
-    this.selectedGroupId = groupId;
-    this.refreshSelectionClasses();
-    this.syncWindowListeners();
+    this.selection.selectOnly("group", groupId);
   }
 
   clearSelection(): void {
     this.cancelPointerGesture?.();
     if (!this.selectedGroupId) return;
-    this.selectedGroupId = null;
-    this.refreshSelectionClasses();
-    this.syncWindowListeners();
+    this.selection.clear("group");
   }
 
   private refreshSelectionClasses(): void {
@@ -555,9 +558,10 @@ export class StudioGraphGroupController {
     if (!node) {
       return null;
     }
-    const nodeEl = this.host.getNodeElement(nodeId);
-    const nodeHeight = resolveMeasuredStudioNodeHeight(nodeEl?.offsetHeight);
-    const nodeWidth = resolveMeasuredStudioNodeWidth(nodeEl?.offsetWidth, node);
+    const size = this.geometry.getNodeSize(nodeId);
+    if (!size) return null;
+    const nodeHeight = size.height;
+    const nodeWidth = size.width;
     const left = node.position.x;
     const top = node.position.y;
     const right = left + nodeWidth;
@@ -767,9 +771,8 @@ export class StudioGraphGroupController {
       return;
     }
 
-    const nodeMap = buildNodeMap(project);
     const dragNodes = group.nodeIds
-      .map((nodeId) => nodeMap.get(nodeId))
+      .map((nodeId) => this.geometry.getNode(nodeId))
       .filter((node): node is StudioProjectV1["graph"]["nodes"][number] => Boolean(node));
     const dragShapeIds = group.shapeIds || [];
     // Session reconciliation patches nested objects in place. A gesture origin
@@ -884,7 +887,7 @@ export class StudioGraphGroupController {
       }
       this.host.previewShapeTranslation?.();
       this.host.showMovementGuides?.(group.nodeIds, dragShapeIds);
-      this.host.notifyNodePositionsChanged({ recomputeCanvasBounds: false, translating: true });
+      this.host.notifyNodePositionsChanged({ recomputeCanvasBounds: false, translating: true, nodeIds: group.nodeIds, shapeIds: dragShapeIds });
     };
 
     const onPointerMove = (moveEvent: PointerEvent): void => {
@@ -926,7 +929,7 @@ export class StudioGraphGroupController {
   }
 
   private findNode(project: StudioProjectV1, nodeId: string): StudioProjectV1["graph"]["nodes"][number] | null {
-    return project.graph.nodes.find((node) => node.id === nodeId) || null;
+    return this.geometry.getNode(nodeId, project);
   }
 
   private computeGroupBounds(group: StudioNodeGroup): StudioGraphGroupBounds | null {
@@ -934,20 +937,19 @@ export class StudioGraphGroupController {
     if (!project) {
       return null;
     }
-    return computeStudioGraphGroupBounds(project, group, {
-      getNodeWidth: (nodeId) => {
-        const node = this.findNode(project, nodeId);
-        const nodeEl = this.host.getNodeElement(nodeId);
-        if (!node) {
-          return nodeEl ? resolveMeasuredStudioNodeWidth(nodeEl.offsetWidth) : null;
-        }
-        return resolveMeasuredStudioNodeWidth(nodeEl?.offsetWidth, node);
-      },
-      getNodeHeight: (nodeId) => {
-        const nodeEl = this.host.getNodeElement(nodeId);
-        return nodeEl ? nodeEl.offsetHeight : null;
-      },
+    if (this.boundsRevision !== this.geometry.revision) {
+      this.boundsByGroupId.clear();
+      this.boundsRevision = this.geometry.revision;
+    }
+    if (this.boundsByGroupId.has(group.id)) return this.boundsByGroupId.get(group.id) ?? null;
+    const bounds = computeStudioGraphGroupBounds(project, group, {
+      getNode: nodeId => this.geometry.getNode(nodeId),
+      getShape: shapeId => this.geometry.getShape(shapeId),
+      getNodeWidth: nodeId => this.geometry.getNodeSize(nodeId)?.width ?? null,
+      getNodeHeight: nodeId => this.geometry.getNodeSize(nodeId)?.height ?? null,
     });
+    this.boundsByGroupId.set(group.id, bounds);
+    return bounds;
   }
 
   private startGroupNameEdit(groupId: string, options?: { selectText?: boolean }): void {

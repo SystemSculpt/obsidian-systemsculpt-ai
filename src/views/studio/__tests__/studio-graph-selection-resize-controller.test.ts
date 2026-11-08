@@ -4,6 +4,7 @@
 import { MANAGED_OUTPUT_PENDING_KEY, MANAGED_TEXT_OWNER, MANAGED_TEXT_OWNER_KEY } from '../../../studio/StudioManagedOutputMetadata';
 import type { StudioNodeInstance, StudioProjectV1 } from "../../../studio/types";
 import type { StudioGraphNodeMutationOptions } from "../canvas/StudioGraphNodeCardTypes";
+import { StudioCanvasGeometry } from "../canvas/StudioCanvasGeometry";
 import {
   StudioGraphSelectionResizeController,
   type StudioGraphSelectionResizePatchEntry,
@@ -68,6 +69,7 @@ type CommitCall = {
 
 type Harness = {
   controller: StudioGraphSelectionResizeController;
+  geometry: StudioCanvasGeometry;
   canvas: HTMLElement;
   project: StudioProjectV1;
   elements: Map<string, HTMLElement>;
@@ -91,6 +93,8 @@ function createHarness(options: {
   for (const entry of options.nodes) {
     elements.set(entry.node.id, createNodeElement(entry.size));
   }
+  const geometry = new StudioCanvasGeometry(() => project);
+  for (const [nodeId, element] of elements) geometry.registerNodeElement(nodeId, element);
   const commits: CommitCall[] = [];
   const history: StudioProjectV1[] = [];
   let busy = false;
@@ -131,11 +135,12 @@ function createHarness(options: {
       }
       commits.push({ patches, options: commitOptions });
     },
-  });
+  }, geometry);
   const canvas = document.body.createDiv({ cls: "ss-studio-graph-canvas" });
   controller.registerCanvasElement(canvas);
   Object.assign(harness, {
     controller,
+    geometry,
     canvas,
     project,
     elements,
@@ -225,6 +230,30 @@ describe("StudioGraphSelectionResizeController", () => {
   });
 
   describe("frame visibility", () => {
+    it("refreshes from cached selected geometry without layout reads or unrelated node scans", () => {
+      const harness = createTwoNodeHarness();
+      const unrelated = createNode("unrelated", "studio.input", { x: 2000, y: 3000 });
+      harness.project.graph.nodes.push(unrelated);
+      const unrelatedRead = jest.fn(() => 2000);
+      Object.defineProperty(unrelated.position, "x", { get: unrelatedRead });
+      harness.geometry.refresh();
+      const layoutReads: jest.Mock[] = [];
+      for (const element of harness.elements.values()) {
+        for (const property of ["offsetWidth", "offsetHeight"] as const) {
+          const value = element[property];
+          const read = jest.fn(() => value);
+          Object.defineProperty(element, property, { get: read, configurable: true });
+          layoutReads.push(read);
+        }
+      }
+      unrelatedRead.mockClear();
+      for (let frame = 0; frame < 10; frame++) harness.controller.refreshSelectionFrame();
+      expect(queryFrame(harness.canvas).style.width).toBe("900px");
+      for (const read of layoutReads) expect(read).not.toHaveBeenCalled();
+      expect(unrelatedRead).not.toHaveBeenCalled();
+      harness.geometry.clearNodeElements();
+    });
+
     it("shows one bounds frame with the shared 8 zones when 2+ nodes are selected", () => {
       const harness = createTwoNodeHarness();
       harness.controller.refreshSelectionFrame();

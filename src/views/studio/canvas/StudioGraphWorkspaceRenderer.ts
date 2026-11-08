@@ -15,7 +15,7 @@ import {
   type StudioShapeLayerOptions,
 } from "../shapes/StudioShapeLayer";
 import { readStudioDiagramFromProject } from "../../../studio/StudioShapes";
-import { resolveStudioGraphNodeWidth, resolveStudioGraphNodeMinHeight, resolveStudioGraphSafeZoom } from "../../../studio/StudioNodeGeometry";
+import { resolveStudioGraphNodeWidth } from "../../../studio/StudioNodeGeometry";
 import type { StudioNodeActivity } from "../activity/StudioActivity";
 import { resolveNodeMediaPreview } from "./StudioGraphMediaPreview";
 
@@ -73,6 +73,7 @@ export type StudioGraphWorkspaceRendererOptions = Omit<RenderStudioGraphNodeCard
   shapeLayer: Pick<
     StudioShapeLayerOptions,
     | "selection"
+    | "getSelection"
     | "onSelect"
     | "onMoveSelection"
     | "onResizeShape"
@@ -490,7 +491,6 @@ export function renderStudioGraphWorkspace(
 
   // Diagram arrows use visual card bounds while remaining separate from ports.
   const { registerLayerHandle, ...shapeLayerOptions } = shapeLayer;
-  const nodesById = new Map(currentProject.graph.nodes.map((node) => [node.id, node]));
   const shapeHandle = renderStudioShapeLayer({
       canvasEl: world,
       diagram: readStudioDiagramFromProject(currentProject),
@@ -498,23 +498,13 @@ export function renderStudioGraphWorkspace(
       activeCanvasTool,
       getGraphZoom: () => graphInteraction.getGraphZoom(),
       getNodeAnchor: (nodeId) => {
-        const node = nodesById.get(nodeId);
-        if (!node) return null;
-        const element = graphInteraction.getNodeElement(nodeId);
-        const rect = element?.getBoundingClientRect();
-        const origin = world.getBoundingClientRect();
-        const zoom = resolveStudioGraphSafeZoom(graphInteraction.getGraphZoom());
+        const rect = graphInteraction.geometry.getNodeRect(nodeId);
+        if (!rect) return null;
         return {
           id: nodeId,
           shape: "rectangle",
-          position: {
-            x: rect?.width ? (rect.left - origin.left) / zoom : node.position.x,
-            y: rect?.height ? (rect.top - origin.top) / zoom : node.position.y,
-          },
-          size: {
-            width: element?.offsetWidth || resolveStudioGraphNodeWidth(node),
-            height: element?.offsetHeight || resolveStudioGraphNodeMinHeight(node),
-          },
+          position: { x: rect.left, y: rect.top },
+          size: { width: rect.right - rect.left, height: rect.bottom - rect.top },
         };
       },
       ...shapeLayerOptions,

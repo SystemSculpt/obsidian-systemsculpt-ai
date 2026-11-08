@@ -1,4 +1,5 @@
 /** @jest-environment jsdom */
+import { StudioCanvasSelection } from '../StudioCanvasSelection';
 import { StudioGraphInteractionEngine } from '../StudioGraphInteractionEngine';
 import type { StudioProjectV1 } from '../../../studio/types';
 
@@ -11,10 +12,10 @@ function harness() {
     {id:'inside',kind:'studio.json',position:{x:200,y:200},config:{}},
     {id:'outside',kind:'studio.json',position:{x:5000,y:5000},config:{}},
   ],edges:[],groups:[{id:'group',name:'Automation',nodeIds:['inside'],color:'#8de8bc'}]}} as unknown as StudioProjectV1;
-  const commit=jest.fn((_reason,mutator) => mutator(project) !== false), clearDiagramSelection=jest.fn();
+  const commit=jest.fn((_reason,mutator) => mutator(project) !== false), selection=new StudioCanvasSelection();
   const engine=new StudioGraphInteractionEngine({getCurrentProject:()=>project,isBusy:()=>false,setError:jest.fn(),
-    requestRender:jest.fn(),commitProjectMutation:commit,clearDiagramSelection,
-    getPortType:()=>null,portTypeCompatible:()=>true});
+    requestRender:jest.fn(),commitProjectMutation:commit,
+    getPortType:()=>null,portTypeCompatible:()=>true}, selection);
   const viewport=document.body.createDiv(), canvas=viewport.createDiv();
   Object.defineProperties(viewport,{clientWidth:{value:1000},clientHeight:{value:800}});
   engine.registerViewportElement(viewport); engine.registerCanvasElement(canvas);
@@ -22,7 +23,7 @@ function harness() {
   engine.renderGroupLayer();
   const frame=()=>canvas.querySelector<HTMLElement>('.ss-studio-group-frame')!;
   const select=()=>{frame().dispatchEvent(pointer('pointerdown'));window.dispatchEvent(pointer('pointerup'));};
-  return {engine,project,viewport,canvas,frame,select,commit,clearDiagramSelection};
+  return {engine,project,viewport,canvas,frame,select,commit,selection};
 }
 let cleanup:()=>void=()=>{};
 afterEach(()=>{cleanup();document.body.innerHTML='';});
@@ -54,9 +55,9 @@ describe('group background selection and fit',()=>{
   });
   it('selects a group without moving it, clears stale member selections, and fits only its frame',()=>{
     const h=harness();cleanup=()=>h.engine.clearRenderBindings();h.engine.setSelectedNodeIds(['outside']);
-    h.select();
+    h.selection.replace('shape', ['shape']);h.selection.replace('arrow', ['arrow']);h.select();
     expect(h.frame().getAttribute('aria-pressed')).toBe('true');expect(document.activeElement).toBe(h.frame());
-    expect(h.engine.getSelectedNodeIds()).toEqual([]);expect(h.clearDiagramSelection).toHaveBeenCalled();expect(h.commit).not.toHaveBeenCalled();
+    expect(h.engine.getSelectedNodeIds()).toEqual([]);expect(h.selection.ids('shape').size).toBe(0);expect(h.selection.ids('arrow').size).toBe(0);expect(h.commit).not.toHaveBeenCalled();
     expect(h.project.graph.nodes[0].position).toEqual({x:200,y:200});
     expect(h.engine.fitSelectedNodesInViewport({paddingPx:40})).toBe(true);
     expect(h.engine.getGraphZoom()).toBeGreaterThan(2);expect(h.engine.getViewportWorldTopLeft()!.x).toBeLessThan(200);

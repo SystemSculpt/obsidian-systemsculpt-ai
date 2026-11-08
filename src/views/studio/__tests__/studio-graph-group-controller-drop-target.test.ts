@@ -2,6 +2,7 @@
 
 import { StudioProjectSession } from "../../../studio/StudioProjectSession";
 import type { StudioProjectV1 } from "../../../studio/types";
+import { StudioCanvasGeometry } from "../canvas/StudioCanvasGeometry";
 import { StudioGraphGroupController } from "../StudioGraphGroupController";
 import {
   createElementStub,
@@ -97,7 +98,7 @@ function createController(
   project: StudioProjectV1,
   overrides?: Partial<GroupHost>
 ): StudioGraphGroupController {
-  return new StudioGraphGroupController({
+  const host: GroupHost = {
     isBusy: () => false,
     getCurrentProject: () => project,
     getGraphZoom: () => 1,
@@ -106,7 +107,13 @@ function createController(
     requestRender: () => undefined,
     commitProjectMutation: (_reason, mutator) => mutator(project) !== false,
     ...overrides,
-  });
+  };
+  const geometry = new StudioCanvasGeometry(host.getCurrentProject);
+  for (const node of project.graph.nodes) {
+    const element = host.getNodeElement(node.id);
+    if (element) geometry.registerNodeElement(node.id, element);
+  }
+  return new StudioGraphGroupController(host, geometry);
 }
 
 describe("StudioGraphGroupController drop target resolution", () => {
@@ -133,6 +140,31 @@ describe("StudioGraphGroupController drop target resolution", () => {
       expect(live.graph.groups![0].outputOffset).toEqual({x: 176, y: -80});
       expect(live.graph.nodes[0].position).toEqual({x: 180, y: 20});
     } finally { controller.clearRenderBindings(); harness.restore(); raf.mockRestore(); session.blockProjectFileWrites(); frame.remove(); }
+  });
+
+  it("updates only groups containing moved items without rereading card layout", () => {
+    const project = createProject();
+    project.graph.groups!.push({ id: "group_2", name: "Other", nodeIds: ["drag_far"] });
+    const card = document.createElement("div");
+    const width = jest.fn(() => 320), height = jest.fn(() => 180);
+    Object.defineProperties(card, { offsetWidth: { get: width }, offsetHeight: { get: height } });
+    const controller = createController(project, { getNodeElement: () => card });
+    const canvas = document.body.createDiv();
+    controller.registerCanvasElement(canvas);
+    controller.renderGroupLayer();
+    const other = canvas.querySelector<HTMLElement>('[data-group-id="group_2"]')!;
+    const observer = new MutationObserver(() => {});
+    observer.observe(other, { attributes: true, subtree: true, childList: true, characterData: true });
+    width.mockClear(); height.mockClear();
+    try {
+      project.graph.nodes.find(node => node.id === "member")!.position.x += 50;
+      controller.refreshGroupBounds({ nodeIds: ["member"], shapeIds: [] });
+      expect(observer.takeRecords()).toEqual([]);
+      expect(width).not.toHaveBeenCalled();
+      expect(height).not.toHaveBeenCalled();
+      expect(controller.resolveDropTargetGroupId(["drag_inside"])).toBe("group_1");
+      expect(width).not.toHaveBeenCalled();
+    } finally { observer.disconnect(); controller.clearRenderBindings(); canvas.remove(); }
   });
 
   it("matches a group when dragged node center is inside bounds", () => {

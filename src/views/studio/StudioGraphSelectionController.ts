@@ -1,3 +1,4 @@
+import { StudioCanvasSelection } from "./StudioCanvasSelection";
 import { createStudioMovementSnap, STUDIO_ALIGNMENT_SNAP_THRESHOLD_PX, type StudioMovementSnap } from "./canvas/StudioGraphAlignmentGuides";
 import { latestStudioPointerEvent, startStudioPointerGesture } from "./StudioPointerGesture";
 import type { StudioProjectSessionMutationReason } from "../../studio/StudioProjectSession";
@@ -17,8 +18,6 @@ import {
   type StudioWorldRect,
 } from "./canvas/StudioGraphWorldExtent";
 import {
-  resolveMeasuredStudioNodeHeight,
-  resolveMeasuredStudioNodeWidth,
   resolveStudioCanvasDelta,
   resolveStudioGraphSafeZoom,
 } from "../../studio/StudioNodeGeometry";
@@ -35,6 +34,7 @@ import {
   shouldStudioGraphDeferWheelToNativeScroll,
 } from "./StudioGraphDomTargeting";
 import { getStudioOwnerWindow } from "./StudioDomContext";
+import { StudioCanvasGeometry } from "./canvas/StudioCanvasGeometry";
 
 type GraphPoint = {
   x: number;
@@ -60,7 +60,7 @@ type StudioGraphSelectionHost = {
   isBusy: () => boolean;
   getCurrentProject: () => StudioProjectV1 | null;
   renderEdgeLayer: (options?: { translating?: boolean }) => void;
-  onNodePositionsChanged?: () => void;
+  onNodePositionsChanged?: (options?: NotifyNodePositionsChangedOptions) => void;
   commitProjectMutation: (
     reason: StudioProjectSessionMutationReason,
     mutator: (project: StudioProjectV1) => boolean | void,
@@ -84,13 +84,23 @@ type StudioGraphSelectionHost = {
   finishDiagramTranslation?: () => void;
 };
 
-type NotifyNodePositionsChangedOptions = {
+export type NotifyNodePositionsChangedOptions = {
+  nodeIds?: readonly string[];
+  shapeIds?: readonly string[];
   recomputeCanvasBounds?: boolean;
   /** A drag frame: nodes only moved, so edges reuse their measured port offsets. */
   translating?: boolean;
 };
 
 export class StudioGraphSelectionController {
+  readonly geometry: StudioCanvasGeometry;
+  private movementTargets: {
+    revision: number;
+    nodeIds: readonly string[];
+    shapeIds: readonly string[];
+    others: StudioGuideRect[];
+  } | null = null;
+  private resizeTargets: { revision: number; nodeId: string; others: StudioGuideRect[] } | null = null;
   private graphZoom = STUDIO_GRAPH_DEFAULT_ZOOM;
   private graphZoomMode: StudioGraphZoomMode = "interactive";
   /**
@@ -112,8 +122,8 @@ export class StudioGraphSelectionController {
   private viewportResizeObserver: ResizeObserver | null = null;
   private viewportWorldTopLeft: GraphPoint = { x: 0, y: 0 };
   private viewportPositionNeedsRestore = false;
-  private nodeElsById = new Map<string, HTMLElement>();
-  private selectedNodeIds = new Set<string>();
+  private get selectedNodeIds(): ReadonlySet<string> { return this.selection.ids("node"); }
+  private set selectedNodeIds(ids: ReadonlySet<string>) { this.selection.replace("node", ids); }
   private nodeTranslationOrigins = new Map<string, GraphPoint>();
   private suppressNextCanvasClick = false;
   private onSelectionChange: (() => void) | null = null;
@@ -121,7 +131,18 @@ export class StudioGraphSelectionController {
   private zoomSettleWindow: Window | null = null;
   private cancelPointerGesture: (() => void) | null = null;
 
-  constructor(private readonly host: StudioGraphSelectionHost) {}
+  constructor(
+    private readonly host: StudioGraphSelectionHost,
+    private readonly selection = new StudioCanvasSelection()
+  ) {
+    this.selection.subscribe(() => this.refreshNodeSelectionClasses());
+    this.geometry = new StudioCanvasGeometry(() => this.host.getCurrentProject(), (nodeId) => {
+      this.retainMovingGuideTargets([nodeId], this.geometry.revision - 1);
+      this.ensureWorldCoverage();
+      this.host.renderEdgeLayer();
+      this.host.onNodePositionsChanged?.({ nodeIds: [nodeId] });
+    });
+  }
 
   getGraphZoom(): number {
     return this.graphZoom;
@@ -195,7 +216,7 @@ export class StudioGraphSelectionController {
   clearProjectState(): void {
     this.cancelPointerGesture?.();
     const hadSelection = this.selectedNodeIds.size > 0;
-    this.selectedNodeIds.clear();
+    this.selection.clear("node");
     this.cancelScheduledGraphZoomSettle();
     this.graphZoomMode = "interactive";
     if (hadSelection) {
@@ -221,12 +242,12 @@ export class StudioGraphSelectionController {
     this.graphOwnerWindow = null;
     this.worldExtent = null;
     this.suppressNextCanvasClick = false;
-    this.graphZoomMode = "interactive";
-    this.nodeElsById.clear();
+    this.clearNodeElements();
   }
 
   onNodeRemoved(nodeId: string): void {
-    if (this.selectedNodeIds.delete(nodeId)) {
+    if (this.selectedNodeIds.has(nodeId)) {
+      this.selection.remove("node", nodeId);
       this.notifySelectionChanged();
     }
   }
@@ -281,10 +302,20 @@ export class StudioGraphSelectionController {
   notifyNodePositionsChanged(options?: NotifyNodePositionsChangedOptions): void {
     const shouldRecomputeCanvasBounds = options?.recomputeCanvasBounds !== false;
     if (shouldRecomputeCanvasBounds) {
+      this.geometry.refresh();
       this.ensureWorldCoverage();
+    } else {
+      const nodeIds = options?.nodeIds ?? [];
+      if (!options?.translating) {
+        const previousRevision = this.geometry.revision;
+        this.geometry.refreshNodes(nodeIds);
+        this.retainMovingGuideTargets(nodeIds, previousRevision);
+      }
+      for (const nodeId of nodeIds) this.geometry.getNodeRect(nodeId);
+      for (const shapeId of options?.shapeIds ?? []) this.geometry.getShapeRect(shapeId);
     }
     this.host.renderEdgeLayer({ translating: options?.translating === true });
-    this.host.onNodePositionsChanged?.();
+    this.host.onNodePositionsChanged?.(options);
   }
 
   /** World px added to a position to reach scroll-box px. */
@@ -362,8 +393,7 @@ export class StudioGraphSelectionController {
     const zoom = resolveStudioGraphSafeZoom(this.graphZoom);
     const viewWidth = Math.max(1, view.right - view.left);
     const viewHeight = Math.max(1, view.bottom - view.top);
-    const project = this.host.getCurrentProject();
-    const content = project ? this.computeNodeBounds(project) : null;
+    const content = this.geometry.getNodeBounds();
     const next = computeStudioWorldExtent({
       current: this.worldExtent,
       content,
@@ -413,19 +443,21 @@ export class StudioGraphSelectionController {
   }
 
   clearNodeElements(): void {
-    this.nodeElsById.clear();
+    this.geometry.clearNodeElements();
+    this.movementTargets = null;
+    this.resizeTargets = null;
   }
 
   registerNodeElement(nodeId: string, nodeEl: HTMLElement): void {
-    this.nodeElsById.set(nodeId, nodeEl);
+    this.geometry.registerNodeElement(nodeId, nodeEl);
   }
 
   getNodeElement(nodeId: string): HTMLElement | null {
-    return this.nodeElsById.get(nodeId) || null;
+    return this.geometry.getNodeElement(nodeId);
   }
 
   refreshNodeSelectionClasses(): void {
-    for (const [nodeId, nodeEl] of this.nodeElsById.entries()) {
+    for (const [nodeId, nodeEl] of this.geometry.getNodeElements()) {
       nodeEl.classList.toggle("is-selected", this.selectedNodeIds.has(nodeId));
     }
   }
@@ -434,7 +466,7 @@ export class StudioGraphSelectionController {
     if (this.selectedNodeIds.size === 0) {
       return;
     }
-    this.selectedNodeIds.clear();
+    this.selection.clear("node");
     this.refreshNodeSelectionClasses();
     this.notifySelectionChanged();
   }
@@ -446,7 +478,7 @@ export class StudioGraphSelectionController {
       return false;
     }
 
-    const selectionBounds = this.computeNodeBounds(project, this.selectedNodeIds);
+    const selectionBounds = this.geometry.getNodeBounds(this.selectedNodeIds);
     if (!selectionBounds) {
       return false;
     }
@@ -463,7 +495,7 @@ export class StudioGraphSelectionController {
       return false;
     }
 
-    const graphBounds = this.computeNodeBounds(project);
+    const graphBounds = this.geometry.getNodeBounds();
     if (!graphBounds) {
       return false;
     }
@@ -547,49 +579,6 @@ export class StudioGraphSelectionController {
     };
   }
 
-  private computeNodeBounds(project: StudioProjectV1, nodeIds?: Iterable<string>): GraphBounds | null {
-    const nodeById = new Map(project.graph.nodes.map((node) => [node.id, node] as const));
-    const nodes = nodeIds
-      ? Array.from(nodeIds)
-        .map((nodeId) => nodeById.get(nodeId))
-        .filter((node): node is StudioNodeInstance => Boolean(node))
-      : project.graph.nodes;
-    let left = Number.POSITIVE_INFINITY;
-    let top = Number.POSITIVE_INFINITY;
-    let right = Number.NEGATIVE_INFINITY;
-    let bottom = Number.NEGATIVE_INFINITY;
-
-    for (const node of nodes) {
-      if (!node.position) {
-        continue;
-      }
-      const nodeX = Number(node.position.x);
-      const nodeY = Number(node.position.y);
-      if (!Number.isFinite(nodeX) || !Number.isFinite(nodeY)) {
-        continue;
-      }
-
-      const nodeEl = this.nodeElsById.get(node.id);
-      const nodeWidth = resolveMeasuredStudioNodeWidth(nodeEl?.offsetWidth, node);
-      const nodeHeight = resolveMeasuredStudioNodeHeight(nodeEl?.offsetHeight);
-
-      left = Math.min(left, nodeX);
-      top = Math.min(top, nodeY);
-      right = Math.max(right, nodeX + nodeWidth);
-      bottom = Math.max(bottom, nodeY + nodeHeight);
-    }
-
-    if (
-      !Number.isFinite(left) ||
-      !Number.isFinite(top) ||
-      !Number.isFinite(right) ||
-      !Number.isFinite(bottom)
-    ) {
-      return null;
-    }
-    return { left, top, right, bottom };
-  }
-
   startMarqueeSelection(startEvent: PointerEvent): void {
     if (this.graphZoomMode === "overview") {
       return;
@@ -648,17 +637,10 @@ export class StudioGraphSelectionController {
       if (!project) {
         return;
       }
-      for (const node of project.graph.nodes) {
-        const nodeEl = this.nodeElsById.get(node.id);
-        const nodeHeight = resolveMeasuredStudioNodeHeight(nodeEl?.offsetHeight);
-        const nodeWidth = resolveMeasuredStudioNodeWidth(nodeEl?.offsetWidth, node);
-        const nodeX1 = node.position.x;
-        const nodeY1 = node.position.y;
-        const nodeX2 = nodeX1 + nodeWidth;
-        const nodeY2 = nodeY1 + nodeHeight;
-        const intersects = nodeX1 <= x2 && nodeX2 >= x1 && nodeY1 <= y2 && nodeY2 >= y1;
+      for (const [nodeId, rect] of this.geometry.getNodeRects()) {
+        const intersects = rect.left <= x2 && rect.right >= x1 && rect.top <= y2 && rect.bottom >= y1;
         if (intersects) {
-          marqueeSelected.add(node.id);
+          marqueeSelected.add(nodeId);
         }
       }
 
@@ -691,7 +673,7 @@ export class StudioGraphSelectionController {
       if (movedDistance > 3) {
         this.suppressNextCanvasClick = true;
       } else if (!additive) {
-        this.selectedNodeIds.clear();
+        this.selection.clear("node");
         this.refreshNodeSelectionClasses();
       }
       this.notifySelectionChanged();
@@ -959,7 +941,7 @@ export class StudioGraphSelectionController {
   }
 
   private findNode(project: StudioProjectV1, nodeId: string): StudioNodeInstance | null {
-    return project.graph.nodes.find((node) => node.id === nodeId) || null;
+    return this.geometry.getNode(nodeId, project);
   }
 
   private updateNodePosition(nodeId: string): void {
@@ -969,7 +951,8 @@ export class StudioGraphSelectionController {
     }
 
     const node = this.findNode(project, nodeId);
-    const element = this.nodeElsById.get(nodeId);
+    this.geometry.getNodeRect(nodeId);
+    const element = this.geometry.getNodeElement(nodeId);
     if (!node || !element) {
       return;
     }
@@ -1021,7 +1004,12 @@ export class StudioGraphSelectionController {
     for (const nodeId of this.nodeTranslationOrigins.keys()) {
       this.updateNodePosition(nodeId);
     }
-    this.notifyNodePositionsChanged({ recomputeCanvasBounds: false, translating: true });
+    this.notifyNodePositionsChanged({
+      recomputeCanvasBounds: false,
+      translating: true,
+      nodeIds: Array.from(this.nodeTranslationOrigins.keys()),
+      shapeIds: this.host.getSelectedShapeIds?.() ?? [],
+    });
   }
 
   finishSelectionTranslation(): void {
@@ -1163,7 +1151,12 @@ export class StudioGraphSelectionController {
         this.updateNodePosition(dragNodeId);
       }
       this.host.previewDiagramTranslation?.();
-      this.notifyNodePositionsChanged({ recomputeCanvasBounds: false, translating: true });
+      this.notifyNodePositionsChanged({
+        recomputeCanvasBounds: false,
+        translating: true,
+        nodeIds: dragNodeIds,
+        shapeIds: this.host.getSelectedShapeIds?.() ?? [],
+      });
       syncHoveredGroup();
     };
 
@@ -1233,27 +1226,19 @@ export class StudioGraphSelectionController {
       this.renderAlignmentGuides(null);
       return;
     }
-    const others: StudioGuideRect[] = [];
-    for (const node of project.graph.nodes) {
-      if (node.id === nodeId) {
-        continue;
-      }
-      const nodeX = Number(node.position?.x);
-      const nodeY = Number(node.position?.y);
-      if (!Number.isFinite(nodeX) || !Number.isFinite(nodeY)) {
-        continue;
-      }
-      const nodeEl = this.nodeElsById.get(node.id);
-      others.push({
-        left: nodeX,
-        top: nodeY,
-        right: nodeX + resolveMeasuredStudioNodeWidth(nodeEl?.offsetWidth, node),
-        bottom: nodeY + resolveMeasuredStudioNodeHeight(nodeEl?.offsetHeight),
-      });
+    const revision = this.geometry.revision;
+    if (!this.resizeTargets || this.resizeTargets.revision !== revision || this.resizeTargets.nodeId !== nodeId) {
+      this.resizeTargets = {
+        revision,
+        nodeId,
+        others: Array.from(this.geometry.getNodeRects())
+          .filter(([id]) => id !== nodeId)
+          .map(([, rect]) => rect),
+      };
     }
     const guides = resolveStudioResizeGuides({
       moving,
-      others,
+      others: this.resizeTargets.others,
       threshold: STUDIO_GUIDE_THRESHOLD_PX / resolveStudioGraphSafeZoom(this.graphZoom),
       edges,
     });
@@ -1265,26 +1250,56 @@ export class StudioGraphSelectionController {
   }
 
   private movementGeometry(nodeIds: readonly string[], shapeIds: readonly string[]): { moving: StudioGuideRect; others: StudioGuideRect[] } | null {
-    const project = this.host.getCurrentProject();
-    if (!project) return null;
-    const nodes = new Set(nodeIds), shapes = new Set(shapeIds);
-    const moving: StudioGuideRect[] = [], others: StudioGuideRect[] = [];
-    for (const node of project.graph.nodes) {
-      const element = this.nodeElsById.get(node.id);
-      (nodes.has(node.id) ? moving : others).push({
-        left: node.position.x, top: node.position.y,
-        right: node.position.x + resolveMeasuredStudioNodeWidth(element?.offsetWidth, node),
-        bottom: node.position.y + resolveMeasuredStudioNodeHeight(element?.offsetHeight),
-      });
+    if (!this.host.getCurrentProject()) return null;
+    const revision = this.geometry.revision;
+    const targets = this.movementTargets;
+    if (!targets || targets.revision !== revision ||
+      !this.sameIds(targets.nodeIds, nodeIds) || !this.sameIds(targets.shapeIds, shapeIds)) {
+      const nodes = new Set(nodeIds), shapes = new Set(shapeIds);
+      this.movementTargets = {
+        revision,
+        nodeIds: [...nodeIds],
+        shapeIds: [...shapeIds],
+        others: [
+          ...Array.from(this.geometry.getNodeRects()).filter(([id]) => !nodes.has(id)).map(([, rect]) => rect),
+          ...Array.from(this.geometry.getShapeRects()).filter(([id]) => !shapes.has(id)).map(([, rect]) => rect),
+        ],
+      };
     }
-    for (const shape of project.diagram?.shapes || []) {
-      (shapes.has(shape.id) ? moving : others).push({ left: shape.position.x, top: shape.position.y,
-        right: shape.position.x + shape.size.width, bottom: shape.position.y + shape.size.height });
+    const moving: StudioGuideRect[] = [];
+    for (const nodeId of nodeIds) {
+      const rect = this.geometry.getNodeRect(nodeId);
+      if (rect) moving.push(rect);
+    }
+    for (const shapeId of shapeIds) {
+      const rect = this.geometry.getShapeRect(shapeId);
+      if (rect) moving.push(rect);
     }
     if (!moving.length) return null;
     const bounds = moving.reduce((union, rect) => ({ left: Math.min(union.left, rect.left),
       top: Math.min(union.top, rect.top), right: Math.max(union.right, rect.right), bottom: Math.max(union.bottom, rect.bottom) }));
-    return { moving: bounds, others };
+    return { moving: bounds, others: this.movementTargets!.others };
+  }
+
+  private sameIds(previous: readonly string[], current: readonly string[]): boolean {
+    return previous.length === current.length && previous.every((id, index) => id === current[index]);
+  }
+
+  private retainMovingGuideTargets(nodeIds: readonly string[], previousRevision: number): void {
+    if (nodeIds.length === 0) return;
+    const revision = this.geometry.revision;
+    const movement = this.movementTargets;
+    if (movement?.revision === previousRevision && nodeIds.every(id => movement.nodeIds.includes(id))) {
+      movement.revision = revision;
+    } else {
+      this.movementTargets = null;
+    }
+    const resize = this.resizeTargets;
+    if (resize?.revision === previousRevision && nodeIds.every(id => id === resize.nodeId)) {
+      resize.revision = revision;
+    } else {
+      this.resizeTargets = null;
+    }
   }
 
   createMovementSnap(nodeIds: readonly string[], shapeIds: readonly string[]): StudioMovementSnap {
@@ -1312,11 +1327,7 @@ export class StudioGraphSelectionController {
   }
 
   toggleNodeSelection(nodeId: string): void {
-    if (this.selectedNodeIds.has(nodeId)) {
-      this.selectedNodeIds.delete(nodeId);
-    } else {
-      this.selectedNodeIds.add(nodeId);
-    }
+    this.selection.toggle("node", nodeId);
     this.refreshNodeSelectionClasses();
     this.notifySelectionChanged();
   }

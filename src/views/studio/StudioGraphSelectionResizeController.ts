@@ -1,7 +1,5 @@
 import { isManagedOutputPlaceholderNode } from "../../studio/StudioManagedOutputNodes";
 import {
-  resolveMeasuredStudioNodeHeight,
-  resolveMeasuredStudioNodeWidth,
   resolveStudioCanvasDelta,
   isStudioFillTextNode,
   resolveStudioTextNodeFontSize,
@@ -24,6 +22,7 @@ import {
   type StudioSelectionResizePatchEntry,
 } from "./canvas/StudioGraphSelectionTransform";
 import { getStudioOwnerWindow } from "./StudioDomContext";
+import type { StudioCanvasGeometry } from "./canvas/StudioCanvasGeometry";
 
 /** @internal Tests type their fixtures with this. */
 export type StudioGraphSelectionResizePatchEntry = StudioSelectionResizePatchEntry;
@@ -88,7 +87,10 @@ export class StudioGraphSelectionResizeController {
   private frameEl: HTMLElement | null = null;
   private gesture: GestureState | null = null;
 
-  constructor(private readonly host: StudioGraphSelectionResizeControllerHost) {}
+  constructor(
+    private readonly host: StudioGraphSelectionResizeControllerHost,
+    private readonly geometry: StudioCanvasGeometry
+  ) {}
 
   registerCanvasElement(canvas: HTMLElement): void {
     this.canvasEl = canvas;
@@ -131,7 +133,7 @@ export class StudioGraphSelectionResizeController {
   }
 
   /**
-   * Re-derives the frame from the current selection and live node DOM.
+   * Re-derives the frame from the current selection and cached card geometry.
    * No-op while a gesture is in flight — the gesture drives the frame from
    * its own transform math.
    */
@@ -165,9 +167,8 @@ export class StudioGraphSelectionResizeController {
   }
 
   /**
-   * Snapshots the current multi-selection: canvas-space rects (width from
-   * the geometry resolvers, height from live DOM measurement — the same
-   * sources the group-bounds overlays use) plus per-node transform context.
+   * Snapshots the current multi-selection from the shared canvas geometry
+   * owner, plus per-node transform context.
    * Returns null unless at least two selected nodes exist in the project.
    */
   private snapshotSelection(): {
@@ -179,12 +180,12 @@ export class StudioGraphSelectionResizeController {
     if (!project) {
       return null;
     }
-    const nodeById = new Map(project.graph.nodes.map((node) => [node.id, node] as const));
     const snapshots: StudioSelectionResizeNodeSnapshot[] = [];
     const nodesById = new Map<string, StudioNodeInstance>();
     for (const rawNodeId of this.host.getSelectedNodeIds()) {
-      const node = nodeById.get(rawNodeId);
-      if (!node || nodesById.has(node.id)) {
+      const node = this.geometry.getNode(rawNodeId);
+      const size = this.geometry.getNodeSize(rawNodeId);
+      if (!node || !size || nodesById.has(node.id)) {
         continue;
       }
       const nodeEl = this.host.getNodeElement(node.id);
@@ -194,8 +195,8 @@ export class StudioGraphSelectionResizeController {
         rect: {
           left: node.position.x,
           top: node.position.y,
-          width: resolveMeasuredStudioNodeWidth(nodeEl?.offsetWidth, node),
-          height: resolveMeasuredStudioNodeHeight(nodeEl?.offsetHeight),
+          width: size.width,
+          height: size.height,
         },
         fontSize: resolveStudioTextNodeFontSize(node),
         hasAspectMediaContent: Boolean(
