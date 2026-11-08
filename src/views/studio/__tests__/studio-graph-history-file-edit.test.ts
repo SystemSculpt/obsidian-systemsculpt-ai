@@ -127,6 +127,41 @@ it("undoes each completed local edit without inferring ownership from the live c
   expect(history.redo()?.project.name).toBe("4");
 });
 
+it("records and extends a field transaction without serializing whole projects", () => {
+  const project = createEmptyStudioProject({ name: "A", policyPath: "p", minPluginVersion: "6", maxRuns: 10, maxArtifactsMb: 10 });
+  const history = new StudioGraphHistory();
+  history.reset(project);
+  const stringify = jest.spyOn(JSON, "stringify");
+  try {
+    for (const name of ["B", "C", "D"]) {
+      const before = { project: { ...project }, selectedNodeIds: [] };
+      project.name = name;
+      history.recordEdit(before, { project, selectedNodeIds: [] }, "field:name");
+    }
+    expect(stringify.mock.calls.filter(([value]) => value && typeof value === "object" && "projectId" in value)).toHaveLength(0);
+  } finally {
+    stringify.mockRestore();
+  }
+  expect(history.undo()?.project.name).toBe("A");
+  expect(history.undo()).toBeNull();
+  expect(history.redo()?.project.name).toBe("D");
+});
+
+it("keeps peer changes outside a continued field transaction", () => {
+  const project = createEmptyStudioProject({ name: "A", policyPath: "p", minPluginVersion: "6", maxRuns: 10, maxArtifactsMb: 10 });
+  const history = new StudioGraphHistory();
+  history.reset(project);
+  const first = { ...project, name: "B" };
+  history.recordEdit({ project, selectedNodeIds: [] }, { project: first, selectedNodeIds: [] }, "field:name");
+  const peer = { ...first, settings: { ...first.settings, retention: { ...first.settings.retention, maxRuns: 25 } } };
+  const continued = { ...peer, name: "C" };
+  history.recordEdit({ project: peer, selectedNodeIds: [] }, { project: continued, selectedNodeIds: [] }, "field:name");
+  const undone = history.undo(undefined, { project: continued, selectedNodeIds: [] })!;
+  expect(undone.project.name).toBe("A");
+  expect(undone.project.settings.retention.maxRuns).toBe(25);
+  expect(history.redo()?.project.settings.retention.maxRuns).toBe(25);
+});
+
 it.each([0, -1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1])("rejects unsafe history capacity %s", capacity => {
   expect(() => new StudioGraphHistory(capacity)).toThrow(RangeError);
 });

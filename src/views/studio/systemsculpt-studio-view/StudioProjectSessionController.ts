@@ -253,7 +253,7 @@ export class StudioProjectSessionController {
     mutator: (project: StudioProjectV1) => boolean | void,
     options?: {
       captureHistory?: boolean;
-      historyGroup?: string;
+      historyGroup?: string | symbol;
       mode?: StudioProjectSessionAutosaveMode;
     }
   ): boolean {
@@ -261,14 +261,17 @@ export class StudioProjectSessionController {
     if (!session) {
       return false;
     }
-    const before = options?.captureHistory !== false ? session.getProjectSnapshot() : null;
+    if (options?.captureHistory !== false && !options?.historyGroup) this.host.history.finishGroup();
     const selectedNodeIds = this.host.graphInteraction.getSelectedNodeIds();
-    const changed = session.mutate(reason, mutator, { mode: options?.mode || "discrete", origin: this.mutationOrigin });
-    if (changed && before) this.host.history.recordEdit(
-      { project: before, selectedNodeIds },
-      { project: session.getProject(), selectedNodeIds: this.host.graphInteraction.getSelectedNodeIds() }, options?.historyGroup
-    );
-    return changed;
+    return session.mutate(reason, mutator, {
+      mode: options?.mode || "discrete", origin: this.mutationOrigin,
+      onCommit: options?.captureHistory === false ? undefined : (before, after) => {
+        this.host.history.recordEdit(
+          { project: before, selectedNodeIds },
+          { project: after, selectedNodeIds: this.host.graphInteraction.getSelectedNodeIds() }, options?.historyGroup
+        );
+      },
+    });
   }
 
   async commitMutationAsync(
@@ -276,7 +279,7 @@ export class StudioProjectSessionController {
     mutator: (project: StudioProjectV1) => Promise<boolean | void>,
     options?: {
       captureHistory?: boolean;
-      historyGroup?: string;
+      historyGroup?: string | symbol;
       mode?: StudioProjectSessionAutosaveMode;
     }
   ): Promise<boolean> {
@@ -284,14 +287,18 @@ export class StudioProjectSessionController {
     if (!session) {
       return false;
     }
-    const before = options?.captureHistory !== false ? session.getProjectSnapshot() : null;
+    if (options?.captureHistory !== false && !options?.historyGroup) this.host.history.finishGroup();
     const selectedNodeIds = this.host.graphInteraction.getSelectedNodeIds();
-    const changed = await session.mutateAsync(reason, mutator, { mode: options?.mode || "discrete", origin: this.mutationOrigin });
-    if (changed && before && this.currentProjectSession === session) this.host.history.recordEdit(
-      { project: before, selectedNodeIds },
-      { project: session.getProject(), selectedNodeIds: this.host.graphInteraction.getSelectedNodeIds() }, options?.historyGroup
-    );
-    return changed;
+    return session.mutateAsync(reason, mutator, {
+      mode: options?.mode || "discrete", origin: this.mutationOrigin,
+      onCommit: options?.captureHistory === false ? undefined : (before, after) => {
+        if (this.currentProjectSession !== session) return;
+        this.host.history.recordEdit(
+          { project: before, selectedNodeIds },
+          { project: after, selectedNodeIds: this.host.graphInteraction.getSelectedNodeIds() }, options?.historyGroup
+        );
+      },
+    });
   }
 
   async flushPendingProjectSaveWork(options?: {
