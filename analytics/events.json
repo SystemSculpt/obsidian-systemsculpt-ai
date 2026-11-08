@@ -14,7 +14,7 @@
     },
     "chat-empty-pro-try": {
       "events": [],
-      "not_measured": "A subscriber's empty-chat taps (Make an image fills the composer, Smart search opens search, Open Studio opens Studio) stay local; Obsidian's policies ban client telemetry. What follows is measured where it reaches the API: the image tool's job and search's semantic query as api_request.",
+      "not_measured": "Empty-chat try taps for subscribers and starters with credits (image and video fills the composer with an image prompt, smart search opens search or, with embeddings off, their setting, Studio opens Studio) stay local; Obsidian's policies ban client telemetry. What follows is measured where it reaches the API: the image tool's job and search's semantic query as api_request.",
       "where": ["src/views/chatview/AgentEmptyState.ts", "src/views/chatview/AgentChatView.ts"]
     },
     "studio-photo-export": {
