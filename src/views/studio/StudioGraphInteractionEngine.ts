@@ -30,7 +30,7 @@ export class StudioGraphInteractionEngine {
           ? { nodeIds: options.nodeIds ?? [], shapeIds: options.shapeIds ?? [] }
           : undefined);
         this.selectionResizeController.refreshSelectionFrame();
-        this.host.onNodePositionsChanged?.();
+        this.host.onNodePositionsChanged?.(options);
       },
       commitProjectMutation: (reason, mutator, options) =>
         this.host.commitProjectMutation(reason, mutator, options),
