@@ -109,6 +109,13 @@ describe("Codex images in chat", () => {
     expect(files.size).toBe(2);
   });
 
+  it("ends a generation that returned no file instead of leaving Chat saving", async () => {
+    const { app } = vault();
+    const empty = { type: "imageGeneration", id: "exec-2", status: "completed" };
+    const saved = await new CodexImageImporter(app).present(update(empty), empty, "/vault");
+    expect(saved.output?.summary).toBe("Codex returned no image file.");
+  });
+
   it("copies the image again after the person deletes the vault copy", async () => {
     const { app, files } = vault();
     const importer = new CodexImageImporter(app);

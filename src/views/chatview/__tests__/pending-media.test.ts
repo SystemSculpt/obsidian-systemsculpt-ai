@@ -3,7 +3,7 @@ import { TFile, type App } from "obsidian";
 import type { AgentToolPart } from "../../../chat/ChatConversation";
 import { beginGeneration, generationKey, updateGeneration } from "../../../tools/systemsculpt/GenerationProgress";
 import { encodeSystemSculptToolResult } from "../../../tools/systemsculpt/SystemSculptTools";
-import { parseAspectRatio, pendingStatus, presentPendingMedia } from "../PendingMedia";
+import { parseAspectRatio, pendingStatus, presentPendingMedia, retryHint } from "../PendingMedia";
 import { renderTurnMedia } from "../TurnMedia";
 
 function tool(overrides: Partial<AgentToolPart> & Pick<AgentToolPart, "name" | "state">): AgentToolPart {
@@ -63,6 +63,32 @@ describe("live generation placeholders", () => {
     expect(presentPendingMedia([failed("Busy."), retried], false)).toEqual([]);
   });
 
+  it("waits for streamed arguments, so the tiles are drawn once at their real count and shape", () => {
+    expect(presentPendingMedia([tool({ name: "mcp__systemsculpt__generate_image", state: "input-streaming", input: {} })], true)).toEqual([]);
+  });
+
+  it("does not invent a failure for a call the turn's own error ended", () => {
+    const stamped = tool({ name: "generate_image", state: "failed", input: { prompt: "Owls" }, error: { code: "NATIVE_TOOL_FAILED", message: "Native tool failed." } } as Partial<AgentToolPart> & Pick<AgentToolPart, "name" | "state">);
+    expect(presentPendingMedia([stamped], false)).toEqual([]);
+  });
+
+  it("keeps a failure when the later call was only gated", () => {
+    const failed = tool({ name: "generate_image", state: "failed", input: { prompt: "Owls" }, output: { data: encodeSystemSculptToolResult({ ok: false, message: "Busy." }) } });
+    const gated = tool({ name: "generate_image", callId: "call-2", state: "succeeded", input: { prompt: "Owls" },
+      output: { data: encodeSystemSculptToolResult({ ok: false, message: "Not enough credits.", link: { label: "Buy credits", url: "https://systemsculpt.com/credits" } }) } });
+    expect(presentPendingMedia([failed, gated], false).map(tile => tile.error)).toEqual(["Busy."]);
+  });
+
+  it("never runs the clock backward when the reported start ends before the call does", () => {
+    const args = { prompt: "Clock" };
+    const key = generationKey("generate_image", args);
+    const end = beginGeneration(key, 1_000);
+    const [tile] = presentPendingMedia([tool({ name: "generate_image", callId: "clock-1", state: "running", input: args })], true);
+    expect(pendingStatus(tile, 11_000).meta).toBe("10s");
+    end();
+    expect(pendingStatus(tile, 12_000).meta).toBe("11s");
+  });
+
   it("estimates time left from the job's usual length and never claims done", () => {
     const args = { prompt: "Estimate me" };
     const key = generationKey("generate_image", args);
@@ -95,6 +121,14 @@ describe("live generation placeholders", () => {
     expect(figure.style.getPropertyValue("--ss-media-ratio")).toBe(String(3 / 2));
     block.querySelector<HTMLElement>("[data-testid='chat.turn.media.open']")!.click();
     expect(actions.openFile).toHaveBeenCalledWith(PATH);
+
+    // A broken file still ends the sheen.
+    figure.querySelector("img")!.dispatchEvent(new Event("error"));
+    expect(figure.classList.contains("is-loaded")).toBe(true);
+    // Landed media survives a rebuild of its block untouched.
+    const second = tool({ ...running, callId: "call-2", state: "running" });
+    const rebuilt = renderTurnMedia(app([PATH]), parent, [done, second], actions, "", true)!;
+    expect(rebuilt.querySelector("figure[data-media-path]")).toBe(figure);
   });
 
   it("shows a failed generation's reason with the retry hint", () => {
@@ -105,5 +139,6 @@ describe("live generation placeholders", () => {
     expect(tile.textContent).toContain("The video model timed out.");
     expect(tile.textContent).toContain("Ask again to retry.");
     expect(tile.hasAttribute("aria-busy")).toBe(false);
+    expect(retryHint("The prompt was flagged by the provider's safety system.")).toBe("Change the prompt and ask again.");
   });
 });

@@ -410,6 +410,12 @@ video.systemsculpt-agent-media-frame {
   object-fit: contain;
 }
 
+/* An asked-for shape holds even if the file comes back another one: shown whole, never cropped. */
+.systemsculpt-agent-media.has-ratio[data-ratio="fixed"] .systemsculpt-agent-media-frame {
+  height: 100%;
+  object-fit: contain;
+}
+
 .systemsculpt-agent-media.has-ratio .systemsculpt-agent-media-open img {
   position: relative;
   opacity: 0;
@@ -582,11 +588,7 @@ video.systemsculpt-agent-media-frame {
 }
 
 .systemsculpt-agent-media.is-failed .ss-media-pending-label {
-  display: -webkit-box;
-  white-space: normal;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  text-wrap: balance;
+  max-width: 100%;
 }
 
 /* A Studio run has no known shape: one slim row across the grid. */

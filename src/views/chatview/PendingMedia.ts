@@ -75,7 +75,20 @@ function codexFailure(part: AgentToolPart): string | undefined {
       ? ` until ${resetsAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : "";
     return `Codex image limit reached${when}.`;
   }
-  return text(part.output?.summary) ?? text(record(part.output?.data).message) ?? (part.error ? presentAgentToolFailure(part) : undefined);
+  return text(part.output?.summary) ?? text(record(part.output?.data).message) ?? ownReason(part);
+}
+
+/** A call's own error; the generic native-tool codes Chat stamps on a failed turn's open calls are not one. */
+function ownReason(part: AgentToolPart): string | undefined {
+  if (!part.error || /^NATIVE_TOOL_/u.test(part.error.code)) return undefined;
+  return presentAgentToolFailure(part);
+}
+
+/** A later call that actually produced media, not one that was stopped, gated or failed. */
+function madeUp(later: AgentToolPart): boolean {
+  if (later.state !== "succeeded") return false;
+  const result = decodeSystemSculptToolOutput(later.output?.data);
+  return result ? result.ok && !result.link : codexImageMedia(later) !== null;
 }
 
 /**
@@ -86,7 +99,8 @@ function codexFailure(part: AgentToolPart): string | undefined {
 export function presentPendingMedia(parts: readonly AgentToolPart[], live: boolean): PendingMedia[] {
   const pending: PendingMedia[] = [];
   parts.forEach((part, order) => {
-    const active = live && isActiveAgentToolState(part.state);
+    // Claude streams a call's arguments before it runs: wait for them, so the tile is drawn once at its real size and count.
+    const active = live && isActiveAgentToolState(part.state) && part.state !== "input-streaming";
     const finished = part.state === "succeeded" || part.state === "failed";
     const tool = systemSculptToolName(part.name);
     if (tool === "generate_image" || tool === "generate_video" || tool === "studio_run_workflow") {
@@ -118,7 +132,7 @@ export function presentPendingMedia(parts: readonly AgentToolPart[], live: boole
       if (result?.ok || result?.link || result && QUIET_RESULTS.some(pattern => pattern.test(result.message))) return;
       if (!result && part.state !== "failed") return;
       // Without a reason of its own the turn's error already explains it.
-      const error = result ? failureText(result) : part.error ? presentAgentToolFailure(part) : undefined;
+      const error = result ? failureText(result) : ownReason(part);
       if (!error) return;
       pending.push({
         ...base, id: `${part.callId}:failed`, kind, ratio, state: "failed",
@@ -129,7 +143,8 @@ export function presentPendingMedia(parts: readonly AgentToolPart[], live: boole
     // Codex's own image tool: it says nothing until done, then Chat saves the file.
     const input = record(part.input);
     if (part.native?.agent !== "codex" || input.type !== "imageGeneration") return;
-    const base = { order, progressKey: null, callId: part.callId, kind: "image" as const, ratio: 1, caption: "Codex image" };
+    // Codex fills in its rewritten prompt as it goes; until then the tile names its maker.
+    const base = { order, progressKey: null, callId: part.callId, kind: "image" as const, ratio: 1, caption: text(input.revisedPrompt) ?? "Codex image" };
     if (active) {
       pending.push({ ...base, id: `${part.callId}:0`, state: "working", label: "Generating image" });
       return;
@@ -146,20 +161,22 @@ export function presentPendingMedia(parts: readonly AgentToolPart[], live: boole
   });
   // A failure the agent made up for later in the turn is history, not news.
   return pending.filter(tile => tile.state !== "failed"
-    || !parts.slice(tile.order + 1).some(later => later.state === "succeeded" && later.name === parts[tile.order].name));
+    || !parts.slice(tile.order + 1).some(later => later.name === parts[tile.order].name && madeUp(later)));
 }
 
 /** First time this session saw each call running, for calls with no reported start. */
 const firstSeen = new Map<string, number>();
 
+/** The earliest start known for the call, kept so the clock never jumps back when the report ends first. */
 function startedAt(tile: PendingMedia, now: number): number {
   const reported = generationProgress(tile.progressKey)?.startedAt;
-  if (reported !== undefined) return reported;
   const seen = firstSeen.get(tile.callId);
-  if (seen !== undefined) return seen;
-  if (firstSeen.size > 200) firstSeen.clear();
-  firstSeen.set(tile.callId, now);
-  return now;
+  const start = Math.min(reported ?? now, seen ?? now);
+  if (start !== seen) {
+    if (seen === undefined && firstSeen.size > 200) firstSeen.clear();
+    firstSeen.set(tile.callId, start);
+  }
+  return start;
 }
 
 function roughly(ms: number): string {
@@ -187,6 +204,36 @@ export function pendingStatus(tile: PendingMedia, now: number): Readonly<{ meta:
 }
 
 const ICONS: Readonly<Record<PendingMedia["kind"], string>> = { image: "image", video: "film", workflow: "workflow" };
+const FAILED_ICONS: Readonly<Record<PendingMedia["kind"], string>> = { image: "image-off", video: "video-off", workflow: "workflow" };
+
+/** What to do next: a refused prompt needs new words, anything else another try. */
+export function retryHint(error: string): string {
+  return /\b(safety|flagged|moderation|content policy|not allowed)\b/iu.test(error) ? "Change the prompt and ask again." : "Ask again to retry.";
+}
+
+/**
+ * Cuts text at a word so it fits its one line, ending in "…"; the full text
+ * stays in the title. CSS ellipsis remains the fallback after a resize.
+ */
+export function fitToLine(element: HTMLElement, full: string): void {
+  element.textContent = full;
+  if (!element.isConnected || element.scrollWidth <= element.clientWidth) return;
+  const words = full.split(" ");
+  let low = 1, high = words.length - 1;
+  while (low <= high) {
+    const middle = (low + high) >> 1;
+    element.textContent = `${words.slice(0, middle).join(" ").replace(/[\s,.;:–—-]+$/u, "")}…`;
+    if (element.scrollWidth <= element.clientWidth) low = middle + 1; else high = middle - 1;
+  }
+  element.textContent = `${words.slice(0, Math.max(1, high)).join(" ").replace(/[\s,.;:–—-]+$/u, "")}…`;
+}
+
+/** Fits every one-line text in a freshly drawn block once it has a size. */
+export function fitPendingText(block: HTMLElement): void {
+  const view = block.ownerDocument.defaultView;
+  const fit = () => block.querySelectorAll<HTMLElement>("[data-fit]").forEach(element => fitToLine(element, element.dataset.fit ?? ""));
+  if (view?.requestAnimationFrame) view.requestAnimationFrame(fit); else fit();
+}
 
 /** One placeholder or failure tile; its live line and bar update from the block's clock. */
 export function renderPendingMedia(grid: HTMLElement, tile: PendingMedia): HTMLElement {
@@ -202,13 +249,15 @@ export function renderPendingMedia(grid: HTMLElement, tile: PendingMedia): HTMLE
   const frame = figure.createDiv({ cls: "ss-media-pending-frame" });
   if (tile.state !== "failed") frame.createSpan({ cls: "ss-media-pending-sheen", attr: { "aria-hidden": "true" } });
   const icon = frame.createSpan({ cls: "ss-media-pending-icon", attr: { "aria-hidden": "true" } });
-  setIcon(icon, tile.state === "failed" ? "image-off" : ICONS[tile.kind]);
+  setIcon(icon, tile.state === "failed" ? FAILED_ICONS[tile.kind] : ICONS[tile.kind]);
   const status = frame.createDiv({ cls: "ss-media-pending-status" });
   if (tile.state === "failed") {
     // The reason is the headline; what to do next is the one line under it.
     figure.setAttribute("role", "status");
-    status.createSpan({ cls: "ss-media-pending-label", text: tile.error ?? tile.label, attr: { title: tile.error ?? tile.label } });
-    status.createSpan({ cls: "ss-media-pending-meta", text: "Ask again to retry." });
+    // One line; the whole reason stays in its title and in the call's own row above.
+    const reason = tile.error ?? tile.label;
+    status.createSpan({ cls: "ss-media-pending-label", text: reason, attr: { title: reason, "data-fit": reason } });
+    status.createSpan({ cls: "ss-media-pending-meta", text: retryHint(reason) });
   } else {
     status.createSpan({ cls: "ss-media-pending-label", text: tile.label });
     status.createSpan({ cls: "ss-media-pending-meta", attr: { "data-testid": "chat.turn.media.pending.meta" } });
@@ -216,7 +265,8 @@ export function renderPendingMedia(grid: HTMLElement, tile: PendingMedia): HTMLE
     updatePendingTile(figure, tile, Date.now());
   }
   if (tile.kind !== "workflow") {
-    figure.createEl("figcaption", { cls: "systemsculpt-agent-media-caption is-single-line", text: tile.caption ?? "", attr: { title: tile.caption ?? "" } });
+    const caption = tile.caption ?? "";
+    figure.createEl("figcaption", { cls: "systemsculpt-agent-media-caption is-single-line", text: caption, attr: { title: caption, "data-fit": caption } });
   }
   pendingTiles.set(figure, tile);
   return figure;

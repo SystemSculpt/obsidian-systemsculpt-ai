@@ -2,10 +2,11 @@ import { TFile, type App } from "obsidian";
 import type { AgentToolPart } from "../../chat/ChatConversation";
 import { decodeSystemSculptToolOutput, systemSculptToolName, type SystemSculptMedia } from "../../tools/systemsculpt/SystemSculptTools";
 import { codexImageMedia, rememberCodexImage } from "../../services/codex/CodexImages";
-import { generationArguments, presentPendingMedia, renderPendingMedia, requestedMediaRatio, syncPendingClock, type PendingMedia } from "./PendingMedia";
+import { fitPendingText, generationArguments, presentPendingMedia, renderPendingMedia, requestedMediaRatio, syncPendingClock, type PendingMedia } from "./PendingMedia";
 
 /** A file to show, with where its call sits in the turn and the frame its call asked for. */
-type TurnMediaItem = SystemSculptMedia & Readonly<{ order?: number; ratio?: number }>;
+/** `fixed`: the ratio was asked for, so the file keeps that frame even if it comes back another shape. */
+type TurnMediaItem = SystemSculptMedia & Readonly<{ order?: number; ratio?: number; fixed?: boolean }>;
 
 type TurnMedia = Readonly<{
   media: readonly TurnMediaItem[];
@@ -52,7 +53,7 @@ export function presentTurnMedia(parts: readonly AgentToolPart[], answer = "", l
     const tool = systemSculptToolName(part.name);
     // A generated file opens in the frame its placeholder had, so it lands without a jump.
     const ratio = tool === "generate_image" || tool === "generate_video" ? requestedMediaRatio(tool, generationArguments(part)) : undefined;
-    for (const item of result.media ?? []) if (!embeddedInAnswer(answer, item.path)) media.set(item.path, { ...item, order, ...(ratio ? { ratio } : {}) });
+    for (const item of result.media ?? []) if (!embeddedInAnswer(answer, item.path)) media.set(item.path, { ...item, order, ...(ratio ? { ratio, fixed: true } : {}) });
     if (result.link) {
       // The line is the message's first part; what follows the link is guidance for the agent.
       const text = result.message.split(`${result.link.label}:`)[0].trim();
@@ -85,6 +86,9 @@ export function renderTurnMedia(app: App, parent: HTMLElement, parts: readonly A
   }
   const fingerprint = JSON.stringify(presented);
   if (existing?.dataset.media === fingerprint) return existing;
+  // Landed media moves into the new block as is: no reload, blink or restarted video.
+  const landed = new Map<string, HTMLElement>();
+  existing?.querySelectorAll<HTMLElement>("figure.is-loaded[data-media-path]").forEach(figure => landed.set(figure.dataset.mediaPath ?? "", figure));
   existing?.remove();
   const block = parent.createDiv({ cls: "systemsculpt-agent-turn-media", attr: { "data-testid": "chat.turn.media" } });
   block.dataset.media = fingerprint;
@@ -101,18 +105,25 @@ export function renderTurnMedia(app: App, parent: HTMLElement, parts: readonly A
         continue;
       }
       if (!item) continue;
+      const kept = landed.get(item.path);
+      if (kept && kept.dataset.kind === item.kind) {
+        grid.appendChild(kept);
+        continue;
+      }
       const file = app.vault.getAbstractFileByPath(item.path);
       const name = item.label ?? item.path.split("/").pop() ?? item.path;
-      const figure = grid.createEl("figure", { cls: "systemsculpt-agent-media", attr: { "data-kind": item.kind } });
+      const figure = grid.createEl("figure", { cls: "systemsculpt-agent-media", attr: { "data-kind": item.kind, "data-media-path": item.path } });
       if (!(file instanceof TFile)) {
         figure.addClass("is-missing");
         figure.createDiv({ cls: "systemsculpt-agent-media-missing", text: `${name} was moved or deleted.` });
         continue;
       }
       const source = app.vault.getResourcePath(file);
-      if (item.ratio) {
+      const ratio = item.fixed ? item.ratio : naturalRatios.get(item.path) ?? item.ratio;
+      if (ratio) {
         figure.addClass("has-ratio");
-        figure.setCssProps({ "--ss-media-ratio": String(item.ratio) });
+        if (item.fixed) figure.dataset.ratio = "fixed";
+        figure.setCssProps({ "--ss-media-ratio": String(ratio) });
       }
       if (item.kind === "video") {
         const video = figure.createEl("video", { cls: "systemsculpt-agent-media-frame", attr: { src: source, controls: "", preload: "metadata", playsinline: "", "aria-label": name } });
@@ -125,7 +136,8 @@ export function renderTurnMedia(app: App, parent: HTMLElement, parts: readonly A
         settleFrame(figure, image, () => [image.naturalWidth, image.naturalHeight], "load");
         open.onclick = () => actions.openFile(item.path);
       }
-      const caption = figure.createEl("figcaption", { cls: "systemsculpt-agent-media-caption" });
+      // One line, like the placeholder's, so the tile keeps its height when the file lands.
+      const caption = figure.createEl("figcaption", { cls: `systemsculpt-agent-media-caption${ratio ? " is-single-line" : ""}` });
       const link = caption.createEl("a", { text: name, attr: { href: item.path, title: item.path, "data-testid": "chat.turn.media.path" } });
       link.onclick = event => { event.preventDefault(); actions.openFile(item.path); };
     }
@@ -137,6 +149,7 @@ export function renderTurnMedia(app: App, parent: HTMLElement, parts: readonly A
     link.onclick = event => { event.preventDefault(); actions.openLink(notice.url); };
   }
   syncPendingClock(block);
+  fitPendingText(block);
   return block;
 }
 
@@ -144,13 +157,22 @@ export function renderTurnMedia(app: App, parent: HTMLElement, parts: readonly A
  * A generated file sits in its requested frame until its own size is known,
  * then the frame takes the file's exact shape and the file fades in.
  */
+/** Each file's own shape once seen, so a reopened chat draws it at its size from the start. */
+const naturalRatios = new Map<string, number>();
+
 function settleFrame(figure: HTMLElement, frame: HTMLImageElement | HTMLVideoElement, size: () => [number, number], event: "load" | "loadedmetadata"): void {
   const settle = () => {
     const [width, height] = size();
-    if (figure.hasClass("has-ratio") && width > 0 && height > 0) figure.setCssProps({ "--ss-media-ratio": String(width / height) });
+    if (figure.hasClass("has-ratio") && figure.dataset.ratio !== "fixed" && width > 0 && height > 0) {
+      figure.setCssProps({ "--ss-media-ratio": String(width / height) });
+      if (naturalRatios.size > 500) naturalRatios.clear();
+      naturalRatios.set(figure.dataset.mediaPath ?? "", width / height);
+    }
     figure.addClass("is-loaded");
   };
   frame.addEventListener(event, settle, { once: true });
+  // A file that cannot be shown still ends the sheen; the browser draws its broken state.
+  frame.addEventListener("error", () => figure.addClass("is-loaded", "is-broken"), { once: true });
   const ready = frame.tagName === "IMG" ? (frame as HTMLImageElement).complete && (frame as HTMLImageElement).naturalWidth > 0 : (frame as HTMLVideoElement).readyState >= 1;
   if (ready) settle();
 }
