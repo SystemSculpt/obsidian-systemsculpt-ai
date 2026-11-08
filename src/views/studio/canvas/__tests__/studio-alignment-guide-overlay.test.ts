@@ -36,6 +36,10 @@ function expectInside(rect: StudioGuideRect, viewport: StudioGuideRect): void {
 }
 
 beforeEach(() => {
+  jest.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+    if (!this.classList.contains("ss-studio-distance-badge")) throw new Error("Measured a peer instead of the badge");
+    return new DOMRect(0, 0, 40, 18);
+  });
   jest.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockImplementation(function (this: HTMLElement) {
     if (!this.classList.contains("ss-studio-distance-badge")) throw new Error("Measured a peer instead of the badge");
     return 40;
@@ -167,6 +171,26 @@ it.each([0.8, 1, 2])("keeps badges separate when their anchors clamp to the same
   rects.forEach(rect => expectInside(rect, viewport));
   expect(intersects(rects[0], rects[1])).toBe(false);
   expect(layer.children).toHaveLength(4);
+});
+
+it.each([0.8, 1, 2])("keeps fractional badge borders inside camera edges at zoom %s", zoom => {
+  const width = 46.484375, height = 19.3984375;
+  jest.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+    if (!this.classList.contains("ss-studio-distance-badge")) throw new Error("Measured a peer instead of the badge");
+    return new DOMRect(0, 0, width, height);
+  });
+  jest.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(46);
+  jest.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(19);
+  const layer = document.createElement("div");
+  const viewport = { left: -80.25, top: 120.5, right: 219.75, bottom: 340.5 };
+  const origin = { x: 350, y: -70 };
+  const desired = { left: viewport.right + 100, right: viewport.right + 140,
+    top: viewport.bottom + 100, bottom: viewport.bottom + 118 };
+  renderStudioGraphAlignmentGuidesLayer(layer, badgeFixture(desired, zoom), zoom, origin, [], viewport);
+  const badge = layer.querySelector<HTMLElement>(".ss-studio-distance-badge")!;
+  const left = Number.parseFloat(badge.style.left), top = Number.parseFloat(badge.style.top);
+  expect(left + width).toBeLessThanOrEqual((viewport.right + origin.x) * zoom);
+  expect(top + height).toBeLessThanOrEqual((viewport.bottom + origin.y) * zoom);
 });
 
 it("keeps spans but omits a badge when no clear bounded candidate is found among dense occluders", () => {

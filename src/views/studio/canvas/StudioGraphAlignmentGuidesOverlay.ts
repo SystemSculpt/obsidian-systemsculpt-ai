@@ -145,7 +145,9 @@ export function renderStudioGraphAlignmentGuidesLayer(
   const placed: StudioGuideRect[] = [];
   const placeBadge = (badge: HTMLElement, anchor: { x: number; y: number }, kind: "x" | "y" | "offset"): void => {
     layer.appendChild(badge);
-    const width = badge.offsetWidth / scale, height = badge.offsetHeight / scale;
+    // offsetWidth/Height can round down fractional text boxes and clip an edge.
+    const measured = badge.getBoundingClientRect();
+    const width = Math.ceil(measured.width) / scale, height = Math.ceil(measured.height) / scale;
     if (!width || !height) return;
     const gap = BADGE_GAP_PX / scale;
     const left = anchor.x - (kind === "y" ? width + gap : width / 2);
