@@ -119,6 +119,52 @@ function createHarness() {
 describe("AgentTranscriptRepository", () => {
   const conversationId = "conversation_0123456789abcdef0123456789abcdef";
 
+  it("recovers the user turn and conversation locator after failed writes, including reload", async () => {
+    const { repository, storage } = createHarness();
+    const messages = [user("u-recover", "Keep my question"), assistant("a-recover", "Final answer")];
+    storage.createChatExclusive.mockRejectedValueOnce(new Error("Chat folder unavailable"));
+    await expect(repository.commitUser({ kind: "append", message: messages[0] }, conversationId))
+      .rejects.toThrow("Failed to exclusively create chat");
+    expect(repository.snapshot()).toMatchObject({ messages: [], chatId: "" });
+    expect(repository.snapshot().agentConversationId).toBeUndefined();
+
+    storage.createChatExclusive.mockRejectedValueOnce(new Error("Still unavailable"));
+    await expect(repository.reconcileServerHistory(messages, conversationId))
+      .rejects.toThrow("Failed to exclusively create chat");
+    expect(repository.snapshot().agentConversationId).toBeUndefined();
+
+    const saved = await repository.reconcileServerHistory(messages, conversationId);
+    expect(saved).toMatchObject({ messages, agentConversationId: conversationId });
+    repository.reset();
+    const reloaded = await repository.load(saved.chatId);
+    expect(reloaded).toMatchObject({ messages, agentConversationId: conversationId });
+  });
+
+  it("recovers a failed fork write with the replacement locator instead of the source locator", async () => {
+    const { repository, storage } = createHarness();
+    const original = await repository.commitUser({ kind: "append", message: user("original") }, conversationId);
+    const replacementId = "conversation_22222222222222222222222222222222";
+    const replacement = user("edited", "Edited question");
+    storage.saveChat.mockRejectedValueOnce(new Error("Temporary write failure"));
+    await expect(repository.commitUser({
+      kind: "resend", message: replacement, targetMessageId: "original", expectedIndex: 0, expectedVersion: original.version,
+    }, replacementId)).rejects.toThrow("Temporary write failure");
+    expect(repository.snapshot().agentConversationId).toBe(conversationId);
+    const recovered = await repository.reconcileServerHistory([replacement, assistant("edited-answer")], replacementId);
+    repository.reset();
+    expect(await repository.load(recovered.chatId)).toMatchObject({
+      agentConversationId: replacementId, messages: [replacement, assistant("edited-answer")],
+    });
+  });
+
+  it("rejects an invalid recovery locator before writing server history", async () => {
+    const { repository, storage } = createHarness();
+    await expect(repository.reconcileServerHistory([user("u1")], "invalid-conversation"))
+      .rejects.toThrow("Invalid agent conversation identifier.");
+    expect(storage.createChatExclusive).not.toHaveBeenCalled();
+    expect(repository.snapshot().messages).toEqual([]);
+  });
+
   it("saves back to the folder a chat was created in or loaded from", async () => {
     const { repository, records, storage } = createHarness();
     storage.createChatExclusive.mockImplementationOnce(async (id: string, messages: ChatMessage[]) => {

@@ -3126,8 +3126,9 @@ describe("AgentChatView composer admission", () => {
     expect(workspace.setRunPending).toHaveBeenLastCalledWith(false);
   });
 
-  it("settles a cache-missed completed assistant as an ephemeral live history row", async () => {
+  it.each([false, true])("keeps the submitted user when a completed answer settles despite cache failure (user write fails: %s)", async (userWriteFails) => {
     const durableMessages: ChatMessage[] = [];
+    let submittedUser: ChatMessage | undefined;
     const snapshot = () => ({
       chatId: durableMessages.length > 0 ? "cache-missed-chat" : "",
       title: "Cache missed settlement",
@@ -3139,8 +3140,14 @@ describe("AgentChatView composer admission", () => {
       snapshot: jest.fn(snapshot),
       setTitle: jest.fn(),
       commitUser: jest.fn(async (input: { message: ChatMessage }) => {
+        submittedUser = input.message;
+        if (userWriteFails) throw new Error("The chat folder is not writable.");
         durableMessages.push(input.message);
         return snapshot();
+      }),
+      reconcileServerHistory: jest.fn(async (messages: readonly ChatMessage[], agentConversationId: string) => {
+        durableMessages.splice(0, durableMessages.length, ...messages);
+        return { ...snapshot(), agentConversationId };
       }),
     };
     const workspace = {
@@ -3159,13 +3166,17 @@ describe("AgentChatView composer admission", () => {
       content: "The server response remains visible.",
       message_id: "assistant-cache-missed",
     };
+    const completedAssistants: ChatMessage[] = [];
     const view = Object.create(AgentChatView.prototype) as AgentChatView & Record<string, any>;
     Object.assign(view, {
       workspace,
       transcript,
       agent: {
         start: jest.fn(async (input: AgentRunInput): Promise<AgentRunResult> => {
-          await input.beforeSend?.();
+          // Hosted execution continues after a local cache failure.
+          await input.beforeSend?.().catch(() => undefined);
+          const response = { ...assistant, message_id: `${input.turnId}_assistant` };
+          completedAssistants.push(response);
           return {
             kind: "completed",
             snapshot: {
@@ -3176,7 +3187,7 @@ describe("AgentChatView composer admission", () => {
               messages: [],
               parts: [],
             },
-            message: assistant,
+            message: response,
           };
         }),
         stageContext: jest.fn(async () => ({
@@ -3216,15 +3227,111 @@ describe("AgentChatView composer admission", () => {
       { expectedConversationOriginToken: "origin-cache-missed" },
     )).resolves.toBeUndefined();
 
-    expect(durableMessages).toHaveLength(1);
-    expect(durableMessages[0].role).toBe("user");
+    expect(submittedUser).toMatchObject({ role: "user", content: "Keep the successful response visible" });
+    expect(durableMessages).toHaveLength(userWriteFails ? 0 : 1);
     expect(workspace.settleCompletedRun).toHaveBeenCalledWith([
-      durableMessages[0],
-      assistant,
+      submittedUser,
+      completedAssistants[0],
     ]);
+    if (userWriteFails) {
+      expect(workspace.setBanner).toHaveBeenCalledWith(
+        "Chat couldn't be saved. Check the chats folder in Settings.", "error",
+      );
+      const firstUser = submittedUser;
+      await (view as any).executeSubmission(
+        { text: "Keep the first turn too", mode: "send" },
+        { expectedConversationOriginToken: "origin-cache-missed" },
+      );
+      const completeHistory = [firstUser, completedAssistants[0], submittedUser, completedAssistants[1]];
+      expect(workspace.setHistory).toHaveBeenCalledWith([firstUser, completedAssistants[0]]);
+      expect(workspace.settleCompletedRun).toHaveBeenLastCalledWith(completeHistory);
+      await (view as any).reconcileAgentHistory(completeHistory);
+      expect(transcript.reconcileServerHistory).toHaveBeenCalledWith(
+        completeHistory, (view as any).pendingThinConversationId,
+      );
+      expect(workspace.setBanner).toHaveBeenLastCalledWith(null);
+      expect(durableMessages).toEqual(completeHistory);
+    }
     expect(workspace.restoreRejectedSubmission).not.toHaveBeenCalled();
     expect((view as any).pendingRejectedRetry).toBeNull();
     expect((view as any).activeSubmissionOperation).toBeNull();
+  });
+
+  it("keeps unsaved display history isolated from a replacement fork and retains it if the fork is rejected", () => {
+    const oldId = "conversation_11111111111111111111111111111111";
+    const newId = "conversation_22222222222222222222222222222222";
+    const oldHistory: ChatMessage[] = [
+      { role: "user", message_id: "old-user", content: "Original question" },
+      { role: "assistant", message_id: "old-answer", content: "Original answer" },
+    ];
+    const forkHistory: ChatMessage[] = [{ role: "user", message_id: "edited-user", content: "Edited question" }];
+    const { view } = createHistoricalResubmitHarness(oldHistory, 0);
+    Object.assign(view, {
+      pendingThinConversationId: newId,
+      unsavedCompletedHistory: { originToken: "origin-resubmit", conversationId: oldId, turnId: "old-user", messages: oldHistory },
+    });
+    expect((view as any).historyForDisplay(forkHistory, newId)).toEqual(forkHistory);
+    // A rejected fork has not retired the outgoing display-only copy.
+    expect((view as any).historyForDisplay([], oldId)).toEqual(oldHistory);
+    Object.assign(view, { conversationOriginToken: "different-chat" });
+    expect((view as any).historyForDisplay([], oldId)).toEqual([]);
+  });
+
+  it("keeps earlier unsaved turns when a later committed run fails", async () => {
+    const harness = createHarness("after-commit");
+    const prior: ChatMessage[] = [
+      { role: "user", message_id: "unsaved-user", content: "First question" },
+      { role: "assistant", message_id: "unsaved-answer", content: "First answer" },
+    ];
+    Object.assign(harness.view, { unsavedCompletedHistory: {
+      originToken: "origin-admission", conversationId: "conversation_11111111111111111111111111111111",
+      turnId: "unsaved-user", messages: prior,
+    } });
+    harness.runGate.resolve();
+    await (harness.view as any).executeSubmission(
+      { text: "Next question", mode: "send" }, { expectedConversationOriginToken: "origin-admission" },
+    );
+    expect(harness.workspace.settleUnfinishedRun).toHaveBeenCalledWith([...prior, ...harness.durableMessages]);
+    harness.composer.unload();
+  });
+
+  it("retires the outgoing unsaved warning when authoritative history durably admits a fork", async () => {
+    const oldHistory: ChatMessage[] = [{ role: "user", message_id: "old-user", content: "Original" }];
+    const newHistory: ChatMessage[] = [{ role: "user", message_id: "edited-user", content: "Edited" }];
+    const newId = "conversation_22222222222222222222222222222222";
+    const { view, transcript, workspace } = createHistoricalResubmitHarness(oldHistory, 0);
+    Object.assign(view, {
+      pendingThinConversationId: newId,
+      pendingForkHistory: { turnId: "edited-user", prefix: [] },
+      unsavedCompletedHistory: {
+        originToken: "origin-resubmit", conversationId: "conversation_11111111111111111111111111111111",
+        turnId: "old-user", messages: oldHistory,
+      },
+    });
+    transcript.reconcileServerHistory.mockImplementation(async (messages) => ({
+      ...transcript.snapshot(), agentConversationId: newId, messages: [...messages],
+    }));
+    await (view as any).reconcileAgentHistory(newHistory);
+    expect((view as any).unsavedCompletedHistory).toBeNull();
+    expect(workspace.setBanner).toHaveBeenLastCalledWith(null);
+  });
+
+  it.each(["pending fork", "completed unsaved fork"])("recovers the replacement locator only with its admitted user (%s)", async (stage) => {
+    const oldHistory: ChatMessage[] = [{ role: "user", message_id: "old-user", content: "Original" }];
+    const newHistory: ChatMessage[] = [{ role: "user", message_id: "edited-user", content: "Edited" }];
+    const newId = "conversation_22222222222222222222222222222222";
+    const { view, transcript } = createHistoricalResubmitHarness(oldHistory, 0);
+    Object.assign(view, {
+      pendingThinConversationId: newId,
+      ...(stage === "pending fork"
+        ? { pendingForkHistory: { turnId: "edited-user", prefix: [] } }
+        : { unsavedCompletedHistory: { originToken: "origin-resubmit", conversationId: newId, turnId: "edited-user", messages: newHistory } }),
+    });
+    await (view as any).reconcileAgentHistory(oldHistory);
+    expect(transcript.reconcileServerHistory).not.toHaveBeenCalledWith(oldHistory, newId);
+    transcript.reconcileServerHistory.mockClear();
+    await (view as any).reconcileAgentHistory(newHistory);
+    expect(transcript.reconcileServerHistory).toHaveBeenCalledWith(newHistory, newId);
   });
 
   it("Stop during hydration retires preflight synchronously and late work cannot start", async () => {
