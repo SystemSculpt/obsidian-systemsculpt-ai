@@ -41,8 +41,9 @@ describe("Chat tab native layout", () => {
     cleanups.clear();
   };
 
-  const render = async () => {
+  const render = async (defaultChatTag = "") => {
     const plugin = createPluginStub(app);
+    plugin.settings.defaultChatTag = defaultChatTag;
     const tab: any = {
       app,
       plugin,
@@ -118,6 +119,19 @@ describe("Chat tab native layout", () => {
     await Promise.resolve();
     // The toggle itself shows the change.
     expect(Notice).not.toHaveBeenCalled();
+  });
+
+  it("distinguishes the empty example and preserves stored and edited tag case", async () => {
+    const defaults = await render();
+    expect(defaults.input.value).toBe("");
+    expect(defaults.input.placeholder).toBe("For example, notes");
+    const { input, updateSettings } = await render("MyAI-Notes");
+    expect(input.value).toBe("MyAI-Notes");
+    expect(updateSettings).not.toHaveBeenCalled();
+    typeValue(input, "MiXeD-Tag");
+    jest.advanceTimersByTime(300);
+    expect(input.value).toBe("MiXeD-Tag");
+    expect(updateSettings).toHaveBeenCalledWith({ defaultChatTag: "MiXeD-Tag" });
   });
 
   it("coalesces typing and normalizes only the final chat tag", async () => {

@@ -452,6 +452,19 @@
     justify-content: flex-start;
     flex-wrap: wrap;
   }
+
+  .systemsculpt-tab-content .setting-item-control > input[type="text"],
+  .systemsculpt-tab-content .setting-item-control > select {
+    width: 100%;
+    min-width: 0;
+    height: var(--input-height);
+    padding-inline-start: var(--ss-space-2);
+    border: var(--input-border-width) solid var(--background-modifier-border);
+    border-radius: var(--ss-radius-sm);
+    background-color: var(--background-modifier-form-field);
+    text-align: start;
+    text-align-last: start;
+  }
 }
 
 /* Mobile settings keep navigation on one predictable, swipeable row and put
