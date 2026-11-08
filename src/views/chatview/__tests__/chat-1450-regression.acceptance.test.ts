@@ -13,6 +13,7 @@ import type {
 } from "../../../chat/ChatConversation";
 import { AgentWorkspace } from "../AgentWorkspace";
 import { AgentConversationRenderer } from "../AgentConversationRenderer";
+import { historyHydrationFor } from "./fixtures/conversation-rendering";
 import { CHAT_1450_REGRESSION_FIXTURE as fixture } from "./fixtures/chat-1450-regression.fixture";
 
 const GENERIC_AGENT_FAILURE = "SystemSculpt could not complete the response.";
@@ -40,16 +41,9 @@ async function hydrateRestoredWorked(
   worked: HTMLDetailsElement | null,
 ): Promise<void> {
   if (!worked) return;
-  const state = (renderer as unknown as {
-    historicalActivityHydrationStates: Map<
-      HTMLDetailsElement,
-      { hydration: Promise<void> | null }
-    >;
-  }).historicalActivityHydrationStates.get(worked);
-  if (!state) return;
   worked.open = true;
   worked.dispatchEvent(new Event("toggle"));
-  await state.hydration;
+  await historyHydrationFor(renderer).hydrate(worked);
   worked.open = false;
   worked.dispatchEvent(new Event("toggle"));
 }
@@ -59,13 +53,7 @@ async function expandHistoricalOverflow(
   overflow: HTMLButtonElement,
 ): Promise<void> {
   overflow.click();
-  const state = (renderer as unknown as {
-    historicalOverflowHydrationStates: Map<
-      HTMLButtonElement,
-      { hydration: Promise<void> | null }
-    >;
-  }).historicalOverflowHydrationStates.get(overflow);
-  await state?.hydration;
+  await historyHydrationFor(renderer).hydrate(overflow);
 }
 
 function legacyReadPart(

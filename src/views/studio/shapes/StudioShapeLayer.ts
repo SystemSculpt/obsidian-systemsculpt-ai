@@ -67,7 +67,8 @@ export type StudioShapeLayerHandle = {
   dispose?: () => void;
   startArrowGesture: (itemId: string, event: PointerEvent) => void;
   cancelArrowGesture: () => void;
-  refreshArrows: () => void;
+  /** Touched node/shape IDs coalesce until the next frame; omitted IDs reconcile everything immediately. */
+  refreshArrows: (itemIds?: readonly string[]) => void;
   applyShapePositions: (
     positions: ReadonlyArray<{ shapeId: string; position: { x: number; y: number } }>
   ) => void;
@@ -121,7 +122,26 @@ export function renderStudioShapeLayer(options: StudioShapeLayerOptions): Studio
   );
   const shapeElements = new Map<string, ShapeElements>();
   const arrowElements = new Map<string, ArrowElements>();
-  let arrowFans = resolveArrowFans(currentDiagram);
+  const arrowsById = new Map<string, StudioDiagram["arrows"][number]>();
+  const arrowIdsByItemId = new Map<string, Set<string>>();
+  const pendingArrowIds = new Set<string>();
+  let arrowFrame: number | null = null;
+  let disposed = false;
+  let arrowFans = new Map<string, StudioShapeArrowFan>();
+
+  const indexArrows = (): void => {
+    arrowFans = resolveArrowFans(currentDiagram);
+    arrowsById.clear();
+    arrowIdsByItemId.clear();
+    for (const arrow of currentDiagram.arrows) {
+      arrowsById.set(arrow.id, arrow);
+      for (const itemId of [arrow.fromShapeId, arrow.toShapeId]) {
+        let ids = arrowIdsByItemId.get(itemId);
+        if (!ids) arrowIdsByItemId.set(itemId, ids = new Set());
+        ids.add(arrow.id);
+      }
+    }
+  };
   const activeGestureShapeIds = new Set<string>();
   let previewPath: SVGPathElement | null = null;
   let cancelArrowGesture = (): void => {};
@@ -155,17 +175,26 @@ export function renderStudioShapeLayer(options: StudioShapeLayerOptions): Studio
     elements.detail.setAttribute("d", outline.detail);
   };
 
-  const renderArrows = (): void => {
-    const seen = new Set<string>();
+  const removeArrow = (arrowId: string): void => {
+    const elements = arrowElements.get(arrowId);
+    elements?.group.remove();
+    elements?.label.remove();
+    arrowElements.delete(arrowId);
+  };
+
+  const renderArrows = (arrowIds: Iterable<string>): void => {
     const anchors = new Map<string, StudioArrowAnchor | null>();
     const anchor = (id: string): StudioArrowAnchor | null => {
       if (!anchors.has(id)) anchors.set(id, resolveAnchor(id));
       return anchors.get(id) ?? null;
     };
-    for (const arrow of currentDiagram.arrows) {
+    for (const arrowId of arrowIds) {
+      const arrow = arrowsById.get(arrowId);
+      if (!arrow) continue;
       const from = anchor(arrow.fromShapeId);
       const to = anchor(arrow.toShapeId);
       if (!from || !to) {
+        removeArrow(arrowId);
         continue;
       }
       const path = buildStudioShapeArrowPath(from, to, arrowFans.get(arrow.id));
@@ -216,16 +245,42 @@ export function renderStudioShapeLayer(options: StudioShapeLayerOptions): Studio
       if (!elements.label.classList.contains("is-editing")) {
         elements.label.textContent = arrow.label || "";
       }
-      seen.add(arrow.id);
     }
-    for (const [arrowId, elements] of arrowElements) {
-      if (seen.has(arrowId)) {
-        continue;
+  };
+
+  const cancelArrowFrame = (): void => {
+    if (arrowFrame !== null) ownerWindow.cancelAnimationFrame(arrowFrame);
+    arrowFrame = null;
+    pendingArrowIds.clear();
+  };
+
+  const refreshArrows = (itemIds?: readonly string[]): void => {
+    if (disposed) return;
+    if (itemIds === undefined) {
+      // A document refresh can replace endpoints/IDs without changing counts.
+      cancelArrowFrame();
+      indexArrows();
+      for (const arrowId of arrowElements.keys()) {
+        if (!arrowsById.has(arrowId)) removeArrow(arrowId);
       }
-      elements.group.remove();
-      elements.label.remove();
-      arrowElements.delete(arrowId);
+      renderArrows(arrowsById.keys());
+      return;
     }
+    for (const itemId of itemIds) {
+      for (const arrowId of arrowIdsByItemId.get(itemId) ?? []) pendingArrowIds.add(arrowId);
+    }
+    if (!pendingArrowIds.size || arrowFrame !== null) return;
+    const flush = (): void => {
+      arrowFrame = null;
+      const ids = [...pendingArrowIds];
+      pendingArrowIds.clear();
+      if (!disposed) renderArrows(ids);
+    };
+    if (typeof ownerWindow.requestAnimationFrame !== "function") { flush(); return; }
+    // Test/host adapters may invoke RAF synchronously.
+    let synchronous = false;
+    const id = ownerWindow.requestAnimationFrame(() => { synchronous = true; flush(); });
+    if (!synchronous) arrowFrame = id;
   };
 
   /** Moves the layer's own copy of the dragged shapes and redraws their arrows. */
@@ -243,7 +298,7 @@ export function renderStudioShapeLayer(options: StudioShapeLayerOptions): Studio
       shape.position = { x: Math.round(origin.x + delta.x), y: Math.round(origin.y + delta.y) };
       applyShapeGeometry(shape);
     }
-    renderArrows();
+    refreshArrows(shapeIds);
   };
 
   const startMoveGesture = (shape: StudioShapeInstance, startEvent: PointerEvent): void => {
@@ -351,7 +406,7 @@ export function renderStudioShapeLayer(options: StudioShapeLayerOptions): Studio
         y: Math.round(pullsUp ? startRect.y + startRect.height - height : startRect.y),
       };
       applyShapeGeometry(shape);
-      renderArrows();
+      refreshArrows([shape.id]);
     }
 
     cancelResizeGesture = startStudioPointerGesture({
@@ -483,30 +538,39 @@ export function renderStudioShapeLayer(options: StudioShapeLayerOptions): Studio
 
   for (const shape of shapesById.values()) mountShape(shape);
 
-  renderArrows();
+  refreshArrows();
   const handle: StudioShapeLayerHandle = {
     el: layerEl,
-    dispose: () => { cancelResizeGesture?.(); cancelMoveGesture?.(); cancelArrowGesture(); },
+    dispose: () => {
+      cancelResizeGesture?.();
+      cancelMoveGesture?.();
+      cancelArrowGesture();
+      disposed = true;
+      cancelArrowFrame();
+    },
     startArrowGesture,
     cancelArrowGesture: () => cancelArrowGesture(),
-    refreshArrows: renderArrows,
+    refreshArrows,
     applyShapePositions: (positions) => {
+      const changedIds: string[] = [];
       for (const { shapeId, position } of positions) {
         const shape = shapesById.get(shapeId);
         if (!shape) {
           continue;
         }
-        shape.position = { x: Math.round(position.x), y: Math.round(position.y) };
+        const next = { x: Math.round(position.x), y: Math.round(position.y) };
+        if (shape.position.x === next.x && shape.position.y === next.y) continue;
+        shape.position = next;
         applyShapeGeometry(shape);
+        changedIds.push(shapeId);
       }
-      renderArrows();
+      refreshArrows(changedIds);
     },
     update: (next) => {
       currentDiagram = next.diagram;
       currentBusy = next.busy;
       currentActiveCanvasTool = next.activeCanvasTool;
       currentSelection = next.selection;
-      arrowFans = resolveArrowFans(currentDiagram);
 
       const incomingIds = new Set(currentDiagram.shapes.map(shape => shape.id));
       for (const [shapeId, elements] of shapeElements) {
@@ -555,7 +619,7 @@ export function renderStudioShapeLayer(options: StudioShapeLayerOptions): Studio
           }
         }
       }
-      renderArrows();
+      refreshArrows();
     },
   };
   return handle;

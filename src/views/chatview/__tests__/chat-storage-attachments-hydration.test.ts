@@ -149,6 +149,21 @@ describe("ChatStorageService attachment hydration", () => {
     const saved = ChatMarkdownSerializer.parseMarkdown(savedMarkdown);
     expect(saved?.messages[0].attachmentMetadata?.[0].contentRef).toEqual(externalized.contentRef);
     expect(savedMarkdown).not.toContain("data:image/png;base64,AQID");
+
+    let patchedMarkdown = "";
+    Object.assign(app.vault, {
+      process: jest.fn(async (_file: TFile, transform: (content: string) => string) => {
+        patchedMarkdown = transform(savedMarkdown);
+        return patchedMarkdown;
+      }),
+    });
+    const patched = await service.updateChatMessages("test-chat", messages => [
+      ...messages, { role: "assistant", message_id: "receipt", content: "" },
+    ]);
+    expect(patched.messages[0].attachmentMetadata).toEqual(saved?.messages[0].attachmentMetadata);
+    expect(patched.messages).toHaveLength(2);
+    expect(patchedMarkdown).not.toContain("data:image/png;base64,AQID");
+    expect(adapter.readBinary).not.toHaveBeenCalled();
   });
 
   it("keeps a missing blob lazy until requested, then returns an unavailable placeholder", async () => {
@@ -267,6 +282,13 @@ function memoryVault() {
         read: async (file: TFile) => notes.get(file.path)!,
         cachedRead: async (file: TFile) => notes.get(file.path)!,
         modify: async (file: TFile, content: string) => { notes.set(file.path, content); },
+        process: async (file: TFile, transform: (content: string) => string) => {
+          const current = notes.get(file.path);
+          if (current === undefined) throw new Error("File no longer exists.");
+          const content = transform(current);
+          notes.set(file.path, content);
+          return content;
+        },
         create: async (path: string, content: string) => {
           if (notes.has(path)) throw new Error("File already exists.");
           addFolders(parentOf(path));

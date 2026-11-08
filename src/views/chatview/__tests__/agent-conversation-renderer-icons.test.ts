@@ -14,6 +14,9 @@ import {
 import { AgentConversationRenderer } from "../AgentConversationRenderer";
 import { incidentMonotonicNow } from "../RenderIncidentMetrics";
 import { historicalToolPart } from "../ConversationPartPresentation";
+import { activeRendererFor, historyHydrationFor } from "./fixtures/conversation-rendering";
+import { restoreDomSelection } from "../ConversationDomState";
+import type { ConversationHistoryHydration } from "../ConversationHistoryHydration";
 
 function toolRendererFor(renderer: AgentConversationRenderer): {
   render(node: HTMLElement, part: Extract<AgentPart, { kind: "tool" }>): boolean;
@@ -259,19 +262,11 @@ describe("AgentConversationRenderer tail status", () => {
     const internals = renderer as unknown as {
       historyRows: Map<unknown, unknown>;
       incidentDisclosureStates: Map<unknown, unknown>;
-      historicalActivityHydrationStates: Map<unknown, unknown>;
-      historicalOverflowHydrationStates: Map<unknown, unknown>;
     };
     const disclosureValues = jest.spyOn(internals.incidentDisclosureStates, "values");
     const forbiddenTraversalSpies = [
       jest.spyOn(internals.historyRows, "values").mockImplementation(() => {
         throw new Error("history-traversal-private-canary");
-      }),
-      jest.spyOn(internals.historicalActivityHydrationStates, "values").mockImplementation(() => {
-        throw new Error("activity-hydration-traversal-private-canary");
-      }),
-      jest.spyOn(internals.historicalOverflowHydrationStates, "values").mockImplementation(() => {
-        throw new Error("overflow-hydration-traversal-private-canary");
       }),
     ];
     expect(() => renderer.captureIncidentSnapshot()).not.toThrow();
@@ -320,7 +315,7 @@ describe("AgentConversationRenderer tail status", () => {
         available: boolean,
         open: boolean,
       ): void;
-      incidentPendingHydrationCount: number;
+      historyHydration: ConversationHistoryHydration;
       incidentMonotonicNow: () => number;
       measureIncidentRenderPass: (task: () => Promise<void>) => Promise<void>;
     };
@@ -329,7 +324,8 @@ describe("AgentConversationRenderer tail status", () => {
     internals.incidentLastRenderDurationMs = Number.NaN;
     internals.incidentMaxRenderDurationMs = 100_000_000;
     internals.incidentHistoricalPartCount = 1_000_001;
-    internals.incidentPendingHydrationCount = 1_000_001;
+    const pendingHydrations = jest.spyOn(internals.historyHydration, "pendingCount", "get")
+      .mockReturnValue(1_000_001);
     internals.trackIncidentDisclosure(parent.createDiv(), "activity", true, true);
     internals.trackIncidentDisclosure(parent.createDiv(), "reasoning", true, false);
     internals.trackIncidentDisclosure(parent.createDiv(), "tool", true, true);
@@ -349,6 +345,7 @@ describe("AgentConversationRenderer tail status", () => {
       overflowDisclosureCount: 0,
       pendingHydrationCount: 1_000_000,
     });
+    pendingHydrations.mockRestore();
 
     let release!: () => void;
     const task = new Promise<void>((resolve) => { release = resolve; });
@@ -390,17 +387,11 @@ describe("AgentConversationRenderer tail status", () => {
       activeTurnId: string | null;
       committedFailedTurnIds: Set<string>;
       incidentMonotonicNow(): number;
-      restoreDomSelection(selection: Readonly<{
-        anchorNode: Node;
-        anchorOffset: number;
-        focusNode: Node;
-        focusOffset: number;
-      }> | null): void;
     };
 
     internals.committedFailedTurnIds.add("turn-committed-failure");
     expect(renderer.hasCommittedFailureSurface("turn-committed-failure")).toBe(true);
-    internals.activeTurnId = "turn-other-failure";
+    (activeRendererFor(renderer) as any).activeTurnId = "turn-other-failure";
     expect(renderer.hasCommittedFailureSurface("turn-missing-failure")).toBe(false);
 
     const performanceNow = jest.spyOn(window.performance, "now").mockReturnValue(Number.NaN);
@@ -419,7 +410,7 @@ describe("AgentConversationRenderer tail status", () => {
       focusOffset: 99,
     };
     const getSelection = jest.spyOn(document, "getSelection").mockReturnValue(null);
-    expect(() => internals.restoreDomSelection(preserved)).not.toThrow();
+    expect(() => restoreDomSelection(preserved)).not.toThrow();
 
     const removeAllRanges = jest.fn();
     const addRange = jest.fn();
@@ -431,14 +422,14 @@ describe("AgentConversationRenderer tail status", () => {
       configurable: true,
       get: () => null,
     });
-    internals.restoreDomSelection(preserved);
+    restoreDomSelection(preserved);
     expect(addRange).toHaveBeenCalledTimes(1);
     expect((addRange.mock.calls[0]?.[0] as Range).startOffset).toBe(0);
 
     addRange.mockImplementationOnce(() => {
       throw new Error("private-selection-restore-canary");
     });
-    expect(() => internals.restoreDomSelection(preserved)).not.toThrow();
+    expect(() => restoreDomSelection(preserved)).not.toThrow();
     expect(removeAllRanges).toHaveBeenCalledTimes(3);
     getSelection.mockRestore();
 
@@ -577,11 +568,10 @@ describe("AgentConversationRenderer tail status", () => {
         part: Extract<AgentPart, { kind: "reasoning" }>,
       ): Promise<boolean>;
       updateIncidentDisclosureOpen(element: HTMLElement, open: boolean): void;
-      setHistoricalHydrationStatus(state: { status: string }, status: string): void;
       enhanceCodeBlocks(parent: HTMLElement): void;
     };
 
-    const orphan = await internals.renderActivePart({
+    const orphan = await (activeRendererFor(renderer) as any).renderActivePart({
       id: "text-orphan-guard",
       kind: "text",
       messageId: "assistant-orphan-guard",
@@ -618,9 +608,6 @@ describe("AgentConversationRenderer tail status", () => {
       ?.dataset.iconState).toBe("streaming");
 
     internals.updateIncidentDisclosureOpen(document.createElement("details"), true);
-    const hydrationState = { status: "cold" };
-    internals.setHistoricalHydrationStatus(hydrationState, "cold");
-    expect(hydrationState.status).toBe("cold");
 
     const codeHost = parent.createDiv();
     codeHost.createEl("pre");
@@ -1046,7 +1033,7 @@ describe("AgentConversationRenderer tail status", () => {
       )!;
       const textNode = label.firstChild;
       const setTextNode = jest.spyOn(
-        renderer as unknown as {
+        activeRendererFor(renderer) as unknown as {
           setTextNode(element: HTMLElement | null, text: string): void;
         },
         "setTextNode",
@@ -1170,7 +1157,7 @@ describe("AgentConversationRenderer tail status", () => {
     try {
       await renderer.renderActive(running, presentAgentConversation(running, true));
       const status = parent.querySelector<HTMLElement>(".systemsculpt-agent-tail-status")!;
-      const internals = renderer as unknown as { activeWorkingTimer: number | null };
+      const internals = activeRendererFor(renderer) as unknown as { activeWorkingTimer: number | null };
       expect(internals.activeWorkingTimer).not.toBeNull();
       const waiting: AgentConversationSnapshot = {
         ...running,
@@ -1347,15 +1334,10 @@ describe("AgentConversationRenderer tail status", () => {
     const firstBody = firstWorked.querySelector<HTMLElement>(
       ":scope > .systemsculpt-agent-activity-body",
     )!;
-    const hydrationState = (renderer as unknown as {
-      historicalActivityHydrationStates: Map<
-        HTMLDetailsElement,
-        { hydration: Promise<void> | null }
-      >;
-    }).historicalActivityHydrationStates.get(firstWorked)!;
+
     firstWorked.open = true;
     firstWorked.dispatchEvent(new Event("toggle"));
-    await hydrationState.hydration;
+    await historyHydrationFor(renderer).hydrate(firstWorked);
 
     expect(beginLayoutMutation).toHaveBeenCalledWith(firstSummary, firstBody);
     expect(finishLayoutMutation).toHaveBeenCalledTimes(1);
@@ -1458,15 +1440,10 @@ describe("AgentConversationRenderer tail status", () => {
       }],
     }]);
     const worked = parent.querySelector<HTMLDetailsElement>("details[data-agent-turn-fold]")!;
-    const workedHydration = (renderer as unknown as {
-      historicalActivityHydrationStates: Map<
-        HTMLDetailsElement,
-        { hydration: Promise<void> | null }
-      >;
-    }).historicalActivityHydrationStates.get(worked)!;
+
     worked.open = true;
     worked.dispatchEvent(new Event("toggle"));
-    await workedHydration.hydration;
+    await historyHydrationFor(renderer).hydrate(worked);
 
     const body = worked.querySelector<HTMLElement>(
       ":scope > .systemsculpt-agent-activity-body",
@@ -1474,12 +1451,7 @@ describe("AgentConversationRenderer tail status", () => {
     const overflow = body.querySelector<HTMLButtonElement>(
       "button[data-agent-activity-overflow]",
     )!;
-    const overflowStates = (renderer as unknown as {
-      historicalOverflowHydrationStates: Map<
-        HTMLButtonElement,
-        { hydration: Promise<void> | null; status: string }
-      >;
-    }).historicalOverflowHydrationStates;
+    const overflowHydration = historyHydrationFor(renderer);
     expect(body.querySelector('[data-part-key="reasoning-lazy-overflow"]')).toBeNull();
     expect(body.querySelector('[data-part-key="tool:call-lazy-one"]')).toBeNull();
     expect(body.querySelector('[data-part-key="tool:call-lazy-two"]')).not.toBeNull();
@@ -1488,10 +1460,6 @@ describe("AgentConversationRenderer tail status", () => {
     )).toBeNull();
 
     const internals = renderer as unknown as {
-      historicalOverflowHydrationStates: Map<
-        HTMLButtonElement,
-        { hydration: Promise<void> | null; status: string }
-      >;
       renderHistoricalPart(parent: HTMLElement, part: MessagePart): Promise<void>;
     };
     const originalRenderHistoricalPart = internals.renderHistoricalPart.bind(renderer);
@@ -1518,20 +1486,20 @@ describe("AgentConversationRenderer tail status", () => {
 
     overflow.click();
     await firstAttemptStarted;
-    const firstHydration = overflowStates.get(overflow)?.hydration!;
+    const firstHydration = overflowHydration.hydrate(overflow)!;
     overflow.click();
     overflow.click();
-    expect(overflowStates.get(overflow)?.hydration).toBe(firstHydration);
+    expect(overflowHydration.hydrate(overflow)).toBe(firstHydration);
     releaseFirstAttempt();
     await expect(firstHydration).rejects.toThrow("Transient historical render failure");
     await Promise.resolve();
-    expect(overflowStates.get(overflow)?.status).toBe("cold");
+    expect(overflowHydration.wasHydrated(overflow)).toBe(false);
     expect(body.querySelector('[data-part-key="reasoning-lazy-overflow"]')).toBeNull();
     expect(body.querySelector('[data-part-key="tool:call-lazy-one"]')).toBeNull();
 
     overflow.click();
     overflow.click();
-    const retryHydration = overflowStates.get(overflow)?.hydration!;
+    const retryHydration = overflowHydration.hydrate(overflow)!;
     expect(retryHydration).not.toBe(firstHydration);
     await retryHydration;
     await Promise.resolve();
@@ -1550,7 +1518,7 @@ describe("AgentConversationRenderer tail status", () => {
       .toHaveLength(0);
     expect(beginLayoutMutation).toHaveBeenLastCalledWith(overflow, drawer);
     expect(finishLayoutMutation).toHaveBeenCalledTimes(6);
-    expect(overflowStates.get(overflow)?.status).toBe("hydrated");
+    expect(overflowHydration.wasHydrated(overflow)).toBe(true);
     const olderNodes = rows.slice(0, 2);
     const callsAfterFirstExpansion = markdownRender.mock.calls.length;
 
@@ -1617,26 +1585,16 @@ describe("AgentConversationRenderer tail status", () => {
       }],
     }]);
     const worked = parent.querySelector<HTMLDetailsElement>("details[data-agent-turn-fold]")!;
-    const workedHydration = (renderer as unknown as {
-      historicalActivityHydrationStates: Map<
-        HTMLDetailsElement,
-        { hydration: Promise<void> | null }
-      >;
-    }).historicalActivityHydrationStates.get(worked)!;
+
     worked.open = true;
     worked.dispatchEvent(new Event("toggle"));
-    await workedHydration.hydration;
+    await historyHydrationFor(renderer).hydrate(worked);
     const overflow = worked.querySelector<HTMLButtonElement>(
       "button[data-agent-activity-overflow]",
     )!;
-    const overflowStates = (renderer as unknown as {
-      historicalOverflowHydrationStates: Map<
-        HTMLButtonElement,
-        { hydration: Promise<void> | null }
-      >;
-    }).historicalOverflowHydrationStates;
+    const overflowHydration = historyHydrationFor(renderer);
     overflow.click();
-    const hydration = overflowStates.get(overflow)?.hydration!;
+    const hydration = overflowHydration.hydrate(overflow)!;
 
     renderer.unload();
     await hydration;
@@ -1645,7 +1603,7 @@ describe("AgentConversationRenderer tail status", () => {
     expect((renderer as unknown as {
       liveMarkdown: { states: Map<HTMLElement, unknown> };
     }).liveMarkdown.states.size).toBe(0);
-    expect(overflowStates.size).toBe(0);
+    expect(overflowHydration.hydrate(overflow)).toBeNull();
     markdownRender.mockRestore();
   });
 
@@ -1702,20 +1660,12 @@ describe("AgentConversationRenderer tail status", () => {
     await renderer.renderHistory(initial);
     const worked = parent.querySelector<HTMLDetailsElement>("details[data-agent-turn-fold]")!;
     const internals = renderer as unknown as {
-      historicalActivityHydrationStates: Map<
-        HTMLDetailsElement,
-        { hydration: Promise<void> | null }
-      >;
-      historicalOverflowHydrationStates: Map<
-        HTMLButtonElement,
-        { hydration: Promise<void> | null; status: string }
-      >;
       renderHistoricalPart(parent: HTMLElement, part: MessagePart): Promise<void>;
     };
-    const workedHydration = internals.historicalActivityHydrationStates.get(worked)!;
+
     worked.open = true;
     worked.dispatchEvent(new Event("toggle"));
-    await workedHydration.hydration;
+    await historyHydrationFor(renderer).hydrate(worked);
     const overflow = worked.querySelector<HTMLButtonElement>(
       "button[data-agent-activity-overflow]",
     )!;
@@ -1742,7 +1692,7 @@ describe("AgentConversationRenderer tail status", () => {
 
     overflow.click();
     await firstPartStarted;
-    const staleHydration = internals.historicalOverflowHydrationStates.get(overflow)?.hydration!;
+    const staleHydration = historyHydrationFor(renderer).hydrate(overflow)!;
     overflow.click();
     const corrected = [{
       ...initial[0]!,
@@ -1768,8 +1718,8 @@ describe("AgentConversationRenderer tail status", () => {
     expect(currentWorked.querySelector('[data-part-key="tool:call-lazy-stale-one"]')).toBeNull();
     expect(parent.textContent).toContain("Corrected final answer");
     expect(parent.textContent).not.toContain("Initial final answer");
-    expect(internals.historicalOverflowHydrationStates.has(overflow)).toBe(false);
-    expect(internals.historicalOverflowHydrationStates.get(currentOverflow)?.status).toBe("cold");
+    expect(historyHydrationFor(renderer).hydrate(overflow)).toBeNull();
+    expect(historyHydrationFor(renderer).wasHydrated(currentOverflow)).toBe(false);
     historicalPartRender.mockRestore();
     renderer.unload();
   });
@@ -1825,20 +1775,12 @@ describe("AgentConversationRenderer tail status", () => {
     await renderer.renderHistory(history);
     const worked = parent.querySelector<HTMLDetailsElement>("details[data-agent-turn-fold]")!;
     const internals = renderer as unknown as {
-      historicalActivityHydrationStates: Map<
-        HTMLDetailsElement,
-        { hydration: Promise<void> | null }
-      >;
-      historicalOverflowHydrationStates: Map<
-        HTMLButtonElement,
-        { hydration: Promise<void> | null; status: string }
-      >;
       renderHistoricalPart(parent: HTMLElement, part: MessagePart): Promise<void>;
     };
-    const workedHydration = internals.historicalActivityHydrationStates.get(worked)!;
+
     worked.open = true;
     worked.dispatchEvent(new Event("toggle"));
-    await workedHydration.hydration;
+    await historyHydrationFor(renderer).hydrate(worked);
     const overflow = worked.querySelector<HTMLButtonElement>(
       "button[data-agent-activity-overflow]",
     )!;
@@ -1863,13 +1805,13 @@ describe("AgentConversationRenderer tail status", () => {
 
     overflow.click();
     await firstPartStarted;
-    const hydration = internals.historicalOverflowHydrationStates.get(overflow)?.hydration!;
+    const hydration = historyHydrationFor(renderer).hydrate(overflow)!;
     await renderer.renderHistory(history);
     expect(parent.querySelector("button[data-agent-activity-overflow]")).toBe(overflow);
     releaseFirstPart();
     await hydration;
 
-    expect(internals.historicalOverflowHydrationStates.get(overflow)?.status).toBe("hydrated");
+    expect(historyHydrationFor(renderer).wasHydrated(overflow)).toBe(true);
     expect(Array.from(worked.querySelectorAll<HTMLElement>(
       ":scope > .systemsculpt-agent-activity-body > .systemsculpt-agent-activity-overflow-body > [data-agent-activity-row]",
     )).map((row) => row.dataset.partKey)).toEqual([
@@ -1944,25 +1886,15 @@ describe("AgentConversationRenderer tail status", () => {
     const worked = parent.querySelector<HTMLDetailsElement>(
       "details[data-agent-turn-fold]",
     )!;
-    const hydrationState = (renderer as unknown as {
-      historicalActivityHydrationStates: Map<
-        HTMLDetailsElement,
-        { hydration: Promise<void> | null }
-      >;
-    }).historicalActivityHydrationStates.get(worked)!;
+
     worked.open = true;
     worked.dispatchEvent(new Event("toggle"));
-    await hydrationState.hydration;
+    await historyHydrationFor(renderer).hydrate(worked);
     const overflow = parent.querySelector<HTMLButtonElement>(
       "button[data-agent-activity-overflow-key]",
     )!;
     overflow.click();
-    await (renderer as unknown as {
-      historicalOverflowHydrationStates: Map<
-        HTMLButtonElement,
-        { hydration: Promise<void> | null }
-      >;
-    }).historicalOverflowHydrationStates.get(overflow)?.hydration;
+    await historyHydrationFor(renderer).hydrate(overflow);
     const reasoningPart = parent.querySelector<HTMLElement>(
       '[data-part-key="reasoning-late-correction"]',
     )!;
@@ -2319,7 +2251,6 @@ describe("AgentConversationRenderer tail status", () => {
         workedOpen: boolean;
         overflowOpen: ReadonlyMap<string, boolean>;
       };
-      disposeHistoricalOverflowHydration(element: HTMLButtonElement): void;
       setTextNode(element: HTMLElement | null, text: string): void;
       updateActivityOverflow(element: HTMLButtonElement, hiddenCount: number): void;
     };
@@ -2327,10 +2258,10 @@ describe("AgentConversationRenderer tail status", () => {
     renderer.focusInlineMessageEdit();
     renderer.showCompletedRenderFallback();
     renderer.showCompletedRenderFallback();
-    internals.setTextNode(null, "ignored");
+    (activeRendererFor(renderer) as any).setTextNode(null, "ignored");
     expect(internals.captureHistoricalDisclosureState(document.createElement("div")).workedOpen)
       .toBe(false);
-    internals.disposeHistoricalOverflowHydration(document.createElement("button"));
+    historyHydrationFor(renderer).forgetWithin(document.createElement("button"));
 
     const untrackedOverflow = document.createElement("button");
     internals.updateActivityOverflow(untrackedOverflow, 2);
@@ -2454,20 +2385,13 @@ describe("AgentConversationRenderer tail status", () => {
     const body = worked.querySelector<HTMLElement>(
       ":scope > .systemsculpt-agent-activity-body",
     )!;
-    const hydrationState = (renderer as unknown as {
-      historicalActivityHydrationStates: Map<
-        HTMLDetailsElement,
-        { hydration: Promise<void> | null }
-      >;
-    }).historicalActivityHydrationStates.get(worked)!;
+
     worked.open = true;
     worked.dispatchEvent(new Event("toggle"));
     await hiddenRenderStarted;
-    const hydration = hydrationState.hydration!;
+    const hydration = historyHydrationFor(renderer).hydrate(worked)!;
     expect(renderer.captureIncidentSnapshot().pendingHydrationCount).toBe(1);
-    expect((renderer as unknown as {
-      hydrateHistoricalActivity(state: object): Promise<void>;
-    }).hydrateHistoricalActivity(hydrationState)).toBe(hydration);
+    expect(historyHydrationFor(renderer).hydrate(worked)).toBe(hydration);
 
     renderer.unload();
     expect(renderer.captureIncidentSnapshot().pendingHydrationCount).toBe(0);
@@ -2479,9 +2403,7 @@ describe("AgentConversationRenderer tail status", () => {
     expect((renderer as unknown as {
       liveMarkdown: { states: Map<HTMLElement, unknown> };
     }).liveMarkdown.states.size).toBe(0);
-    expect((renderer as unknown as {
-      historicalActivityHydrationStates: Map<HTMLDetailsElement, unknown>;
-    }).historicalActivityHydrationStates.size).toBe(0);
+    expect(historyHydrationFor(renderer).hydrate(worked)).toBeNull();
     markdownRender.mockRestore();
   });
 
@@ -2548,23 +2470,17 @@ describe("AgentConversationRenderer tail status", () => {
     const body = worked.querySelector<HTMLElement>(
       ":scope > .systemsculpt-agent-activity-body",
     )!;
-    const state = (renderer as unknown as {
-      historicalActivityHydrationStates: Map<
-        HTMLDetailsElement,
-        { status: string; hydration: Promise<void> | null; staging: HTMLElement | null }
-      >;
-    }).historicalActivityHydrationStates.get(worked)!;
+
 
     worked.open = true;
     worked.dispatchEvent(new Event("toggle"));
-    await expect(state.hydration).rejects.toThrow("hidden render failed");
-    expect(state.status).toBe("cold");
-    expect(state.staging).toBeNull();
+    await expect(historyHydrationFor(renderer).hydrate(worked)).rejects.toThrow("hidden render failed");
+    expect(historyHydrationFor(renderer).wasHydrated(worked)).toBe(false);
     expect(body.childElementCount).toBe(0);
 
     worked.dispatchEvent(new Event("toggle"));
-    await state.hydration;
-    expect(state.status).toBe("hydrated");
+    await historyHydrationFor(renderer).hydrate(worked);
+    expect(historyHydrationFor(renderer).wasHydrated(worked)).toBe(true);
     expect(body.textContent).toContain("Hidden work");
     renderer.unload();
     markdownRender.mockRestore();
@@ -3507,7 +3423,7 @@ describe("AgentConversationRenderer tail status", () => {
     expect(artifactSerializations).toBe(1);
     expect(parent.querySelector('[data-part-key="tool:call-fingerprint"]')).toBe(toolNode);
     expect(toolNode.querySelector(".systemsculpt-agent-tool-support")).toBe(support);
-    const internals = renderer as unknown as {
+    const internals = activeRendererFor(renderer) as unknown as {
       activeToolDisplayFingerprints: Map<string, string>;
     };
     expect(internals.activeToolDisplayFingerprints.has("tool:call-fingerprint")).toBe(true);
@@ -3735,25 +3651,15 @@ describe("AgentConversationRenderer tail status", () => {
     const worked = parent.querySelector<HTMLDetailsElement>(
       "details[data-agent-turn-fold]",
     )!;
-    const hydrationState = (renderer as unknown as {
-      historicalActivityHydrationStates: Map<
-        HTMLDetailsElement,
-        { hydration: Promise<void> | null }
-      >;
-    }).historicalActivityHydrationStates.get(worked)!;
+
     worked.open = true;
     worked.dispatchEvent(new Event("toggle"));
-    await hydrationState.hydration;
+    await historyHydrationFor(renderer).hydrate(worked);
     const overflow = parent.querySelector<HTMLButtonElement>(
       "button[data-agent-activity-overflow]",
     )!;
     overflow.click();
-    await (renderer as unknown as {
-      historicalOverflowHydrationStates: Map<
-        HTMLButtonElement,
-        { hydration: Promise<void> | null }
-      >;
-    }).historicalOverflowHydrationStates.get(overflow)?.hydration;
+    await historyHydrationFor(renderer).hydrate(overflow);
     const older = parent.querySelector<HTMLElement>(
       '[data-part-key="reasoning-overflow-old"]',
     )!;
@@ -3843,9 +3749,7 @@ describe("AgentConversationRenderer tail status", () => {
       running,
       presentation("responding", true, "Writing", running),
     );
-    const liveReasoning = (renderer as unknown as {
-      activeNodes: Map<string, HTMLElement>;
-    }).activeNodes.get("reasoning-adopt-work")!;
+    const liveReasoning = (activeRendererFor(renderer) as any).activeNodes.get("reasoning-adopt-work")!;
     const liveTool = parent.querySelector<HTMLElement>(
       '[data-part-key="tool:call-adopt-work"]',
     )!;
@@ -4145,15 +4049,10 @@ describe("AgentConversationRenderer tail status", () => {
     const worked = row.querySelector<HTMLDetailsElement>("details[data-agent-turn-fold]")!;
     expect(worked.open).toBe(false);
     expect(worked.textContent).not.toContain("Custom action complete");
-    const hydrationState = (renderer as unknown as {
-      historicalActivityHydrationStates: Map<
-        HTMLDetailsElement,
-        { hydration: Promise<void> | null }
-      >;
-    }).historicalActivityHydrationStates.get(worked)!;
+
     worked.open = true;
     worked.dispatchEvent(new Event("toggle"));
-    await hydrationState.hydration;
+    await historyHydrationFor(renderer).hydrate(worked);
     expect(worked.textContent).toContain("Custom action complete");
     expect(worked.textContent).not.toContain("### Sources");
     expect(row.textContent).toContain("### Sources");
@@ -4238,15 +4137,10 @@ describe("AgentConversationRenderer tail status", () => {
     expect(sources.textContent).toContain("Sources");
     expect(row.querySelector('[data-part-key="blank-late-blank-history"]')).toBeNull();
 
-    const hydrationState = (renderer as unknown as {
-      historicalActivityHydrationStates: Map<
-        HTMLDetailsElement,
-        { hydration: Promise<void> | null }
-      >;
-    }).historicalActivityHydrationStates.get(worked)!;
+
     worked.open = true;
     worked.dispatchEvent(new Event("toggle"));
-    await hydrationState.hydration;
+    await historyHydrationFor(renderer).hydrate(worked);
     expect(worked.querySelector('[data-part-key="tool:call-late-blank-history"]'))
       .not.toBeNull();
     expect(worked.contains(answer)).toBe(false);
@@ -4725,11 +4619,11 @@ describe("AgentConversationRenderer tail status", () => {
       presentation("responding", true, "Writing", running),
     );
     const status = parent.querySelector<HTMLElement>(".systemsculpt-agent-tail-status")!;
-    expect((renderer as unknown as { activeWorkingTimer: number | null }).activeWorkingTimer)
+    expect((activeRendererFor(renderer) as unknown as { activeWorkingTimer: number | null }).activeWorkingTimer)
       .not.toBeNull();
     status.remove();
     jest.advanceTimersByTime(1_000);
-    expect((renderer as unknown as { activeWorkingTimer: number | null }).activeWorkingTimer)
+    expect((activeRendererFor(renderer) as unknown as { activeWorkingTimer: number | null }).activeWorkingTimer)
       .toBeNull();
     renderer.unload();
   });

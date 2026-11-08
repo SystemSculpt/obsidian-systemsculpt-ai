@@ -416,8 +416,8 @@ describe("AgentWorkspace response scroll identity", () => {
     expect((workspace as any).scroller.captureIncidentSnapshot().mode).toBe("manual");
 
     const originalRenderHistory = workspace.renderer.renderHistory.bind(workspace.renderer);
-    jest.spyOn(workspace.renderer, "renderHistory").mockImplementation(async (messages) => {
-      await originalRenderHistory(messages);
+    jest.spyOn(workspace.renderer, "renderHistory").mockImplementation(async (...args) => {
+      await originalRenderHistory(...args);
       const durableResponse = host.querySelector<HTMLElement>(
         `.systemsculpt-agent-history .systemsculpt-agent-turn.is-assistant[data-turn-id="${turnId}"]`,
       )!;

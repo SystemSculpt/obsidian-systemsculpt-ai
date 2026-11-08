@@ -67,6 +67,72 @@ protocol evolution.
 - The server conversation session and event journal are authoritative. Local
   transcript data is a cache/export surface only.
 
+## Audio Processor durable device sources
+
+Device uploads intentionally finish local staging before sending multipart bytes.
+This is a recovery boundary, not a leftover whole-file upload implementation:
+
+- `AudioProcessorService.process` stages only sources without a recovery
+  descriptor. Vault sources already use their vault path and modification time
+  directly; they do not make a staging copy.
+- `AudioProcessorDeviceStaging.stage` writes bounded, immutable chunks through
+  `ManagedLocalStaging.stage`. Only the complete ready manifest publishes their
+  lengths and SHA-256 digests. Its verified JSON determines `manifestSha256` in
+  the historical schema-1 staged descriptor.
+- `AudioProcessorUploadRecovery.rememberStarted` persists that descriptor before
+  `uploadManagedParts` sends the first part. Each consumed chunk still passes
+  size and SHA-256 verification; each accepted part is checkpointed before the
+  next part. Staging does not redundantly read every binary write back.
+- After a restart, `openForJob` can discover a complete ready source even when
+  the settings checkpoint was interrupted. It deliberately refuses a partial
+  staging manifest. The device picker's `File` is not saved and cannot supply
+  the unstaged tail after restart.
+
+Starting uploads from completed chunks while still reading the device tail
+would leave a crash window with remote parts but no complete recoverable local
+source. Recording those parts does not recover the missing bytes. Calling a
+partial manifest ready, ignoring its final SHA-256 descriptor, or assuming the
+user can reselect the same file would weaken the current contract. A producer
+running behind the uploader would also need joined cancellation and cleanup;
+`process` currently aborts the incomplete upload, removes partial staging, and
+releases the device source through its existing error/finally path.
+
+A direct desktop device path is not a drop-in alternative. `createDeviceFileSource`
+exposes bounded Blob slices, not a persistent path or descriptor. Current saved
+sources are only vault-relative files or SHA-bound staging manifests. Reopening
+an external pathname or keeping a file handle would not preserve an immutable
+copy across restart, deletion, replacement or edits. A future external-source
+recovery design would need equivalent identity/content checks and historical
+manifest compatibility, rather than silently skipping staging.
+
+### Measure the local staging cost
+
+The opt-in [real-disk benchmark](../../testing/bench/audio-staging.bench.test.ts)
+drives `AudioProcessorService.process`, the real device Blob-slice path, staging,
+SHA-256 verification, and multipart checkpoint ordering. Staging uses real disk;
+settings checkpoints remain in memory, so the timings exclude durable initial
+and per-part settings writes. It hashes the received stream and reopens the
+staged source with a new owner after releasing the device source. Run its
+documented command; `AUDIO_STAGING_BENCH_BYTES` selects the size. No credentials,
+network, model calls or user vault are involved.
+
+One Node 22.23.4/macOS sample on source `4f75c064` measured a non-sparse
+129 MiB + 7 byte fixture: **248.91 ms staging**, **262.96 ms to first part send**,
+and **474.53 ms for the local staging/upload path**. It wrote 17 chunks of at
+most 8 MiB and sent 13 parts of at most 10 MiB. Unaligned upload windows caused
+26 verified chunk reads. The generated fixture, received bytes and reopened
+source had matching SHA-256 digests. Fixture creation and restart verification
+were outside the timed path.
+
+This is one warm-cache local-disk sample, not a mobile result, network upload
+measurement, production transcription or speedup claim. The in-process sink
+hashes immediately, so the local duration cannot predict an internet upload.
+The measured staging cost does not justify weakening restart recovery. Issue
+[#377](https://github.com/SystemSculpt/obsidian-systemsculpt-ai/issues/377)'s
+proposed staging/upload overlap and automatic desktop bypass are therefore
+retired under this contract; bounded uploads and the removed redundant staging
+read-back remain implemented. No admission limit or historical format changes.
+
 ## Saved chat parsing
 
 - Saved chat parsing fails closed. A malformed or truncated history must never

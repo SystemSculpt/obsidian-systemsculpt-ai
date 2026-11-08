@@ -12,7 +12,8 @@ public operations and behavioral tests before following private helpers.
 | Plugin startup and disposal | `src/main.ts`, `src/core/plugin/` | Composes capabilities and Obsidian commands/views; `LifecycleCoordinator` owns task tracing and failure recording. Services start on use, except recovery for saved work and configured automation. |
 | Chat execution | `src/chat/ChatSession.ts`, `src/chat/managed/ChatSession.ts` | Shared session contract and managed conversation synchronization, local tools, approvals, and replay safety. |
 | Managed conversation projection | `src/chat/managed/ConversationProjection.ts` | Optimistic display, interrupted responses, exact local-result overlays, and live/durable message conversion. |
-| Chat presentation | `src/views/chatview/AgentChatView.ts`, `AgentConversationRenderer.ts` | Composer, conversation projection, interaction, rendering, and view lifecycle. |
+| Chat turn coordination | `src/views/chatview/ChatTurnCoordinator.ts` | Local submission admission, cancellation fences, draft restoration, historical edits/retries, durable follow-up FIFO and failed-receipt persistence. Sessions retain execution ownership; receipt retries keep their original transcript across navigation. Storage patches the current existing note atomically, preserves receipts through stale snapshot saves, and never recreates a deleted note. |
+| Chat presentation | `src/views/chatview/AgentChatView.ts`, `AgentConversationRenderer.ts` | Composer and session composition, conversation projection, interaction, rendering, and view lifecycle. Settled attachment-prune and catalog calls release their abort ownership; closing aborts only outstanding calls. |
 | Saved chats | `src/views/chatview/ChatStorageService.ts`, `storage/`, `persistence/`, `attachments/` | Local transcript and attachment storage, strict parsing, and restore. A saved note is not execution authority. Saved native tool records spell vault paths from their saved working directory and the home folder as `~`, in structured arguments and in native text alike; the live record and the native session keep absolute paths. |
 | Native chat lifetime | `src/views/chatview/NativeChatSessions.ts` | Plugin-owned connections keyed by chat id retain their original transcript while views detach and reattach. Explicit deletion and plugin unload cancel and drain them; idle unobserved connections close. Native agents still own execution. |
 | Managed operations | `src/services/managed/` | First-party capability admission, job transport, reconnect, and delivery contracts. `ManagedMultipartUpload` owns slice upload, retry and durable part ordering across transcription, documents and Audio Processor; `ManagedJobDispatch` persists managed dispatch identity. `ManagedLocalStaging` owns immutable local staging publication and verified reads while capability modules retain historical manifest formats. `ManagedMediaJobContract` owns strict v2 media request/response decoding; `ManagedRecoveryRecordDecoder` owns recovery record and journal admission. Transport and recovery transitions remain in their clients/store. Capability-specific consumers live beside audio, images, video, and embeddings. |
@@ -86,6 +87,16 @@ composition point; its store and session objects own their own invariants.
 session implementation. Native Codex adapts to that contract without importing
 a view. `src/views/chatview/` owns the Obsidian workspace and readable local
 transcripts. Do not add an agent continuation loop to either module.
+
+`ConversationHistoryHydration` owns deferred activity and overflow rendering for
+restored history: staging, coalescing, visibility invalidation, disposal and pending
+counts. `ActiveConversationRenderer` owns keyed live parts, progress timers and
+their one-way settled-row handoff. `AgentConversationRenderer` reconciles durable
+rows and supplies shared visual primitives; only explicit settlement can adopt a
+live row. History never coordinates the active owner's mutable part maps.
+`ConversationDomState` shares owner-document focus, exact-node selection and
+disclosure restoration with `LiveMarkdownRenderer`. Markdown replacement alone
+remaps selection by text offset when an exact node cannot survive.
 
 Shared native text projection lives in `services/codex/NativeTurnText.ts`;
 backend mode definitions and Codex request codecs stay outside transport and

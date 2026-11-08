@@ -324,7 +324,9 @@ export class SystemSculptStudioView extends ItemView {
         this.projectSessionController.commitMutation(reason, mutator, options),
       requestRender: () => this.render(),
       onNodeDragStateChange: (isDragging) => this.handleNodeDragStateChange(isDragging),
-      onNodePositionsChanged: () => this.shapeController.refreshArrows(),
+      onNodePositionsChanged: options => this.shapeController.refreshArrows(
+        options?.nodeIds || options?.shapeIds ? [...options.nodeIds ?? [], ...options.shapeIds ?? []] : undefined
+      ),
       onSelectionResize: (patches, options) => this.handleSelectionResize(patches, options),
       onGraphZoomChanged: (zoom, context) => this.handleGraphZoomChanged(zoom, context),
       getPortType: (nodeId, direction, portId) => this.getPortType(nodeId, direction, portId),
