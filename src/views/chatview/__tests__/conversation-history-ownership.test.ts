@@ -67,6 +67,90 @@ it.each(["restored", "adopted"])("does not duplicate the action summary in opene
   }
 });
 
+it.each(["live", "restored", "adopted"].flatMap(origin =>
+  [false, true].map(cancelled => ({ origin, cancelled })),
+))("keeps one tool row through a $origin single-tool turn (cancelled=$cancelled)", async ({ origin, cancelled }) => {
+  const parent = document.body.createDiv();
+  const renderer = new AgentConversationRenderer(parent, {
+    app: new App(), sourcePath: () => "", onApprove: jest.fn(),
+    onOpenArtifact: jest.fn(), onCopyArtifactPath: jest.fn(),
+  });
+  renderer.load();
+  try {
+    const tool: ToolCall = {
+      id: "single-call", messageId: "single-assistant", timestamp: 2,
+      request: { id: "single-call", type: "function", function: { name: "read", arguments: JSON.stringify({ paths: ["Plan.md"] }) } },
+      state: "completed", result: { success: true, data: { summary: "Read Plan.md" } },
+    };
+    const messages: ChatMessage[] = [
+      { role: "user", message_id: "single-user", content: "Read the plan." },
+      { role: "assistant", message_id: "single-assistant", content: "Reviewed the plan.", responseDurationMs: 12000,
+        ...(cancelled ? { terminalOutcome: "cancelled" as const } : {}), messageParts: [
+          { id: "single-tool", type: "tool_call", timestamp: 2, data: tool },
+          { id: "single-answer", type: "content", timestamp: 3, data: "Reviewed the plan." },
+        ] },
+    ];
+    // Reproduce the CEO's screenshot: an ordinary completed Read followed by
+    // a separate, cancelled text-only turn must not duplicate the earlier tool.
+    if (origin === "restored" && !cancelled) messages.push(
+      { role: "user", message_id: "later-user", content: "Check the next steps." },
+      { role: "assistant", message_id: "later-answer", content: "Stopped before the next step.", terminalOutcome: "cancelled" },
+    );
+    const snapshot: AgentConversationSnapshot = {
+      runId: "single-run", turnId: "single-user", status: cancelled ? "cancelled" : "completed", phase: "complete", elapsedMs: 12000,
+      messages: [{ id: "single-assistant", role: "assistant", partIds: ["single-tool", "single-answer"] }],
+      parts: [
+        { id: "single-tool", kind: "tool", messageId: "single-assistant", order: 2, state: "succeeded", callId: tool.id, name: "read", location: "vault", input: { paths: ["Plan.md"] }, output: { summary: "Read Plan.md" } },
+        { id: "single-answer", kind: "text", messageId: "single-assistant", order: 3, state: "complete", markdown: "Reviewed the plan." },
+      ],
+    };
+    let liveTool: Element | null = null;
+    if (origin === "restored") {
+      await renderer.renderHistory(messages);
+    } else {
+      await renderer.renderHistory(messages.slice(0, 1));
+      await renderer.renderActive(snapshot, presentAgentConversation(snapshot, false));
+      const fold = parent.querySelector<HTMLDetailsElement>("details[data-agent-turn-fold]");
+      if (fold) {
+        fold.open = true;
+        fold.dispatchEvent(new Event("toggle"));
+        await historyHydrationFor(renderer).hydrate(fold);
+      }
+      liveTool = parent.querySelector(".systemsculpt-agent-tool");
+      expect(liveTool).not.toBeNull();
+      if (origin === "adopted") await renderer.settleHistory(messages, "single-user");
+    }
+    const activity = parent.querySelector<HTMLDetailsElement>("details[data-agent-turn-fold]");
+    if (activity) {
+      activity.open = true;
+      activity.dispatchEvent(new Event("toggle"));
+      await historyHydrationFor(renderer).hydrate(activity);
+    }
+    const scope = activity ?? parent;
+    const label = scope.querySelector<HTMLElement>(activity ? ":scope > summary .systemsculpt-agent-activity-label" : ".systemsculpt-agent-tail-status-label")!;
+    const row = scope.querySelector(".systemsculpt-agent-tool")!;
+    expect(parent.querySelectorAll(".systemsculpt-agent-tool")).toHaveLength(1);
+    expect(row.querySelector(".systemsculpt-agent-tool-label")?.textContent).toBe("Read Plan.md");
+    expect(label.textContent).not.toMatch(/read|plan\.md/i);
+    if (cancelled) expect(label.textContent).toMatch(/stopped/i);
+    if (liveTool) expect(row).toBe(liveTool);
+    if (origin === "live") await renderer.renderActive(snapshot, presentAgentConversation(snapshot, false));
+    else await renderer.renderHistory(messages);
+    expect(parent.querySelectorAll(".systemsculpt-agent-tool")).toHaveLength(1);
+    expect(scope.querySelector(".systemsculpt-agent-tool")).toBe(row);
+    if (activity) {
+      expect(activity.open).toBe(true);
+      activity.open = false;
+      activity.dispatchEvent(new Event("toggle"));
+      if (cancelled) expect(label.textContent).toMatch(/stopped/i);
+      else expect(label.textContent).toBe("Read Plan.md");
+    }
+  } finally {
+    renderer.unload();
+    parent.remove();
+  }
+});
+
 it.each(["current-user", null])("does not adopt an active turn %j during an ordinary history refresh", async (turnId) => {
   const parent = document.body.createDiv();
   const renderer = new AgentConversationRenderer(parent, {

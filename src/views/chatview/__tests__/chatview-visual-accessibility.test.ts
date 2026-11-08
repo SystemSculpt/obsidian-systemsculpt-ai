@@ -91,10 +91,14 @@ describe("ChatView text contrast (WCAG AA, default Obsidian themes)", () => {
   });
 
   test("lone activity rows share the turn-summary gutter", () => {
-    const css = readCss("views/agent-workspace/activity.css");
-    for (const kind of ["tool", "reasoning"]) {
-      expect(rule(css, `.systemsculpt-agent-activity-body > .systemsculpt-agent-part.is-${kind}`))
-        .toMatch(/padding-inline-start:\s*var\(--ss-space-1\)/);
+    for (const [sheet, selector] of [
+      ["activity", "summary.systemsculpt-agent-activity-header"],
+      ["tools", ".systemsculpt-agent-conversation .systemsculpt-agent-tool-header"],
+      ["reasoning", ".systemsculpt-agent-reasoning-header"],
+    ]) {
+      const header = rule(readCss(`views/agent-workspace/${sheet}.css`), selector);
+      expect(header).toMatch(/gap:\s*var\(--ss-space-1\)/);
+      expect(header).toMatch(/padding:\s*0 var\(--ss-space-1\)/);
     }
   });
 

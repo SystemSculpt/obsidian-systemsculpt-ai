@@ -208,11 +208,6 @@ strong.systemsculpt-agent-activity-overflow-label {
   padding: var(--ss-space-0) 0 var(--ss-space-1);
 }
 
-.systemsculpt-agent-activity-body > .systemsculpt-agent-part.is-tool,
-.systemsculpt-agent-activity-body > .systemsculpt-agent-part.is-reasoning {
-  padding-inline-start: var(--ss-space-1);
-}
-
 details.systemsculpt-agent-activity:not([open]) > .systemsculpt-agent-activity-body {
   display: none;
 }

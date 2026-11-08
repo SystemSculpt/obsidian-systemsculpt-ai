@@ -17,10 +17,10 @@
   box-sizing: border-box;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--ss-space-1);
   width: 100%;
   min-height: var(--ss-control-height-sm);
-  padding: 0 var(--ss-space-0);
+  padding: 0 var(--ss-space-1);
   border-radius: var(--ss-radius-sm);
   color: var(--ss-ink-muted);
   cursor: pointer;
@@ -60,8 +60,6 @@
 
 .systemsculpt-agent-reasoning-icon {
   order: 0;
-  flex-basis: 16px;
-  width: 16px;
 }
 
 .systemsculpt-agent-reasoning-header strong {
