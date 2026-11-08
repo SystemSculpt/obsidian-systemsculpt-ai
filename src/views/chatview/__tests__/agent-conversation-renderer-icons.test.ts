@@ -14,7 +14,7 @@ import {
 import { AgentConversationRenderer } from "../AgentConversationRenderer";
 import { incidentMonotonicNow } from "../RenderIncidentMetrics";
 import { historicalToolPart } from "../ConversationPartPresentation";
-import { historyHydrationFor } from "./fixtures/conversation-rendering";
+import { activeRendererFor, historyHydrationFor } from "./fixtures/conversation-rendering";
 import { restoreDomSelection } from "../ConversationDomState";
 import type { ConversationHistoryHydration } from "../ConversationHistoryHydration";
 
@@ -391,7 +391,7 @@ describe("AgentConversationRenderer tail status", () => {
 
     internals.committedFailedTurnIds.add("turn-committed-failure");
     expect(renderer.hasCommittedFailureSurface("turn-committed-failure")).toBe(true);
-    internals.activeTurnId = "turn-other-failure";
+    (activeRendererFor(renderer) as any).activeTurnId = "turn-other-failure";
     expect(renderer.hasCommittedFailureSurface("turn-missing-failure")).toBe(false);
 
     const performanceNow = jest.spyOn(window.performance, "now").mockReturnValue(Number.NaN);
@@ -571,7 +571,7 @@ describe("AgentConversationRenderer tail status", () => {
       enhanceCodeBlocks(parent: HTMLElement): void;
     };
 
-    const orphan = await internals.renderActivePart({
+    const orphan = await (activeRendererFor(renderer) as any).renderActivePart({
       id: "text-orphan-guard",
       kind: "text",
       messageId: "assistant-orphan-guard",
@@ -1033,7 +1033,7 @@ describe("AgentConversationRenderer tail status", () => {
       )!;
       const textNode = label.firstChild;
       const setTextNode = jest.spyOn(
-        renderer as unknown as {
+        activeRendererFor(renderer) as unknown as {
           setTextNode(element: HTMLElement | null, text: string): void;
         },
         "setTextNode",
@@ -1157,7 +1157,7 @@ describe("AgentConversationRenderer tail status", () => {
     try {
       await renderer.renderActive(running, presentAgentConversation(running, true));
       const status = parent.querySelector<HTMLElement>(".systemsculpt-agent-tail-status")!;
-      const internals = renderer as unknown as { activeWorkingTimer: number | null };
+      const internals = activeRendererFor(renderer) as unknown as { activeWorkingTimer: number | null };
       expect(internals.activeWorkingTimer).not.toBeNull();
       const waiting: AgentConversationSnapshot = {
         ...running,
@@ -2258,7 +2258,7 @@ describe("AgentConversationRenderer tail status", () => {
     renderer.focusInlineMessageEdit();
     renderer.showCompletedRenderFallback();
     renderer.showCompletedRenderFallback();
-    internals.setTextNode(null, "ignored");
+    (activeRendererFor(renderer) as any).setTextNode(null, "ignored");
     expect(internals.captureHistoricalDisclosureState(document.createElement("div")).workedOpen)
       .toBe(false);
     historyHydrationFor(renderer).forgetWithin(document.createElement("button"));
@@ -3423,7 +3423,7 @@ describe("AgentConversationRenderer tail status", () => {
     expect(artifactSerializations).toBe(1);
     expect(parent.querySelector('[data-part-key="tool:call-fingerprint"]')).toBe(toolNode);
     expect(toolNode.querySelector(".systemsculpt-agent-tool-support")).toBe(support);
-    const internals = renderer as unknown as {
+    const internals = activeRendererFor(renderer) as unknown as {
       activeToolDisplayFingerprints: Map<string, string>;
     };
     expect(internals.activeToolDisplayFingerprints.has("tool:call-fingerprint")).toBe(true);
@@ -3749,9 +3749,7 @@ describe("AgentConversationRenderer tail status", () => {
       running,
       presentation("responding", true, "Writing", running),
     );
-    const liveReasoning = (renderer as unknown as {
-      activeNodes: Map<string, HTMLElement>;
-    }).activeNodes.get("reasoning-adopt-work")!;
+    const liveReasoning = (activeRendererFor(renderer) as any).activeNodes.get("reasoning-adopt-work")!;
     const liveTool = parent.querySelector<HTMLElement>(
       '[data-part-key="tool:call-adopt-work"]',
     )!;
@@ -4621,11 +4619,11 @@ describe("AgentConversationRenderer tail status", () => {
       presentation("responding", true, "Writing", running),
     );
     const status = parent.querySelector<HTMLElement>(".systemsculpt-agent-tail-status")!;
-    expect((renderer as unknown as { activeWorkingTimer: number | null }).activeWorkingTimer)
+    expect((activeRendererFor(renderer) as unknown as { activeWorkingTimer: number | null }).activeWorkingTimer)
       .not.toBeNull();
     status.remove();
     jest.advanceTimersByTime(1_000);
-    expect((renderer as unknown as { activeWorkingTimer: number | null }).activeWorkingTimer)
+    expect((activeRendererFor(renderer) as unknown as { activeWorkingTimer: number | null }).activeWorkingTimer)
       .toBeNull();
     renderer.unload();
   });

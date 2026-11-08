@@ -1,3 +1,16 @@
+export function reconcileConversationChildren(parent: HTMLElement, desired: readonly HTMLElement[]): void {
+  let cursor = parent.firstElementChild;
+  for (const node of desired) {
+    if (cursor !== node) parent.insertBefore(node, cursor);
+    cursor = node.nextElementSibling;
+  }
+  while (cursor) {
+    const next = cursor.nextElementSibling;
+    cursor.remove();
+    cursor = next;
+  }
+}
+
 export type PreservedDomSelection = Readonly<{
   anchorNode: Node;
   anchorOffset: number;

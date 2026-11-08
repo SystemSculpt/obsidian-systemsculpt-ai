@@ -10,7 +10,7 @@ import {
 } from "../../../chat/ChatConversation";
 import { AgentWorkspace } from "../AgentWorkspace";
 import { AgentConversationRenderer } from "../AgentConversationRenderer";
-import { historyHydrationFor } from "./fixtures/conversation-rendering";
+import { activeRendererFor, historyHydrationFor } from "./fixtures/conversation-rendering";
 import { historicalToolPart } from "../ConversationPartPresentation";
 import { ChatMarkdownSerializer } from "../storage/ChatMarkdownSerializer";
 import type { ChatMessage } from "../../../types";
@@ -2722,7 +2722,7 @@ describe("AgentWorkspace", () => {
       const body = parent.querySelector<HTMLElement>(
         ".systemsculpt-agent-active-run .systemsculpt-agent-turn-body",
       )!;
-      const reasoningNode = (workspace.renderer as any).activeNodes.get(
+      const reasoningNode = (activeRendererFor(workspace.renderer) as any).activeNodes.get(
         "reasoning-activity-lifecycle",
       ) as HTMLElement;
       const toolNode = body.querySelector<HTMLElement>(
@@ -2743,7 +2743,7 @@ describe("AgentWorkspace", () => {
         .toBe(reasoningNode);
 
       const reasoningError = new Error("reasoning failed");
-      jest.spyOn(workspace.renderer as any, "renderActivePart")
+      jest.spyOn(activeRendererFor(workspace.renderer) as any, "renderActivePart")
         .mockRejectedValueOnce(reasoningError);
       await expect(workspace.setAgentSnapshot(snapshot("running", {
         ...tool,
@@ -3210,7 +3210,7 @@ describe("AgentWorkspace", () => {
       expect(overflowDrawer.querySelector(
         ".systemsculpt-agent-activity-overflow-label",
       )?.textContent).toBe("Thought, create file");
-      const reasoningNode = (workspace.renderer as any).activeNodes.get(
+      const reasoningNode = (activeRendererFor(workspace.renderer) as any).activeNodes.get(
         "reasoning-token-stream",
       ) as HTMLElement;
       expect(reasoningNode.isConnected).toBe(false);
@@ -4485,10 +4485,10 @@ describe("AgentWorkspace", () => {
     expect(parent.querySelectorAll(
       ".systemsculpt-agent-active-run .systemsculpt-agent-part.is-tool",
     )).toHaveLength(1);
-    const firstToolNode = (workspace.renderer as any).activeNodes.get(
+    const firstToolNode = (activeRendererFor(workspace.renderer) as any).activeNodes.get(
       "tool:read-live-1",
     ) as HTMLElement;
-    const secondToolNode = (workspace.renderer as any).activeNodes.get(
+    const secondToolNode = (activeRendererFor(workspace.renderer) as any).activeNodes.get(
       "tool:read-live-2",
     ) as HTMLElement;
     expect(firstToolNode.isConnected).toBe(false);
@@ -5194,8 +5194,8 @@ describe("AgentWorkspace", () => {
       expect(parent.querySelector(".systemsculpt-agent-active-run")?.innerHTML)
         .toBe(htmlAfterUnload);
       expect(parent.querySelector(".systemsculpt-agent-part.is-error")).toBeNull();
-      expect((workspace.renderer as any).activeNodes.size).toBe(0);
-      expect((workspace.renderer as any).activePartRefs.size).toBe(0);
+      expect((activeRendererFor(workspace.renderer) as any).activeNodes.size).toBe(0);
+      expect((activeRendererFor(workspace.renderer) as any).activePartRefs.size).toBe(0);
       expect((workspace.renderer as any).liveMarkdown.states.size).toBe(0);
     } finally {
       releaseMarkdown();
