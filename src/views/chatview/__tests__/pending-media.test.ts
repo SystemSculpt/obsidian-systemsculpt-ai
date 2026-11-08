@@ -28,7 +28,7 @@ describe("live generation placeholders", () => {
     expect(parseAspectRatio("1024x1536")).toBeCloseTo(2 / 3);
     expect(parseAspectRatio("portrait")).toBeCloseTo(2 / 3);
     expect(parseAspectRatio("wide")).toBeNull();
-    const [video] = presentPendingMedia([tool({ name: "mcp__systemsculpt__generate_video", state: "running", input: { prompt: "Waves" } })], true);
+    const [video] = presentPendingMedia([tool({ name: "generate_video", state: "running", input: { prompt: "Waves" } })], true);
     expect(video).toMatchObject({ kind: "video", label: "Generating video", caption: "Waves" });
     expect(video.ratio).toBeCloseTo(16 / 9);
   });
@@ -64,7 +64,7 @@ describe("live generation placeholders", () => {
   });
 
   it("waits for streamed arguments, so the tiles are drawn once at their real count and shape", () => {
-    expect(presentPendingMedia([tool({ name: "mcp__systemsculpt__generate_image", state: "input-streaming", input: {} })], true)).toEqual([]);
+    expect(presentPendingMedia([tool({ name: "generate_image", state: "input-streaming", input: {} })], true)).toEqual([]);
   });
 
   it("does not invent a failure for a call the turn's own error ended", () => {
