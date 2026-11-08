@@ -465,7 +465,7 @@ export async function assertLatestToolSettledAfterContinuation(
     const record = matchingRecords[matchingRecords.length - 1] ?? null;
     if (record && continuationEntry) {
       const tool = record.element;
-      const assistantTurn = tool.closest<HTMLElement>(".systemsculpt-agent-turn.is-assistant");
+      const assistantTurn = tool.closest<HTMLElement>("[data-testid='chat.turn'][data-role='assistant']");
       if (
         !record.turnId
         || (
@@ -480,7 +480,7 @@ export async function assertLatestToolSettledAfterContinuation(
       if (continuationEntry[1].turnId === record.turnId) {
         const [continuation, continuationAt] = continuationEntry;
         const snapshot = capturedToolRowSnapshot(record);
-        const agentStatus = container.querySelector(".systemsculpt-agent-tail-status")
+        const agentStatus = container.querySelector("[data-testid='chat.tail-status']")
           ?.getAttribute("data-status") ?? null;
         if (expectedState && snapshot.state !== expectedState) {
           throw new DriverActionError(

@@ -148,7 +148,7 @@ export function validatedVaultPath(value: unknown): string {
 
 export function revealActivityTarget(ctx: ActionContext, target: string): HTMLElement | null {
   const element = resolveTarget(ctx, target);
-  const body = element?.closest<HTMLElement>(".systemsculpt-agent-activity-overflow-body");
+  const body = element?.closest<HTMLElement>("[data-testid='chat.activity.body']");
   const disclosure = body?.previousElementSibling;
   if (
     disclosure?.instanceOf(HTMLButtonElement)

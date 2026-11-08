@@ -45,23 +45,23 @@ export function chatSnapshot(
     return (element?.textContent ?? "").trim();
   };
   const turns: Array<Record<string, unknown>> = [];
-  for (const turn of container.querySelectorAll(".systemsculpt-agent-turn")) {
+  for (const turn of container.querySelectorAll("[data-testid='chat.turn']")) {
     const parts: Array<Record<string, unknown>> = [];
-    for (const part of turn.querySelectorAll(".systemsculpt-agent-part")) {
+    for (const part of turn.querySelectorAll("[data-testid='chat.part']")) {
       const element = part as HTMLElement;
-      const kind = [...element.classList].find((cls) => cls.startsWith("is-")) ?? "part";
+      const kind = element.dataset.kind ? `is-${element.dataset.kind}` : "part";
       parts.push({
         kind,
         text: (part.textContent ?? "").trim().slice(0, 2000),
-        ...(element.classList.contains("is-tool") ? { tool: toolRowSnapshot(element) } : {}),
+        ...(element.dataset.kind === "tool" ? { tool: toolRowSnapshot(element) } : {}),
       });
     }
     const turnText = turn.textContent ?? "";
     turns.push({
-      role: turn.classList.contains("is-assistant") ? "assistant"
-        : turn.classList.contains("is-user") ? "user"
+      role: turn.getAttribute("data-role") === "assistant" ? "assistant"
+        : turn.getAttribute("data-role") === "user" ? "user"
         : "unknown",
-      active: turn.classList.contains("is-active"),
+      active: turn.getAttribute("data-active") === "true",
       text: turnText.trim().slice(0, 4000),
       textCharacters: turnText.length,
       parts,
@@ -71,7 +71,7 @@ export function chatSnapshot(
   const send = container.querySelector('[data-testid="chat.composer.send"]');
   const stop = container.querySelector('[data-testid="chat.composer.stop"]');
   const approval = container.querySelector<HTMLElement>('[data-testid="chat.run.mode"]');
-  const tailStatus = container.querySelector(".systemsculpt-agent-tail-status");
+  const tailStatus = container.querySelector("[data-testid='chat.tail-status']");
   const attachments: string[] = [];
   for (const open of container.querySelectorAll('[data-testid="chat.composer.attachment.open"]')) {
     const item = open.closest('[role="listitem"]') ?? open;
@@ -79,7 +79,7 @@ export function chatSnapshot(
     if (label) attachments.push(label.slice(0, 200));
   }
   const banners: string[] = [];
-  for (const banner of container.querySelectorAll(".systemsculpt-agent-banner")) {
+  for (const banner of container.querySelectorAll("[data-testid='chat.banner']")) {
     const label = (banner.textContent ?? "").trim();
     if (label) banners.push(label.slice(0, 500));
   }
@@ -90,7 +90,7 @@ export function chatSnapshot(
     turns,
     banners,
     agentStatus: tailStatus?.getAttribute("data-status")
-      ?? tailStatus?.querySelector(".systemsculpt-agent-tail-status-label")?.textContent?.trim()
+      ?? tailStatus?.querySelector("[data-testid='chat.tail-status.label']")?.textContent?.trim()
       ?? null,
     toolLifecycle: includeToolLifecycle && toolLifecycleCaptures.has(ctx.app)
       ? toolLifecycleReport(ctx)
@@ -109,15 +109,14 @@ export function settingsSnapshot(ctx: ActionContext): Record<string, unknown> {
   const surface = resolveTarget(ctx, "settings.surface");
   if (!surface?.instanceOf(HTMLElement) || !isVisible(surface)) return { open: false };
   const tabs: Array<Record<string, unknown>> = [];
-  const bar = surface.querySelector(".ss-settings-tab-bar");
-  for (const button of bar?.querySelectorAll("button, [role='tab']") ?? []) {
+  const bar = surface.querySelector("[data-testid='settings.tab-bar']");
+  for (const button of bar?.querySelectorAll("[role='tab'][data-testid^='settings.tab.']") ?? []) {
     tabs.push({
       label: (button.textContent ?? "").trim(),
-      active: button.classList.contains("is-active") ||
-        button.getAttribute("aria-selected") === "true",
+      active: button.getAttribute("aria-selected") === "true",
     });
   }
-  const activePanel = surface.querySelector(".systemsculpt-tab-content.is-active");
+  const activePanel = surface.querySelector("[data-testid^='settings.panel.'][role='tabpanel']:not([hidden])");
   return {
     open: true,
     tabs,
@@ -156,7 +155,7 @@ export async function waitForFailedTurnRetryAdmission(
     if (stop && isVisible(stop)) return;
     const container = chatContainer(ctx.app);
     const currentUserTurns = container?.querySelectorAll<HTMLElement>(
-      ".systemsculpt-agent-turn.is-user",
+      "[data-testid='chat.turn'][data-role='user']",
     );
     const currentUserTurn = currentUserTurns?.[currentUserTurns.length - 1] ?? null;
     const currentMessageId = currentUserTurn?.dataset.messageId ?? "";

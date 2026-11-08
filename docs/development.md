@@ -290,6 +290,19 @@ the same catalog. Each area module supplies handlers; actions.ts merges them,
 and catalog tests require exact handler coverage. Observation-only waits may
 detach on cancellation; waits that can approve UI actions retain queue ownership.
 
+Chat structure uses repeated `chat.turn` and `chat.part` identities, qualified
+by `data-role`, `data-active`, `data-kind`, and each tool’s displayed
+`data-state`. `data-part-key` keeps a part’s execution identity. Tools expose
+`data-tool-name` and a single displayed target as `data-tool-path`; exact write
+approvals cross-check it against `chat.diff.file` and its `data-path`, even
+when the preview header is hidden. Tool labels,
+summaries and status icons use `chat.tool.label`, `chat.tool.summary`, and
+`chat.tool.state`; `chat.tail-status` retains `data-status` and exposes
+`data-phase`. Settings use `settings.surface`, `settings.tab-bar`, and
+`settings.panel.<id>` with the tabs’ existing ARIA selection/visibility state.
+Supported actions read these identities, not cosmetic classes. Snapshot part
+kinds retain their existing `is-<kind>` values for script compatibility.
+
 The guarded live ChatView lanes drive the visible UI, use synthetic
 `SS-DEV-TEST-*` ownership markers, stay in Ask Approval, and trash only the
 exact saved chat and marker folder they created:
