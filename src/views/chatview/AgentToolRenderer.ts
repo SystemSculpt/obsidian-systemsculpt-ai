@@ -302,7 +302,9 @@ export class AgentToolRenderer {
     const displayLabel = planDecision
       ? decision === "denied" ? "Kept planning" : decision === "withdrawn" ? "Plan withdrawn" : "Plan started"
       : isQuestion && decision ? decision === "denied" ? "Skipped" : "Answered question"
-        : decision ? `${presentation.label} · ${decisionLabel}` : presentation.label;
+        : decision ? `${presentation.label} · ${decisionLabel}`
+          // Stopped while running, as the activity summary and the card's notice say.
+          : part.state === "cancelled" ? `${presentation.label} · Stopped` : presentation.label;
     if (label.textContent !== displayLabel) {
       label.setText(displayLabel);
       const target = presentation.targetPath;

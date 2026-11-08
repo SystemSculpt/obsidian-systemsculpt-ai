@@ -36,8 +36,12 @@ export function setActivityLabelText(element: HTMLElement, label: string): void 
 /** Count adjacent activity by action without repeating payloads or full paths. */
 export function summarizeAgentActivity(parts: readonly AgentPart[]): AgentActivitySummary {
   const groups = new Map<string, ActivityGroup>();
-  let failedCount = 0, blockedCount = 0, uncertainCount = 0, refused = false, gated = false, denied = false;
+  let failedCount = 0, refused = false, gated = false, denied = false;
+  // Each failure remembers the clause that names it, so the tally counts only the ones no shown clause names.
+  const failures: { kind: string; word: "failed" | "blocked" | "uncertain" }[] = [];
+  let lastKind = "";
   const add = (kind: string, label: string, items: readonly string[] = [], count = 1): void => {
+    lastKind = kind;
     const group = groups.get(kind) ?? { label, items: new Set<string>(), uncounted: 0, rows: 0 };
     group.label = label;
     group.rows += 1;
@@ -57,10 +61,14 @@ export function summarizeAgentActivity(parts: readonly AgentPart[]): AgentActivi
       // failed or uncertain actions aren't completed changes: each keeps its
       // own clause, and a withdrawn request is not a failure.
       if (tool.displayState === "denied") { denied = true; add("denied", `${tool.label} · Denied`); }
-      else if (tool.displayState === "cancelled" || part.approvalDecision === "withdrawn") add("withdrawn", `${tool.label} · Withdrawn`);
+      // A request withdrawn before it was answered never ran; one stopped while running did, partway.
+      else if (part.approvalDecision === "withdrawn" || tool.displayState === "cancelled" && part.approvalId && !part.approvalDecision) add("withdrawn", `${tool.label} · Withdrawn`);
+      else if (tool.displayState === "cancelled") add("stopped", `${tool.label} · Stopped`);
       // An uncertain result may have happened: it is never folded into "couldn't".
       else if (tool.displayState === "outcome-unknown") add("uncertain", `${tool.label} · Uncertain`);
       else if (tool.displayState === "failed") add("failed", tool.label);
+      // A partly done batch says how far it got ("Moved 1 of 2 notes to trash"), never the whole request.
+      else if (tool.displayState === "partial") add("partial", tool.label);
       // A gate (subscription, credits) and a refusal did nothing: neither joins the work that was done.
       else if (gatedSystemSculptTurn(part)) add("gated", tool.label);
       else if (refusedSystemSculptCall(part)) add("failed", tool.label);
@@ -69,8 +77,7 @@ export function summarizeAgentActivity(parts: readonly AgentPart[]): AgentActivi
       if (part.approvalDecision !== "withdrawn" && (refusal || ["failed", "partial", "outcome-unknown"].includes(tool.displayState))) {
         failedCount += 1;
         // A guard's block and an uncertain result are not known failures: each keeps its own word.
-        if (tool.icon === "shield-x") blockedCount += 1;
-        else if (tool.displayState === "outcome-unknown") uncertainCount += 1;
+        failures.push({ kind: lastKind, word: tool.icon === "shield-x" ? "blocked" : tool.displayState === "outcome-unknown" ? "uncertain" : "failed" });
       }
     }
   }
@@ -78,9 +85,11 @@ export function summarizeAgentActivity(parts: readonly AgentPart[]): AgentActivi
     const count = groupSize(group);
     if (kind === "denied") return count === 1 ? group.label : `Denied ${count} actions`;
     if (kind === "withdrawn") return count === 1 ? group.label : `${count} actions withdrawn`;
+    if (kind === "stopped") return count === 1 ? group.label : `Stopped ${count} actions`;
     if (kind === "gated") return count === 1 ? group.label : `${count} actions need a subscription or credits`;
     if (kind === "uncertain") return count === 1 ? group.label : `${count} actions uncertain`;
     if (kind === "failed") return count === 1 ? group.label : `Couldn't complete ${count} actions`;
+    if (kind === "partial") return count === 1 ? group.label : `${count} actions partly done`;
     // One read names its note (spec 3.2: "Read Plan.md, searched 2 patterns").
     if (kind === "read") return count === 1 ? group.label : `Read ${count} notes`;
     if (kind === "search") return `Searched ${count} pattern${count === 1 ? "" : "s"}`;
@@ -94,13 +103,16 @@ export function summarizeAgentActivity(parts: readonly AgentPart[]): AgentActivi
     }
     return group.label;
   });
-  const visible = labels.slice(0, 3).map((label, index) => index ? label.charAt(0).toLowerCase() + label.slice(1) : label).join(", ");
-  const more = Array.from(groups.values()).slice(3).reduce((count, group) => count + group.rows, 0);
-  const failed = failedCount - blockedCount - uncertainCount;
-  // Uncertain work says so in its own clause; when that clause is past the
-  // three shown, its tally keeps the uncertainty visible.
-  const uncertainHidden = Array.from(groups.keys()).indexOf("uncertain") >= 3;
-  const outcomes = [[failed, "failed"], [blockedCount, "blocked"], [uncertainHidden ? uncertainCount : 0, "uncertain"]]
+  // Two kinds that read the same ("Used forecast" from Claude and from Codex) are one clause.
+  const shown = labels.flatMap((label, index) => labels.indexOf(label) === index ? [label] : []);
+  const visible = shown.slice(0, 3).map((label, index) => index ? label.charAt(0).toLowerCase() + label.slice(1) : label).join(", ");
+  const kinds = Array.from(groups.keys());
+  const more = kinds.filter((_, index) => !shown.slice(0, 3).includes(labels[index])).reduce((count, kind) => count + groups.get(kind)!.rows, 0);
+  // A failure a shown clause already names ("Couldn't edit A.md") is not counted again;
+  // the tally keeps the ones folded into "· N more" visible.
+  const hidden = failures.filter(failure => !shown.slice(0, 3).includes(labels[kinds.indexOf(failure.kind)]));
+  const outcomes = (["failed", "blocked", "uncertain"] as const)
+    .map(word => [hidden.filter(failure => failure.word === word).length, word] as const)
     .filter(([count]) => count).map(([count, word]) => ` · ${count} ${word}`).join("");
   return {
     label: `${visible || "Activity"}${more ? ` · ${more} more` : ""}${outcomes}`,

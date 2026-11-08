@@ -324,6 +324,7 @@ export class AgentConversationRenderer extends Component {
       onHiddenApproval: options.onHiddenApproval,
       onAnnounce: options.onAnnounce,
       onOpenPath: (path) => this.options.onOpenArtifact({ id: path, title: path, path, kind: "vault_file" }),
+      exists: (path) => Boolean(options.app.vault.getAbstractFileByPath(path)),
     });
     this.addChild(this.approvals);
     this.tools = new AgentToolRenderer({
@@ -1713,6 +1714,11 @@ export class AgentConversationRenderer extends Component {
         const presented = presentAgentError(
           part.error, part.retryable, this.options.showPlanOffer?.(), this.options.showPaymentFix?.() ?? false,
         );
+        // Credits and plans are a gate with a way through, not a failure: calm, with a lock (as on a tool row).
+        if (presented.action === "see-plans" || presented.action === "monthly" || presented.action === "add-credits") {
+          node.addClass("is-gate");
+          setIcon(errorIcon, "lock");
+        }
         copy.createEl("strong", {
           cls: "systemsculpt-agent-error-heading",
           text: presented.heading,
@@ -1773,8 +1779,11 @@ export class AgentConversationRenderer extends Component {
           hosted.onclick = () => void this.options.onUseHosted?.();
         }
         if (presented.details) {
-          const details = copy.createEl("details", { cls: "systemsculpt-agent-error-details" });
-          details.createEl("summary", { text: "Details", attr: { "data-testid": "chat.turn.error-details" } });
+          // The same quiet "› Details" disclosure as tool cards and approvals.
+          const details = copy.createEl("details", { cls: "systemsculpt-agent-error-details systemsculpt-agent-tool-raw" });
+          const summary = details.createEl("summary", { attr: { "data-testid": "chat.turn.error-details" } });
+          setIcon(summary.createSpan({ cls: "systemsculpt-agent-tool-raw-chevron", attr: { "aria-hidden": "true" } }), "chevron-right");
+          summary.appendText("Details");
           details.createEl("pre", { attr: { tabindex: "0" } }).createEl("code", { text: presented.details });
         }
         if (actions && (presented.action === "see-plans" || presented.action === "monthly" && !monthlyOffer) && this.options.onViewPlans) {

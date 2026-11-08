@@ -150,17 +150,16 @@ describe("AgentConversationPresentation product-copy boundary", () => {
     });
   });
 
-  it.each(["license_rejected", "license_required"])("offers recovery for %s without changing failure copy or report ids", (code) => {
+  it.each(["license_rejected", "license_required", "PRO_REQUIRED"])("names the plan %s needs, without the license service detail", (code) => {
     for (const showPlanOffer of [false, true]) {
       expect(presentAgentError({
         code,
         message: "Private license service detail.",
         reportId: "report_0123456789abcdef0123456789abcdef",
       }, false, showPlanOffer)).toEqual({
-        heading: "Could not finish",
-        message: "SystemSculpt could not complete the response.",
+        heading: "SystemSculpt plan needed",
+        message: "Start free with 500 credits, or choose a plan.",
         action: "see-plans",
-        reportId: "report_0123456789abcdef0123456789abcdef",
       });
     }
   });

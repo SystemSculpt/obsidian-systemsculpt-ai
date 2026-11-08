@@ -4728,7 +4728,7 @@ describe("AgentConversationRenderer tail status", () => {
       ".systemsculpt-agent-approval-preview",
     )!;
     expect(approval.querySelector(".systemsculpt-agent-approval-copy")?.textContent)
-      .toBe("SystemSculpt wants to create Plan.md");
+      .toBe("SystemSculpt wants to replace Plan.md");
     expect(approval.querySelector(".systemsculpt-agent-approval-meta")?.textContent).toBe("Projects");
     expect(approval.querySelector('[data-testid="chat.approval.deny"]')).not.toBeNull();
     expect(approval.querySelector('[data-testid="chat.approval.allow-once"]')).not.toBeNull();
@@ -4797,7 +4797,9 @@ describe("AgentConversationRenderer tail status", () => {
       const node = parent.querySelector<HTMLElement>(
         '[data-part-key="tool:call-first-frame-approval"]',
       );
-      connectedAtHydrationStart.push(Boolean(
+      // The card's title asks whether the file exists before the card is connected; only the
+      // preview's lookup counts here, and a preview lookup outside the connected card records nothing.
+      if (node?.querySelector(".systemsculpt-agent-approval-preview")) connectedAtHydrationStart.push(Boolean(
         node?.isConnected
         && node.querySelector(".systemsculpt-agent-approval")?.isConnected,
       ));

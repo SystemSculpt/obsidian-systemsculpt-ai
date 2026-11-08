@@ -96,6 +96,10 @@ function madeUp(later: AgentToolPart): boolean {
  * failed. A failed call that a later call of the same kind made up for shows
  * nothing; the gated ones (Subscribe, Buy credits) already have their own line.
  */
+function editing(args: Readonly<Record<string, unknown>>): boolean {
+  return Array.isArray(args.reference_images) && args.reference_images.some(path => typeof path === "string" && path.trim() !== "");
+}
+
 export function presentPendingMedia(parts: readonly AgentToolPart[], live: boolean): PendingMedia[] {
   const pending: PendingMedia[] = [];
   parts.forEach((part, order) => {
@@ -125,8 +129,9 @@ export function presentPendingMedia(parts: readonly AgentToolPart[], live: boole
         for (let index = 0; index < count; index += 1) {
           pending.push({
             ...base, id: `${part.callId}:${index}`, kind, ratio, state: "working",
-            label: count > 1 ? `Image ${index + 1} of ${count}` : `Generating ${kind}`,
-            ...(prompt ? { caption: prompt } : {}),
+            label: count > 1 ? `Image ${index + 1} of ${count}` : `${editing(args) ? "Editing" : "Generating"} ${kind}`,
+            // A grid's tiles share one prompt; the call's row names it, not four captions.
+            ...(prompt && count === 1 ? { caption: prompt } : {}),
           });
         }
         return;
@@ -216,41 +221,6 @@ function retryHint(error: string): string {
   return /\blimit reached\b/iu.test(error) ? "Try again once it resets." : "Ask again to retry.";
 }
 
-/**
- * Cuts text at a word so it fits its one line, ending in "…"; the full text
- * stays in the title. CSS ellipsis remains the fallback after a resize.
- */
-function fitToLine(element: HTMLElement, full: string): void {
-  element.textContent = full;
-  if (!element.isConnected || element.scrollWidth <= element.clientWidth) return;
-  const words = full.split(" ");
-  let low = 1, high = words.length - 1;
-  while (low <= high) {
-    const middle = (low + high) >> 1;
-    element.textContent = `${words.slice(0, middle).join(" ").replace(/[\s,.;:–—-]+$/u, "")}…`;
-    if (element.scrollWidth <= element.clientWidth) low = middle + 1; else high = middle - 1;
-  }
-  element.textContent = `${words.slice(0, Math.max(1, high)).join(" ").replace(/[\s,.;:–—-]+$/u, "")}…`;
-}
-
-/** Fits every one-line text in a freshly drawn block once it has a size, and again whenever its width changes. */
-export function fitPendingText(block: HTMLElement): void {
-  if (!block.querySelector("[data-fit]")) return;
-  const fit = () => block.querySelectorAll<HTMLElement>("[data-fit]").forEach(element => fitToLine(element, element.dataset.fit ?? ""));
-  const view = block.ownerDocument.defaultView;
-  if (!view?.ResizeObserver) {
-    fit();
-    return;
-  }
-  let width = -1;
-  new view.ResizeObserver(entries => {
-    const next = Math.round(entries[0]?.contentRect.width ?? 0);
-    if (next === width) return;
-    width = next;
-    fit();
-  }).observe(block);
-}
-
 /** One placeholder or failure tile; its live line and bar update from the block's clock. */
 export function renderPendingMedia(grid: HTMLElement, tile: PendingMedia): HTMLElement {
   const figure = grid.createEl("figure", {
@@ -270,11 +240,9 @@ export function renderPendingMedia(grid: HTMLElement, tile: PendingMedia): HTMLE
   if (tile.state === "failed") {
     // The reason is the headline; what to do next is the one line under it.
     figure.setAttribute("role", "status");
-    // A framed tile has one line (the whole reason stays in its title and the call's row);
-    // a Studio row has no fixed height, so its reason wraps and is read whole.
+    // The reason wraps and is read whole: the frame has the room, and a cut reason hides what to change.
     const reason = tile.error ?? tile.label;
-    const fit = tile.kind === "workflow" ? {} : { "data-fit": reason };
-    status.createSpan({ cls: "ss-media-pending-label", text: reason, attr: { title: reason, ...fit } });
+    status.createSpan({ cls: "ss-media-pending-label", text: reason, attr: { title: reason } });
     status.createSpan({ cls: "ss-media-pending-meta", text: retryHint(reason) });
   } else {
     status.createSpan({ cls: "ss-media-pending-label", text: tile.label });
@@ -284,7 +252,8 @@ export function renderPendingMedia(grid: HTMLElement, tile: PendingMedia): HTMLE
   }
   if (tile.kind !== "workflow") {
     const caption = tile.caption ?? "";
-    figure.createEl("figcaption", { cls: "systemsculpt-agent-media-caption is-single-line", text: caption, attr: { title: caption, "data-fit": caption } });
+    // The prompt wraps under its frame (up to three lines), so its words are read, not cut at one line.
+    figure.createEl("figcaption", { cls: "systemsculpt-agent-media-caption is-prompt", text: caption, attr: { title: caption } });
   }
   pendingTiles.set(figure, tile);
   return figure;

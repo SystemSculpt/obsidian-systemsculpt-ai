@@ -17,6 +17,7 @@ import {
   inputFields,
   renderFields,
   renderLinks,
+  mediaDisplayName,
   renderMedia,
   renderPathList,
   renderTerminal,
@@ -140,9 +141,10 @@ export function nativeToolPresentation(part: AgentToolPart): NativeToolPresentat
   const systemsculpt = systemSculptToolName(part.name);
   if (systemsculpt) {
     const input = systemSculptArguments(part);
-    const workflow = text(input.path) ? basename(text(input.path)!).replace(/\.systemsculpt$/iu, "") : text(input.name) ?? "workflow";
+    const named = text(input.path) ? studioWorkflowName(text(input.path)!) : text(input.name);
+    const workflow = named ? `${named} workflow` : "workflow";
     const [verb, completed, running, target, icon] = ({
-      generate_image: ["Generate", "Generated", "Generating", imageCountTarget(part, input), "image"],
+      generate_image: [...(editsImages(input) ? ["Edit", "Edited", "Editing"] : ["Generate", "Generated", "Generating"]), imageCountTarget(part, input), "image"],
       generate_video: ["Generate", "Generated", "Generating", "video", "film"],
       studio_list_workflows: ["List", "Listed", "Listing", "Studio workflows", "layout-dashboard"],
       studio_create_workflow: ["Create", "Created", "Creating", workflow, "layout-dashboard"],
@@ -188,7 +190,8 @@ export function nativeToolPresentation(part: AgentToolPart): NativeToolPresentat
       return presentation("Search the web for", "Searched the web for", "Searching the web for", query ? `“${query}”` : "information", "globe-2", "web-search", { approval: "search the web" });
     }
     case "Grep": return presentation("Search", "Searched", "Searching", `“${text(input.pattern) ?? "text"}”`, "search", "search");
-    case "Glob": return presentation("List", "Listed", "Listing", text(input.pattern) ?? "files", "file-search", "list");
+    // A name pattern finds files; it is a search, not a folder listing.
+    case "Glob": return presentation("Find", "Found", "Finding", `files matching ${text(input.pattern) ?? "a pattern"}`, "file-search", "search");
     case "TodoWrite":
     case "plan": {
       const todos = records(input.todos ?? input.plan);
@@ -220,7 +223,7 @@ export function nativeToolPresentation(part: AgentToolPart): NativeToolPresentat
     case "imageView": {
       const image = codexImageLocalPath(input.path);
       // Codex names its generated files by internal id, so those read as "image".
-      const name = image && !isCodexGeneratedImagePath(image) ? basename(image) : "image";
+      const name = image && !isCodexGeneratedImagePath(image) ? mediaDisplayName(image) : "image";
       return presentation("View", "Viewed", "Viewing", name, "image", "image-view", image ? { path: image } : {});
     }
     case "permissions": return presentation("Allow", "Allowed", "Requesting", "additional access", "shield-check", "permission", {
@@ -608,6 +611,8 @@ export async function renderNativeToolPreview(app: App, host: HTMLElement, part:
     await renderResolvedNative(app, card, part, component);
     if (!card.childElementCount) card.remove();
   } else {
+    // A pending question's card asks it, with its options; a preview would say it all again.
+    if (["AskUserQuestion", "requestUserInput", "questions"].includes(kind(part))) return false;
     const details = previewDetails(part);
     if (details.length) {
       const list = container.createEl("dl", { cls: "ss-agent-tool-details" });
@@ -632,7 +637,6 @@ export async function renderNativeToolPreview(app: App, host: HTMLElement, part:
     if (kind(part) === "fileChange") renderFileChanges(container, part, true);
     if (kind(part) === "ExitPlanMode") await renderPlan(app, container, part, component);
     if (["TodoWrite", "plan"].includes(kind(part))) renderTodos(container, part);
-    if (["AskUserQuestion", "requestUserInput", "questions"].includes(kind(part))) renderQuestions(container, part);
     if (!container.childElementCount) {
       const card = createToolCard(container, `native:${kind(part)}`);
       renderGeneric(app, card, part);
@@ -642,6 +646,16 @@ export async function renderNativeToolPreview(app: App, host: HTMLElement, part:
   host.querySelector(":scope > .ss-native-tool-preview")?.remove();
   host.appendChild(container);
   return true;
+}
+
+/** A Studio workflow's name from its vault path ("Poster" from "…/Poster.systemsculpt"). */
+export function studioWorkflowName(path: string): string {
+  return (path.split(/[\\/]/u).pop() ?? path).replace(/\.systemsculpt$/iu, "");
+}
+
+/** An image call with reference images edits them; the chat says so. */
+export function editsImages(input: Record<string, unknown>): boolean {
+  return Array.isArray(input.reference_images) && input.reference_images.some(path => typeof path === "string" && path.trim() !== "");
 }
 
 /** "image", or "3 images": what a batch saved once it finished, else what it asked for. */

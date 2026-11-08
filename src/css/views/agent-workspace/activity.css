@@ -61,11 +61,13 @@ summary.systemsculpt-agent-activity-header,
 button.systemsculpt-agent-activity-overflow-header {
   box-sizing: border-box;
   display: flex;
-  align-items: center;
+  /* A wrapped summary keeps its icon, time and chevron on its first line. */
+  align-items: flex-start;
   gap: var(--ss-space-1);
   width: 100%;
   min-height: var(--ss-control-height-sm);
   padding: 0 var(--ss-space-1);
+  padding-block: calc((var(--ss-control-height-sm) - 20px) / 2);
   background: transparent;
   color: var(--ss-ink-muted);
   cursor: pointer;
@@ -86,7 +88,7 @@ button.systemsculpt-agent-activity-overflow-header {
   /* A summary can wrap; Obsidian's fixed button height must not clip it. */
   height: auto;
   padding: 0 var(--ss-space-1);
-  padding-block: var(--ss-space-0);
+  padding-block: calc((var(--ss-control-height-sm) - 20px) / 2);
   border: 0;
   border-radius: var(--ss-radius-sm);
   font-family: inherit;

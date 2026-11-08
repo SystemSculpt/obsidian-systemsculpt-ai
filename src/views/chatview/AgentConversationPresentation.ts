@@ -4,7 +4,7 @@ import type {
   AgentPart,
   AgentToolPart,
 } from "../../chat/ChatConversation";
-import { isPlanAccessError } from "../../utils/errors";
+import { isPlanAccessError, PLAN_REQUIRED_MESSAGE } from "../../utils/errors";
 
 const INTERRUPTED_ERROR_CODE =
   /(?:connection|socket|stream|resume|recover|interrupt|transport)/i;
@@ -107,6 +107,10 @@ export function presentAgentError(
       message: "Stopped by the safety filter. Try rewording.",
     };
   }
+  // A missing or rejected plan is a way in, not a failure: say what is needed (no license detail).
+  if (isPlanAccessError(error)) {
+    return { heading: "SystemSculpt plan needed", message: PLAN_REQUIRED_MESSAGE, action: "see-plans" };
+  }
   const interrupted = retryable
     && !NOT_STARTED_ERROR.test(`${error.code} ${error.message}`)
     && (
@@ -123,7 +127,6 @@ export function presentAgentError(
   return {
     heading: interrupted ? "Response interrupted" : "Could not finish",
     message: presentAgentErrorMessage(error.message, interrupted),
-    ...(isPlanAccessError(error) ? { action: "see-plans" as const } : {}),
     ...(reportId ? { reportId } : {}),
   };
 }

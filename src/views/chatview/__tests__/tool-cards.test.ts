@@ -230,7 +230,7 @@ describe("studio and gated summaries", () => {
     const gate = { ...hosted("generate_image", { prompt: "B" }, encodeSystemSculptToolResult({ ok: false, message: "Out of credits.", link: { label: "Buy credits", url: "https://systemsculpt.com/pricing" } })), callId: "gate", id: "gate" } as AgentToolPart;
     const refused = { ...hosted("generate_image", { prompt: "C" }, encodeSystemSculptToolResult({ ok: false, message: "Nope." })), callId: "refused", id: "refused" } as AgentToolPart;
     const summary = summarizeAgentActivity([done, gate, refused]);
-    expect(summary.label).toBe("Generated image, generate image · Needs credits, couldn't generate image · 1 failed");
+    expect(summary.label).toBe("Generated image, generate image · Needs credits, couldn't generate image");
     expect(summary.failedCount).toBe(1);
     expect(summary.gated).toBe(true);
   });

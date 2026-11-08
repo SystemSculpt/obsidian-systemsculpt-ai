@@ -27,6 +27,18 @@
   height: calc(var(--ss-text-sm) * 1.5);
   color: var(--ss-danger);
 }
+/* A credits or plan gate: the tool rows' calm notice, not the failure red. */
+.systemsculpt-agent-part.is-error.is-gate {
+  border-color: var(--ss-line);
+  background: var(--ss-surface-1);
+  color: var(--ss-ink);
+}
+.systemsculpt-agent-part.is-error.is-gate .systemsculpt-agent-error-icon {
+  color: var(--ss-warning);
+}
+.systemsculpt-agent-part.is-error.is-gate .systemsculpt-agent-error-heading {
+  color: var(--ss-ink);
+}
 .systemsculpt-agent-error-copy {
   display: flex;
   flex-direction: column;
@@ -155,6 +167,25 @@
   text-align: end;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* An open card reads its whole header: the label wraps and the meta drops below instead of
+   either being cut. Icons stay on the first line. A closed row stays one line. */
+.systemsculpt-agent-conversation details.systemsculpt-agent-tool[open] > .systemsculpt-agent-tool-header {
+  align-items: flex-start;
+  padding-block: 3px;
+}
+.systemsculpt-agent-conversation details.systemsculpt-agent-tool[open] > .systemsculpt-agent-tool-header .systemsculpt-agent-tool-copy {
+  flex-wrap: wrap;
+  column-gap: 6px;
+  row-gap: 0;
+}
+.systemsculpt-agent-conversation details.systemsculpt-agent-tool[open] > .systemsculpt-agent-tool-header .systemsculpt-agent-tool-label {
+  flex-shrink: 1;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.systemsculpt-agent-conversation details.systemsculpt-agent-tool[open] > .systemsculpt-agent-tool-header .systemsculpt-agent-tool-summary {
+  white-space: normal;
 }
 .systemsculpt-agent-conversation .systemsculpt-agent-tool-summary.is-compact {
   /* Short meta still yields to the label on a narrow row, with an ellipsis. */
@@ -325,6 +356,10 @@
   border-radius: var(--ss-radius-sm);
   background: var(--ss-surface-0);
 }
+/* The plan sits inside the native preview wrapper, so match it at any depth. */
+.systemsculpt-agent-approval-preview .ss-native-plan-preview {
+  padding: var(--ss-space-2) var(--ss-space-3);
+}
 .systemsculpt-agent-approval-preview dl {
   margin: 0;
   padding: var(--ss-space-2);
@@ -380,11 +415,32 @@
   gap: var(--ss-space-2);
   margin-bottom: var(--ss-space-2);
 }
-.systemsculpt-agent-approval-options button {
+/* An option reads as one line, its shortcut number then its label, with the description under the label. */
+.systemsculpt-agent-approval .systemsculpt-agent-approval-options button.ss-button {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  /* The gap rides on the number, so a hidden number (touch, narrow) leaves no indent. */
+  column-gap: 0;
+  row-gap: 2px;
+  align-items: baseline;
+  justify-items: start;
   height: auto;
+  padding-block: var(--ss-space-1);
   white-space: normal;
-  flex-direction: column;
-  align-items: flex-start;
+  text-align: start;
+}
+.systemsculpt-agent-approval-options button > .ss-button__label {
+  grid-column: 2;
+  grid-row: 1;
+}
+.systemsculpt-agent-approval-options button > kbd {
+  grid-column: 1;
+  grid-row: 1;
+  margin-inline: 0 var(--ss-space-2);
+}
+.systemsculpt-agent-approval-options button > .systemsculpt-agent-approval-option-description {
+  grid-column: 2;
+  grid-row: 2;
 }
 .systemsculpt-agent-approval-options button[aria-pressed="true"] {
   outline: 2px solid var(--ss-accent);
@@ -564,7 +620,8 @@
     grid-template-columns: minmax(0, 1fr);
     gap: 0;
   }
-  .ss-tool-fields dd + dt {
+  /* Each label and value pair sits in its own row wrapper, so the gap goes between wrappers. */
+  .ss-tool-field + .ss-tool-field > dt {
     margin-top: var(--ss-space-2);
   }
 }

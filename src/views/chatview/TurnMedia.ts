@@ -2,7 +2,7 @@ import { TFile, type App } from "obsidian";
 import type { AgentToolPart } from "../../chat/ChatConversation";
 import { decodeSystemSculptToolOutput, systemSculptToolName, type SystemSculptMedia } from "../../tools/systemsculpt/SystemSculptTools";
 import { codexImageMedia, rememberCodexImage } from "../../services/codex/CodexImages";
-import { fitPendingText, generationArguments, presentPendingMedia, renderPendingMedia, requestedMediaRatio, syncPendingClock, type PendingMedia } from "./PendingMedia";
+import { generationArguments, presentPendingMedia, renderPendingMedia, requestedMediaRatio, syncPendingClock, type PendingMedia } from "./PendingMedia";
 import { mediaDisplayName, syncToolMediaWithReply } from "./ToolCardBlocks";
 
 /** A file to show, with where its call sits in the turn and the frame its call asked for. */
@@ -165,7 +165,6 @@ function buildTurnMedia(app: App, parent: HTMLElement, presented: ReturnType<typ
     link.onclick = event => { event.preventDefault(); actions.openLink(notice.url); };
   }
   syncPendingClock(block);
-  fitPendingText(block);
   return block;
 }
 

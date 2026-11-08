@@ -20,6 +20,8 @@ type ApprovalOptions = {
   onHiddenApproval?: (part: AgentToolPart) => void;
   onAnnounce?: (text: string) => void;
   onOpenPath?: (path: string) => void | Promise<void>;
+  /** Whether a vault path already holds a file, so a write over it reads as replacing it. */
+  exists?: (path: string) => boolean;
 };
 
 type Question = { id: string; header: string; question: string; isSecret: boolean; multiSelect: boolean; options: { label: string; description: string }[] };
@@ -139,7 +141,9 @@ export class AgentApprovalCards extends Component {
     const tool = presentAgentTool(part);
     const plan = part.native?.agent === "claude" && part.name === "ExitPlanMode";
     const questionList = questions(part);
-    const actionTitle = native?.approvalTitle ?? tool.label.charAt(0).toLowerCase() + tool.label.slice(1);
+    const replaces = !native && canonicalName === "write" && Boolean(tool.targetPath && this.options.exists?.(tool.targetPath));
+    const label = replaces ? tool.label.replace(/^Create /u, "Replace ") : tool.label;
+    const actionTitle = native?.approvalTitle ?? label.charAt(0).toLowerCase() + label.slice(1);
     const agent = native?.agentName ?? "SystemSculpt";
     const title = plan ? `${agent} has a plan` : questionList.length ? `${agent} asks: ${questionList.length === 1 ? questionList[0].question : "A few questions"}`
       : `${agent} wants to ${actionTitle}`;
@@ -201,8 +205,11 @@ export class AgentApprovalCards extends Component {
       }
     }
 
-    const details = card.createEl("details", { cls: "systemsculpt-agent-approval-details" });
-    details.createEl("summary", { text: "Details" });
+    // The same quiet "› Details" disclosure every tool card ends with.
+    const details = card.createEl("details", { cls: "systemsculpt-agent-approval-details systemsculpt-agent-tool-raw" });
+    const summary = details.createEl("summary");
+    setIcon(summary.createSpan({ cls: "systemsculpt-agent-tool-raw-chevron", attr: { "aria-hidden": "true" } }), "chevron-right");
+    summary.appendText("Details");
     // Secret answers are never copied into this disclosure or the conversation.
     const raw = JSON.stringify(part.native?.permissionSuggestions?.length
       ? { input: part.input, permissionSuggestions: part.native.permissionSuggestions }

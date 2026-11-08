@@ -609,6 +609,6 @@ describe("native preview rendering", () => {
   it("names the workflow of a completed Codex dynamic call from its own arguments", () => {
     const item = { type: "dynamicToolCall", id: "call", tool: "studio_list_outputs", arguments: { path: "SystemSculpt/Studio/Garden cards.systemsculpt" }, status: "completed" };
     const presented = nativeToolPresentation(codex("studio_list_outputs", item, undefined));
-    expect(presented?.completedTitle).toBe("Listed outputs of Garden cards");
+    expect(presented?.completedTitle).toBe("Listed outputs of Garden cards workflow");
   });
 });

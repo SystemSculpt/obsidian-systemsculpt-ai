@@ -178,8 +178,9 @@ describe("AgentWorkspace", () => {
     expect(failed.classList.contains("is-failed")).toBe(true);
     expect(failed.querySelector<HTMLElement>(".systemsculpt-agent-tool-state-icon")?.dataset.iconState)
       .toBe("x");
-    expect(failed.querySelector(".systemsculpt-agent-tool-summary")?.textContent)
-      .toBe("0 completed, 2 failed");
+    // "Couldn't …" already says it; the summary does not repeat "0 completed, 2 failed".
+    expect(failed.querySelector(".systemsculpt-agent-tool-summary")?.textContent ?? "").toBe("");
+    expect(failed.querySelector(".systemsculpt-agent-tool-label")?.textContent).toMatch(/^Couldn't /u);
     expect(failed.querySelector(".systemsculpt-agent-tool-error")?.textContent)
       .toBe("This vault action could not be completed.");
 
@@ -5989,8 +5990,8 @@ describe("AgentWorkspace", () => {
     expect(parent.querySelector<HTMLElement>(
       ".systemsculpt-agent-tool-state-icon",
     )?.dataset.iconState).toBe("x");
-    expect(parent.querySelector(".systemsculpt-agent-tool-summary")?.textContent)
-      .toBe("1 completed, 1 failed");
+    expect(parent.querySelector(".systemsculpt-agent-tool-summary")?.textContent ?? "").toBe("");
+    expect(parent.querySelector(".systemsculpt-agent-tool-label")?.textContent).toMatch(/\b1 of 2\b/u);
     expect(parent.querySelectorAll(".systemsculpt-agent-artifact")).toHaveLength(1);
     expect(parent.textContent).toContain("Changed.md");
     expect(parent.textContent).not.toContain("Failed.md");
@@ -6039,8 +6040,8 @@ describe("AgentWorkspace", () => {
     expect(parent.querySelector<HTMLElement>(
       ".systemsculpt-agent-tool-state-icon",
     )?.dataset.iconState).toBe("x");
-    expect(parent.querySelector(".systemsculpt-agent-tool-summary")?.textContent)
-      .toBe("1 completed, 1 failed");
+    expect(parent.querySelector(".systemsculpt-agent-tool-summary")?.textContent ?? "").toBe("");
+    expect(parent.querySelector(".systemsculpt-agent-tool-label")?.textContent).toMatch(/\b1 of 2\b/u);
     expect(parent.querySelector(".systemsculpt-agent-tool-error")?.textContent)
       .toBe("Some requested items failed; successful items were kept.");
     expect(parent.querySelector(".systemsculpt-agent-tool")?.textContent)

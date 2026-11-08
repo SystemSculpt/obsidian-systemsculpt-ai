@@ -155,14 +155,14 @@ describe("sanitized 14:50 ChatView regression acceptance", () => {
         expect(mixedTool?.querySelector<HTMLElement>(
           ".systemsculpt-agent-tool-state-icon",
         )?.dataset.iconState).toBe("x");
-        expect(mixedTool?.querySelector(".systemsculpt-agent-tool-summary")?.textContent)
-          .toBe("2 completed, 1 failed");
+        expect(mixedTool?.querySelector(".systemsculpt-agent-tool-summary")?.textContent ?? "").toBe("");
+        expect(mixedTool?.querySelector(".systemsculpt-agent-tool-label")?.textContent).toMatch(/\b2 of 3\b/u);
         expect(failedTool?.classList).toContain("is-failed");
         expect(failedTool?.querySelector<HTMLElement>(
           ".systemsculpt-agent-tool-state-icon",
         )?.dataset.iconState).toBe("x");
-        expect(failedTool?.querySelector(".systemsculpt-agent-tool-summary")?.textContent)
-          .toBe("0 completed, 2 failed");
+        expect(failedTool?.querySelector(".systemsculpt-agent-tool-summary")?.textContent ?? "").toBe("");
+        expect(failedTool?.querySelector(".systemsculpt-agent-tool-label")?.textContent).toMatch(/^Couldn't /u);
         return tools;
       };
 

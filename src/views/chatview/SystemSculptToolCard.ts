@@ -95,10 +95,11 @@ export function renderSystemSculptToolCard(app: App, host: HTMLElement, part: Ag
     fields.push({ label: "Changes", value: shown.length ? shown.join("\n") : `${args.edits.length} ${args.edits.length === 1 ? "edit" : "edits"}` });
   }
   const references = Array.isArray(args.reference_images) ? args.reference_images.filter((value): value is string => typeof value === "string") : [];
-  for (const reference of references) fields.push({ label: "Reference", value: reference.split("/").pop() ?? reference, path: reference });
+  // A reference reads by its name, as the saved files do ("lighthouse at dusk"); the link opens the file.
+  for (const reference of references) fields.push({ label: "Reference", value: mediaDisplayName(reference), path: reference });
   for (const [key, label] of [["first_frame", "First frame"], ["last_frame", "Last frame"]] as const) {
     const frame = text(args[key]);
-    if (frame) fields.push({ label, value: frame.split("/").pop() ?? frame, path: frame });
+    if (frame) fields.push({ label, value: mediaDisplayName(frame), path: frame });
   }
   renderFields(app, card, fields);
 

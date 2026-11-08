@@ -473,7 +473,7 @@ video.systemsculpt-agent-media-frame {
   background: linear-gradient(
     100deg,
     transparent 20%,
-    color-mix(in srgb, var(--ss-accent) 10%, transparent) 50%,
+    color-mix(in srgb, var(--ss-ink) 5%, transparent) 50%,
     transparent 80%
   );
   animation: ss-shimmer calc(var(--ss-dur-slow) * 7) var(--ss-ease) infinite;
@@ -574,6 +574,16 @@ video.systemsculpt-agent-media-frame {
   .systemsculpt-agent-media:not(.is-estimated) .ss-media-pending-fill { visibility: hidden; }
 }
 
+.systemsculpt-agent-media-caption.is-prompt {
+  display: -webkit-box;
+  overflow: hidden;
+  white-space: normal;
+  text-wrap: pretty;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+}
+
 .systemsculpt-agent-media-caption.is-single-line {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -602,12 +612,47 @@ video.systemsculpt-agent-media-frame {
 
 .systemsculpt-agent-media.is-failed .ss-media-pending-label {
   max-width: 100%;
+  white-space: normal;
+  text-wrap: balance;
 }
 
 .systemsculpt-agent-media.is-failed[data-kind="workflow"] .ss-media-pending-label {
   text-align: start;
   white-space: normal;
   overflow-wrap: anywhere;
+}
+
+/* A lone failure holds no place for a file that will not come: one slim row, as a
+   failed Studio run. A failure beside other tiles keeps its frame, so the grid lines up. */
+.systemsculpt-agent-media.is-failed:only-child {
+  grid-column: 1 / -1;
+  width: 100%;
+}
+
+.systemsculpt-agent-media.is-failed:only-child .ss-media-pending-frame {
+  flex-direction: row;
+  justify-content: flex-start;
+  align-items: center;
+  gap: var(--ss-space-3);
+  padding-left: var(--ss-space-3);
+  aspect-ratio: auto;
+  text-align: start;
+}
+
+.systemsculpt-agent-media.is-failed:only-child .ss-media-pending-icon svg {
+  width: var(--ss-space-5);
+  height: var(--ss-space-5);
+}
+
+.systemsculpt-agent-media.is-failed:only-child .ss-media-pending-status {
+  flex: 1;
+  align-items: flex-start;
+  padding: var(--ss-space-3) var(--ss-space-3) var(--ss-space-3) 0;
+}
+
+.systemsculpt-agent-media.is-failed:only-child .ss-media-pending-label {
+  text-align: start;
+  text-wrap: pretty;
 }
 
 /* A Studio run has no known shape: one slim row across the grid. */

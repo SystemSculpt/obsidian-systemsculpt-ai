@@ -74,13 +74,19 @@ export function folderLink(app: App, parent: HTMLElement, path: string, text = p
   link.onclick = event => {
     event.preventDefault();
     event.stopPropagation();
-    const leaf = app.workspace.getLeavesOfType("file-explorer")[0];
-    const explorer = leaf?.view as { revealInFolder?: (file: TFolder) => void } | undefined;
-    if (!leaf || typeof explorer?.revealInFolder !== "function") return;
-    void app.workspace.revealLeaf(leaf);
-    explorer.revealInFolder(folder);
+    void revealFolder(app, folder);
   };
   return link;
+}
+
+/** Shows a folder in the file explorer, loading the explorer first when its sidebar has not drawn it yet. */
+export async function revealFolder(app: App, folder: TFolder): Promise<void> {
+  const leaf = app.workspace.getLeavesOfType("file-explorer")[0];
+  if (!leaf) return;
+  await app.workspace.revealLeaf(leaf);
+  await (leaf as { loadIfDeferred?: () => Promise<void> }).loadIfDeferred?.();
+  const explorer = leaf.view as { revealInFolder?: (file: TFolder) => void };
+  if (typeof explorer.revealInFolder === "function") explorer.revealInFolder(folder);
 }
 
 export function externalLink(parent: HTMLElement, url: string, text = url): HTMLAnchorElement {

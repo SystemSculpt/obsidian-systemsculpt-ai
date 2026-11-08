@@ -254,7 +254,8 @@ describe("presentAgentTool", () => {
   it("uses only the public result count for hosted web search", () => {
     const search = part({ name: "web_search", location: "server", state: "succeeded", input: {},
       output: { data: { query: "Public query", result_count: 3, matches: ["private"] } } });
-    expect(presentAgentToolDetails(search)).toEqual([{ label: "Query", value: "Public query" }, { label: "Results", value: "3" }]);
+    // The count is the row's meta ("3 results"), not a repeated field.
+    expect(presentAgentToolDetails(search)).toEqual([{ label: "Query", value: "Public query" }]);
     expect(presentAgentTool(search).meta).toBe("3 results");
     for (const count of [-1, 1.5, "3", NaN, Infinity]) {
       expect(presentAgentTool({ ...search, output: { data: { result_count: count, matches: ["private"] } } }).meta).toBeUndefined();

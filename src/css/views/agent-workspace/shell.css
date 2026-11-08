@@ -576,5 +576,6 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--ss-space-2);
-  width: min(calc(100% - 2 * var(--ss-space-3)), var(--ss-agent-content-width));
+  /* The conversation column's width, so the banner's edges line up with the messages and composer. */
+  width: min(calc(100% - 2 * var(--ss-space-3)), calc(var(--ss-agent-content-width) - 2 * var(--ss-space-5)));
 }

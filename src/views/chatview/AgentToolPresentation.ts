@@ -5,7 +5,7 @@ import {
 } from "../../tools/LocalToolOutcome";
 import type { AgentToolPart } from "../../chat/ChatConversation";
 import { isActiveAgentToolState } from "./AgentConversationPresentation";
-import { imageCountTarget, nativeToolPresentation } from "./NativeToolPresentation";
+import { editsImages, studioWorkflowName, imageCountTarget, nativeToolPresentation } from "./NativeToolPresentation";
 import { decodeSystemSculptToolOutput, systemSculptToolName } from "../../tools/systemsculpt/SystemSculptTools";
 
 type AgentToolDisplayState = AgentToolPart["state"] | "partial";
@@ -372,6 +372,11 @@ function contextToolLabel(input: Record<string, unknown>): string {
 }
 
 /** Tools whose group copy counts notes or folders ("Edited 2 notes", "Listed 3 folders"). */
+/** A Studio call on one workflow names it ("Edit Poster workflow"), not the generic "Studio workflow". */
+const STUDIO_VERBS: Readonly<Record<string, string>> = {
+  studio_create_workflow: "Create", studio_open_workflow: "Open", studio_edit_workflow: "Edit", studio_run_workflow: "Run",
+};
+
 const PATH_GROUP_TOOLS: ReadonlySet<string> = new Set(["read", "write", "edit", "multi_edit", "trash", "list_items"]);
 
 const MAX_TOOL_DETAIL_ROWS = 8;
@@ -440,7 +445,8 @@ export function presentToolLineMeta(presentation: AgentToolPresentation): string
   if (presentation.meta) return presentation.meta;
   const summary = presentation.summary;
   if (!summary) return undefined;
-  if (presentation.summaryCountsOutcomes) return summary;
+  // "Moved 1 of 2 notes" and "Couldn't read A.md" already say the outcome; the tally would repeat it.
+  if (presentation.summaryCountsOutcomes) return /\d+ of \d+|^Couldn't /u.test(presentation.label) ? undefined : summary;
   if (presentation.groupCount > 1 || presentation.label.toLowerCase().includes(summary.toLowerCase())) return undefined;
   return summary;
 }
@@ -459,10 +465,9 @@ export function presentAgentToolDetails(
   if (part.location === "server") {
     if (canonicalName !== "web_search") return [];
     const query = webSearchQuery(part);
-    const count = webSearchResultCount(part);
+    // The result count is the row's meta; the query is the one thing the row may cut.
     return [
       ...(query ? [{ label: "Query", value: detailValue(query)! }] : []),
-      ...(count !== undefined ? [{ label: "Results", value: String(count) }] : []),
     ];
   }
   if (!VAULT_TOOLS_WITH_SAFE_DETAILS.has(canonicalName)) return [];
@@ -628,7 +633,8 @@ export function presentAgentTool(part: AgentToolPart): AgentToolPresentation {
                   })()
                   : canonicalName === "find" || canonicalName === "search"
                     ? counted && counted.items.length > 1 ? countedLabel(counted, "base") : `Search “${firstString(input.patterns) ?? firstString(input.query) ?? firstString(input.pattern) ?? "your vault"}”`
-                    : canonicalName === "generate_image" ? `Generate ${imageCountTarget(part, input)}`
+                    : canonicalName === "generate_image" ? `${editsImages(input) ? "Edit" : "Generate"} ${imageCountTarget(part, input)}`
+                    : STUDIO_VERBS[canonicalName] && firstString(input.path) ? `${STUDIO_VERBS[canonicalName]} ${studioWorkflowName(firstString(input.path)!)} workflow`
                     : counted ? countedLabel(counted, "base") : TOOL_LABELS[canonicalName] ?? `Use ${canonicalName || "tool"}`;
   const query = webSearchQuery(part);
   const label = serverTool ? actionLabel(query ? `Search the web for “${query}”` : serverLabel ?? UNKNOWN_SERVER_TOOL_LABEL, labelState)

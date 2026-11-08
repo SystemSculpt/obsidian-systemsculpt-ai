@@ -25,6 +25,21 @@ describe("AgentActivityPresentation", () => {
     ])).toEqual({ label: "Read 3 notes, searched 2 patterns, edited Plan.md · 2 more", failedCount: 0 });
   });
 
+  it("says how far a partly done batch got and names a clause that reads the same once", () => {
+    const partial = tool("trash", { paths: ["Notes/Old.md", "Notes/Draft.md"] }, {
+      state: "failed",
+      output: { data: { results: [{ path: "Notes/Old.md", success: true }, { path: "Notes/Draft.md", success: false, error: "File not found" }] } },
+      error: { code: "TOOL_PARTIAL_FAILURE", message: "partial" },
+    } as Partial<AgentToolPart>);
+    const summary = summarizeAgentActivity([partial]);
+    expect(summary.label).toMatch(/^Moved 1 of 2 notes to trash$/u);
+    expect(summary.failedCount).toBe(1);
+    const forecast = (agent: "claude" | "codex", id: string) => tool(agent === "claude" ? "mcp__weather__forecast" : "forecast",
+      agent === "claude" ? { city: "Portland" } : { type: "mcpToolCall", server: "weather", tool: "forecast", arguments: { city: "Portland" } },
+      { id, callId: id, location: "server", native: { agent, workingDirectory: "/vault" } } as Partial<AgentToolPart>);
+    expect(summarizeAgentActivity([forecast("claude", "a"), forecast("codex", "b")]).label).toBe("Used forecast");
+  });
+
   it.each(["claude", "codex"] as const)("labels a denied %s edit without counting a failure", agent => {
     const denied = tool(agent === "claude" ? "Edit" : "fileChange", agent === "claude"
       ? { file_path: "/vault/Notes/Launch plan.md" }
@@ -111,11 +126,13 @@ describe("AgentActivityPresentation", () => {
         id, callId: id, approvalId: id, location: "server", native: { agent: backend, workingDirectory: "/vault" }, ...overrides,
       });
     const withdrawn = edit("withdrawn", { state: "cancelled", ...(backend === "hosted" ? {} : { approvalDecision: "withdrawn" as const }) });
-    expect(summarizeAgentActivity([withdrawn])).toEqual({ label: "Edit Launch plan.md · Withdrawn", failedCount: 0 });
+    // A hosted call has no approval to withdraw: cancelled means it was stopped while running.
+    const word = backend === "hosted" ? "Stopped" : "Withdrawn";
+    expect(summarizeAgentActivity([withdrawn])).toEqual({ label: `Edit Launch plan.md · ${word}`, failedCount: 0 });
     expect(summarizeAgentActivity([withdrawn, edit("stopped", { state: "cancelled" })]))
-      .toEqual({ label: "2 actions withdrawn", failedCount: 0 });
+      .toEqual({ label: backend === "hosted" ? "Stopped 2 actions" : "2 actions withdrawn", failedCount: 0 });
     expect(summarizeAgentActivity([edit("done", { state: "succeeded" }), withdrawn]))
-      .toEqual({ label: "Edited Launch plan.md, edit Launch plan.md · Withdrawn", failedCount: 0 });
+      .toEqual({ label: `Edited Launch plan.md, edit Launch plan.md · ${word}`, failedCount: 0 });
     if (backend === "hosted") return;
     // A card still pending when the run finished is withdrawn, not an uncertain edit.
     expect(summarizeAgentActivity([edit("unanswered", { state: "outcome-unknown", approvalDecision: "withdrawn" })]))
@@ -127,21 +144,21 @@ describe("AgentActivityPresentation", () => {
       tool("edit", { path: "Notes/A.md" }),
       tool("edit", { path: "Notes/B.md" }, { id: "failed", callId: "failed", state: "failed" }),
       tool("edit", { path: "Notes/C.md" }, { id: "denied", callId: "denied", state: "denied" }),
-    ])).toEqual({ label: "Edited A.md, couldn't edit B.md, edit C.md · Denied · 1 failed", failedCount: 1, denied: true });
+    ])).toEqual({ label: "Edited A.md, couldn't edit B.md, edit C.md · Denied", failedCount: 1, denied: true });
     expect(summarizeAgentActivity([
       tool("edit", { path: "Notes/A.md" }, { state: "failed" }),
       tool("edit", { path: "Notes/A.md" }, { id: "retry", callId: "retry" }),
-    ])).toEqual({ label: "Couldn't edit A.md, edited A.md · 1 failed", failedCount: 1 });
+    ])).toEqual({ label: "Couldn't edit A.md, edited A.md", failedCount: 1 });
     expect(summarizeAgentActivity([
       tool("edit", { path: "Notes/A.md" }, { state: "failed" }),
       tool("write", { path: "Notes/B.md" }, { id: "uncertain", callId: "uncertain", state: "outcome-unknown" }),
-    ])).toEqual({ label: "Couldn't edit A.md, create B.md · Uncertain · 1 failed", failedCount: 2 });
+    ])).toEqual({ label: "Couldn't edit A.md, create B.md · Uncertain", failedCount: 2 });
     expect(summarizeAgentActivity([
       tool("Bash", { command: "rm -rf build" }, {
         location: "server", state: "failed", native: { agent: "claude", workingDirectory: "/vault" },
         error: { code: "CLAUDE_AUTO_BLOCKED", message: "Blocked" },
       } as Partial<AgentToolPart>),
-    ]).label).toMatch(/ · 1 blocked$/u);
+    ]).label).toMatch(/· Blocked by Claude Code$/u);
     expect(summarizeAgentActivity([
       tool("edit", { path: "Notes/A.md" }, { id: "denied", callId: "denied", state: "denied" }),
       tool("read", { paths: ["One.md"] }, { id: "r", callId: "r" }),
@@ -153,14 +170,14 @@ describe("AgentActivityPresentation", () => {
       tool("Edit", { file_path: "/vault/A.md" }, { ...native, approvalDecision: "approved" }),
       tool("Bash", { command: "npm test" }, { ...native, id: "bash", callId: "bash", state: "failed", output: { data: { exitCode: 1 } } }),
       tool("Edit", { file_path: "/vault/B.md" }, { ...native, id: "denied", callId: "denied", state: "denied", approvalDecision: "denied" }),
-    ])).toEqual({ label: "Edited A.md, couldn't run npm test, edit B.md · Denied · 1 failed", failedCount: 1, denied: true });
+    ])).toEqual({ label: "Edited A.md, couldn't run npm test, edit B.md · Denied", failedCount: 1, denied: true });
   });
 
   it("distinguishes failed and denied work without exposing hosted server inputs", () => {
     expect(summarizeAgentActivity([
       tool("edit", { path: "Notes/Plan.md" }, { state: "failed" }),
       tool("edit", { path: "Notes/Other.md" }, { state: "denied" }),
-    ])).toEqual({ label: "Couldn't edit Plan.md, edit Other.md · Denied · 1 failed", failedCount: 1, denied: true });
+    ])).toEqual({ label: "Couldn't edit Plan.md, edit Other.md · Denied", failedCount: 1, denied: true });
     const summary = summarizeAgentActivity([tool("private_provider_action", { paths: ["Secret.md"] }, { location: "server" })]);
     expect(summary.label).toBe("Ran SystemSculpt action");
     expect(JSON.stringify(summary)).not.toMatch(/private|Secret/u);

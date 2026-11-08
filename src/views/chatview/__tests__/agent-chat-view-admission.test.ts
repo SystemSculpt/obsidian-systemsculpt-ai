@@ -854,7 +854,7 @@ describe("AgentChatView composer admission", () => {
     expect(harness.agent.stageContext).not.toHaveBeenCalled();
     expect(harness.agent.start).not.toHaveBeenCalled();
     expect(refreshCreditsBalance).toHaveBeenCalledTimes(1);
-    expect(harness.workspace.setBanner).toHaveBeenCalledWith(expected, "error");
+    expect(harness.workspace.setBanner).toHaveBeenCalledWith(expected, "info", expect.objectContaining({ label: "Add credits", testId: "chat.banner.add-credits" }));
     expect(harness.composer.getValue()).toBe("Do not read my pinned note");
     expect(harness.composer.getMessageAttachments()).toEqual([ORIGINAL_ATTACHMENT]);
     expect(harness.parent.querySelector<HTMLButtonElement>('[data-testid="chat.composer.send"]')!.disabled).toBe(false);
@@ -1343,7 +1343,8 @@ describe("AgentChatView composer admission", () => {
     expect(refreshCreditsBalance).toHaveBeenCalledWith({ reason: "billing_failure" });
     expect(setBanner).toHaveBeenCalledWith(
       "Not enough credits. Add more to keep chatting.",
-      "error",
+      "info",
+      expect.objectContaining({ label: "Add credits", testId: "chat.banner.add-credits" }),
     );
   });
 
@@ -1373,7 +1374,12 @@ describe("AgentChatView composer admission", () => {
     expect((harness.view as any).attachmentStore.hydrateMessage).toHaveBeenCalled();
     expect(harness.workspace.setBanner).not.toHaveBeenCalledWith(
       expect.stringMatching(/credits/iu),
-      "error",
+      expect.anything(),
+    );
+    expect(harness.workspace.setBanner).not.toHaveBeenCalledWith(
+      expect.stringMatching(/credits/iu),
+      expect.anything(),
+      expect.anything(),
     );
     harness.composer.unload();
   });

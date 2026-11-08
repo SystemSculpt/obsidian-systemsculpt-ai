@@ -17,9 +17,10 @@ import { ClaudeChatSession } from "../../services/claude/ClaudeChatSession";
 import { systemSculptToolService } from "../../tools/systemsculpt/SystemSculptToolHost";
 import { claudeOptionsFromSettings, isClaudePermissionMode, type ClaudePermissionMode } from "../../services/claude/ClaudeExecutionOptions";
 import { isCodexApprovalMode, type CodexApprovalMode } from "../../services/codex/CodexApprovalPolicy";
-import { ItemView, MarkdownView, Menu, normalizePath, Notice, Scope, TFile, WorkspaceLeaf } from "obsidian";
+import { ItemView, MarkdownView, Menu, normalizePath, Notice, Scope, TFile, TFolder, WorkspaceLeaf } from "obsidian";
 import type SystemSculptPlugin from "../../main";
 import { CHAT_VIEW_TYPE } from "../../core/plugin/viewTypes";
+import { revealFolder } from "./ToolCardBlocks";
 import { SystemSculptService } from "../../services/SystemSculptService";
 import type {
   CreditsBalanceObservation,
@@ -1464,7 +1465,7 @@ export class AgentChatView extends ItemView {
       const planMessage = error instanceof Error && error.message.trim()
         ? error.message
         : `Chat needs an active SystemSculpt plan. ${PLAN_REQUIRED_MESSAGE}`;
-      this.workspace?.setBanner(planMessage, "error");
+      this.workspace?.setBanner(planMessage, "info");
       return;
     }
     this.turns.refreshCreditsAfterBillingFailure(error);
@@ -1512,15 +1513,23 @@ export class AgentChatView extends ItemView {
         onSelect: () => void this.openBillingPortal(),
       });
     } else if (presented.action === "see-plans") {
-      this.workspace?.setBanner(presented.message, "error", true);
+      // Credits and plans are a way through, not a failure: the calm banner, as in the turn.
+      this.workspace?.setBanner(presented.message, "info", true);
     } else if (presented.action === "monthly" && !isStarterBalance(this.creditsBalance)) {
       // Only a starter account gets the direct Monthly checkout; others compare plans.
-      this.workspace?.setBanner(presented.message, "error", true);
+      this.workspace?.setBanner(presented.message, "info", true);
     } else if (presented.action === "monthly") {
-      this.workspace?.setBanner(presented.message, "error", {
+      this.workspace?.setBanner(presented.message, "info", {
         label: "Subscribe",
         testId: "chat.banner.subscribe",
         onSelect: () => void this.openMonthlyCheckout(),
+      });
+    } else if (presented.action === "add-credits") {
+      // "Add more to keep chatting" needs the way to add them beside it.
+      this.workspace?.setBanner(presented.message, "info", {
+        label: "Add credits",
+        testId: "chat.banner.add-credits",
+        onSelect: () => void this.openCreditsBalanceModal(),
       });
     } else {
       this.workspace?.setBanner(presented.message, "error");
@@ -2557,6 +2566,8 @@ export class AgentChatView extends ItemView {
     const path = artifact.path.replace(/^\[\[(.*?)\]\]$/, "$1");
     const file = this.app.vault.getAbstractFileByPath(path);
     if (file instanceof TFile) await this.app.workspace.getLeaf(false).openFile(file);
+    // A folder ("Listed Notes") is shown where it lives, as the card's folder links do.
+    else if (file instanceof TFolder) await revealFolder(this.app, file);
     else new Notice(`Artifact not found: ${path}`);
   }
 
