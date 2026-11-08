@@ -594,7 +594,8 @@
     "open-systemsculpt-chat": {
       "events": [
         "api_request:agent_session"
-      ]
+      ],
+      "not_measured": "empty-state copy, history hydration, activity disclosures, reasoning rows and the Latest control emit no client telemetry; Obsidian bans it"
     },
     "chat-new-chat": {
       "events": [

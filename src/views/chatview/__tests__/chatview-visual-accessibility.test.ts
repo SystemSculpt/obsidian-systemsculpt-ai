@@ -83,6 +83,58 @@ const textPairs = [
 ];
 
 describe("ChatView text contrast (WCAG AA, default Obsidian themes)", () => {
+  test("open tool and reasoning disclosures rotate their right chevrons downward", () => {
+    expect(rule(readCss("views/agent-workspace/tools.css"), ".systemsculpt-agent-conversation .systemsculpt-agent-tool.is-disclosure[open] > .systemsculpt-agent-tool-header .systemsculpt-agent-tool-disclosure"))
+      .toMatch(/transform:\s*rotate\(90deg\)/);
+    expect(rule(readCss("views/agent-workspace/reasoning.css"), ".systemsculpt-agent-reasoning-details[open] .systemsculpt-agent-reasoning-disclosure"))
+      .toMatch(/transform:\s*rotate\(90deg\)/);
+  });
+
+  test("lone activity rows share the turn-summary gutter", () => {
+    for (const [sheet, selector] of [
+      ["activity", "summary.systemsculpt-agent-activity-header"],
+      ["tools", ".systemsculpt-agent-conversation .systemsculpt-agent-tool-header"],
+      ["reasoning", ".systemsculpt-agent-reasoning-header"],
+    ]) {
+      const header = rule(readCss(`views/agent-workspace/${sheet}.css`), selector);
+      expect(header).toMatch(/gap:\s*var\(--ss-space-1\)/);
+      expect(header).toMatch(/padding:\s*0 var\(--ss-space-1\)/);
+    }
+  });
+
+  test("grouped activity does not override the shared icon gutters", () => {
+    const override = readCss("views/agent-workspace/activity.css")
+      .match(/button\.systemsculpt-agent-activity-overflow-header\s*\{[^}]+\}/g)?.pop();
+    expect(override).toMatch(/gap:\s*var\(--ss-space-1\)/);
+    expect(override).toMatch(/padding:\s*0 var\(--ss-space-1\)/);
+  });
+
+  test("replayed edit diff prefixes have an inset when no number gutter precedes them", () => {
+    const css = readCss("views/agent-workspace/tools.css");
+    for (const preview of ["native", "hosted"]) {
+      expect(rule(css, `.ss-${preview}-tool-preview .systemsculpt-diff-prefix:first-child`))
+        .toMatch(/margin-inline-start:\s*var\(--ss-space-2\)/);
+    }
+  });
+
+  test("raw tool Details wraps long values instead of clipping paths", () => {
+    const css = readCss("views/agent-workspace/tools.css");
+    for (const selector of [".systemsculpt-agent-conversation .systemsculpt-agent-tool-raw pre", ".systemsculpt-agent-conversation .systemsculpt-agent-tool-raw code"]) {
+      const details = rule(css, selector);
+      expect(details).toMatch(/white-space:\s*pre-wrap/);
+      expect(details).toMatch(/overflow-wrap:\s*anywhere/);
+    }
+  });
+
+  test("Latest stays in its own transcript row rather than covering content", () => {
+    const transcript = rule(readCss("views/agent-workspace/shell.css"), ".systemsculpt-agent-transcript");
+    const latest = rule(readCss("views/agent-workspace/states.css"), ".systemsculpt-agent-jump");
+    expect(transcript).toMatch(/flex-direction:\s*column/);
+    expect(latest).toMatch(/flex:\s*0 0 auto/);
+    expect(latest).toMatch(/align-self:\s*flex-end/);
+    expect(latest).not.toMatch(/position:\s*(?:absolute|fixed)|\b(?:bottom|right):/);
+  });
+
   test("the contrast calculation accounts for alpha before luminance", () => {
     expect(contrast([0, 0, 0, 1], [255, 255, 255, 1])).toBe(21);
     expect(contrast([0, 0, 0, 0], [255, 255, 255, 1])).toBe(1);
