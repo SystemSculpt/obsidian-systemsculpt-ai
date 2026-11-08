@@ -11,7 +11,7 @@ import { ChatStorageService } from "./ChatStorageService";
 import {
   isLocalReportId,
   normalizeFailedTerminalReceipt,
-  type NormalizedFailedTerminalReceipt,
+  preserveContentFreeLocalFailedReceipts,
 } from "./FailedTerminalReceipt";
 import { ChatIdAllocator } from "./persistence/ChatIdAllocator";
 import { ChatMarkdownSerializer } from "./storage/ChatMarkdownSerializer";
@@ -305,55 +305,6 @@ function preserveProjectedAssistantMetadata(
   };
 }
 
-function preserveContentFreeLocalFailedReceipts(
-  incoming: ChatMessage[],
-  local: readonly ChatMessage[],
-): ChatMessage[] {
-  const receipts = new Map<string, NormalizedFailedTerminalReceipt>();
-  let localTurnId: string | null = null;
-  for (const message of local) {
-    if (message.role === "user") {
-      localTurnId = message.message_id;
-      continue;
-    }
-    const receipt = normalizeFailedTerminalReceipt(message);
-    if (localTurnId && receipt?.terminalReportId) receipts.set(localTurnId, receipt);
-  }
-  const next = [...incoming];
-  for (const [turnId, receipt] of receipts) {
-    const userIndex = next.findIndex((message) =>
-      message.role === "user" && message.message_id === turnId);
-    if (userIndex < 0) continue;
-    let turnEnd = userIndex + 1;
-    while (turnEnd < next.length && next[turnEnd].role === "assistant") turnEnd += 1;
-    let failedIndex = -1;
-    for (let index = turnEnd - 1; index > userIndex; index -= 1) {
-      if (next[index].role === "assistant" && normalizeFailedTerminalReceipt(next[index])) {
-        failedIndex = index;
-        break;
-      }
-    }
-    if (failedIndex >= 0) {
-      next[failedIndex] = {
-        ...next[failedIndex],
-        terminalReportId: receipt.terminalReportId,
-      };
-      continue;
-    }
-    if (turnEnd > userIndex + 1) continue;
-    next.splice(turnEnd, 0, {
-      role: "assistant",
-      message_id: `failure-${receipt.terminalReportId}`,
-      content: "",
-      terminalOutcome: "failed",
-      terminalReportId: receipt.terminalReportId,
-      terminalFailureCode: receipt.terminalFailureCode,
-      terminalRetryable: receipt.terminalRetryable,
-    });
-  }
-  return next;
-}
-
 function mergeToolCalls(previous: readonly ToolCall[] = [], incoming: readonly ToolCall[] = []): ToolCall[] | undefined {
   const calls = new Map<string, ToolCall>();
   for (const call of previous) calls.set(call.id, call);
@@ -386,6 +337,7 @@ export class AgentTranscriptRepository {
   private chatDirectory: string | undefined;
   private title = "New chat";
   private version = 0;
+  private savedOptions: AgentTranscriptSaveOptions = {};
   private agentConversationId: string | undefined;
   private messages: readonly ChatMessage[] = Object.freeze([]);
   private queue: Promise<unknown> = Promise.resolve();
@@ -462,6 +414,13 @@ export class AgentTranscriptRepository {
       // leaves the note alone, and its next save stores the bounded form.
       this.messages = deepFreeze((loaded.messages || []).map(withDurableToolResults));
       this.agentConversationId = parseAgentConversationId(loaded.agentConversationId);
+      this.savedOptions = {
+        title: this.title,
+        contextFiles: new Set(loaded.context_files || []),
+        chatFontSize: loaded.chatFontSize,
+        approvalMode: parseChatApprovalMode(loaded.approvalMode),
+        agentConversationId: this.agentConversationId,
+      };
       this.generation += 1;
       return Object.freeze({
         ...this.snapshot(),
@@ -477,6 +436,7 @@ export class AgentTranscriptRepository {
     this.chatDirectory = undefined;
     this.title = input.title?.trim() || "New chat";
     this.version = 0;
+    this.savedOptions = {};
     this.agentConversationId = undefined;
     this.messages = Object.freeze([]);
     this.generation += 1;
@@ -550,43 +510,53 @@ export class AgentTranscriptRepository {
         || !isThinAgentFailureCode(input.failureCode)) {
         throw new Error("Invalid local failure receipt.");
       }
-      const userIndex = this.messages.findIndex((message) =>
-        message.role === "user" && message.message_id === input.turnId);
-      if (userIndex < 0) {
+      if (!this.chatId) {
         throw new Error("A local failure receipt requires a durable user turn.");
       }
-      let turnEnd = userIndex + 1;
-      while (turnEnd < this.messages.length && this.messages[turnEnd].role === "assistant") {
-        turnEnd += 1;
-      }
-      const next = [...this.messages];
-      let failedIndex = -1;
-      for (let index = turnEnd - 1; index > userIndex; index -= 1) {
-        if (next[index].role === "assistant" && next[index].terminalOutcome === "failed") {
-          failedIndex = index;
-          break;
+      let messageId = `failure-${input.reportId}`;
+      const saved = await this.storage.updateChatMessages(this.chatId, (messages) => {
+        const userIndex = messages.findIndex((message) =>
+          message.role === "user" && message.message_id === input.turnId);
+        if (userIndex < 0) {
+          throw new Error("A local failure receipt requires a durable user turn.");
         }
-      }
-      const receipt = {
-        terminalOutcome: "failed" as const,
-        terminalReportId: input.reportId,
-        terminalFailureCode: input.failureCode,
-        terminalRetryable: input.retryable,
-      };
-      let messageId: string;
-      if (failedIndex >= 0) {
-        next[failedIndex] = deepFreeze({ ...next[failedIndex], ...receipt });
-        messageId = next[failedIndex].message_id;
-      } else {
-        messageId = `failure-${input.reportId}`;
-        next.splice(turnEnd, 0, deepFreeze({
-          role: "assistant",
-          message_id: messageId,
-          content: "",
-          ...receipt,
-        }));
-      }
-      await this.persist(next, false, generation);
+        let turnEnd = userIndex + 1;
+        while (turnEnd < messages.length && messages[turnEnd].role === "assistant") {
+          turnEnd += 1;
+        }
+        const next = [...messages];
+        let failedIndex = -1;
+        for (let index = turnEnd - 1; index > userIndex; index -= 1) {
+          if (next[index].role === "assistant" && next[index].terminalOutcome === "failed") {
+            failedIndex = index;
+            break;
+          }
+        }
+        const receipt = {
+          terminalOutcome: "failed" as const,
+          terminalReportId: input.reportId,
+          terminalFailureCode: input.failureCode,
+          terminalRetryable: input.retryable,
+        };
+        if (failedIndex >= 0) {
+          next[failedIndex] = deepFreeze({ ...next[failedIndex], ...receipt });
+          messageId = next[failedIndex].message_id;
+        } else {
+          next.splice(turnEnd, 0, deepFreeze({
+            role: "assistant",
+            message_id: messageId,
+            content: "",
+            ...receipt,
+          }));
+        }
+        return next;
+      }, this.location());
+      this.assertGeneration(generation, "The active chat changed while saving the transcript.");
+      this.messages = deepFreeze(saved.messages.map(withDurableToolResults));
+      this.title = saved.title || "New chat";
+      this.version = saved.version || 0;
+      this.agentConversationId = parseAgentConversationId(saved.agentConversationId);
+      this.savedOptions = { ...this.savedOptions, title: this.title, agentConversationId: this.agentConversationId };
       const snapshot = this.snapshot();
       this.emitCommit({ snapshot, role: "assistant", messageId });
       return snapshot;
@@ -661,16 +631,17 @@ export class AgentTranscriptRepository {
     const generation = this.generation;
     return this.serializeForGeneration(generation, async () => {
       if (!this.chatId) return this.snapshot();
+      const options = this.options();
       const saved = await this.storage.saveChat(
         this.chatId,
         this.messages,
-        { ...this.options(), ...this.location() },
+        { ...options, ...this.location(), expectedVersion: this.version, expectedMetadata: this.savedOptions },
       );
       this.assertGeneration(
         generation,
         "The active chat changed while saving the transcript.",
       );
-      this.version = saved.version;
+      this.acceptSavedChat(saved, this.messages, options);
       return this.snapshot();
     });
   }
@@ -724,13 +695,14 @@ export class AgentTranscriptRepository {
     generation: number,
     source: "local" | "authoritative-server-history" = "local",
   ): Promise<void> {
+    const options = this.options();
     if (!this.chatId) {
       if (!allowAllocate) throw new Error("An assistant response cannot precede a durable user turn.");
       const allocator = new ChatIdAllocator(async (candidateId) => {
         const created = await this.storage.createChatExclusive(
           candidateId,
           next,
-          this.options(),
+          options,
         );
         return created;
       });
@@ -741,16 +713,17 @@ export class AgentTranscriptRepository {
       );
       this.chatId = allocated.chatId;
       this.chatDirectory = allocated.value.chatDirectory;
-      this.version = allocated.value.version;
-      this.messages = Object.freeze(next);
+      this.acceptSavedChat({ version: allocated.value.version }, next, options);
       return;
     }
     const saved = await this.storage.saveChat(
       this.chatId,
       next,
       {
-        ...this.options(),
+        ...options,
         ...this.location(),
+        expectedVersion: this.version,
+        expectedMetadata: this.savedOptions,
         ...(source === "authoritative-server-history"
           ? { authoritativeServerHistoryReconciliation: true }
           : {}),
@@ -760,13 +733,30 @@ export class AgentTranscriptRepository {
       generation,
       "The active chat changed while saving the transcript.",
     );
+    this.acceptSavedChat(saved, next, options);
+  }
+
+  private acceptSavedChat(
+    saved: Awaited<ReturnType<ChatStorageService["saveChat"]>>,
+    messages: readonly ChatMessage[],
+    options: AgentTranscriptSaveOptions,
+  ): void {
     this.version = saved.version;
-    this.messages = Object.freeze(next);
+    this.messages = saved.messages
+      ? deepFreeze(saved.messages.map(withDurableToolResults))
+      : Object.freeze(messages);
+    if (saved.metadata) {
+      this.title = saved.metadata.title || "New chat";
+      this.agentConversationId = parseAgentConversationId(saved.metadata.agentConversationId);
+    }
+    this.savedOptions = { ...options, title: this.title, agentConversationId: this.agentConversationId };
   }
 
   private options(): AgentTranscriptSaveOptions {
+    const options = this.getSaveOptions();
     return {
-      ...this.getSaveOptions(),
+      ...options,
+      ...(options.contextFiles ? { contextFiles: new Set(options.contextFiles) } : {}),
       title: this.title,
       ...(this.agentConversationId ? { agentConversationId: this.agentConversationId } : {}),
     };

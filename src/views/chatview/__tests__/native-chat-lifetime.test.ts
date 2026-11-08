@@ -84,17 +84,20 @@ function harness(backend: LocalAgentId) {
       contextManager: { getPinnedFiles: () => [], setPinnedFiles: async () => {}, clearPinnedFiles: () => {}, dispose: () => {} },
       attachmentStore: { hydrateMessage: async (message: unknown) => message },
       queueRepository: { save: async () => {} },
-      conversationOriginToken: 'initial', activeSubmissionOperation: null, runConversationOrigins: new Map(),
-      sessionTrustedToolNames: new Set(), queuedFollowUps: [], queueHydrated: false, queuePersistence: Promise.resolve(),
-      queueDrainSuppressionDepth: 0, pendingForkHistory: null, pendingRetry: null, pendingRejectedRetry: null,
-      messageEditGeneration: 0, chatId: '', chatTitle: 'Original', chatVersion: 0, chatFontSize: 'medium', approvalMode: 'ask',
+      conversationOriginToken: 'initial', runConversationOrigins: new Map(),
+      sessionTrustedToolNames: new Set(), pendingForkHistory: null, chatId: '', chatTitle: 'Original', chatVersion: 0, chatFontSize: 'medium', approvalMode: 'ask',
       chatExecutionBackend: backend, automationApprovalMode: 'interactive', isFullyLoaded: true, detection: null,
       thinClientId: `client_${'c'.repeat(32)}`, creditsBalance: null,
       readThinAgentContextSources: async () => ({ sources: [], measurement: {} }),
-      bindQueueToChat: async () => {}, hydrateQueue: async () => {}, persistQueueState: async () => {},
-      applyFontSize: () => {}, syncAttachments: () => {}, syncQueue: () => {}, syncChrome: () => {},
+      applyFontSize: () => {}, syncAttachments: () => {}, syncChrome: () => {},
       updateViewState: () => {}, loadCodexCatalog: () => {}, applyBackendAvailability: () => {},
       prepareThinConversation: async () => {}, refreshCreditsBalance: async () => {},
+    });
+    Object.assign(view["turns"], {
+      activeSubmissionOperation: null, queuedFollowUps: [], queueHydrated: false, queuePersistence: Promise.resolve(),
+      queueDrainSuppressionDepth: 0, pendingRetry: null, pendingRejectedRetry: null,
+      messageEditGeneration: 0,
+      bindQueueToChat: async () => {}, hydrateQueue: async () => {}, persistQueueState: async () => {}, syncQueue: () => {},
     });
     view.bindTranscript(view.createTranscript());
     view.agent = view.createAgentSession();
@@ -124,7 +127,7 @@ afterEach(() => { jest.restoreAllMocks(); document.body.empty(); });
 
 it.each(['claude', 'codex'] as const)('%s keeps New chat independent and saves the answer to the original Markdown note', async backend => {
   const h = harness(backend);
-  const run = h.view.executeSubmission({ text: 'Original task', mode: 'send' });
+  const run = h.view["turns"].executeSubmission({ text: 'Original task', mode: 'send' });
   const native = await h.started.promise;
   const chatId = h.view.chatId;
   const path = h.view.transcript.chatPath(chatId);
@@ -157,7 +160,7 @@ it.each(['claude', 'codex'] as const)('%s keeps New chat independent and saves t
 it.each(['claude', 'codex'] as const)('%s survives a history switch and reattaches to the same live turn', async backend => {
   const h = harness(backend);
   await h.storage.saveChat('other', [{ role: 'user', content: 'Other task', message_id: 'other-user' }], { title: 'Other chat' });
-  const run = h.view.executeSubmission({ text: 'Original task', mode: 'send' });
+  const run = h.view["turns"].executeSubmission({ text: 'Original task', mode: 'send' });
   const native = await h.started.promise;
   const chatId = h.view.chatId, session = h.view.agent;
   await h.view.loadChatById('other');
@@ -180,7 +183,7 @@ it.each(['claude', 'codex'] as const)('%s survives a history switch and reattach
 
 it('shares a live session between views and keeps it alive when either leaves', async () => {
   const h = harness('claude');
-  const run = h.view.executeSubmission({ text: 'Original task', mode: 'send' });
+  const run = h.view["turns"].executeSubmission({ text: 'Original task', mode: 'send' });
   const native = await h.started.promise;
   const chatId = h.view.chatId, session = h.view.agent;
   const second = h.createView();
@@ -199,7 +202,7 @@ it('shares a live session between views and keeps it alive when either leaves', 
 
 it('gives every pane an independent draft after deleting their shared chat', async () => {
   const h = harness('codex');
-  const run = h.view.executeSubmission({ text: 'Original task', mode: 'send' });
+  const run = h.view["turns"].executeSubmission({ text: 'Original task', mode: 'send' });
   await h.started.promise;
   const chatId = h.view.chatId, path = h.view.transcript.chatPath(chatId);
   const second = h.createView();
@@ -207,17 +210,17 @@ it('gives every pane an independent draft after deleting their shared chat', asy
   await h.view.deleteSavedChat({ chatId, chatPath: path, title: 'Original', favorite: false });
   await run;
   expect(h.view.transcript).not.toBe(second.transcript);
-  await h.view.executeSubmission({ text: 'Independent first draft', mode: 'send' });
+  await h.view["turns"].executeSubmission({ text: 'Independent first draft', mode: 'send' });
   expect(second.chatId).toBe('');
   expect(second.messages).toEqual([]);
-  await second.executeSubmission({ text: 'Independent second draft', mode: 'send' });
+  await second["turns"].executeSubmission({ text: 'Independent second draft', mode: 'send' });
   expect(second.chatId).not.toBe(h.view.chatId);
   await nativeChatSessions(h.plugin).dispose();
 });
 
 it('removes a departing secondary pane as the shared metadata provider', async () => {
   const h = harness('claude');
-  const run = h.view.executeSubmission({ text: 'Original task', mode: 'send' });
+  const run = h.view["turns"].executeSubmission({ text: 'Original task', mode: 'send' });
   await h.started.promise;
   const chatId = h.view.chatId;
   const second = h.createView();
@@ -236,7 +239,7 @@ it.each(['claude', 'codex'] as const)('%s retries with the preceding conversatio
   const h = harness(backend);
   await h.view.transcript.commitUser({ kind: 'append', message: { role: 'user', content: 'Remember the first question', message_id: 'prior-user' } });
   await h.view.transcript.persistAssistant({ role: 'assistant', content: 'Remember the first answer', message_id: 'prior-assistant' });
-  const run = h.view.executeSubmission({ text: 'Original task', mode: 'send' });
+  const run = h.view["turns"].executeSubmission({ text: 'Original task', mode: 'send' });
   await h.started.promise;
   const chatId = h.view.chatId;
   await h.view.onClose();
@@ -246,7 +249,7 @@ it.each(['claude', 'codex'] as const)('%s retries with the preceding conversatio
   await run;
   const snapshot = second.transcript.snapshot();
   mockRun.mockClear();
-  await second.executeSubmission({ text: 'Retry this task', mode: 'send' }, {
+  await second["turns"].executeSubmission({ text: 'Retry this task', mode: 'send' }, {
     historicalResubmit: { targetMessageId: snapshot.messages[2].message_id, expectedIndex: 2, expectedVersion: snapshot.version },
   });
   expect(mockRun.mock.calls[0][0].prompt).toContain('Remember the first question');
@@ -257,7 +260,7 @@ it.each(['claude', 'codex'] as const)('%s retries with the preceding conversatio
 
 it('updates every attached pane with committed history before the next live turn', async () => {
   const h = harness('codex');
-  const run = h.view.executeSubmission({ text: 'Original task', mode: 'send' });
+  const run = h.view["turns"].executeSubmission({ text: 'Original task', mode: 'send' });
   await h.started.promise;
   const second = h.createView();
   await second.loadChatById(h.view.chatId);
@@ -266,7 +269,7 @@ it('updates every attached pane with committed history before the next live turn
   expect(second.workspace.settleCompletedRun).toHaveBeenCalledWith(expect.arrayContaining([expect.objectContaining({ content: 'Original answer' })]));
   const nextStarted = deferred(), nextFinish = deferred<{ text: string }>();
   mockRun.mockImplementationOnce(async () => { nextStarted.resolve(); return nextFinish.promise; });
-  const next = h.view.executeSubmission({ text: 'Next question', mode: 'send' });
+  const next = h.view["turns"].executeSubmission({ text: 'Next question', mode: 'send' });
   await nextStarted.promise;
   expect(second.workspace.setHistory).toHaveBeenLastCalledWith(expect.arrayContaining([
     expect.objectContaining({ content: 'Original answer' }), expect.objectContaining({ content: 'Next question' }),
@@ -278,7 +281,7 @@ it('updates every attached pane with committed history before the next live turn
 
 it('saves metadata from the pane that edits it, not the last pane attached', async () => {
   const h = harness('codex');
-  const run = h.view.executeSubmission({ text: 'Original task', mode: 'send' });
+  const run = h.view["turns"].executeSubmission({ text: 'Original task', mode: 'send' });
   await h.started.promise;
   const chatId = h.view.chatId;
   const second = h.createView();
@@ -293,7 +296,7 @@ it('saves metadata from the pane that edits it, not the last pane attached', asy
 
 it.each(['new-chat', 'close'] as const)('fences a reattachment superseded by %s while outgoing detach is pending', async action => {
   const h = harness('codex');
-  const run = h.view.executeSubmission({ text: 'Original task', mode: 'send' });
+  const run = h.view["turns"].executeSubmission({ text: 'Original task', mode: 'send' });
   await h.started.promise;
   const chatId = h.view.chatId;
   await h.view.startNewChat(false, undefined, undefined, { backend: 'systemsculpt' });
@@ -334,7 +337,7 @@ it.each(['new-chat', 'close'] as const)('fences a reattachment superseded by %s 
 
 it('closing the last view preserves the native run and its save target', async () => {
   const h = harness('claude');
-  const run = h.view.executeSubmission({ text: 'Original task', mode: 'send' });
+  const run = h.view["turns"].executeSubmission({ text: 'Original task', mode: 'send' });
   const native = await h.started.promise;
   const chatId = h.view.chatId;
   await h.view.onClose();
@@ -348,7 +351,7 @@ it('closing the last view preserves the native run and its save target', async (
 
 it('pins the selected live session while the temporary connection detaches', async () => {
   const h = harness('codex');
-  const run = h.view.executeSubmission({ text: 'Original task', mode: 'send' });
+  const run = h.view["turns"].executeSubmission({ text: 'Original task', mode: 'send' });
   await h.started.promise;
   const chatId = h.view.chatId, session = h.view.agent;
   await h.view.startNewChat(false);
@@ -372,12 +375,12 @@ it('pins the selected live session while the temporary connection detaches', asy
 
 it('keeps saved metadata when a turn finishes during reattachment', async () => {
   const h = harness('codex');
-  const run = h.view.executeSubmission({ text: 'Original task', mode: 'send' });
+  const run = h.view["turns"].executeSubmission({ text: 'Original task', mode: 'send' });
   await h.started.promise;
   const chatId = h.view.chatId;
   await h.view.startNewChat(false);
   const loadingQueue = deferred(), resumeQueue = deferred();
-  h.view.hydrateQueue = async () => { loadingQueue.resolve(); await resumeQueue.promise; };
+  h.view["turns"].hydrateQueue = async () => { loadingQueue.resolve(); await resumeQueue.promise; };
   const reopening = h.view.loadChatById(chatId);
   await loadingQueue.promise;
   h.finish.resolve({ text: 'Working — finished while opening' });
@@ -391,7 +394,7 @@ it('keeps saved metadata when a turn finishes during reattachment', async () => 
 
 it.each([false, true])('preserves a background rename or restores it on failure (failure: %s)', async failRename => {
   const h = harness('codex');
-  const run = h.view.executeSubmission({ text: 'Original task', mode: 'send' });
+  const run = h.view["turns"].executeSubmission({ text: 'Original task', mode: 'send' });
   await h.started.promise;
   const chatId = h.view.chatId, chatPath = h.view.transcript.chatPath(chatId);
   await h.view.startNewChat(false);
@@ -409,7 +412,7 @@ it.each([false, true])('preserves a background rename or restores it on failure 
 
 it.each(['stop', 'delete', 'unload'] as const)('explicit %s still cancels and drains the native turn', async action => {
   const h = harness('codex');
-  const run = h.view.executeSubmission({ text: 'Original task', mode: 'send' });
+  const run = h.view["turns"].executeSubmission({ text: 'Original task', mode: 'send' });
   const native = await h.started.promise;
   const chatId = h.view.chatId, path = h.view.transcript.chatPath(chatId);
   if (action === 'stop') {
@@ -438,7 +441,7 @@ it('keeps an approval live offscreen and allows an answer after reattachment', a
     const response = await permission;
     return { text: response.approved ? 'Approved edit finished' : 'Denied' };
   });
-  const run = h.view.executeSubmission({ text: 'Edit my plan', mode: 'send' });
+  const run = h.view["turns"].executeSubmission({ text: 'Edit my plan', mode: 'send' });
   await pending.promise;
   const chatId = h.view.chatId;
   await h.view.startNewChat(false);

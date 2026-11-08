@@ -5,13 +5,13 @@ import { AgentChatSession } from '../../../chat/managed/ChatSession';
 
 const prototype = AgentChatView.prototype as any;
 function view(backend: 'codex' | 'claude' | 'systemsculpt' = 'codex') {
-  return { app: { vault: { adapter: {} } }, plugin: { settings: { textExecutionBackend: backend, licenseKey: '' }, manifest: { version: 'test' } },
+  return Object.assign(Object.create(prototype), { app: { vault: { adapter: {} } }, plugin: { settings: { textExecutionBackend: backend, licenseKey: '' }, manifest: { version: 'test' } },
     agentBaseUrl: 'https://systemsculpt.com', agentMutationJournal: {}, pendingForkHistory: null,
     transcript: { snapshot: () => ({ messages: [] }) },
     contextManager: { getPinnedFiles: () => [] },
     createTranscript: prototype.createTranscript, bindTranscript: prototype.bindTranscript,
     shouldOfferPlan: prototype.shouldOfferPlan,
-    creditsBalance: { totalRemaining: 0, availableUnreserved: 0 }, workspace: { setPlanOfferVisible: jest.fn(), setChrome: jest.fn() } } as any;
+    creditsBalance: { totalRemaining: 0, availableUnreserved: 0 }, workspace: { setPlanOfferVisible: jest.fn(), setChrome: jest.fn() } });
 }
 it('creates native sessions for the selected backend and retains saved-chat routing over the default', () => {
   const native = view(); native.agent = prototype.createAgentSession.call(native);
@@ -30,7 +30,7 @@ it('creates native sessions for the selected backend and retains saved-chat rout
 it('does not block native chat on SystemSculpt credits', async () => {
   const native = view(); native.agent = prototype.createAgentSession.call(native);
   native.syncChrome = jest.fn();
-  expect(prototype.hasAuthoritativeUnavailableBalance.call(native)).toBe(false);
+  expect(native['turns'].hasAuthoritativeUnavailableBalance()).toBe(false);
   await prototype.refreshCreditsBalance.call(native);
   expect(native.creditsBalance).toBeNull(); expect(native.syncChrome).toHaveBeenCalled();
   expect(native.workspace.setPlanOfferVisible).toHaveBeenLastCalledWith(true);
@@ -164,7 +164,7 @@ it.each([false, true])('clears the previous account balance and serializes a fre
 it('creates a Claude Code session for the selected backend and for saved Claude Code chats', () => {
   const native = view('claude'); native.agent = prototype.createAgentSession.call(native);
   expect(native.agent).toBeInstanceOf(ClaudeChatSession); expect(native.agent.agent).toBe('claude');
-  expect(prototype.hasAuthoritativeUnavailableBalance.call(native)).toBe(false);
+  expect(native['turns'].hasAuthoritativeUnavailableBalance()).toBe(false);
   const saved = view('codex'); saved.chatExecutionBackend = 'claude';
   expect(prototype.createAgentSession.call(saved)).toBeInstanceOf(ClaudeChatSession);
 });

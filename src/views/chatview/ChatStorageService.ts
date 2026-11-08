@@ -1,6 +1,7 @@
 import { resolveKnownChatsDirectories, recordedChatsDirectories } from "./storage/ChatTranscriptLocations";
 import { App, TFile, stringifyYaml } from "obsidian";
 import { ChatMessage } from "../../types";
+import { preserveContentFreeLocalFailedReceipts } from "./FailedTerminalReceipt";
 import { isChatAttachmentMetadata, chatAttachmentRefKey } from "./attachments/ChatAttachmentDescriptor";
 import { ChatAttachmentVaultStore, collectChatAttachmentRefKeys } from "./attachments/ChatAttachmentVaultStore";
 import { hasChatIdentityFrontmatter, parseChatFrontmatterYaml, splitChatFrontmatter } from "./storage/ChatFrontmatterIdentity";
@@ -26,7 +27,16 @@ type LoadedChatRecord = {
   chatPath: string;
 };
 
+type SavedChatResult = {
+  version: number;
+  /** Present only when a stale snapshot merged receipts from the current note. */
+  messages?: ChatMessage[];
+  metadata?: ChatMetadata;
+};
+
 type SaveChatOptions = {
+  expectedVersion?: number;
+  expectedMetadata?: Pick<SaveChatOptions, "title" | "chatFontSize" | "approvalMode" | "contextFiles" | "agentConversationId">;
   contextFiles?: Set<string>;
   title?: string;
   chatFontSize?: "small" | "medium" | "large";
@@ -218,21 +228,57 @@ export class ChatStorageService {
     this.knownMetadata.delete(filePath);
   }
 
+  /** Patch the latest durable history without recreating a deleted chat or replacing its metadata. */
+  async updateChatMessages(
+    chatId: string,
+    transform: (messages: readonly ChatMessage[]) => readonly ChatMessage[],
+    options: Pick<SaveChatOptions, "chatDirectory"> = {},
+  ): Promise<LoadedChatRecord> {
+    const filePath = `${options.chatDirectory ?? this.chatDirectory}/${chatId}.md`;
+    const file = this.app.vault.getAbstractFileByPath(filePath);
+    if (!(file instanceof TFile)) throw new Error("This chat could not be loaded.");
+    const content = await this.app.vault.process(file, (current) => {
+      const parsed = ChatMarkdownSerializer.parseMarkdown(current);
+      const envelope = splitChatFrontmatter(current);
+      const frontmatter = envelope ? parseChatFrontmatterYaml(envelope.yamlContent) : null;
+      if (!parsed || parsed.metadata.id !== chatId || !envelope || !frontmatter) {
+        throw new SavedChatCorruptedError(filePath);
+      }
+      const messages = transform(parsed.messages);
+      const metadata = {
+        ...frontmatter,
+        lastModified: new Date().toISOString(),
+        version: (parsed.metadata.version || 0) + 1,
+        messageCount: messages.length,
+      };
+      const bom = current.startsWith("﻿") ? "﻿" : "";
+      return `${bom}---\n${stringifyYaml(metadata)}---\n\n${this.serializeMessages(messages)}`;
+    });
+    this.knownMetadata.delete(filePath);
+    const updated = this.parseDirectChatLoad(content, filePath);
+    if (!updated) throw new SavedChatCorruptedError(filePath);
+    return updated;
+  }
+
   // Master save method - always saves in the new, simple format
   async saveChat(
     chatId: string,
     messages: readonly ChatMessage[],
     options: SaveChatOptions = {},
-  ): Promise<{ version: number }> {
+  ): Promise<SavedChatResult> {
     try {
-      const { version } = await this.saveChatSimple(
+      const saved = await this.saveChatSimple(
         chatId,
         messages,
         options,
         false,
         options.chatDirectory ?? this.chatDirectory,
       );
-      return { version };
+      return {
+        version: saved.version,
+        ...(saved.messages ? { messages: saved.messages } : {}),
+        ...(saved.metadata ? { metadata: saved.metadata } : {}),
+      };
     } catch (error) {
       const detail = error instanceof Error && error.message.trim()
         ? error.message.trim()
@@ -272,7 +318,7 @@ export class ChatStorageService {
     options: SaveChatOptions = {},
     exclusiveCreate: boolean,
     chatDirectory: string,
-  ): Promise<{ filePath: string; version: number }> {
+  ): Promise<SavedChatResult & { filePath: string }> {
     const filePath = `${chatDirectory}/${chatId}.md`;
       const now = new Date().toISOString();
       const vault = this.app.vault;
@@ -280,6 +326,10 @@ export class ChatStorageService {
       let existingMetadata: ExistingChatMetadata | null = null;
 
       const file = exclusiveCreate ? null : vault.getAbstractFileByPath(filePath);
+      if (options.expectedVersion !== undefined) {
+        if (!(file instanceof TFile)) throw new Error("This chat could not be loaded.");
+        return this.saveSnapshot(file, chatId, messages, options);
+      }
       if (file instanceof TFile) {
         fileExists = true;
         existingMetadata = await this.existingChatMetadata(file, filePath);
@@ -336,15 +386,7 @@ export class ChatStorageService {
         }));
       }
 
-      const messagesContent = ChatMarkdownSerializer.serializeMessages(
-        messages.map((message) => {
-          if (collectChatAttachmentRefKeys([message]).size === 0) return message;
-          if (!this.attachmentStore) {
-            throw new Error("Attachment references cannot be saved without a vault adapter.");
-          }
-          return this.attachmentStore.materializeMessageReferences(message);
-        }),
-      );
+      const messagesContent = this.serializeMessages(messages);
 
       const fullContent = `---\n${stringifyYaml(metadata)}---\n\n${messagesContent}`;
 
@@ -373,6 +415,75 @@ export class ChatStorageService {
       }, written?.stat);
 
       return { filePath, version: newVersion };
+  }
+
+  /** Validate the revision at the atomic write boundary; only stale history needs parsing. */
+  private async saveSnapshot(
+    file: TFile,
+    chatId: string,
+    messages: readonly ChatMessage[],
+    options: SaveChatOptions,
+  ): Promise<SavedChatResult & { filePath: string }> {
+    let merged = false;
+    const content = await this.app.vault.process(file, current => {
+      const envelope = splitChatFrontmatter(current);
+      const frontmatter = envelope ? parseChatFrontmatterYaml(envelope.yamlContent) : null;
+      const metadata = ChatMarkdownSerializer.parseMetadata(current);
+      if (!frontmatter || !metadata || metadata.id !== chatId) throw new SavedChatCorruptedError(file.path);
+      if (messages.length === 0 && current.includes("SYSTEMSCULPT-MESSAGE-START")
+        && (options.authoritativeServerHistoryReconciliation !== true || !parseAgentConversationId(options.agentConversationId))) {
+        throw new Error("Cannot save empty messages over existing chat content");
+      }
+      let next = messages;
+      if (metadata.version !== options.expectedVersion) {
+        const parsed = ChatMarkdownSerializer.parseMarkdown(current);
+        if (!parsed) throw new SavedChatCorruptedError(file.path);
+        next = preserveContentFreeLocalFailedReceipts(messages, parsed.messages);
+        merged = true;
+      }
+      const savedMetadata: Record<string, unknown> = {
+        ...frontmatter,
+        lastModified: new Date().toISOString(),
+        version: (metadata.version || 0) + 1,
+        messageCount: next.length,
+      };
+      const baseline = options.expectedMetadata;
+      for (const key of ["title", "chatFontSize", "approvalMode", "agentConversationId"] as const) {
+        if (options[key] !== undefined && (!baseline || options[key] !== baseline[key])) savedMetadata[key] = options[key];
+      }
+      if (options.contextFiles && (!baseline?.contextFiles
+        || options.contextFiles.size !== baseline.contextFiles.size
+        || [...options.contextFiles].some(path => !baseline.contextFiles!.has(path)))) {
+        savedMetadata.context_files = [...options.contextFiles].map(path => ({
+          path, type: path.includes("/Extractions/") ? "extraction" : "source",
+        }));
+      }
+      const defaultTag = this.resolveDefaultChatTag();
+      if (defaultTag) savedMetadata.tags = this.mergeTags(metadata.tags ?? [], defaultTag);
+      const bom = current.startsWith("﻿") ? "﻿" : "";
+      return `${bom}---\n${stringifyYaml(savedMetadata)}---\n\n${this.serializeMessages(next)}`;
+    });
+    this.knownMetadata.delete(file.path);
+    const metadata = ChatMarkdownSerializer.parseMetadata(content);
+    if (!metadata) throw new SavedChatCorruptedError(file.path);
+    const updated = merged ? this.parseDirectChatLoad(content, file.path) : null;
+    if (merged && !updated) throw new SavedChatCorruptedError(file.path);
+    return {
+      filePath: file.path,
+      version: metadata.version || 0,
+      metadata,
+      ...(updated ? { messages: updated.messages } : {}),
+    };
+  }
+
+  private serializeMessages(messages: readonly ChatMessage[]): string {
+    return ChatMarkdownSerializer.serializeMessages(messages.map((message) => {
+      if (collectChatAttachmentRefKeys([message]).size === 0) return message;
+      if (!this.attachmentStore) {
+        throw new Error("Attachment references cannot be saved without a vault adapter.");
+      }
+      return this.attachmentStore.materializeMessageReferences(message);
+    }));
   }
 
   /**

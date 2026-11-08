@@ -77,24 +77,27 @@ function harness(backend: LocalAgentId) {
     contextManager: { getPinnedFiles: () => [], setPinnedFiles: async () => {}, clearPinnedFiles: () => {}, dispose: () => {} },
     attachmentStore: { hydrateMessage: async (message: unknown) => message },
     queueRepository: { save: async () => {} },
-    conversationOriginToken: 'initial', activeSubmissionOperation: null, runConversationOrigins: new Map(),
-    sessionTrustedToolNames: new Set(), queuedFollowUps: [], queueHydrated: false, queuePersistence: Promise.resolve(),
-    queueDrainSuppressionDepth: 0, pendingForkHistory: null, pendingRetry: null, pendingRejectedRetry: null,
-    messageEditGeneration: 0, chatId: '', chatTitle: 'Notes', chatVersion: 0, chatFontSize: 'medium', approvalMode: 'ask',
+    conversationOriginToken: 'initial', runConversationOrigins: new Map(),
+    sessionTrustedToolNames: new Set(), pendingForkHistory: null, chatId: '', chatTitle: 'Notes', chatVersion: 0, chatFontSize: 'medium', approvalMode: 'ask',
     chatExecutionBackend: backend, automationApprovalMode: 'interactive', isFullyLoaded: true, detection: null,
     thinClientId: `client_${'c'.repeat(32)}`, creditsBalance: null,
     readThinAgentContextSources: async () => ({ sources: context, measurement: {} }),
-    bindQueueToChat: async () => {}, hydrateQueue: async () => {}, persistQueueState: async () => {},
-    applyFontSize: () => {}, syncAttachments: () => {}, syncQueue: () => {}, syncChrome: () => {},
+    applyFontSize: () => {}, syncAttachments: () => {}, syncChrome: () => {},
     updateViewState: () => {}, loadCodexCatalog: () => {}, applyBackendAvailability: () => {},
     prepareThinConversation: async () => {}, refreshCreditsBalance: async () => {},
+  });
+  Object.assign(view["turns"], {
+    activeSubmissionOperation: null, queuedFollowUps: [], queueHydrated: false, queuePersistence: Promise.resolve(),
+    queueDrainSuppressionDepth: 0, pendingRetry: null, pendingRejectedRetry: null,
+    messageEditGeneration: 0,
+    bindQueueToChat: async () => {}, hydrateQueue: async () => {}, persistQueueState: async () => {}, syncQueue: () => {},
   });
   view.bindTranscript(view.createTranscript());
   view.agent = view.createAgentSession();
   view.bindAgentSession();
   const send = async (text: string) => {
     let result: AgentRunResult | undefined;
-    await view.executeSubmission({ text, mode: 'send' }, { onResult: (value: AgentRunResult) => { result = value; } });
+    await view["turns"].executeSubmission({ text, mode: 'send' }, { onResult: (value: AgentRunResult) => { result = value; } });
     return result!;
   };
   const saved = async () => ((await storage.loadChat(view.chatId))?.messages ?? []) as ChatMessage[];
@@ -147,7 +150,7 @@ it.each(preSend)('$agent: a message that fails before sending ($scenario) saves 
   if (h.view.conversationOriginToken === 'initial') {
     // The composer gets the words back, and Retry resends them as a new message.
     expect(h.workspace.restoreRejectedSubmission).toHaveBeenCalledWith(expect.objectContaining({ text: 'Second question' }));
-    expect(h.view.pendingRejectedRetry).toMatchObject({ turnId: result.snapshot.turnId });
+    expect(h.view["turns"].pendingRejectedRetry).toMatchObject({ turnId: result.snapshot.turnId });
   }
   await nativeChatSessions(h.plugin).dispose();
 });
