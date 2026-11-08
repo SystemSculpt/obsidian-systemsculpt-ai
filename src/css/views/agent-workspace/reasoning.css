@@ -60,6 +60,8 @@
 
 .systemsculpt-agent-reasoning-icon {
   order: 0;
+  flex-basis: 16px;
+  width: 16px;
 }
 
 .systemsculpt-agent-reasoning-header strong {

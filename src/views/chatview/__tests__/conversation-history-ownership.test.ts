@@ -4,8 +4,68 @@
 
 import { App, MarkdownRenderer } from "obsidian";
 import type { AgentConversationSnapshot } from "../../../chat/ChatConversation";
+import type { ChatMessage } from "../../../types";
+import type { ToolCall } from "../../../types/toolCalls";
+import { historyHydrationFor } from "./fixtures/conversation-rendering";
 import { AgentConversationRenderer } from "../AgentConversationRenderer";
 import { presentAgentConversation } from "../AgentConversationPresentation";
+
+it.each(["restored", "adopted"])("does not duplicate the action summary in opened %s history", async (origin) => {
+  const parent = document.body.createDiv();
+  const renderer = new AgentConversationRenderer(parent, {
+    app: new App(), sourcePath: () => "", onApprove: jest.fn(),
+    onOpenArtifact: jest.fn(), onCopyArtifactPath: jest.fn(),
+  });
+  renderer.load();
+  try {
+    const tool: ToolCall = {
+      id: "summary-call", messageId: "summary-assistant", timestamp: 2,
+      request: { id: "summary-call", type: "function", function: { name: "read", arguments: JSON.stringify({ paths: ["Plan.md"] }) } },
+      state: "completed", result: { success: true, data: { summary: "Read Plan.md" } },
+    };
+    const messages: ChatMessage[] = [
+      { role: "user", message_id: "summary-user", content: "Review the plan." },
+      { role: "assistant", message_id: "summary-assistant", content: "Done.", responseDurationMs: 12000, messageParts: [
+        { id: "summary-reasoning", type: "reasoning", timestamp: 1, data: "Checked the plan." },
+        { id: "summary-tool", type: "tool_call", timestamp: 2, data: tool },
+        { id: "summary-answer", type: "content", timestamp: 3, data: "Done." },
+      ] },
+    ];
+    if (origin === "adopted") {
+      await renderer.renderHistory(messages.slice(0, 1));
+      const snapshot: AgentConversationSnapshot = {
+        runId: "summary-run", turnId: "summary-user", status: "completed", phase: "complete", elapsedMs: 12000,
+        messages: [{ id: "summary-assistant", role: "assistant", partIds: ["summary-reasoning", "summary-tool", "summary-answer"] }],
+        parts: [
+          { id: "summary-reasoning", kind: "reasoning", messageId: "summary-assistant", order: 1, state: "complete", summary: "Checked the plan." },
+          { id: "summary-tool", kind: "tool", messageId: "summary-assistant", order: 2, state: "succeeded", callId: tool.id, name: "read", location: "vault", input: { paths: ["Plan.md"] }, output: { summary: "Read Plan.md" } },
+          { id: "summary-answer", kind: "text", messageId: "summary-assistant", order: 3, state: "complete", markdown: "Done." },
+        ],
+      };
+      await renderer.renderActive(snapshot, presentAgentConversation(snapshot, false));
+      await renderer.settleHistory(messages, "summary-user");
+    } else {
+      await renderer.renderHistory(messages);
+    }
+    const activity = parent.querySelector<HTMLDetailsElement>("details[data-agent-turn-fold]")!;
+    const label = activity.querySelector<HTMLElement>(":scope > summary .systemsculpt-agent-activity-label")!;
+    expect(label.textContent).toBe("Thought, read Plan.md");
+    activity.open = true;
+    activity.dispatchEvent(new Event("toggle"));
+    await historyHydrationFor(renderer).hydrate(activity);
+    expect(label.textContent).toBe("Activity");
+    expect(activity.querySelector(".systemsculpt-agent-activity-overflow-label")?.textContent).toBe("Thought, read Plan.md");
+    expect(activity.querySelector(".systemsculpt-agent-activity-duration")?.textContent).toBe("12s");
+    await renderer.renderHistory(messages);
+    expect(label.textContent).toBe("Activity");
+    activity.open = false;
+    activity.dispatchEvent(new Event("toggle"));
+    expect(label.textContent).toBe("Thought, read Plan.md");
+  } finally {
+    renderer.unload();
+    parent.remove();
+  }
+});
 
 it.each(["current-user", null])("does not adopt an active turn %j during an ordinary history refresh", async (turnId) => {
   const parent = document.body.createDiv();

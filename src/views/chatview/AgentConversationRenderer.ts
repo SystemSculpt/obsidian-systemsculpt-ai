@@ -20,6 +20,7 @@ import {
   formatAgentWorkingDuration,
   finalAgentAnswerPartIds,
   groupAdjacentAgentActivity,
+  isAgentActivityPart,
   splitPreviousAgentActivity,
   summarizeAgentActivity,
 } from "./AgentActivityPresentation";
@@ -1079,6 +1080,7 @@ export class AgentConversationRenderer extends Component {
     this.trackIncidentDisclosure(element, "activity", true, false);
     element.addEventListener("toggle", () => {
       header.setAttribute("aria-expanded", String(element.open));
+      this.syncCompletedActivityLabel(element);
       this.updateIncidentDisclosure(element, true, element.open);
     });
     return { element, summary: header, body };
@@ -1094,8 +1096,14 @@ export class AgentConversationRenderer extends Component {
     const header = element.querySelector<HTMLElement>(":scope > summary")!;
     const duration = formatAgentActivityDuration(elapsedMs);
     const label = cancelled ? this.workedLabel(elapsedMs, true) : summary.label;
-    // A wrapped summary keeps each "· 2 failed" whole instead of stranding the dot.
-    header.querySelector(".systemsculpt-agent-activity-label")?.setText(label.replace(/ · /gu, " ·\u00a0"));
+    // Keep the action summary while closed; once open, name the whole-turn
+    // container instead of repeating the nested activity drawer's summary.
+    header.dataset.closedLabel = label.replace(/ · /gu, " ·\u00a0");
+    const repeatsNestedSummary = !cancelled && groupAdjacentAgentActivity(parts, isAgentActivityPart)
+      .some((entry) => entry.kind === "activity" && entry.items.length > 1
+        && summarizeAgentActivity(entry.items).label === summary.label);
+    header.dataset.openLabel = repeatsNestedSummary ? "Activity" : header.dataset.closedLabel;
+    this.syncCompletedActivityLabel(element);
     let icon = header.querySelector<HTMLElement>(".systemsculpt-agent-activity-state");
     if (!icon) {
       icon = header.createSpan({ cls: "systemsculpt-agent-activity-state", attr: { "aria-hidden": "true" } });
@@ -1105,6 +1113,12 @@ export class AgentConversationRenderer extends Component {
     let meta = header.querySelector<HTMLElement>(".systemsculpt-agent-activity-duration");
     if (!meta) meta = header.createSpan({ cls: "systemsculpt-agent-activity-duration" });
     meta.setText(!cancelled && duration ? duration : "");
+  }
+
+  private syncCompletedActivityLabel(element: HTMLDetailsElement): void {
+    const header = element.querySelector<HTMLElement>(":scope > summary");
+    const label = element.open ? header?.dataset.openLabel : header?.dataset.closedLabel;
+    if (label) header?.querySelector(".systemsculpt-agent-activity-label")?.setText(label);
   }
 
   private createActivityOverflow(

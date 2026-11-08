@@ -559,7 +559,8 @@
     "open-systemsculpt-chat": {
       "events": [
         "api_request:agent_session"
-      ]
+      ],
+      "not_measured": "local history hydration, activity disclosures and reasoning rows emit no client telemetry; Obsidian bans it"
     },
     "chat-new-chat": {
       "events": [
