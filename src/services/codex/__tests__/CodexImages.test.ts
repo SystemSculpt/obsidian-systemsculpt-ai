@@ -64,7 +64,7 @@ describe("Codex images in chat", () => {
     const saved = await importer.present(update(generation), generation, "/vault");
     const path = "SystemSculpt/Images/2026-11-08 093000 Codex image.png";
     expect(files.has(path)).toBe(true);
-    expect(presentTurnMedia([part(saved)], "Added faded sepia tones.").media).toEqual([{ kind: "image", path, mimeType: "image/png" }]);
+    expect(presentTurnMedia([part(saved)], "Added faded sepia tones.").media).toEqual([{ kind: "image", path, mimeType: "image/png", order: 0, ratio: 1 }]);
     expect(codexImageVaultPath(SAVED)).toBe(path);
     // A saved chat writes the home folder as ~.
     expect(codexImageVaultPath("~/.codex/generated_images/thread/exec-1.png")).toBe(path);

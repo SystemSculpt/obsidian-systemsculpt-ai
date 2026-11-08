@@ -26,7 +26,7 @@ type ActiveConversationRendererOptions = Readonly<{
   renderPart: (node: HTMLElement, part: AgentPart, previous?: AgentPart, suppressToolError?: boolean, progressActive?: boolean) => Promise<boolean>;
   forgetMarkdown: (target: HTMLElement) => void;
   renderMessageAttachments: (parent: HTMLElement, attachments: readonly PresentedMessageAttachment[]) => void;
-  renderTurnMediaBlock: (parent: HTMLElement, parts: readonly AgentToolPart[], answer: string) => HTMLElement | null;
+  renderTurnMediaBlock: (parent: HTMLElement, parts: readonly AgentToolPart[], answer: string, live?: boolean) => HTMLElement | null;
   renderTurnChanges: (parent: HTMLElement, parts: readonly AgentToolPart[]) => void;
   addTurnHeading: (row: HTMLElement, user: boolean) => void;
   createCompletedActivity: (parent: HTMLElement, elapsedMs?: number, cancelled?: boolean) => Activity;
@@ -339,12 +339,23 @@ export class ActiveConversationRenderer {
     // An unchanged receipt survives reconciliation, so a focused link keeps focus.
     const receipt = presentation.busy ? null
       : body.querySelector<HTMLElement>(":scope > .systemsculpt-agent-turn-changes");
-    // Generated media shows as soon as a tool saves it, above the working status.
+    // Generated media shows as soon as a tool saves it, above the working status;
+    // while the turn runs, each generation holds its place as a live placeholder.
     const media = this.options.renderTurnMediaBlock(
       body,
       orderedParts.filter((part): part is AgentToolPart => part.kind === "tool"),
       orderedParts.flatMap((part) => part.kind === "text" ? [part.markdown] : []).join("\n"),
+      presentation.busy,
     );
+    if (tailStatus) {
+      // A generation's live card already shows its label and time; the tail would say it twice.
+      const latest = [...presentation.visibleParts].reverse().find((part) =>
+        part.kind === "tool" ? isActiveAgentToolState(part.state)
+          : (part.kind === "text" || part.kind === "reasoning") && part.state === "streaming");
+      const placeholders = Array.from(media?.querySelectorAll<HTMLElement>("[data-pending-id][aria-busy]") ?? [])
+        .map((tile) => (tile.dataset.pendingId ?? "").replace(/:[^:]*$/u, ""));
+      tailStatus.hidden = presentation.phase === "acting" && latest?.kind === "tool" && placeholders.includes(latest.callId);
+    }
     const laneNodes = visibleLanes.map((lane) => lane.node);
     if (media) laneNodes.splice(tailStatus ? laneNodes.length - 1 : laneNodes.length, 0, media);
     reconcileConversationChildren(body, [...laneNodes, ...(receipt ? [receipt] : [])]);

@@ -2,9 +2,15 @@ import { TFile, type App } from "obsidian";
 import type { AgentToolPart } from "../../chat/ChatConversation";
 import { decodeSystemSculptToolOutput, systemSculptToolName, type SystemSculptMedia } from "../../tools/systemsculpt/SystemSculptTools";
 import { codexImageMedia, rememberCodexImage } from "../../services/codex/CodexImages";
+import { generationArguments, presentPendingMedia, renderPendingMedia, requestedMediaRatio, syncPendingClock, type PendingMedia } from "./PendingMedia";
+
+/** A file to show, with where its call sits in the turn and the frame its call asked for. */
+type TurnMediaItem = SystemSculptMedia & Readonly<{ order?: number; ratio?: number }>;
 
 type TurnMedia = Readonly<{
-  media: readonly SystemSculptMedia[];
+  media: readonly TurnMediaItem[];
+  /** Generations still running (live turns) or failed, drawn where their result goes. */
+  pending: readonly PendingMedia[];
   /** A one-line next step such as Subscribe, from a tool the account can't use yet. */
   notices: readonly Readonly<{ text: string; label: string; url: string }>[];
 }>;
@@ -26,29 +32,34 @@ function embeddedInAnswer(answer: string, path: string): boolean {
  * the reply.
  */
 /** @internal Exported for tests. */
-export function presentTurnMedia(parts: readonly AgentToolPart[], answer = ""): TurnMedia {
-  const media = new Map<string, SystemSculptMedia>();
+export function presentTurnMedia(parts: readonly AgentToolPart[], answer = "", live = false): TurnMedia {
+  const media = new Map<string, TurnMediaItem>();
   const notices = new Map<string, { text: string; label: string; url: string }>();
-  for (const part of parts) {
+  for (const [order, part] of parts.entries()) {
     // Codex's own image tools: a generated image always shows; a viewed one shows when the reply points at it.
     const image = codexImageMedia(part);
     if (image) {
       // Codex names each image file uniquely, so its file name alone finds a link to it.
       const linked = [image.media.path, image.sourcePath?.split(/[\\/]/u).pop()].some(path => path && (answer.includes(path) || answer.includes(encodeURI(path))));
-      if ((image.item === "imageGeneration" || linked) && !embeddedInAnswer(answer, image.media.path)) media.set(image.media.path, image.media);
+      if ((image.item === "imageGeneration" || linked) && !embeddedInAnswer(answer, image.media.path)) {
+        media.set(image.media.path, { ...image.media, order, ...(image.item === "imageGeneration" ? { ratio: 1 } : {}) });
+      }
       continue;
     }
     if (!systemSculptToolName(part.name) || (part.state !== "succeeded" && part.state !== "failed")) continue;
     const result = decodeSystemSculptToolOutput(part.output?.data);
     if (!result) continue;
-    for (const item of result.media ?? []) if (!embeddedInAnswer(answer, item.path)) media.set(item.path, item);
+    const tool = systemSculptToolName(part.name);
+    // A generated file opens in the frame its placeholder had, so it lands without a jump.
+    const ratio = tool === "generate_image" || tool === "generate_video" ? requestedMediaRatio(tool, generationArguments(part)) : undefined;
+    for (const item of result.media ?? []) if (!embeddedInAnswer(answer, item.path)) media.set(item.path, { ...item, order, ...(ratio ? { ratio } : {}) });
     if (result.link) {
       // The line is the message's first part; what follows the link is guidance for the agent.
       const text = result.message.split(`${result.link.label}:`)[0].trim();
       notices.set(`${result.link.url}\n${text}`, { text, label: result.link.label, url: result.link.url });
     }
   }
-  return { media: [...media.values()], notices: [...notices.values()] };
+  return { media: [...media.values()], pending: presentPendingMedia(parts, live), notices: [...notices.values()] };
 }
 
 type TurnMediaActions = Readonly<{
@@ -60,15 +71,15 @@ type TurnMediaActions = Readonly<{
  * Keeps one media block per turn, rebuilt only when its content changes, so a
  * playing video or a focused link survives later renders.
  */
-export function renderTurnMedia(app: App, parent: HTMLElement, parts: readonly AgentToolPart[], actions: TurnMediaActions, answer = ""): HTMLElement | null {
+export function renderTurnMedia(app: App, parent: HTMLElement, parts: readonly AgentToolPart[], actions: TurnMediaActions, answer = "", live = false): HTMLElement | null {
   const existing = parent.querySelector<HTMLElement>(":scope > .systemsculpt-agent-turn-media");
   // A saved chat's reply can still link Codex's own copy; its link opens the vault copy.
   for (const part of parts) {
     const image = codexImageMedia(part);
     if (image?.sourcePath) rememberCodexImage(image.sourcePath, image.media.path);
   }
-  const presented = presentTurnMedia(parts, answer);
-  if (!presented.media.length && !presented.notices.length) {
+  const presented = presentTurnMedia(parts, answer, live);
+  if (!presented.media.length && !presented.pending.length && !presented.notices.length) {
     existing?.remove();
     return null;
   }
@@ -77,10 +88,19 @@ export function renderTurnMedia(app: App, parent: HTMLElement, parts: readonly A
   existing?.remove();
   const block = parent.createDiv({ cls: "systemsculpt-agent-turn-media", attr: { "data-testid": "chat.turn.media" } });
   block.dataset.media = fingerprint;
-  if (presented.media.length) {
+  const tiles = [
+    ...presented.media.map(item => ({ order: item.order ?? -1, item, pending: null })),
+    ...presented.pending.map(tile => ({ order: tile.order, item: null, pending: tile })),
+  ].sort((left, right) => left.order - right.order);
+  if (tiles.length) {
     const grid = block.createDiv({ cls: "systemsculpt-agent-media-grid" });
-    if (presented.media.length > 1) grid.addClass("is-multiple");
-    for (const item of presented.media) {
+    if (tiles.length > 1) grid.addClass("is-multiple");
+    for (const { item, pending } of tiles) {
+      if (pending) {
+        renderPendingMedia(grid, pending);
+        continue;
+      }
+      if (!item) continue;
       const file = app.vault.getAbstractFileByPath(item.path);
       const name = item.label ?? item.path.split("/").pop() ?? item.path;
       const figure = grid.createEl("figure", { cls: "systemsculpt-agent-media", attr: { "data-kind": item.kind } });
@@ -90,11 +110,19 @@ export function renderTurnMedia(app: App, parent: HTMLElement, parts: readonly A
         continue;
       }
       const source = app.vault.getResourcePath(file);
+      if (item.ratio) {
+        figure.addClass("has-ratio");
+        figure.setCssProps({ "--ss-media-ratio": String(item.ratio) });
+      }
       if (item.kind === "video") {
-        figure.createEl("video", { cls: "systemsculpt-agent-media-frame", attr: { src: source, controls: "", preload: "metadata", playsinline: "", "aria-label": name } });
+        const video = figure.createEl("video", { cls: "systemsculpt-agent-media-frame", attr: { src: source, controls: "", preload: "metadata", playsinline: "", "aria-label": name } });
+        settleFrame(figure, video, () => [video.videoWidth, video.videoHeight], "loadedmetadata");
       } else {
         const open = figure.createEl("button", { cls: "systemsculpt-agent-media-open", attr: { type: "button", "aria-label": `Open ${name}`, "data-testid": "chat.turn.media.open" } });
-        open.createEl("img", { cls: "systemsculpt-agent-media-frame", attr: { src: source, alt: name, loading: "lazy", decoding: "async" } });
+        // Until the file decodes, the frame keeps the placeholder's sheen.
+        if (item.ratio) open.createSpan({ cls: "ss-media-pending-sheen", attr: { "aria-hidden": "true" } });
+        const image = open.createEl("img", { cls: "systemsculpt-agent-media-frame", attr: { src: source, alt: name, loading: "lazy", decoding: "async" } });
+        settleFrame(figure, image, () => [image.naturalWidth, image.naturalHeight], "load");
         open.onclick = () => actions.openFile(item.path);
       }
       const caption = figure.createEl("figcaption", { cls: "systemsculpt-agent-media-caption" });
@@ -108,5 +136,21 @@ export function renderTurnMedia(app: App, parent: HTMLElement, parts: readonly A
     const link = line.createEl("a", { text: notice.label, attr: { href: notice.url, "data-testid": "chat.turn.media.subscribe" } });
     link.onclick = event => { event.preventDefault(); actions.openLink(notice.url); };
   }
+  syncPendingClock(block);
   return block;
+}
+
+/**
+ * A generated file sits in its requested frame until its own size is known,
+ * then the frame takes the file's exact shape and the file fades in.
+ */
+function settleFrame(figure: HTMLElement, frame: HTMLImageElement | HTMLVideoElement, size: () => [number, number], event: "load" | "loadedmetadata"): void {
+  const settle = () => {
+    const [width, height] = size();
+    if (figure.hasClass("has-ratio") && width > 0 && height > 0) figure.setCssProps({ "--ss-media-ratio": String(width / height) });
+    figure.addClass("is-loaded");
+  };
+  frame.addEventListener(event, settle, { once: true });
+  const ready = frame.tagName === "IMG" ? (frame as HTMLImageElement).complete && (frame as HTMLImageElement).naturalWidth > 0 : (frame as HTMLVideoElement).readyState >= 1;
+  if (ready) settle();
 }

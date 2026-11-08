@@ -167,7 +167,7 @@ describe("billing and approval", () => {
     const { host: fake } = host({ studio: () => studio as never });
     const stop = new AbortController();
     const result = await new SystemSculptToolService(fake).call("studio_run_workflow", { path: "SystemSculpt/Studio/P.systemsculpt" }, stop.signal);
-    expect((runProject.mock.calls[0] as unknown[])[1]).toEqual({ signal: stop.signal });
+    expect((runProject.mock.calls[0] as unknown[])[1]).toEqual({ signal: stop.signal, onEvent: expect.any(Function) });
     expect(result.media).toEqual([{ kind: "image", path: "SystemSculpt/Studio/P/assets/new.png", mimeType: "image/png", label: "Seed packet" }]);
     expect((result.data as { nodes: unknown[] }).nodes).toHaveLength(2);
   });
@@ -199,7 +199,7 @@ describe("tool results in chat", () => {
       part("c", "Bash", encoded),
       part("d", "generate_image", encoded, "running"),
     ]);
-    expect(presented.media).toEqual([{ kind: "image", path: "SystemSculpt/Images/a.png" }]);
+    expect(presented.media).toEqual([{ kind: "image", path: "SystemSculpt/Images/a.png", order: 0, ratio: 1 }]);
     expect(presented.notices).toEqual([{ text: "Image generation comes with a SystemSculpt subscription.", label: "Subscribe", url: SUBSCRIBE }]);
   });
 });
