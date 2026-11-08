@@ -82,8 +82,8 @@ summary.systemsculpt-agent-activity-header {
 }
 
 button.systemsculpt-agent-activity-overflow-header {
-  gap: 6px;
-  padding: 0 var(--ss-space-0);
+  gap: var(--ss-space-1);
+  padding: 0 var(--ss-space-1);
   border: 0;
   border-radius: var(--ss-radius-sm);
   font-family: inherit;

@@ -102,6 +102,13 @@ describe("ChatView text contrast (WCAG AA, default Obsidian themes)", () => {
     }
   });
 
+  test("grouped activity does not override the shared icon gutters", () => {
+    const override = readCss("views/agent-workspace/activity.css")
+      .match(/button\.systemsculpt-agent-activity-overflow-header\s*\{[^}]+\}/g)?.pop();
+    expect(override).toMatch(/gap:\s*var\(--ss-space-1\)/);
+    expect(override).toMatch(/padding:\s*0 var\(--ss-space-1\)/);
+  });
+
   test("replayed edit diff prefixes have an inset when no number gutter precedes them", () => {
     const css = readCss("views/agent-workspace/tools.css");
     for (const preview of ["native", "hosted"]) {
