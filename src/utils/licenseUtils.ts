@@ -1,5 +1,5 @@
 import { SystemSculptSettings } from "../types";
-import type { CreditsBalanceSnapshot } from "../services/SystemSculptService";
+import type { CreditsBalanceSnapshot } from "../services/credits/HostedCreditsClient";
 
 export interface PremiumUserStatus {
   isPremium: boolean;

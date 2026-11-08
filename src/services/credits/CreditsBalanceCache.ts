@@ -1,7 +1,7 @@
 import type {
   CreditsBalanceObservation,
   CreditsBalanceSnapshot,
-} from "../SystemSculptService";
+} from "./HostedCreditsClient";
 
 /** Display surfaces reuse a balance this recent instead of asking again. */
 const CREDITS_BALANCE_CACHE_TTL_MS = 60_000;

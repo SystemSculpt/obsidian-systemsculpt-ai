@@ -1,6 +1,6 @@
 import { CLAUDE_MODELS, CLAUDE_PERMISSION_LABELS, type ClaudePermissionMode } from "../../services/claude/ClaudeExecutionOptions";
 import { CODEX_APPROVAL_LABELS, type CodexApprovalMode } from "../../services/codex/CodexApprovalPolicy";
-import type { CreditsBalanceSnapshot } from "../../services/SystemSculptService";
+import type { CreditsBalanceSnapshot } from "../../services/credits/HostedCreditsClient";
 import { codexDefaultLabel, type CodexModel } from "../../services/codex/CodexModelCatalog";
 import { isLocalAgentUsable as usable, type LocalAgentDetection } from "../../services/codex/LocalAgentDetection";
 import { LOCAL_AGENTS, isLocalAgentId, type LocalAgentId, type TextExecutionBackend } from "../../services/codex/LocalAgents";

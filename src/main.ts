@@ -10,7 +10,8 @@ import { MarkdownView, Plugin, Notice, apiVersion, requireApiVersion } from "obs
 import { setClientPluginVersion } from "./services/api/clientIdentity";
 import { checkObsidianCompatibility, MINIMUM_OBSIDIAN_VERSION } from "./core/plugin/lifecycle/ObsidianCompat";
 import { SystemSculptSettings, DEFAULT_SETTINGS, LogLevel, LICENSE_URL } from "./types";
-import { SystemSculptService, type CreditsBalanceSnapshot } from "./services/SystemSculptService";
+import { SystemSculptService } from "./services/SystemSculptService";
+import type { CreditsBalanceSnapshot } from "./services/credits/HostedCreditsClient";
 import { SystemSculptSettingTab } from "./settings/SystemSculptSettingTab";
 import { RecorderService } from "./services/RecorderService";
 import { TranscriptionService } from "./services/TranscriptionService";
@@ -159,7 +160,7 @@ export default class SystemSculptPlugin extends Plugin {
   public get aiService(): SystemSculptService {
     if (!this._aiService) {
       this._aiService = SystemSculptService.getInstance(this);
-      this.register(this._aiService.onCreditsBalance((balance) => {
+      this.register(this._aiService.credits.subscribe((balance) => {
         if (!this.isUnloading && balance.iosAppLinked === true) {
           void this.getPhoneCaptureInbox().linkReported();
         }
@@ -1500,7 +1501,7 @@ export default class SystemSculptPlugin extends Plugin {
         loadBalance: async () => {
           try {
             // The modal is an explicit look: read fresh and update every view.
-            const balance = await this.aiService.readCreditsBalance({ fresh: true });
+            const balance = await this.aiService.credits.readBalance({ fresh: true });
             lastKnownBalance = balance;
             if (
               (
@@ -1522,7 +1523,7 @@ export default class SystemSculptPlugin extends Plugin {
           }
         },
         loadUsage: (params) =>
-          this.aiService.getCreditsUsage({
+          this.aiService.credits.readUsage({
             limit: params?.limit,
             before: params?.before,
           }),
@@ -1590,7 +1591,7 @@ export default class SystemSculptPlugin extends Plugin {
         linked: this.settings.phoneCapturesLinked === true,
       }),
       // The credits balance carries the link; a recent balance is reused.
-      checkLinked: async () => (await this.aiService.readCreditsBalance()).iosAppLinked === true,
+      checkLinked: async () => (await this.aiService.credits.readBalance()).iosAppLinked === true,
       onLinked: async (licenseKey) => {
         await this.getSettingsManager().updateSettings(current =>
           current.licenseKey?.trim() === licenseKey ? { phoneCapturesLinked: true } : {});

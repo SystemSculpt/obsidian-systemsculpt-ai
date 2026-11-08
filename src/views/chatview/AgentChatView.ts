@@ -19,12 +19,12 @@ import { isCodexApprovalMode, type CodexApprovalMode } from "../../services/code
 import { ItemView, MarkdownView, Menu, normalizePath, Notice, Scope, TFile, WorkspaceLeaf } from "obsidian";
 import type SystemSculptPlugin from "../../main";
 import { CHAT_VIEW_TYPE } from "../../core/plugin/viewTypes";
-import {
-  SystemSculptService,
-  type CreditsBalanceObservation,
-  type CreditsBalanceServerTiming,
-  type CreditsBalanceSnapshot,
-} from "../../services/SystemSculptService";
+import { SystemSculptService } from "../../services/SystemSculptService";
+import type {
+  CreditsBalanceObservation,
+  CreditsBalanceServerTiming,
+  CreditsBalanceSnapshot,
+} from "../../services/credits/HostedCreditsClient";
 import type { RecorderService } from "../../services/RecorderService";
 import type { ChatMessage } from "../../types";
 import type { ChatExportOptions } from "../../types/chatExport";
@@ -1349,7 +1349,7 @@ export class AgentChatView extends ItemView {
     this.creditsPromise = (async () => {
       try {
         // Views share one balance read per minute; billing events read fresh.
-        const balance = await this.aiService.readCreditsBalance({
+        const balance = await this.aiService.credits.readBalance({
           fresh: options.requireFresh === true || refreshReason === "billing_failure",
           onObservation: (value) => { observation = value; },
         });
@@ -3213,7 +3213,7 @@ export class AgentChatView extends ItemView {
       let backend: TextExecutionBackend;
       try {
         backend = options.backend
-          ?? await resolveDefaultChatBackend(settings, () => this.aiService.readCreditsBalance(), localAgentDetectionDirectory(this.app));
+          ?? await resolveDefaultChatBackend(settings, () => this.aiService.credits.readBalance(), localAgentDetectionDirectory(this.app));
       } finally {
         this.detecting = false;
       }

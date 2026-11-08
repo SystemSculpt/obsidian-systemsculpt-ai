@@ -1,5 +1,5 @@
 import { CreditsBalanceCache } from "../CreditsBalanceCache";
-import type { CreditsBalanceSnapshot } from "../../SystemSculptService";
+import type { CreditsBalanceSnapshot } from "../HostedCreditsClient";
 
 function balance(totalRemaining: number): CreditsBalanceSnapshot {
   return { totalRemaining, availableUnreserved: totalRemaining } as unknown as CreditsBalanceSnapshot;

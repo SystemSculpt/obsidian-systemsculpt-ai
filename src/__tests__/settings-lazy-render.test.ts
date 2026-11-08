@@ -29,7 +29,7 @@ describe("lazy settings with the production registry", () => {
     const app = new App();
     getFiles = jest.spyOn(app.vault, "getFiles");
     readCredits = jest.fn().mockResolvedValue({ totalRemaining: 100, cycleEndsAt: "2026-11-01" });
-    (SystemSculptService.getInstance as jest.Mock).mockReturnValue({ readCreditsBalance: readCredits });
+    (SystemSculptService.getInstance as jest.Mock).mockReturnValue({ credits: { readBalance: readCredits } });
     enumerateDevices = jest.fn().mockResolvedValue([]);
     Object.defineProperty(navigator, "mediaDevices", { configurable: true, value: { enumerateDevices } });
     plugin = {

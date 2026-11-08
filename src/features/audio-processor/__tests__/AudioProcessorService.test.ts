@@ -1524,10 +1524,10 @@ describe("AudioProcessorService", () => {
     let balanceListener: ((balance: { totalRemaining: number; availableUnreserved?: number }) => void) | null = null;
     const unsubscribe = jest.fn();
     (plugin as unknown as { aiService: unknown }).aiService = {
-      onCreditsBalance: jest.fn((listener: typeof balanceListener) => {
+      credits: { subscribe: jest.fn((listener: typeof balanceListener) => {
         balanceListener = listener;
         return unsubscribe;
-      }),
+      }) },
     };
     const waits: number[] = [];
     const sleep = jest.fn((milliseconds: number, signal: AbortSignal) => {

@@ -201,7 +201,7 @@ describe("AccountConnectService browser sign-in", () => {
   ])("reports the credits ready for %s", async (_label, balance, expected) => {
     const plugin = createPlugin();
     const readCreditsBalance = jest.fn().mockResolvedValue(balance);
-    plugin.aiService = { readCreditsBalance };
+    plugin.aiService = { credits: { readBalance: readCreditsBalance } };
     const { service, openedUrls } = createService(plugin);
     request.mockResolvedValue(jsonResponse(200, successPayload));
     await service.begin("sign-in");

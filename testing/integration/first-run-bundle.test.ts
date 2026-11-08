@@ -149,6 +149,15 @@ class FakeSystemSculpt {
           cycle_ends_at: "2026-11-01T00:00:00.000Z",
           turn_in_flight_until: null,
         } };
+      case "/api/plugin/credits/usage":
+        return { status: 200, json: {
+          items: [{
+            id: "usage-first", created_at: "2026-10-24T12:00:00.000Z",
+            endpoint: " /chat ", usage_kind: "agent_turn", credits_charged: "4",
+            total_tokens: "30", total_before: 500, total_after: 496,
+          }],
+          next_before: null,
+        } };
       case "/api/plugin/billing/portal":
         return { status: 200, json: { url: "https://billing.stripe.com/p/session/test_qa_portal" } };
       case "/api/plugin/connectivity":
@@ -627,6 +636,25 @@ describe.each(["desktop", "mobile"])("a new user's first run in the built bundle
     expect(saved).toHaveLength(1);
     expect(saved[0][1]).toEqual(expect.stringContaining(QUESTION));
     expect(saved[0][1]).toEqual(expect.stringContaining(ANSWER));
+  });
+
+  it("opens hosted balance and usage through the compiled credits client without starting checkout", async () => {
+    await signUpFromChat();
+    const opens = openedUrls.length;
+    control("chat.run.detail", chat()).click();
+    await jest.advanceTimersByTimeAsync(1_000);
+    expect(document.querySelector("[role='dialog']")?.textContent).toContain("500 credits");
+    control("credits.tab.usage").click();
+    await jest.advanceTimersByTimeAsync(1_000);
+    const row = document.querySelector(".ss-credits-usage__item");
+    expect(row?.querySelector(".ss-credits-usage__item-title")?.textContent).toBe("/chat");
+    expect(row?.querySelector(".ss-credits-usage__item-credits")?.textContent).toBe("4 credits");
+    expect(row?.querySelector(".ss-credits-usage__item-details")?.textContent).toBe("30 tokens");
+    expect(row?.querySelector(".ss-credits-usage__item-balance-trail")?.textContent).toBe("Balance: 500 → 496");
+    const usage = server.requests.filter(({ path }) => path === "/api/plugin/credits/usage");
+    expect(usage).toHaveLength(1);
+    expect(usage[0]).toMatchObject({ method: "GET", headers: { "x-license-key": LICENSE_KEY } });
+    expect(openedUrls).toHaveLength(opens);
   });
 
   it("hosted starter at 500 credits opens the tagged $9 Pro checkout after a fresh entitlement read", async () => {

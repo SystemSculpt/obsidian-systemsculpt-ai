@@ -305,12 +305,12 @@ describe("EmbeddingsManager local empty-note lifecycle", () => {
     const warn = jest.spyOn(console, "warn").mockImplementation(() => undefined);
     const state = harness("This note would otherwise be uploaded for embeddings. ".repeat(4));
     (state.plugin as any).aiService = {
-      readCreditsBalance: jest.fn(async () => ({
+      credits: { readBalance: jest.fn(async () => ({
         usageClass: "customer",
         totalRemaining: 5,
         heldInFlight: 5,
         availableUnreserved: 0,
-      })),
+      })) },
     };
     await state.manager.initialize();
     state.vault.read.mockClear();
@@ -334,7 +334,7 @@ describe("EmbeddingsManager local empty-note lifecycle", () => {
     const balanceStarted = new Promise<void>((resolve) => { signalBalanceStarted = resolve; });
     const balanceRelease = new Promise<void>((resolve) => { releaseBalance = resolve; });
     (state.plugin as any).aiService = {
-      readCreditsBalance: jest.fn(async () => {
+      credits: { readBalance: jest.fn(async () => {
         signalBalanceStarted();
         await balanceRelease;
         return {
@@ -343,7 +343,7 @@ describe("EmbeddingsManager local empty-note lifecycle", () => {
           heldInFlight: 0,
           availableUnreserved: 5,
         };
-      }),
+      }) },
     };
     state.getMetadata
       .mockResolvedValueOnce(managedMetadata)

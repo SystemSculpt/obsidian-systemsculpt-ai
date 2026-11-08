@@ -1,7 +1,7 @@
 /**
  * @jest-environment node
  */
-import type { CreditsBalanceSnapshot } from "../../services/SystemSculptService";
+import type { CreditsBalanceSnapshot } from "../../services/credits/HostedCreditsClient";
 import { isStarterBalance, needsPaymentFix } from "../licenseUtils";
 
 jest.mock("../externalUrl", () => ({ openExternalUrl: jest.fn(async () => true) }));
