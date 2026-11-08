@@ -182,13 +182,23 @@
   position: absolute;
   transform: translate(-50%, -50%);
   padding: 1px var(--ss-space-1);
-  background-color: var(--ss-accent);
-  color: var(--ss-ink-on-accent);
+  background-color: var(--ss-surface-0);
+  border: 1px solid var(--ss-accent);
+  color: var(--ss-ink);
   font-size: var(--ss-text-xs);
   font-variant-numeric: tabular-nums;
   line-height: 1.4;
   border-radius: var(--ss-radius-xs);
   white-space: nowrap;
+}
+
+/* Keep distance labels clear of connector labels centered on the measured span. */
+.ss-studio-distance-badge.is-horizontal-gap {
+  transform: translate(-50%, calc(-100% - var(--ss-space-2)));
+}
+
+.ss-studio-distance-badge.is-vertical-gap {
+  transform: translate(calc(-100% - var(--ss-space-2)), -50%);
 }
 
 /* Workspace controls (floating toolbar) — row one drives the graph, row two

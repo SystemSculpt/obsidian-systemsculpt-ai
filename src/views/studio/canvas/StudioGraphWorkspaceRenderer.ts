@@ -15,7 +15,7 @@ import {
   type StudioShapeLayerOptions,
 } from "../shapes/StudioShapeLayer";
 import { readStudioDiagramFromProject } from "../../../studio/StudioShapes";
-import { resolveStudioGraphNodeWidth } from "../../../studio/StudioNodeGeometry";
+import { isStudioTextNodeAutoWidth, resolveStudioGraphNodeWidth } from "../../../studio/StudioNodeGeometry";
 import type { StudioNodeActivity } from "../activity/StudioActivity";
 import { resolveNodeMediaPreview } from "./StudioGraphMediaPreview";
 
@@ -622,7 +622,8 @@ export function renderStudioGraphWorkspace(
       const nextTransform = `translate(${node.position.x}px, ${node.position.y}px)`;
       const nextWidth = `${resolveStudioGraphNodeWidth(node)}px`;
       if (!preserveForGesture) {
-        geometryChanged = geometryChanged || existing.element.style.transform !== nextTransform || existing.element.style.width !== nextWidth;
+        geometryChanged = geometryChanged || existing.element.style.transform !== nextTransform
+          || (!isStudioTextNodeAutoWidth(node) && existing.element.style.width !== nextWidth);
         existing.updateGeometry(node);
       }
       const signature = studioNodeContentSignature(node, next, inboundEdges);

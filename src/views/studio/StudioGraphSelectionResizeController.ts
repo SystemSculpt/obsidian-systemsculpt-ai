@@ -56,6 +56,7 @@ type StudioGraphSelectionResizeControllerHost = {
   getCurrentProject: () => StudioProjectV1 | null;
   getGraphZoom: () => number;
   getSelectedNodeIds: () => string[];
+  hasDiagramSelection: () => boolean;
   getNodeElement: (nodeId: string) => HTMLElement | null;
   /** Atomic multi-node geometry commit: ONE project mutation per call. */
   onSelectionResize?: (
@@ -180,7 +181,9 @@ export class StudioGraphSelectionResizeController {
     nodesById: Map<string, StudioNodeInstance>;
   } | null {
     const project = this.host.getCurrentProject();
-    if (!project) {
+    // This frame transforms nodes only; never imply that it contains or resizes
+    // diagram items in a mixed selection. Their own handles remain available.
+    if (!project || this.host.hasDiagramSelection()) {
       return null;
     }
     const snapshots: StudioSelectionResizeNodeSnapshot[] = [];

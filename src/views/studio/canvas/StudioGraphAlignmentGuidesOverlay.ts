@@ -65,7 +65,7 @@ export function renderStudioGraphAlignmentGuidesLayer(
     layer.appendChild(span);
 
     const badge = layer.createDiv();
-    badge.className = "ss-studio-distance-badge";
+    badge.className = `ss-studio-distance-badge ${gap.axis === "x" ? "is-horizontal-gap" : "is-vertical-gap"}`;
     badge.textContent = gap.label;
     const midWorld = (gap.start + gap.end) / 2;
     if (gap.axis === "x") {

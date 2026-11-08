@@ -1,7 +1,7 @@
 import type { StudioDiagram, StudioShapeInstance } from "../../../studio/types";
 import { clampStudioShapeHeight, clampStudioShapeWidth } from "../../../studio/StudioShapes";
 import { resolveStudioGraphSafeZoom } from "../../../studio/StudioNodeGeometry";
-import { createStudioSvgElement } from "../StudioDomContext";
+import { createStudioSvgElement, getStudioOwnerWindow } from "../StudioDomContext";
 import { startStudioPointerGesture } from "../StudioPointerGesture";
 import type { StudioCanvasTool } from "../StudioCanvasTool";
 import {
@@ -102,6 +102,7 @@ function isAdditive(event: PointerEvent): boolean {
 
 export function renderStudioShapeLayer(options: StudioShapeLayerOptions): StudioShapeLayerHandle {
   const { canvasEl, getGraphZoom } = options;
+  const ownerWindow = getStudioOwnerWindow(canvasEl);
   let currentDiagram = options.diagram;
   let currentBusy = options.busy;
   let currentActiveCanvasTool = options.activeCanvasTool;

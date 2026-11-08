@@ -154,6 +154,11 @@
   font-size: var(--ss-text-sm);
 }
 
+.ss-studio-node-context-menu-search-input::placeholder {
+  color: var(--ss-ink-muted);
+  opacity: 1;
+}
+
 .ss-studio-node-context-menu-search-input:focus-visible {
   outline: none;
   border-color: var(--ss-accent);
