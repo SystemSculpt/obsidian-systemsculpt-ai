@@ -224,6 +224,7 @@
 .ss-studio-shape-arrow-label {
   position: absolute;
   transform: translate(-50%, -50%);
+  width: max-content;
   max-width: 220px;
   padding: 0 var(--ss-space-1);
   border-radius: var(--ss-radius-xs);
