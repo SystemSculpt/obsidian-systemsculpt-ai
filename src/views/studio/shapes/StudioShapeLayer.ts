@@ -328,7 +328,7 @@ export function renderStudioShapeLayer(options: StudioShapeLayerOptions): Studio
           diagram: currentDiagram,
           busy: currentBusy,
           activeCanvasTool: currentActiveCanvasTool,
-          selection: { shapeIds: [...selectedShapeIds], arrowIds: [...selectedArrowIds] },
+          selection: selection(),
         });
         return;
       }
