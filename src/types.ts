@@ -1,3 +1,4 @@
+import type { ManagedMultipartPart } from "./services/managed/ManagedTypes";
 import type { ClaudePermissionMode } from "./services/claude/ClaudeExecutionOptions";
 import type { CodexApprovalMode } from "./services/codex/CodexApprovalPolicy";
 import { LogLevel } from "./utils/errorHandling";
@@ -46,11 +47,6 @@ export interface PendingRecorderCapture {
   discarded?: true;
 }
 
-interface PendingAudioProcessorUploadPart {
-  partNumber: number;
-  etag: string;
-}
-
 export type PendingAudioProcessorUploadSource =
   | Readonly<{
     kind: "vault";
@@ -71,7 +67,7 @@ export interface PendingAudioProcessorUpload {
   source: PendingAudioProcessorUploadSource;
   partSizeBytes: number;
   totalParts: number;
-  uploadedParts: PendingAudioProcessorUploadPart[];
+  uploadedParts: ManagedMultipartPart[];
   updatedAt: number;
 }
 

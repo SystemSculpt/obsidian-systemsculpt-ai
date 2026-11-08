@@ -1,4 +1,5 @@
 import { ManagedDocumentLocalStaging, ManagedDocumentLocalStagingError } from "../managed/ManagedDocumentLocalStaging";
+import { sha256HexFromArrayBuffer } from "../../utils/sha256";
 
 class MemoryAdapter {
   files = new Map<string, string | ArrayBuffer>();
@@ -58,7 +59,7 @@ describe("ManagedDocumentLocalStaging", () => {
     expect(adapter.calls).toHaveLength(callsBefore);
   });
 
-  it("writes opaque verified artifacts and redacted immutable manifest generations", async () => {
+  it("writes opaque artifacts once and verifies them only when consumed", async () => {
     const adapter = new MemoryAdapter();
     const staging = new ManagedDocumentLocalStaging(installedPlugin(adapter));
     const metadata = await staging.stage("operation-secret-name", [
@@ -67,12 +68,14 @@ describe("ManagedDocumentLocalStaging", () => {
     ]);
     const paths = [...adapter.files.keys()];
     expect(paths.join("\n")).not.toContain("operation-secret-name");
-    expect(paths.filter((path) => /manifest-\d{6}\.json$/.test(path))).toHaveLength(4);
+    expect(paths.filter((path) => /manifest-\d{6}\.json$/.test(path))).toHaveLength(2);
+    expect(adapter.calls.filter(call => call === "readBinary")).toHaveLength(0);
     expect(adapter.calls).not.toContain("remove");
     const manifests = [...adapter.files.entries()].filter(([path]) => path.includes("manifest-")).map(([, value]) => String(value));
     expect(manifests.join("\n")).not.toMatch(/private output|private image/);
     const restored = await staging.readVerified("operation-secret-name", metadata);
     expect(new TextDecoder().decode(restored[0])).toBe("# private output");
+    expect(adapter.calls.filter(call => call === "readBinary")).toHaveLength(2);
   });
 
   it("keeps the previous valid manifest selectable when a later generation write or rename fails", async () => {
@@ -105,7 +108,80 @@ describe("ManagedDocumentLocalStaging", () => {
     await expect(staging.readVerified("operation-1", metadata)).rejects.toMatchObject({ code: "local_staging_corrupt" });
   });
 
-  it.each(["exists", "mkdir", "list", "write", "rename", "writeBinary", "readBinary", "digest"])(
+  it("hashes each artifact once before persistence without a second integrity pass", async () => {
+    const adapter = new MemoryAdapter();
+    const digest = jest.fn(sha256HexFromArrayBuffer);
+    const staging = new ManagedDocumentLocalStaging(installedPlugin(adapter), { digest });
+    const metadata = await staging.stage("operation-io", [
+      { kind: "markdown", bytes: bytes("markdown") }, { kind: "image", bytes: bytes("image") },
+    ]);
+    expect(digest).toHaveBeenCalledTimes(5); // Operation identity, two content hashes, two artifact identities.
+    expect(adapter.calls.filter(call => call === "readBinary")).toHaveLength(0);
+    await staging.readVerified("operation-io", metadata);
+    expect(digest).toHaveBeenCalledTimes(8);
+    expect(adapter.calls.filter(call => call === "readBinary")).toHaveLength(2);
+  });
+
+  it("rejects corruption introduced by a staging write before delivery", async () => {
+    const adapter = new MemoryAdapter();
+    adapter.after = operation => {
+      if (operation === "writeBinary") {
+        const path = [...adapter.files.keys()].find(path => !path.includes("manifest-") && path.endsWith(".tmp"))!;
+        adapter.files.set(path, bytes("evil"));
+      }
+    };
+    const staging = new ManagedDocumentLocalStaging(installedPlugin(adapter));
+    const metadata = await staging.stage("operation-corrupt-write", [{ kind: "markdown", bytes: bytes("good") }]);
+    await expect(staging.readVerified("operation-corrupt-write", metadata)).rejects.toMatchObject({ code: "local_staging_corrupt" });
+  });
+
+  it("preserves older ready work when a later binary write fails", async () => {
+    const adapter = new MemoryAdapter();
+    const staging = new ManagedDocumentLocalStaging(installedPlugin(adapter));
+    const metadata = await staging.stage("operation-partial", [{ kind: "markdown", bytes: bytes("good") }]);
+    let writes = 0;
+    adapter.fail = operation => operation === "writeBinary" && ++writes === 2;
+    await expect(staging.stage("operation-partial", [
+      { kind: "markdown", bytes: bytes("new markdown") }, { kind: "image", bytes: bytes("new image") },
+    ])).rejects.toThrow("injected writeBinary");
+    adapter.fail = undefined;
+    await expect(staging.readVerified("operation-partial", metadata)).resolves.toEqual([bytes("good")]);
+    const manifests = [...adapter.files.values()].filter(value => typeof value === "string").map(value => JSON.parse(String(value)));
+    expect(manifests.filter(value => value.phase === "ready")).toHaveLength(1);
+  });
+
+  it("stops manifest reads at the newest matching ready generation", async () => {
+    const adapter = new MemoryAdapter();
+    const staging = new ManagedDocumentLocalStaging(installedPlugin(adapter));
+    const oldMetadata = await staging.stage("operation-history", [{ kind: "markdown", bytes: bytes("old") }]);
+    const metadata = await staging.stage("operation-history", [{ kind: "markdown", bytes: bytes("new") }]);
+    adapter.calls.length = 0;
+    await expect(staging.readVerified("operation-history", metadata)).resolves.toEqual([bytes("new")]);
+    expect(adapter.calls.filter(call => call === "read")).toHaveLength(1);
+    await expect(staging.readVerified("operation-history", oldMetadata)).resolves.toEqual([bytes("old")]);
+  });
+
+  it("restores the historical document format with per-artifact manifest generations", async () => {
+    const adapter = new MemoryAdapter();
+    const operationHash = await sha256HexFromArrayBuffer(bytes("historical-operation"));
+    const sha256 = await sha256HexFromArrayBuffer(bytes("historical content"));
+    const id = await sha256HexFromArrayBuffer(bytes(`managed-document-artifact-v1\0${0}\0markdown\0${sha256}`));
+    const metadata = [{ id, kind: "markdown" as const, byteLength: bytes("historical content").byteLength, sha256 }];
+    const directory = `.obsidian/plugins/systemsculpt-ai/.managed-document-staging/${operationHash}`;
+    adapter.directories.add(directory);
+    adapter.files.set(`${directory}/${id}`, bytes("historical content"));
+    adapter.files.set(`${directory}/manifest-000001.json`, JSON.stringify({ schemaVersion: 1, operationHash, sequence: 1, phase: "staging", artifacts: [] }));
+    adapter.files.set(`${directory}/manifest-000002.json`, JSON.stringify({ schemaVersion: 1, operationHash, sequence: 2, phase: "staging", artifacts: metadata }));
+    adapter.files.set(`${directory}/manifest-000003.json`, JSON.stringify({ schemaVersion: 1, operationHash, sequence: 3, phase: "ready", artifacts: metadata }));
+    adapter.files.set(`${directory}/manifest-000004.json`, "{");
+    adapter.files.set(`${directory}/manifest-000005.json.tmp`, "{}");
+    const staging = new ManagedDocumentLocalStaging(installedPlugin(adapter));
+    await expect(staging.readVerified("historical-operation", metadata)).resolves.toEqual([bytes("historical content")]);
+    await staging.cleanup("historical-operation");
+    expect([...adapter.files.keys()]).toHaveLength(0);
+  });
+
+  it.each(["exists", "mkdir", "list", "write", "rename", "writeBinary", "read", "digest"])(
     "fences cancellation immediately after awaited %s boundaries",
     async (boundary) => {
       const adapter = new MemoryAdapter();
@@ -136,7 +212,7 @@ describe("ManagedDocumentLocalStaging", () => {
     const digest = async (value: ArrayBuffer) => {
       const result = await crypto.subtle.digest("SHA-256", value);
       digestCalls += 1;
-      if (boundary === "digest" && digestCalls === 1) controller.abort();
+      if (boundary === "digest" && digestCalls === 2) controller.abort();
       return Array.from(new Uint8Array(result), (byte) => byte.toString(16).padStart(2, "0")).join("");
     };
     adapter.after = (operation) => { if (operation === boundary) controller.abort(); };

@@ -1,4 +1,6 @@
 import { TFile } from "obsidian";
+import { managedAbortError } from "../../services/managed/ManagedAbort";
+import { uploadManagedParts } from "../../services/managed/ManagedMultipartUpload";
 import type SystemSculptPlugin from "../../main";
 import type { PendingAudioProcessorUploadSource } from "../../types";
 import {
@@ -26,6 +28,7 @@ import {
   dispatchManagedJob,
   isRetryableManagedJobObservationError,
   observeManagedJob,
+  waitForManagedJob,
 } from "../../services/managed/ManagedJobObservation";
 
 const POLL_INTERVAL_MS = 2_000;
@@ -80,7 +83,7 @@ export class AudioProcessorService {
       licenseKey: () => plugin.settings.licenseKey,
     });
     this.pollIntervalMs = options.pollIntervalMs ?? POLL_INTERVAL_MS;
-    this.sleep = options.sleep ?? abortableSleep;
+    this.sleep = options.sleep ?? waitForManagedJob;
     this.uploadRecovery = new AudioProcessorUploadRecovery(plugin);
     this.delivery = new AudioProcessorDelivery(plugin, (url, signal) => this.api.downloadNote(url, signal));
     this.deviceStaging = options.deviceStaging ?? null;
@@ -437,73 +440,45 @@ export class AudioProcessorService {
     options: ProcessAudioOptions,
     recoveredParts: ReadonlyArray<{ part_number: number; etag: string }> = [],
   ): Promise<Array<{ part_number: number; etag: string }>> {
-    const expectedParts = Math.ceil(source.sizeBytes / partSizeBytes);
-    if (expectedParts !== totalParts) {
-      throw new Error("The audio service returned an inconsistent upload plan.");
-    }
-
-    const uploadedPartMap = new Map<number, { part_number: number; etag: string }>();
-    for (const part of recoveredParts) uploadedPartMap.set(part.part_number, part);
-    for (let index = 0; index < totalParts; index += 1) {
-      if (options.signal.aborted) throw abortError();
-      const partNumber = index + 1;
-      const start = index * partSizeBytes;
-      const end = Math.min(source.sizeBytes, start + partSizeBytes);
-      if (uploadedPartMap.has(partNumber)) {
+    let currentPart = 1;
+    const parts = await uploadManagedParts({
+      source,
+      plan: { partSizeBytes, totalParts },
+      completedParts: recoveredParts.map((part) => ({ partNumber: part.part_number, etag: part.etag })),
+      signal: options.signal,
+      sourceChangedMessage: "The selected audio changed during upload.",
+      abortMessage: "Audio processing was cancelled.",
+      sendPart: async (partNumber, bytes) => {
+        currentPart = partNumber;
+        const signed = await this.api.getPartUrl(jobId, partNumber, options.signal);
+        const part = await this.api.uploadPart(signed, bytes, options.signal);
+        return { partNumber: part.part_number, etag: part.etag };
+      },
+      checkpoint: {
+        begin: async () => undefined,
+        acknowledge: (part) => this.uploadRecovery.rememberPart(jobId, { part_number: part.partNumber, etag: part.etag }),
+      },
+      onProgress: (partNumber, state) => {
+        if (state === "uploaded") return;
         options.onProgress?.({
           stage: "uploading",
-          progress: 0.08 + (index / totalParts) * 0.27,
-          message: `Resuming audio upload… ${index + 1} of ${totalParts}`,
+          progress: 0.08 + ((partNumber - 1) / totalParts) * 0.27,
+          message: state === "recovered"
+            ? `Resuming audio upload… ${partNumber} of ${totalParts}`
+            : `Uploading audio… ${partNumber} of ${totalParts}`,
         });
-        continue;
-      }
-      options.onProgress?.({
-        stage: "uploading",
-        progress: 0.08 + (index / totalParts) * 0.27,
-        message: `Uploading audio… ${index + 1} of ${totalParts}`,
-      });
-      const bytes = await source.readSlice(start, end);
-      if (bytes.byteLength !== end - start) {
-        throw new Error("The selected audio changed during upload.");
-      }
-      const uploadedPart = await this.uploadPartWithRetry(
-        jobId,
-        partNumber,
-        bytes,
-        index / totalParts,
-        options,
-      );
-      uploadedPartMap.set(partNumber, uploadedPart);
-      await this.uploadRecovery.rememberPart(jobId, uploadedPart);
-    }
-    options.onProgress?.({ stage: "uploading", progress: 0.35, message: "Audio uploaded" });
-    return Array.from(uploadedPartMap.values()).sort(
-      (left, right) => left.part_number - right.part_number,
-    );
-  }
-
-  private async uploadPartWithRetry(
-    jobId: string,
-    partNumber: number,
-    bytes: ArrayBuffer,
-    uploadProgress: number,
-    options: ProcessAudioOptions,
-  ): Promise<{ part_number: number; etag: string }> {
-    return dispatchManagedJob({
-      send: async () => {
-        const signed = await this.api.getPartUrl(jobId, partNumber, options.signal);
-        return this.api.uploadPart(signed, bytes, options.signal);
       },
-      signal: options.signal,
       wait: async (milliseconds, signal) => {
         options.onProgress?.({
           stage: "uploading",
-          progress: 0.08 + uploadProgress * 0.27,
-          message: `Retrying audio upload… part ${partNumber}`,
+          progress: 0.08 + ((currentPart - 1) / totalParts) * 0.27,
+          message: `Retrying audio upload… part ${currentPart}`,
         });
         await this.sleep(milliseconds, signal);
       },
     });
+    options.onProgress?.({ stage: "uploading", progress: 0.35, message: "Audio uploaded" });
+    return parts.map((part) => ({ part_number: part.partNumber, etag: part.etag }));
   }
 
   private async completeUploadWithRetry(
@@ -1000,21 +975,5 @@ function normalizeAudioProcessorError(error: unknown): Error {
 }
 
 function abortError(): DOMException {
-  return new DOMException("Audio processing was cancelled.", "AbortError");
-}
-
-function abortableSleep(milliseconds: number, signal: AbortSignal): Promise<void> {
-  if (signal.aborted) return Promise.reject(abortError());
-  return new Promise((resolve, reject) => {
-    let timeout = 0;
-    const abort = (): void => {
-      window.clearTimeout(timeout);
-      reject(abortError());
-    };
-    timeout = window.setTimeout(() => {
-      signal.removeEventListener("abort", abort);
-      resolve();
-    }, milliseconds);
-    signal.addEventListener("abort", abort, { once: true });
-  });
+  return managedAbortError("Audio processing was cancelled.");
 }

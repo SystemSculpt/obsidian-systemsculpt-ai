@@ -493,6 +493,51 @@ describe("PlatformRequestClient", () => {
     expect(response.headers.get("x-systemsculpt-image-output-contract")).toBe("managed-image-output-v1");
   });
 
+  it("exposes the bounded native buffer as one direct response chunk", async () => {
+    const bytes = new Uint8Array([0, 255, 128, 1]).buffer;
+    (requestUrl as jest.Mock).mockResolvedValueOnce({
+      status: 200,
+      headers: { "content-type": "application/octet-stream" },
+      arrayBuffer: bytes,
+    });
+    const response = await new PlatformRequestClient().request({
+      url: "https://api.test/output",
+      method: "GET",
+      responseEncoding: "arrayBuffer",
+      maxResponseBytes: bytes.byteLength,
+    });
+    const reader = response.body!.getReader();
+    try {
+      const chunk = await reader.read();
+      expect(chunk.value?.buffer === bytes).toBe(true);
+      expect(chunk.value?.byteOffset).toBe(0);
+      expect(chunk.value?.byteLength).toBe(bytes.byteLength);
+      await expect(reader.read()).resolves.toMatchObject({ done: true });
+      expect(response.bodyUsed).toBe(true);
+    } finally {
+      reader.releaseLock();
+    }
+  });
+
+  it("preserves native binary HTTP errors and normal Response consumption", async () => {
+    const bytes = new TextEncoder().encode('{"code":"unavailable"}').buffer;
+    (requestUrl as jest.Mock).mockResolvedValueOnce({
+      status: 503,
+      headers: { "content-type": "application/json", "retry-after": "5" },
+      arrayBuffer: bytes,
+    });
+    const response = await new PlatformRequestClient().request({
+      url: "https://api.test/output", method: "GET", responseEncoding: "arrayBuffer", maxResponseBytes: bytes.byteLength,
+    });
+    expect(response.status).toBe(503);
+    expect(response.ok).toBe(false);
+    expect(response.headers.get("retry-after")).toBe("5");
+    await expect(response.clone().json()).resolves.toEqual({ code: "unavailable" });
+    await expect(response.text()).resolves.toBe('{"code":"unavailable"}');
+    expect(response.bodyUsed).toBe(true);
+    await expect(response.arrayBuffer()).rejects.toMatchObject({ name: "TypeError" });
+  });
+
   it.each([204, 205, 304].flatMap((status) => [
     [status, "text"],
     [status, "arrayBuffer"],

@@ -67,13 +67,14 @@ export function chatSnapshot(
       parts,
     });
   }
-  const input = container.querySelector("textarea.systemsculpt-agent-prompt-input");
-  const send = container.querySelector("button.systemsculpt-agent-send");
-  const stop = container.querySelector("button.systemsculpt-agent-stop");
+  const input = container.querySelector('[data-testid="chat.composer.input"]');
+  const send = container.querySelector('[data-testid="chat.composer.send"]');
+  const stop = container.querySelector('[data-testid="chat.composer.stop"]');
   const approval = container.querySelector<HTMLElement>('[data-testid="chat.run.mode"]');
   const tailStatus = container.querySelector(".systemsculpt-agent-tail-status");
   const attachments: string[] = [];
-  for (const item of container.querySelectorAll(".systemsculpt-agent-composer-attachments [role='listitem'], .systemsculpt-agent-composer-attachments > *")) {
+  for (const open of container.querySelectorAll('[data-testid="chat.composer.attachment.open"]')) {
+    const item = open.closest('[role="listitem"]') ?? open;
     const label = (item.textContent ?? "").trim();
     if (label) attachments.push(label.slice(0, 200));
   }
@@ -84,7 +85,7 @@ export function chatSnapshot(
   }
   return {
     open: true,
-    title: text(".systemsculpt-agent-header-title"),
+    title: text('[data-testid="chat.header.title"]'),
     turnCount: turns.length,
     turns,
     banners,

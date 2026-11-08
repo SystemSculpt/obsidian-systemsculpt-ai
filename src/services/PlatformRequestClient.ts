@@ -29,6 +29,11 @@ export type PlatformRequestInput = {
   allowTransportFallback?: boolean;
   transport?: PlatformTransport;
   bodyEncoding?: "json" | "raw";
+  /**
+   * Native binary responses expose the host buffer as one body-stream chunk,
+   * after maxResponseBytes validation, without a Response-owned byte copy.
+   * Consumers can retain that chunk's backing buffer instead of joining it.
+   */
   responseEncoding?: "text" | "arrayBuffer";
   maxResponseBytes?: number;
   /**
@@ -331,13 +336,6 @@ export class PlatformRequestClient {
     });
 
     const status = result.status || 500;
-    const responseBody = NULL_BODY_STATUSES.has(status)
-      ? null
-      : input.responseEncoding === "arrayBuffer"
-        ? result.arrayBuffer
-        : typeof result.text === "string"
-          ? result.text
-          : JSON.stringify(result.json || {});
     if (
       input.maxResponseBytes !== undefined
       && input.responseEncoding === "arrayBuffer"
@@ -356,6 +354,20 @@ export class PlatformRequestClient {
       responseHeaders.set("Content-Type", input.stream ? "text/event-stream" : "application/json");
     }
 
+    const responseBody = NULL_BODY_STATUSES.has(status)
+      ? null
+      : input.responseEncoding === "arrayBuffer"
+        // Response copies an ArrayBuffer BodyInit. A stream retains the host
+        // buffer directly while preserving normal body-use and clone behavior.
+        ? new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(new Uint8Array(result.arrayBuffer));
+              controller.close();
+            },
+          })
+        : typeof result.text === "string"
+          ? result.text
+          : JSON.stringify(result.json || {});
     const response = new Response(responseBody, { status, headers: responseHeaders });
     return input.stream
       ? markResponseDeliveryMode(response, "request_url_buffered")
