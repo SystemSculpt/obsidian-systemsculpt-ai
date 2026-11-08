@@ -7,6 +7,11 @@
     "x-systemsculpt-platform": "macos | windows | linux | ios | android"
   },
   "local_interactions": {
+    "studio-photo-export": {
+      "events": [],
+      "not_measured": "Studio encodes new opaque JPEG/WebP edits as verified lossless WebP, with PNG for transparency or unsupported encoders and clipboard copies. Encoding and saved-artifact reuse stay local; no client telemetry or server call is sent.",
+      "where": ["src/studio/StudioImageBoardEncoding.ts", "src/studio/StudioImageBoardRenderer.ts", "src/views/studio/canvas/image-board/StudioImageBoardEditor.ts", "src/views/studio/systemsculpt-studio-view/StudioImageEditingController.ts"]
+    },
     "studio-field-history": {
       "events": [],
       "not_measured": "Studio field edits, blur boundaries and undo/redo stay in the vault. No server call or client telemetry is sent.",

@@ -472,7 +472,7 @@ class StudioImageBoardEditor implements StudioImageBoardEditorHandle {
       );
       if (baseAsset && !cached && studioImageBoardHasEdits(board)) {
         const scene = await this.completeScene();
-        const rendered = await renderStudioImageBoardScene(scene);
+        const rendered = await renderStudioImageBoardScene(scene, baseAsset.mimeType);
         const asset = await this.options.storeAsset(rendered.bytes, rendered.mimeType);
         if (this.disposed) {
           return;

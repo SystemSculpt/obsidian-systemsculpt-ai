@@ -6,6 +6,16 @@ jest.mock("obsidian", () => {
 });
 
 import { Notice, type App } from "obsidian";
+import * as Encoding from "../../../../../studio/StudioImageBoardEncoding";
+
+jest.mock("../../../../../studio/StudioImageBoardEncoding", () => ({
+  encodeStudioImageBoard: jest.fn(jest.requireActual("../../../../../studio/StudioImageBoardEncoding").encodeStudioImageBoard),
+}));
+beforeEach(() => {
+  jest.mocked(Encoding.encodeStudioImageBoard).mockReset().mockImplementation(
+    jest.requireActual("../../../../../studio/StudioImageBoardEncoding").encodeStudioImageBoard
+  );
+});
 import {
   readStudioImageBoard,
   studioImageBoardDrawingKey,
@@ -28,7 +38,7 @@ jest.mock("../../../../../utils/clipboard", () => ({
 
 const SOURCE = { hash: "s".repeat(64), path: "Studio/assets/source.png", mimeType: "image/png", sizeBytes: 42 };
 
-async function mount(config: Record<string, StudioJsonValue> = {}) {
+async function mount(config: Record<string, StudioJsonValue> = {}, source = SOURCE) {
   const { encoded } = installImageBoardTestCanvas();
   const contentEl = document.body.createDiv({ cls: "ss-studio-media-content" });
   const toolbarHost = document.body.createDiv();
@@ -60,7 +70,7 @@ async function mount(config: Record<string, StudioJsonValue> = {}) {
       status: "idle",
       message: "",
       updatedAt: null,
-      outputs: { source_preview_asset: SOURCE, source_preview_path: SOURCE.path },
+      outputs: { source_preview_asset: source, source_preview_path: source.path },
     },
     getGraphZoom: () => 1,
     readAsset: async () => new ArrayBuffer(8),
@@ -92,6 +102,25 @@ afterEach(() => {
 });
 
 describe("in-place image editor", () => {
+  it("preserves JPEG source identity on save while Copy requests PNG", async () => {
+    const h = await mount({}, { ...SOURCE, path: "Studio/assets/photo.jpg", mimeType: "image/jpeg" });
+    const png = new ArrayBuffer(4);
+    const webp = new ArrayBuffer(5);
+    const encode = jest.mocked(Encoding.encodeStudioImageBoard).mockImplementation(async (_context, source) => (
+      source === "image/jpeg" ? { bytes: webp, mimeType: "image/webp" } : { bytes: png, mimeType: "image/png" }
+    ));
+    h.button("studio.image.tool.highlight").click();
+    drag(h.stage, [20, 20], [60, 60]);
+    h.button("studio.image.copy").click();
+    await flushImageBoard();
+    expect(tryCopyImageBytesToClipboard).toHaveBeenCalledWith(png, "image/png", expect.any(HTMLElement));
+    await h.editor.finish();
+    expect(encode).toHaveBeenLastCalledWith(expect.anything(), "image/jpeg");
+    expect(h.storeAsset).toHaveBeenCalledWith(webp, "image/webp");
+    expect(readStudioImageBoard(h.store).lastRenderedAsset?.mimeType).toBe("image/webp");
+    h.editor.dispose();
+  });
+
   it("edits on the card itself: a stage where the picture was, tools in one bar, no modal", async () => {
     const { stage, toolbar, contentEl } = await mount();
 

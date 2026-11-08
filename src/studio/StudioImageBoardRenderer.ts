@@ -1,4 +1,5 @@
 import type { StudioAssetRef } from "./types";
+import { encodeStudioImageBoard, type StudioEncodedImageBoard } from "./StudioImageBoardEncoding";
 import {
   studioImageBoardHasEdits,
   studioImageBoardLayerIsVisible,
@@ -77,9 +78,7 @@ export type StudioImageBoardPaintOptions = {
   scratch?: StudioImageBoardScratch;
 };
 
-export type StudioRenderedImageBoard = {
-  bytes: ArrayBuffer;
-  mimeType: "image/png";
+export type StudioRenderedImageBoard = StudioEncodedImageBoard & {
   width: number;
   height: number;
 };
@@ -89,7 +88,6 @@ export const STUDIO_IMAGE_BOARD_MAX_OUTPUT_SIDE = 8192;
 export const STUDIO_IMAGE_BOARD_RENDER_UNAVAILABLE =
   "Image rendering is unavailable here, so this edited image cannot be produced.";
 
-const OUTPUT_MIME = "image/png" as const;
 const INK = "#000000";
 const HIGHLIGHT_ALPHA = 0.4;
 const CROP_MASK = "rgba(0, 0, 0, 0.58)";
@@ -961,30 +959,10 @@ export async function decodeStudioImageBoardImage(
   }
 }
 
-async function encodePng(canvas: HTMLCanvasElement): Promise<ArrayBuffer> {
-  if (typeof canvas.toBlob === "function") {
-    const blob = await new Promise<Blob>((resolve, reject) => {
-      canvas.toBlob((next) => {
-        if (next) resolve(next);
-        else reject(new Error("The edited image could not be encoded."));
-      }, OUTPUT_MIME);
-    });
-    return blob.arrayBuffer();
-  }
-  if (typeof atob !== "function") {
-    throw new Error("The edited image could not be encoded.");
-  }
-  const binary = atob(canvas.toDataURL(OUTPUT_MIME).split(",")[1] || "");
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
-  }
-  return bytes.buffer;
-}
-
-/** Flattens an already decoded scene to PNG bytes at full output resolution. */
+/** Flattens at full output resolution; omitted source MIME keeps clipboard renders PNG. */
 export async function renderStudioImageBoardScene(
-  scene: StudioImageBoardScene
+  scene: StudioImageBoardScene,
+  sourceMimeType: string = "image/png"
 ): Promise<StudioRenderedImageBoard> {
   const size = resolveStudioImageBoardOutputSize(scene.board, scene.baseSize);
   const scratch = new StudioImageBoardScratch();
@@ -994,8 +972,8 @@ export async function renderStudioImageBoardScene(
       view: studioImageBoardOutputFrame(scene.board),
       scratch,
     });
-    const bytes = await encodePng(context.canvas);
-    return { bytes, mimeType: OUTPUT_MIME, width: size.width, height: size.height };
+    const encoded = await encodeStudioImageBoard(context, sourceMimeType);
+    return { ...encoded, width: size.width, height: size.height };
   } finally {
     scratch.dispose();
   }
@@ -1030,7 +1008,7 @@ export async function renderStudioImageBoard(options: {
       baseSize: { width: base.width, height: base.height },
       base,
       images,
-    });
+    }, baseImage.mimeType);
   } finally {
     for (const image of decoded) {
       image.close();
