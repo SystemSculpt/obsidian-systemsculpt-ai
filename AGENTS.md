@@ -73,13 +73,17 @@ Gate contents, compatibility and release validation live in
 [Tests and CI](docs/dev/tests.md). Obsidian Community Plugins owns installation
 and rollback; the plugin only detects and announces published releases.
 
+- Fixes merge source only. Do not bump versions, create release tags, or publish
+  per fix. The no-model daily Trellis script owns one combined release per
+  Pacific day when main changed, starting November 8, 2026.
 - Release artifacts are exactly manifest.json, main.js, and styles.css.
+- Daily release operation and recovery: [Release validation](docs/development.md#release-validation).
 
 ## Repository hygiene
 
-- Publishing and releasing require operator approval. Trellis's standing
-  authority covers its commits, pushes, PRs, merges, deploys and releases;
-  no additional CEO round-trip is needed.
+- Michael approved the daily release script in T-5751 on November 7, 2026.
+  This authorizes that script, not ad-hoc publishing. Normal commits, pushes,
+  PRs and source merges need no extra approval.
 - Preserve unrelated dirty work.
 - Do not commit generated main.js or styles.css unless the release workflow
   explicitly requires them.

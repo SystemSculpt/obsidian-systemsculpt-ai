@@ -326,19 +326,56 @@ Do not run either two-phase journey concurrently.
 
 ## Release validation
 
+Fixes merge source only. Do not bump a version, create a release tag, or publish
+for an individual fix. Michael approved one combined release per Pacific day
+on November 7, 2026 (T-5751); the first daily release is November 8.
+
+Trellis owns the no-model daily schedule at 00:05 America/Los_Angeles:
+
 ~~~bash
-npm run release:plugin
+# From the Trellis repository; read-only plan, including the next unused version:
+node tools/plugin-daily-release.mjs --dry-run
+# The scheduled command launches its owned, logged release job:
+node tools/plugin-daily-release.mjs
 ~~~
 
-The release command does not rerun check:ci (main CI already ran it on the
-tagged commit; fix or revert a red main first). It verifies version consistency, rebuilds the production artifact, and validates
-exactly manifest.json, main.js, and styles.css. It rejects local API bases,
-retired client AI runtimes, provider SDKs, and inline source maps. Publishing
-still requires explicit operator approval. The command only succeeds from a
-clean Git worktree when the exact version tag exists and points to the same full
-revision recorded in release provenance. It always rebuilds the artifacts;
-there is no release CLI path that can bind stale pre-existing bytes to a newer
-source revision.
+The script skips when main equals the latest published release revision, or
+when a stable release already went out that Pacific day. Its persistent private
+clone, state and logs belong to the script, not to individual fix tasks. It
+bumps all four version files in a metadata-only PR, merges after the required
+PR check, pins an immutable tag on that main commit, and requires the full CI
+and all four compatibility lanes green on that exact revision. Tag-dispatched
+CI avoids cancellation when unrelated source fixes merge during the release.
+
+It then installs the locked dependencies and builds with Node 22, matching the
+release-metadata verifier. It runs the exact production bytes in isolated
+real Obsidian: plugin load/reload, Chat, Studio and settings. It stages a draft
+with exactly manifest.json, main.js and styles.css, compares SHA-256 before
+publication, publishes once, downloads again and compares all three hashes.
+No model inference or account sign-in is part of this host smoke.
+
+Unpublished tags 6.19.6–6.19.8 remain immutable and unpublished. Their source
+fixes go into the next daily release, whose version exceeds all existing
+semantic version tags (initially 6.19.9). Never publish those old tags later.
+
+The scheduler launches a durable supervisor because CI can exceed its ordinary
+ten-minute command lifetime. The job holds `release:obsidian-systemsculpt-ai`,
+logs each stage and has a one-hour wall-clock timeout. On failure it files or
+updates one rolling repair task; healthy and no-change runs never wake an agent.
+Runtime state and logs are under `~/.trellis/var/plugin-daily-release/`; the
+owned checkout is `~/.trellis/checkouts/plugin-daily-release/`. An interrupted
+publication resumes the same candidate and verifies remote bytes instead of
+creating another release. Repair failed source on main, then rerun the daily
+tool; never move an existing tag or publish by hand.
+
+`npm run release:plugin` remains the daily tool's build/validation step, not a
+publication command for fix tasks. It does not rerun check:ci: the exact tagged
+commit must already have passed CI. It verifies version consistency, rebuilds
+production artifacts, and rejects local API bases, retired client AI runtimes,
+provider SDKs and inline source maps. It requires a clean Git worktree, an exact
+version tag and matching full-revision provenance. There is no path that binds
+stale pre-existing bytes to a newer source revision. Michael's standing
+approval covers the daily script only; ad-hoc publication stays blocked.
 
 Publishing a stable GitHub release runs `publish-release-metadata.yml`. Its unprivileged verification job checks out and rebuilds the full tag, downloads `manifest.json`, `main.js`, and `styles.css` from the published release, requires byte-for-byte equality, and creates GitHub build-provenance attestations for those exact published assets. Only then can the environment-protected job write `plugin/releases/latest.json` to the release-metadata R2 bucket, wait through the API's 60-second cache, and verify the public endpoint. Drafts, prereleases, ordinary tags, mismatched assets, and merges to main cannot announce a release.
 
@@ -351,7 +388,10 @@ Use credentials limited to the dedicated `systemsculpt-plugin-releases` bucket.
 The workflow cannot create, edit, or delete GitHub releases and does not deploy
 the plugin or API worker.
 
-Before releasing a change that touches managed chat, deploy the paired website first. Run its thin-agent control-plane smoke with an explicitly supplied smoke license and candidate version (it makes no inference requests):
+Managed-chat source changes still need their paired website deployment and
+credentialed control-plane checks before source merge. This does not authorize
+a per-fix release. Run the website's thin-agent control-plane smoke with an
+explicit smoke license and candidate version (it makes no inference requests):
 
 ~~~bash
 cd ../systemsculpt-website
@@ -359,7 +399,13 @@ SYSTEMSCULPT_E2E_PLUGIN_VERSION=6.8.0 npm run test:agent-control-plane:live
 # Supply SYSTEMSCULPT_E2E_LICENSE_KEY securely through the environment.
 ~~~
 
-Then install the exact production-built candidate in real Obsidian. Verify one server web-search turn, a follow-up over the settled transcript, reconnect, and any changed approval or vault-tool flow. Record the Obsidian version and SHA-256 values for `main.js`, `manifest.json`, and `styles.css`. The credentialed production check is manual and cannot replace the deterministic critical-risk, endurance, integration, and byte-pinned cross-repository fixture gates.
+Verify that source change's production-built candidate in isolated real
+Obsidian: one server web-search turn, a follow-up over the settled transcript,
+reconnect, and changed approval or vault-tool flows. Include the host version
+and artifact hashes in the task proof. These change-specific credentialed
+checks do not replace deterministic critical-risk, endurance, integration or
+byte-pinned cross-repository fixture gates. The daily release's unattended
+host smoke separately verifies the combined artifact without model calls.
 
 ## Canonical source references
 
