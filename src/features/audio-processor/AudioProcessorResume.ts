@@ -12,7 +12,19 @@ export interface ResumeAudioProcessorOptions {
 }
 
 const resumeTasks = new WeakMap<SystemSculptPlugin, Promise<void>>();
+const resumeShutdownSignals = new WeakMap<SystemSculptPlugin, AbortSignal>();
 const RESUME_CONCURRENCY = 2;
+
+function resumeShutdownSignal(plugin: SystemSculptPlugin): AbortSignal {
+  const existing = resumeShutdownSignals.get(plugin);
+  if (existing) return existing;
+  const controller = new AbortController();
+  // Component cleanup runs synchronously while main.onunload may still be
+  // draining producers and logs, before isPluginUnloading becomes true.
+  plugin.register(() => controller.abort());
+  resumeShutdownSignals.set(plugin, controller.signal);
+  return controller.signal;
+}
 
 /**
  * Reconnects the thin plugin client to server-owned work. The single-flight
@@ -23,10 +35,13 @@ export function resumeAudioProcessorJobs(
   plugin: SystemSculptPlugin,
   options: ResumeAudioProcessorOptions = {},
 ): Promise<void> {
+  if (plugin.isPluginUnloading?.()) return Promise.resolve();
+  const shutdownSignal = resumeShutdownSignal(plugin);
+  if (shutdownSignal.aborted) return Promise.resolve();
   const current = resumeTasks.get(plugin);
   if (current) return current;
 
-  const task = runResume(plugin, options);
+  const task = runResume(plugin, options, shutdownSignal);
   trackResumeTask(plugin, task);
   return task;
 }
@@ -34,6 +49,7 @@ export function resumeAudioProcessorJobs(
 async function runResume(
   plugin: SystemSculptPlugin,
   options: ResumeAudioProcessorOptions,
+  shutdownSignal: AbortSignal,
 ): Promise<void> {
   // Startup command registration can run before a legacy/test settings
   // object has been fully normalized. Recovery is optional at this boundary;
@@ -43,17 +59,18 @@ async function runResume(
   const controller = new AbortController();
   const releaseUnload = registerRunTeardown(plugin, () => controller.abort());
   try {
-    await discoverAndResume(plugin, options, controller.signal);
+    await discoverAndResume(plugin, options, controller.signal, shutdownSignal);
   } finally {
     releaseUnload();
   }
 }
 
-/** Lists the server's active jobs and resumes each under its own controller; `signal` covers discovery only. */
+/** Discovery releases its own signal; the plugin shutdown signal also covers queued recovery. */
 async function discoverAndResume(
   plugin: SystemSculptPlugin,
   options: ResumeAudioProcessorOptions,
   signal: AbortSignal,
+  shutdownSignal: AbortSignal,
 ): Promise<void> {
   const availability = await getAudioProcessorAvailability(plugin, {}, signal);
   if (signal.aborted) return;
@@ -96,32 +113,36 @@ async function discoverAndResume(
   const watcherJobs = jobs.filter((job) => !isTerminalDeliveryJob(job) && job.status !== "uploading");
   const uploadJobs = jobs.filter((job) => job.status === "uploading");
 
-  await runWithConcurrencyLimit(terminalJobs, RESUME_CONCURRENCY, async (job) => {
-    await resumeJob(plugin, service, job, "watch");
+  await runWithConcurrencyLimit(terminalJobs, RESUME_CONCURRENCY, shutdownSignal, async (job) => {
+    await resumeJob(plugin, service, job, "watch", shutdownSignal);
   });
 
   for (const job of jobs) {
+    if (signal.aborted || shutdownSignal.aborted) return;
     if (job.status === "uploading") continue;
     await service.clearUploadRecovery(job.id).catch(() => undefined);
   }
 
-  if (signal.aborted || (watcherJobs.length === 0 && uploadJobs.length === 0)) return;
+  if (signal.aborted || shutdownSignal.aborted || (watcherJobs.length === 0 && uploadJobs.length === 0)) return;
   const background = runWithConcurrencyLimit(
     [...uploadJobs.map((job) => ({ kind: "upload" as const, job })), ...watcherJobs.map((job) => ({ kind: "watch" as const, job }))],
     RESUME_CONCURRENCY,
+    shutdownSignal,
     async (task) => {
       if (task.kind === "upload") {
-        if (!await service.hasUploadRecovery(task.job.id)) {
+        const hasRecovery = await service.hasUploadRecovery(task.job.id);
+        if (shutdownSignal.aborted) return;
+        if (!hasRecovery) {
           plugin.getLogger().warn("Skipping upload recovery without a durable checkpoint", {
             source: "AudioProcessorResume",
             metadata: { jobId: task.job.id },
           });
           return;
         }
-        await resumeJob(plugin, service, task.job, "upload");
+        await resumeJob(plugin, service, task.job, "upload", shutdownSignal);
         return;
       }
-      await resumeJob(plugin, service, task.job, "watch");
+      await resumeJob(plugin, service, task.job, "watch", shutdownSignal);
     },
   );
   trackResumeTask(plugin, background);
@@ -130,13 +151,14 @@ async function discoverAndResume(
 async function runWithConcurrencyLimit<T>(
   items: readonly T[],
   limit: number,
+  shutdownSignal: AbortSignal,
   worker: (item: T) => Promise<void>,
 ): Promise<void> {
   const concurrency = Math.max(1, Math.min(limit, items.length));
 
   let index = 0;
   await Promise.all(Array.from({ length: concurrency }, async () => {
-    while (index < items.length) {
+    while (!shutdownSignal.aborted && index < items.length) {
       const item = items[index];
       index += 1;
       await worker(item);
@@ -149,7 +171,9 @@ async function resumeJob(
   service: AudioProcessorService,
   job: AudioProcessorJob,
   kind: "upload" | "watch",
+  shutdownSignal: AbortSignal,
 ): Promise<void> {
+  if (shutdownSignal.aborted) return;
   const jobController = new AbortController();
   const releaseUnload = registerRunTeardown(plugin, () => jobController.abort());
   let userCancelled = false;
