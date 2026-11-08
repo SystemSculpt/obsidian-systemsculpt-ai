@@ -73,6 +73,7 @@ export class DiffViewer {
 
     fileInfo.createSpan({
       cls: 'systemsculpt-diff-filename',
+      attr: { "data-testid": "chat.diff.filename" },
       text: this.fileName
     });
 
@@ -298,7 +299,8 @@ export class DiffViewer {
 
   private createCompactLine(container: HTMLElement, line: DiffLine): void {
     const lineEl = container.createDiv({
-      cls: `systemsculpt-diff-line systemsculpt-diff-line-${line.type}`
+      cls: `systemsculpt-diff-line systemsculpt-diff-line-${line.type}`,
+      attr: { "data-testid": "chat.diff.line", "data-change": line.type }
     });
 
     // Optional line numbers (only if enabled and space allows)
@@ -334,6 +336,7 @@ export class DiffViewer {
     // Line content
     const content = lineEl.createSpan({
       cls: 'systemsculpt-diff-line-content',
+      attr: { "data-testid": "chat.diff.content" },
       text: line.content || ''
     });
 

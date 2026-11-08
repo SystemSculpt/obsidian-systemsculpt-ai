@@ -106,7 +106,7 @@ function makeDevelopmentHarness(options: { chatId?: string; draft?: string } = {
     loadChatById: jest.fn(async (chatId: string) => {
       view.chatId = chatId;
       input.value = "";
-      for (const turn of container.querySelectorAll(".systemsculpt-agent-turn")) turn.remove();
+      for (const turn of container.querySelectorAll("[data-testid='chat.turn']")) turn.remove();
     }),
   };
   // The run line's mode segment and its Obsidian menu (AgentRunLine).
@@ -145,7 +145,7 @@ function makeDevelopmentHarness(options: { chatId?: string; draft?: string } = {
     view.chatId = "";
     input.value = "";
     running = false;
-    for (const turn of container.querySelectorAll(".systemsculpt-agent-turn")) turn.remove();
+    for (const turn of container.querySelectorAll("[data-testid='chat.turn']")) turn.remove();
     for (const attachment of container.querySelectorAll(
       '[data-testid="chat.composer.attachment.remove"]',
     )) attachment.remove();
@@ -291,25 +291,31 @@ async function renderTerminalGroupedToolTurn(
   }>,
 ): Promise<void> {
   const assistantTurn = document.createElement("div");
-  assistantTurn.className = "systemsculpt-agent-turn is-assistant";
+  assistantTurn.dataset.testid = "chat.turn";
+  assistantTurn.dataset.role = "assistant";
+  assistantTurn.dataset.active = "false";
   assistantTurn.dataset.turnId = options.turnId;
   const tool = document.createElement("div");
-  tool.className = "systemsculpt-agent-part is-tool is-succeeded";
+  tool.dataset.testid = "chat.part";
+  tool.dataset.kind = "tool";
+  tool.dataset.toolGrouped = "false";
+  tool.dataset.state = "succeeded";
   tool.dataset.partKey = `tool:${options.firstCallId}`;
   tool.dataset.toolCount = String(options.toolCount);
   tool.innerHTML = [
     '<span class="systemsculpt-agent-tool-icon"></span>',
-    `<strong class="systemsculpt-agent-tool-label">Read ${String(options.toolCount)} ${
+    `<strong data-testid="chat.tool.label">Read ${String(options.toolCount)} ${
       options.toolCount === 1 ? "file" : "files"
     }</strong>`,
-    '<span class="systemsculpt-agent-tool-state-icon" data-icon-state="check"></span>',
+    '<span data-testid="chat.tool.state" data-icon-state="check"></span>',
   ].join("");
   assistantTurn.append(tool);
   harness.container.append(assistantTurn);
   await new Promise((resolve) => window.setTimeout(resolve, 0));
   options.beforeContinuation?.();
   const continuation = document.createElement("div");
-  continuation.className = "systemsculpt-agent-part is-text";
+  continuation.dataset.testid = "chat.part";
+  continuation.dataset.kind = "text";
   continuation.textContent = options.continuation;
   assistantTurn.append(continuation);
   await new Promise((resolve) => window.setTimeout(resolve, 0));
@@ -323,12 +329,15 @@ interface ExactToolSeed {
 
 function exactToolElement(callId: string, state: "running" | "succeeded"): HTMLDivElement {
   const tool = document.createElement("div");
-  tool.className = `systemsculpt-agent-part is-tool is-${state}`;
+  tool.dataset.testid = "chat.part";
+  tool.dataset.kind = "tool";
+  tool.dataset.toolGrouped = "false";
+  tool.dataset.state = state;
   tool.dataset.partKey = `tool:${callId}`;
   tool.innerHTML = [
     '<span class="systemsculpt-agent-tool-icon"></span>',
-    '<strong class="systemsculpt-agent-tool-label">Read 1 file</strong>',
-    `<span class="systemsculpt-agent-tool-state-icon" data-icon-state="${
+    '<strong data-testid="chat.tool.label">Read 1 file</strong>',
+    `<span data-testid="chat.tool.state" data-icon-state="${
       state === "running" ? "minus" : "check"
     }"></span>`,
   ].join("");
@@ -336,8 +345,11 @@ function exactToolElement(callId: string, state: "running" | "succeeded"): HTMLD
 }
 
 function settleExactTool(tool: HTMLElement): void {
-  tool.className = "systemsculpt-agent-part is-tool is-succeeded";
-  const stateIcon = tool.querySelector<HTMLElement>(".systemsculpt-agent-tool-state-icon");
+  tool.dataset.testid = "chat.part";
+  tool.dataset.kind = "tool";
+  tool.dataset.toolGrouped = "false";
+  tool.dataset.state = "succeeded";
+  const stateIcon = tool.querySelector<HTMLElement>("[data-testid='chat.tool.state']");
   if (stateIcon) stateIcon.dataset.iconState = "check";
 }
 
@@ -363,12 +375,15 @@ async function renderExactSequentialToolTurn(
   turn: HTMLDivElement;
 }> {
   const turn = document.createElement("div");
-  turn.className = "systemsculpt-agent-turn is-assistant is-active";
+  turn.dataset.testid = "chat.turn";
+  turn.dataset.role = "assistant";
+  turn.dataset.active = "true";
   turn.dataset.turnId = options.turnId;
   harness.container.append(turn);
   if (options.preToolText) {
     const text = document.createElement("div");
-    text.className = "systemsculpt-agent-part is-text";
+    text.dataset.testid = "chat.part";
+    text.dataset.kind = "text";
     text.dataset.partKey = `text:pre:${options.turnId}`;
     text.textContent = options.preToolText;
     turn.append(text);
@@ -422,9 +437,9 @@ async function renderExactSequentialToolTurn(
   options.beforeMarker?.(lifecycles);
   if (options.groupFinalSurface && elements.length > 1) {
     const first = elements[0]!;
-    first.classList.add("is-grouped");
+    first.dataset.toolGrouped = "true";
     first.dataset.toolCount = String(elements.length);
-    const label = first.querySelector(".systemsculpt-agent-tool-label");
+    const label = first.querySelector("[data-testid='chat.tool.label']");
     if (label) label.textContent = `Read ${String(elements.length)} files`;
     for (const tool of elements.slice(1)) tool.remove();
     await new Promise((resolve) => window.setTimeout(resolve, 0));
@@ -434,7 +449,8 @@ async function renderExactSequentialToolTurn(
     const hiddenNodes: HTMLElement[] = [...elements.slice(0, -1)];
     if (options.collapseFinalReasoning) {
       const reasoning = document.createElement("div");
-      reasoning.className = "systemsculpt-agent-part is-reasoning";
+      reasoning.dataset.testid = "chat.part";
+      reasoning.dataset.kind = "reasoning";
       reasoning.dataset.partKey = `reasoning:${options.turnId}`;
       reasoning.textContent = "Private reasoning";
       latest.before(reasoning);
@@ -457,9 +473,10 @@ async function renderExactSequentialToolTurn(
     latest.after(overflow);
     await new Promise((resolve) => window.setTimeout(resolve, 0));
   }
-  turn.classList.remove("is-active");
+  turn.dataset.active = "false";
   const marker = document.createElement("div");
-  marker.className = "systemsculpt-agent-part is-text";
+  marker.dataset.testid = "chat.part";
+  marker.dataset.kind = "text";
   marker.dataset.partKey = `text:${options.turnId}`;
   marker.textContent = options.marker;
   turn.append(marker);
@@ -496,13 +513,15 @@ function renderWriteApproval(
   text: string,
 ): jest.Mock {
   const tool = document.createElement("div");
-  tool.className = "systemsculpt-agent-part is-tool";
+  tool.dataset.testid = "chat.part";
+  tool.dataset.kind = "tool";
+  tool.dataset.toolGrouped = "false";
   tool.innerHTML = [
-    '<strong class="systemsculpt-agent-tool-label">Write file</strong>',
-    `<span class="systemsculpt-agent-tool-summary">${path}</span>`,
-    '<div class="systemsculpt-agent-approval-preview">',
-    `<div class="systemsculpt-diff-filename">${path}</div>`,
-    `<div class="systemsculpt-diff-line-added"><span class="systemsculpt-diff-line-content">${text}</span></div>`,
+    '<strong data-testid="chat.tool.label">Write file</strong>',
+    `<span data-testid="chat.tool.summary">${path}</span>`,
+    '<div data-testid="chat.approval.preview">',
+    `<div data-testid="chat.diff.filename">${path}</div>`,
+    `<div data-testid="chat.diff.line" data-change="added"><span data-testid="chat.diff.content">${text}</span></div>`,
     "</div>",
   ].join("");
   const allowOnce = document.createElement("button");
@@ -521,13 +540,13 @@ function collapseApprovalIntoActivityDrawer(
   const approval = harness.container.querySelector<HTMLElement>(
     '[data-testid="chat.approval.allow-once"]',
   )!;
-  const tool = approval.closest<HTMLElement>(".systemsculpt-agent-part.is-tool")!;
+  const tool = approval.closest<HTMLElement>("[data-testid='chat.part'][data-kind='tool']")!;
   const parent = tool.parentElement!;
   const disclosure = document.createElement("button");
   disclosure.dataset.agentActivityOverflow = "";
   disclosure.setAttribute("aria-expanded", "false");
   const body = document.createElement("div");
-  body.className = "systemsculpt-agent-activity-overflow-body";
+  body.dataset.testid = "chat.activity.body";
   body.hidden = true;
   disclosure.onclick = () => {
     const expanded = disclosure.getAttribute("aria-expanded") !== "true";
@@ -548,10 +567,15 @@ function renderMutationApproval(
   input: unknown,
 ): jest.Mock {
   const turn = document.createElement("div");
-  turn.className = "systemsculpt-agent-turn is-assistant is-active";
+  turn.dataset.testid = "chat.turn";
+  turn.dataset.role = "assistant";
+  turn.dataset.active = "true";
   turn.getBoundingClientRect = () => rect();
   const tool = document.createElement("div");
-  tool.className = "systemsculpt-agent-part is-tool is-approval-required";
+  tool.dataset.testid = "chat.part";
+  tool.dataset.kind = "tool";
+  tool.dataset.toolGrouped = "false";
+  tool.dataset.state = "approval-required";
   tool.dataset.partKey = `tool:${callId}`;
   tool.getBoundingClientRect = () => rect();
   const allowOnce = document.createElement("button");
@@ -718,6 +742,93 @@ describe("test driver actions", () => {
           attachments: ["Pinned note", "photo.png"],
         },
       });
+  });
+
+  it("snapshots semantic turns, parts, tool state and banners instead of cosmetic decoys", async () => {
+    const harness = makeDevelopmentHarness();
+    const turn = harness.container.createDiv({
+      cls: "renamed-turn is-user is-active",
+      attr: { "data-testid": "chat.turn", "data-role": "assistant", "data-active": "false" },
+    });
+    const tool = turn.createDiv({
+      cls: "renamed-part is-text is-running",
+      attr: {
+        "data-testid": "chat.part", "data-kind": "tool", "data-state": "succeeded",
+        "data-tool-grouped": "false", "data-part-key": "tool:semantic",
+      },
+    });
+    tool.createEl("strong", { cls: "systemsculpt-agent-tool-label", text: "Wrong label" });
+    tool.createEl("span", {
+      cls: "systemsculpt-agent-tool-state-icon", attr: { "data-icon-state": "x" },
+    });
+    tool.createEl("strong", { text: "Read file", attr: { "data-testid": "chat.tool.label" } });
+    tool.createEl("span", {
+      attr: { "data-testid": "chat.tool.state", "data-icon-state": "check" },
+    });
+    turn.createDiv({ cls: "systemsculpt-agent-part is-error", text: "CSS-only error" });
+    turn.createDiv({
+      text: "Reply", attr: { "data-testid": "chat.part", "data-kind": "text" },
+    });
+    harness.container.createDiv({ cls: "systemsculpt-agent-turn is-user", text: "Wrong turn" });
+    harness.container.createDiv({ cls: "systemsculpt-agent-banner", text: "Wrong banner" });
+    harness.container.createDiv({
+      text: "Current banner", attr: { "data-testid": "chat.banner" },
+    });
+    harness.container.createDiv({
+      cls: "systemsculpt-agent-tail-status", attr: { "data-status": "Wrong status" },
+    });
+    const status = harness.container.createDiv({ attr: { "data-testid": "chat.tail-status" } });
+    status.createEl("span", { cls: "systemsculpt-agent-tail-status-label", text: "Wrong label" });
+    status.createEl("span", {
+      text: "Thinking", attr: { "data-testid": "chat.tail-status.label" },
+    });
+
+    await expect(runDriverAction(harness.ctx, "snapshot", { scope: "chat" }))
+      .resolves.toMatchObject({
+        turnCount: 1,
+        turns: [{
+          role: "assistant", active: false,
+          parts: [
+            { kind: "is-tool", tool: { label: "Read file", state: "succeeded", stateIcon: "check" } },
+            { kind: "is-text", text: "Reply" },
+          ],
+        }],
+        banners: ["Current banner"],
+        agentStatus: "Thinking",
+      });
+  });
+
+  it("snapshots settings identity, selection and panel visibility without cosmetic classes", async () => {
+    const { ctx } = makeContext();
+    const decoy = document.body.createDiv({ cls: "ss-settings-surface" });
+    decoy.createDiv({ cls: "systemsculpt-tab-content is-active", text: "Wrong panel" });
+    const surface = document.body.createDiv({
+      cls: "renamed-settings", attr: { "data-testid": "settings.surface" },
+    });
+    surface.getBoundingClientRect = () => rect();
+    const bar = surface.createDiv({ attr: { "data-testid": "settings.tab-bar" } });
+    bar.createEl("button", { text: "Wrong tab", cls: "is-active" });
+    bar.createEl("button", {
+      text: "Chat", cls: "not-current",
+      attr: { "data-testid": "settings.tab.chat", role: "tab", "aria-selected": "true" },
+    });
+    bar.createEl("button", {
+      text: "General", cls: "is-active",
+      attr: { "data-testid": "settings.tab.general", role: "tab", "aria-selected": "false" },
+    });
+    surface.createDiv({
+      text: "Hidden panel", cls: "is-active",
+      attr: { "data-testid": "settings.panel.general", role: "tabpanel", hidden: "" },
+    });
+    surface.createDiv({
+      text: "Current chat settings",
+      attr: { "data-testid": "settings.panel.chat", role: "tabpanel" },
+    });
+    await expect(runDriverAction(ctx, "snapshot", { scope: "settings" })).resolves.toEqual({
+      open: true,
+      tabs: [{ label: "Chat", active: true }, { label: "General", active: false }],
+      activePanelText: "Current chat settings",
+    });
   });
 
   it("waits for a running canonical stop control after its CSS classes change", async () => {
@@ -888,21 +999,28 @@ describe("guarded development driver actions", () => {
   it("times visible feedback from the current turn rather than historical replies", async () => {
     const harness = makeDevelopmentHarness();
     const historicalAssistant = document.createElement("div");
-    historicalAssistant.className = "systemsculpt-agent-turn is-assistant";
+    historicalAssistant.dataset.testid = "chat.turn";
+    historicalAssistant.dataset.role = "assistant";
+    historicalAssistant.dataset.active = "false";
     historicalAssistant.textContent = "old visible answer";
     harness.container.append(historicalAssistant);
     const currentUser = document.createElement("div");
-    currentUser.className = "systemsculpt-agent-turn is-user";
+    currentUser.dataset.testid = "chat.turn";
+    currentUser.dataset.role = "user";
+    currentUser.dataset.active = "false";
     currentUser.textContent = "new request";
     harness.container.append(currentUser);
     const currentAssistant = document.createElement("div");
-    currentAssistant.className = "systemsculpt-agent-turn is-assistant is-active";
+    currentAssistant.dataset.testid = "chat.turn";
+    currentAssistant.dataset.role = "assistant";
+    currentAssistant.dataset.active = "true";
     harness.container.append(currentAssistant);
     harness.setRunning(true);
 
     window.setTimeout(() => {
       const text = document.createElement("div");
-      text.className = "systemsculpt-agent-part is-text";
+      text.dataset.testid = "chat.part";
+      text.dataset.kind = "text";
       text.textContent = "new visible answer";
       currentAssistant.append(text);
       harness.setRunning(false);
@@ -933,13 +1051,18 @@ describe("guarded development driver actions", () => {
   it("keeps detecting progress after bounded snapshot text reaches 4,000 characters", async () => {
     const harness = makeDevelopmentHarness();
     const user = document.createElement("div");
-    user.className = "systemsculpt-agent-turn is-user";
+    user.dataset.testid = "chat.turn";
+    user.dataset.role = "user";
+    user.dataset.active = "false";
     user.textContent = "stream a long response";
     harness.container.append(user);
     const assistant = document.createElement("div");
-    assistant.className = "systemsculpt-agent-turn is-assistant is-active";
+    assistant.dataset.testid = "chat.turn";
+    assistant.dataset.role = "assistant";
+    assistant.dataset.active = "true";
     const answer = document.createElement("div");
-    answer.className = "systemsculpt-agent-part is-text";
+    answer.dataset.testid = "chat.part";
+    answer.dataset.kind = "text";
     answer.textContent = "A".repeat(4001);
     assistant.append(answer);
     harness.container.append(assistant);
@@ -963,11 +1086,15 @@ describe("guarded development driver actions", () => {
   it("keeps detecting repeated identical tools through a collapsed activity surface", async () => {
     const harness = makeDevelopmentHarness();
     const user = document.createElement("div");
-    user.className = "systemsculpt-agent-turn is-user";
+    user.dataset.testid = "chat.turn";
+    user.dataset.role = "user";
+    user.dataset.active = "false";
     user.textContent = "run repeated reads";
     harness.container.append(user);
     const assistant = document.createElement("div");
-    assistant.className = "systemsculpt-agent-turn is-assistant is-active";
+    assistant.dataset.testid = "chat.turn";
+    assistant.dataset.role = "assistant";
+    assistant.dataset.active = "true";
     const overflow = document.createElement("button");
     overflow.dataset.agentActivityOverflow = "";
     overflow.setAttribute("aria-expanded", "false");
@@ -986,7 +1113,7 @@ describe("guarded development driver actions", () => {
       }, (index - 10) * 70);
     }
     window.setTimeout(() => {
-      assistant.classList.remove("is-active");
+      assistant.dataset.active = "false";
       harness.setRunning(false);
     }, 280);
 
@@ -1004,13 +1131,18 @@ describe("guarded development driver actions", () => {
       submit: true,
     });
     const user = document.createElement("div");
-    user.className = "systemsculpt-agent-turn is-user";
+    user.dataset.testid = "chat.turn";
+    user.dataset.role = "user";
+    user.dataset.active = "false";
     user.textContent = "fast exact-output request";
     harness.container.append(user);
     const assistant = document.createElement("div");
-    assistant.className = "systemsculpt-agent-turn is-assistant";
+    assistant.dataset.testid = "chat.turn";
+    assistant.dataset.role = "assistant";
+    assistant.dataset.active = "false";
     const answer = document.createElement("div");
-    answer.className = "systemsculpt-agent-part is-text";
+    answer.dataset.testid = "chat.part";
+    answer.dataset.kind = "text";
     answer.textContent = "FAST-COMPLETE";
     assistant.append(answer);
     harness.container.append(assistant);
@@ -1033,11 +1165,15 @@ describe("guarded development driver actions", () => {
   it("does not accept an arbitrary historical completed turn as a new run", async () => {
     const harness = makeDevelopmentHarness();
     const user = document.createElement("div");
-    user.className = "systemsculpt-agent-turn is-user";
+    user.dataset.testid = "chat.turn";
+    user.dataset.role = "user";
+    user.dataset.active = "false";
     user.textContent = "old request";
     harness.container.append(user);
     const assistant = document.createElement("div");
-    assistant.className = "systemsculpt-agent-turn is-assistant";
+    assistant.dataset.testid = "chat.turn";
+    assistant.dataset.role = "assistant";
+    assistant.dataset.active = "false";
     assistant.textContent = "old answer";
     harness.container.append(assistant);
 
@@ -1076,13 +1212,18 @@ describe("guarded development driver actions", () => {
     harness.send.onclick = () => {
       harness.input.value = "";
       const user = document.createElement("div");
-      user.className = "systemsculpt-agent-turn is-user";
+      user.dataset.testid = "chat.turn";
+      user.dataset.role = "user";
+      user.dataset.active = "false";
       user.textContent = `${marker} fast guarded request`;
       harness.container.append(user);
       const assistant = document.createElement("div");
-      assistant.className = "systemsculpt-agent-turn is-assistant";
+      assistant.dataset.testid = "chat.turn";
+      assistant.dataset.role = "assistant";
+      assistant.dataset.active = "false";
       const answer = document.createElement("div");
-      answer.className = "systemsculpt-agent-part is-text";
+      answer.dataset.testid = "chat.part";
+      answer.dataset.kind = "text";
       answer.textContent = "FAST-GUARDED-COMPLETE";
       assistant.append(answer);
       harness.container.append(assistant);
@@ -1108,16 +1249,20 @@ describe("guarded development driver actions", () => {
     const marker = "SS-DEV-TEST-FASTRETRY";
     const harness = makeDevelopmentHarness();
     const renderFailedTurn = (messageId: string): void => {
-      for (const turn of harness.container.querySelectorAll(".systemsculpt-agent-turn")) {
+      for (const turn of harness.container.querySelectorAll("[data-testid='chat.turn']")) {
         turn.remove();
       }
       const user = document.createElement("div");
-      user.className = "systemsculpt-agent-turn is-user";
+      user.dataset.testid = "chat.turn";
+      user.dataset.role = "user";
+      user.dataset.active = "false";
       user.dataset.messageId = messageId;
       user.textContent = `${marker} retry request`;
       harness.container.append(user);
       const assistant = document.createElement("div");
-      assistant.className = "systemsculpt-agent-turn is-assistant";
+      assistant.dataset.testid = "chat.turn";
+      assistant.dataset.role = "assistant";
+      assistant.dataset.active = "false";
       assistant.textContent = "same deterministic failure";
       harness.container.append(assistant);
     };
@@ -1164,11 +1309,15 @@ describe("guarded development driver actions", () => {
       window.setTimeout(() => {
         harness.view.chatId = "development-chat";
         const user = document.createElement("div");
-        user.className = "systemsculpt-agent-turn is-user";
+        user.dataset.testid = "chat.turn";
+        user.dataset.role = "user";
+        user.dataset.active = "false";
         user.textContent = `${marker} delayed optimistic request`;
         harness.container.append(user);
         const assistant = document.createElement("div");
-        assistant.className = "systemsculpt-agent-turn is-assistant";
+        assistant.dataset.testid = "chat.turn";
+        assistant.dataset.role = "assistant";
+        assistant.dataset.active = "false";
         assistant.textContent = "DELAYED-GUARDED-COMPLETE";
         harness.container.append(assistant);
       }, 0);
@@ -1197,9 +1346,11 @@ describe("guarded development driver actions", () => {
     const ownedChatId = "owned-development-chat";
     const harness = makeDevelopmentHarness();
     const renderOwnedTranscript = (): void => {
-      for (const turn of harness.container.querySelectorAll(".systemsculpt-agent-turn")) turn.remove();
+      for (const turn of harness.container.querySelectorAll("[data-testid='chat.turn']")) turn.remove();
       const user = document.createElement("div");
-      user.className = "systemsculpt-agent-turn is-user";
+      user.dataset.testid = "chat.turn";
+      user.dataset.role = "user";
+      user.dataset.active = "false";
       user.textContent = `${marker} persisted request`;
       harness.container.append(user);
     };
@@ -1292,7 +1443,9 @@ describe("guarded development driver actions", () => {
     harness.send.onclick = () => {
       harness.input.value = "";
       const unrelated = document.createElement("div");
-      unrelated.className = "systemsculpt-agent-turn is-user";
+      unrelated.dataset.testid = "chat.turn";
+      unrelated.dataset.role = "user";
+      unrelated.dataset.active = "false";
       unrelated.textContent = "SS-DEV-TEST-OTHER unrelated request";
       harness.container.append(unrelated);
     };
@@ -1306,7 +1459,7 @@ describe("guarded development driver actions", () => {
       timeoutMs: 25,
     })).rejects.toThrow(/active chat does not contain the owned development-test marker/);
 
-    for (const turn of harness.container.querySelectorAll(".systemsculpt-agent-turn")) turn.remove();
+    for (const turn of harness.container.querySelectorAll("[data-testid='chat.turn']")) turn.remove();
     await runDriverAction(harness.ctx, "chat.resetDevelopmentState", { marker });
   });
 
@@ -1363,7 +1516,9 @@ describe("guarded development driver actions", () => {
     const marker = "SS-DEV-TEST-AB";
     const harness = makeDevelopmentHarness();
     const turn = document.createElement("div");
-    turn.className = "systemsculpt-agent-turn";
+    turn.dataset.testid = "chat.turn";
+    turn.dataset.role = "other";
+    turn.dataset.active = "false";
     turn.textContent = "private unsaved conversation";
     harness.container.append(turn);
 
@@ -2038,7 +2193,7 @@ describe("guarded development driver actions", () => {
       },
     )).rejects.toThrow(/does not exactly match/);
     expect(mismatched).not.toHaveBeenCalled();
-    harness.container.querySelector(".systemsculpt-agent-turn.is-active")?.remove();
+    harness.container.querySelector("[data-testid='chat.turn'][data-active='true']")?.remove();
 
     const escapedInput = {
       items: [{ source: ownedPath, destination: "Outside/moved.md" }],
@@ -2055,7 +2210,7 @@ describe("guarded development driver actions", () => {
       { toolName: "move", input: escapedInput },
     )).rejects.toThrow(/must use a unique marker/);
     expect(escaped).not.toHaveBeenCalled();
-    harness.container.querySelector(".systemsculpt-agent-turn.is-active")?.remove();
+    harness.container.querySelector("[data-testid='chat.turn'][data-active='true']")?.remove();
     await runDriverAction(harness.ctx, "chat.resetDevelopmentState", { marker });
   });
 
@@ -2186,7 +2341,7 @@ describe("guarded development driver actions", () => {
       },
     )).rejects.toThrow(/does not exactly match/);
     expect(refused).not.toHaveBeenCalled();
-    harness.container.querySelector(".systemsculpt-agent-turn.is-active")?.remove();
+    harness.container.querySelector("[data-testid='chat.turn'][data-active='true']")?.remove();
     await runDriverAction(harness.ctx, "chat.resetDevelopmentState", { marker });
   });
 
@@ -2224,7 +2379,7 @@ describe("guarded development driver actions", () => {
       },
     )).rejects.toThrow(/does not exactly match/);
     expect(refused).not.toHaveBeenCalled();
-    harness.container.querySelector(".systemsculpt-agent-turn.is-active")?.remove();
+    harness.container.querySelector("[data-testid='chat.turn'][data-active='true']")?.remove();
     await runDriverAction(harness.ctx, "chat.resetDevelopmentState", { marker });
   });
 
@@ -2251,7 +2406,7 @@ describe("guarded development driver actions", () => {
     expect(first).not.toHaveBeenCalled();
     expect(second).not.toHaveBeenCalled();
     for (const turn of harness.container.querySelectorAll(
-      ".systemsculpt-agent-turn.is-active",
+      "[data-testid='chat.turn'][data-active='true']",
     )) turn.remove();
 
     const trashInput = { paths: [ownedPath] };
@@ -2266,7 +2421,7 @@ describe("guarded development driver actions", () => {
       { toolName: "trash", input: trashInput },
     )).rejects.toThrow(/ambiguous or already occupied/);
     expect(trash).not.toHaveBeenCalled();
-    harness.container.querySelector(".systemsculpt-agent-turn.is-active")?.remove();
+    harness.container.querySelector("[data-testid='chat.turn'][data-active='true']")?.remove();
     await runDriverAction(harness.ctx, "chat.resetDevelopmentState", { marker });
   });
 
@@ -2344,33 +2499,82 @@ describe("guarded development driver actions", () => {
     expect(harness.trashFile).toHaveBeenCalledWith(folder);
   });
 
+  it("captures semantic tool state and icon-only settlement while ignoring CSS-only lifecycle decoys", async () => {
+    const harness = makeDevelopmentHarness();
+    await runDriverAction(harness.ctx, "chat.beginToolLifecycleCapture", {});
+    const turn = harness.container.createDiv({
+      attr: { "data-testid": "chat.turn", "data-role": "assistant", "data-active": "true" },
+    });
+    const tool = exactToolElement("semantic-lifecycle", "running");
+    tool.className = "renamed-tool is-failed is-grouped";
+    turn.append(tool);
+    turn.createDiv({ cls: "systemsculpt-agent-part is-error", text: "CSS-only error" });
+    const decoyTool = turn.createDiv({ cls: "systemsculpt-agent-part is-tool is-running" });
+    decoyTool.createEl("strong", { cls: "systemsculpt-agent-tool-label", text: "Read 1 file" });
+    harness.container.createDiv({
+      cls: "systemsculpt-agent-tail-status", attr: { "data-status": "Working in vault" },
+    });
+    const status = harness.container.createDiv({
+      attr: { "data-testid": "chat.tail-status", "data-status": "Working in vault" },
+    });
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    tool.dataset.state = "succeeded";
+    status.dataset.status = "Thinking";
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    // No state/class/text mutation accompanies this icon change.
+    tool.querySelector<HTMLElement>('[data-testid="chat.tool.state"]')!.dataset.iconState = "check";
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    turn.createDiv({
+      text: "SEMANTIC-CONTINUATION",
+      attr: { "data-testid": "chat.part", "data-kind": "text" },
+    });
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    try {
+      await expect(runDriverAction(harness.ctx, "chat.assertLatestToolSettledAfterContinuation", {
+        toolLabel: "Read 1 file", text: "SEMANTIC-CONTINUATION", timeoutMs: 0,
+      })).resolves.toMatchObject({
+        tool: { state: "succeeded", stateIcon: "check" },
+      });
+      const snapshot = await runDriverAction(harness.ctx, "snapshot", { scope: "chat" });
+      expect(snapshot).toMatchObject({ toolLifecycle: { tools: [{ partKey: "tool:semantic-lifecycle" }] } });
+    } finally {
+      await runDriverAction(harness.ctx, "chat.endToolLifecycleCapture", {});
+    }
+  });
+
   it("keeps failing after the fact when continuation appeared before tool settlement", async () => {
     const harness = makeDevelopmentHarness();
     await runDriverAction(harness.ctx, "chat.beginToolLifecycleCapture", {});
 
     const assistantTurn = document.createElement("div");
-    assistantTurn.className = "systemsculpt-agent-turn is-assistant is-active";
+    assistantTurn.dataset.testid = "chat.turn";
+    assistantTurn.dataset.role = "assistant";
+    assistantTurn.dataset.active = "true";
     assistantTurn.dataset.turnId = "run-invalid-order";
     harness.container.append(assistantTurn);
     const tool = document.createElement("div");
-    tool.className = "systemsculpt-agent-part is-tool is-running";
+    tool.dataset.testid = "chat.part";
+    tool.dataset.kind = "tool";
+    tool.dataset.toolGrouped = "false";
+    tool.dataset.state = "running";
     tool.dataset.partKey = "tool-live-lifecycle";
     tool.innerHTML = [
       '<div class="systemsculpt-agent-tool">',
       '<div class="systemsculpt-agent-tool-header">',
       '<span class="systemsculpt-agent-tool-icon"></span>',
-      '<strong class="systemsculpt-agent-tool-label">Read files</strong>',
-      '<span class="systemsculpt-agent-tool-state-icon" data-icon-state="minus"></span>',
+      '<strong data-testid="chat.tool.label">Read files</strong>',
+      '<span data-testid="chat.tool.state" data-icon-state="minus"></span>',
       "</div>",
       "</div>",
     ].join("");
     assistantTurn.append(tool);
     const continuation = document.createElement("div");
-    continuation.className = "systemsculpt-agent-part is-text";
+    continuation.dataset.testid = "chat.part";
+    continuation.dataset.kind = "text";
     continuation.textContent = "CONTINUATION-MARKER";
     assistantTurn.append(continuation);
     const status = document.createElement("div");
-    status.className = "systemsculpt-agent-tail-status";
+    status.dataset.testid = "chat.tail-status";
     status.dataset.status = "Working in vault";
     harness.container.append(status);
     await new Promise((resolve) => window.setTimeout(resolve, 0));
@@ -2381,8 +2585,11 @@ describe("guarded development driver actions", () => {
       { toolLabel: "Read files", text: "CONTINUATION-MARKER", timeoutMs: 0 },
     )).rejects.toThrow(/Continuation text appeared.*before its row was visibly settled/);
 
-    tool.className = "systemsculpt-agent-part is-tool is-succeeded";
-    const stateIcon = tool.querySelector<HTMLElement>(".systemsculpt-agent-tool-state-icon");
+    tool.dataset.testid = "chat.part";
+    tool.dataset.kind = "tool";
+    tool.dataset.toolGrouped = "false";
+    tool.dataset.state = "succeeded";
+    const stateIcon = tool.querySelector<HTMLElement>("[data-testid='chat.tool.state']");
     status.dataset.status = "Thinking";
     await new Promise((resolve) => window.setTimeout(resolve, 0));
 
@@ -2411,35 +2618,44 @@ describe("guarded development driver actions", () => {
     const harness = makeDevelopmentHarness();
     await runDriverAction(harness.ctx, "chat.beginToolLifecycleCapture", {});
     const assistantTurn = document.createElement("div");
-    assistantTurn.className = "systemsculpt-agent-turn is-assistant is-active";
+    assistantTurn.dataset.testid = "chat.turn";
+    assistantTurn.dataset.role = "assistant";
+    assistantTurn.dataset.active = "true";
     assistantTurn.dataset.turnId = "run-valid-order";
     harness.container.append(assistantTurn);
     const tool = document.createElement("div");
-    tool.className = "systemsculpt-agent-part is-tool is-running";
+    tool.dataset.testid = "chat.part";
+    tool.dataset.kind = "tool";
+    tool.dataset.toolGrouped = "false";
+    tool.dataset.state = "running";
     tool.dataset.partKey = "tool-valid-lifecycle";
     tool.innerHTML = [
       '<div class="systemsculpt-agent-tool">',
       '<div class="systemsculpt-agent-tool-header">',
       '<span class="systemsculpt-agent-tool-icon"></span>',
-      '<strong class="systemsculpt-agent-tool-label">Read files</strong>',
-      '<span class="systemsculpt-agent-tool-state-icon" data-icon-state="minus"></span>',
+      '<strong data-testid="chat.tool.label">Read files</strong>',
+      '<span data-testid="chat.tool.state" data-icon-state="minus"></span>',
       "</div>",
       "</div>",
     ].join("");
     assistantTurn.append(tool);
     const status = document.createElement("div");
-    status.className = "systemsculpt-agent-tail-status";
+    status.dataset.testid = "chat.tail-status";
     status.dataset.status = "Working in vault";
     harness.container.append(status);
     await new Promise((resolve) => window.setTimeout(resolve, 0));
 
-    tool.className = "systemsculpt-agent-part is-tool is-succeeded";
-    const stateIcon = tool.querySelector<HTMLElement>(".systemsculpt-agent-tool-state-icon");
+    tool.dataset.testid = "chat.part";
+    tool.dataset.kind = "tool";
+    tool.dataset.toolGrouped = "false";
+    tool.dataset.state = "succeeded";
+    const stateIcon = tool.querySelector<HTMLElement>("[data-testid='chat.tool.state']");
     if (stateIcon) stateIcon.dataset.iconState = "check";
     status.dataset.status = "Thinking";
     await new Promise((resolve) => window.setTimeout(resolve, 0));
     const continuation = document.createElement("div");
-    continuation.className = "systemsculpt-agent-part is-text";
+    continuation.dataset.testid = "chat.part";
+    continuation.dataset.kind = "text";
     continuation.textContent = "CONTINUATION-AFTER-DONE";
     assistantTurn.append(continuation);
     await new Promise((resolve) => window.setTimeout(resolve, 0));
@@ -2481,20 +2697,26 @@ describe("guarded development driver actions", () => {
     const harness = makeDevelopmentHarness();
     await runDriverAction(harness.ctx, "chat.beginToolLifecycleCapture", {});
     const assistantTurn = document.createElement("div");
-    assistantTurn.className = "systemsculpt-agent-turn is-assistant";
+    assistantTurn.dataset.testid = "chat.turn";
+    assistantTurn.dataset.role = "assistant";
+    assistantTurn.dataset.active = "false";
     assistantTurn.dataset.messageId = "message-keyless-terminal";
     const tool = document.createElement("div");
-    tool.className = "systemsculpt-agent-part is-tool is-failed";
+    tool.dataset.testid = "chat.part";
+    tool.dataset.kind = "tool";
+    tool.dataset.toolGrouped = "false";
+    tool.dataset.state = "failed";
     tool.innerHTML = [
       '<div class="systemsculpt-agent-tool">',
       '<span class="systemsculpt-agent-tool-icon"></span>',
-      '<strong class="systemsculpt-agent-tool-label">Read 2 files</strong>',
-      '<span class="systemsculpt-agent-tool-state-icon" data-icon-state="x"></span>',
+      '<strong data-testid="chat.tool.label">Read 2 files</strong>',
+      '<span data-testid="chat.tool.state" data-icon-state="x"></span>',
       "</div>",
     ].join("");
     assistantTurn.append(tool);
     const continuation = document.createElement("div");
-    continuation.className = "systemsculpt-agent-part is-text";
+    continuation.dataset.testid = "chat.part";
+    continuation.dataset.kind = "text";
     continuation.textContent = "KEYLESS-TERMINAL-RECOVERED";
     assistantTurn.append(continuation);
     harness.container.append(assistantTurn);
@@ -2557,24 +2779,33 @@ describe("guarded development driver actions", () => {
     const harness = makeDevelopmentHarness();
     await runDriverAction(harness.ctx, "chat.beginToolLifecycleCapture", {});
     const assistantTurn = document.createElement("div");
-    assistantTurn.className = "systemsculpt-agent-turn is-assistant";
+    assistantTurn.dataset.testid = "chat.turn";
+    assistantTurn.dataset.role = "assistant";
+    assistantTurn.dataset.active = "false";
     const tool = document.createElement("div");
-    tool.className = "systemsculpt-agent-part is-tool is-running";
+    tool.dataset.testid = "chat.part";
+    tool.dataset.kind = "tool";
+    tool.dataset.toolGrouped = "false";
+    tool.dataset.state = "running";
     tool.innerHTML = [
       '<span class="systemsculpt-agent-tool-icon"></span>',
-      '<strong class="systemsculpt-agent-tool-label">Read 2 files</strong>',
-      '<span class="systemsculpt-agent-tool-state-icon" data-icon-state="minus"></span>',
+      '<strong data-testid="chat.tool.label">Read 2 files</strong>',
+      '<span data-testid="chat.tool.state" data-icon-state="minus"></span>',
     ].join("");
     assistantTurn.append(tool);
     const continuation = document.createElement("div");
-    continuation.className = "systemsculpt-agent-part is-text";
+    continuation.dataset.testid = "chat.part";
+    continuation.dataset.kind = "text";
     continuation.textContent = "KEYLESS-EARLY-CONTINUATION";
     assistantTurn.append(continuation);
     harness.container.append(assistantTurn);
     await new Promise((resolve) => window.setTimeout(resolve, 0));
 
-    tool.className = "systemsculpt-agent-part is-tool is-failed";
-    const stateIcon = tool.querySelector<HTMLElement>(".systemsculpt-agent-tool-state-icon");
+    tool.dataset.testid = "chat.part";
+    tool.dataset.kind = "tool";
+    tool.dataset.toolGrouped = "false";
+    tool.dataset.state = "failed";
+    const stateIcon = tool.querySelector<HTMLElement>("[data-testid='chat.tool.state']");
     if (stateIcon) stateIcon.dataset.iconState = "x";
     await new Promise((resolve) => window.setTimeout(resolve, 0));
     assistantTurn.remove();
@@ -2599,33 +2830,42 @@ describe("guarded development driver actions", () => {
     const harness = makeDevelopmentHarness();
     await runDriverAction(harness.ctx, "chat.beginToolLifecycleCapture", {});
     const assistantTurn = document.createElement("div");
-    assistantTurn.className = "systemsculpt-agent-turn is-assistant is-active";
+    assistantTurn.dataset.testid = "chat.turn";
+    assistantTurn.dataset.role = "assistant";
+    assistantTurn.dataset.active = "true";
     assistantTurn.dataset.turnId = "run-failed-tool-recovery";
     harness.container.append(assistantTurn);
     const tool = document.createElement("div");
-    tool.className = "systemsculpt-agent-part is-tool is-running";
+    tool.dataset.testid = "chat.part";
+    tool.dataset.kind = "tool";
+    tool.dataset.toolGrouped = "false";
+    tool.dataset.state = "running";
     tool.dataset.partKey = "tool-failed-recovery";
     tool.innerHTML = [
       '<div class="systemsculpt-agent-tool">',
       '<span class="systemsculpt-agent-tool-icon"></span>',
-      '<strong class="systemsculpt-agent-tool-label">Read 1 file</strong>',
-      '<span class="systemsculpt-agent-tool-state-icon" data-icon-state="minus"></span>',
+      '<strong data-testid="chat.tool.label">Read 1 file</strong>',
+      '<span data-testid="chat.tool.state" data-icon-state="minus"></span>',
       "</div>",
     ].join("");
     assistantTurn.append(tool);
     const status = document.createElement("div");
-    status.className = "systemsculpt-agent-tail-status";
+    status.dataset.testid = "chat.tail-status";
     status.dataset.status = "Working in vault";
     harness.container.append(status);
     await new Promise((resolve) => window.setTimeout(resolve, 0));
 
-    tool.className = "systemsculpt-agent-part is-tool is-failed";
-    const stateIcon = tool.querySelector<HTMLElement>(".systemsculpt-agent-tool-state-icon");
+    tool.dataset.testid = "chat.part";
+    tool.dataset.kind = "tool";
+    tool.dataset.toolGrouped = "false";
+    tool.dataset.state = "failed";
+    const stateIcon = tool.querySelector<HTMLElement>("[data-testid='chat.tool.state']");
     if (stateIcon) stateIcon.dataset.iconState = "x";
     status.dataset.status = "Thinking";
     await new Promise((resolve) => window.setTimeout(resolve, 0));
     const continuation = document.createElement("div");
-    continuation.className = "systemsculpt-agent-part is-text";
+    continuation.dataset.testid = "chat.part";
+    continuation.dataset.kind = "text";
     continuation.textContent = "FAILED-TOOL-RECOVERED";
     assistantTurn.append(continuation);
     await new Promise((resolve) => window.setTimeout(resolve, 0));
@@ -2664,20 +2904,26 @@ describe("guarded development driver actions", () => {
       callCount: number,
     ): Promise<void> => {
       const turn = document.createElement("div");
-      turn.className = "systemsculpt-agent-turn is-assistant";
+      turn.dataset.testid = "chat.turn";
+      turn.dataset.role = "assistant";
+      turn.dataset.active = "false";
       turn.dataset.turnId = turnId;
       const tool = document.createElement("div");
-      tool.className = "systemsculpt-agent-part is-tool is-succeeded";
+      tool.dataset.testid = "chat.part";
+      tool.dataset.kind = "tool";
+      tool.dataset.toolGrouped = "false";
+      tool.dataset.state = "succeeded";
       tool.dataset.partKey = partKey;
       if (callCount > 1) tool.dataset.toolCount = String(callCount);
       tool.innerHTML = [
         '<span class="systemsculpt-agent-tool-icon"></span>',
-        '<strong class="systemsculpt-agent-tool-label">Read 1 file</strong>',
-        '<span class="systemsculpt-agent-tool-state-icon" data-icon-state="check"></span>',
+        '<strong data-testid="chat.tool.label">Read 1 file</strong>',
+        '<span data-testid="chat.tool.state" data-icon-state="check"></span>',
       ].join("");
       turn.append(tool);
       const continuation = document.createElement("div");
-      continuation.className = "systemsculpt-agent-part is-text";
+      continuation.dataset.testid = "chat.part";
+      continuation.dataset.kind = "text";
       continuation.textContent = continuationText;
       turn.append(continuation);
       harness.container.append(turn);
@@ -2707,36 +2953,45 @@ describe("guarded development driver actions", () => {
     const harness = makeDevelopmentHarness();
     await runDriverAction(harness.ctx, "chat.beginToolLifecycleCapture", {});
     const assistantTurn = document.createElement("div");
-    assistantTurn.className = "systemsculpt-agent-turn is-assistant is-active";
+    assistantTurn.dataset.testid = "chat.turn";
+    assistantTurn.dataset.role = "assistant";
+    assistantTurn.dataset.active = "true";
     assistantTurn.dataset.turnId = "run-mixed-tools";
     harness.container.append(assistantTurn);
     const running = document.createElement("div");
-    running.className = "systemsculpt-agent-part is-tool is-running";
+    running.dataset.testid = "chat.part";
+    running.dataset.kind = "tool";
+    running.dataset.toolGrouped = "false";
+    running.dataset.state = "running";
     running.dataset.partKey = "tool-running-group";
     running.dataset.toolCount = "29";
     running.innerHTML = [
       '<span class="systemsculpt-agent-tool-icon"></span>',
-      '<strong class="systemsculpt-agent-tool-label">Search vault</strong>',
-      '<span class="systemsculpt-agent-tool-state-icon" data-icon-state="minus"></span>',
+      '<strong data-testid="chat.tool.label">Search vault</strong>',
+      '<span data-testid="chat.tool.state" data-icon-state="minus"></span>',
     ].join("");
     assistantTurn.append(running);
     const partial = document.createElement("div");
-    partial.className = "systemsculpt-agent-part is-tool is-partial";
+    partial.dataset.testid = "chat.part";
+    partial.dataset.kind = "tool";
+    partial.dataset.toolGrouped = "false";
+    partial.dataset.state = "partial";
     partial.dataset.partKey = "tool-partial";
     partial.innerHTML = [
       '<span class="systemsculpt-agent-tool-icon"></span>',
-      '<strong class="systemsculpt-agent-tool-label">Read files</strong>',
-      '<span class="systemsculpt-agent-tool-state-icon" data-icon-state="x"></span>',
+      '<strong data-testid="chat.tool.label">Read files</strong>',
+      '<span data-testid="chat.tool.state" data-icon-state="x"></span>',
     ].join("");
     assistantTurn.append(partial);
     const status = document.createElement("div");
-    status.className = "systemsculpt-agent-tail-status";
+    status.dataset.testid = "chat.tail-status";
     status.dataset.status = "Thinking";
     harness.container.append(status);
     await new Promise((resolve) => window.setTimeout(resolve, 0));
 
     const earlyContinuation = document.createElement("div");
-    earlyContinuation.className = "systemsculpt-agent-part is-text";
+    earlyContinuation.dataset.testid = "chat.part";
+    earlyContinuation.dataset.kind = "text";
     earlyContinuation.textContent = "EARLY-CONTINUATION";
     assistantTurn.append(earlyContinuation);
     await new Promise((resolve) => window.setTimeout(resolve, 0));
@@ -2751,9 +3006,12 @@ describe("guarded development driver actions", () => {
       },
     )).rejects.toThrow(/before every prior current-run tool was visibly terminal/);
 
-    running.className = "systemsculpt-agent-part is-tool is-succeeded";
+    running.dataset.testid = "chat.part";
+    running.dataset.kind = "tool";
+    running.dataset.toolGrouped = "false";
+    running.dataset.state = "succeeded";
     const runningStateIcon = running.querySelector<HTMLElement>(
-      ".systemsculpt-agent-tool-state-icon",
+      "[data-testid='chat.tool.state']",
     );
     if (runningStateIcon) runningStateIcon.dataset.iconState = "check";
     await new Promise((resolve) => window.setTimeout(resolve, 0));
@@ -2764,7 +3022,8 @@ describe("guarded development driver actions", () => {
     )).rejects.toThrow(/before every prior current-run tool was visibly terminal/);
 
     const lateContinuation = document.createElement("div");
-    lateContinuation.className = "systemsculpt-agent-part is-text";
+    lateContinuation.dataset.testid = "chat.part";
+    lateContinuation.dataset.kind = "text";
     lateContinuation.textContent = "LATE-CONTINUATION";
     assistantTurn.append(lateContinuation);
     await new Promise((resolve) => window.setTimeout(resolve, 0));
@@ -2807,15 +3066,20 @@ describe("guarded development driver actions", () => {
     diagnostics.push(...lifecycle.slice(0, 2));
 
     const assistantTurn = document.createElement("div");
-    assistantTurn.className = "systemsculpt-agent-turn is-assistant";
+    assistantTurn.dataset.testid = "chat.turn";
+    assistantTurn.dataset.role = "assistant";
+    assistantTurn.dataset.active = "false";
     assistantTurn.dataset.turnId = "turn-early-pollution";
     const tool = document.createElement("div");
-    tool.className = "systemsculpt-agent-part is-tool is-running";
+    tool.dataset.testid = "chat.part";
+    tool.dataset.kind = "tool";
+    tool.dataset.toolGrouped = "false";
+    tool.dataset.state = "running";
     tool.dataset.partKey = "tool:early-pollution";
     tool.innerHTML = [
       '<span class="systemsculpt-agent-tool-icon"></span>',
-      '<strong class="systemsculpt-agent-tool-label">Read 1 file</strong>',
-      '<span class="systemsculpt-agent-tool-state-icon" data-icon-state="minus"></span>',
+      '<strong data-testid="chat.tool.label">Read 1 file</strong>',
+      '<span data-testid="chat.tool.state" data-icon-state="minus"></span>',
     ].join("");
     assistantTurn.append(tool);
     harness.container.append(assistantTurn);
@@ -2823,19 +3087,24 @@ describe("guarded development driver actions", () => {
 
     const pollutedText = "PRIVATE-EARLY-CONTINUATION-CONTENT";
     const early = document.createElement("div");
-    early.className = "systemsculpt-agent-part is-text";
+    early.dataset.testid = "chat.part";
+    early.dataset.kind = "text";
     early.textContent = pollutedText;
     assistantTurn.append(early);
     await new Promise((resolve) => window.setTimeout(resolve, 0));
 
-    tool.className = "systemsculpt-agent-part is-tool is-succeeded";
-    const stateIcon = tool.querySelector<HTMLElement>(".systemsculpt-agent-tool-state-icon");
+    tool.dataset.testid = "chat.part";
+    tool.dataset.kind = "tool";
+    tool.dataset.toolGrouped = "false";
+    tool.dataset.state = "succeeded";
+    const stateIcon = tool.querySelector<HTMLElement>("[data-testid='chat.tool.state']");
     if (stateIcon) stateIcon.dataset.iconState = "check";
     diagnostics.push(lifecycle[2]!);
     await new Promise((resolve) => window.setTimeout(resolve, 0));
     const expectedText = "EXACT-AFTER-EARLY-CONTINUATION";
     const exact = document.createElement("div");
-    exact.className = "systemsculpt-agent-part is-text";
+    exact.dataset.testid = "chat.part";
+    exact.dataset.kind = "text";
     exact.textContent = expectedText;
     assistantTurn.append(exact);
     await new Promise((resolve) => window.setTimeout(resolve, 0));
@@ -2885,7 +3154,8 @@ describe("guarded development driver actions", () => {
     if (!assistantTurn) throw new Error("Expected the synthetic assistant turn.");
     const expectedText = "EXACT-AFTER-DURABLE-ACK";
     const exact = document.createElement("div");
-    exact.className = "systemsculpt-agent-part is-text";
+    exact.dataset.testid = "chat.part";
+    exact.dataset.kind = "text";
     exact.textContent = expectedText;
     assistantTurn.append(exact);
     await new Promise((resolve) => window.setTimeout(resolve, 0));
@@ -2932,7 +3202,8 @@ describe("guarded development driver actions", () => {
     );
     if (!assistantTurn) throw new Error("Expected the synthetic assistant turn.");
     const exact = document.createElement("div");
-    exact.className = "systemsculpt-agent-part is-text";
+    exact.dataset.testid = "chat.part";
+    exact.dataset.kind = "text";
     exact.textContent = "SAFE-FINAL-CONTINUATION";
     assistantTurn.append(exact);
     await new Promise((resolve) => window.setTimeout(resolve, 0));
@@ -2963,20 +3234,26 @@ describe("guarded development driver actions", () => {
     await runDriverAction(harness.ctx, "chat.beginToolLifecycleCapture", {});
 
     const assistantTurn = document.createElement("div");
-    assistantTurn.className = "systemsculpt-agent-turn is-assistant";
+    assistantTurn.dataset.testid = "chat.turn";
+    assistantTurn.dataset.role = "assistant";
+    assistantTurn.dataset.active = "false";
     assistantTurn.dataset.turnId = "turn-reverse-same-batch";
     harness.container.append(assistantTurn);
     const preToolText = document.createElement("div");
-    preToolText.className = "systemsculpt-agent-part is-text";
+    preToolText.dataset.testid = "chat.part";
+    preToolText.dataset.kind = "text";
     preToolText.textContent = "LEGITIMATE-PRE-TOOL-TEXT";
     assistantTurn.append(preToolText);
     const tool = document.createElement("div");
-    tool.className = "systemsculpt-agent-part is-tool is-running";
+    tool.dataset.testid = "chat.part";
+    tool.dataset.kind = "tool";
+    tool.dataset.toolGrouped = "false";
+    tool.dataset.state = "running";
     tool.dataset.partKey = "tool:reverse-same-batch";
     tool.innerHTML = [
       '<span class="systemsculpt-agent-tool-icon"></span>',
-      '<strong class="systemsculpt-agent-tool-label">Read 1 file</strong>',
-      '<span class="systemsculpt-agent-tool-state-icon" data-icon-state="minus"></span>',
+      '<strong data-testid="chat.tool.label">Read 1 file</strong>',
+      '<span data-testid="chat.tool.state" data-icon-state="minus"></span>',
     ].join("");
     const laterToolWrapper = document.createElement("div");
     laterToolWrapper.className = "systemsculpt-agent-tool-wrapper";
@@ -2984,12 +3261,16 @@ describe("guarded development driver actions", () => {
     assistantTurn.append(laterToolWrapper);
     await new Promise((resolve) => window.setTimeout(resolve, 0));
 
-    tool.className = "systemsculpt-agent-part is-tool is-succeeded";
-    const stateIcon = tool.querySelector<HTMLElement>(".systemsculpt-agent-tool-state-icon");
+    tool.dataset.testid = "chat.part";
+    tool.dataset.kind = "tool";
+    tool.dataset.toolGrouped = "false";
+    tool.dataset.state = "succeeded";
+    const stateIcon = tool.querySelector<HTMLElement>("[data-testid='chat.tool.state']");
     if (stateIcon) stateIcon.dataset.iconState = "check";
     await new Promise((resolve) => window.setTimeout(resolve, 0));
     const continuation = document.createElement("div");
-    continuation.className = "systemsculpt-agent-part is-text";
+    continuation.dataset.testid = "chat.part";
+    continuation.dataset.kind = "text";
     continuation.textContent = "REVERSE-SAME-BATCH-COMPLETE";
     assistantTurn.append(continuation);
     await new Promise((resolve) => window.setTimeout(resolve, 0));
@@ -3069,18 +3350,23 @@ describe("guarded development driver actions", () => {
     const harness = makeDevelopmentHarness();
     await runDriverAction(harness.ctx, "chat.beginToolLifecycleCapture", {});
     const assistantTurn = document.createElement("div");
-    assistantTurn.className = "systemsculpt-agent-turn is-assistant";
+    assistantTurn.dataset.testid = "chat.turn";
+    assistantTurn.dataset.role = "assistant";
+    assistantTurn.dataset.active = "false";
     assistantTurn.dataset.turnId = "run-regrouped-tools";
     harness.container.append(assistantTurn);
     const tools: HTMLElement[] = [];
     for (let index = 0; index < 30; index += 1) {
       const tool = document.createElement("div");
-      tool.className = "systemsculpt-agent-part is-tool is-succeeded";
+      tool.dataset.testid = "chat.part";
+      tool.dataset.kind = "tool";
+      tool.dataset.toolGrouped = "false";
+      tool.dataset.state = "succeeded";
       tool.dataset.partKey = `tool:read-${String(index)}`;
       tool.innerHTML = [
         '<span class="systemsculpt-agent-tool-icon"></span>',
-        '<strong class="systemsculpt-agent-tool-label">Read 1 file</strong>',
-        '<span class="systemsculpt-agent-tool-state-icon" data-icon-state="check"></span>',
+        '<strong data-testid="chat.tool.label">Read 1 file</strong>',
+        '<span data-testid="chat.tool.state" data-icon-state="check"></span>',
       ].join("");
       assistantTurn.append(tool);
       tools.push(tool);
@@ -3090,7 +3376,7 @@ describe("guarded development driver actions", () => {
     const grouped = tools[0];
     if (!grouped) throw new Error("Expected a grouped tool seed.");
     grouped.dataset.toolCount = "30";
-    const groupedLabel = grouped.querySelector(".systemsculpt-agent-tool-label");
+    const groupedLabel = grouped.querySelector("[data-testid='chat.tool.label']");
     if (groupedLabel) groupedLabel.textContent = "Read 30 files";
     for (const tool of tools.slice(1)) tool.remove();
     await new Promise((resolve) => window.setTimeout(resolve, 0));
@@ -3122,15 +3408,20 @@ describe("guarded development driver actions", () => {
     await runDriverAction(harness.ctx, "chat.beginToolLifecycleCapture", {});
 
     const assistantTurn = document.createElement("div");
-    assistantTurn.className = "systemsculpt-agent-turn is-assistant";
+    assistantTurn.dataset.testid = "chat.turn";
+    assistantTurn.dataset.role = "assistant";
+    assistantTurn.dataset.active = "false";
     assistantTurn.dataset.turnId = "run-ack-before-continuation";
     const tool = document.createElement("div");
-    tool.className = "systemsculpt-agent-part is-tool is-succeeded";
+    tool.dataset.testid = "chat.part";
+    tool.dataset.kind = "tool";
+    tool.dataset.toolGrouped = "false";
+    tool.dataset.state = "succeeded";
     tool.dataset.partKey = "tool:call-ack-before";
     tool.innerHTML = [
       '<span class="systemsculpt-agent-tool-icon"></span>',
-      '<strong class="systemsculpt-agent-tool-label">Read 1 file</strong>',
-      '<span class="systemsculpt-agent-tool-state-icon" data-icon-state="check"></span>',
+      '<strong data-testid="chat.tool.label">Read 1 file</strong>',
+      '<span data-testid="chat.tool.state" data-icon-state="check"></span>',
     ].join("");
     assistantTurn.append(tool);
     harness.container.append(assistantTurn);
@@ -3142,7 +3433,8 @@ describe("guarded development driver actions", () => {
       10,
     ).slice(0, 3));
     const continuation = document.createElement("div");
-    continuation.className = "systemsculpt-agent-part is-text";
+    continuation.dataset.testid = "chat.part";
+    continuation.dataset.kind = "text";
     continuation.textContent = "ACK-BEFORE-CONTINUATION";
     assistantTurn.append(continuation);
     await new Promise((resolve) => window.setTimeout(resolve, 0));
@@ -3181,21 +3473,27 @@ describe("guarded development driver actions", () => {
     diagnostics.push(...lifecycle.slice(0, 3));
 
     const assistantTurn = document.createElement("div");
-    assistantTurn.className = "systemsculpt-agent-turn is-assistant";
+    assistantTurn.dataset.testid = "chat.turn";
+    assistantTurn.dataset.role = "assistant";
+    assistantTurn.dataset.active = "false";
     assistantTurn.dataset.turnId = "turn-failed-result-ack";
     const tool = document.createElement("div");
-    tool.className = "systemsculpt-agent-part is-tool is-failed";
+    tool.dataset.testid = "chat.part";
+    tool.dataset.kind = "tool";
+    tool.dataset.toolGrouped = "false";
+    tool.dataset.state = "failed";
     tool.dataset.partKey = "tool:failed-result-ack";
     tool.innerHTML = [
       '<span class="systemsculpt-agent-tool-icon"></span>',
-      '<strong class="systemsculpt-agent-tool-label">Read 1 file</strong>',
-      '<span class="systemsculpt-agent-tool-state-icon" data-icon-state="x"></span>',
+      '<strong data-testid="chat.tool.label">Read 1 file</strong>',
+      '<span data-testid="chat.tool.state" data-icon-state="x"></span>',
     ].join("");
     assistantTurn.append(tool);
     harness.container.append(assistantTurn);
     await new Promise((resolve) => window.setTimeout(resolve, 0));
     const continuation = document.createElement("div");
-    continuation.className = "systemsculpt-agent-part is-text";
+    continuation.dataset.testid = "chat.part";
+    continuation.dataset.kind = "text";
     continuation.textContent = "FAILED-RESULT-ACK-CONTINUATION";
     assistantTurn.append(continuation);
     await new Promise((resolve) => window.setTimeout(resolve, 0));
@@ -3563,23 +3861,31 @@ describe("guarded development driver actions", () => {
     const turnId = "run-live-history-rebind";
     const callId = "call-live-history-rebind";
     const liveTurn = document.createElement("div");
-    liveTurn.className = "systemsculpt-agent-turn is-assistant is-active";
+    liveTurn.dataset.testid = "chat.turn";
+    liveTurn.dataset.role = "assistant";
+    liveTurn.dataset.active = "true";
     liveTurn.dataset.turnId = turnId;
     const liveTool = document.createElement("div");
-    liveTool.className = "systemsculpt-agent-part is-tool is-running";
+    liveTool.dataset.testid = "chat.part";
+    liveTool.dataset.kind = "tool";
+    liveTool.dataset.toolGrouped = "false";
+    liveTool.dataset.state = "running";
     liveTool.dataset.partKey = `tool:${callId}`;
     liveTool.innerHTML = [
       '<span class="systemsculpt-agent-tool-icon"></span>',
-      '<strong class="systemsculpt-agent-tool-label">Read 1 file</strong>',
-      '<span class="systemsculpt-agent-tool-state-icon" data-icon-state="minus"></span>',
+      '<strong data-testid="chat.tool.label">Read 1 file</strong>',
+      '<span data-testid="chat.tool.state" data-icon-state="minus"></span>',
     ].join("");
     liveTurn.append(liveTool);
     harness.container.append(liveTurn);
     await new Promise((resolve) => window.setTimeout(resolve, 0));
 
-    liveTool.className = "systemsculpt-agent-part is-tool is-succeeded";
+    liveTool.dataset.testid = "chat.part";
+    liveTool.dataset.kind = "tool";
+    liveTool.dataset.toolGrouped = "false";
+    liveTool.dataset.state = "succeeded";
     const liveStateIcon = liveTool.querySelector<HTMLElement>(
-      ".systemsculpt-agent-tool-state-icon",
+      "[data-testid='chat.tool.state']",
     );
     if (liveStateIcon) liveStateIcon.dataset.iconState = "check";
     await new Promise((resolve) => window.setTimeout(resolve, 0));
@@ -3590,19 +3896,25 @@ describe("guarded development driver actions", () => {
     ).slice(0, 3));
 
     const historicalTurn = document.createElement("div");
-    historicalTurn.className = "systemsculpt-agent-turn is-assistant";
+    historicalTurn.dataset.testid = "chat.turn";
+    historicalTurn.dataset.role = "assistant";
+    historicalTurn.dataset.active = "false";
     historicalTurn.dataset.turnId = turnId;
     const historicalTool = document.createElement("div");
-    historicalTool.className = "systemsculpt-agent-part is-tool is-succeeded";
+    historicalTool.dataset.testid = "chat.part";
+    historicalTool.dataset.kind = "tool";
+    historicalTool.dataset.toolGrouped = "false";
+    historicalTool.dataset.state = "succeeded";
     historicalTool.dataset.partKey = `tool:${callId}`;
     historicalTool.innerHTML = [
       '<span class="systemsculpt-agent-tool-icon"></span>',
-      '<strong class="systemsculpt-agent-tool-label">Read 1 file</strong>',
-      '<span class="systemsculpt-agent-tool-state-icon" data-icon-state="check"></span>',
+      '<strong data-testid="chat.tool.label">Read 1 file</strong>',
+      '<span data-testid="chat.tool.state" data-icon-state="check"></span>',
     ].join("");
     historicalTurn.append(historicalTool);
     const continuation = document.createElement("div");
-    continuation.className = "systemsculpt-agent-part is-text";
+    continuation.dataset.testid = "chat.part";
+    continuation.dataset.kind = "text";
     continuation.textContent = "LIVE-HISTORY-REBIND-CONTINUATION";
     historicalTurn.append(continuation);
     harness.container.prepend(historicalTurn);
@@ -3649,15 +3961,20 @@ describe("guarded development driver actions", () => {
     await runDriverAction(harness.ctx, "chat.beginToolLifecycleCapture", {});
 
     const assistantTurn = document.createElement("div");
-    assistantTurn.className = "systemsculpt-agent-turn is-assistant";
+    assistantTurn.dataset.testid = "chat.turn";
+    assistantTurn.dataset.role = "assistant";
+    assistantTurn.dataset.active = "false";
     assistantTurn.dataset.turnId = "run-ack-after-continuation";
     const tool = document.createElement("div");
-    tool.className = "systemsculpt-agent-part is-tool is-succeeded";
+    tool.dataset.testid = "chat.part";
+    tool.dataset.kind = "tool";
+    tool.dataset.toolGrouped = "false";
+    tool.dataset.state = "succeeded";
     tool.dataset.partKey = "tool:call-ack-after";
     tool.innerHTML = [
       '<span class="systemsculpt-agent-tool-icon"></span>',
-      '<strong class="systemsculpt-agent-tool-label">Read 1 file</strong>',
-      '<span class="systemsculpt-agent-tool-state-icon" data-icon-state="check"></span>',
+      '<strong data-testid="chat.tool.label">Read 1 file</strong>',
+      '<span data-testid="chat.tool.state" data-icon-state="check"></span>',
     ].join("");
     assistantTurn.append(tool);
     harness.container.append(assistantTurn);
@@ -3670,7 +3987,8 @@ describe("guarded development driver actions", () => {
     );
     diagnostics.push(...lifecycle.slice(0, 2));
     const continuation = document.createElement("div");
-    continuation.className = "systemsculpt-agent-part is-text";
+    continuation.dataset.testid = "chat.part";
+    continuation.dataset.kind = "text";
     continuation.textContent = "ACK-AFTER-CONTINUATION";
     assistantTurn.append(continuation);
     await new Promise((resolve) => window.setTimeout(resolve, 0));
@@ -3714,7 +4032,7 @@ describe("guarded development driver actions", () => {
       turnId: "request-collapsed-exact-plan",
     });
 
-    expect(rendered.turn.querySelectorAll(".systemsculpt-agent-part.is-tool"))
+    expect(rendered.turn.querySelectorAll("[data-testid='chat.part'][data-kind='tool']"))
       .toHaveLength(1);
     expect(rendered.turn.querySelector(
       'button[data-agent-activity-overflow][aria-expanded="false"]',
@@ -3772,9 +4090,9 @@ describe("guarded development driver actions", () => {
       exactSequentialPlanParams(tools, marker),
     )).resolves.toMatchObject({ asserted: true, exactToolCallCount: 2 });
     expect(overflow?.getAttribute("aria-expanded")).toBe("false");
-    expect(rendered.turn.querySelectorAll(".systemsculpt-agent-part.is-tool"))
+    expect(rendered.turn.querySelectorAll("[data-testid='chat.part'][data-kind='tool']"))
       .toHaveLength(1);
-    expect(rendered.turn.querySelector(".systemsculpt-agent-part.is-reasoning"))
+    expect(rendered.turn.querySelector("[data-testid='chat.part'][data-kind='reasoning']"))
       .toBeNull();
     await runDriverAction(harness.ctx, "chat.assertExactToolPlanCleanClose", {});
     expect(overflow?.getAttribute("aria-expanded")).toBe("false");
@@ -3800,7 +4118,7 @@ describe("guarded development driver actions", () => {
       turnId: "request-collapsed-retained-plan",
     });
 
-    expect(rendered.turn.querySelectorAll(".systemsculpt-agent-part.is-tool"))
+    expect(rendered.turn.querySelectorAll("[data-testid='chat.part'][data-kind='tool']"))
       .toHaveLength(1);
     await expect(runDriverAction(
       harness.ctx,
@@ -3814,7 +4132,7 @@ describe("guarded development driver actions", () => {
   it("rejects malformed production-grouped terminal tool surfaces", async () => {
     const mutations: Array<(row: HTMLElement) => void> = [
       (row) => { row.dataset.toolCount = "3"; },
-      (row) => { row.classList.remove("is-grouped"); },
+      (row) => { row.dataset.toolGrouped = "false"; },
       (row) => { row.dataset.partKey = "tool:wrong-group-anchor"; },
     ];
     for (const [index, mutate] of mutations.entries()) {
@@ -3870,9 +4188,12 @@ describe("guarded development driver actions", () => {
         schedule: "paint",
         mutate: (_harness, rendered) => {
           const tool = rendered.tools[1]!;
-          tool.className = "systemsculpt-agent-part is-tool is-running";
+          tool.dataset.testid = "chat.part";
+          tool.dataset.kind = "tool";
+          tool.dataset.toolGrouped = "false";
+          tool.dataset.state = "running";
           const stateIcon = tool.querySelector<HTMLElement>(
-            ".systemsculpt-agent-tool-state-icon",
+            "[data-testid='chat.tool.state']",
           );
           if (stateIcon) stateIcon.dataset.iconState = "minus";
         },
@@ -3882,7 +4203,8 @@ describe("guarded development driver actions", () => {
         schedule: "timer",
         mutate: (_harness, rendered) => {
           const text = document.createElement("div");
-          text.className = "systemsculpt-agent-part is-text";
+          text.dataset.testid = "chat.part";
+          text.dataset.kind = "text";
           text.dataset.partKey = "text:clean-close-additional";
           text.textContent = "PRIVATE LATE ADDITIONAL TEXT";
           rendered.turn.append(text);
@@ -3893,7 +4215,8 @@ describe("guarded development driver actions", () => {
         schedule: "paint",
         mutate: (_harness, rendered, tools) => {
           const text = document.createElement("div");
-          text.className = "systemsculpt-agent-part is-text";
+          text.dataset.testid = "chat.part";
+          text.dataset.kind = "text";
           text.dataset.partKey = "text:clean-close-duplicate";
           text.textContent = `CLEAN-CLOSE-${String(tools.length)}-DUPLICATE-TEXT`;
           rendered.turn.append(text);
@@ -3958,7 +4281,7 @@ describe("guarded development driver actions", () => {
         suffix: "reordered-marker",
         mutate: (_harness, rendered) => {
           const marker = rendered.turn.querySelector<HTMLElement>(
-            ".systemsculpt-agent-part.is-text",
+            "[data-testid='chat.part'][data-kind='text']",
           );
           if (marker) rendered.turn.prepend(marker);
         },
@@ -4087,7 +4410,8 @@ describe("guarded development driver actions", () => {
         turnId: `request-transient-${kind}`,
       });
       const transient = document.createElement("div");
-      transient.className = `systemsculpt-agent-part is-${kind}`;
+      transient.dataset.testid = "chat.part";
+      transient.dataset.kind = kind;
       transient.textContent = `PRIVATE TRANSIENT ${kind.toUpperCase()}`;
       rendered.turn.append(transient);
       transient.remove();
@@ -4254,7 +4578,8 @@ describe("guarded development driver actions", () => {
       });
       if (scenario.duplicate) {
         const duplicate = document.createElement("div");
-        duplicate.className = "systemsculpt-agent-part is-text";
+        duplicate.dataset.testid = "chat.part";
+        duplicate.dataset.kind = "text";
         duplicate.dataset.partKey = `text:duplicate:${String(index)}`;
         duplicate.textContent = scenario.marker;
         rendered.turn.append(duplicate);
@@ -4409,7 +4734,8 @@ describe("guarded development driver actions", () => {
     });
     window.setTimeout(() => {
       const error = document.createElement("div");
-      error.className = "systemsculpt-agent-part is-error";
+      error.dataset.testid = "chat.part";
+      error.dataset.kind = "error";
       error.textContent = "PRIVATE LATE FAILURE";
       rendered.turn.append(error);
     }, 0);
@@ -4428,10 +4754,13 @@ describe("guarded development driver actions", () => {
     harness.ctx.readSupportDiagnostics = () => [];
     await runDriverAction(harness.ctx, "chat.beginToolLifecycleCapture", {});
     const assistantTurn = document.createElement("div");
-    assistantTurn.className = "systemsculpt-agent-turn is-assistant";
+    assistantTurn.dataset.testid = "chat.turn";
+    assistantTurn.dataset.role = "assistant";
+    assistantTurn.dataset.active = "false";
     assistantTurn.dataset.turnId = "run-no-client-tools";
     const continuation = document.createElement("div");
-    continuation.className = "systemsculpt-agent-part is-text";
+    continuation.dataset.testid = "chat.part";
+    continuation.dataset.kind = "text";
     continuation.textContent = "INVALID-TOOLS-CORRECTED-V1";
     assistantTurn.append(continuation);
     harness.container.append(assistantTurn);
@@ -4460,10 +4789,13 @@ describe("guarded development driver actions", () => {
     const harness = makeDevelopmentHarness();
     await runDriverAction(harness.ctx, "chat.beginToolLifecycleCapture", {});
     const assistantTurn = document.createElement("div");
-    assistantTurn.className = "systemsculpt-agent-turn is-assistant";
+    assistantTurn.dataset.testid = "chat.turn";
+    assistantTurn.dataset.role = "assistant";
+    assistantTurn.dataset.active = "false";
     assistantTurn.dataset.turnId = "run-missing-support-diagnostics";
     const continuation = document.createElement("div");
-    continuation.className = "systemsculpt-agent-part is-text";
+    continuation.dataset.testid = "chat.part";
+    continuation.dataset.kind = "text";
     continuation.textContent = "MISSING-DIAGNOSTICS-CORRECTED";
     assistantTurn.append(continuation);
     harness.container.append(assistantTurn);
@@ -4488,10 +4820,13 @@ describe("guarded development driver actions", () => {
     await runDriverAction(harness.ctx, "chat.beginToolLifecycleCapture", {});
     diagnosticsThrow = false;
     const assistantTurn = document.createElement("div");
-    assistantTurn.className = "systemsculpt-agent-turn is-assistant";
+    assistantTurn.dataset.testid = "chat.turn";
+    assistantTurn.dataset.role = "assistant";
+    assistantTurn.dataset.active = "false";
     assistantTurn.dataset.turnId = "run-throwing-support-baseline";
     const continuation = document.createElement("div");
-    continuation.className = "systemsculpt-agent-part is-text";
+    continuation.dataset.testid = "chat.part";
+    continuation.dataset.kind = "text";
     continuation.textContent = "THROWING-BASELINE-CORRECTED";
     assistantTurn.append(continuation);
     harness.container.append(assistantTurn);
@@ -4516,10 +4851,13 @@ describe("guarded development driver actions", () => {
     await runDriverAction(harness.ctx, "chat.beginToolLifecycleCapture", {});
     diagnosticsThrow = true;
     const assistantTurn = document.createElement("div");
-    assistantTurn.className = "systemsculpt-agent-turn is-assistant";
+    assistantTurn.dataset.testid = "chat.turn";
+    assistantTurn.dataset.role = "assistant";
+    assistantTurn.dataset.active = "false";
     assistantTurn.dataset.turnId = "run-throwing-current-support";
     const continuation = document.createElement("div");
-    continuation.className = "systemsculpt-agent-part is-text";
+    continuation.dataset.testid = "chat.part";
+    continuation.dataset.kind = "text";
     continuation.textContent = "THROWING-CURRENT-CORRECTED";
     assistantTurn.append(continuation);
     harness.container.append(assistantTurn);
@@ -4539,18 +4877,24 @@ describe("guarded development driver actions", () => {
     harness.ctx.readSupportDiagnostics = () => [];
     await runDriverAction(harness.ctx, "chat.beginToolLifecycleCapture", {});
     const assistantTurn = document.createElement("div");
-    assistantTurn.className = "systemsculpt-agent-turn is-assistant";
+    assistantTurn.dataset.testid = "chat.turn";
+    assistantTurn.dataset.role = "assistant";
+    assistantTurn.dataset.active = "false";
     assistantTurn.dataset.turnId = "run-transient-client-tool";
     harness.container.append(assistantTurn);
     const tool = document.createElement("div");
-    tool.className = "systemsculpt-agent-part is-tool is-running";
+    tool.dataset.testid = "chat.part";
+    tool.dataset.kind = "tool";
+    tool.dataset.toolGrouped = "false";
+    tool.dataset.state = "running";
     tool.dataset.partKey = "tool:transient-client-tool";
-    tool.innerHTML = '<strong class="systemsculpt-agent-tool-label">Read 1 file</strong>';
+    tool.innerHTML = '<strong data-testid="chat.tool.label">Read 1 file</strong>';
     assistantTurn.append(tool);
     await new Promise((resolve) => window.setTimeout(resolve, 0));
     tool.remove();
     const continuation = document.createElement("div");
-    continuation.className = "systemsculpt-agent-part is-text";
+    continuation.dataset.testid = "chat.part";
+    continuation.dataset.kind = "text";
     continuation.textContent = "TRANSIENT-TOOL-CORRECTED";
     assistantTurn.append(continuation);
     await new Promise((resolve) => window.setTimeout(resolve, 0));
@@ -4571,10 +4915,13 @@ describe("guarded development driver actions", () => {
     await runDriverAction(harness.ctx, "chat.beginToolLifecycleCapture", {});
     diagnostics.push(supportDiagnostic("local_tool_started", "local-tool-started"));
     const assistantTurn = document.createElement("div");
-    assistantTurn.className = "systemsculpt-agent-turn is-assistant";
+    assistantTurn.dataset.testid = "chat.turn";
+    assistantTurn.dataset.role = "assistant";
+    assistantTurn.dataset.active = "false";
     assistantTurn.dataset.turnId = "run-local-tool-started";
     const continuation = document.createElement("div");
-    continuation.className = "systemsculpt-agent-part is-text";
+    continuation.dataset.testid = "chat.part";
+    continuation.dataset.kind = "text";
     continuation.textContent = "LOCAL-EXECUTION-CORRECTED";
     assistantTurn.append(continuation);
     harness.container.append(assistantTurn);
@@ -4599,10 +4946,13 @@ describe("guarded development driver actions", () => {
       supportDiagnostic("tool_result_acknowledged_failed", "unexpected-result", 2),
     );
     const assistantTurn = document.createElement("div");
-    assistantTurn.className = "systemsculpt-agent-turn is-assistant";
+    assistantTurn.dataset.testid = "chat.turn";
+    assistantTurn.dataset.role = "assistant";
+    assistantTurn.dataset.active = "false";
     assistantTurn.dataset.turnId = "run-unexpected-tool-result";
     const continuation = document.createElement("div");
-    continuation.className = "systemsculpt-agent-part is-text";
+    continuation.dataset.testid = "chat.part";
+    continuation.dataset.kind = "text";
     continuation.textContent = "UNEXPECTED-RESULT-CORRECTED";
     assistantTurn.append(continuation);
     harness.container.append(assistantTurn);
@@ -4625,10 +4975,13 @@ describe("guarded development driver actions", () => {
     await runDriverAction(harness.ctx, "chat.beginToolLifecycleCapture", {});
     harness.agent.pendingDeliveries.set("pending-result", {});
     const assistantTurn = document.createElement("div");
-    assistantTurn.className = "systemsculpt-agent-turn is-assistant";
+    assistantTurn.dataset.testid = "chat.turn";
+    assistantTurn.dataset.role = "assistant";
+    assistantTurn.dataset.active = "false";
     assistantTurn.dataset.turnId = "run-pending-result";
     const continuation = document.createElement("div");
-    continuation.className = "systemsculpt-agent-part is-text";
+    continuation.dataset.testid = "chat.part";
+    continuation.dataset.kind = "text";
     continuation.textContent = "PENDING-RESULT-CORRECTED";
     assistantTurn.append(continuation);
     harness.container.append(assistantTurn);
@@ -4649,10 +5002,13 @@ describe("guarded development driver actions", () => {
     await runDriverAction(harness.ctx, "chat.beginToolLifecycleCapture", {});
     harness.agent.pendingApprovalDeliveries.set("pending-approval", {});
     const assistantTurn = document.createElement("div");
-    assistantTurn.className = "systemsculpt-agent-turn is-assistant";
+    assistantTurn.dataset.testid = "chat.turn";
+    assistantTurn.dataset.role = "assistant";
+    assistantTurn.dataset.active = "false";
     assistantTurn.dataset.turnId = "run-pending-approval";
     const continuation = document.createElement("div");
-    continuation.className = "systemsculpt-agent-part is-text";
+    continuation.dataset.testid = "chat.part";
+    continuation.dataset.kind = "text";
     continuation.textContent = "PENDING-APPROVAL-CORRECTED";
     assistantTurn.append(continuation);
     harness.container.append(assistantTurn);
@@ -4757,7 +5113,9 @@ describe("incident report and reload ownership bridges", () => {
       before.view.chatId = "owned-chat";
       before.input.value = "";
       const turn = document.createElement("div");
-      turn.className = "systemsculpt-agent-turn is-user";
+      turn.dataset.testid = "chat.turn";
+      turn.dataset.role = "user";
+      turn.dataset.active = "false";
       turn.textContent = `${marker} request`;
       before.container.append(turn);
     };
@@ -4783,7 +5141,9 @@ describe("incident report and reload ownership bridges", () => {
     const after = makeDevelopmentHarness({ chatId: "owned-chat" });
     after.adapterRead.mockResolvedValue(savedText);
     const restoredTurn = document.createElement("div");
-    restoredTurn.className = "systemsculpt-agent-turn is-user";
+    restoredTurn.dataset.testid = "chat.turn";
+    restoredTurn.dataset.role = "user";
+    restoredTurn.dataset.active = "false";
     restoredTurn.textContent = `${marker} request`;
     after.container.append(restoredTurn);
     const chatFile = { path: "SystemSculpt/Chats/owned-chat.md" };

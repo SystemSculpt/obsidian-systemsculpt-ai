@@ -18,7 +18,9 @@ describe("DiffViewer", () => {
       fileName: "Plan.md",
       showLineNumbers: true,
     }).render();
-    expect(host.querySelector(".systemsculpt-diff-filename")?.textContent).toBe("Plan.md");
+    expect(host.querySelector('[data-testid="chat.diff.filename"]')?.textContent).toBe("Plan.md");
+    expect(host.querySelector('[data-testid="chat.diff.line"][data-change="added"] [data-testid="chat.diff.content"]')?.textContent).toBe("after");
+    expect(host.querySelector('[data-testid="chat.diff.line"][data-change="removed"] [data-testid="chat.diff.content"]')?.textContent).toBe("before");
     expect(host.querySelector(".systemsculpt-diff-line-number-old")?.textContent).toBe("21");
     expect(Array.from(host.querySelectorAll(".systemsculpt-diff-prefix"), (line) => line.textContent))
       .toEqual(["−", "+"]);

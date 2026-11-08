@@ -190,7 +190,7 @@ export function renderPreparedWriteEditPreviews(hostElement: HTMLElement, previe
     if (section !== container) section.createEl("summary", { text: `${preview.path} · +${preview.diff.stats.additions} −${preview.diff.stats.deletions}` });
     const body = section.createDiv({ cls: "systemsculpt-inline-diff__body" });
     if (preview.status === "unavailable" || (preview.notice && preview.status === "changed" && !preview.diff.stats.additions && !preview.diff.stats.deletions)) {
-      if (!options.approval || previews.length > 1) body.createDiv({ cls: "systemsculpt-diff-filename", text: preview.path });
+      if (!options.approval || previews.length > 1) body.createDiv({ cls: "systemsculpt-diff-filename", text: preview.path, attr: { "data-testid": "chat.diff.filename" } });
       body.createDiv({ cls: "systemsculpt-diff-no-changes-notice", text: preview.notice ?? "The change preview is unavailable. Review Details before approving." });
       continue;
     }

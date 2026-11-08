@@ -159,6 +159,10 @@ export class AgentToolRenderer {
       stagedApproval.dataset.approvalFingerprint = approvalFingerprint;
     }
     node.className = `systemsculpt-agent-part is-tool is-${presentation.displayState}`;
+    node.dataset.testid = "chat.part";
+    node.dataset.kind = "tool";
+    node.dataset.state = presentation.displayState;
+    node.dataset.toolGrouped = "false";
     node.dataset.agentActivityRow = "";
     node.dataset.activityKind = "tool";
     delete node.dataset.toolCount;
@@ -225,16 +229,18 @@ export class AgentToolRenderer {
       copy = header.createSpan({ cls: "systemsculpt-agent-tool-copy" });
       label = copy.createEl("strong", {
         cls: "systemsculpt-agent-tool-label",
+        attr: { "data-testid": "chat.tool.label" },
       });
       summary = copy.createSpan({
         cls: "systemsculpt-agent-tool-summary",
+        attr: { "data-testid": "chat.tool.summary" },
       });
       controls = header.createSpan({ cls: "systemsculpt-agent-tool-controls" });
       disclosureIcon = controls.createSpan({
         cls: "systemsculpt-agent-tool-disclosure",
       });
       disclosureIcon.setAttribute("aria-hidden", "true");
-      stateIcon = controls.createSpan({ cls: "systemsculpt-agent-tool-state-icon" });
+      stateIcon = controls.createSpan({ cls: "systemsculpt-agent-tool-state-icon", attr: { "data-testid": "chat.tool.state" } });
       stateIcon.setAttribute("aria-hidden", "true");
       header.dataset.focusKey = "tool-summary";
       const createdShell = shell as HTMLDetailsElement;

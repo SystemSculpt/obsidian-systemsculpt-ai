@@ -137,12 +137,12 @@ function settingRowControl(ctx: LocatorContext, name: string): HTMLElement | nul
 }
 
 function settingsTabButton(ctx: LocatorContext, label: string): HTMLElement | null {
-  const bar = inDocuments(ctx, ".ss-settings-tab-bar");
+  const bar = inDocuments(ctx, "[data-testid='settings.tab-bar']");
   if (!bar) return null;
   const wanted = label.trim().toLowerCase();
   const exact: Element[] = [];
   const partial: Element[] = [];
-  for (const button of bar.querySelectorAll("button, [role='tab']")) {
+  for (const button of bar.querySelectorAll("[role='tab'][data-testid^='settings.tab.']")) {
     const text = (button.textContent ?? "").trim().toLowerCase();
     if (text === wanted) exact.push(button);
     else if (text.includes(wanted)) partial.push(button);
@@ -152,8 +152,8 @@ function settingsTabButton(ctx: LocatorContext, label: string): HTMLElement | nu
 
 const SEMANTIC_TARGETS: Record<string, (ctx: LocatorContext) => HTMLElement | null> = {
   "chat.view": ({ app }) => chatContainer(app),
-  "settings.surface": (ctx) => inDocuments(ctx, ".ss-settings-surface"),
-  "settings.tab-bar": (ctx) => inDocuments(ctx, ".ss-settings-tab-bar"),
+  "settings.surface": (ctx) => inDocuments(ctx, "[data-testid='settings.surface']"),
+  "settings.tab-bar": (ctx) => inDocuments(ctx, "[data-testid='settings.tab-bar']"),
 };
 
 export function resolveTarget(ctx: LocatorContext, target: string): HTMLElement | null {
