@@ -69,6 +69,8 @@ export function renderTurnMedia(app: App, parent: HTMLElement, parts: readonly A
     if (image?.sourcePath) rememberCodexImage(image.sourcePath, image.media.path);
   }
   const presented = presentTurnMedia(parts, answer);
+  // Everything the reply shows, in the strip below or embedded in the answer itself.
+  parent.setAttribute("data-reply-media", JSON.stringify(presentTurnMedia(parts).media.map(item => item.path)));
   if (!presented.media.length && !presented.notices.length) {
     existing?.remove();
     syncToolMediaWithReply(parent);

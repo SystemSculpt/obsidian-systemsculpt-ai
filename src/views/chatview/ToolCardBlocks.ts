@@ -225,6 +225,10 @@ const TURN_MEDIA_ITEM = ":scope > .systemsculpt-agent-turn-media [data-media-pat
 export function syncToolMediaWithReply(turnBody: Element | null): void {
   if (!turnBody) return;
   const below = new Set(Array.from(turnBody.querySelectorAll(TURN_MEDIA_ITEM), item => item.getAttribute("data-media-path")));
+  try {
+    const shown: unknown = JSON.parse(turnBody.getAttribute("data-reply-media") ?? "[]");
+    if (Array.isArray(shown)) for (const path of shown) if (typeof path === "string") below.add(path);
+  } catch { /* An unreadable list hides nothing. */ }
   for (const media of Array.from(turnBody.querySelectorAll<HTMLElement>(".ss-tool-media"))) {
     const paths = Array.from(media.querySelectorAll("[data-media-path]"), tile => tile.getAttribute("data-media-path"));
     media.classList.toggle("is-shown-in-reply", paths.length > 0 && paths.every(path => below.has(path)));

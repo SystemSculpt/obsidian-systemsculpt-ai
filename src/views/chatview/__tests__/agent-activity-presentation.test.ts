@@ -134,7 +134,13 @@ describe("AgentActivityPresentation", () => {
     expect(summarizeAgentActivity([
       tool("edit", { path: "Notes/A.md" }, { state: "failed" }),
       tool("write", { path: "Notes/B.md" }, { id: "uncertain", callId: "uncertain", state: "outcome-unknown" }),
-    ])).toEqual({ label: "Couldn't complete 2 actions · 2 failed", failedCount: 2 });
+    ])).toEqual({ label: "Couldn't complete 2 actions · 1 failed · 1 uncertain", failedCount: 2 });
+    expect(summarizeAgentActivity([
+      tool("Bash", { command: "rm -rf build" }, {
+        location: "server", state: "failed", native: { agent: "claude", workingDirectory: "/vault" },
+        error: { code: "CLAUDE_AUTO_BLOCKED", message: "Blocked" },
+      } as Partial<AgentToolPart>),
+    ]).label).toMatch(/ · 1 blocked$/u);
     const native = { location: "server" as const, native: { agent: "claude" as const, workingDirectory: "/vault" } };
     expect(summarizeAgentActivity([
       tool("Edit", { file_path: "/vault/A.md" }, { ...native, approvalDecision: "approved" }),
