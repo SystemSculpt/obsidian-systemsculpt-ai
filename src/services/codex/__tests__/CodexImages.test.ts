@@ -48,7 +48,7 @@ function update(item: Record<string, unknown>): LocalAgentToolUpdate {
 }
 function codexImageMediaPath(value: AgentToolPart): string { return codexImageMedia(value)!.media.path; }
 function part(saved: LocalAgentToolUpdate): AgentToolPart {
-  return { id: saved.callId, order: 0, kind: "tool", messageId: "m", location: "server", name: saved.name ?? "tool", input: saved.input, state: saved.state, output: saved.output, native: { agent: "codex", workingDirectory: "/vault", vaultRoot: "/vault" } };
+  return { id: saved.callId, callId: saved.callId, order: 0, kind: "tool", messageId: "m", location: "server", name: saved.name ?? "tool", input: saved.input, state: saved.state, output: saved.output, native: { agent: "codex", workingDirectory: "/vault", vaultRoot: "/vault" } };
 }
 
 describe("Codex images in chat", () => {
