@@ -218,6 +218,38 @@ export class ChatStorageService {
     this.knownMetadata.delete(filePath);
   }
 
+  /** Patch the latest durable history without recreating a deleted chat or replacing its metadata. */
+  async updateChatMessages(
+    chatId: string,
+    transform: (messages: readonly ChatMessage[]) => readonly ChatMessage[],
+    options: Pick<SaveChatOptions, "chatDirectory"> = {},
+  ): Promise<LoadedChatRecord> {
+    const filePath = `${options.chatDirectory ?? this.chatDirectory}/${chatId}.md`;
+    const file = this.app.vault.getAbstractFileByPath(filePath);
+    if (!(file instanceof TFile)) throw new Error("This chat could not be loaded.");
+    const content = await this.app.vault.process(file, (current) => {
+      const parsed = ChatMarkdownSerializer.parseMarkdown(current);
+      const envelope = splitChatFrontmatter(current);
+      const frontmatter = envelope ? parseChatFrontmatterYaml(envelope.yamlContent) : null;
+      if (!parsed || parsed.metadata.id !== chatId || !envelope || !frontmatter) {
+        throw new SavedChatCorruptedError(filePath);
+      }
+      const messages = transform(parsed.messages);
+      const metadata = {
+        ...frontmatter,
+        lastModified: new Date().toISOString(),
+        version: (parsed.metadata.version || 0) + 1,
+        messageCount: messages.length,
+      };
+      const bom = current.startsWith("﻿") ? "﻿" : "";
+      return `${bom}---\n${stringifyYaml(metadata)}---\n\n${this.serializeMessages(messages)}`;
+    });
+    this.knownMetadata.delete(filePath);
+    const updated = this.parseDirectChatLoad(content, filePath);
+    if (!updated) throw new SavedChatCorruptedError(filePath);
+    return updated;
+  }
+
   // Master save method - always saves in the new, simple format
   async saveChat(
     chatId: string,
@@ -336,15 +368,7 @@ export class ChatStorageService {
         }));
       }
 
-      const messagesContent = ChatMarkdownSerializer.serializeMessages(
-        messages.map((message) => {
-          if (collectChatAttachmentRefKeys([message]).size === 0) return message;
-          if (!this.attachmentStore) {
-            throw new Error("Attachment references cannot be saved without a vault adapter.");
-          }
-          return this.attachmentStore.materializeMessageReferences(message);
-        }),
-      );
+      const messagesContent = this.serializeMessages(messages);
 
       const fullContent = `---\n${stringifyYaml(metadata)}---\n\n${messagesContent}`;
 
@@ -373,6 +397,16 @@ export class ChatStorageService {
       }, written?.stat);
 
       return { filePath, version: newVersion };
+  }
+
+  private serializeMessages(messages: readonly ChatMessage[]): string {
+    return ChatMarkdownSerializer.serializeMessages(messages.map((message) => {
+      if (collectChatAttachmentRefKeys([message]).size === 0) return message;
+      if (!this.attachmentStore) {
+        throw new Error("Attachment references cannot be saved without a vault adapter.");
+      }
+      return this.attachmentStore.materializeMessageReferences(message);
+    }));
   }
 
   /**

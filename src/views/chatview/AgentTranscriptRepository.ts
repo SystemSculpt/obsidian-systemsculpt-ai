@@ -550,43 +550,52 @@ export class AgentTranscriptRepository {
         || !isThinAgentFailureCode(input.failureCode)) {
         throw new Error("Invalid local failure receipt.");
       }
-      const userIndex = this.messages.findIndex((message) =>
-        message.role === "user" && message.message_id === input.turnId);
-      if (userIndex < 0) {
+      if (!this.chatId) {
         throw new Error("A local failure receipt requires a durable user turn.");
       }
-      let turnEnd = userIndex + 1;
-      while (turnEnd < this.messages.length && this.messages[turnEnd].role === "assistant") {
-        turnEnd += 1;
-      }
-      const next = [...this.messages];
-      let failedIndex = -1;
-      for (let index = turnEnd - 1; index > userIndex; index -= 1) {
-        if (next[index].role === "assistant" && next[index].terminalOutcome === "failed") {
-          failedIndex = index;
-          break;
+      let messageId = `failure-${input.reportId}`;
+      const saved = await this.storage.updateChatMessages(this.chatId, (messages) => {
+        const userIndex = messages.findIndex((message) =>
+          message.role === "user" && message.message_id === input.turnId);
+        if (userIndex < 0) {
+          throw new Error("A local failure receipt requires a durable user turn.");
         }
-      }
-      const receipt = {
-        terminalOutcome: "failed" as const,
-        terminalReportId: input.reportId,
-        terminalFailureCode: input.failureCode,
-        terminalRetryable: input.retryable,
-      };
-      let messageId: string;
-      if (failedIndex >= 0) {
-        next[failedIndex] = deepFreeze({ ...next[failedIndex], ...receipt });
-        messageId = next[failedIndex].message_id;
-      } else {
-        messageId = `failure-${input.reportId}`;
-        next.splice(turnEnd, 0, deepFreeze({
-          role: "assistant",
-          message_id: messageId,
-          content: "",
-          ...receipt,
-        }));
-      }
-      await this.persist(next, false, generation);
+        let turnEnd = userIndex + 1;
+        while (turnEnd < messages.length && messages[turnEnd].role === "assistant") {
+          turnEnd += 1;
+        }
+        const next = [...messages];
+        let failedIndex = -1;
+        for (let index = turnEnd - 1; index > userIndex; index -= 1) {
+          if (next[index].role === "assistant" && next[index].terminalOutcome === "failed") {
+            failedIndex = index;
+            break;
+          }
+        }
+        const receipt = {
+          terminalOutcome: "failed" as const,
+          terminalReportId: input.reportId,
+          terminalFailureCode: input.failureCode,
+          terminalRetryable: input.retryable,
+        };
+        if (failedIndex >= 0) {
+          next[failedIndex] = deepFreeze({ ...next[failedIndex], ...receipt });
+          messageId = next[failedIndex].message_id;
+        } else {
+          next.splice(turnEnd, 0, deepFreeze({
+            role: "assistant",
+            message_id: messageId,
+            content: "",
+            ...receipt,
+          }));
+        }
+        return next;
+      }, this.location());
+      this.assertGeneration(generation, "The active chat changed while saving the transcript.");
+      this.messages = deepFreeze(saved.messages.map(withDurableToolResults));
+      this.title = saved.title || "New chat";
+      this.version = saved.version || 0;
+      this.agentConversationId = parseAgentConversationId(saved.agentConversationId);
       const snapshot = this.snapshot();
       this.emitCommit({ snapshot, role: "assistant", messageId });
       return snapshot;

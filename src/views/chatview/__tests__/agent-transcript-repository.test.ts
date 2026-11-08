@@ -1,10 +1,11 @@
-import { TFile, type App, type Workspace } from "obsidian";
+import { TFile, parseYaml, stringifyYaml, type App, type Workspace } from "obsidian";
 import type { ChatMessage } from "../../../types";
 import type { ToolCall } from "../../../types/toolCalls";
 import { AgentTranscriptConflictError, AgentTranscriptRepository } from "../AgentTranscriptRepository";
 import { ChatStorageService } from "../ChatStorageService";
 import { CHAT_TRANSCRIPT_COMMITTED_EVENT, emitChatTranscriptCommitted } from "../ChatTranscriptEvents";
 import { ChatMarkdownSerializer } from "../storage/ChatMarkdownSerializer";
+import { splitChatFrontmatter } from "../storage/ChatFrontmatterIdentity";
 import { createTextAttachmentPart } from "../../../chat/ChatAttachmentContent";
 import { ConversationProjection } from "../../../chat/managed/ConversationProjection";
 import type { WireMessage } from "../../../chat/managed/WireConversation";
@@ -93,6 +94,14 @@ function createHarness() {
         agentConversationId: options.agentConversationId,
       });
       return { version: 1 };
+    }),
+    updateChatMessages: jest.fn(async (id: string, transform: (messages: readonly ChatMessage[]) => readonly ChatMessage[]) => {
+      const previous = records.get(id);
+      if (!previous) throw new Error("This chat could not be loaded.");
+      const messages = transform(previous.messages);
+      const saved = { ...previous, messages, version: previous.version + 1 };
+      records.set(id, saved);
+      return saved;
     }),
     saveChat: jest.fn(async (id: string, messages: ChatMessage[], options: any) => {
       const previous = records.get(id);
@@ -718,6 +727,7 @@ describe("AgentTranscriptRepository", () => {
 
     expect(repository.snapshot()).toEqual(committed);
     expect(storage.saveChat).not.toHaveBeenCalled();
+    expect(storage.updateChatMessages).toHaveBeenCalledTimes(expectedMessage.startsWith("Invalid") ? 0 : 1);
   });
 
   it("replaces the last failed assistant receipt within a turn", async () => {
@@ -1642,6 +1652,138 @@ describe("AgentTranscriptRepository with saved chat notes", () => {
     });
     await new ChatStorageService(app, "SystemSculpt/Chats").renameChat(chatPath, "chat-1", "Renamed");
     expect(notes.get(chatPath)!.content).toContain("Arrived before processing");
+  });
+
+  it.each([false, true])("patches a delayed receipt into the latest note without replacing newer history or metadata (process interleaving: %s)", async interleaved => {
+    const { app, vault, notes } = noteVault();
+    await saveNote(app, [user("u1")]);
+    let directory = "SystemSculpt/Chats";
+    const stale = new AgentTranscriptRepository(new ChatStorageService(app, () => directory), () => ({}));
+    const current = openChat(app);
+    await stale.load("chat-1");
+    await current.load("chat-1");
+    directory = "New/Chats";
+    let latestMetadata: Record<string, unknown> = {};
+    const advance = async () => {
+      current.setTitle("Newer title");
+      await current.commitUser({ kind: "append", message: user("u2", "Newer turn") }, conversationId);
+      const note = notes.get(chatPath)!;
+      const envelope = splitChatFrontmatter(note.content)!;
+      latestMetadata = {
+        ...parseYaml(envelope.yamlContent),
+        custom_property: { nested: "preserved" },
+        tags: ["keep-me"],
+        context_files: [{ path: "New context.md", type: "source" }],
+        chatFontSize: "large",
+        approvalMode: "auto",
+      };
+      note.content = `---\n${stringifyYaml(latestMetadata)}---\n${envelope.body}`;
+    };
+    if (interleaved) {
+      const process = vault.process.getMockImplementation()!;
+      vault.process.mockImplementationOnce(async (file, transform) => {
+        await advance();
+        return process(file, transform);
+      });
+    } else {
+      await advance();
+    }
+    vault.create.mockClear();
+
+    const reportId = `report_${"e".repeat(32)}`;
+    const patched = await stale.persistFailedReceipt({
+      turnId: "u1", reportId, failureCode: "response_start_failed", retryable: true,
+    });
+
+    expect(patched.messages.map(message => message.message_id)).toEqual(["u1", `failure-${reportId}`, "u2"]);
+    expect(patched.messages[2].content).toBe("Newer turn");
+    expect(patched.title).toBe("Newer title");
+    expect(patched.version).toBe(Number(latestMetadata.version) + 1);
+    expect(patched.agentConversationId).toBe(conversationId);
+    const metadata = parseYaml(splitChatFrontmatter(notes.get(chatPath)!.content)!.yamlContent);
+    expect(metadata).toEqual({
+      ...latestMetadata, version: patched.version, messageCount: 3, lastModified: expect.any(String),
+    });
+    expect([...notes.keys()]).toEqual([chatPath]);
+    expect(vault.create).not.toHaveBeenCalled();
+    const reloaded = await new ChatStorageService(app, "SystemSculpt/Chats").loadChat("chat-1");
+    expect(reloaded).toMatchObject({
+      title: "Newer title", version: patched.version,
+      context_files: ["New context.md"], chatFontSize: "large", approvalMode: "auto",
+    });
+    expect(reloaded?.messages.map(message => message.message_id)).toEqual(patched.messages.map(message => message.message_id));
+  });
+
+  it("does not resurrect a removed user turn when its old repository persists a receipt", async () => {
+    const { app, vault, notes } = noteVault();
+    await saveNote(app, [user("u1")]);
+    const stale = openChat(app);
+    const current = openChat(app);
+    const original = await stale.load("chat-1");
+    const originalSnapshot = stale.snapshot();
+    await current.load("chat-1");
+    await current.commitUser({
+      kind: "resend", message: user("replacement"), targetMessageId: "u1", expectedIndex: 0, expectedVersion: original!.version,
+    }, conversationId);
+    const before = notes.get(chatPath)!.content;
+    vault.create.mockClear();
+
+    await expect(stale.persistFailedReceipt({
+      turnId: "u1", reportId: `report_${"e".repeat(32)}`, failureCode: "response_start_failed", retryable: true,
+    })).rejects.toThrow("A local failure receipt requires a durable user turn.");
+
+    expect(notes.get(chatPath)!.content).toBe(before);
+    expect(stale.snapshot()).toEqual(originalSnapshot);
+    expect(vault.create).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])("does not recreate a deleted chat during receipt persistence (deleted during process: %s)", async duringProcess => {
+    const { app, vault, notes } = noteVault();
+    await saveNote(app, [user("u1")]);
+    const stale = openChat(app);
+    await stale.load("chat-1");
+    if (duringProcess) {
+      const process = vault.process.getMockImplementation()!;
+      vault.process.mockImplementationOnce(async (file, transform) => {
+        notes.delete(chatPath);
+        return process(file, transform);
+      });
+    } else {
+      notes.delete(chatPath);
+    }
+    vault.create.mockClear();
+
+    await expect(stale.persistFailedReceipt({
+      turnId: "u1", reportId: `report_${"e".repeat(32)}`, failureCode: "response_start_failed", retryable: true,
+    })).rejects.toThrow();
+
+    expect(notes.has(chatPath)).toBe(false);
+    expect(vault.create).not.toHaveBeenCalled();
+  });
+
+  it.each(["truncated", "wrong-id"])("rejects a receipt when the note becomes %s before the atomic callback", async kind => {
+    const { app, vault, notes } = noteVault();
+    await saveNote(app, [user("u1")]);
+    const stale = openChat(app);
+    await stale.load("chat-1");
+    let changed = "";
+    const process = vault.process.getMockImplementation()!;
+    vault.process.mockImplementationOnce(async (file, transform) => {
+      const note = notes.get(chatPath)!;
+      changed = kind === "truncated"
+        ? note.content.replace("<!-- SYSTEMSCULPT-MESSAGE-END -->", "")
+        : note.content.replace("id: chat-1", "id: different-chat");
+      note.content = changed;
+      return process(file, transform);
+    });
+    vault.create.mockClear();
+
+    await expect(stale.persistFailedReceipt({
+      turnId: "u1", reportId: `report_${"e".repeat(32)}`, failureCode: "response_start_failed", retryable: true,
+    })).rejects.toThrow("Saved chat history is corrupted");
+
+    expect(notes.get(chatPath)!.content).toBe(changed);
+    expect(vault.create).not.toHaveBeenCalled();
   });
 
   it("opens a chat saved before tool results were bounded without rewriting its note", async () => {

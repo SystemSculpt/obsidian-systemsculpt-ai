@@ -1097,6 +1097,7 @@ describe("ChatView incident report regression integration", () => {
         content: PRIVATE.prompt,
       }]);
       let receiptWriteCount = 0;
+      const receiptWrites: Array<readonly [string, readonly ChatMessage[]]> = [];
       let markFirstReceiptWriteRejected!: () => void;
       const firstReceiptWriteRejected = new Promise<void>((resolve) => {
         markFirstReceiptWriteRejected = resolve;
@@ -1109,11 +1110,13 @@ describe("ChatView incident report regression integration", () => {
           messages: parseDurableMessages(durableTranscript),
           context_files: [],
         } : null),
-        saveChat: jest.fn(async (
+        updateChatMessages: jest.fn(async (
           id: string,
-          messages: ChatMessage[],
+          transform: (messages: readonly ChatMessage[]) => readonly ChatMessage[],
         ) => {
           expect(id).toBe(chatId);
+          const messages = transform(parseDurableMessages(durableTranscript));
+          receiptWrites.push([id, messages]);
           receiptWriteCount += 1;
           if (receiptWriteCount === 1) {
             markFirstReceiptWriteRejected();
@@ -1121,7 +1124,7 @@ describe("ChatView incident report regression integration", () => {
           }
           durableTranscript = ChatMarkdownSerializer.serializeMessages(messages);
           transcriptVersion += 1;
-          return { version: transcriptVersion };
+          return { id, title: "Failed local run", messages, version: transcriptVersion };
         }),
       };
       const transcript = new AgentTranscriptRepository(
@@ -1194,7 +1197,7 @@ describe("ChatView incident report regression integration", () => {
         for (let index = 0; index < 20 && jest.getTimerCount() === 0; index += 1) {
           await Promise.resolve();
         }
-        expect(transcriptStorage.saveChat).toHaveBeenCalledTimes(1);
+        expect(transcriptStorage.updateChatMessages).toHaveBeenCalledTimes(1);
         expect(jest.getTimerCount()).toBe(1);
         expect((closeView as any)["turns"].pendingLocalReportIds.get(REQUEST_ID))
           .toBe(localReportId);
@@ -1202,8 +1205,8 @@ describe("ChatView incident report regression integration", () => {
 
         await expect(closeView.onClose()).resolves.toBeUndefined();
 
-        expect(transcriptStorage.saveChat).toHaveBeenCalledTimes(2);
-        for (const [savedChatId, savedMessages] of transcriptStorage.saveChat.mock.calls) {
+        expect(transcriptStorage.updateChatMessages).toHaveBeenCalledTimes(2);
+        for (const [savedChatId, savedMessages] of receiptWrites) {
           expect(savedChatId).toBe(chatId);
           expect(savedMessages).toEqual(expect.arrayContaining([
             expect.objectContaining({
@@ -1219,7 +1222,7 @@ describe("ChatView incident report regression integration", () => {
         expect(durableTranscript).toContain(localReportId);
         expect(jest.getTimerCount()).toBe(0);
         await jest.advanceTimersByTimeAsync(1_000);
-        expect(transcriptStorage.saveChat).toHaveBeenCalledTimes(2);
+        expect(transcriptStorage.updateChatMessages).toHaveBeenCalledTimes(2);
       } finally {
         jest.useRealTimers();
       }
