@@ -56,11 +56,11 @@ function maskSegments(element: HTMLElement, guide: StudioAlignmentGuideLine, seg
 
 /** Find the nearest free point on one axis using cached world boxes, not peer DOM reads. */
 function nearestBadgeCoordinate(
-  axis: "x" | "y", desired: StudioGuideRect, occlusions: Occlusions, placed: readonly StudioGuideRect[], gap: number
-): number {
+  axis: "x" | "y", desired: StudioGuideRect, obstacles: readonly StudioGuideRect[], gap: number, bounds: Interval
+): number | null {
   const intervals: Interval[] = [];
   const width = desired.right - desired.left, height = desired.bottom - desired.top;
-  for (const rect of rectangles(occlusions, placed)) {
+  for (const rect of obstacles) {
     const crosses = axis === "x"
       ? desired.top < rect.bottom + gap && desired.bottom > rect.top - gap
       : desired.left < rect.right + gap && desired.right > rect.left - gap;
@@ -69,13 +69,61 @@ function nearestBadgeCoordinate(
       ? { start: rect.left - width - gap, end: rect.right + gap }
       : { start: rect.top - height - gap, end: rect.bottom + gap });
   }
-  const coordinate = axis === "x" ? desired.left : desired.top;
+  const coordinate = Math.min(bounds.end, Math.max(bounds.start, axis === "x" ? desired.left : desired.top));
   for (const interval of mergeIntervals(intervals)) {
     if (coordinate > interval.start && coordinate < interval.end) {
-      return coordinate - interval.start <= interval.end - coordinate ? interval.start : interval.end;
+      const before = interval.start >= bounds.start ? interval.start : null;
+      const after = interval.end <= bounds.end ? interval.end : null;
+      if (before === null) return after;
+      if (after === null) return before;
+      return coordinate - before <= after - coordinate ? before : after;
     }
   }
   return coordinate;
+}
+
+/** Search bounded axis projections before collision resolution; never clamp the result afterward. */
+function nearestBadgeRect(
+  desired: StudioGuideRect, occlusions: Occlusions, placed: readonly StudioGuideRect[], gap: number,
+  viewport: Readonly<StudioGuideRect> | null
+): StudioGuideRect | null {
+  const width = desired.right - desired.left, height = desired.bottom - desired.top;
+  const minX = viewport?.left ?? -Infinity, maxX = (viewport?.right ?? Infinity) - width;
+  const minY = viewport?.top ?? -Infinity, maxY = (viewport?.bottom ?? Infinity) - height;
+  if (maxX < minX || maxY < minY) return null;
+  const obstacles = [...rectangles(occlusions, placed)].filter(rect =>
+    rect.right + gap > minX && rect.left - width - gap < maxX
+    && rect.bottom + gap > minY && rect.top - height - gap < maxY);
+  const startX = Math.min(maxX, Math.max(minX, desired.left));
+  const startY = Math.min(maxY, Math.max(minY, desired.top));
+  const projections: Array<{ axis: "x" | "y"; cross: number }> = [
+    { axis: "x", cross: startY }, { axis: "y", cross: startX },
+  ];
+  if (viewport) projections.push(
+    { axis: "x", cross: minY }, { axis: "x", cross: maxY },
+    { axis: "y", cross: minX }, { axis: "y", cross: maxX },
+  );
+  let best: StudioGuideRect | null = null;
+  let distance = Infinity;
+  const minDistance = (startX - desired.left) ** 2 + (startY - desired.top) ** 2;
+  // At most six camera-derived projections: interval merging stays O(N log N).
+  for (const { axis, cross } of projections) {
+    const row = axis === "x"
+      ? { left: startX, top: cross, right: startX + width, bottom: cross + height }
+      : { left: cross, top: startY, right: cross + width, bottom: startY + height };
+    const coordinate = nearestBadgeCoordinate(axis, row, obstacles, gap,
+      axis === "x" ? { start: minX, end: maxX } : { start: minY, end: maxY });
+    if (coordinate === null) continue;
+    const left = axis === "x" ? coordinate : cross;
+    const top = axis === "y" ? coordinate : cross;
+    const candidateDistance = (left - desired.left) ** 2 + (top - desired.top) ** 2;
+    if (candidateDistance < distance) {
+      best = { left, top, right: left + width, bottom: top + height };
+      distance = candidateDistance;
+      if (distance === minDistance) break;
+    }
+  }
+  return best;
 }
 
 /**
@@ -87,7 +135,8 @@ export function renderStudioGraphAlignmentGuidesLayer(
   result: { guides: StudioAlignmentGuideLine[]; gaps: StudioDistanceBadge[] } | null,
   zoom: number,
   origin: { x: number; y: number } = { x: 0, y: 0 },
-  occlusions: Occlusions = []
+  occlusions: Occlusions = [],
+  viewport: Readonly<StudioGuideRect> | null = null
 ): void {
   while (layer.firstChild) layer.removeChild(layer.firstChild);
   if (!result || (result.guides.length === 0 && result.gaps.length === 0)) return;
@@ -102,11 +151,9 @@ export function renderStudioGraphAlignmentGuidesLayer(
     const left = anchor.x - (kind === "y" ? width + gap : width / 2);
     const top = kind === "offset" ? anchor.y + gap : anchor.y - (kind === "x" ? height + gap : height / 2);
     const desired = { left, top, right: left + width, bottom: top + height };
-    const nextX = nearestBadgeCoordinate("x", desired, occlusions, placed, gap);
-    const nextY = nearestBadgeCoordinate("y", desired, occlusions, placed, gap);
-    const resolved = Math.abs(nextX - left) <= Math.abs(nextY - top)
-      ? { left: nextX, top, right: nextX + width, bottom: top + height }
-      : { left, top: nextY, right: left + width, bottom: nextY + height };
+    const resolved = nearestBadgeRect(desired, occlusions, placed, gap, viewport);
+    // Keep the guide/span when no clear bounded candidate is found for its label.
+    if (!resolved) { badge.remove(); return; }
     placed.push(resolved);
     badge.classList.add("is-positioned");
     badge.style.left = `${(resolved.left + origin.x) * scale}px`;

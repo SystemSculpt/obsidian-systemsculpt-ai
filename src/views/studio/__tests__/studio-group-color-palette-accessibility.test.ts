@@ -1,6 +1,8 @@
 /**
  * @jest-environment jsdom
  */
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import type { StudioProjectV1 } from "../../../studio/types";
 import { StudioCanvasGeometry } from "../canvas/StudioCanvasGeometry";
 import { StudioGraphGroupController } from "../StudioGraphGroupController";
@@ -33,6 +35,23 @@ function createProject(): StudioProjectV1 {
     },
   } as unknown as StudioProjectV1;
 }
+
+it("does not animate group bounds separately from their members", () => {
+  const style = document.createElement("style");
+  const frame = document.createElement("div");
+  style.textContent = readFileSync(resolve(__dirname, "../../../css/views/studio/groups.css"), "utf8");
+  frame.className = "ss-studio-group-frame";
+  document.head.appendChild(style);
+  document.body.appendChild(frame);
+  try {
+    const transition = getComputedStyle(frame).transition;
+    expect(transition).toContain("border-color");
+    expect(transition).not.toMatch(/\b(?:left|top|width|height|all)\s/);
+  } finally {
+    style.remove();
+    frame.remove();
+  }
+});
 
 describe("Studio group color palette accessibility", () => {
   it("links its trigger and supports checked roving radio selection", () => {

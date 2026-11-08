@@ -1325,9 +1325,10 @@ export class StudioGraphSelectionController {
       return;
     }
     try {
+      const viewport = this.getViewportWorldRect();
       renderStudioGraphAlignmentGuidesLayer(this.alignmentGuidesEl, result, this.graphZoom, this.getWorldOrigin(), [
         this.geometry.getNodeRects(), this.geometry.getShapeRects(), this.geometry.getArrowLabelRects(), moving ? [moving] : [],
-      ]);
+      ], viewport);
     } catch {
       // Guide rendering must never break an in-flight drag.
     }

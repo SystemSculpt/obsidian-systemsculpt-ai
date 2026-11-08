@@ -12,12 +12,8 @@
   border-radius: var(--ss-radius-xl);
   background-color: color-mix(in srgb, var(--ss-studio-group-accent) 5%, transparent);
   cursor: grab;
-  transition:
-    left var(--ss-dur-fast) var(--ss-ease),
-    top var(--ss-dur-fast) var(--ss-ease),
-    width var(--ss-dur-fast) var(--ss-ease),
-    height var(--ss-dur-fast) var(--ss-ease),
-    border-color var(--ss-dur-fast) var(--ss-ease);
+  /* Bounds must move with members, not ease behind live gesture geometry. */
+  transition: border-color var(--ss-dur-fast) var(--ss-ease);
 }
 
 .ss-studio-group-frame.is-dragging {
