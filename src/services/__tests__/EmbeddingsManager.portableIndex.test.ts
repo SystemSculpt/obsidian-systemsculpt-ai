@@ -10,7 +10,9 @@ jest.mock("../embeddings/storage/EmbeddingsStorage", () => {
     countVectors: jest.fn(async () => 0),
     getAllVectors: jest.fn(() => []),
     peekCurrentManagedNamespace: jest.fn(() => null),
-    size: jest.fn(() => 0),
+    listManagedRootNamespaces: jest.fn(() => []),
+    peekLatestManagedNamespace: jest.fn(() => null),
+    retainNamespaces: jest.fn(async () => 0),
     storeVectors: jest.fn(),
     purgeCorruptedVectors: jest.fn(() => ({
       removedCount: 0,

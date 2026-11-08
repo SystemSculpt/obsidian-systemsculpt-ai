@@ -137,6 +137,7 @@ describe("EmbeddingsManager superseded generation pruning (#324)", () => {
         getVectorSync: jest.fn((id: string) => roots.get(id) ?? null),
         removeByPath: jest.fn(async () => 0),
         listRootNamespaces: jest.fn(() => [...new Set([...roots.values()].map((root) => root.metadata.namespace))]),
+        listManagedRootNamespaces: jest.fn(() => [...new Set([...roots.values()].map((root) => root.metadata.namespace))]),
         retainNamespaces: jest.fn(async () => 1),
         writeState: jest.fn(async () => undefined),
         deleteState: jest.fn(async () => undefined),

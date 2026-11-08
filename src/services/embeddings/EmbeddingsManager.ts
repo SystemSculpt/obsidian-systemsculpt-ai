@@ -583,7 +583,7 @@ export class EmbeddingsManager {
    * Callers key caches on it (Similar Notes results, the search indicator).
    */
   public getIndexRevision(): number {
-    return typeof this.storage.getRevision === "function" ? this.storage.getRevision() : 0;
+    return this.storage.getRevision();
   }
 
   getStats(): { total: number; processed: number; present: number; needsProcessing: number; failed: number } {
@@ -775,10 +775,6 @@ export class EmbeddingsManager {
     return this.storage.getDistinctPaths().some((path) => this.getFileIndexSnapshot(path).ready);
   }
 
-  public hasVector(path: string): boolean {
-    return this.getFileIndexSnapshot(path).ready;
-  }
-
   async clearAll(): Promise<void> {
     await this.awaitReady();
     this.processor.cancel();
@@ -844,7 +840,7 @@ export class EmbeddingsManager {
     this.queryCache.clear();
     this.similarCache.clear();
     // Closing lets the next build an in-app update loads upgrade the database.
-    if (typeof this.storage.close === "function") this.storage.close();
+    this.storage.close();
     this.lifecycle.clearListeners();
   }
 
@@ -1282,9 +1278,7 @@ export class EmbeddingsManager {
     if (active && isManagedNamespace(active) && this.namespaceMatchesPublishedGeneration(active)) {
       return active;
     }
-    const inferred = typeof this.storage.peekCurrentManagedNamespace === "function"
-      ? this.storage.peekCurrentManagedNamespace()
-      : null;
+    const inferred = this.storage.peekCurrentManagedNamespace();
     if (
       inferred
       && isManagedNamespace(inferred)
@@ -1349,14 +1343,7 @@ export class EmbeddingsManager {
 
   private async hydrateManagedIdentityFromStorage(): Promise<void> {
     const inferred = this.storage.peekCurrentManagedNamespace();
-    const storage = this.storage as EmbeddingsStorage & {
-      listManagedRootNamespaces?: EmbeddingsStorage["listManagedRootNamespaces"];
-    };
-    const available = typeof storage.listManagedRootNamespaces === "function"
-      ? storage.listManagedRootNamespaces().filter(isManagedNamespace)
-      : inferred && isManagedNamespace(inferred)
-        ? [inferred]
-        : [];
+    const available = this.storage.listManagedRootNamespaces().filter(isManagedNamespace);
     const candidates = [inferred, ...available]
       .filter((namespace): namespace is string => Boolean(namespace && isManagedNamespace(namespace)))
       .filter((namespace, index, all) => all.indexOf(namespace) === index);
@@ -1396,12 +1383,7 @@ export class EmbeddingsManager {
    * was removed, so the indexing identity never names a deleted generation.
    */
   private async compactStoredGenerations(committed: string | null): Promise<string | null> {
-    const storage = this.storage as EmbeddingsStorage & {
-      peekLatestManagedNamespace?: EmbeddingsStorage["peekLatestManagedNamespace"];
-    };
-    const latest = typeof storage.peekLatestManagedNamespace === "function"
-      ? storage.peekLatestManagedNamespace()
-      : null;
+    const latest = this.storage.peekLatestManagedNamespace();
     try {
       const pruned = await this.pruneSupersededNamespaces([committed, latest], { verifyStore: true });
       if (pruned === 0) return null;
@@ -1581,11 +1563,6 @@ export class EmbeddingsManager {
     candidates: ReadonlyArray<string | null> = this.liveGenerationCandidates(),
     options: { verifyStore?: boolean } = {},
   ): Promise<number> {
-    const storage = this.storage as EmbeddingsStorage & {
-      retainNamespaces?: EmbeddingsStorage["retainNamespaces"];
-      listRootNamespaces?: EmbeddingsStorage["listRootNamespaces"];
-    };
-    if (typeof storage.retainNamespaces !== "function") return 0;
     const keep = new Set(candidates.filter((namespace): namespace is string => (
       Boolean(namespace && isManagedNamespace(namespace))
     )));
@@ -1593,15 +1570,14 @@ export class EmbeddingsManager {
     // routine runs skip the store walk when nothing outside `keep` remains.
     if (
       !options.verifyStore
-      && typeof storage.listRootNamespaces === "function"
-      && storage.listRootNamespaces().every((namespace) => (
+      && this.storage.listRootNamespaces().every((namespace) => (
         namespace === LOCAL_EMPTY_EMBEDDING_NAMESPACE || keep.has(namespace)
       ))
     ) {
       return 0;
     }
     // With no trusted generation yet, drop only namespaces that are not managed.
-    return storage.retainNamespaces(keep.size > 0 ? keep : null);
+    return this.storage.retainNamespaces(keep.size > 0 ? keep : null);
   }
 
   /**
@@ -1611,11 +1587,8 @@ export class EmbeddingsManager {
    */
   private liveGenerationCandidates(): Array<string | null> {
     const candidates = [this.getSearchNamespace(), this.getIndexingNamespace()];
-    const storage = this.storage as EmbeddingsStorage & {
-      listManagedRootNamespaces?: EmbeddingsStorage["listManagedRootNamespaces"];
-    };
-    if (this.gateway.metadata?.generation && typeof storage.listManagedRootNamespaces === "function") {
-      candidates.push(...storage.listManagedRootNamespaces().filter((namespace) => (
+    if (this.gateway.metadata?.generation) {
+      candidates.push(...this.storage.listManagedRootNamespaces().filter((namespace) => (
         this.namespaceMatchesPublishedGeneration(namespace)
       )));
     }

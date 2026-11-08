@@ -71,8 +71,10 @@ function fixture(result = indexedResult()) {
   const storage = {
     publishPath: jest.fn(async (_path: string, _namespace: string, _vectors: EmbeddingVector[]) => undefined),
     replacePath: jest.fn(async () => undefined),
+    getVectorSync: jest.fn(() => null),
+    touchPath: jest.fn(async () => false),
   };
-  const processor = new EmbeddingsProcessor({ index } as never, storage as never);
+  const processor = new EmbeddingsProcessor({ index } as never, storage);
   const file = {
     path: "Note.md",
     basename: "Note",

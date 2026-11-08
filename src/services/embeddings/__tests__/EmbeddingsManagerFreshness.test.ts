@@ -52,6 +52,7 @@ function harness() {
   manager.plugin = { settings: {} };
   manager.app = { vault: { getAbstractFileByPath: jest.fn(() => file) } };
   manager.storage = {
+    getRevision: jest.fn(() => 0),
     getVectorSync: jest.fn((id: string) => id === root.id ? root : null),
     getVectorsByPath: jest.fn(async () => [root]),
   };
@@ -63,12 +64,10 @@ describe("EmbeddingsManager file freshness", () => {
     const { file, manager } = harness();
 
     expect(manager.getFileIndexSnapshot(file.path)).toMatchObject({ state: "ready", ready: true, indexedAt: 100 });
-    expect(manager.hasVector(file.path)).toBe(true);
 
     file.stat.mtime = 101;
 
     expect(manager.getFileIndexSnapshot(file.path)).toMatchObject({ state: "stale", ready: false, indexedAt: 100 });
-    expect(manager.hasVector(file.path)).toBe(false);
     await expect(manager.findSimilar(file.path)).resolves.toEqual([]);
     expect(manager.storage.getVectorsByPath).not.toHaveBeenCalled();
   });

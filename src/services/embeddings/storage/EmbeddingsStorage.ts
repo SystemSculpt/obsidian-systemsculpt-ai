@@ -868,37 +868,6 @@ export class EmbeddingsStorage {
   }
 
   /**
-   * Reset the database
-   */
-  async reset(): Promise<void> {
-    // The delete would wait silently behind the blocked open.
-    if (this.blockedOpen) throw new EmbeddingsStorageBlockedError();
-    if (this.db) {
-      this.db.close();
-      this.db = null;
-    }
-    this.initialized = false;
-    this.cache.clear();
-    this.pathsSet.clear();
-    this.releaseSearchMatrices();
-    this.revision += 1;
-
-    return new Promise((resolve, reject) => {
-      const deleteRequest = indexedDB.deleteDatabase(this.dbName);
-      deleteRequest.onsuccess = () => resolve();
-      deleteRequest.onerror = () => reject(toError(deleteRequest.error, "IndexedDB reset failed."));
-      deleteRequest.onblocked = () => reject(new Error("IndexedDB reset was blocked by another open connection."));
-    });
-  }
-
-  /**
-   * Get storage size
-   */
-  size(): number {
-    return this.cache.size;
-  }
-
-  /**
    * Get a snapshot of all distinct file paths represented in the store
    */
   getDistinctPaths(): string[] {

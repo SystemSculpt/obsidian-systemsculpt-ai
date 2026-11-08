@@ -71,7 +71,6 @@ describe("EmbeddingsIndexFile", () => {
     const adapter = makeAdapter();
     const file = new EmbeddingsIndexFile(adapter as never);
 
-    expect(await file.exists()).toBe(false);
     expect(await file.read()).toBeNull();
   });
 
@@ -80,7 +79,6 @@ describe("EmbeddingsIndexFile", () => {
     adapter.files.set(".systemsculpt/embeddings/index.json", "{not json");
     const file = new EmbeddingsIndexFile(adapter as never);
 
-    expect(await file.exists()).toBe(true);
     await expect(file.read()).resolves.toBeNull();
   });
 

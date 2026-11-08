@@ -70,6 +70,7 @@ function harness(paths: Array<{ path: string; size?: number }>) {
       activeGeneration: { id: "semantic-v1", indexSchemaVersion: 3, indexNamespace: namespace, dimensions: 2 },
     },
     storage: {
+      listRootNamespaces: jest.fn(() => [...new Set([...roots.values()].map((root) => root.metadata.namespace))]),
       getVectorSync: jest.fn((id: string) => roots.get(id) ?? null),
       getDistinctPaths: jest.fn(() => [...new Set([...roots.values()].map((vector) => vector.path))]),
       removeByPath: jest.fn(async (path: string) => {
