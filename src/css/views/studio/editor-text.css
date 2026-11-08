@@ -108,6 +108,13 @@
   letter-spacing: var(--ss-tracking-tight);
 }
 
+/* List bullets and numbers carry structure; Obsidian's faint marker ink is
+ * about 2.3:1 on the light field, so rendered text takes muted ink. */
+.ss-studio-node-text-rendered,
+.ss-studio-text-node-display.is-markdown {
+  --list-marker-color: var(--ss-ink-muted);
+}
+
 .ss-studio-node-text-rendered :is(p, ul, ol) {
   margin: var(--ss-space-1) 0;
 }
