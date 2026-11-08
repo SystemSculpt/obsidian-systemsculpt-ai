@@ -278,11 +278,24 @@ function hasPartialOutcome(part: AgentToolPart, counts: ToolOutcomeCounts): bool
  * provider and vault details private while making it clear that later agent
  * work may still continue and that successful partial results were retained.
  */
+/** How loud a tool's notice is: a choice or a guard is calm, uncertainty a warning, breakage an error. */
+export function agentToolNoticeTone(part: AgentToolPart, displayState: AgentToolDisplayState): "danger" | "warning" | "info" {
+  if (part.state === "denied" || part.state === "cancelled") return "info";
+  if (/(?:^|_)(?:AUTO_BLOCKED|REVIEW_BLOCKED|BLOCKED_BY_REVIEW)(?:_|$)/u.test(part.error?.code ?? "")) return "info";
+  return displayState === "partial" || part.state === "outcome-unknown" ? "warning" : "danger";
+}
+
 export function presentAgentToolFailure(part: AgentToolPart): string {
   // SystemSculpt tools write their own plain reason; show it, without the link the chat shows already.
   const own = systemSculptToolName(part.name) ? decodeSystemSculptToolOutput(part.output?.data) : null;
   if (own && !own.ok && own.message) return (own.link ? own.message.split(`${own.link.label}:`)[0] : own.message).trim().slice(0, 300);
+  // Declined, stopped and blocked are outcomes the person chose or a guard made, not breakage.
+  if (part.state === "denied") return "Declined, so it didn't run.";
+  if (part.state === "cancelled") return "Stopped before it finished.";
   const native = nativeToolPresentation(part);
+  if (native && /(?:^|_)(?:AUTO_BLOCKED|REVIEW_BLOCKED|BLOCKED_BY_REVIEW)(?:_|$)/u.test(part.error?.code ?? "")) {
+    return `${native.agentName} blocked this before it ran.`;
+  }
   if (native) return part.state === "outcome-unknown"
     ? `The result from ${native.agentName} is uncertain. Check the requested action before retrying.`
     : `This ${native.agentName} action could not be completed.`;
@@ -557,7 +570,7 @@ export function presentAgentTool(part: AgentToolPart): AgentToolPresentation {
       canonicalName: part.name, label,
       actionIcon: native.icon,
       displayState: part.state,
-      icon: blocked ? "shield-x" : STATE_ICONS[part.state],
+      icon: blocked ? "shield-x" : gatedSystemSculptCall(part) ? "lock" : refusedSystemSculptCall(part) ? "x" : STATE_ICONS[part.state],
       summary: native.description ?? null,
       meta, targetPath: native.targetPath,
       groupKind: native.groupKind, groupCount: native.groupCount,
@@ -625,7 +638,8 @@ export function presentAgentTool(part: AgentToolPart): AgentToolPresentation {
     canonicalName: presentedName, label,
     actionIcon: TOOL_ACTION_ICONS[presentedName] ?? "wrench",
     displayState,
-    icon: STATE_ICONS[displayState],
+    // A gate (subscription, credits) is a lock, a refusal an x: never a check beside "Couldn't".
+    icon: gatedSystemSculptCall(part) ? "lock" : refusedSystemSculptCall(part) ? "x" : STATE_ICONS[displayState],
     summary,
     ...(partialSummary && summary === partialSummary ? { summaryCountsOutcomes: true as const } : {}),
     ...(resultCount !== undefined ? { meta: `${resultCount} result${resultCount === 1 ? "" : "s"}` } : {}),

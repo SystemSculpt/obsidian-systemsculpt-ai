@@ -194,15 +194,23 @@ it("does not infer mutation success from missing or empty per-item results", () 
   expect(host.textContent).toContain("Notes · Folder ready");
 });
 
-it("leaves server tools, unknown vault tools, and native calls to their existing privacy projection", () => {
+it("leaves server tools and native calls to their existing privacy projection", () => {
   const { host, render } = setup();
   for (const tool of [
     part("web_search", { query: "PRIVATE INPUT" }, { result_count: 2, sources: [{ title: "PRIVATE EVIDENCE", url: "https://example.com" }] }, { location: "server" }),
     part("write", { content: "PRIVATE INPUT" }, { path: "PRIVATE EVIDENCE" }, { location: "server" }),
-    part("unknown_provider_tool", { content: "PRIVATE INPUT" }, { results: [{ path: "PRIVATE EVIDENCE" }] }),
     part("read", { paths: ["PRIVATE INPUT"] }, undefined, { native: { agent: "claude", workingDirectory: "/vault" } }),
   ]) expect(render(tool)).toBe(false);
   expect(host.childElementCount).toBe(0);
+});
+
+it("shows an unknown vault tool's input as labelled fields, never an apology or its structured output", () => {
+  const { host, render } = setup();
+  expect(render(part("unknown_provider_tool", { content: "A short note", max_items: 3 }, { results: [{ path: "PRIVATE EVIDENCE" }] }))).toBe(true);
+  expect(Array.from(host.querySelectorAll(".ss-tool-fields dt"), node => node.textContent)).toEqual(["Content", "Max items"]);
+  expect(Array.from(host.querySelectorAll(".ss-tool-fields dd"), node => node.textContent)).toEqual(["A short note", "3"]);
+  expect(host.textContent).not.toContain("PRIVATE EVIDENCE");
+  expect(host.textContent).not.toMatch(/No preview/u);
 });
 
 it("replaces only its own preview and uses the host owner document", () => {
