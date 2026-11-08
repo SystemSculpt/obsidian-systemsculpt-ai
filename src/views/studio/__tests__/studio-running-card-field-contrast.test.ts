@@ -17,7 +17,7 @@ function ruleBody(selector: string): string {
 
 it("keeps disabled fields and value dropdowns on a running card fully opaque", () => {
   const body = ruleBody(
-    '.ss-studio-node-card :is(textarea, select, input:not([type="checkbox"], [type="radio"], [type="range"]), button.ss-studio-searchable-select-trigger):disabled'
+    '.ss-studio-node-card :is(textarea, select, input:not([type="checkbox"], [type="radio"], [type="range"]), button.ss-studio-searchable-select-trigger, button.ss-studio-node-text-display-mode-button.is-selected):disabled'
   );
   expect(body).toMatch(/(^|;)\s*opacity:\s*1\s*;/);
 });
