@@ -36,7 +36,27 @@ function listSourceFiles(): string[] {
   return files.sort();
 }
 
+const STORAGE_NAME = /adapter|vault|fileManager/i;
+
+function referencesStorage(node: ts.Node, aliases: ReadonlySet<string>): boolean {
+  if (ts.isIdentifier(node)) return STORAGE_NAME.test(node.text) || aliases.has(node.text);
+  if (ts.isElementAccessExpression(node) && ts.isStringLiteral(node.argumentExpression) && STORAGE_NAME.test(node.argumentExpression.text)) return true;
+  return ts.forEachChild(node, child => referencesStorage(child, aliases) || undefined) ?? false;
+}
+
 describe("Studio persistence architecture lint", () => {
+  it.each([
+    ["canvas.createDiv(/* host adapters */ { text: 'vault' })", false],
+    ["(() => vault.adapter)()", true],
+    ["app.vault.adapter", true],
+    ["app['vault']['adapter']", true],
+    ["storage", true],
+    ["adapter.remove.bind(adapter)", true],
+  ])("classifies storage references in %s without treating prose as a receiver", (initializer, expected) => {
+    const source = ts.createSourceFile("fixture.ts", `const value = ${initializer};`, ts.ScriptTarget.Latest, true);
+    const statement = source.statements[0] as ts.VariableStatement;
+    expect(referencesStorage(statement.declarationList.declarations[0].initializer!, new Set(["storage"]))).toBe(expected);
+  });
   it("keeps Studio project-local mutations behind the document and support stores using AST call and import analysis", () => {
     const mutationMethods = new Set(["process", "write", "writeBinary", "append", "remove", "rename", "mkdir", "rmdir", "create", "createBinary", "modify", "modifyBinary", "delete", "renameFile"]);
     const persistenceFiles = new Set([
@@ -63,7 +83,6 @@ describe("Studio persistence architecture lint", () => {
       const source = ts.createSourceFile(filePath, readFileSync(filePath, "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
       const destructuredMutationAliases = new Set<string>();
       const storageAliases = new Set<string>(["adapter", "vault", "fileManager"]);
-      const referencesStorage = (text: string): boolean => /adapter|vault|fileManager/i.test(text) || [...storageAliases].some((alias) => new RegExp(`\\b${alias}\\b`).test(text));
       const visit = (node: ts.Node, context = "<module>"): void => {
         let nextContext = context;
         if (ts.isMethodDeclaration(node) && node.name && ts.isIdentifier(node.name)) nextContext = node.name.text;
@@ -72,8 +91,8 @@ describe("Studio persistence architecture lint", () => {
           const imported = node.moduleSpecifier.text;
           if (relativePath.startsWith("src/views/") && imported.includes("studio/persistence")) violations.push(`${relativePath}: imports persistence internals`);
         }
-        if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer && referencesStorage(node.initializer.getText(source))) storageAliases.add(node.name.text);
-        if (ts.isVariableDeclaration(node) && ts.isObjectBindingPattern(node.name) && node.initializer && referencesStorage(node.initializer.getText(source))) {
+        if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer && referencesStorage(node.initializer, storageAliases)) storageAliases.add(node.name.text);
+        if (ts.isVariableDeclaration(node) && ts.isObjectBindingPattern(node.name) && node.initializer && referencesStorage(node.initializer, storageAliases)) {
           for (const element of node.name.elements) {
             if (!ts.isIdentifier(element.name)) continue;
             const property = element.propertyName && ts.isIdentifier(element.propertyName) ? element.propertyName.text : element.name.text;
@@ -85,10 +104,10 @@ describe("Studio persistence architecture lint", () => {
           let storageReceiver = false;
           if (ts.isPropertyAccessExpression(node.expression)) {
             method = node.expression.name.text;
-            storageReceiver = referencesStorage(node.expression.expression.getText(source));
+            storageReceiver = referencesStorage(node.expression.expression, storageAliases);
           } else if (ts.isElementAccessExpression(node.expression) && ts.isStringLiteral(node.expression.argumentExpression)) {
             method = node.expression.argumentExpression.text;
-            storageReceiver = referencesStorage(node.expression.expression.getText(source));
+            storageReceiver = referencesStorage(node.expression.expression, storageAliases);
           } else if (ts.isIdentifier(node.expression) && destructuredMutationAliases.has(node.expression.text)) {
             method = node.expression.text;
             storageReceiver = true;
