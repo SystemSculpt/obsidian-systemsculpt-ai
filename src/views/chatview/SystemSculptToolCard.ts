@@ -79,7 +79,19 @@ export function renderSystemSculptToolCard(app: App, host: HTMLElement, part: Ag
   if (workflow && name.startsWith("studio_")) fields.push({ label: "Workflow", value: workflowName(workflow), path: workflow });
   if (name === "studio_create_workflow" && !workflow && text(args.name)) fields.push({ label: "Name", value: text(args.name)! });
   if (name === "studio_edit_workflow" && Array.isArray(args.edits)) {
-    fields.push({ label: "Changes", value: `${args.edits.length} ${args.edits.length === 1 ? "edit" : "edits"}` });
+    // Each change in words: what happened to which node or connection, and which setting.
+    const changes = args.edits.flatMap((edit: unknown) => {
+      if (!edit || typeof edit !== "object") return [];
+      const { kind, entityId, path, remove } = edit as Record<string, unknown>;
+      if (typeof entityId !== "string" || !entityId.trim()) return [];
+      const verb = remove === true || kind === "delete" ? "Remove" : kind === "create" ? "Add" : kind === "restore" ? "Restore" : "Set";
+      const entity = entityId.replace(/^(node|edge|group):/u, "");
+      const setting = Array.isArray(path) ? path.filter((part): part is string => typeof part === "string").join(".") : "";
+      return [`${verb} ${entity}${setting && verb === "Set" ? ` · ${setting}` : ""}`];
+    });
+    const shown = changes.slice(0, 8);
+    if (changes.length > shown.length) shown.push(`${changes.length - shown.length} more`);
+    fields.push({ label: "Changes", value: shown.length ? shown.join("\n") : `${args.edits.length} ${args.edits.length === 1 ? "edit" : "edits"}` });
   }
   const references = Array.isArray(args.reference_images) ? args.reference_images.filter((value): value is string => typeof value === "string") : [];
   for (const reference of references) fields.push({ label: "Reference", value: reference.split("/").pop() ?? reference, path: reference });

@@ -97,6 +97,7 @@ const STATE_ICONS: Readonly<Record<AgentToolDisplayState, string>> = {
   failed: "x",
   denied: "ban",
   cancelled: "minus",
+  // Spec 3.4: uncertain stays `x`; its colour (warning, not danger) says it may have worked.
   "outcome-unknown": "x",
 };
 
@@ -607,14 +608,16 @@ export function presentAgentTool(part: AgentToolPart): AgentToolPresentation {
     : [...strings(input.paths), ...strings(input.path)];
   const targetPath = !serverTool && VAULT_TOOLS_WITH_SAFE_DETAILS.has(canonicalName) && paths.length === 1 ? paths[0] : undefined;
   const target = targetPath?.split(/[\\/]/u).filter(Boolean).pop();
+  // A partly finished batch says how many of its notes it reached, never the whole request.
+  const noteCount = displayState === "partial" && paths.length > 1 ? `${outcomeCounts.completed} of ${paths.length}` : `${paths.length}`;
   const baseLabel = canonicalName === "context" ? contextToolLabel(input)
-    : canonicalName === "read" ? (target ? `Read ${target}` : `Read ${paths.length || ""} notes`.replace("  ", " "))
+    : canonicalName === "read" ? (target ? `Read ${target}` : `Read ${paths.length ? noteCount : ""} notes`.replace("  ", " "))
       : canonicalName === "write" ? `Create ${target ?? "file"}`
         : canonicalName === "edit" ? `Edit ${target ?? "file"}`
-          : canonicalName === "multi_edit" ? `Edit ${target ?? `${paths.length} notes`}`
+          : canonicalName === "multi_edit" ? `Edit ${target ?? `${noteCount} notes`}`
             : canonicalName === "list_items" ? `List ${targetPath ?? (counted ? `${counted.items.length} folders` : "vault")}`
-              : canonicalName === "create_folders" ? `Create ${targetPath ?? `${paths.length} folders`}`
-                : canonicalName === "trash" ? `Move ${target ?? `${paths.length} notes`} to trash`
+              : canonicalName === "create_folders" ? `Create ${targetPath ?? `${noteCount} folders`}`
+                : canonicalName === "trash" ? `Move ${target ?? `${noteCount} notes`} to trash`
                   : canonicalName === "move" ? (() => {
                     const sources = objectStrings(input.items, "source"), destinations = objectStrings(input.items, "destination");
                     if (sources.length !== 1 || destinations.length !== 1) return `Move ${sources.length || ""} notes`.replace("  ", " ");

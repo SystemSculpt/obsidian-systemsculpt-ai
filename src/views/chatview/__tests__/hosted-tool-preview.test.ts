@@ -85,7 +85,7 @@ it("shows folder entries and safe notices without exposing unknown result metada
     path: ".", directories: [{ path: "Notes", name: "Notes", itemCount: 2 }], files: [],
     totalItems: 1, offset: 0, nextOffset: null, notice: "Some files are excluded.", privateField: "SECRET",
   }] }));
-  expect(host.textContent).toContain("Notes · Folder");
+  expect(host.textContent).toContain("Notes ·\u00a0Folder");
   expect(host.textContent).toContain("Some files are excluded.");
   expect(host.textContent).not.toContain("SECRET");
   expect(host.textContent).not.toContain("another tool result");
@@ -171,27 +171,27 @@ it("keeps successful move destinations usable and trashed entries non-clickable"
     { source: "Old.md", destination: "New.md", success: true },
     { source: "Stay.md", destination: "Missing.md", success: false, error: "Move failed" },
   ] }));
-  expect(host.textContent).toContain("Old.md → New.md · Moved");
-  expect(host.textContent).toContain("Stay.md → Missing.md · Failed");
+  expect(host.textContent).toContain("Old.md → New.md ·\u00a0Moved");
+  expect(host.textContent).toContain("Stay.md → Missing.md ·\u00a0Failed");
   expect(host.querySelector('a[data-href="Old.md"]')).toBeNull();
   expect(host.querySelector('a[data-href="New.md"]')).not.toBeNull();
   expect(host.querySelector('a[data-href="Stay.md"]')).not.toBeNull();
   expect(host.querySelector('a[data-href="Missing.md"]')).toBeNull();
   render(part("trash", {}, { results: [{ path: "Gone.md", success: true }, { path: "Stay.md", success: false }] }));
-  expect(host.textContent).toContain("Gone.md · In trash");
-  expect(host.textContent).toContain("Stay.md · Failed");
+  expect(host.textContent).toContain("Gone.md ·\u00a0In trash");
+  expect(host.textContent).toContain("Stay.md ·\u00a0Failed");
   expect(host.querySelector("a")).toBeNull();
 });
 
 it("does not infer mutation success from missing or empty per-item results", () => {
   const { host, render } = setup();
   render(part("create_folders", { paths: ["Notes"] }, undefined, { state: "approval-required" }));
-  expect(host.textContent).toContain("Notes · Requested");
+  expect(host.textContent).toContain("Notes ·\u00a0Requested");
   render(part("create_folders", { paths: ["Notes"] }, { results: [] }));
   expect(host.textContent).toContain("No item results were recorded");
   expect(host.textContent).not.toContain("Folder ready");
   render(part("create_folders", {}, { results: [{ path: "Notes", success: true }] }));
-  expect(host.textContent).toContain("Notes · Folder ready");
+  expect(host.textContent).toContain("Notes ·\u00a0Folder ready");
 });
 
 it("leaves server tools and native calls to their existing privacy projection", () => {

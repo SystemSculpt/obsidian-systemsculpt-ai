@@ -6,7 +6,7 @@ import { generateDiff } from "../../utils/diffUtils";
 import { splitToolName } from "../../utils/toolPolicy";
 import { isAbsoluteFilesystemPath, normalizeVaultRelativePath } from "../../utils/vaultPathUtils";
 import { renderSystemSculptToolCard } from "./SystemSculptToolCard";
-import { createToolCard, inputFields, renderFields, renderNotice, renderText, toolOutputText } from "./ToolCardBlocks";
+import { createToolCard, folderLink, inputFields, renderFields, renderNotice, renderText, toolOutputText } from "./ToolCardBlocks";
 
 type RecordValue = Record<string, unknown>;
 export type HostedToolPreviewOptions = Readonly<{
@@ -95,7 +95,8 @@ function caption(host: HTMLElement, value: string): HTMLElement {
 
 /** A secondary fact beside a path: " · Folder", " · Moved". */
 function note(row: HTMLElement, value: string, tone?: "warning"): void {
-  row.createSpan({ cls: `ss-tool-path-note${tone ? ` is-${tone}` : ""}`, text: ` · ${value}` });
+  // The separator stays with its note, never stranded at a line end.
+  row.createSpan({ cls: `ss-tool-path-note${tone ? ` is-${tone}` : ""}`, text: ` ·\u00a0${value}` });
 }
 
 function renderNotices(host: HTMLElement, result: RecordValue): void {
@@ -162,8 +163,10 @@ function renderDirectory(app: App, host: HTMLElement, input: RecordValue, output
       ...records(result.files).map(entry => ({ ...entry, folder: false })),
     ];
     renderList(section, entries, (row, entry) => {
-      renderPath(app, row, entry.path, options, !entry.folder);
-      if (entry.folder) note(row, "Folder");
+      if (entry.folder && typeof entry.path === "string") {
+        folderLink(app, row, entry.path);
+        note(row, "Folder");
+      } else renderPath(app, row, entry.path, options);
     });
     const total = count(result.totalItems);
     const offset = count(result.offset) ?? 0;
