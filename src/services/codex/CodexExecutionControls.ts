@@ -14,10 +14,10 @@ import { CODEX_APPROVAL_MODES, CODEX_APPROVAL_LABELS, isCodexApprovalMode } from
  */
 export function mountCodexExecutionControls(parent: HTMLElement, plugin: SystemSculptPlugin, context?: Record<string, never>): () => void {
   const desktop = hasHostCapability('local-cli', parent);
-  const detect = desktop && context ? parent.createEl('button', { text: 'Detect again', attr: { type: 'button', 'data-testid': 'chat.execution.detect' } }) : undefined;
-  const detectionStatus = context ? parent.createDiv({ cls: 'ss-agent-detection-status', attr: { role: 'status', 'aria-live': 'polite' } }) : undefined;
   const root = parent.createDiv({ cls: 'ss-codex-controls', attr: { role: 'group', 'aria-label': 'Text execution' } });
-  parent.prepend(...[detectionStatus, root].filter((element): element is HTMLDivElement => !!element));
+  parent.prepend(root);
+  const detect = desktop && context ? root.createEl('button', { cls: 'ss-agent-detection-action', text: 'Detect again', attr: { type: 'button', 'data-testid': 'chat.execution.detect' } }) : undefined;
+  const detectionStatus = context ? root.createDiv({ cls: 'ss-agent-detection-status', attr: { role: 'status', 'aria-live': 'polite' } }) : undefined;
   if (detectionStatus) detectionStatus.hidden = true;
   const provider = context ? root.createEl('label', { cls: 'ss-codex-control', text: 'Provider' }).createEl('select', { attr: { 'aria-label': 'Provider', 'data-testid': 'codex.execution.provider' } }) : undefined;
   const backend = () => desktop ? plugin.settings.textExecutionBackend ?? (context ? 'systemsculpt' : 'codex') : 'systemsculpt';
@@ -39,6 +39,8 @@ export function mountCodexExecutionControls(parent: HTMLElement, plugin: SystemS
   mode.title = 'Auto reviews requests in the vault workspace. Ask lets you review; Codex settings inherits your own configuration.';
   root.append(permissions);
   const claude = mountClaudeExecutionControls(root, plugin, () => desktop && backend() === 'claude');
+  // Detection belongs to the provider group, after its current choices.
+  root.append(...[detect, detectionStatus].filter((element) => element !== undefined));
   const render = () => {
     if (disposed) return;
     const selected = backend();
