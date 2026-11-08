@@ -49,7 +49,6 @@ jest.mock("../../../services/search/searchScoring", () => ({
 
 // Mock tokenCounting
 jest.mock("../../../utils/tokenCounting", () => ({
-  countTextTokens: jest.fn((text: string) => Math.ceil(text.length / 4)),
   estimateTextTokens: jest.fn((text: string) => Math.ceil(text.length / 4)),
 }));
 
