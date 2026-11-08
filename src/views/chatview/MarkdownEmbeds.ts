@@ -25,18 +25,14 @@ export function enhanceMarkdownEmbeds(parent: HTMLElement): void {
     if (!target || !match) continue;
     const next = embed.nextElementSibling;
     if (next?.classList.contains("ss-embed-source") && next.getAttribute("data-href") === target) continue;
-    const doc = parent.ownerDocument;
-    const link = doc.createElement("a");
-    link.className = "internal-link ss-embed-source";
-    link.setAttribute("href", target);
-    link.setAttribute("data-href", target);
-    link.setAttribute("aria-label", `Open ${target.split("/").pop()} in the vault`);
-    link.dataset.embedKind = match[0];
-    const icon = link.appendChild(doc.createElement("span"));
-    icon.className = "ss-embed-source-icon";
-    icon.setAttribute("aria-hidden", "true");
+    const name = target.split("/").pop() ?? target;
+    const link = embed.parentElement!.createEl("a", {
+      cls: "internal-link ss-embed-source",
+      attr: { href: target, "data-href": target, "aria-label": `Open ${name} in the vault`, "data-embed-kind": match[0] },
+    });
+    const icon = link.createSpan({ cls: "ss-embed-source-icon", attr: { "aria-hidden": "true" } });
     setIcon(icon, match[1]);
-    link.appendChild(doc.createTextNode(target.split("/").pop() ?? target));
+    link.appendText(name);
     embed.after(link);
   }
 }
