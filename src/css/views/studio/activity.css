@@ -152,11 +152,12 @@
   animation: ss-pulse 1.2s var(--ss-ease) infinite;
 }
 
-/* Status words are text: the phase color mixed toward ink keeps 4.5:1 on the
- * card in both themes; the dot carries the pure phase color. */
+/* Status words are text: the phase color mixed toward ink keeps them well
+ * past 4.5:1 on the card in both themes (60% read as dim blue on the dark
+ * card); the dot carries the pure phase color. */
 .ss-studio-node-activity-label {
   flex-shrink: 0;
-  color: color-mix(in srgb, var(--ss-activity-color) 60%, var(--ss-ink));
+  color: color-mix(in srgb, var(--ss-activity-color) 45%, var(--ss-ink));
   font-weight: var(--ss-weight-medium);
 }
 
