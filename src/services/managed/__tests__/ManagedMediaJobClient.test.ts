@@ -1,5 +1,6 @@
 import { ManagedMediaJobClient, ManagedMediaJobError, MANAGED_MEDIA_JOB_PROTOCOL } from "../ManagedMediaJobClient";
 import { HostedTransportAdapter } from "../adapters/HostedTransportAdapter";
+import { MANAGED_IMAGE_OUTPUT_MAX_BYTES } from "../ManagedTypes";
 import retryFixture from "../../../../testing/fixtures/retry-after.json";
 
 const JOB_ID = "123e4567-e89b-42d3-a456-426614174000";
@@ -173,6 +174,43 @@ describe("ManagedMediaJobClient managed-job-protocol-v2 wire contract", () => {
     expect(JSON.stringify([image, video])).not.toMatch(/signed|url/);
   });
 
+  it.each(["auto", "match_input_image", "1.25:2.5"])("preserves model-optional image requests and server-defined options: %s", async aspect_ratio => {
+    const body = { prompt: "x", input_images: [], options: { aspect_ratio, image_size: "1.5k", quality: "model_quality", background: "model-background", seed: 0 } };
+    request.mockResolvedValue(json({ job: createJob(), poll_url: "/poll", idempotent_replay: false }));
+    await expect(client.images.create(body, "op")).resolves.toEqual({ job: createJob(), poll_url: "/poll", idempotent_replay: false });
+    expect(request.mock.calls[0][0].body).toEqual(body);
+  });
+
+  it.each(["images", "videos"] as const)("preserves nullable and boundary output metadata for %s", async kind => {
+    const output = kind === "images"
+      ? { ...imageOutput, index: 3, width: 0, height: null }
+      : { ...videoOutput, index: 3, width: null, height: 0, duration_seconds: null };
+    request.mockResolvedValue(json({ job: succeededJob(), outputs: [output], usage: usage(0), poll_after_ms: 0, typical_duration_ms: 3_600_000 }));
+    await expect(client[kind].status(JOB_ID)).resolves.toMatchObject({ outputs: [output], poll_after_ms: 0, typical_duration_ms: 3_600_000 });
+  });
+
+  it("ignores additive terminal detail fields without weakening strict media envelopes", async () => {
+    const error = { code: "provider_timeout", message: "Timed out.", future_detail: { arbitrary: true } };
+    request.mockResolvedValue(json({ items: [{ job: mediaJob("failed", { error }), outputs: [], usage: usage(0) }], next_before: null }));
+    await expect(client.images.list()).resolves.toMatchObject({ items: [{ job: { error: { code: "provider_timeout", message: "Timed out." } } }] });
+
+    request.mockResolvedValue(json({ job: mediaJob("failed", { error: { ...error, code: "Unsafe Code" } }), outputs: [], usage: usage(0) }));
+    await expect(client.images.status(JOB_ID)).rejects.toMatchObject({ code: "image_generation_failed", message: "Timed out.", jobFailure: { code: null } });
+  });
+
+  it.each([
+    ["output byte minimum", { ...imageOutput, size_bytes: 0 }],
+    ["output byte maximum", { ...imageOutput, size_bytes: MANAGED_IMAGE_OUTPUT_MAX_BYTES + 1 }],
+    ["output index", { ...imageOutput, index: 4 }],
+    ["output negative dimension", { ...imageOutput, width: -1 }],
+    ["output dimension maximum", { ...imageOutput, height: 32_769 }],
+    ["output digest case", { ...imageOutput, sha256: SHA_1_2.toUpperCase() }],
+    ["output missing dimension", { index: 0, mime_type: "image/png", size_bytes: 2, sha256: SHA_1_2, width: 1 }],
+  ])("rejects output boundary violations through status: %s", async (_name, output) => {
+    request.mockResolvedValue(json({ job: succeededJob(), outputs: [output], usage: usage() }));
+    await expect(client.images.status(JOB_ID)).rejects.toMatchObject({ code: "malformed_response" });
+  });
+
   it("constructs the generation list query from typed fields", async () => {
     request.mockResolvedValue(json({ items: [{ job: mediaJob(), outputs: [], usage: usage(0) }], next_before: null }));
     const result = await client.videos.list({ limit: 10, before: "2026-01-01T00:00:00Z", status: "failed" });
@@ -259,6 +297,63 @@ describe("ManagedMediaJobClient managed-job-protocol-v2 wire contract", () => {
       { index: 0, upload: { method: "PUT", url: (override.url as string) ?? "https://signed/a", headers: (override.entryHeaders as Record<string, string>) ?? { "content-type": "image/png" }, expires_in_seconds: 900, expires_at: futureUploadExpiry() }, input_image: { type: override.type ?? "uploaded", key: "key-a", mime_type: "image/png", size_bytes: 1, sha256: (override.sha256 as string) ?? "a".repeat(64) } },
     ] }));
     await expect(client.images.prepareInputs([{ mime_type: "image/png", size_bytes: 1, sha256: "a".repeat(64) }], async () => new ArrayBuffer(1))).rejects.toMatchObject({ code: "malformed_response" });
+  });
+
+  it("accepts the existing prepare expiry tolerance without exposing signed upload details", async () => {
+    const now = Date.parse("2026-11-04T00:00:00Z");
+    const fixedClient = new ManagedMediaJobClient(transport, () => now, () => "req-1");
+    const input = { mime_type: "image/png", size_bytes: 1, sha256: "a".repeat(64) };
+    const upload = jest.spyOn(transport, "uploadSignedInput").mockResolvedValue(undefined);
+    try {
+      request.mockResolvedValue(json({
+        contract: "systemsculpt-image-input-upload-v1",
+        upload_id: "up-1",
+        expires_at: new Date(now + 960_000).toISOString(),
+        input_uploads: [{
+          index: 0,
+          upload: { method: "PUT", url: "https://signed/input", headers: { "content-type": "image/png" }, expires_in_seconds: 3600, expires_at: new Date(now + 961_000).toISOString() },
+          input_image: { type: "uploaded", key: "key-0", ...input },
+        }],
+      }));
+      await expect(fixedClient.images.prepareInputs([input], async () => new ArrayBuffer(1))).resolves.toEqual({
+        uploadId: "up-1", inputs: [{ type: "uploaded", key: "key-0", ...input }],
+      });
+      expect(upload).toHaveBeenCalledTimes(1);
+    } finally {
+      upload.mockRestore();
+    }
+  });
+
+  it.each([
+    ["duplicate indexes", [0, 0], 600_000, 600_000],
+    ["non-contiguous indexes", [0, 2], 600_000, 600_000],
+    ["expired root", [0, 1], 0, 0],
+    ["root expiry too far", [0, 1], 960_001, 600_000],
+    ["expired signed upload", [0, 1], 600_000, 0],
+    ["signed upload outlives root", [0, 1], 600_000, 601_001],
+  ] as const)("rejects invalid prepared identity or expiry before reading bytes: %s", async (_name, indexes, rootOffset, uploadOffset) => {
+    const now = Date.parse("2026-11-04T00:00:00Z");
+    const fixedClient = new ManagedMediaJobClient(transport, () => now, () => "req-1");
+    const input = { mime_type: "image/png", size_bytes: 1, sha256: "a".repeat(64) };
+    const bytes = jest.fn(async () => new ArrayBuffer(1));
+    const upload = jest.spyOn(transport, "uploadSignedInput").mockResolvedValue(undefined);
+    try {
+      request.mockResolvedValue(json({
+        contract: "systemsculpt-image-input-upload-v1",
+        upload_id: "up-1",
+        expires_at: new Date(now + rootOffset).toISOString(),
+        input_uploads: indexes.map(index => ({
+          index,
+          upload: { method: "PUT", url: "https://signed/input", headers: { "content-type": "image/png" }, expires_in_seconds: 900, expires_at: new Date(now + uploadOffset).toISOString() },
+          input_image: { type: "uploaded", key: `key-${index}`, ...input },
+        })),
+      }));
+      await expect(fixedClient.images.prepareInputs([input, input], bytes)).rejects.toMatchObject({ code: "malformed_response" });
+      expect(bytes).not.toHaveBeenCalled();
+      expect(upload).not.toHaveBeenCalled();
+    } finally {
+      upload.mockRestore();
+    }
   });
 
   it.each([

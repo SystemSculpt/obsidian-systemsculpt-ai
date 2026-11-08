@@ -23,6 +23,15 @@ const createRequest = {
   contentType: "audio/webm",
   contentLengthBytes: 6,
 } as const;
+const savedRecord = (overrides: Record<string, unknown> = {}) => ({
+  schemaVersion: 1,
+  revision: 1,
+  ...initial,
+  phase: "admitted",
+  createdAt: "2026-01-01T00:00:00Z",
+  updatedAt: "2026-01-01T00:00:00Z",
+  ...overrides,
+});
 
 describe("ManagedJobRecoveryStore hardening", () => {
   it("distinguishes a genuinely absent recovery record from a corrupt one", async () => {
@@ -349,6 +358,149 @@ describe("ManagedJobRecoveryStore hardening", () => {
     await expect(create(store, { ...initial, source: { identity: "https://signed.example/x", fingerprint: "bad" } })).rejects.toMatchObject({ code: "invalid_record" });
     await expect(create(store, { ...initial, operationId: "x".repeat(129) })).rejects.toMatchObject({ code: "invalid_record" });
     expect(JSON.stringify([...adapter.files.values()])).not.toMatch(/signed|authorization|headers|content/i);
+  });
+
+  it("preserves additive source fields and accepted metadata through mutation and crash recovery", async () => {
+    const adapter = new MemoryAdapter();
+    const timestamp = "January 1, 2026 00:00:00 GMT";
+    const store = new ManagedJobRecoveryStore(adapter, () => timestamp);
+    const source = { ...initial.source, future: { content: "retained", nested: [null, 7] } };
+    const admitted = await create(store, { ...initial, source });
+    const ready = await store.markContentReady("transcription", "op-1", admitted.revision);
+    const pending = {
+      operation: "create" as const,
+      requestId: "request:1",
+      idempotencyKey: "op-1:create",
+      dispatchedAt: "December 31, 2025 00:00:00 GMT",
+      createRequest: { filename: " ../ audio ", contentType: " not a MIME type ", contentLengthBytes: 1, language: "" },
+    };
+    // Interrupt after moving the original, before updating the journal phase.
+    adapter.failAt = adapter.boundaries + 4;
+    await expect(store.beginDispatch("transcription", "op-1", ready.revision, pending))
+      .rejects.toMatchObject({ code: "recovery_unavailable", message: "Atomic recovery write interrupted." });
+    adapter.failAt = -1;
+
+    const recovered = new ManagedJobRecoveryStore(adapter);
+    await recovered.initialize();
+    const record = await recovered.read("transcription", "op-1");
+    expect(record).toEqual({
+      ...admitted,
+      revision: 3,
+      phase: "create_dispatching",
+      pendingDispatch: pending,
+    });
+    expect(record.source).toEqual(source);
+    expect(JSON.parse(adapter.files.get(".systemsculpt/managed-jobs/transcription/op-1.json")!)).toEqual(record);
+  });
+
+  it.each([
+    ["record", "transcription", { future: true }],
+    ["dispatch", "transcription", { phase: "create_dispatching", pendingDispatch: { operation: "create", requestId: "r", idempotencyKey: "op-1:create", dispatchedAt: "2026-01-01", future: true } }],
+    ["create request", "transcription", { phase: "create_dispatching", pendingDispatch: { operation: "create", requestId: "r", idempotencyKey: "op-1:create", dispatchedAt: "2026-01-01", createRequest: { ...createRequest, future: true } } }],
+    ["multipart upload", "transcription", { phase: "created", multipartUpload: { createRequest, partSizeBytes: 6, totalParts: 1, future: true } }],
+    ["completed part", "transcription", { completedParts: [{ partNumber: 1, etag: "a".repeat(32), future: true }] }],
+    ["receipt", "transcription", { phase: "local_commit_pending", localCommitReceipt: { kind: "exact", outputPath: "notes/out.md", contentSha256: "a".repeat(64), future: true } }],
+    ["media delivery", "video_generation", { phase: "result_ready", mediaDelivery: { downloadStartedAt: "2026-01-01", downloadCompletedOffsetMs: 0, future: true } }],
+    ["media output", "video_generation", { phase: "result_ready", mediaDelivery: { downloadStartedAt: "2026-01-01", downloadCompletedOffsetMs: 0, outputs: [{ index: 0, width: null, height: null, durationSeconds: null, future: true }] } }],
+  ] as const)("rejects additive %s envelope fields on read and recovery", async (_label, capability, overrides) => {
+    const path = `.systemsculpt/managed-jobs/${capability}/op-1.json`;
+    const bytes = JSON.stringify(savedRecord({ ...overrides, capability }));
+    const adapter = new MemoryAdapter(new Map([[path, bytes]]));
+    const store = new ManagedJobRecoveryStore(adapter);
+    await expect(store.read(capability, "op-1")).rejects.toMatchObject({
+      name: "ManagedRecoveryError", code: "recovery_corrupt", message: "Invalid recovery record.",
+    });
+    await expect(store.initialize()).rejects.toMatchObject({
+      code: "recovery_corrupt", message: "Invalid recovery candidate.",
+    });
+    expect(adapter.files.get(path)).toBe(bytes);
+  });
+
+  it.each([
+    ["multipart create without request metadata", "transcription", { phase: "create_dispatching", pendingDispatch: { operation: "create", requestId: "r", idempotencyKey: "op-1:create", dispatchedAt: "2026-01-01" } }],
+    ["media create with request metadata", "image_generation", { phase: "create_dispatching", pendingDispatch: { operation: "create", requestId: "r", idempotencyKey: "op-1:create", dispatchedAt: "2026-01-01", createRequest } }],
+    ["non-create dispatch with request metadata", "transcription", { phase: "abort_dispatching", pendingDispatch: { operation: "abort", requestId: "r", dispatchedAt: "2026-01-01", createRequest } }],
+    ["processing without a job ID", "video_generation", { phase: "processing", completedParts: [] }],
+    ["unsafe integer multipart layout", "transcription", { phase: "created", multipartUpload: { createRequest: { ...createRequest, contentLengthBytes: 2 ** 53 }, partSizeBytes: 2 ** 53, totalParts: 1 } }],
+    ["unordered parts beyond the declared layout", "transcription", { phase: "created", completedParts: [{ partNumber: 50, etag: '"ABCDEF12-9"' }, { partNumber: 1, etag: "12345678" }], multipartUpload: { createRequest, partSizeBytes: 6, totalParts: 1 } }],
+    ["unordered nullable video measurements", "video_generation", { phase: "result_ready", mediaDelivery: { downloadStartedAt: "2026-01-01", downloadCompletedOffsetMs: 604_800_000, displayedOffsetMs: 604_800_000, vaultWriteCompletedOffsetMs: 604_800_000, outputs: [{ index: 3, width: null, height: 32_768, durationSeconds: 3_600 }, { index: 0, width: 1, height: null, durationSeconds: null }] } }],
+  ] as const)("retains accepted canonical edge case: %s", async (_label, capability, overrides) => {
+    const path = `.systemsculpt/managed-jobs/${capability}/op-1.json`;
+    const record = savedRecord({ ...overrides, capability });
+    const bytes = JSON.stringify(record);
+    const adapter = new MemoryAdapter(new Map([[path, bytes]]));
+    const store = new ManagedJobRecoveryStore(adapter);
+    await expect(store.read(capability, "op-1")).resolves.toEqual(record);
+    await expect(store.initialize()).resolves.toBeUndefined();
+    expect(adapter.files.get(path)).toBe(bytes);
+    expect(adapter.events.some(event => event.startsWith("write:"))).toBe(false);
+  });
+
+  it("retains receipt string coercion and integer rather than safe-integer revisions during mutation", async () => {
+    const path = ".systemsculpt/managed-jobs/transcription/op-1.json";
+    const adapter = new MemoryAdapter(new Map([[path, JSON.stringify(savedRecord({
+      revision: 2 ** 53,
+      phase: "local_commit_pending",
+    }))]]));
+    const store = new ManagedJobRecoveryStore(adapter, () => "2026-01-01T00:00:00Z");
+    const receipt = { kind: ["marker"], outputPath: "notes/out.md", contentSha256: ["a".repeat(64)] };
+    const record = await store.recordLocalCommitReceipt("transcription", "op-1", 2 ** 53, receipt as never);
+    expect(record.revision).toBe(2 ** 53);
+    expect(record.localCommitReceipt).toEqual(receipt);
+    await expect(store.read("transcription", "op-1")).resolves.toEqual(record);
+  });
+
+  it("keeps dispatch metadata errors ahead of nested create request errors without writing", async () => {
+    const adapter = new MemoryAdapter();
+    const store = new ManagedJobRecoveryStore(adapter);
+    const admitted = await create(store);
+    const ready = await store.markContentReady("transcription", "op-1", admitted.revision);
+    const pending = { operation: "create" as const, requestId: "https://invalid", idempotencyKey: "op-1:create", dispatchedAt: "2026-01-01", createRequest: { ...createRequest, filename: "" } };
+    adapter.events = [];
+    await expect(store.beginDispatch("transcription", "op-1", ready.revision, pending))
+      .rejects.toMatchObject({ code: "invalid_record", message: "Invalid dispatch metadata." });
+    await expect(store.beginDispatch("transcription", "op-1", ready.revision, { ...pending, requestId: "r" }))
+      .rejects.toMatchObject({ code: "invalid_record", message: "Invalid create request filename." });
+    expect(adapter.events).toEqual([]);
+    await expect(store.read("transcription", "op-1")).resolves.toEqual(ready);
+  });
+
+  it.each([
+    ["journal", "{", "Malformed write journal."],
+    ["journal", JSON.stringify({ schemaVersion: 1, phase: "prepared", capability: "transcription", operationId: "op-1", fromRevision: 0, toRevision: 1, future: true }), "Invalid write journal."],
+    ["journal", JSON.stringify({ schemaVersion: 1, phase: "prepared", capability: "transcription", operationId: "other", fromRevision: 0, toRevision: 1 }), "Invalid write journal."],
+    ["delete-journal", "{", "Malformed delete journal."],
+    ["delete-journal", JSON.stringify({ schemaVersion: 1, capability: "transcription", operationId: "op-1", revision: 1, intent: "delete", future: true }), "Invalid delete journal."],
+    ["delete-journal", JSON.stringify({ schemaVersion: 1, capability: "transcription", operationId: "op-1", revision: 0, intent: "delete" }), "Invalid delete journal."],
+  ])("preserves strict %s decoding and error text: %s", async (suffix, bytes, message) => {
+    const path = ".systemsculpt/managed-jobs/transcription/op-1.json";
+    const original = JSON.stringify(savedRecord());
+    const adapter = new MemoryAdapter(new Map([[path, original], [`${path}.${suffix}`, bytes]]));
+    await expect(new ManagedJobRecoveryStore(adapter).read("transcription", "op-1"))
+      .rejects.toMatchObject({ name: "ManagedRecoveryError", code: "recovery_corrupt", message });
+    expect(adapter.files.get(path)).toBe(original);
+    expect(adapter.files.get(`${path}.${suffix}`)).toBe(bytes);
+    expect(adapter.events).toEqual([]);
+  });
+
+  it("keeps negative write revisions admissible to journal decoding but rejects their artifact combination", async () => {
+    const path = ".systemsculpt/managed-jobs/transcription/op-1.json";
+    const adapter = new MemoryAdapter(new Map([[`${path}.journal`, JSON.stringify({
+      schemaVersion: 1, phase: "prepared", capability: "transcription", operationId: "op-1", fromRevision: -1, toRevision: 0,
+    })]]));
+    await expect(new ManagedJobRecoveryStore(adapter).readOptional("transcription", "op-1"))
+      .rejects.toMatchObject({ code: "recovery_corrupt", message: "Unrecoverable journal artifact combination." });
+  });
+
+  it("replays delete journals for nonterminal records and removes the journal last", async () => {
+    const path = ".systemsculpt/managed-jobs/transcription/op-1.json";
+    const adapter = new MemoryAdapter(new Map([
+      [path, JSON.stringify(savedRecord())],
+      [`${path}.delete-journal`, JSON.stringify({ schemaVersion: 1, capability: "transcription", operationId: "op-1", revision: 1, intent: "delete" })],
+    ]));
+    await expect(new ManagedJobRecoveryStore(adapter).readOptional("transcription", "op-1")).resolves.toBeNull();
+    expect(adapter.events).toEqual([`remove:${path}`, `remove:${path}.delete-journal`]);
+    expect(adapter.files.size).toBe(0);
   });
 
   it("is capability-exhaustive for every dispatching phase/status Cartesian product", () => {
