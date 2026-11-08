@@ -1704,7 +1704,7 @@ describe("AgentWorkspace", () => {
     expect(historicalActivity.hasAttribute("data-agent-turn-fold")).toBe(true);
     expect(historicalActivity.dataset.activityState).toBe("settled");
     expect(historicalActivity.querySelector(".systemsculpt-agent-activity-label")?.textContent)
-      .toBe("Searched the web for “stable identity”");
+      .toBe("Activity");
     expect(historicalActivity.open).toBe(true);
     const historicalDetails = historicalTools[0].querySelector<HTMLDetailsElement>("details")!;
     expect(historicalDetails).toBe(liveDetails);

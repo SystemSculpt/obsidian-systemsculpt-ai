@@ -83,6 +83,24 @@ const textPairs = [
 ];
 
 describe("ChatView text contrast (WCAG AA, default Obsidian themes)", () => {
+  test("raw tool Details wraps long values instead of clipping paths", () => {
+    const css = readCss("views/agent-workspace/tools.css");
+    for (const selector of [".systemsculpt-agent-conversation .systemsculpt-agent-tool-raw pre", ".systemsculpt-agent-conversation .systemsculpt-agent-tool-raw code"]) {
+      const details = rule(css, selector);
+      expect(details).toMatch(/white-space:\s*pre-wrap/);
+      expect(details).toMatch(/overflow-wrap:\s*anywhere/);
+    }
+  });
+
+  test("Latest stays in its own transcript row rather than covering content", () => {
+    const transcript = rule(readCss("views/agent-workspace/shell.css"), ".systemsculpt-agent-transcript");
+    const latest = rule(readCss("views/agent-workspace/states.css"), ".systemsculpt-agent-jump");
+    expect(transcript).toMatch(/flex-direction:\s*column/);
+    expect(latest).toMatch(/flex:\s*0 0 auto/);
+    expect(latest).toMatch(/align-self:\s*flex-end/);
+    expect(latest).not.toMatch(/position:\s*(?:absolute|fixed)|\b(?:bottom|right):/);
+  });
+
   test("the contrast calculation accounts for alpha before luminance", () => {
     expect(contrast([0, 0, 0, 1], [255, 255, 255, 1])).toBe(21);
     expect(contrast([0, 0, 0, 0], [255, 255, 255, 1])).toBe(1);

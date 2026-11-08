@@ -290,7 +290,7 @@ describe("empty states (spec 3.1)", () => {
 
   it("A: names the most-used agent and starters for the open note", () => {
     const empty = presentEmptyState(state({ detection: detection(ready, ready, "claude"), activeNote: note }));
-    expect(empty.title).toBe("What should we work on?");
+    expect(empty.title).toBe("AI chat for your Obsidian vault");
     expect(empty.lead).toBe(
       "Using Claude Code, your most used agent. No credits needed.",
     );
@@ -393,7 +393,7 @@ describe("empty states (spec 3.1)", () => {
 
   it("G: shows only the title while detection runs", () => {
     expect(presentEmptyState(state({ detecting: true }))).toEqual({
-      title: "What should we work on?",
+      title: "AI chat for your Obsidian vault",
       lead: null,
       notes: [],
       offer: null,

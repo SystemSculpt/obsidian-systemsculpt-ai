@@ -218,6 +218,12 @@
   user-select: text;
   white-space: pre-wrap;
 }
+.systemsculpt-agent-conversation .systemsculpt-agent-tool-raw pre,
+.systemsculpt-agent-conversation .systemsculpt-agent-tool-raw code {
+  max-width: 100%;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .systemsculpt-agent-conversation .systemsculpt-agent-tool-detail {
   display: block;
   min-width: 0;

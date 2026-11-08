@@ -20,7 +20,6 @@ import {
   formatAgentWorkingDuration,
   finalAgentAnswerPartIds,
   groupAdjacentAgentActivity,
-  isAgentActivityPart,
   splitPreviousAgentActivity,
   summarizeAgentActivity,
 } from "./AgentActivityPresentation";
@@ -1097,12 +1096,9 @@ export class AgentConversationRenderer extends Component {
     const duration = formatAgentActivityDuration(elapsedMs);
     const label = cancelled ? this.workedLabel(elapsedMs, true) : summary.label;
     // Keep the action summary while closed; once open, name the whole-turn
-    // container instead of repeating the nested activity drawer's summary.
+    // container instead of repeating the activity labels below it.
     header.dataset.closedLabel = label.replace(/ · /gu, " ·\u00a0");
-    const repeatsNestedSummary = !cancelled && groupAdjacentAgentActivity(parts, isAgentActivityPart)
-      .some((entry) => entry.kind === "activity" && entry.items.length > 1
-        && summarizeAgentActivity(entry.items).label === summary.label);
-    header.dataset.openLabel = repeatsNestedSummary ? "Activity" : header.dataset.closedLabel;
+    header.dataset.openLabel = cancelled ? header.dataset.closedLabel : "Activity";
     this.syncCompletedActivityLabel(element);
     let icon = header.querySelector<HTMLElement>(".systemsculpt-agent-activity-state");
     if (!icon) {

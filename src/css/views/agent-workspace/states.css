@@ -4,11 +4,10 @@
  */
 
 .systemsculpt-agent-jump {
-  position: absolute;
-  right: var(--ss-space-5);
-  bottom: var(--ss-space-4);
-  z-index: var(--ss-z-sticky);
   display: inline-flex;
+  flex: 0 0 auto;
+  align-self: flex-end;
+  margin: var(--ss-space-2) var(--ss-space-5) var(--ss-space-2) auto;
   align-items: center;
   gap: var(--ss-space-2);
   min-height: var(--ss-control-height);
