@@ -175,7 +175,7 @@
     transform var(--ss-dur-fast) var(--ss-ease);
 }
 .systemsculpt-agent-conversation .systemsculpt-agent-tool.is-disclosure[open] > .systemsculpt-agent-tool-header .systemsculpt-agent-tool-disclosure {
-  transform: rotate(180deg);
+  transform: rotate(90deg);
 }
 .systemsculpt-agent-conversation .systemsculpt-agent-tool-header:hover .systemsculpt-agent-tool-disclosure {
   opacity: 1;

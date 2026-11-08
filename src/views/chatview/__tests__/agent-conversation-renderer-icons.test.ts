@@ -3170,7 +3170,8 @@ describe("AgentConversationRenderer tail status", () => {
     expect(Array.from(controls.children)).toEqual([disclosure, stateIcon]);
     expect(setIcon).toHaveBeenCalledWith(actionIcon, "loader-circle");
     expect(setIcon).not.toHaveBeenCalledWith(actionIcon, "file-text");
-    expect(setIcon).toHaveBeenCalledWith(disclosure, "chevron-down");
+    expect(setIcon).toHaveBeenCalledWith(disclosure, "chevron-right");
+    expect(disclosure.dataset.iconName).toBe("chevron-right");
     expect(setIcon).toHaveBeenCalledWith(stateIcon, "loader-circle");
     expect(actionIcon.classList).toContain("is-animated");
     expect(actionIcon.getAttribute("aria-hidden")).toBe("true");
@@ -3198,6 +3199,18 @@ describe("AgentConversationRenderer tail status", () => {
     expect(stateIcon.classList).not.toContain("is-animated");
     expect(summary.textContent).toBe("Read Projects/Plan.md");
     expect(details.open).toBe(false);
+    const disclosureGlyph = disclosure.firstChild;
+    details.open = true;
+    details.dispatchEvent(new Event("toggle"));
+    await renderTool(node, {
+      ...running,
+      state: "succeeded",
+      output: { summary: "Read Projects/Plan.md" },
+    });
+    expect(details.open).toBe(true);
+    expect(header.querySelector(".systemsculpt-agent-tool-disclosure")).toBe(disclosure);
+    expect(disclosure.firstChild).toBe(disclosureGlyph);
+    expect(disclosure.dataset.iconName).toBe("chevron-right");
     renderer.unload();
   });
 
