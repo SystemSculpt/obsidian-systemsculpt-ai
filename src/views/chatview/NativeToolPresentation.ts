@@ -1,4 +1,5 @@
 import { decodeSystemSculptToolOutput, systemSculptToolName } from "../../tools/systemsculpt/SystemSculptTools";
+import { bridgedToolName } from "../../utils/toolPolicy";
 import { MarkdownRenderer, setIcon, type App, type Component } from "obsidian";
 import { codexImageLocalPath, codexImageMedia, isCodexGeneratedImagePath } from "../../services/codex/CodexImages";
 import type { AgentToolPart } from "../../chat/ChatConversation";
@@ -111,11 +112,6 @@ function realReason(part: AgentToolPart, target: string, title: string): string 
   return candidates.find(candidate => candidate && !repeated.some(value => candidate.toLowerCase() === value.toLowerCase()));
 }
 
-/** `mcp__server__tool` reads as its tool, with its server beside it. */
-function mcpName(name: string): { server: string; tool: string } | null {
-  const match = /^mcp__(.+?)__(.+)$/u.exec(name);
-  return match ? { server: match[1].replace(/[_-]+/gu, " "), tool: match[2].replace(/[_-]+/gu, " ") } : null;
-}
 function duration(ms: unknown): string {
   return typeof ms === "number" && ms > 0 ? ms < 60_000 ? `${Math.round(ms / 1000)} s` : `${Math.round(ms / 60_000)} min` : "a moment";
 }
@@ -257,7 +253,7 @@ export function nativeToolPresentation(part: AgentToolPart): NativeToolPresentat
     case "sleep": return presentation("Wait", "Waited", "Waiting", duration(input.durationMs), "timer", "wait");
     case "mcpToolCall": return presentation("Use", "Used", "Using", (text(input.tool) ?? part.name).replace(/[_-]+/gu, " "), "plug", `mcp:${part.name}`, { meta: text(input.server) });
     default: {
-      const mcp = mcpName(part.name);
+      const mcp = bridgedToolName(part.name);
       if (mcp) return presentation("Use", "Used", "Using", mcp.tool, "plug", `mcp:${part.name}`, { meta: mcp.server });
       return presentation("Use", "Used", "Using", part.name, "wrench", `unknown:${part.name}`);
     }

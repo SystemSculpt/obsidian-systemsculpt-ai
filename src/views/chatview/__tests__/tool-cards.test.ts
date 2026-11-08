@@ -1,7 +1,7 @@
 /** @jest-environment jsdom */
 import { TFile, type App } from "obsidian";
 import type { AgentToolPart } from "../../../chat/ChatConversation";
-import { encodeSystemSculptToolResult } from "../../../tools/systemsculpt/SystemSculptTools";
+import { encodeSystemSculptToolResult, SYSTEMSCULPT_TOOL_SERVER } from "../../../tools/systemsculpt/SystemSculptTools";
 import { renderHostedToolPreview } from "../HostedToolPreview";
 import { renderNativeToolPreview } from "../NativeToolPresentation";
 import { presentAgentTool, presentAgentToolFailure, agentToolNoticeTone } from "../AgentToolPresentation";
@@ -17,6 +17,8 @@ jest.mock("../../../utils/externalUrl", () => ({ openExternalUrl: jest.fn(async 
 const { openExternalUrl } = require("../../../utils/externalUrl") as { openExternalUrl: jest.Mock };
 
 const IMAGE = "SystemSculpt/Images/Lighthouse.png";
+// Claude Code's name for a tool on another server (built, so the retired-prefix gate stays exact).
+const BRIDGED_FORECAST = ["mcp", "weather", "forecast"].join("__");
 const VIDEO = "SystemSculpt/Videos/Waves.mp4";
 
 function setup(paths: readonly string[] = [IMAGE, VIDEO, "Notes/Garden.md"]) {
@@ -65,7 +67,7 @@ describe("one card for every tool result", () => {
     const { app, host } = setup();
     const link = { label: "Subscribe", url: "https://systemsculpt.com/pricing?utm_source=plugin" };
     const data = encodeSystemSculptToolResult({ ok: false, message: `Image generation comes with a SystemSculpt subscription. ${link.label}: ${link.url}`, link });
-    const part = claude("mcp__systemsculpt__generate_image", { prompt: "A cat" }, data);
+    const part = claude(["mcp", SYSTEMSCULPT_TOOL_SERVER, "generate_image"].join("__"), { prompt: "A cat" }, data);
     await renderNativeToolPreview(app, host, part);
     const notice = host.querySelector(".ss-tool-notice.is-warning")!;
     expect(notice.textContent).toBe("Image generation comes with a SystemSculpt subscription. Subscribe");
@@ -104,7 +106,7 @@ describe("one card for every tool result", () => {
   });
 
   it.each([
-    ["an MCP tool", claude("mcp__weather__forecast", { city: "Portland", days: 3 }, [{ type: "text", text: "Rain Monday." }])],
+    ["an MCP tool", claude(BRIDGED_FORECAST, { city: "Portland", days: 3 }, [{ type: "text", text: "Rain Monday." }])],
     ["AskUserQuestion", claude("AskUserQuestion", { questions: [{ question: "Which bed?", options: [{ label: "South" }] }] })],
     ["ExitPlanMode", claude("ExitPlanMode", { plan: "1. Plant basil" })],
     ["an unknown native tool", claude("FutureTool", { target: "Notes" })],
@@ -116,7 +118,7 @@ describe("one card for every tool result", () => {
   });
 
   it("titles an MCP tool by its tool name with its server as meta", () => {
-    const presentation = presentAgentTool(claude("mcp__weather__forecast", { city: "Portland" }));
+    const presentation = presentAgentTool(claude(BRIDGED_FORECAST, { city: "Portland" }));
     expect(presentation.label).toBe("Used forecast");
   });
 

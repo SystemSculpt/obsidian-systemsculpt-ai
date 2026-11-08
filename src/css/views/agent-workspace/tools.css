@@ -916,7 +916,7 @@
 }
 .systemsculpt-agent-tool-raw-chevron {
   display: inline-flex;
-  transition: transform 120ms ease;
+  transition: transform var(--ss-dur-fast) var(--ss-ease);
 }
 .systemsculpt-agent-tool-raw-chevron svg {
   width: 12px;
