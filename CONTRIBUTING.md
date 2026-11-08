@@ -23,8 +23,10 @@ npm run test:related -- <changed src files>
 
 Run the loop once for the changed area, using the focused test command instead
 of the full suite. Add compiled integration only for bundle/composition
-changes. `release:plugin` builds and validates the artifact without rerunning
-`check:ci`; main CI already ran it on the tagged commit.
+changes. Fixes merge source only: no per-fix version bumps, tags or publication.
+The no-model Trellis daily script owns the combined release. Its
+`release:plugin` step builds and validates artifacts without rerunning
+`check:ci`; full CI must already be green on the exact tagged commit.
 
 ## Conventions
 
