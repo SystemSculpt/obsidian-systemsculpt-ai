@@ -303,20 +303,28 @@ describe("empty state: what Pro adds (T-5585)", () => {
       ],
       subscribe: "Get Pro for $9/month",
     });
-    expect(presentEmptyState(state({ account: "signed-in", credits: starter })).pro?.subscribe)
-      .toBe("Get Pro for $9/month");
+    const spent = credits({ ...starter, totalRemaining: 0, availableUnreserved: 0 });
+    expect(presentEmptyState(state({ account: "signed-in", credits: spent })).pro?.kind).toBe("offer");
   });
 
-  it("a subscriber gets one tap into each, the image one naming the open note", () => {
-    const pro = presentEmptyState(state({ account: "paid", credits: paid, activeNote: { name: "Plan", link: "Projects/Plan" } })).pro;
-    expect(pro?.kind).toBe("try");
-    expect(pro?.subscribe).toBeNull();
-    expect(pro?.rows.map((row) => row.label)).toEqual(["Make an image for Plan", "Smart search your vault", "Open Studio"]);
+  it("a starter with credits left can try each now, and still gets the Subscribe link", () => {
+    expect(presentEmptyState(state({ account: "signed-in", credits: starter })).pro).toEqual({
+      ...presentEmptyState(state()).pro,
+      kind: "try",
+      title: "Try with your free credits",
+    });
+    expect(presentEmptyState(state({ account: "paid", credits: credits({ ...paid, usageClass: "master_auth", includedCreditsEntitled: false }) })).pro?.kind)
+      .toBe("try");
+  });
+
+  it("a subscriber taps the same lines to try each, with no Subscribe link", () => {
+    const pro = presentEmptyState(state({ account: "paid", credits: paid })).pro;
+    expect(pro).toEqual({ ...presentEmptyState(state()).pro, kind: "try", title: "Included with Pro", subscribe: null });
   });
 
   it("hosted starter: the composer already offers Pro, so the lines carry no second link", () => {
     const pro = presentEmptyState(state({ backend: "systemsculpt", account: "signed-in", credits: starter })).pro;
-    expect(pro?.kind).toBe("offer");
+    expect(pro?.kind).toBe("try");
     expect(pro?.subscribe).toBeNull();
   });
 
@@ -324,6 +332,8 @@ describe("empty state: what Pro adds (T-5585)", () => {
     expect(presentEmptyState(state({ account: "paid", credits: null })).pro).toBeNull();
     expect(presentEmptyState(state({ account: "signed-in", credits: null })).pro).toBeNull();
     expect(presentEmptyState(state({ account: "paid", credits: credits({ ...paid, subscriptionStatus: "past_due" }) })).pro).toBeNull();
+    // An older server that omits the plan status cannot prove there is no plan.
+    expect(presentEmptyState(state({ account: "signed-in", credits: credits({ ...starter, subscriptionStatus: undefined }) })).pro).toBeNull();
   });
 
   it("stays off the sign-in, plan and detection screens", () => {

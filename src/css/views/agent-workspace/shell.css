@@ -390,7 +390,8 @@
   inset: 0;
   z-index: var(--ss-z-raised);
   display: grid;
-  place-items: center;
+  /* Safe: a block taller than a short pane starts at its top instead of overflowing out of reach. */
+  place-items: safe center;
   min-height: var(--ss-agent-empty-height);
   padding: var(--ss-space-4) var(--ss-space-3);
   overflow-y: auto;

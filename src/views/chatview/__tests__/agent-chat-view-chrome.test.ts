@@ -12,6 +12,10 @@ jest.mock("../../../platform/hostCapabilities", () => {
     getHostOperatingSystem: () => "macOS",
   };
 });
+const mockOpenedUrls: string[] = [];
+jest.mock("../../../utils/externalUrl", () => ({
+  openExternalUrl: jest.fn(async (url: string) => { mockOpenedUrls.push(url); return true; }),
+}));
 const confirm = { confirmed: true };
 jest.mock("../../../core/ui/notifications", () => ({
   showConfirm: jest.fn(async () => confirm),
@@ -398,6 +402,35 @@ describe("AgentChatView chrome wiring", () => {
       expect(openConnect).toHaveBeenCalledWith(view.plugin, "sign-up", { feature: "Chat" });
     } finally {
       openConnect.mockRestore();
+    }
+  });
+
+  it("opens the empty chat's Pro checkout and its try taps", async () => {
+    const { view } = harness({ agent: null });
+    mockOpenedUrls.length = 0;
+    const setInputText = jest.spyOn(view as any, "setInputText").mockImplementation(() => undefined);
+    const execute = jest.fn(() => true);
+    Object.assign(view.app, { commands: { executeCommandById: execute } });
+    view.plugin.openSettingsTab = jest.fn();
+    Object.assign(view.plugin, { manifest: { id: "systemsculpt-ai" } });
+    try {
+      (view as any).handleEmptyStateAction("subscribe-pro");
+      await Promise.resolve();
+      expect(mockOpenedUrls).toEqual([expect.stringContaining("cta=plugin_chat_empty_monthly")]);
+      (view as any).handleEmptyStateAction("try-media");
+      expect(setInputText.mock.calls[0][0]).toMatch(/^Make an image (of |for \[\[)/);
+      view.plugin.settings.embeddingsEnabled = false;
+      (view as any).handleEmptyStateAction("try-search");
+      expect(view.plugin.openSettingsTab).toHaveBeenCalledWith("knowledge");
+      view.plugin.settings.embeddingsEnabled = true;
+      (view as any).handleEmptyStateAction("try-search");
+      (view as any).handleEmptyStateAction("try-studio");
+      expect(execute.mock.calls.map(([id]) => id)).toEqual([
+        "systemsculpt-ai:open-systemsculpt-search",
+        "systemsculpt-ai:open-systemsculpt-studio",
+      ]);
+    } finally {
+      setInputText.mockRestore();
     }
   });
 

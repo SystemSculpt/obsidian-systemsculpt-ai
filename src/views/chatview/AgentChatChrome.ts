@@ -506,54 +506,43 @@ const PRO_ICONS: Readonly<Record<ProCapability, string>> = {
   studio: "workflow",
 };
 
-const PRO_OFFER_ROWS: Readonly<Record<ProCapability, string>> = {
+/** One line each; a subscriber taps the same line to try it. */
+const PRO_ROWS: Readonly<Record<ProCapability, string>> = {
   media: "Image and video generation in chat",
   search: "Smart search across your vault",
   studio: "Studio for visual AI workflows",
 };
 
-const PRO_TRY_ROWS: Readonly<Record<ProCapability, string>> = {
-  media: "Make an image",
-  search: "Smart search your vault",
-  studio: "Open Studio",
-};
-
 const PRO_SUBSCRIBE = "Get Pro for $9/month";
 
 /**
- * Whether this account has the subscription the image, video, search and
- * Studio tools need: "subscribed", "free", or null while it is not known (a
- * key whose balance has not loaded, or a failed renewal, which the payment
- * line handles). A valid key alone proves nothing: starter keys validate too.
+ * What the image, video, search and Studio tools can do for this account:
+ * "subscribed"; "trial", a free starter whose credits can still try them;
+ * "free", nothing to spend; or null while it is not known (a key whose
+ * balance has not loaded, an older server that omits the plan, or a failed
+ * renewal, which the payment line handles). The tools admit any valid key
+ * with credits, so a starter really can try them (no entitlement change).
  */
-function proStanding(state: AgentChromeState): "subscribed" | "free" | null {
+function proStanding(state: AgentChromeState): "subscribed" | "trial" | "free" | null {
   const credits = state.credits;
   if (!credits) return state.account === "signed-out" || state.account === "no-plan" ? "free" : null;
   if (needsPaymentFix(credits)) return null;
   if (credits.usageClass === "master_auth" || credits.includedCreditsEntitled === true) return "subscribed";
-  return isStarterBalance(credits) ? "free" : null;
+  // Like the composer's offer: only a reported null status proves there is no plan.
+  if (!isStarterBalance(credits) || credits.subscriptionStatus !== null) return null;
+  return starterOfferLead(credits) === "Out of credits." ? "free" : "trial";
 }
 
 function presentPro(state: AgentChromeState): EmptyStatePro | null {
   const standing = proStanding(state);
   if (!standing) return null;
   const ids: readonly ProCapability[] = ["media", "search", "studio"];
-  if (standing === "subscribed") {
-    return {
-      kind: "try",
-      title: "Included with Pro",
-      rows: ids.map((id) => ({
-        id,
-        label: id === "media" && state.activeNote ? `Make an image for ${state.activeNote.name}` : PRO_TRY_ROWS[id],
-        icon: PRO_ICONS[id],
-      })),
-      subscribe: null,
-    };
-  }
+  const rows = ids.map((id) => ({ id, label: PRO_ROWS[id], icon: PRO_ICONS[id] }));
+  if (standing === "subscribed") return { kind: "try", title: "Included with Pro", rows, subscribe: null };
   return {
-    kind: "offer",
-    title: "With SystemSculpt Pro",
-    rows: ids.map((id) => ({ id, label: PRO_OFFER_ROWS[id], icon: PRO_ICONS[id] })),
+    kind: standing === "trial" ? "try" : "offer",
+    title: standing === "trial" ? "Try with your free credits" : "With SystemSculpt Pro",
+    rows,
     // Hosted Chat already shows "Get Pro for $9/month" above the composer (T-5452).
     subscribe: presentCreditsOffer(state) ? null : PRO_SUBSCRIBE,
   };

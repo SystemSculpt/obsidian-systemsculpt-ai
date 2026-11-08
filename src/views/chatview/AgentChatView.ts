@@ -2386,14 +2386,15 @@ export class AgentChatView extends ItemView {
     UpgradePlanModal.openConnect(this.plugin, mode, { feature: "Chat" });
   }
 
-  /** The empty chat's Subscribe link: the $9 Monthly checkout, or Billing for a failed renewal (T-5348). */
+  /** The empty chat's Subscribe link; it never shows for a failed renewal, whose card is fixed in Billing. */
   private async openProCheckout(): Promise<void> {
-    const ownerWindow = this.containerEl.ownerDocument.defaultView ?? undefined;
-    if (needsPaymentFix(this.creditsBalance)) {
-      await this.openBillingPortal();
-      return;
-    }
-    await openExternalUrl(SYSTEMSCULPT_WEBSITE.MONTHLY_CHAT_EMPTY, ownerWindow);
+    await openExternalUrl(SYSTEMSCULPT_WEBSITE.MONTHLY_CHAT_EMPTY, this.containerEl.ownerDocument.defaultView ?? undefined);
+  }
+
+  /** Smart search ranks by meaning only with embeddings on; until then the tap opens the setting that turns them on. */
+  private trySmartSearch(): void {
+    if (this.plugin.settings.embeddingsEnabled) this.runPluginCommand("open-systemsculpt-search");
+    else this.plugin.openSettingsTab("knowledge");
   }
 
   /** A subscriber's "Make an image" tap: a prompt for the open note, ready to finish or send. */
@@ -2414,7 +2415,7 @@ export class AgentChatView extends ItemView {
     else if (action === "detect-again") void this.detectAgain();
     else if (action === "subscribe-pro") void this.openProCheckout();
     else if (action === "try-media") this.setInputText(this.imageStarterPrompt(), { focus: true });
-    else if (action === "try-search") this.runPluginCommand("open-systemsculpt-search");
+    else if (action === "try-search") this.trySmartSearch();
     else if (action === "try-studio") this.runPluginCommand("open-systemsculpt-studio");
     else if (action === "switch-below") this.openBackendMenu();
     else if (action === "back-to-previous") {
