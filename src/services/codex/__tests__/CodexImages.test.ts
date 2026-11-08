@@ -90,8 +90,8 @@ describe("Codex images in chat", () => {
     await renderNativeToolPreview(app, host, viewed);
     expect(host.querySelector("img")?.getAttribute("src")).toBe("app://vault/Photos/old.png");
     expect(host.textContent).not.toContain("No preview is available");
-    (host.querySelector("[data-testid='chat.tool.image.path']") as HTMLElement).click();
-    expect(openLinkText).toHaveBeenCalledWith("Photos/old.png", "");
+    (host.querySelector("[data-testid='chat.tool.media.open']") as HTMLElement).click();
+    expect(openLinkText).toHaveBeenCalledWith("Photos/old.png", "", false);
   });
 
   it("finds the image in a saved chat, where the result is nested under data", async () => {

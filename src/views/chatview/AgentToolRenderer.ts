@@ -4,10 +4,11 @@ import { createSurfaceElement } from "../../core/ui/surface";
 import type { ToolCall } from "../../types/toolCalls";
 import type { AgentArtifact, AgentToolPart } from "../../chat/ChatConversation";
 import { renderOperationsInlinePreview, renderWriteEditInlineDiff } from "./ToolCallPreview";
-import { presentAgentTool, presentAgentToolDetails, presentToolLineMeta } from "./AgentToolPresentation";
+import { agentToolNoticeTone, gatedSystemSculptTurn, presentAgentTool, presentAgentToolDetails, presentToolLineMeta, refusedSystemSculptCall } from "./AgentToolPresentation";
 import type { AgentApprovalCards } from "./AgentApprovalCards";
 import { renderNativeToolPreview } from "./NativeToolPresentation";
 import { renderHostedToolPreview } from "./HostedToolPreview";
+import { renderNotice, renderRawDetails } from "./ToolCardBlocks";
 import { ACTIONABLE_ARTIFACT_TOOLS, toolCallForPart, visibleToolError } from "./ConversationPartPresentation";
 
 type ToolApprovalPreviewHydrationState = {
@@ -105,39 +106,28 @@ export class AgentToolRenderer {
     const stagedSupport = createSurfaceElement(node.ownerDocument, "div");
     stagedSupport.className = "systemsculpt-agent-tool-support";
     if (supportNeedsRender && detailRows.length > 0) {
-      const detailsList = stagedSupport.createEl("pre", {
-        cls: "systemsculpt-agent-tool-details",
-        attr: { tabindex: "0" },
-      });
+      // The same label and value rows every tool card uses; a richer preview replaces them once it loads.
+      const detailsCard = stagedSupport.createDiv({ cls: "ss-tool-card systemsculpt-agent-tool-details", attr: { "data-card": "summary" } });
+      const detailsList = detailsCard.createEl("dl", { cls: "ss-tool-fields" });
       for (const detail of detailRows) {
-        const row = detailsList.createSpan({ cls: "systemsculpt-agent-tool-detail" });
-        row.createSpan({ cls: "systemsculpt-agent-tool-detail-label", text: detail.label });
-        row.appendText(": ");
-        row.createSpan({ cls: "systemsculpt-agent-tool-detail-value", text: detail.value });
+        const row = detailsList.createDiv({ cls: "ss-tool-field systemsculpt-agent-tool-detail" });
+        row.createEl("dt", { cls: "systemsculpt-agent-tool-detail-label", text: detail.label });
+        row.createEl("dd", { cls: "systemsculpt-agent-tool-detail-value", text: detail.value });
       }
     }
     if (supportNeedsRender && hasReadablePayload && !retainedNativePreview) {
       stagedSupport.createDiv({ cls: "systemsculpt-agent-tool-preview" });
-      const raw = stagedSupport.createEl("details", { cls: "systemsculpt-agent-tool-raw" });
-      raw.createEl("summary", { text: "Details" });
-      const rawCode = raw.createEl("pre", { attr: { tabindex: "0" } }).createEl("code");
-      raw.addEventListener("toggle", () => {
-        if (raw.open && !rawCode.hasChildNodes()) {
-          rawCode.setText(JSON.stringify({ input: part.input, ...(!isQuestion && part.output ? { output: part.output.data } : {}) }, null, 2));
-        }
-      });
     }
     if (supportNeedsRender && toolError) {
-      stagedSupport.createDiv({
-        cls: "systemsculpt-agent-tool-error",
-        text: toolError,
-        attr: { role: "alert" },
-      });
+      renderNotice(stagedSupport, { tone: agentToolNoticeTone(part, presentation.displayState), text: toolError }).addClass("systemsculpt-agent-tool-error");
     }
     if (supportNeedsRender) {
       for (const artifact of actionableArtifacts) {
         this.options.renderArtifact(stagedSupport, artifact);
       }
+    }
+    if (supportNeedsRender && hasReadablePayload && !retainedNativePreview) {
+      renderRawDetails(stagedSupport, () => ({ input: part.input, ...(!isQuestion && part.output ? { output: part.output.data } : {}) }));
     }
 
     const approvalFingerprint = approvalRequired
@@ -159,6 +149,8 @@ export class AgentToolRenderer {
       stagedApproval.dataset.approvalFingerprint = approvalFingerprint;
     }
     node.className = `systemsculpt-agent-part is-tool is-${presentation.displayState}`;
+    if (gatedSystemSculptTurn(part)) node.classList.add("is-gated");
+    else if (refusedSystemSculptCall(part)) node.classList.add("is-refused");
     node.dataset.testid = "chat.part";
     node.dataset.kind = "tool";
     node.dataset.state = presentation.displayState;
@@ -368,6 +360,10 @@ export class AgentToolRenderer {
           try {
             if (hasPreview) currentSupport.querySelector(":scope > .systemsculpt-agent-tool-details")?.remove();
             previewHost.replaceChildren(...Array.from(staging.childNodes));
+            // A SystemSculpt card already says why it stopped, with its action; one notice is enough.
+            if (previewHost.querySelector('[data-card^="systemsculpt:"] .ss-tool-notice')) {
+              currentSupport.querySelector(":scope > .systemsculpt-agent-tool-error")?.remove();
+            }
           } finally { finish?.(); }
         }).catch(() => { delete previewHost.dataset.hydrated; });
       });

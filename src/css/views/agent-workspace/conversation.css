@@ -432,3 +432,39 @@ video.systemsculpt-agent-media-frame {
   width: 100%;
   max-width: 100%;
 }
+
+/* Embedded files in an answer open in the vault (T-5956): images on click,
+   PDFs, audio and video through the file name under their player. */
+.systemsculpt-agent-conversation .internal-embed.image-embed img {
+  cursor: zoom-in;
+}
+.systemsculpt-agent-conversation a.ss-embed-source {
+  display: flex;
+  align-items: center;
+  gap: var(--ss-space-1);
+  width: fit-content;
+  max-width: 100%;
+  margin: var(--ss-space-1) 0 var(--ss-space-2);
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+.systemsculpt-agent-conversation a.ss-embed-source:hover {
+  color: var(--ss-ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.systemsculpt-agent-conversation a.ss-embed-source:focus-visible {
+  outline: 2px solid var(--ss-line-accent);
+  outline-offset: 2px;
+  border-radius: var(--ss-radius-xs);
+}
+.ss-embed-source-icon {
+  display: inline-flex;
+  flex: none;
+}
+.ss-embed-source-icon svg {
+  width: 12px;
+  height: 12px;
+}

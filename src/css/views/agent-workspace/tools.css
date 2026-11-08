@@ -179,6 +179,14 @@
 .systemsculpt-agent-conversation .systemsculpt-agent-part.is-tool.is-succeeded .systemsculpt-agent-tool-state-icon {
   color: var(--ss-ink-muted);
 }
+.systemsculpt-agent-conversation .systemsculpt-agent-part.is-tool.is-gated .systemsculpt-agent-tool-icon,
+.systemsculpt-agent-conversation .systemsculpt-agent-part.is-tool.is-gated .systemsculpt-agent-tool-state-icon {
+  color: var(--ss-warning);
+}
+.systemsculpt-agent-conversation .systemsculpt-agent-part.is-tool.is-refused .systemsculpt-agent-tool-icon,
+.systemsculpt-agent-conversation .systemsculpt-agent-part.is-tool.is-refused .systemsculpt-agent-tool-state-icon {
+  color: var(--ss-danger);
+}
 .systemsculpt-agent-part.is-tool.is-failed,
 .systemsculpt-agent-part.is-tool.is-cancelled,
 .systemsculpt-agent-part.is-tool.is-outcome-unknown,
@@ -186,29 +194,23 @@
   color: var(--ss-danger);
 }
 .systemsculpt-agent-conversation .systemsculpt-agent-tool-support {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-3);
   margin: var(--ss-space-1) 0 var(--ss-space-2) 22px;
-  padding: var(--ss-space-2) var(--ss-space-3);
+  padding: var(--ss-space-3);
   overflow: auto;
   overscroll-behavior: contain;
-  border-radius: var(--ss-radius-sm);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-md);
   background: var(--ss-surface-1);
+}
+.systemsculpt-agent-conversation .systemsculpt-agent-tool-preview:empty {
+  display: none;
 }
 .systemsculpt-agent-conversation .systemsculpt-agent-tool-support[hidden],
 .systemsculpt-agent-conversation details.systemsculpt-agent-tool:not([open]) > .systemsculpt-agent-tool-support {
   display: none;
-}
-.systemsculpt-agent-conversation .systemsculpt-agent-tool-details {
-  max-height: var(--ss-agent-tool-details-height);
-  margin: 0;
-  padding: var(--ss-space-1) 0;
-  overflow: auto;
-  color: var(--ss-ink-muted);
-  font-family: var(--ss-font-mono);
-  font-size: var(--ss-text-xs);
-  line-height: 1.55;
-  overflow-wrap: anywhere;
-  user-select: text;
-  white-space: pre-wrap;
 }
 .systemsculpt-agent-conversation .systemsculpt-agent-tool-raw pre,
 .systemsculpt-agent-conversation .systemsculpt-agent-tool-raw code {
@@ -216,18 +218,6 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.systemsculpt-agent-conversation .systemsculpt-agent-tool-detail {
-  display: block;
-  min-width: 0;
-}
-.systemsculpt-agent-conversation .systemsculpt-agent-tool-detail-label {
-  color: var(--ss-ink-muted);
-  font-weight: 400;
-}
-.systemsculpt-agent-conversation .systemsculpt-agent-tool-detail-value {
-  color: var(--ss-ink-muted);
-}
-.systemsculpt-agent-conversation .systemsculpt-agent-part.is-tool.is-partial .systemsculpt-agent-tool-error,
 .systemsculpt-agent-conversation .systemsculpt-agent-part.is-tool.is-partial .systemsculpt-agent-tool-icon,
 .systemsculpt-agent-conversation .systemsculpt-agent-part.is-tool.is-approval-required .systemsculpt-agent-tool-icon {
   color: var(--ss-warning);
@@ -236,12 +226,6 @@
 .systemsculpt-agent-conversation .systemsculpt-agent-part.is-tool.is-denied .systemsculpt-agent-tool-icon,
 .systemsculpt-agent-conversation .systemsculpt-agent-part.is-tool.is-outcome-unknown .systemsculpt-agent-tool-icon {
   color: var(--ss-danger);
-}
-.systemsculpt-agent-tool-error {
-  padding: var(--ss-space-2) var(--ss-space-3);
-  font-size: var(--ss-text-sm);
-  color: var(--ss-danger);
-  text-wrap: pretty;
 }
 .systemsculpt-agent-error-actions {
   display: flex;
@@ -493,52 +477,434 @@
 .systemsculpt-agent-approval-preview code {
   overflow-wrap: anywhere;
 }
+/* One card for every tool result (T-5956): fields, paths, sources, terminal,
+   text, media and one calm notice, with raw JSON last behind Details. */
 .ss-native-tool-preview,
 .ss-hosted-tool-preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-3);
   min-width: 0;
   font-size: var(--ss-text-sm);
 }
-.ss-hosted-tool-preview p {
-  margin-block: var(--ss-space-2);
+.ss-tool-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-3);
+  min-width: 0;
+  color: var(--ss-ink);
+  font-size: var(--ss-text-sm);
+  line-height: var(--ss-leading-base);
 }
-.ss-hosted-tool-list {
-  margin-block: var(--ss-space-2);
-  padding-inline-start: var(--ss-space-4);
-  overflow-wrap: anywhere;
-}
-.ss-native-tool-preview .ss-agent-tool-details {
+.ss-tool-card > *,
+.ss-tool-section > * {
   margin: 0;
 }
-.ss-native-tool-preview .ss-native-tool-image {
-  margin-block: 0 var(--ss-space-2);
+.ss-tool-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-2);
+  min-width: 0;
 }
-.ss-native-tool-preview .ss-native-tool-image .systemsculpt-agent-media-frame {
-  max-height: 16rem;
+.ss-tool-section + .ss-tool-section {
+  padding-top: var(--ss-space-3);
+  border-top: 1px solid var(--ss-line);
 }
-.ss-native-tool-preview .ss-agent-tool-details dt {
+.ss-tool-section-title {
+  font-weight: var(--ss-weight-medium);
+  overflow-wrap: anywhere;
+}
+.ss-tool-caption {
+  margin: 0;
   color: var(--ss-ink-muted);
   font-size: var(--ss-text-xs);
+  line-height: var(--ss-leading-base);
+  text-wrap: pretty;
 }
-.ss-native-tool-preview .ss-agent-tool-details dd {
-  margin: 0 0 var(--ss-space-2);
+.ss-tool-result {
+  color: var(--ss-ink);
+  text-wrap: pretty;
+}
+
+/* Label and value rows. */
+.ss-tool-fields {
+  display: grid;
+  grid-template-columns: minmax(4.5rem, max-content) minmax(0, 1fr);
+  gap: var(--ss-space-1) var(--ss-space-4);
+  margin: 0;
+}
+.ss-tool-field {
+  display: contents;
+}
+.ss-tool-fields dt {
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
+  line-height: calc(var(--ss-text-sm) * var(--ss-leading-base));
+}
+.ss-tool-fields dd {
+  min-width: 0;
+  margin: 0;
+  white-space: pre-line;
+  color: var(--ss-ink);
   overflow-wrap: anywhere;
   text-wrap: pretty;
 }
+.ss-tool-fields dd code {
+  font-size: var(--ss-text-xs);
+}
+@container ss-surface (max-width: 379px) {
+  .ss-tool-fields {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+  .ss-tool-fields dd + dt {
+    margin-top: var(--ss-space-2);
+  }
+}
+
+/* Vault paths and web sources: one per row, the link first, a muted note after. */
+.ss-tool-paths,
+.ss-tool-links,
+.ss-tool-questions,
+.ss-native-tool-plan {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ss-tool-paths > li,
+.ss-tool-links > li {
+  display: block;
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.ss-tool-paths > li > pre,
+.ss-tool-paths > li > .ss-tool-more {
+  margin-top: var(--ss-space-1);
+}
+.ss-tool-paths .ss-tool-path-note,
+.ss-tool-path-arrow {
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
+}
+.ss-tool-card a.internal-link,
+.ss-tool-card a.external-link {
+  color: var(--ss-ink-accent);
+  text-decoration: none;
+}
+.ss-tool-card a.external-link {
+  padding-inline-end: 0;
+  background-image: none;
+}
+.ss-tool-card a.internal-link:hover,
+.ss-tool-card a.external-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.ss-tool-card a.internal-link.is-unresolved {
+  color: var(--ss-ink-muted);
+}
+.ss-tool-paths .ss-tool-path-note.is-warning {
+  color: var(--ss-ink);
+  font-weight: var(--ss-weight-medium);
+}
+.ss-tool-paths > li > .ss-tool-caption {
+  margin-top: var(--ss-space-0);
+}
+.ss-tool-link-host {
+  margin-inline-start: var(--ss-space-2);
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
+}
+
+/* A command and its output. */
+.ss-tool-terminal pre,
 .ss-native-tool-preview pre,
 .ss-hosted-tool-preview pre {
+  max-height: var(--ss-agent-tool-details-height);
+  margin: 0;
+  padding: var(--ss-space-2) var(--ss-space-3);
   overflow: auto;
-  white-space: pre;
-  overflow-wrap: normal;
-  word-break: normal;
+  overscroll-behavior: contain;
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-sm);
+  background: var(--ss-surface-0);
+  color: var(--ss-ink-muted);
   font-family: var(--ss-font-mono);
-  font-size: calc(1em * 0.9);
+  font-size: var(--ss-text-xs);
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+.ss-tool-terminal pre code {
+  display: block;
+  padding: 0;
+  background: none;
+  color: inherit;
+  font-size: inherit;
+  white-space: inherit;
+}
+.ss-tool-terminal-command {
+  color: var(--ss-ink);
+}
+.ss-tool-terminal-command + .ss-tool-terminal-output {
+  margin-top: var(--ss-space-1);
+}
+.ss-tool-terminal-prompt {
+  color: var(--ss-ink-muted);
+  user-select: none;
 }
 .ss-native-tool-preview .systemsculpt-diff-prefix:first-child,
 .ss-hosted-tool-preview .systemsculpt-diff-prefix:first-child {
   margin-inline-start: var(--ss-space-2);
 }
-.ss-native-tool-output {
+.systemsculpt-agent-tool-support .systemsculpt-diff-viewer pre,
+.systemsculpt-agent-tool-support .systemsculpt-inline-diff pre {
+  white-space: pre;
+  overflow-wrap: normal;
+}
+
+/* Prose a tool returned. */
+.ss-tool-text {
+  color: var(--ss-ink);
+  line-height: var(--ss-leading-relaxed);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+.ss-tool-text.is-clamped {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: var(--ss-tool-text-lines, 8);
+  overflow: hidden;
+}
+.ss-tool-card > .ss-tool-more,
+.ss-tool-section > .ss-tool-more,
+.ss-native-tool-preview > .ss-tool-more {
+  align-self: flex-start;
+  margin-top: calc(var(--ss-space-1) * -1);
+}
+
+/* Questions and to-dos. */
+.ss-tool-questions {
+  gap: var(--ss-space-2);
+}
+.ss-tool-question-options {
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
+}
+.ss-native-tool-plan > li {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ss-space-2);
+  margin: 0;
+}
+.ss-native-tool-plan-mark {
+  display: inline-flex;
+  flex: none;
+  margin-top: 0.2em;
+  color: var(--ss-ink-muted);
+}
+.ss-native-tool-plan-mark svg {
+  width: 14px;
+  height: 14px;
+}
+.ss-native-tool-plan > li.is-done {
+  color: var(--ss-ink-muted);
+}
+.ss-native-tool-plan > li.is-done .ss-native-tool-plan-mark {
+  color: var(--ss-success);
+}
+.ss-native-tool-plan > li.is-active .ss-native-tool-plan-mark {
+  color: var(--ss-ink-accent);
+}
+
+/* One calm line for errors, gates and partial results. */
+.ss-tool-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ss-space-2);
+  margin: 0;
+  padding: var(--ss-space-2) var(--ss-space-3);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-sm);
+  background: var(--ss-surface-0);
+  color: var(--ss-ink);
+  font-size: var(--ss-text-sm);
+  line-height: var(--ss-leading-base);
+}
+.ss-tool-notice-icon {
+  display: inline-flex;
+  flex: none;
+  height: calc(var(--ss-text-sm) * var(--ss-leading-base));
+  align-items: center;
+}
+.ss-tool-notice-icon svg {
+  width: 14px;
+  height: 14px;
+}
+.ss-tool-notice.is-danger .ss-tool-notice-icon { color: var(--ss-danger); }
+.ss-tool-notice.is-warning .ss-tool-notice-icon { color: var(--ss-warning); }
+.ss-tool-notice.is-info .ss-tool-notice-icon { color: var(--ss-ink-muted); }
+.ss-tool-notice-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+}
+.ss-tool-card a.ss-tool-notice-action,
+.systemsculpt-agent-tool-support a.ss-tool-notice-action {
+  color: var(--ss-ink-accent);
+  font-weight: var(--ss-weight-medium);
+  white-space: nowrap;
+  text-decoration: none;
+  background-image: none;
+  padding-inline-end: 0;
+}
+
+/* Media a tool made or viewed: thumbnails that open the vault file. */
+.ss-tool-media {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ss-space-2);
+}
+.ss-tool-media-tile {
+  position: relative;
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: 168px;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-md);
+  background: var(--ss-surface-sunken);
+  box-shadow: none;
+  cursor: zoom-in;
+}
+.ss-tool-media-tile.is-video {
+  cursor: pointer;
+}
+.ss-tool-media-tile:hover {
+  border-color: var(--ss-line-strong);
+}
+.ss-tool-media-tile:focus-visible {
+  outline: 2px solid var(--ss-line-accent);
+  outline-offset: 2px;
+}
+.ss-tool-media-tile img,
+.ss-tool-media-tile video {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+}
+.ss-tool-media-tile.is-video video {
+  aspect-ratio: 16 / 9;
+}
+.ss-tool-media-play {
+  position: absolute;
+  inset: 50% auto auto 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--ss-radius-full);
+  background: var(--ss-media-scrim);
+  transform: translate(-50%, -50%);
+}
+.ss-tool-media-play svg {
+  width: 16px;
+  height: 16px;
+  margin-inline-start: 2px;
+  fill: var(--ss-ink-on-media);
+  stroke: var(--ss-ink-on-media);
+}
+.ss-tool-media-tile.is-missing {
+  display: flex;
+  align-items: center;
+  height: auto;
+  padding: var(--ss-space-2) var(--ss-space-3);
+  border-style: dashed;
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
+  cursor: default;
+}
+@container ss-surface (max-width: 379px) {
+  .ss-tool-media-tile {
+    height: 136px;
+  }
+}
+
+/* Raw request and result, last and quiet. */
+.systemsculpt-agent-conversation .systemsculpt-agent-tool-raw > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ss-space-1);
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
+  cursor: pointer;
+  list-style: none;
+}
+.systemsculpt-agent-conversation .systemsculpt-agent-tool-raw > summary::-webkit-details-marker {
+  display: none;
+}
+.systemsculpt-agent-conversation .systemsculpt-agent-tool-raw > summary:hover {
+  color: var(--ss-ink);
+}
+.systemsculpt-agent-conversation .systemsculpt-agent-tool-raw > summary:focus-visible {
+  outline: 2px solid var(--ss-line-accent);
+  outline-offset: 2px;
+  border-radius: var(--ss-radius-xs);
+}
+.systemsculpt-agent-tool-raw-chevron {
+  display: inline-flex;
+  transition: transform 120ms ease;
+}
+.systemsculpt-agent-tool-raw-chevron svg {
+  width: 12px;
+  height: 12px;
+}
+.systemsculpt-agent-tool-raw[open] .systemsculpt-agent-tool-raw-chevron {
+  transform: rotate(90deg);
+}
+.systemsculpt-agent-tool-raw > pre {
   max-height: var(--ss-agent-tool-details-height);
+  margin: var(--ss-space-2) 0 0;
+  padding: var(--ss-space-2) var(--ss-space-3);
+  overflow: auto;
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-sm);
+  background: var(--ss-surface-0);
+  color: var(--ss-ink-muted);
+  font-family: var(--ss-font-mono);
+  font-size: var(--ss-text-xs);
+}
+@media (prefers-reduced-motion: reduce) {
+  .systemsculpt-agent-tool-raw-chevron { transition: none; }
+}
+.ss-native-plan-preview > :first-child,
+.ss-native-plan-preview > :first-child > :first-child {
+  margin-top: 0;
+}
+.ss-native-plan-preview > :last-child,
+.ss-native-plan-preview > :last-child > :last-child {
+  margin-bottom: 0;
+}
+.ss-native-plan-preview :is(h1, h2, h3, h4) {
+  margin: var(--ss-space-3) 0 var(--ss-space-1);
+  font-size: var(--ss-text-base);
+  font-weight: var(--ss-weight-semibold);
+  line-height: var(--ss-leading-tight);
+}
+.ss-native-plan-preview :is(ul, ol) {
+  margin-block: var(--ss-space-1);
 }
 .ss-native-plan-preview.is-collapsed {
   max-height: 25.6em;

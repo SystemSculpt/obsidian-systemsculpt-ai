@@ -28,6 +28,7 @@ import { renderTurnMedia } from "./TurnMedia";
 import { codexImageVaultPath } from "../../services/codex/CodexImages";
 import { openExternalUrl } from "../../utils/externalUrl";
 import { enhanceMarkdownCodeBlocks } from "./MarkdownCodeBlocks";
+import { embedTarget, enhanceMarkdownEmbeds } from "./MarkdownEmbeds";
 import {
   presentAgentError,
   type AgentConversationPresentation,
@@ -278,8 +279,11 @@ export class AgentConversationRenderer extends Component {
     // Delegate from the stable root: streamed Markdown reconciliation clones links.
     const openSourceLink = (event: MouseEvent): void => {
       if (event.defaultPrevented || (event.type === "click" ? event.button !== 0 : event.button !== 1)) return;
-      const link = (event.target as Element | null)?.closest?.("a.internal-link");
-      const linked = link?.getAttribute("data-href") ?? link?.getAttribute("href");
+      const target = event.target as Element | null;
+      const link = target?.closest?.("a.internal-link");
+      // An embedded image in an answer opens its vault file, like a link to it.
+      const image = !link && target?.tagName === "IMG" ? target.closest?.(".internal-embed.image-embed") : null;
+      const linked = link?.getAttribute("data-href") ?? link?.getAttribute("href") ?? (image ? embedTarget(image) : null);
       if (!linked) return;
       event.preventDefault();
       event.stopPropagation();
@@ -306,6 +310,7 @@ export class AgentConversationRenderer extends Component {
           component,
         );
         this.enhanceCodeBlocks(staging);
+        enhanceMarkdownEmbeds(staging);
       },
     });
     this.addChild(this.liveMarkdown);

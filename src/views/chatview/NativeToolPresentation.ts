@@ -1,5 +1,5 @@
 import { decodeSystemSculptToolOutput, systemSculptToolName } from "../../tools/systemsculpt/SystemSculptTools";
-import { MarkdownRenderer, TFile, type App, type Component } from "obsidian";
+import { MarkdownRenderer, setIcon, type App, type Component } from "obsidian";
 import { codexImageLocalPath, codexImageMedia, isCodexGeneratedImagePath } from "../../services/codex/CodexImages";
 import type { AgentToolPart } from "../../chat/ChatConversation";
 import { DiffViewer } from "../../components/DiffViewer";
@@ -10,6 +10,20 @@ import {
   prepareNativeWriteEditPreview,
   renderPreparedWriteEditPreviews,
 } from "./ToolCallPreview";
+import { renderSystemSculptToolCard, systemSculptToolArguments as systemSculptArguments } from "./SystemSculptToolCard";
+import {
+  createToolCard,
+  inputFields,
+  renderFields,
+  renderLinks,
+  renderMedia,
+  renderPathList,
+  renderTerminal,
+  renderText,
+  toolOutputText,
+  type ToolCardField,
+  type ToolCardLink,
+} from "./ToolCardBlocks";
 
 export type NativeToolPresentation = Readonly<{
   title: string;
@@ -97,10 +111,13 @@ function realReason(part: AgentToolPart, target: string, title: string): string 
   return candidates.find(candidate => candidate && !repeated.some(value => candidate.toLowerCase() === value.toLowerCase()));
 }
 
-/** A Codex dynamic call stores its whole item; the tool's own arguments sit inside it. */
-function systemSculptArguments(part: AgentToolPart): Record<string, unknown> {
-  const input = record(part.input);
-  return input.type === "dynamicToolCall" ? { ...input, ...record(input.arguments) } : input;
+/** `mcp__server__tool` reads as its tool, with its server beside it. */
+function mcpName(name: string): { server: string; tool: string } | null {
+  const match = /^mcp__(.+?)__(.+)$/u.exec(name);
+  return match ? { server: match[1].replace(/[_-]+/gu, " "), tool: match[2].replace(/[_-]+/gu, " ") } : null;
+}
+function duration(ms: unknown): string {
+  return typeof ms === "number" && ms > 0 ? ms < 60_000 ? `${Math.round(ms / 1000)} s` : `${Math.round(ms / 60_000)} min` : "a moment";
 }
 
 /** Native metadata stays separate from hosted-tool names, policy, and summaries. */
@@ -165,7 +182,15 @@ export function nativeToolPresentation(part: AgentToolPart): NativeToolPresentat
     }
     case "WebFetch": return presentation("Read", "Read", "Opening", host(text(input.url)), "globe-2", "web", { approval: `fetch ${host(text(input.url))}` });
     case "WebSearch":
-    case "webSearch": return presentation("Search the web for", "Searched the web for", "Searching the web for", `“${text(input.query) ?? "information"}”`, "globe-2", "web-search", { approval: "search the web" });
+    case "webSearch": {
+      // Codex reports opening a page and finding in it as web searches; title them as what happened.
+      const action = record(input.action);
+      const url = text(action.url);
+      if (url && action.type === "openPage") return presentation("Open", "Opened", "Opening", host(url), "globe-2", "web-search", { approval: "open a web page" });
+      if (url && action.type === "findInPage") return presentation("Find in", "Found in", "Finding in", host(url), "globe-2", "web-search", { approval: "search a web page" });
+      const query = text(input.query) ?? text(action.query) ?? strings(action.queries)[0];
+      return presentation("Search the web for", "Searched the web for", "Searching the web for", query ? `“${query}”` : "information", "globe-2", "web-search", { approval: "search the web" });
+    }
     case "Grep": return presentation("Search", "Searched", "Searching", `“${text(input.pattern) ?? "text"}”`, "search", "search");
     case "Glob": return presentation("List", "Listed", "Listing", text(input.pattern) ?? "files", "file-search", "list");
     case "TodoWrite":
@@ -208,7 +233,34 @@ export function nativeToolPresentation(part: AgentToolPart): NativeToolPresentat
     case "questions":
     case "requestUserInput":
     case "AskUserQuestion": return presentation("Answer", "Answered", "Asking", "a question", "message-circle-question", "question");
-    default: return presentation("Use", "Used", "Using", part.name, "wrench", `unknown:${part.name}`);
+    case "Task":
+    case "Agent": return presentation("Run", "Ran", "Running", "an agent", "bot", "agent");
+    case "NotebookEdit": {
+      const notebook = text(input.notebook_path);
+      return presentation("Edit", "Edited", "Editing", notebook ? basename(displayPath(part, notebook)) : "notebook", "file-pen-line", "edit", { path: notebook });
+    }
+    case "BashOutput": return presentation("Check", "Checked", "Checking", "a running command", "terminal", "command");
+    case "KillShell":
+    case "KillBash": return presentation("Stop", "Stopped", "Stopping", "a running command", "terminal", "command");
+    case "Skill": return presentation("Use", "Used", "Using", `the ${text(input.skill) ?? text(input.command) ?? ""} skill`.replace(/\s+/gu, " "), "sparkles", "skill");
+    case "SlashCommand": return presentation("Run", "Ran", "Running", text(input.command) ?? "a command", "terminal", "command");
+    case "ToolSearch": return presentation("Find", "Found", "Finding", "tools", "search", "search");
+    case "ListMcpResourcesTool": return presentation("List", "Listed", "Listing", "resources", "list-tree", "list");
+    case "ReadMcpResourceTool": return presentation("Read", "Read", "Reading", text(input.uri) ?? "a resource", "file-text", "read");
+    case "collabAgentToolCall": {
+      const tool = text(input.tool);
+      return tool === "spawnAgent" ? presentation("Start", "Started", "Starting", "an agent", "bot", "agent")
+        : tool === "wait" ? presentation("Wait for", "Waited for", "Waiting for", "an agent", "bot", "agent")
+          : tool === "closeAgent" ? presentation("Close", "Closed", "Closing", "an agent", "bot", "agent")
+            : presentation("Message", "Messaged", "Messaging", "an agent", "bot", "agent");
+    }
+    case "sleep": return presentation("Wait", "Waited", "Waiting", duration(input.durationMs), "timer", "wait");
+    case "mcpToolCall": return presentation("Use", "Used", "Using", (text(input.tool) ?? part.name).replace(/[_-]+/gu, " "), "plug", `mcp:${part.name}`, { meta: text(input.server) });
+    default: {
+      const mcp = mcpName(part.name);
+      if (mcp) return presentation("Use", "Used", "Using", mcp.tool, "plug", `mcp:${part.name}`, { meta: mcp.server });
+      return presentation("Use", "Used", "Using", part.name, "wrench", `unknown:${part.name}`);
+    }
   }
 }
 
@@ -285,9 +337,7 @@ function previewDetails(part: AgentToolPart): Detail[] {
   return details;
 }
 function renderOutput(container: HTMLElement, output: unknown): void {
-  const data = record(output);
-  const content = typeof output === "string" ? output : text(data.aggregatedOutput) ?? text(data.output)
-    ?? (Array.isArray(output) ? output.flatMap(value => text(record(value).text) ?? []).join("\n") : undefined);
+  const content = toolOutputText(output);
   if (!content) return;
   const lines = content.split("\n");
   const pre = container.createEl("pre", { cls: "ss-native-tool-output", attr: { tabindex: "0" } });
@@ -301,23 +351,23 @@ function renderOutput(container: HTMLElement, output: unknown): void {
 function renderRequestedWriteEdit(container: HTMLElement, part: AgentToolPart): void {
   const input = record(part.input);
   if (part.name === "Write") {
-    container.createEl("p", { text: "Requested file content. The original file is unavailable; this is not a before-and-after diff." });
+    container.createEl("p", { cls: "ss-tool-caption", text: "Requested content, not a before-and-after diff." });
     if (typeof input.content === "string") {
       if (input.content) renderOutput(container, input.content);
-      else container.createEl("p", { text: "The requested content is empty." });
+      else container.createEl("p", { cls: "ss-tool-caption", text: "The requested content is empty." });
     }
     return;
   }
-  container.createEl("p", { text: "Requested text changes only. Original file line numbers are unavailable; this preview does not verify where or how many times the text was replaced." });
+  container.createEl("p", { cls: "ss-tool-caption", text: "Requested text changes only. Original file line numbers are unavailable." });
   const edits = part.name === "MultiEdit" ? records(input.edits) : [input];
   for (const [index, edit] of edits.entries()) {
     if (typeof edit.old_string !== "string" || typeof edit.new_string !== "string") continue;
     const body = container.createDiv({ cls: "systemsculpt-inline-diff__body" });
-    if (edits.length > 1) body.createEl("p", { text: `Requested edit ${index + 1}` });
+    if (edits.length > 1) body.createEl("p", { cls: "ss-tool-caption", text: `Requested edit ${index + 1}` });
     const context = Math.max(edit.old_string.split("\n").length, edit.new_string.split("\n").length);
     const diff = generateDiff(edit.old_string, edit.new_string, context);
     if (!diff.stats.additions && !diff.stats.deletions) {
-      body.createEl("p", { text: edit.old_string === edit.new_string ? "The requested text is unchanged." : "The request changes the final line break." });
+      body.createEl("p", { cls: "ss-tool-caption", text: edit.old_string === edit.new_string ? "The requested text is unchanged." : "The request changes the final line break." });
       continue;
     }
     new DiffViewer({
@@ -329,22 +379,223 @@ function renderRequestedWriteEdit(container: HTMLElement, part: AgentToolPart): 
   }
 }
 
-/** The image itself, opening its vault file on click. */
-function renderImage(app: App, container: HTMLElement, path: string): void {
-  const figure = container.createEl("figure", { cls: "systemsculpt-agent-media ss-native-tool-image", attr: { "data-kind": "image" } });
-  const file = app.vault.getAbstractFileByPath(path);
-  const name = basename(path);
-  if (!(file instanceof TFile)) {
-    figure.addClass("is-missing");
-    figure.createDiv({ cls: "systemsculpt-agent-media-missing", text: `${name} was moved or deleted.` });
-    return;
+function renderFileChanges(container: HTMLElement, part: AgentToolPart, approval: boolean): void {
+  const changes = records(record(part.input).changes);
+  const diffContainer = container.createDiv({ cls: "systemsculpt-inline-diff" });
+  for (const change of changes) {
+    const fileName = displayPath(part, text(change.path) ?? "File");
+    const [verb] = fileAction(change);
+    const destination = text(record(change.kind).move_path);
+    const patch = text(change.diff);
+    const diff = patch ? parseUnifiedDiff(patch) : null;
+    const section = changes.length > 1 ? diffContainer.createEl("details", { cls: "systemsculpt-inline-diff__file" }) : diffContainer;
+    if (changes.length > 1) section.createEl("summary", { text: `${verb} ${fileName}${destination ? ` → ${displayPath(part, destination)}` : ""}${diff ? ` · +${diff.stats.additions} −${diff.stats.deletions}` : ""}` });
+    const body = section.createDiv({ cls: "systemsculpt-inline-diff__body" });
+    if (verb === "Create") body.createDiv({ cls: "systemsculpt-inline-diff__new-file", text: "New file" });
+    if (diff && (diff.stats.additions || diff.stats.deletions)) {
+      new DiffViewer({ container: body, diffResult: diff, fileName, maxContextLines: 3, showLineNumbers: true, hideHeader: approval && changes.length === 1, ...(approval ? { maxVisibleLines: 12 } : {}) }).render();
+    } else {
+      body.createDiv({ cls: "systemsculpt-diff-no-changes-notice", text: "A line-by-line preview is not available. Review Details for the requested file change." });
+      if (patch) body.createEl("pre").createEl("code", { text: patch });
+    }
   }
-  const open = figure.createEl("button", { cls: "systemsculpt-agent-media-open", attr: { type: "button", "aria-label": `Open ${name}`, "data-testid": "chat.tool.image.open" } });
-  open.createEl("img", { cls: "systemsculpt-agent-media-frame", attr: { src: app.vault.getResourcePath(file), alt: name, loading: "lazy", decoding: "async" } });
-  open.onclick = () => void app.workspace.openLinkText(path, "");
-  const link = figure.createEl("figcaption", { cls: "systemsculpt-agent-media-caption" })
-    .createEl("a", { text: path, cls: "internal-link", attr: { href: path, "data-href": path, title: path, "data-testid": "chat.tool.image.path" } });
-  link.onclick = event => { event.preventDefault(); void app.workspace.openLinkText(path, ""); };
+  if (!changes.length) diffContainer.createDiv({ cls: "systemsculpt-diff-no-changes-notice", text: "The requested file changes are not available yet. Review Details before approving." });
+}
+
+async function renderPlan(app: App, container: HTMLElement, part: AgentToolPart, component?: Component): Promise<void> {
+  const plan = text(record(part.input).plan);
+  if (!plan) return;
+  const body = container.createDiv({ cls: "ss-native-plan-preview" });
+  if (component) await MarkdownRenderer.render(app, plan, body, "", component);
+  else body.setText(plan);
+  if (plan.split("\n").length > 16) {
+    body.addClass("is-collapsed");
+    const all = createUiAction(container, { label: "Show all", testId: "chat.approval.show-plan", size: "small", tooltip: false });
+    all.addClass("ss-tool-more");
+    all.onclick = () => { body.removeClass("is-collapsed"); all.remove(); };
+  }
+}
+
+function renderTodos(container: HTMLElement, part: AgentToolPart): void {
+  const input = record(part.input);
+  const todos = records(input.todos ?? input.plan);
+  if (!todos.length) return;
+  const list = container.createEl("ul", { cls: "ss-native-tool-plan" });
+  for (const todo of todos) {
+    const done = todo.status === "completed";
+    const active = todo.status === "in_progress" || todo.status === "inProgress";
+    const item = list.createEl("li", { cls: done ? "is-done" : active ? "is-active" : "" });
+    const mark = item.createSpan({ cls: "ss-native-tool-plan-mark", attr: { "aria-hidden": "true" } });
+    setIcon(mark, done ? "check" : active ? "circle-dot" : "circle");
+    item.createSpan({ text: text(todo.content) ?? text(todo.step) ?? "Step" });
+    item.setAttribute("aria-label", `${done ? "Done" : active ? "In progress" : "To do"}: ${text(todo.content) ?? text(todo.step) ?? "Step"}`);
+  }
+}
+
+/** The questions asked. Answers stay out: a secret answer never reaches the conversation. */
+function renderQuestions(container: HTMLElement, part: AgentToolPart): void {
+  const list = container.createEl("ol", { cls: "ss-tool-questions" });
+  for (const question of records(record(part.input).questions)) {
+    const prompt = text(question.question) ?? text(question.header);
+    if (!prompt) continue;
+    const item = list.createEl("li");
+    item.createDiv({ cls: "ss-tool-question", text: prompt });
+    const options = records(question.options).flatMap(option => text(option.label) ?? []);
+    if (options.length) item.createDiv({ cls: "ss-tool-question-options", text: options.join(" · ") });
+  }
+  if (!list.childElementCount) list.remove();
+}
+
+/** `Links: [{"title","url"}]` inside Claude Code's WebSearch result. */
+function webSearchLinks(output: string): { links: ToolCardLink[]; rest: string } {
+  const match = /Links:\s*(\[[\s\S]*?\])\s*(?:\n|$)/u.exec(output);
+  if (!match) return { links: [], rest: output };
+  try {
+    const parsed = JSON.parse(match[1]) as unknown;
+    const links = records(parsed).flatMap(link => {
+      const url = text(link.url);
+      return url && /^https?:\/\//iu.test(url) ? [{ title: text(link.title) ?? url, url }] : [];
+    });
+    const rest = output.slice(match.index + match[0].length).replace(/^Web search results for query:.*$/mu, "").trim();
+    return { links, rest };
+  } catch {
+    return { links: [], rest: output };
+  }
+}
+
+function pathRows(part: AgentToolPart, lines: readonly string[]): { path: string; link?: boolean }[] {
+  return lines.flatMap(line => {
+    const value = line.trim();
+    if (!value || /^Found \d+ files?$/u.test(value) || value.length > 400) return [];
+    const resolved = resolvedPath(part, value);
+    return [resolved.vaultPath ? { path: resolved.vaultPath } : { path: resolved.displayPath, link: false }];
+  });
+}
+
+/** Native calls the chat has no specific card for: Claude Code's MCP and subagent tools, Codex's MCP and agent calls. */
+function renderGeneric(app: App, card: HTMLElement, part: AgentToolPart): void {
+  const input = record(part.input);
+  const toolKind = kind(part);
+  if (toolKind === "Task" || toolKind === "Agent") {
+    const prompt = text(input.prompt)?.replace(/\s+/gu, " ");
+    renderFields(app, card, [
+      ...inputFields(input, { skip: ["prompt", "description"] }),
+      ...(prompt ? [{ label: "Task", value: prompt.length > 280 ? `${prompt.slice(0, 279).trimEnd()}…` : prompt }] : []),
+    ]);
+  } else if (toolKind === "mcpToolCall" || toolKind === "dynamicToolCall") {
+    renderFields(app, card, inputFields(input.arguments));
+  } else if (toolKind === "collabAgentToolCall") {
+    renderFields(app, card, inputFields(input, { skip: ["tool", "senderThreadId", "receiverThreadIds", "agentsStates"] }));
+  } else {
+    renderFields(app, card, inputFields(input, { skip: ["description"] }));
+  }
+  const output = toolOutputText(toolKind === "mcpToolCall" ? input.result ?? part.output?.data : part.output?.data);
+  if (output && part.state !== "failed") renderText(card, output);
+  else if (output) renderTerminal(card, { output });
+}
+
+/** A finished or running native call: one card per kind, with the same blocks every tool uses. */
+async function renderResolvedNative(app: App, card: HTMLElement, part: AgentToolPart, component?: Component): Promise<void> {
+  if (renderSystemSculptToolCard(app, card, part)) return;
+  const input = record(part.input);
+  const toolKind = kind(part);
+  const output = toolOutputText(part.output?.data);
+  switch (toolKind) {
+    case "Bash":
+    case "commandExecution":
+      if (input.kind === "writeStdin") renderFields(app, card, inputFields(input, { skip: ["kind"] }));
+      else renderTerminal(card, { command: command(input), output: output || text(input.aggregatedOutput) });
+      return;
+    case "BashOutput":
+      renderTerminal(card, { output });
+      return;
+    case "Read":
+    case "LS":
+    case "Glob":
+    case "Grep": {
+      const path = text(input.file_path) ?? text(input.path);
+      // The title already names the pattern; the card adds where it looked.
+      const fields: ToolCardField[] = [];
+      if (path && toolKind !== "Read") {
+        const resolved = resolvedPath(part, path);
+        fields.push({ label: "In", value: resolved.displayPath, ...(resolved.vaultPath ? { path: resolved.vaultPath } : {}) });
+      }
+      renderFields(app, card, fields);
+      if (toolKind === "Read" && path) {
+        const resolved = resolvedPath(part, path);
+        const lines = output ? output.replace(/\n+$/u, "").split("\n").length : 0;
+        renderPathList(app, card, [{ path: resolved.vaultPath ?? resolved.displayPath, link: Boolean(resolved.vaultPath), ...(lines ? { note: `${lines} ${lines === 1 ? "line" : "lines"}` } : {}) }]);
+      } else if (toolKind === "LS") {
+        renderTerminal(card, { output });
+      } else if (output) {
+        // Grep and Glob list one path per line; content matches keep their own lines.
+        const lines = output.trim().split("\n");
+        const looksLikePaths = lines.every(line => !line.includes(":") || /^[A-Za-z]:[\\/]/u.test(line) || line.startsWith("Found "));
+        if (looksLikePaths) renderPathList(app, card, pathRows(part, lines));
+        else renderTerminal(card, { output });
+      }
+      return;
+    }
+    case "WebSearch":
+    case "webSearch": {
+      const action = record(input.action);
+      const queries = strings(action.queries).length ? strings(action.queries) : [text(input.query) ?? text(action.query)].filter((value): value is string => Boolean(value));
+      // One query is already the title; several are listed.
+      const fields: ToolCardField[] = queries.length > 1 ? [{ label: "Searches", value: queries.join("\n") }] : [];
+      const url = text(action.url);
+      if (url) fields.push({ label: "Page", value: url, url });
+      if (text(action.pattern)) fields.push({ label: "Find", value: text(action.pattern)! });
+      renderFields(app, card, fields);
+      if (output) {
+        const { links, rest } = webSearchLinks(output);
+        renderLinks(card, links);
+        if (rest) renderText(card, rest, 4);
+      }
+      return;
+    }
+    case "WebFetch": {
+      const url = text(input.url);
+      renderFields(app, card, [
+        ...(url ? [{ label: "Address", value: url, url }] : []),
+        ...(text(input.prompt) ? [{ label: "Look for", value: text(input.prompt)! }] : []),
+      ]);
+      if (output) renderText(card, output, 6);
+      return;
+    }
+    case "imageGeneration":
+    case "imageView": {
+      // Codex's own image tools: the saved vault copy, like every generated image.
+      const image = codexImageMedia(part);
+      if (image) renderMedia(app, card, [image.media]);
+      if (toolKind === "imageGeneration" && text(input.revisedPrompt)) renderFields(app, card, [{ label: "Prompt", value: text(input.revisedPrompt)! }]);
+      return;
+    }
+    case "TodoWrite":
+    case "plan":
+      renderTodos(card, part);
+      return;
+    case "ExitPlanMode":
+      await renderPlan(app, card, part, component);
+      return;
+    case "questions":
+    case "requestUserInput":
+    case "AskUserQuestion":
+      renderQuestions(card, part);
+      return;
+    case "fileChange":
+      renderFileChanges(card, part, false);
+      return;
+    case "permissions":
+      renderFields(app, card, permissionDetails(part, input.permissions).map(detail => ({ label: detail.label, value: detail.value })));
+      return;
+    case "Edit":
+    case "MultiEdit":
+    case "Write":
+      if (part.native?.agent === "claude") renderRequestedWriteEdit(card, part);
+      return;
+    default:
+      renderGeneric(app, card, part);
+  }
 }
 
 /** Renders only the preview. Approval controls and raw Details belong to the caller. */
@@ -353,24 +604,26 @@ export async function renderNativeToolPreview(app: App, host: HTMLElement, part:
   delete host.dataset.changeSize;
   const container = createSurfaceElement(host.ownerDocument, "div");
   container.className = "ss-native-tool-preview";
-  const details = previewDetails(part);
-  if (details.length) {
-    const list = container.createEl("dl", { cls: "ss-agent-tool-details" });
-    for (const detail of details) {
-      if (!detail.code) list.createEl("dt", { text: detail.label });
-      const value = list.createEl("dd");
-      if (detail.code) value.createEl("pre", { attr: { tabindex: "0" } }).createEl("code", { text: detail.value });
-      else if (detail.path) {
-        const path = detail.path;
-        const link = value.createEl("a", { text: detail.value, cls: "internal-link", attr: { href: path, "data-href": path } });
-        link.onclick = event => { event.preventDefault(); void app.workspace.openLinkText(path, ""); };
-      } else value.textContent = detail.value;
-    }
-  }
-  const image = codexImageMedia(part);
-  if (image) renderImage(app, container, image.media.path);
   const approval = part.state === "approval-required";
-  if (approval) {
+  if (!approval) {
+    const card = createToolCard(container, `native:${kind(part)}`);
+    await renderResolvedNative(app, card, part, component);
+    if (!card.childElementCount) card.remove();
+  } else {
+    const details = previewDetails(part);
+    if (details.length) {
+      const list = container.createEl("dl", { cls: "ss-agent-tool-details" });
+      for (const detail of details) {
+        if (!detail.code) list.createEl("dt", { text: detail.label });
+        const value = list.createEl("dd");
+        if (detail.code) value.createEl("pre", { attr: { tabindex: "0" } }).createEl("code", { text: detail.value });
+        else if (detail.path) {
+          const path = detail.path;
+          const link = value.createEl("a", { text: detail.value, cls: "internal-link", attr: { href: path, "data-href": path } });
+          link.onclick = event => { event.preventDefault(); void app.workspace.openLinkText(path, ""); };
+        } else value.textContent = detail.value;
+      }
+    }
     const preview = await prepareNativeWriteEditPreview(app, part);
     if (preview) {
       renderPreparedWriteEditPreviews(container, [preview], { approval: true });
@@ -378,53 +631,16 @@ export async function renderNativeToolPreview(app: App, host: HTMLElement, part:
         host.dataset.changeSize = `+${preview.diff.stats.additions} −${preview.diff.stats.deletions}`;
       }
     }
-  } else if (part.native.agent === "claude" && ["Edit", "MultiEdit", "Write"].includes(part.name)) {
-    // The vault now holds later content, not the original input to this request.
-    renderRequestedWriteEdit(container, part);
-  }
-  if (kind(part) === "fileChange") {
-    const changes = records(record(part.input).changes);
-    const diffContainer = container.createDiv({ cls: "systemsculpt-inline-diff" });
-    for (const change of changes) {
-      const fileName = displayPath(part, text(change.path) ?? "File");
-      const [verb] = fileAction(change);
-      const destination = text(record(change.kind).move_path);
-      const patch = text(change.diff);
-      const diff = patch ? parseUnifiedDiff(patch) : null;
-      const section = changes.length > 1 ? diffContainer.createEl("details", { cls: "systemsculpt-inline-diff__file" }) : diffContainer;
-      if (changes.length > 1) section.createEl("summary", { text: `${verb} ${fileName}${destination ? ` → ${displayPath(part, destination)}` : ""}${diff ? ` · +${diff.stats.additions} −${diff.stats.deletions}` : ""}` });
-      const body = section.createDiv({ cls: "systemsculpt-inline-diff__body" });
-      if (verb === "Create") body.createDiv({ cls: "systemsculpt-inline-diff__new-file", text: "New file" });
-      if (diff && (diff.stats.additions || diff.stats.deletions)) {
-        new DiffViewer({ container: body, diffResult: diff, fileName, maxContextLines: 3, showLineNumbers: true, hideHeader: approval && changes.length === 1, ...(approval ? { maxVisibleLines: 12 } : {}) }).render();
-      } else {
-        body.createDiv({ cls: "systemsculpt-diff-no-changes-notice", text: "A line-by-line preview is not available. Review Details for the requested file change." });
-        if (patch) body.createEl("pre").createEl("code", { text: patch });
-      }
-    }
-    if (!changes.length) diffContainer.createDiv({ cls: "systemsculpt-diff-no-changes-notice", text: "The requested file changes are not available yet. Review Details before approving." });
-  }
-  if (kind(part) === "ExitPlanMode") {
-    const plan = text(record(part.input).plan);
-    if (plan) {
-      const body = container.createDiv({ cls: "ss-native-plan-preview" });
-      if (component) await MarkdownRenderer.render(app, plan, body, "", component);
-      else body.setText(plan);
-      if (plan.split("\n").length > 16) {
-        body.addClass("is-collapsed");
-        const all = createUiAction(container, { label: "Show all", testId: "chat.approval.show-plan", size: "small", tooltip: false });
-        all.onclick = () => { body.removeClass("is-collapsed"); all.remove(); };
-      }
+    if (kind(part) === "fileChange") renderFileChanges(container, part, true);
+    if (kind(part) === "ExitPlanMode") await renderPlan(app, container, part, component);
+    if (["TodoWrite", "plan"].includes(kind(part))) renderTodos(container, part);
+    if (["AskUserQuestion", "requestUserInput", "questions"].includes(kind(part))) renderQuestions(container, part);
+    if (!container.childElementCount) {
+      const card = createToolCard(container, `native:${kind(part)}`);
+      renderGeneric(app, card, part);
     }
   }
-  if (["TodoWrite", "plan"].includes(kind(part))) {
-    const list = container.createEl("ul", { cls: "ss-native-tool-plan" });
-    for (const todo of records(record(part.input).todos ?? record(part.input).plan)) {
-      list.createEl("li", { text: `${todo.status === "completed" ? "✓" : "○"} ${text(todo.content) ?? text(todo.step) ?? "Step"}` });
-    }
-  }
-  if (!["AskUserQuestion", "requestUserInput", "questions"].includes(kind(part))) renderOutput(container, part.output?.data);
-  if (!container.childElementCount) container.createEl("p", { text: "No preview is available. The full request is in the disclosure below." });
+  if (!container.childElementCount) return false;
   host.querySelector(":scope > .ss-native-tool-preview")?.remove();
   host.appendChild(container);
   return true;
