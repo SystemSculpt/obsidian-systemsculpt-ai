@@ -270,9 +270,11 @@ export function renderPendingMedia(grid: HTMLElement, tile: PendingMedia): HTMLE
   if (tile.state === "failed") {
     // The reason is the headline; what to do next is the one line under it.
     figure.setAttribute("role", "status");
-    // One line; the whole reason stays in its title and in the call's own row above.
+    // A framed tile has one line (the whole reason stays in its title and the call's row);
+    // a Studio row has no fixed height, so its reason wraps and is read whole.
     const reason = tile.error ?? tile.label;
-    status.createSpan({ cls: "ss-media-pending-label", text: reason, attr: { title: reason, "data-fit": reason } });
+    const fit = tile.kind === "workflow" ? {} : { "data-fit": reason };
+    status.createSpan({ cls: "ss-media-pending-label", text: reason, attr: { title: reason, ...fit } });
     status.createSpan({ cls: "ss-media-pending-meta", text: retryHint(reason) });
   } else {
     status.createSpan({ cls: "ss-media-pending-label", text: tile.label });

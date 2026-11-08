@@ -373,6 +373,9 @@ export class ActiveConversationRenderer {
           anchor += 1;
         }
       }
+      // A settled turn keeps that place too: its work folds into one row and the reply follows the media.
+      const fold = visibleLanes.findIndex((lane) => lane.key === "turn-fold");
+      if (!presentation.busy && fold >= 0) anchor = fold + 1;
       laneNodes.splice(anchor >= 0 ? anchor : tailStatus ? laneNodes.length - 1 : laneNodes.length, 0, media);
     }
     reconcileConversationChildren(body, [...laneNodes, ...(receipt ? [receipt] : [])]);

@@ -746,8 +746,11 @@ export class AgentConversationRenderer extends Component {
         }
         const historicalTools = turnParts.flatMap((part) => part.type === "tool_call"
           ? [historicalToolPart(part.data)] : []);
-        this.renderTurnMediaBlock(body, historicalTools,
+        const media = this.renderTurnMediaBlock(body, historicalTools,
           turnParts.flatMap((part) => part.type === "content" && typeof part.data === "string" ? [part.data] : []).join("\n"));
+        // Same place as the live turn settled it: under the folded work, above the reply.
+        const fold = body.querySelector<HTMLElement>(":scope > details[data-agent-turn-fold]");
+        if (media && fold && fold.nextElementSibling !== media) fold.after(media);
         this.renderTurnChanges(body, historicalTools);
       } else {
         const { content } = presented[0];

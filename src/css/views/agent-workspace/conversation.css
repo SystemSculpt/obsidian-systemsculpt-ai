@@ -591,6 +591,12 @@ video.systemsculpt-agent-media-frame {
   max-width: 100%;
 }
 
+.systemsculpt-agent-media.is-failed[data-kind="workflow"] .ss-media-pending-label {
+  text-align: start;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 /* A Studio run has no known shape: one slim row across the grid. */
 .systemsculpt-agent-media.is-pending[data-kind="workflow"] {
   grid-column: 1 / -1;
