@@ -294,8 +294,12 @@ export class StudioNodeContextMenuOverlay {
     }
 
     const scale = normalizeStudioMenuScale(this.graphZoom);
-    const width = CONTEXT_MENU_WIDTH;
+    const mobile = isMobileLayout(this.rootEl);
+    const width = mobile
+      ? Math.min(CONTEXT_MENU_WIDTH, Math.max(0, this.viewportEl.clientWidth - CONTEXT_MENU_MOBILE_EDGE_GAP * 2) / scale)
+      : CONTEXT_MENU_WIDTH;
     this.rootEl.style.width = `${width}px`;
+    this.rootEl.classList.toggle("is-mobile-width", mobile);
     this.rootEl.style.setProperty("--ss-studio-node-context-menu-scale", String(scale));
 
     const height = Math.max(
@@ -313,7 +317,7 @@ export class StudioNodeContextMenuOverlay {
     });
     let resolvedY = position.y;
 
-    if (isMobileLayout(this.rootEl)) {
+    if (mobile) {
       const viewportRect = this.viewportEl.getBoundingClientRect();
       const viewportScrollTop = this.viewportEl.scrollTop;
       const controls = this.viewportEl.parentElement?.querySelector<HTMLElement>(
@@ -324,7 +328,7 @@ export class StudioNodeContextMenuOverlay {
           - viewportRect.top
           + viewportScrollTop
           + CONTEXT_MENU_MOBILE_EDGE_GAP;
-        resolvedY = Math.min(resolvedY, preferredTop);
+        resolvedY = preferredTop;
       }
       const mobileHost = readMobileHostLayout(this.rootEl);
       const visualBottom = Math.min(

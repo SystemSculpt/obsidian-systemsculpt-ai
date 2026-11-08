@@ -182,6 +182,21 @@ describe("Studio context menu accessibility", () => {
     expect(root?.style.top).toBe("612px");
     expect(root?.style.maxHeight).toBe("500px");
 
+    // A narrow pane and an anchor near the toolbar must not crop the popup
+    // horizontally or place its title underneath the floating controls.
+    Object.defineProperty(viewport, "clientWidth", { configurable: true, value: 322 });
+    overlay.open({
+      anchorX: 1,
+      anchorY: 500,
+      items: [{ definition: definition("studio.alpha"), title: "Alpha", summary: "First node" }],
+      onSelectDefinition: jest.fn(),
+    });
+    expect(root?.style.width).toBe("306px");
+    expect(root?.classList.contains("is-mobile-width")).toBe(true);
+    expect(root?.style.left).toBe("8px");
+    expect(root?.style.top).toBe("612px");
+    expect(focus).not.toHaveBeenCalled();
+
     overlay.destroy();
   });
 
