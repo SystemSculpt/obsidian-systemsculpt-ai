@@ -74,6 +74,12 @@ describe("live generation placeholders", () => {
     expect(presentPendingMedia([failed("Busy."), retried], false)).toEqual([]);
   });
 
+  it("keeps a failed Studio run in its row with the reason", () => {
+    const failed = tool({ name: "studio_run_workflow", state: "succeeded", input: { path: "Studio/Poster.systemsculpt" },
+      output: { data: encodeSystemSculptToolResult({ ok: false, message: "Poster stopped at Image: the model is busy." }) } });
+    expect(presentPendingMedia([failed], false)[0]).toMatchObject({ kind: "workflow", state: "failed", error: "Poster stopped at Image: the model is busy." });
+  });
+
   it("waits for streamed arguments, so the tiles are drawn once at their real count and shape", () => {
     expect(presentPendingMedia([tool({ name: "generate_image", state: "input-streaming", input: {} })], true)).toEqual([]);
   });

@@ -616,6 +616,8 @@ video.systemsculpt-agent-media-frame {
 }
 
 .systemsculpt-agent-media[data-kind="workflow"] .ss-media-pending-status {
+  flex: 1;
+  align-items: flex-start;
   padding: var(--ss-space-3) var(--ss-space-3) var(--ss-space-3) 0;
 }
 

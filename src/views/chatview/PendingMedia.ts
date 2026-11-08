@@ -112,6 +112,10 @@ export function presentPendingMedia(parts: readonly AgentToolPart[], live: boole
         const path = text(args.path);
         const name = path ? (path.split("/").pop() ?? path).replace(/\.systemsculpt$/iu, "") : "workflow";
         if (active) pending.push({ ...base, id: `${part.callId}:0`, kind: "workflow", ratio: 0, state: "working", label: `Running ${name}` });
+        const outcome = finished ? decodeSystemSculptToolOutput(part.output?.data) : null;
+        const reason = outcome && !outcome.ok && !outcome.link && !QUIET_RESULTS.some(pattern => pattern.test(outcome.message))
+          ? failureText(outcome) : finished && !outcome && part.state === "failed" ? ownReason(part) : undefined;
+        if (reason) pending.push({ ...base, id: `${part.callId}:failed`, kind: "workflow", ratio: 0, state: "failed", label: `Couldn't run ${name}`, error: reason });
         return;
       }
       const kind = tool === "generate_video" ? "video" : "image";

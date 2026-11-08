@@ -92,6 +92,9 @@ export function renderTurnMedia(app: App, parent: HTMLElement, parts: readonly A
   existing?.remove();
   const block = parent.createDiv({ cls: "systemsculpt-agent-turn-media", attr: { "data-testid": "chat.turn.media" } });
   block.dataset.media = fingerprint;
+  // The first tool call this block shows; a live turn keeps the block right after it.
+  const first = Math.min(...presented.media.map(item => item.order ?? Infinity), ...presented.pending.map(tile => tile.order));
+  if (Number.isFinite(first)) block.dataset.firstTool = String(first);
   const tiles = [
     ...presented.media.map(item => ({ order: item.order ?? -1, item, pending: null })),
     ...presented.pending.map(tile => ({ order: tile.order, item: null, pending: tile })),

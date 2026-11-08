@@ -341,9 +341,10 @@ export class ActiveConversationRenderer {
       : body.querySelector<HTMLElement>(":scope > .systemsculpt-agent-turn-changes");
     // Generated media shows as soon as a tool saves it, above the working status;
     // while the turn runs, each generation holds its place as a live placeholder.
+    const toolParts = orderedParts.filter((part): part is AgentToolPart => part.kind === "tool");
     const media = this.options.renderTurnMediaBlock(
       body,
-      orderedParts.filter((part): part is AgentToolPart => part.kind === "tool"),
+      toolParts,
       orderedParts.flatMap((part) => part.kind === "text" ? [part.markdown] : []).join("\n"),
       presentation.busy,
     );
@@ -357,7 +358,14 @@ export class ActiveConversationRenderer {
       tailStatus.hidden = presentation.phase === "acting" && latest?.kind === "tool" && placeholders.includes(latest.callId);
     }
     const laneNodes = visibleLanes.map((lane) => lane.node);
-    if (media) laneNodes.splice(tailStatus ? laneNodes.length - 1 : laneNodes.length, 0, media);
+    if (media) {
+      // While the turn runs, media sits just above the activity that makes it: the steps that follow
+      // (and that row growing) land below it, so the frame never moves under the reader.
+      const source = presentation.busy && media.dataset.firstTool !== undefined ? toolParts[Number(media.dataset.firstTool)] : undefined;
+      const sourceNode = source ? this.activeNodes.get(toolPartKey(source.callId)) : undefined;
+      const anchor = sourceNode ? laneNodes.findIndex((node) => node === sourceNode || node.contains(sourceNode)) : -1;
+      laneNodes.splice(anchor >= 0 ? anchor : tailStatus ? laneNodes.length - 1 : laneNodes.length, 0, media);
+    }
     reconcileConversationChildren(body, [...laneNodes, ...(receipt ? [receipt] : [])]);
     for (const [key, node] of this.activeNodes) {
       if (!wantedParts.has(key)) {
