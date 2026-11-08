@@ -10,6 +10,29 @@ type ActivityGroup = { label: string; items: Set<string>; uncounted: number; row
 
 const groupSize = (group: ActivityGroup): number => group.items.size + group.uncounted;
 
+/** "· 2 failed" never strands its dot at a line end. */
+export function unbreakableActivityLabel(label: string): string {
+  return label.replace(/ · /gu, " ·\u00a0");
+}
+
+/**
+ * Writes a summary so that a count and its word ("5 more", "1 blocked") wrap
+ * as one unit; the text itself is unchanged.
+ */
+export function setActivityLabelText(element: HTMLElement, label: string): void {
+  if (element.textContent === label && element.dataset.activityLabel === label) return;
+  element.replaceChildren();
+  element.dataset.activityLabel = label;
+  let last = 0;
+  for (const match of label.matchAll(/\d+ \p{L}+/gu)) {
+    const at = match.index ?? 0;
+    if (at > last) element.appendText(label.slice(last, at));
+    element.createSpan({ cls: "ss-activity-count", text: match[0] });
+    last = at + match[0].length;
+  }
+  if (last < label.length) element.appendText(label.slice(last));
+}
+
 /** Count adjacent activity by action without repeating payloads or full paths. */
 export function summarizeAgentActivity(parts: readonly AgentPart[]): AgentActivitySummary {
   const groups = new Map<string, ActivityGroup>();
@@ -63,9 +86,10 @@ export function summarizeAgentActivity(parts: readonly AgentPart[]): AgentActivi
     if (kind === "search") return `Searched ${count} pattern${count === 1 ? "" : "s"}`;
     if (kind === "command") return `Ran ${count} command${count === 1 ? "" : "s"}`;
     if (kind === "reasoning") return "Thought";
-    if (count > 1 && ["edit", "write", "trash", "list", "web-search"].includes(kind)) {
+    if (count > 1 && ["edit", "write", "trash", "list", "web-search", "web"].includes(kind)) {
       const [verb, noun] = kind === "edit" ? ["Edited", "notes"] : kind === "write" ? ["Created", "notes"]
-        : kind === "trash" ? ["Trashed", "notes"] : kind === "list" ? ["Listed", "folders"] : ["Searched", "web queries"];
+        : kind === "trash" ? ["Trashed", "notes"] : kind === "list" ? ["Listed", "folders"]
+          : kind === "web" ? ["Read", "web pages"] : ["Searched", "web queries"];
       return `${verb} ${count} ${noun}`;
     }
     return group.label;

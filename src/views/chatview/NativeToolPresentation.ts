@@ -186,8 +186,8 @@ export function nativeToolPresentation(part: AgentToolPart): NativeToolPresentat
       // Codex reports opening a page and finding in it as web searches; title them as what happened.
       const action = record(input.action);
       const url = text(action.url);
-      if (url && action.type === "openPage") return presentation("Open", "Opened", "Opening", host(url), "globe-2", "web-search", { approval: "open a web page" });
-      if (url && action.type === "findInPage") return presentation("Find in", "Found in", "Finding in", host(url), "globe-2", "web-search", { approval: "search a web page" });
+      if (url && action.type === "openPage") return presentation("Open", "Opened", "Opening", host(url), "globe-2", "web", { approval: "open a web page" });
+      if (url && action.type === "findInPage") return presentation("Find in", "Found in", "Finding in", host(url), "globe-2", "web", { approval: "search a web page" });
       const query = text(input.query) ?? text(action.query) ?? strings(action.queries)[0];
       return presentation("Search the web for", "Searched the web for", "Searching the web for", query ? `“${query}”` : "information", "globe-2", "web-search", { approval: "search the web" });
     }

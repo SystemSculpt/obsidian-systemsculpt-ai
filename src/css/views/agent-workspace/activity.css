@@ -243,3 +243,8 @@ button.systemsculpt-agent-activity-overflow {
     min-height: 28px;
   }
 }
+
+/* A count and its word ("5 more", "1 blocked") wrap as one unit. */
+.ss-activity-count {
+  white-space: nowrap;
+}
