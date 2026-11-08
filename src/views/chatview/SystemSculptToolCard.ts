@@ -82,12 +82,13 @@ export function renderSystemSculptToolCard(app: App, host: HTMLElement, part: Ag
     // Each change in words: what happened to which node or connection, and which setting.
     const changes = args.edits.flatMap((edit: unknown) => {
       if (!edit || typeof edit !== "object") return [];
-      const { kind, entityId, path, remove } = edit as Record<string, unknown>;
+      const { kind, entityId, path, remove, value } = edit as Record<string, unknown>;
       if (typeof entityId !== "string" || !entityId.trim()) return [];
       const verb = remove === true || kind === "delete" ? "Remove" : kind === "create" ? "Add" : kind === "restore" ? "Restore" : "Set";
       const entity = entityId.replace(/^(node|edge|group):/u, "");
       const setting = Array.isArray(path) ? path.filter((part): part is string => typeof part === "string").join(".") : "";
-      return [`${verb} ${entity}${setting && verb === "Set" ? ` · ${setting}` : ""}`];
+      const shown = verb === "Set" || verb === "Add" ? studioValue(value) : "";
+      return [`${verb} ${entity}${setting && verb === "Set" ? ` · ${setting}` : ""}${shown ? `: ${shown}` : ""}`];
     });
     const shown = changes.slice(0, 8);
     if (changes.length > shown.length) shown.push(`${changes.length - shown.length} more`);
@@ -124,4 +125,18 @@ export function renderSystemSculptToolCard(app: App, host: HTMLElement, part: Ag
   }
   if (!card.childElementCount && card !== host) card.remove();
   return true;
+}
+
+/** The requested value of a Studio edit, short enough for one line. */
+function studioValue(value: unknown): string {
+  const clip = (line: string) => line.length > 80 ? `${line.slice(0, 79).trimEnd()}…` : line;
+  if (typeof value === "string") return value.trim() ? `“${clip(value.trim().replace(/\s+/gu, " "))}”` : "empty";
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (!value || typeof value !== "object" || Array.isArray(value)) return "";
+  // A new node or connection: its title and kind say what it is.
+  const { title, kind, from, to } = value as Record<string, unknown>;
+  if (typeof from === "string" && typeof to === "string") return `${from} to ${to}`;
+  const name = typeof title === "string" && title.trim() ? title.trim() : "";
+  const type = typeof kind === "string" ? kind.replace(/_/gu, " ") : "";
+  return clip([name, type && name ? `(${type})` : type].filter(Boolean).join(" "));
 }

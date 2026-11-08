@@ -5,7 +5,7 @@ import { gatedSystemSculptTurn, presentAgentTool, refusedSystemSculptCall } from
 /** denied: the person declined an action, so the turn is not marked done with a check. */
 export type AgentActivitySummary = Readonly<{ label: string; failedCount: number; refused?: true; gated?: true; denied?: true }>;
 
-/** rows: how many activity rows the group stands for. "N more" counts rows, as the person sees them, and a repeat of the same note once. */
+/** rows: how many activity rows the group stands for; "N more" counts rows, as the person sees them. */
 type ActivityGroup = { label: string; items: Set<string>; uncounted: number; rows: number };
 
 const groupSize = (group: ActivityGroup): number => group.items.size + group.uncounted;
@@ -38,8 +38,12 @@ export function summarizeAgentActivity(parts: readonly AgentPart[]): AgentActivi
       // An uncertain result may have happened: it is never folded into "couldn't".
       else if (tool.displayState === "outcome-unknown") add("uncertain", `${tool.label} · Uncertain`);
       else if (tool.displayState === "failed") add("failed", tool.label);
+      // A gate (subscription, credits) and a refusal did nothing: neither joins the work that was done.
+      else if (gatedSystemSculptTurn(part)) add("gated", tool.label);
+      else if (refusedSystemSculptCall(part)) add("failed", tool.label);
       else add(tool.groupKind, tool.label.replace(/…$/u, ""), tool.groupItems, tool.groupCount);
-      if (part.approvalDecision !== "withdrawn" && ["failed", "partial", "outcome-unknown"].includes(tool.displayState)) {
+      const refusal = refusedSystemSculptCall(part) && !gatedSystemSculptTurn(part);
+      if (part.approvalDecision !== "withdrawn" && (refusal || ["failed", "partial", "outcome-unknown"].includes(tool.displayState))) {
         failedCount += 1;
         // A guard's block and an uncertain result are not known failures: each keeps its own word.
         if (tool.icon === "shield-x") blockedCount += 1;
@@ -51,6 +55,7 @@ export function summarizeAgentActivity(parts: readonly AgentPart[]): AgentActivi
     const count = groupSize(group);
     if (kind === "denied") return count === 1 ? group.label : `Denied ${count} actions`;
     if (kind === "withdrawn") return count === 1 ? group.label : `${count} actions withdrawn`;
+    if (kind === "gated") return count === 1 ? group.label : `${count} actions need a subscription or credits`;
     if (kind === "uncertain") return count === 1 ? group.label : `${count} actions uncertain`;
     if (kind === "failed") return count === 1 ? group.label : `Couldn't complete ${count} actions`;
     // One read names its note (spec 3.2: "Read Plan.md, searched 2 patterns").
@@ -66,7 +71,7 @@ export function summarizeAgentActivity(parts: readonly AgentPart[]): AgentActivi
     return group.label;
   });
   const visible = labels.slice(0, 3).map((label, index) => index ? label.charAt(0).toLowerCase() + label.slice(1) : label).join(", ");
-  const more = Array.from(groups.values()).slice(3).reduce((count, group) => count + Math.min(group.rows, groupSize(group)), 0);
+  const more = Array.from(groups.values()).slice(3).reduce((count, group) => count + group.rows, 0);
   const failed = failedCount - blockedCount - uncertainCount;
   // Uncertain work says so in its own clause; when that clause is past the
   // three shown, its tally keeps the uncertainty visible.

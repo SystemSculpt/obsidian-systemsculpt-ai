@@ -8,6 +8,7 @@ import { presentAgentTool, presentAgentToolFailure, agentToolNoticeTone } from "
 import { mediaDisplayName, renderMedia } from "../ToolCardBlocks";
 import { renderTurnMedia } from "../TurnMedia";
 import { presentTurnChanges } from "../TurnChangeSummary";
+import { summarizeAgentActivity } from "../AgentActivityPresentation";
 
 jest.mock("../../../platform/hostCapabilities", () => ({ hasHostCapability: jest.fn(() => true) }));
 jest.mock("../../../platform/desktopOnly", () => ({ desktopHost: { fs: jest.fn(async () => ({ realpath: async (path: string) => path })) } }));
@@ -207,5 +208,28 @@ describe("empty results", () => {
     renderHostedToolPreview(app, list, hosted("list_items", { path: "Notes/Archive" }, { results: [{ path: "Notes/Archive", directories: [], files: [], totalItems: 0, offset: 0, nextOffset: null }] }));
     expect(list.textContent).toContain("This folder is empty.");
     expect(list.textContent).not.toContain("0 returned");
+  });
+});
+
+describe("studio and gated summaries", () => {
+  it("lists each Studio edit with its requested value", () => {
+    const { app } = setup();
+    const host = document.createElement("div");
+    renderHostedToolPreview(app, host, hosted("studio_edit_workflow", {
+      path: "SystemSculpt/Studio/Poster.systemsculpt", revision: "abc",
+      edits: [{ kind: "set", entityId: "node:prompt", path: ["config", "value"], value: "A lighthouse" }, { kind: "create", entityId: "node:img", value: { kind: "image_generation", title: "Poster image" } }],
+    }, encodeSystemSculptToolResult({ ok: true, message: "Applied 2 edits." })));
+    expect(host.textContent).toContain("Set prompt · config.value: “A lighthouse”");
+    expect(host.textContent).toContain("Add img: Poster image (image generation)");
+  });
+
+  it("keeps a credits gate and a refusal apart from a finished generation", () => {
+    const done = hosted("generate_image", { prompt: "A" }, encodeSystemSculptToolResult({ ok: true, message: "Saved.", media: [{ kind: "image", path: IMAGE }] }));
+    const gate = { ...hosted("generate_image", { prompt: "B" }, encodeSystemSculptToolResult({ ok: false, message: "Out of credits.", link: { label: "Buy credits", url: "https://systemsculpt.com/pricing" } })), callId: "gate", id: "gate" } as AgentToolPart;
+    const refused = { ...hosted("generate_image", { prompt: "C" }, encodeSystemSculptToolResult({ ok: false, message: "Nope." })), callId: "refused", id: "refused" } as AgentToolPart;
+    const summary = summarizeAgentActivity([done, gate, refused]);
+    expect(summary.label).toBe("Generated image, generate image · Needs credits, couldn't generate image · 1 failed");
+    expect(summary.failedCount).toBe(1);
+    expect(summary.gated).toBe(true);
   });
 });
