@@ -640,7 +640,7 @@ async function waitForOwnedHistoryEntry(
     throwIfActionCancelled(ctx);
     const rows = queryElements(
       ctx,
-      '.systemsculpt-history-item[data-kind="chat"]',
+      '[data-testid="history.row"][data-kind="chat"]',
     ).filter(isVisible);
     if (rows.length === 1 && rows[0]?.dataset.entryId === expectedEntryId) {
       return rows[0];
