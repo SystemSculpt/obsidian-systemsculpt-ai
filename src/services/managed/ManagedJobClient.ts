@@ -2,6 +2,8 @@ import { HostedTransportAdapter } from "./adapters/HostedTransportAdapter";
 import { MANAGED_CAPABILITY_CONTRACT, ManagedJobCapability, ManagedJobStatus, ManagedTransportResult } from "./ManagedTypes";
 import { parseRetryAfterMs } from "../../utils/retryAfter";
 import { CREDITS_REQUIRED_MESSAGE } from "../../utils/errors";
+import { classifyManagedHttpError } from "./ManagedHttpError";
+import { throwIfManagedAborted } from "./ManagedAbort";
 
 /** @internal Tests assert against this value. */
 export const MANAGED_JOB_PROTOCOL = "managed-job-protocol-v1" as const;
@@ -9,14 +11,25 @@ export const MANAGED_JOB_PROTOCOL = "managed-job-protocol-v1" as const;
 const DOCUMENT_DOWNLOAD_TIMEOUT_MS = 10 * 60_000;
 type MultipartJobCapability = Exclude<ManagedJobCapability, "image_generation">;
 type Operation = "create" | "part_url" | "upload_complete" | "upload_abort" | "start" | "status" | "download";
-type ErrorCode = "invalid_request" | "license_required" | "payment_required" | "license_rejected" | "operation_conflict" | "upgrade_required" | "rate_limited" | "temporarily_unavailable" | "managed_job_error" | "malformed_response" | "unsupported_operation" | "transcription_failed" | "document_processing_failed" | "job_expired";
+type ErrorCode = "invalid_request" | "license_required" | "payment_required" | "license_rejected" | "operation_conflict" | "upgrade_required" | "rate_limited" | "temporarily_unavailable" | "not_found" | "managed_job_error" | "malformed_response" | "unsupported_operation" | "transcription_failed" | "document_processing_failed" | "job_expired";
 const MANAGED_JOB_HTTP_ERROR_MESSAGES: Readonly<Record<number, string>> = Object.freeze({
   402: CREDITS_REQUIRED_MESSAGE,
   429: "SystemSculpt is receiving too many processing requests right now.",
-  502: "SystemSculpt processing is temporarily unavailable.",
-  503: "SystemSculpt processing is temporarily unavailable.",
 });
-export class ManagedJobError extends Error { constructor(public readonly code: ErrorCode, message: string, public readonly status?: number, public readonly requestId: string | null = null, public readonly retryable = false, public readonly jobFailure: { jobId: string | null; code: string | null } | null = null, public readonly retryAfterMs?: number) { super(message); this.name = "ManagedJobError"; } }
+export class ManagedJobError extends Error {
+  constructor(
+    public readonly code: ErrorCode,
+    message: string,
+    public readonly status?: number,
+    public readonly requestId: string | null = null,
+    public readonly retryable = status !== undefined && classifyManagedHttpError(status).retryable,
+    public readonly jobFailure: { jobId: string | null; code: string | null } | null = null,
+    public readonly retryAfterMs?: number,
+  ) {
+    super(message);
+    this.name = "ManagedJobError";
+  }
+}
 
 // Server-authored job failure detail. Codes and messages come from the
 // managed API's fixed public taxonomy, but treat them as untrusted input:
@@ -67,13 +80,13 @@ export class ManagedJobClient {
   constructor(private readonly transport: HostedTransportAdapter, private readonly now: () => number = () => Date.now()) {}
 
   private async uploadPart(capability: "transcription" | "document_processing", jobId: string, partNumber: number, bytes: ArrayBuffer, maxParts: number, signal?: AbortSignal): Promise<{ partNumber: number; etag: string }> {
-    if (signal?.aborted) throw new DOMException("Aborted", "AbortError"); this.partNumber(partNumber, maxParts); if (!(bytes instanceof ArrayBuffer)) this.invalid("Multipart bytes must be an ArrayBuffer.");
+    throwIfManagedAborted(signal); this.partNumber(partNumber, maxParts); if (!(bytes instanceof ArrayBuffer)) this.invalid("Multipart bytes must be an ArrayBuffer.");
     const descriptor = MANAGED_JOB_DESCRIPTORS[capability].paths.part_url!; let path = descriptor[1].replace("{jobId}", encodeURIComponent(jobId)).replace("{documentId}", encodeURIComponent(jobId)); path += `?partNumber=${partNumber}`;
     const headers = { "x-systemsculpt-contract": MANAGED_CAPABILITY_CONTRACT, "x-systemsculpt-job-contract": MANAGED_JOB_PROTOCOL, "x-systemsculpt-capability": capability };
     const response = await this.transport.job({ path, method: descriptor[0], headers, signal }); const parsed = await this.parse(capability, "part_url", response) as { internal: { partNumber: number; method: string; url: string; expectedBytes: number } };
     if (parsed.internal.partNumber !== partNumber) malformed("Multipart part identity mismatch.");
     if (bytes.byteLength !== parsed.internal.expectedBytes) this.invalid("Multipart bytes do not match expected length."); const upload = await this.transport.uploadSignedJobPart(parsed.internal.url, parsed.internal.method, {}, bytes, signal);
-    if (!upload.ok) throw new ManagedJobError("managed_job_error", `Signed part upload failed (${upload.status}).`, upload.status, upload.headers.get("x-request-id"), upload.status >= 500 || upload.status === 429, null, parseRetryAfterMs(upload.headers.get("retry-after")));
+    if (!upload.ok) throw new ManagedJobError("managed_job_error", `Signed part upload failed (${upload.status}).`, upload.status, upload.headers.get("x-request-id"), classifyManagedHttpError(upload.status).retryable, null, parseRetryAfterMs(upload.headers.get("retry-after")));
     const etag = upload.headers.get("etag"); if (!etag || !/^"?[A-Fa-f0-9]{8,128}(?:-[1-9][0-9]{0,9})?"?$/.test(etag) || (etag.startsWith('"') !== etag.endsWith('"'))) malformed("Invalid multipart ETag."); return { partNumber, etag };
   }
 
@@ -82,6 +95,7 @@ export class ManagedJobClient {
   private partNumber(n: number, max: number) { if (!Number.isInteger(n) || n < 1 || n > max) this.invalid(); }
   private parts(parts: Array<{ partNumber: number; etag: string }>, max: number) { if (!Array.isArray(parts) || parts.length < 1 || parts.length > max || new Set(parts.map(p => p.partNumber)).size !== parts.length || parts.some(p => !Number.isInteger(p.partNumber) || p.partNumber < 1 || p.partNumber > max || typeof p.etag !== "string" || !/^"?[A-Fa-f0-9]{8,128}(?:-[1-9][0-9]{0,9})?"?$/.test(p.etag) || (p.etag.startsWith('"') !== p.etag.endsWith('"')))) this.invalid(); }
   private async call<T = unknown>(capability: MultipartJobCapability, operation: Operation, options: { jobId?: string; body?: unknown; operationId?: string; signal?: AbortSignal }): Promise<T> {
+    throwIfManagedAborted(options.signal);
     const descriptor = MANAGED_JOB_DESCRIPTORS[capability], route = descriptor.paths[operation]; if (!route) throw new ManagedJobError("unsupported_operation", `${capability}.${operation} is unsupported.`);
     if (options.jobId !== undefined && !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/.test(options.jobId)) this.invalid("Invalid first-party job ID.");
     const path = route[1].replace("{jobId}", encodeURIComponent(options.jobId ?? "")).replace("{documentId}", encodeURIComponent(options.jobId ?? ""));
@@ -111,9 +125,11 @@ export class ManagedJobClient {
   private async parse(capability: MultipartJobCapability, operation: Operation, result: ManagedTransportResult): Promise<unknown> {
     if (!result.response.ok) {
       const status = result.response.status;
-      const map: Record<number, [ErrorCode, boolean]> = { 400: ["invalid_request", false], 401: ["license_required", false], 402: ["payment_required", false], 403: ["license_rejected", false], 409: ["operation_conflict", false], 426: ["upgrade_required", false], 429: ["rate_limited", true], 502: ["temporarily_unavailable", true], 503: ["temporarily_unavailable", true] };
-      const [code, retryable] = map[status] ?? ["managed_job_error", false];
-      let message = MANAGED_JOB_HTTP_ERROR_MESSAGES[status] ?? `Managed job request failed (${status}).`;
+      const classification = classifyManagedHttpError(status);
+      const code = classification.code ?? "managed_job_error";
+      const retryable = classification.retryable;
+      let message = MANAGED_JOB_HTTP_ERROR_MESSAGES[status]
+        ?? (code === "temporarily_unavailable" ? "SystemSculpt processing is temporarily unavailable." : `Managed job request failed (${status}).`);
       if (status >= 400 && status < 500) {
         const value: unknown = await result.response.json().catch(() => null);
         if (value && typeof value === "object" && !Array.isArray(value)) {

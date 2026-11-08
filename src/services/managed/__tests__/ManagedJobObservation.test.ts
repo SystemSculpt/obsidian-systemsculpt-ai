@@ -218,6 +218,28 @@ describe("ManagedJobObservation", () => {
     }
   });
 
+  it.each([
+    Object.assign(new Error("Cancelled"), { name: "AbortError", status: 503, retryable: true }),
+    Object.assign(new TypeError("Cancelled"), { name: "AbortError" }),
+    { name: "AbortError", retryable: true },
+    { status: 500, retryable: false },
+    { status: 502, retryable: false, code: "upstream_failed" },
+    Object.assign(new TypeError("Invalid response"), { retryable: false }),
+    { code: "job_expired", status: 200, retryable: false },
+  ])("does not override cancellation or a typed permanent failure (%j)", error => {
+    expect(isRetryableManagedJobObservationError(error)).toBe(false);
+  });
+
+  it("uses the same retry and Retry-After defaults for observation and dispatch", async () => {
+    const wait = jest.fn().mockResolvedValue(undefined);
+    const read = jest.fn().mockRejectedValueOnce({ status: 500, retryable: true, retryAfterMs: 7_000 }).mockResolvedValue("done");
+    const observation = observeManagedJob({ read, signal: new AbortController().signal, wait });
+    await expect(observation.next()).resolves.toMatchObject({ value: "done" });
+    await observation.return(undefined as never);
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(wait).toHaveBeenCalledWith(7_000, expect.any(AbortSignal));
+  });
+
   it("retries a request that hit its client deadline but never a local cancel", () => {
     expect(isRetryableManagedJobObservationError(new PlatformRequestTimeoutError(30_000))).toBe(true);
     expect(isRetryableManagedJobObservationError(new DOMException("Aborted", "AbortError"))).toBe(false);
@@ -353,21 +375,17 @@ describe("dispatchManagedJob", () => {
     expect(attempts).toBe(4);
   });
 
-  it("never replays a rejection the server called permanent", async () => {
-    let attempts = 0;
+  it.each([402, 500, 502, 503])("never replays an explicitly permanent HTTP %s rejection", async status => {
+    const send = jest.fn().mockRejectedValue(Object.assign(new Error("Permanent rejection"), { status, retryable: false }));
+    const wait = jest.fn().mockResolvedValue(undefined);
     await expect(dispatchManagedJob({
-      send: async () => {
-        attempts += 1;
-        throw Object.assign(new Error("payment required"), {
-          status: 402,
-          retryable: false,
-        });
-      },
+      send,
       signal: new AbortController().signal,
-      wait: async () => {},
-    })).rejects.toThrow("payment required");
+      wait,
+    })).rejects.toThrow("Permanent rejection");
 
-    expect(attempts).toBe(1);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(wait).not.toHaveBeenCalled();
   });
 
   it("stops replaying once the caller aborts", async () => {

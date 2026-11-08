@@ -2,6 +2,7 @@ import capabilityFixture from "../../../testing/fixtures/managed/managed-capabil
 import routeFixture from "../../../testing/fixtures/managed/managed-text-generation-route-v1.json";
 import { ManagedCapabilityCatalog } from "../managed/ManagedCapabilityCatalog";
 import { PlatformRequestTimeoutError } from "../PlatformRequestClient";
+import { isRetryableManagedJobObservationError } from "../managed/ManagedJobObservation";
 import {
   MANAGED_TRANSCRIPT_POSTPROCESSING_CONTRACT,
   MANAGED_TRANSCRIPT_POSTPROCESSING_CONTRACT_HEADER,
@@ -187,9 +188,11 @@ describe("ManagedTextGenerationAdapter", () => {
       response: jsonResponse({ error: { code, message: "Bounded first-party error", request_id: "textreq_1", retryable, ...extra } }, status),
       diagnostics: { requestId: "textreq_1", status, contentType: "application/json; charset=utf-8" },
     });
-    await expect(adapter.generate(operation())).rejects.toMatchObject({
+    const failure = await adapter.generate(operation()).catch(error => error);
+    expect(failure).toMatchObject({
       name: "ManagedTextGenerationError", code, status, requestId: "textreq_1", retryable,
     });
+    expect(isRetryableManagedJobObservationError(failure)).toBe(retryable);
     expect(request).toHaveBeenCalledTimes(1);
   });
 

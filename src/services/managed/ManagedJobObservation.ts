@@ -1,3 +1,6 @@
+import { classifyManagedHttpError } from "./ManagedHttpError";
+import { managedAbortError, throwIfManagedAborted } from "./ManagedAbort";
+
 const DEFAULT_POLL_AFTER_MS = 2_000;
 /** No server hint, however small, polls a job more than once a second. */
 const MIN_POLL_AFTER_MS = 1_000;
@@ -38,11 +41,11 @@ export type ManagedJobObservationOptions<T> = Readonly<{
 }>;
 
 function abortError(): DOMException {
-  return new DOMException("Stopped waiting for the managed job.", "AbortError");
+  return managedAbortError("Stopped waiting for the managed job.");
 }
 
 function throwIfAborted(signal: AbortSignal): void {
-  if (signal.aborted) throw abortError();
+  throwIfManagedAborted(signal, "Stopped waiting for the managed job.");
 }
 
 export async function waitForManagedJob(
@@ -106,20 +109,14 @@ async function waitForManagedJobHostOnline(signal: AbortSignal): Promise<void> {
 }
 
 export function isRetryableManagedJobObservationError(error: unknown): boolean {
-  if (
-    error instanceof DOMException
-    && error.name === "AbortError"
-  ) {
-    return false;
-  }
+  if (!error || typeof error !== "object") return false;
+  const candidate = error as { name?: unknown; retryable?: unknown; status?: unknown };
+  if (candidate.name === "AbortError") return false;
+  // Typed protocol failures include terminal and ambiguous outcomes that must
+  // not be replayed, even when their HTTP status would normally be transient.
+  if (typeof candidate.retryable === "boolean") return candidate.retryable;
   if (error instanceof TypeError) return true;
-  const candidate = error as {
-    retryable?: unknown;
-    status?: unknown;
-  } | null;
-  return candidate?.retryable === true
-    || candidate?.status === 429
-    || (typeof candidate?.status === "number" && candidate.status >= 500);
+  return typeof candidate.status === "number" && classifyManagedHttpError(candidate.status).retryable;
 }
 
 /**
@@ -135,6 +132,8 @@ export async function* observeManagedJob<T>(
   options: ManagedJobObservationOptions<T>,
 ): AsyncGenerator<T, never, void> {
   const wait = options.wait ?? waitForManagedJob;
+  const isRetryable = options.isRetryableError ?? isRetryableManagedJobObservationError;
+  const retryAfterMs = options.retryAfterMs ?? managedRetryAfterMs;
   const waitForOnline = options.waitForOnline ?? waitForManagedJobHostOnline;
   let next = options.initial;
   let hasNext = options.initial !== undefined;
@@ -150,12 +149,12 @@ export async function* observeManagedJob<T>(
         transientFailures = 0;
       } catch (error) {
         throwIfAborted(options.signal);
-        if (!options.isRetryableError?.(error)) throw error;
+        if (!isRetryable(error)) throw error;
         // A read that failed because the host went offline waits for the
         // network instead of backing off.
         if (isHostOffline()) continue;
         transientFailures += 1;
-        const retryInMs = normalizedPollAfterMs(options.retryAfterMs?.(error, transientFailures), managedTransientBackoffMs(transientFailures));
+        const retryInMs = normalizedPollAfterMs(retryAfterMs(error, transientFailures), managedTransientBackoffMs(transientFailures));
         try {
           options.onRetrying?.({ consecutiveFailures: transientFailures, retryInMs, error });
         } catch {
@@ -174,6 +173,10 @@ export async function* observeManagedJob<T>(
     hasNext = false;
     next = undefined;
   }
+}
+
+function managedRetryAfterMs(error: unknown): number | undefined {
+  return (error as { retryAfterMs?: number } | null)?.retryAfterMs;
 }
 
 export type ManagedJobDispatchOptions<T> = Readonly<{
@@ -198,8 +201,7 @@ export async function dispatchManagedJob<T>(
 ): Promise<T> {
   const wait = options.wait ?? waitForManagedJob;
   const isRetryable = options.isRetryableError ?? isRetryableManagedJobObservationError;
-  const retryAfterMs = options.retryAfterMs
-    ?? ((error: unknown) => (error as { retryAfterMs?: number } | null)?.retryAfterMs);
+  const retryAfterMs = options.retryAfterMs ?? managedRetryAfterMs;
   let backoffMs = TRANSIENT_RETRY_BASE_MS;
 
   for (let attempt = 1; ; attempt += 1) {

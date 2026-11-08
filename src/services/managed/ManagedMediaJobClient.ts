@@ -1,3 +1,6 @@
+import { classifyManagedHttpError } from "./ManagedHttpError";
+import { createManagedRequestId } from "./ManagedRequestId";
+import { throwIfManagedAborted } from "./ManagedAbort";
 import { readVerifiedManagedOutput } from "./ManagedOutputBytes";
 import { HostedTransportAdapter } from "./adapters/HostedTransportAdapter";
 import {
@@ -53,18 +56,16 @@ const MEDIA_DOWNLOAD_STARTED_AT_HEADER = "x-systemsculpt-download-started-at";
 const MEDIA_DOWNLOAD_REQUESTED_AT_HEADER = "x-systemsculpt-download-requested-at";
 const CAPABILITY: Record<ManagedMediaKind, "image_generation" | "video_generation"> = { image: "image_generation", video: "video_generation" };
 const JOBS_PATH: Record<ManagedMediaKind, string> = { image: "/api/plugin/images/generations/jobs", video: "/api/plugin/videos/generations/jobs" };
-const HTTP_FALLBACK_ERRORS: Readonly<Record<number, [string, string]>> = Object.freeze({
-  400: ["invalid_request", "The managed media request is invalid."],
-  401: ["license_required", "A valid license is required."],
-  402: ["payment_required", "Not enough credits are available for this generation."],
-  403: ["license_rejected", "License access is forbidden."],
-  404: ["not_found", "The managed media job was not found."],
-  409: ["operation_conflict", "The managed media job is in a conflicting state."],
-  413: ["invalid_request", "The managed media request is too large."],
-  426: ["upgrade_required", "A newer SystemSculpt plugin version is required."],
-  429: ["rate_limited", "SystemSculpt is receiving too many processing requests right now."],
-  502: ["temporarily_unavailable", "SystemSculpt processing is temporarily unavailable."],
-  503: ["temporarily_unavailable", "SystemSculpt processing is temporarily unavailable."],
+const HTTP_FALLBACK_MESSAGES: Readonly<Record<number, string>> = Object.freeze({
+  400: "The managed media request is invalid.",
+  401: "A valid license is required.",
+  402: "Not enough credits are available for this generation.",
+  403: "License access is forbidden.",
+  404: "The managed media job was not found.",
+  409: "The managed media job is in a conflicting state.",
+  413: "The managed media request is too large.",
+  426: "A newer SystemSculpt plugin version is required.",
+  429: "SystemSculpt is receiving too many processing requests right now.",
 });
 
 export class ManagedMediaJobError extends Error {
@@ -73,7 +74,7 @@ export class ManagedMediaJobError extends Error {
     message: string,
     public readonly status?: number,
     public readonly requestId: string | null = null,
-    public readonly retryable = false,
+    public readonly retryable = status !== undefined && classifyManagedHttpError(status).retryable,
     public readonly jobFailure: { jobId: string | null; code: string | null } | null = null,
     public readonly retryAfterMs?: number,
   ) { super(message); this.name = "ManagedMediaJobError"; }
@@ -104,7 +105,7 @@ export class ManagedMediaJobClient {
   constructor(
     private readonly transport: HostedTransportAdapter,
     private readonly now: () => number = () => Date.now(),
-    private readonly createRequestId: () => string = () => window.crypto?.randomUUID?.() ?? `plugin-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    private readonly createRequestId: () => string = createManagedRequestId,
     private readonly elapsedNow: () => number = () => window.performance?.now?.() ?? Date.now(),
   ) {
     this.decoder = createManagedMediaDecoder(malformed, invalid, () => this.now());
@@ -128,7 +129,7 @@ export class ManagedMediaJobClient {
   }
 
   private async call(kind: ManagedMediaKind, options: { method: "GET" | "POST"; path: string; body?: unknown; operationId?: string; signal?: AbortSignal }): Promise<{ value: unknown; result: ManagedTransportResult; requestId: string }> {
-    if (options.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    throwIfManagedAborted(options.signal);
     const requestId = this.requestId();
     const result = await this.transport.job({
       path: options.path,
@@ -147,7 +148,8 @@ export class ManagedMediaJobClient {
   private async protocolError(result: ManagedTransportResult, requestId: string): Promise<never> {
     const status = result.response.status;
     const retryAfterMs = result.diagnostics.retryAfterMs;
-    const retryable = status === 429 || status === 502 || status === 503;
+    const classification = classifyManagedHttpError(status);
+    const retryable = classification.retryable;
     let envelope: { code: string; message: string } | null = null;
     try {
       const value = await result.response.clone().json() as JsonObject | null;
@@ -160,7 +162,9 @@ export class ManagedMediaJobClient {
         && value.request_id === requestId
       ) envelope = { code: value.code, message: value.message };
     } catch { /* fall back to the HTTP status taxonomy */ }
-    const [code, message]: [string, string] = envelope ? [envelope.code, envelope.message] : (HTTP_FALLBACK_ERRORS[status] ?? ["managed_media_error", `Managed media request failed (${status}).`]);
+    const code = envelope?.code ?? classification.code ?? "managed_media_error";
+    const message = envelope?.message ?? HTTP_FALLBACK_MESSAGES[status]
+      ?? (classification.code === "temporarily_unavailable" ? "SystemSculpt processing is temporarily unavailable." : `Managed media request failed (${status}).`);
     throw new ManagedMediaJobError(code, message, status, requestId, retryable, null, retryAfterMs);
   }
 
@@ -205,7 +209,7 @@ export class ManagedMediaJobClient {
   }
 
   private async download(kind: ManagedMediaKind, jobId: string, outputIndex: number, expected: ManagedImageOutputMetadata | ManagedVideoOutputMetadata, signal?: AbortSignal): Promise<ManagedDeliveredImageOutputBytes | ManagedDeliveredVideoOutputBytes> {
-    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    throwIfManagedAborted(signal);
     if (!JOB_ID_PATTERN.test(jobId) || !Number.isInteger(outputIndex) || outputIndex < 0 || outputIndex > 3) invalid("Invalid managed media output identity.");
     let validated: ManagedImageOutputMetadata | ManagedVideoOutputMetadata;
     try { validated = this.decoder.outputMetadata(kind, expected); } catch { invalid("Invalid expected media output metadata."); }
