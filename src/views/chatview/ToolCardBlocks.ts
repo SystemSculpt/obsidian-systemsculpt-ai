@@ -184,15 +184,47 @@ export function renderNotice(card: HTMLElement, notice: ToolCardNotice): HTMLEle
 }
 
 /** Thumbnails of generated or viewed media; each opens its vault file. */
+/**
+ * A media file's name as people read it: chat names generated files by time
+ * and prompt words, so the time stamp and extension drop off.
+ */
+export function mediaDisplayName(path: string, label?: string): string {
+  if (label?.trim()) return label.trim();
+  const file = path.split("/").pop() ?? path;
+  const stem = file.replace(/\.[a-z0-9]{2,5}$/iu, "");
+  return stem.replace(/^\d{4}-\d{2}-\d{2}[ _T]\d{4,6}\s+/u, "").trim() || stem;
+}
+
+const TURN_MEDIA_ITEM = ":scope > .systemsculpt-agent-turn-media [data-media-path]";
+
+/**
+ * Media the reply already shows full size is not shown again in its tool card:
+ * the card keeps the file link instead of a second picture. Runs when the
+ * reply's media renders and when a card renders into its turn.
+ */
+export function syncToolMediaWithReply(turnBody: Element | null): void {
+  if (!turnBody) return;
+  const below = new Set(Array.from(turnBody.querySelectorAll(TURN_MEDIA_ITEM), item => item.getAttribute("data-media-path")));
+  for (const media of Array.from(turnBody.querySelectorAll<HTMLElement>(".ss-tool-media"))) {
+    const paths = Array.from(media.querySelectorAll("[data-media-path]"), tile => tile.getAttribute("data-media-path"));
+    media.classList.toggle("is-shown-in-reply", paths.length > 0 && paths.every(path => below.has(path)));
+  }
+}
+
 export function renderMedia(app: App, card: HTMLElement, media: readonly ToolCardMedia[]): void {
   if (!media.length) return;
   const strip = card.createDiv({ cls: "ss-tool-media", attr: { "data-testid": "chat.tool.media" } });
+  // Shown instead of the thumbnails when the reply below already shows the same files.
+  const files = card.createEl("dl", { cls: "ss-tool-fields ss-tool-media-files" }).createDiv({ cls: "ss-tool-field" });
+  files.createEl("dt", { text: "Saved" });
+  const links = files.createEl("dd");
+  for (const item of media) vaultLink(app, links, item.path, mediaDisplayName(item.path, item.label));
   if (media.length > 1) {
     strip.addClass("is-multiple");
     strip.setCssProps({ "--ss-tool-media-columns": String(Math.min(media.length, 4)) });
   }
   for (const item of media) {
-    const name = item.label ?? item.path.split("/").pop() ?? item.path;
+    const name = mediaDisplayName(item.path, item.label);
     const file = app.vault.getAbstractFileByPath(item.path);
     if (!(file instanceof TFile)) {
       strip.createDiv({ cls: "ss-tool-media-tile is-missing", text: "Moved or deleted", attr: { title: item.path } });
@@ -200,7 +232,7 @@ export function renderMedia(app: App, card: HTMLElement, media: readonly ToolCar
     }
     const tile = strip.createEl("button", {
       cls: `ss-tool-media-tile is-${item.kind}`,
-      attr: { type: "button", title: name, "aria-label": `Open ${name}`, "data-testid": "chat.tool.media.open" },
+      attr: { type: "button", title: item.path, "aria-label": `Open ${name}`, "data-testid": "chat.tool.media.open", "data-media-path": item.path },
     });
     const source = app.vault.getResourcePath(file);
     if (item.kind === "video") {
