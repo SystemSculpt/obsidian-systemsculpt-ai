@@ -213,8 +213,10 @@
     min-width: 0;
   }
 
+  /* A wrapped line splits evenly instead of leaving one word alone below it. */
   .systemsculpt-diff-line-content {
     white-space: pre-wrap;
     overflow-wrap: anywhere;
+    text-wrap: balance;
   }
 }
