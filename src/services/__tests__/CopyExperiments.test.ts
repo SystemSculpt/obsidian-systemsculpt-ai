@@ -36,7 +36,7 @@ describe("copy experiments", () => {
   it("keeps one sticky arm per vault from a device-local unit", () => {
     const app = vaultApp({ "systemsculpt-experiment-unit": "2222222222222222" });
     expect(upgradePromptCopy(app)).toEqual({
-      title: "SystemSculpt Pro: AI images and video in your vault",
+      title: "SystemSculpt\u00a0Pro: AI images and video in your vault",
       subtitle: "Plus smart search and Studio. $9 a month.",
       arm: { experiment: "ss-plugin-upgrade-pro-2026-11", variant: "a" },
     });
@@ -60,7 +60,7 @@ describe("copy experiments", () => {
 
   it("shows the control and joins no test without vault local storage", () => {
     expect(upgradePromptCopy({} as any)).toEqual({
-      title: "SystemSculpt Pro: AI images and video in your vault",
+      title: "SystemSculpt\u00a0Pro: AI images and video in your vault",
       subtitle: "Plus smart search and Studio. $9 a month.",
       arm: null,
     });

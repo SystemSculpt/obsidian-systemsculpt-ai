@@ -63,12 +63,13 @@ function experimentUnit(app: App): string | null {
   return unit;
 }
 
-/** The upgrade prompt's title and subtitle (UpgradePlanModal), control first; copy picked by CMO T-5831. */
+/** The upgrade prompt's title and subtitle (UpgradePlanModal), control first; copy picked by CMO T-5831.
+ * A no-break space keeps "SystemSculpt Pro" on one line. */
 export const UPGRADE_PROMPT_EXPERIMENT = {
   key: "ss-plugin-upgrade-pro-2026-11",
   variants: [
-    { key: "a", title: "SystemSculpt Pro: AI images and video in your vault", subtitle: "Plus smart search and Studio. $9 a month." },
-    { key: "b", title: "Get SystemSculpt Pro, AI for your vault", subtitle: "Image and video generation, smart search and Studio for $9 a month." },
+    { key: "a", title: "SystemSculpt\u00a0Pro: AI images and video in your vault", subtitle: "Plus smart search and Studio. $9 a month." },
+    { key: "b", title: "Get SystemSculpt\u00a0Pro, AI for your vault", subtitle: "Image and video generation, smart search and Studio for $9 a month." },
   ],
 } as const;
 
