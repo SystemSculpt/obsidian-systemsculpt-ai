@@ -3,6 +3,7 @@
  */
 import { App, TFile, TFolder } from "obsidian";
 import { SearchOperations } from "../tools/SearchOperations";
+import { SystemSculptSearchEngine } from "../../../services/search/SystemSculptSearchEngine";
 import { FILESYSTEM_LIMITS } from "../constants";
 import * as utils from "../utils";
 import {
@@ -22,7 +23,7 @@ jest.mock("../utils", () => {
 });
 
 // Mock searchScoring module
-jest.mock("../searchScoring", () => ({
+jest.mock("../../../services/search/searchScoring", () => ({
   extractSearchTerms: jest.fn((query: string) => query.split(/\s+/).filter(Boolean)),
   calculateScore: jest.fn((path: string, _content: string, options: any) => ({
     path,
@@ -74,6 +75,9 @@ describe("SearchOperations", () => {
   let searchOps: SearchOperations;
   let mockFiles: TFile[];
   let mockFolders: TFolder[];
+  let engine: SystemSculptSearchEngine | undefined;
+
+  afterEach(() => engine?.destroy());
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -123,6 +127,15 @@ describe("SearchOperations", () => {
       },
     };
 
+    engine = undefined;
+    plugin.getSearchEngine = () => {
+      if (!engine) {
+        engine = new SystemSculptSearchEngine(app, plugin);
+        // Candidate/index integration has its own public-boundary suite.
+        jest.spyOn(engine, "getContentCandidates").mockResolvedValue(null);
+      }
+      return engine;
+    };
     searchOps = new SearchOperations(app, ["/"], plugin);
   });
 
@@ -562,7 +575,7 @@ Body content here`;
       expect(result).toBeDefined();
     });
 
-    it("respects MAX_FILE_SIZE limit", async () => {
+    it("searches notes larger than the former file-size cutoff", async () => {
       const largeFile = new TFile({ path: "large.md" });
       (largeFile.stat as any) = {
         ctime: Date.now(),
@@ -573,11 +586,11 @@ Body content here`;
 
       const result = await searchOps.grepVault({ patterns: ["test"] });
 
-      // Large file should be skipped
-      expect(result).toBeDefined();
+      expect(app.vault.cachedRead).toHaveBeenCalledWith(largeFile);
+      expect(resultPaths(result)).toContain("large.md");
     });
 
-    it("respects MAX_SEARCH_RESULTS limit", async () => {
+    it("ranks every matching file instead of stopping at the former result cutoff", async () => {
       const manyFiles = Array.from({ length: 100 }, (_, i) => {
         const file = new TFile({ path: `file${i}.md` });
         (file.stat as any) = { ctime: Date.now(), mtime: Date.now(), size: 100 };
@@ -588,7 +601,8 @@ Body content here`;
 
       const result = await searchOps.grepVault({ patterns: ["test"] });
 
-      expect(list(field(result, "results")).length).toBeLessThanOrEqual(FILESYSTEM_LIMITS.MAX_SEARCH_RESULTS);
+      expect(field(result, "totalCount")).toBe(100);
+      expect(app.vault.cachedRead).toHaveBeenCalledTimes(100);
     });
 
     it("handles empty files", async () => {
@@ -831,9 +845,8 @@ Body content here`;
 
         expect(readPaths()[0]).toBe(large.path);
         expect(resultPaths(result)).toContain(large.path);
-        expect(field(result, "metaInfo")).toEqual(expect.arrayContaining([
-          expect.objectContaining({ file: "_summary" }),
-        ]));
+        expect(readPaths()).toHaveLength(61);
+        expect(field(result, "totalCount")).toBe(61);
       });
 
       it("reads a note whose title matches before newer notes that only mention the term", async () => {
@@ -934,7 +947,7 @@ Body content here`;
         pagedVault();
         const first = await page();
         expect(first.page.next_cursor).toEqual(expect.any(String));
-        expect(plugin.registerEvent).toHaveBeenCalledTimes(4);
+        expect(app.vault.on).toHaveBeenCalledTimes(4);
 
         const seen = [...first.snippets];
         let cursor: string | null = first.page.next_cursor;
@@ -957,7 +970,7 @@ Body content here`;
         expect(app.vault.getFiles).not.toHaveBeenCalled();
         expect(new Set(seen).size).toBe(seen.length);
         expect(seen).toHaveLength(first.page.total_matches);
-        expect(plugin.registerEvent).toHaveBeenCalledTimes(4);
+        expect(app.vault.on).toHaveBeenCalledTimes(4);
       });
 
       it("advances past an oversized first match with an explicitly shortened preview", async () => {

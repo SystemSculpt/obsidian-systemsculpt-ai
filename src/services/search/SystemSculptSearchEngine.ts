@@ -2,6 +2,7 @@ import { App, EventRef, TFile } from "obsidian";
 import type SystemSculptPlugin from "../../main";
 import { fuzzyMatchScore } from "../../tools/vault/searchUtils";
 import { containsNonAscii } from "../../utils/characterValidation";
+import { normalizeSearchQuery } from "./SearchLexicalSignals";
 import { extractCanvasText } from "./canvasTextExtractor";
 import { extractStudioText } from "./studioTextExtractor";
 import { markdownExcerptText } from "./excerptText";
@@ -136,6 +137,8 @@ export class SystemSculptSearchEngine {
   private indexPromise: Promise<void> | null = null;
   private contentIndexReady = false;
   private indexGeneration = 0;
+  /** Content revision shared by modal candidates and kept agent-tool scans. */
+  private vaultRevision = 0;
   private scheduledIndexHandle: number | null = null;
   private dirtyPaths: Set<string> = new Set();
   private refreshQueue: Promise<void> = Promise.resolve();
@@ -185,7 +188,7 @@ export class SystemSculptSearchEngine {
     const signal = options?.signal;
 
     const searchStart = performance.now();
-    const normalizedQuery = query.trim().toLowerCase();
+    const normalizedQuery = normalizeSearchQuery(query);
     const terms = normalizedQuery.split(/\s+/).filter(Boolean);
     const phrase = normalizedQuery;
 
@@ -378,6 +381,62 @@ export class SystemSculptSearchEngine {
     return previews;
   }
 
+  getRevision(): number {
+    this.refreshEligibilityIfChanged();
+    return this.vaultRevision;
+  }
+
+  /**
+   * Narrow a tool's already-authorized files with the same postings the modal
+   * uses. Only complete raw-text coverage proves a negative. Long notes,
+   * properties, transformed documents, failed reads and arbitrary regexes fall
+   * back to direct scanning, so the modal's prefix index cannot hide a match.
+   */
+  async getContentCandidates(
+    files: readonly TFile[],
+    literals: readonly string[] | null,
+    signal?: AbortSignal,
+  ): Promise<Set<string> | null> {
+    if (literals === null) return null;
+    this.refreshEligibilityIfChanged();
+    const release = this.hold();
+    const checkCancelled = () => {
+      if (signal?.aborted) throw new DOMException("Search aborted", "AbortError");
+    };
+    try {
+      checkCancelled();
+      const prepare = this.refreshQueue.then(async () => {
+        checkCancelled();
+        const stale = files.filter((file) => {
+          if (!this.isEligible(file) || this.isStudioFile(file)) return false;
+          const note = this.textIndex.noteByPath(file.path);
+          return !note || this.dirtyPaths.has(file.path)
+            || note.mtime !== this.modifiedTime(file) || note.size !== this.fileSize(file);
+        });
+        const revision = this.vaultRevision;
+        if (stale.length > 0) await this.buildIndex(stale, true, this.indexGeneration);
+        if (revision === this.vaultRevision) {
+          for (const file of stale) this.dirtyPaths.delete(file.path);
+        }
+      });
+      this.refreshQueue = prepare.catch(() => undefined);
+      await prepare;
+      checkCancelled();
+      const matches = this.textIndex.literalCandidates(literals);
+      if (matches === null) return null;
+      for (const file of files) {
+        const note = this.textIndex.noteByPath(file.path);
+        if (!note?.completeRawText || this.dirtyPaths.has(file.path)
+          || note.mtime !== this.modifiedTime(file) || note.size !== this.fileSize(file)) {
+          matches.add(file.path);
+        }
+      }
+      return matches;
+    } finally {
+      release();
+    }
+  }
+
   startIndexing(): Promise<void> {
     return this.ensureIndex();
   }
@@ -426,8 +485,15 @@ export class SystemSculptSearchEngine {
   }
 
   private registerVaultWatchers() {
+    const changed = (file: { path: string }, oldPath?: string) => {
+      const exclusions = searchVaultExclusions(this.plugin);
+      if ([file.path, oldPath].some((path) => typeof path === "string" && !exclusions.isExcluded(path))) {
+        this.vaultRevision += 1;
+      }
+    };
     this.eventRefs.push(
       this.app.vault.on("modify", (file) => {
+        changed(file);
         this.invalidateStudioDocuments(file);
         if (file instanceof TFile && this.isEligible(file)) {
           this.dirtyPaths.add(file.path);
@@ -439,6 +505,7 @@ export class SystemSculptSearchEngine {
 
     this.eventRefs.push(
       this.app.vault.on("create", (file) => {
+        changed(file);
         this.invalidateStudioDocuments(file);
         this.eligibleFilesCache = null;
         this.eligibleFilesCacheSignature = null;
@@ -455,6 +522,7 @@ export class SystemSculptSearchEngine {
 
     this.eventRefs.push(
       this.app.vault.on("delete", (file) => {
+        changed(file);
         this.invalidateStudioDocuments(file);
         this.eligibleFilesCache = null;
         this.eligibleFilesCacheSignature = null;
@@ -470,6 +538,7 @@ export class SystemSculptSearchEngine {
 
     this.eventRefs.push(
       this.app.vault.on("rename", (file, oldPath) => {
+        changed(file, oldPath);
         this.invalidateStudioDocuments(file, oldPath);
         this.eligibleFilesCache = null;
         this.eligibleFilesCacheSignature = null;
@@ -492,7 +561,10 @@ export class SystemSculptSearchEngine {
           if (changedKeys.some(key => [
             "embeddingsExclusions", "chatsDirectory", "savedChatsDirectory",
             "recordingsDirectory", "attachmentsDirectory", "extractionsDirectory",
-          ].includes(key))) this.clearIndexes();
+          ].includes(key))) {
+            this.vaultRevision += 1;
+            this.clearIndexes();
+          }
         })
       );
     }
@@ -506,7 +578,7 @@ export class SystemSculptSearchEngine {
     }
 
     const generation = this.indexGeneration;
-    this.indexPromise = (async () => {
+    this.indexPromise = this.refreshQueue.then(async () => {
       await this.prepareStudioDocuments();
       const files = this.getEligibleFiles();
       const built = await this.buildIndex(files, false, generation);
@@ -515,7 +587,8 @@ export class SystemSculptSearchEngine {
         // Only the title-only search before the index is ready uses these.
         this.metadataTokenCache.clear();
       }
-    })();
+    });
+    this.refreshQueue = this.indexPromise.catch(() => undefined);
 
     try {
       await this.indexPromise;
@@ -611,7 +684,9 @@ export class SystemSculptSearchEngine {
       this.dirtyPaths.add(file.path);
       return null;
     }
-    const content = this.isStudioFile(file) ? "" : await this.safeRead(file);
+    const mtime = this.modifiedTime(file);
+    const size = this.fileSize(file);
+    const content = this.isStudioFile(file) ? "" : await this.app.vault.cachedRead(file);
     const extracted = this.getIndexText(file, content);
     const metadata = this.metadataTokenCache.get(file.path) ?? this.createMetadataTokenSnapshot(file);
     const body = extracted.slice(0, this.MAX_INDEX_CHARS).toLowerCase();
@@ -633,8 +708,9 @@ export class SystemSculptSearchEngine {
         lowerTitle: metadata.lowerTitle,
         lowerPath: metadata.lowerPath,
         preview: copyFlat(this.buildPreviewFromText(extracted, this.isMarkdownFile(file))),
-        mtime: this.modifiedTime(file),
-        size: this.fileSize(file),
+        mtime,
+        size,
+        completeRawText: !this.isStudioFile(file) && content === extracted && content.length <= this.MAX_INDEX_CHARS,
       },
       tokens,
     };
@@ -740,6 +816,7 @@ export class SystemSculptSearchEngine {
     if (this.eligibleFilesCacheSignature === null || this.eligibleFilesCacheSignature === signature) {
       return;
     }
+    this.vaultRevision += 1;
     this.clearIndexes();
     this.eligibleFilesCacheSignature = signature;
   }

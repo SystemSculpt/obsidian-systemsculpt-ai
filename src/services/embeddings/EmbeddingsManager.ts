@@ -52,6 +52,7 @@ import {
   type SemanticWorkReason,
 } from "./SemanticWorkQueue";
 import { resolveVaultExclusions, type VaultExclusions } from "../search/VaultExclusions";
+import { refineSemanticSearchResults } from "../search/SearchLexicalSignals";
 
 type EmbeddingsRunStatus = "complete" | "aborted";
 
@@ -466,7 +467,7 @@ export class EmbeddingsManager {
       signal,
     );
     if (signal?.aborted) return [];
-    return this.applyLexicalSignals(prepared, this.mergeChunkResults([rawResults ?? []], limit));
+    return refineSemanticSearchResults(prepared, this.mergeChunkResults([rawResults ?? []], limit));
   }
 
   private cachedQueryVector(prepared: string): Float32Array | null {
@@ -1699,23 +1700,6 @@ export class EmbeddingsManager {
       }))
       .sort((left, right) => right.score - left.score)
       .slice(0, Math.max(0, limit));
-  }
-
-  private applyLexicalSignals(query: string, results: SearchResult[]): SearchResult[] {
-    const normalized = query.toLowerCase().trim();
-    const tokens = [...new Set(normalized.split(/\s+/).map((token) => token.replace(/[^a-z0-9]/gi, "")).filter((token) => token.length > 1))];
-    if (tokens.length === 0) return results;
-    return results.map((result) => {
-      const haystack = `${result.path} ${result.metadata.title} ${result.metadata.excerpt}`.toLowerCase();
-      const lexicalScore = haystack.includes(normalized)
-        ? 1
-        : tokens.filter((token) => haystack.includes(token)).length / tokens.length;
-      return {
-        ...result,
-        score: Math.min(1, 0.85 * result.score + 0.15 * lexicalScore),
-        metadata: { ...result.metadata, lexicalScore },
-      };
-    }).sort((left, right) => right.score - left.score);
   }
 
   private hashQuery(query: string): string {

@@ -1,11 +1,10 @@
-import { App, TAbstractFile, TFile, TFolder, normalizePath } from "obsidian";
+import { App, TFile, TFolder, normalizePath } from "obsidian";
 import { FindFilesParams, GrepVaultParams } from "../types";
 import { FILESYSTEM_LIMITS } from "../constants";
 import { countTextTokens } from "../../../utils/tokenCounting";
 import { base64ToUtf8, utf8ToBase64 } from "../../../utils/base64";
 import {
   createLineCalculator,
-  wouldExceedCharLimit,
   validatePath,
   normalizeVaultPath,
   isHiddenSystemPath,
@@ -20,12 +19,15 @@ import {
   formatScoredResults,
   FormattedScoredResults,
   ScoredResult,
-} from "../searchScoring";
+} from "../../../services/search/searchScoring";
 import SystemSculptPlugin from "../../../main";
 import { searchVaultExclusions, VaultExclusions } from "../../../services/search/VaultExclusions";
+import { copyFlat } from "../../../services/search/SearchTextIndex";
 
 type CompiledSearchPattern = Readonly<{
   raw: string;
+  /** Required literal text, or null when regex syntax needs a full scan. */
+  literal: string | null;
   /** Stateless test of a path or title. */
   matcher: RegExp;
   /** Global scan and highlight; each synchronous use starts at lastIndex 0. */
@@ -59,6 +61,7 @@ type GrepQuery = Readonly<{
   searchPaths: string[] | null;
   searchIn: "content" | "frontmatter" | "both";
   exclusions: VaultExclusions;
+  signal?: AbortSignal;
 }>;
 type GrepSnippet = Readonly<{ text: string; tokens: number }>;
 /** One finished read of the vault for a query; later pages are slices of it. */
@@ -90,7 +93,8 @@ function compileSearchPatterns(
       ? raw
       : raw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     try {
-      return { raw, matcher: new RegExp(source, "i"), scanner: new RegExp(source, "gi") };
+      const literal = mode === "literal" || !/[\\^$.*+?()[\]{}|]/.test(raw) ? raw : null;
+      return { raw, literal, matcher: new RegExp(source, "i"), scanner: new RegExp(source, "gi") };
     } catch {
       throw new Error(`Invalid regex pattern: ${raw}`);
     }
@@ -130,9 +134,8 @@ function decodeCursor(cursor?: string): SearchCursor | null {
  * Search operations for first-party vault tools.
  */
 export class SearchOperations {
-  /** Advances on every vault change a search could see. */
-  private vaultRevision = 0;
-  private vaultWatched = false;
+  /** Last shared index revision seen by the kept scans. */
+  private scanRevision = -1;
   /** Scans with a page still to serve, by query, until the vault changes. */
   private readonly grepScans = new Map<string, GrepScan>();
 
@@ -140,32 +143,7 @@ export class SearchOperations {
     private app: App,
     private allowedPaths: string[],
     private plugin: SystemSculptPlugin
-  ) {
-    // Simplified - no complex search engine needed
-  }
-
-  /**
-   * Forget kept scans when a searchable file is created, edited, deleted or
-   * renamed, so a later page never shows text the vault no longer has.
-   * Excluded files, chat transcripts by default, cannot change a result, so
-   * saving the running chat keeps its scans.
-   */
-  private watchVault(): void {
-    if (this.vaultWatched) return;
-    this.vaultWatched = true;
-    const onChange = (file: TAbstractFile, oldPath?: string) => {
-      const exclusions = searchVaultExclusions(this.plugin);
-      const searchable = (path: string | undefined) =>
-        typeof path === "string" && !exclusions.isExcluded(path);
-      if (!searchable(file.path) && !searchable(oldPath)) return;
-      this.vaultRevision++;
-      this.grepScans.clear();
-    };
-    this.plugin.registerEvent(this.app.vault.on("create", onChange));
-    this.plugin.registerEvent(this.app.vault.on("modify", onChange));
-    this.plugin.registerEvent(this.app.vault.on("delete", onChange));
-    this.plugin.registerEvent(this.app.vault.on("rename", onChange));
-  }
+  ) {}
 
   private isAllowedPath(path: string): boolean {
     return validatePath(path, this.allowedPaths);
@@ -419,7 +397,8 @@ export class SearchOperations {
    * Search within note contents using one or more search terms (regex supported) - with intelligent scoring.
    * Pages after the first come from the kept scan and read no file.
    */
-  async grepVault(params: GrepVaultParams): Promise<unknown> {
+  async grepVault(params: GrepVaultParams, signal?: AbortSignal): Promise<unknown> {
+    if (signal?.aborted) throw new DOMException("Search aborted", "AbortError");
     const patterns = this.normalizeStringArray(params.patterns);
     const searchPaths = this.normalizeSearchPaths(params.paths);
     const searchIn = params.searchIn ?? 'content';
@@ -448,7 +427,11 @@ export class SearchOperations {
       throw new Error("Invalid search cursor for this query.");
     }
 
-    this.watchVault();
+    const revision = this.plugin.getSearchEngine().getRevision();
+    if (this.scanRevision !== revision) {
+      this.grepScans.clear();
+      this.scanRevision = revision;
+    }
     const exclusions = searchVaultExclusions(this.plugin);
     const scanKey = `${qId}\u0000${exclusions.signature}`;
     const scan = this.grepScans.get(scanKey) ?? await this.scanContents({
@@ -457,6 +440,7 @@ export class SearchOperations {
       searchPaths,
       searchIn,
       exclusions,
+      signal,
     });
     const snippets = scan.snippets;
     const startOffset = cursorState ? Math.max(0, Math.min(snippets.length, cursorState.o)) : 0;
@@ -551,21 +535,26 @@ export class SearchOperations {
     }
     // Keep the scan only while a cursor can still reach it, and never one the
     // vault changed under while it ran.
-    if (response.page.next_cursor !== null && scan.revision === this.vaultRevision) {
+    if (response.page.next_cursor !== null && scan.revision === this.plugin.getSearchEngine().getRevision()) {
       this.grepScans.set(scanKey, scan);
+    } else {
+      this.grepScans.delete(scanKey);
     }
     return response;
   }
 
   /**
-   * Read the scoped vault once for a query. Files whose title, then path,
-   * matches come first, then the most recently modified, so a large active
-   * note is read before the result and time budgets run out. Hits keep that
-   * order, so an unchanged vault always gives the same pages.
+   * Read the scoped candidates once for a query, then rank every matching
+   * file before paging. Large and older notes remain reachable; page budgets
+   * bound responses, not which files the search is allowed to inspect.
    */
   private async scanContents(query: GrepQuery): Promise<GrepScan> {
-    const { patterns, compiledPatterns, searchPaths, searchIn, exclusions } = query;
-    const revision = this.vaultRevision;
+    const { patterns, compiledPatterns, searchPaths, searchIn, exclusions, signal } = query;
+    const engine = this.plugin.getSearchEngine();
+    const revision = engine.getRevision();
+    const checkCancelled = () => {
+      if (signal?.aborted) throw new DOMException("Search aborted", "AbortError");
+    };
 
     // Extract search terms for intelligent scoring
     const originalQuery = patterns.join(' ');
@@ -576,17 +565,9 @@ export class SearchOperations {
     const metaResults: unknown[] = [];
     const fileHits: GrepFileHit[] = [];
 
-    // Track serialized response size to ensure we never exceed the model-safe
-    // limit.
-    const MAX_CHARS = FILESYSTEM_LIMITS.MAX_RESPONSE_CHARS;
-    let currentSize = 0;
-    let truncated = false;
-
     // Performance configuration constants
     const CONTEXT_CHARS = FILESYSTEM_LIMITS.CONTEXT_CHARS;
     const BATCH_SIZE = FILESYSTEM_LIMITS.BATCH_SIZE;
-    const MAX_PROCESSING_TIME = FILESYSTEM_LIMITS.MAX_PROCESSING_TIME;
-    const MAX_FILE_SIZE = FILESYSTEM_LIMITS.MAX_FILE_SIZE;
     const MAX_MATCHES_PER_FILE = FILESYSTEM_LIMITS.MAX_MATCHES_PER_FILE;
 
     // Performance metrics
@@ -624,7 +605,7 @@ export class SearchOperations {
     // plays no part, so common terms no longer fill the result budget with
     // small notes before a large one is opened. Path order breaks ties.
     const matchesAny = (text: string) => compiledPatterns.some((pattern) => pattern.matcher.test(text));
-    const candidates = filesToSearch.map((file) => {
+    let candidates = filesToSearch.map((file) => {
       const pathHit = matchesAny(file.path);
       return {
         file,
@@ -638,23 +619,27 @@ export class SearchOperations {
       || b.mtime - a.mtime
       || (a.file.path < b.file.path ? -1 : a.file.path > b.file.path ? 1 : 0));
 
+    const literals = compiledPatterns.every((pattern) => pattern.literal !== null)
+      ? compiledPatterns.map((pattern) => pattern.literal!) : null;
+    const indexedCandidates = await engine.getContentCandidates(
+      candidates.map(({ file }) => file).filter((file): file is TFile => file instanceof TFile),
+      literals,
+      signal,
+    );
+    if (indexedCandidates !== null) {
+      candidates = candidates.filter(({ file, pathHit }) =>
+        pathHit || isAdapterFile(file) || indexedCandidates.has(file.path));
+    }
+    checkCancelled();
+
     // Read one candidate. A file whose path matches is a hit even when its
     // text does not; when both match it is still one hit.
     const scanFile = async ({ file, pathHit }: (typeof candidates)[number]): Promise<GrepFileHit | null> => {
-      // Check processing time limit
-      if (Date.now() - startTime > MAX_PROCESSING_TIME) {
-        metrics.timeouts++;
-        return null;
-      }
+      checkCancelled();
 
-      // Check file size limit
+      // File size is metadata, never a reason to hide a searchable note.
       const stat = getStat(file);
       const fileSize = stat?.size ?? 0;
-      if (fileSize > MAX_FILE_SIZE) {
-        metrics.filesSkipped++;
-        return null;
-      }
-
       // Track largest file processed
       if (fileSize > metrics.largestFile) {
         metrics.largestFile = fileSize;
@@ -670,6 +655,7 @@ export class SearchOperations {
         const fullContent = isAdapterFile(file)
           ? await readAdapterText(adapter, file.path)
           : await this.app.vault.cachedRead(file);
+        checkCancelled();
         metrics.filesProcessed++;
 
         // Skip empty files
@@ -717,7 +703,7 @@ export class SearchOperations {
           while ((match = regex.exec(content)) !== null && allMatches.length < MAX_MATCHES_PER_FILE) {
             const lineNumber = getLineNumber(match.index + contentOffset);
             allMatches.push({
-              index: match.index + contentOffset,
+              index: match.index,
               text: match[0],
               line: lineNumber,
               pattern: pattern.raw
@@ -807,7 +793,7 @@ export class SearchOperations {
           return {
             lines: window.lines,
             matchCount: window.matchCount,
-            context: contextStr
+            context: copyFlat(contextStr)
           };
         });
 
@@ -820,6 +806,7 @@ export class SearchOperations {
           fileSize // used for ranking
         };
       } catch {
+        checkCancelled();
         metrics.filesSkipped++;
         // Silently skip problematic files
         return pathOnlyHit;
@@ -828,38 +815,11 @@ export class SearchOperations {
 
     // Process files in batches with yielding
     for (let i = 0; i < candidates.length; i += BATCH_SIZE) {
-      // Check timeout before each batch
-      if (Date.now() - startTime > MAX_PROCESSING_TIME) {
-        metaResults.push({
-          file: "_timeout",
-          notice: `Search timed out after ${MAX_PROCESSING_TIME / 1000} seconds to prevent UI freeze. Found ${fileHits.length} results. Use more specific search terms or paths.`,
-          totalMatches: metrics.totalMatches,
-          contexts: []
-        });
-        break;
-      }
-
-      // Check if we have enough results
-      if (fileHits.length >= FILESYSTEM_LIMITS.MAX_SEARCH_RESULTS) {
-        metaResults.push({
-          file: "_summary",
-          notice: `Search stopped after ${FILESYSTEM_LIMITS.MAX_SEARCH_RESULTS} files with matches. More results may exist.`,
-          totalMatches: metrics.totalMatches,
-          contexts: []
-        });
-        break;
-      }
-
+      checkCancelled();
       // Read a batch at once, then take its hits in candidate order
       const batchHits = await Promise.all(candidates.slice(i, i + BATCH_SIZE).map(scanFile));
       for (const hit of batchHits) {
-        if (!hit || fileHits.length >= FILESYSTEM_LIMITS.MAX_SEARCH_RESULTS) continue;
-        if (wouldExceedCharLimit(currentSize, hit, MAX_CHARS)) {
-          truncated = true;
-          continue;
-        }
-        fileHits.push(hit);
-        currentSize += JSON.stringify(hit).length;
+        if (hit) fileHits.push(hit);
       }
 
       // Yield control to prevent UI freeze (critical for performance)
@@ -955,19 +915,8 @@ export class SearchOperations {
       return snippets;
     };
 
-    // Page order: the best 30%, then the last 30%, then the middle.
-    const buildOrder = (n: number): number[] => {
-      const head = Math.ceil(n * 0.3);
-      const tail = Math.ceil(n * 0.3);
-      const order: number[] = [];
-      for (let i = 0; i < Math.min(head, n); i++) order.push(i);
-      for (let i = Math.max(n - tail, head); i < n; i++) order.push(i);
-      for (let i = head; i < Math.max(n - tail, head); i++) order.push(i);
-      return order;
-    };
-
     const allSnippets = makeSnippets();
-    const results = formatScoredResults(sortedResults, FILESYSTEM_LIMITS.MAX_SEARCH_RESULTS);
+    const results = formatScoredResults(sortedResults, sortedResults.length);
     if (Array.isArray(results.results)) {
       for (const result of results.results) delete result.contexts;
     }
@@ -976,8 +925,8 @@ export class SearchOperations {
       revision,
       results,
       metaResults,
-      truncated,
-      snippets: buildOrder(allSnippets.length).map((index) => allSnippets[index]),
+      truncated: false,
+      snippets: allSnippets,
     };
   }
 

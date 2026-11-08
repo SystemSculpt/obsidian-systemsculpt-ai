@@ -178,7 +178,7 @@
       "name": "api_request",
       "feature": "semantic_search",
       "kind": "server",
-      "description": "Semantic search or similar-notes query.",
+      "description": "Semantic search or similar-notes query. Shared local lexical candidates and agent search pagination stay on-device and emit no client telemetry.",
       "endpoints": [
         "/api/plugin/embeddings/index/query"
       ],

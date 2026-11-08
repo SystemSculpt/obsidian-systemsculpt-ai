@@ -126,7 +126,7 @@ export class FirstPartyToolService {
       case "find":
         return await this.searchOps.findFiles(args as FindFilesParams);
       case "search":
-        return await this.searchOps.grepVault(args as GrepVaultParams);
+        return await this.searchOps.grepVault(args as GrepVaultParams, signal);
       case "open":
         return await this.managementOps.manageWorkspace(args as ManageWorkspaceParams);
       case "context":
