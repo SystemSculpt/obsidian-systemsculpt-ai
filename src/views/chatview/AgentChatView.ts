@@ -4051,7 +4051,7 @@ export class AgentChatView extends ItemView {
     conversationId = this.transcript.snapshot().agentConversationId ?? this.pendingThinConversationId,
   ): readonly ChatMessage[] {
     const unsaved = this.unsavedCompletedHistory;
-    if (unsaved?.originToken !== this.conversationOriginToken || unsaved.conversationId !== conversationId) return messages;
+    if (!unsaved || unsaved.originToken !== this.conversationOriginToken || unsaved.conversationId !== conversationId) return messages;
     const savedById = new Map(messages.map((message) => [message.message_id, message]));
     const unsavedIds = new Set(unsaved.messages.map((message) => message.message_id));
     return [
@@ -4093,7 +4093,7 @@ export class AgentChatView extends ItemView {
     // Bind a replacement only once server history includes its user turn.
     const unsaved = this.unsavedCompletedHistory;
     const recoveryTurnId = pendingFork?.turnId
-      ?? (unsaved?.originToken === this.conversationOriginToken ? unsaved.turnId : undefined);
+      ?? (unsaved && unsaved.originToken === this.conversationOriginToken ? unsaved.turnId : undefined);
     const includesRecoveryTurn = recoveryTurnId && messages.some((message) =>
       message.role === "user" && message.message_id === recoveryTurnId);
     const recoveryConversationId = (!previousSnapshot.agentConversationId || includesRecoveryTurn)
@@ -4106,7 +4106,7 @@ export class AgentChatView extends ItemView {
     const forkWasSaved = pendingFork && includesForkTurn
       && snapshot.agentConversationId === this.pendingThinConversationId
       && unsaved?.conversationId !== snapshot.agentConversationId;
-    if (unsaved?.originToken === this.conversationOriginToken && (forkWasSaved || unsaved.messages.every((message) =>
+    if (unsaved && unsaved.originToken === this.conversationOriginToken && (forkWasSaved || unsaved.messages.every((message) =>
       snapshot.messages.some((saved) => saved.message_id === message.message_id)))) {
       this.unsavedCompletedHistory = null;
       this.workspace?.setBanner(null);
