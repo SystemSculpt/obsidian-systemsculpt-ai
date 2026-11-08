@@ -3,7 +3,7 @@ import { join } from "path";
 import {
   createDefaultStudioPolicy,
   createEmptyStudioProject,
-  parseAndMigrateStudioProject,
+  readAndMigrateStudioProject,
   parseStudioPolicy,
   parseStudioProject,
   serializeStudioProject,
@@ -242,7 +242,7 @@ describe("Studio schema", () => {
       "studio.http_request",
       "studio.text",
     ]);
-    const migrated = parseAndMigrateStudioProject(v1Text);
+    const migrated = readAndMigrateStudioProject(JSON.parse(v1Text));
     expect(migrated.graph.nodes.map((node) => node.kind)).toEqual([
       "studio.text",
       "studio.input",
@@ -254,8 +254,8 @@ describe("Studio schema", () => {
     const v2Document = JSON.parse(serializeStudioProject(migrated));
     v2Document.canvas.nodes[0].kind = "label";
     const v2Text = JSON.stringify(v2Document);
-    expect(parseAndMigrateStudioProject(v2Text).graph).toEqual(parseStudioProject(v2Text).graph);
-    expect(parseAndMigrateStudioProject(v2Text).graph.nodes[0].kind).toBe("studio.label");
+    expect(readAndMigrateStudioProject(JSON.parse(v2Text)).graph).toEqual(parseStudioProject(v2Text).graph);
+    expect(readAndMigrateStudioProject(JSON.parse(v2Text)).graph.nodes[0].kind).toBe("studio.label");
   });
 
   it("migrates legacy canvas-like payloads into v1", () => {

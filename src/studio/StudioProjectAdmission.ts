@@ -1,17 +1,20 @@
 import { StudioGraphCompiler } from "./StudioGraphCompiler";
 import { builtInStudioNodeRegistry } from "./StudioBuiltInNodes";
 import { assertValidStudioProjectAgentDocumentStructure } from "./StudioProjectAgentDocumentValidation";
-import { parseAndMigrateStudioProject, type StudioProjectParseContext } from "./schema";
+import { readAndMigrateStudioProject, type StudioProjectParseContext } from "./schema";
 import type { StudioProjectV1 } from "./types";
 
-/** Pure document admission: validate the authored bytes before compatibility normalization. */
+/** Pure document admission: validate external structure before compatibility normalization and compilation. */
 export function admitStudioProjectText(raw: string, context?: StudioProjectParseContext): {
   record: Record<string, unknown>;
   project: StudioProjectV1;
 } {
   const record: unknown = JSON.parse(raw);
   assertValidStudioProjectAgentDocumentStructure(record);
-  const project = parseAndMigrateStudioProject(raw, context);
+  const project = readAndMigrateStudioProject(record, context);
+  // Layout settings are import hints. Legacy coordinate recovery has already
+  // run; accepted authored state uses the manual layout written by Studio.
+  project.graph.layout = { mode: "manual" };
   validateStudioProjectDocument(project);
   return { record: record as Record<string, unknown>, project };
 }

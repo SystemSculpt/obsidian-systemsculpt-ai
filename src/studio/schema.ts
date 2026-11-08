@@ -687,7 +687,7 @@ export function parseStudioProject(
 }
 
 /**
- * Parse a project file and bring an older dialect up to the current graph
+ * Read a decoded project and bring an older dialect up to the current graph
  * before anything validates or compiles it. v1 files can still carry node
  * kinds that later releases renamed or retired (studio.label,
  * studio.http_request, studio.prompt_template, studio.resend_audience_sync);
@@ -695,11 +695,10 @@ export function parseStudioProject(
  * defines them. v2 content is written in the current dialect by definition,
  * so it is returned as parsed.
  */
-export function parseAndMigrateStudioProject(
-  rawText: string,
+export function readAndMigrateStudioProject(
+  parsed: unknown,
   context?: StudioProjectParseContext
 ): StudioProjectV1 {
-  const parsed: unknown = JSON.parse(rawText);
   const project = readStudioProject(parsed, context);
   if (isCurrentStudioDialect(parsed)) {
     return project;

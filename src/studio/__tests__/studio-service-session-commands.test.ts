@@ -1,6 +1,6 @@
 import { StudioProjectSession } from "../StudioProjectSession";
 import { StudioService } from "../StudioService";
-import { serializeStudioProject } from "../schema";
+import { parseStudioProject, serializeStudioProject } from "../schema";
 import type { StudioProjectV1 } from "../types";
 import { createManagedCapabilityGraphStub, getManagedStudioTestVaultName } from "./managed-capability-graph.stub";
 
@@ -158,9 +158,9 @@ describe("StudioService session-backed mutation commands", () => {
     expect(session.getProject().name).toBe("Reloaded Project");
   });
 
-  it("preserves resized media ingest geometry when legacy config is normalized during reload", async () => {
+  it("adopts current-format media config without repeating legacy migration or saving on reload", async () => {
     const service = new StudioService(createPluginStub());
-    const reloadedProject = projectFixture();
+    const reloadedProject = parseStudioProject(serializeStudioProject(projectFixture()));
     reloadedProject.graph.nodes.push({
       id: "media_1",
       kind: "studio.media_ingest",
@@ -195,32 +195,10 @@ describe("StudioService session-backed mutation commands", () => {
     const mediaNode = session.getProject().graph.nodes.find((node) => node.id === "media_1");
 
     expect(loadProject).toHaveBeenCalledWith("Studio/Test.systemsculpt", { forceReload: true });
-    // Resized geometry survives normalization as first-class node.size;
-    // caption edits stay in config and the legacy geometry keys are stripped.
-    expect(mediaNode?.size).toEqual({ width: 512, height: 356 });
-    expect(mediaNode?.config).toEqual({
-      sourcePath: "/media/input.mp4",
-      captionBoard: {
-        version: 1,
-        labels: [],
-      },
-    });
-    expect(saveProject).toHaveBeenCalledWith(
-      "Studio/Test.systemsculpt",
-      expect.objectContaining({
-        graph: expect.objectContaining({
-          nodes: expect.arrayContaining([
-            expect.objectContaining({
-              id: "media_1",
-              size: { width: 512, height: 356 },
-              config: expect.objectContaining({
-                sourcePath: "/media/input.mp4",
-              }),
-            }),
-          ]),
-        }),
-      })
-    );
+    // Config is authored JSON in v2, even when fields resemble older dialects.
+    // Only the store's external-data gate can decide which dialect to migrate.
+    expect(mediaNode).toEqual(reloadedProject.graph.nodes[0]);
+    expect(saveProject).not.toHaveBeenCalled();
   });
 
   it("runs a project from its retained session snapshot", async () => {
