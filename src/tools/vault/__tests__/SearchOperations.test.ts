@@ -960,6 +960,46 @@ Body content here`;
         expect(plugin.registerEvent).toHaveBeenCalledTimes(4);
       });
 
+      it("advances past an oversized first match with an explicitly shortened preview", async () => {
+        const files = pagedVault().slice(0, 2);
+        (app.vault.getFiles as jest.Mock).mockReturnValue(files);
+        (app.vault.cachedRead as jest.Mock).mockImplementation(async (file: TFile) =>
+          file === files[0] ? `needle ${"words ".repeat(2500)}` : "needle next match");
+        const query = { patterns: ["needle[\\s\\S]*"], patternMode: "regex" as const, pageTokens: 512 };
+
+        const first = await searchOps.grepVault(query) as any;
+
+        expect(first.snippets).toHaveLength(1);
+        expect(first.snippets[0]).toContain("[preview shortened; read the note for the full match]");
+        expect(first.truncated).toBe(true);
+        expect(first.page.tokensUsed).toBeLessThanOrEqual(first.page.bodyTokenBudget);
+        expect(first.page.next_cursor).toEqual(expect.any(String));
+        expect(first.page.returned_matches).toBe(1);
+        expect(JSON.stringify(first).length).toBeLessThanOrEqual(FILESYSTEM_LIMITS.MAX_RESPONSE_CHARS);
+
+        const second = await searchOps.grepVault({ ...query, cursor: first.page.next_cursor }) as any;
+        expect(second.snippets).toEqual([expect.stringContaining("next match")]);
+        expect(second.page.next_cursor).toBeNull();
+        expect(app.vault.cachedRead).toHaveBeenCalledTimes(files.length);
+      });
+
+      it("keeps a match when result metadata fills the response character budget", async () => {
+        pagedVault();
+        const scoring = jest.requireMock("../searchScoring");
+        scoring.formatScoredResults.mockReturnValueOnce({
+          results: [{ path: "x".repeat(FILESYSTEM_LIMITS.MAX_RESPONSE_CHARS - 100) }],
+          totalCount: 12,
+        });
+
+        const first = await page();
+
+        expect(first.snippets.length).toBeGreaterThan(0);
+        expect(first.page.returned_matches).toBeGreaterThan(0);
+        expect(first.page.next_cursor).toEqual(expect.any(String));
+        expect(JSON.stringify(first).length).toBeLessThanOrEqual(FILESYSTEM_LIMITS.MAX_RESPONSE_CHARS);
+        expect(first.truncated).toBe(true);
+      });
+
       it("searches again when a searchable note changes between pages", async () => {
         const files = pagedVault();
         const first = await page();
