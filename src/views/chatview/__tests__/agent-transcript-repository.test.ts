@@ -1712,6 +1712,140 @@ describe("AgentTranscriptRepository with saved chat notes", () => {
       context_files: ["New context.md"], chatFontSize: "large", approvalMode: "auto",
     });
     expect(reloaded?.messages.map(message => message.message_id)).toEqual(patched.messages.map(message => message.message_id));
+
+    await current.saveMetadata();
+    expect(notes.get(chatPath)!.content).toContain(reportId);
+    expect(current.snapshot().messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ terminalReportId: reportId }),
+    ]));
+    await current.commitUser({ kind: "append", message: user("u3", "Next turn") }, conversationId);
+    expect(notes.get(chatPath)!.content).toContain(reportId);
+    expect(current.snapshot().messages.map(message => message.message_id)).toEqual(["u1", `failure-${reportId}`, "u2", "u3"]);
+  });
+
+  it.each(["metadata", "user", "assistant"] as const)("keeps a receipt that lands while an overlapping %s snapshot save waits to write", async operation => {
+    const { app, vault, notes } = noteVault();
+    await saveNote(app, [user("u1"), user("u2")]);
+    const original = openChat(app);
+    const current = openChat(app);
+    await original.load("chat-1");
+    await current.load("chat-1");
+    const entered = deferred<void>();
+    const release = deferred<void>();
+    let holding = false;
+    const holdFirstWrite = async () => {
+      if (holding) return;
+      holding = true;
+      entered.resolve();
+      await release.promise;
+    };
+    const modify = vault.modify.getMockImplementation()!;
+    const process = vault.process.getMockImplementation()!;
+    vault.modify.mockImplementationOnce(async (file, content) => {
+      await holdFirstWrite();
+      return modify(file, content);
+    });
+    vault.process.mockImplementationOnce(async (file, transform) => {
+      await holdFirstWrite();
+      return process(file, transform);
+    });
+    const saving = operation === "metadata" ? current.saveMetadata()
+      : operation === "user" ? current.commitUser({ kind: "append", message: user("u3") }, conversationId)
+        : current.persistAssistant(assistant("a2"));
+    await entered.promise;
+    const reportId = `report_${"e".repeat(32)}`;
+    await original.persistFailedReceipt({ turnId: "u1", reportId, failureCode: "response_start_failed", retryable: true });
+    release.resolve();
+    const saved = await saving;
+
+    const expectedIds = ["u1", `failure-${reportId}`, "u2", ...(operation === "user" ? ["u3"] : operation === "assistant" ? ["a2"] : [])];
+    expect(saved.messages.map(message => message.message_id)).toEqual(expectedIds);
+    expect(ChatMarkdownSerializer.parseMarkdown(notes.get(chatPath)!.content)?.messages.map(message => message.message_id)).toEqual(expectedIds);
+    expect(saved.version).toBe(3);
+  });
+
+  it("persists intentional metadata edits without dropping receipts or custom metadata after a revision conflict", async () => {
+    const { app, notes } = noteVault();
+    let options = { chatFontSize: "medium" as "medium" | "large", approvalMode: "ask" as "ask" | "auto", contextFiles: new Set(["Old context.md"]) };
+    await new ChatStorageService(app, "SystemSculpt/Chats").saveChat("chat-1", [user("u1")], {
+      ...options, title: "Original", agentConversationId: conversationId,
+    });
+    const original = openChat(app);
+    const current = new AgentTranscriptRepository(new ChatStorageService(app, "SystemSculpt/Chats"), () => options);
+    await original.load("chat-1");
+    await current.load("chat-1");
+    const note = notes.get(chatPath)!;
+    note.content = note.content.replace("---\n", "---\ncustom_property: preserved\n");
+    const reportId = `report_${"e".repeat(32)}`;
+    await original.persistFailedReceipt({ turnId: "u1", reportId, failureCode: "response_start_failed", retryable: true });
+    options = { chatFontSize: "large", approvalMode: "auto", contextFiles: new Set(["New context.md"]) };
+    current.setTitle("Intentional title");
+
+    await current.saveMetadata();
+
+    expect(parseYaml(splitChatFrontmatter(note.content)!.yamlContent)).toMatchObject({
+      title: "Intentional title", chatFontSize: "large", approvalMode: "auto",
+      context_files: [{ path: "New context.md", type: "source" }], custom_property: "preserved",
+    });
+    expect(current.snapshot().messages).toEqual(expect.arrayContaining([expect.objectContaining({ terminalReportId: reportId })]));
+    expect(note.content).toContain(reportId);
+  });
+
+  it.each(["fork", "completed", "empty"] as const)("does not restore an obsolete receipt over a %s turn after a revision conflict", async operation => {
+    const { app, notes } = noteVault();
+    await saveNote(app, [user("u1")]);
+    const original = openChat(app);
+    const current = openChat(app);
+    await original.load("chat-1");
+    const loaded = await current.load("chat-1");
+    const reportId = `report_${"e".repeat(32)}`;
+    await original.persistFailedReceipt({ turnId: "u1", reportId, failureCode: "response_start_failed", retryable: true });
+    const forkId = "conversation_22222222222222222222222222222222";
+    const saved = operation === "fork"
+      ? await current.commitUser({ kind: "resend", message: user("replacement"), targetMessageId: "u1", expectedIndex: 0, expectedVersion: loaded!.version }, forkId)
+      : operation === "completed" ? await current.persistAssistant(assistant("completed", "Done"))
+        : await current.reconcileServerHistory([]);
+
+    expect(notes.get(chatPath)!.content).not.toContain(reportId);
+    expect(saved.messages.map(message => message.message_id)).toEqual(operation === "fork" ? ["replacement"] : operation === "completed" ? ["u1", "completed"] : []);
+    expect(saved.agentConversationId).toBe(operation === "fork" ? forkId : conversationId);
+    expect(ChatMarkdownSerializer.parseMetadata(notes.get(chatPath)!.content)?.agentConversationId).toBe(saved.agentConversationId);
+  });
+
+  it("keeps matching-revision snapshot saves immutable without parsing or reading the transcript", async () => {
+    const { app, vault } = noteVault();
+    await saveNote(app, [user("u1")]);
+    const current = openChat(app);
+    await current.load("chat-1");
+    const messages = current.snapshot().messages;
+    vault.read.mockClear();
+    const parse = jest.spyOn(ChatMarkdownSerializer, "parseMarkdown");
+    try {
+      await current.saveMetadata();
+      expect(current.snapshot().messages).toBe(messages);
+      await current.commitUser({ kind: "append", message: user("u2") }, conversationId);
+      expect(current.snapshot().messages[0]).toBe(messages[0]);
+      expect(parse).not.toHaveBeenCalled();
+      expect(vault.read).not.toHaveBeenCalled();
+    } finally {
+      parse.mockRestore();
+    }
+  });
+
+  it.each(["truncated", "wrong-id"])("leaves a %s current note unchanged when a stale snapshot tries to save", async kind => {
+    const { app, notes } = noteVault();
+    await saveNote(app, [user("u1")]);
+    const current = openChat(app);
+    await current.load("chat-1");
+    const note = notes.get(chatPath)!;
+    note.content = note.content.replace("version: 1", "version: 2");
+    note.content = kind === "truncated" ? note.content.replace("<!-- SYSTEMSCULPT-MESSAGE-END -->", "") : note.content.replace("id: chat-1", "id: other-chat");
+    const before = note.content;
+
+    await expect(current.saveMetadata()).rejects.toThrow("Saved chat history is corrupted");
+
+    expect(note.content).toBe(before);
+    expect(current.snapshot().version).toBe(1);
   });
 
   it("does not resurrect a removed user turn when its old repository persists a receipt", async () => {
@@ -1801,13 +1935,14 @@ describe("AgentTranscriptRepository with saved chat notes", () => {
     const reconciled = await repository.reconcileServerHistory(serverHistory(noteText, 9_000_000));
 
     expect(vault.modify).not.toHaveBeenCalled();
+    expect(vault.process).not.toHaveBeenCalled();
     expect(notes.get(chatPath)!.content).toBe(saved);
     expect(reconciled.version).toBe(loaded!.version);
 
     // The next real save stores the bounded summary instead of the whole note.
     await repository.commitUser({ kind: "append", message: user("user-2", "Thanks.") }, conversationId);
     const rewritten = notes.get(chatPath)!.content;
-    expect(vault.modify).toHaveBeenCalledTimes(1);
+    expect(vault.process).toHaveBeenCalledTimes(1);
     expect(rewritten).not.toContain(noteText);
     expect(rewritten).toContain("more characters]");
     expect(rewritten).toContain("Thanks.");
@@ -1824,6 +1959,7 @@ describe("AgentTranscriptRepository with saved chat notes", () => {
     await repository.reconcileServerHistory(serverHistory("A short plan.", 9_000_000));
 
     expect(vault.modify).not.toHaveBeenCalled();
+    expect(vault.process).not.toHaveBeenCalled();
     expect(notes.get(chatPath)!.content).toBe(saved);
   });
 
@@ -1846,6 +1982,7 @@ describe("AgentTranscriptRepository with saved chat notes", () => {
       expect(readBack).not.toHaveBeenCalled();
       expect(again.version).toBe(loaded!.version);
       expect(vault.modify).not.toHaveBeenCalled();
+      expect(vault.process).not.toHaveBeenCalled();
     } finally {
       readBack.mockRestore();
     }
@@ -1862,7 +1999,7 @@ describe("AgentTranscriptRepository with saved chat notes", () => {
       serverHistory("A short plan.", 9_000_000, "The plan has four phases."),
     );
 
-    expect(vault.modify).toHaveBeenCalledTimes(1);
+    expect(vault.process).toHaveBeenCalledTimes(1);
     expect(notes.get(chatPath)!.content).toContain("The plan has four phases.");
     expect(reconciled.version).toBe(loaded!.version + 1);
   });

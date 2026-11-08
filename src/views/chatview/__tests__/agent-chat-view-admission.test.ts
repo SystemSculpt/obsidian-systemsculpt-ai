@@ -426,6 +426,17 @@ async function createPersistentHistoricalResubmitHarness(
   const vault = {
     getAbstractFileByPath: jest.fn((path: string) => files.get(path)?.file ?? null),
     read: jest.fn(async (file: TFile) => files.get(file.path)?.content ?? ""),
+    process: jest.fn(async (file: TFile, transform: (content: string) => string) => {
+      const stored = files.get(file.path);
+      if (!stored) throw new Error(`Missing file: ${file.path}`);
+      const content = transform(stored.content);
+      if (rejectedModifyCount > 0) {
+        rejectedModifyCount -= 1;
+        throw new Error("disk unavailable");
+      }
+      stored.content = content;
+      return content;
+    }),
     modify: jest.fn(async (file: TFile, content: string) => {
       if (rejectedModifyCount > 0) {
         rejectedModifyCount -= 1;

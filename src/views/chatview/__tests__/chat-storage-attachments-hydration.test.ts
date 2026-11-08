@@ -282,6 +282,13 @@ function memoryVault() {
         read: async (file: TFile) => notes.get(file.path)!,
         cachedRead: async (file: TFile) => notes.get(file.path)!,
         modify: async (file: TFile, content: string) => { notes.set(file.path, content); },
+        process: async (file: TFile, transform: (content: string) => string) => {
+          const current = notes.get(file.path);
+          if (current === undefined) throw new Error("File no longer exists.");
+          const content = transform(current);
+          notes.set(file.path, content);
+          return content;
+        },
         create: async (path: string, content: string) => {
           if (notes.has(path)) throw new Error("File already exists.");
           addFolders(parentOf(path));

@@ -46,6 +46,7 @@ const criticalRiskCoverage = [
 	"src/chat/managed/ManagedToolExecution.ts",
 	"src/views/chatview/AgentChatView.ts",
 	"src/views/chatview/ChatTurnCoordinator.ts",
+	"src/views/chatview/FailedTerminalReceipt.ts",
 	"src/views/chatview/HistoricalReplaySafety.ts",
 	"src/views/chatview/ChatViewIdentity.ts",
 	"src/views/chatview/ManagedChatContext.ts",

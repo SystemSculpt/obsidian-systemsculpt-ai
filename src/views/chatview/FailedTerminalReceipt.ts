@@ -1,3 +1,4 @@
+import type { ChatMessage } from "../../types";
 import {
   isThinAgentFailureCode,
   isThinAgentIncidentId,
@@ -78,4 +79,55 @@ export function normalizeFailedTerminalReceipt(
     terminalRetryable: candidate.terminalRetryable,
     ...(terminalServerRunId ? { terminalServerRunId } : {}),
   };
+}
+
+
+/** Carry local report receipts only onto still-present failed or unanswered turns. */
+export function preserveContentFreeLocalFailedReceipts(
+  incoming: readonly ChatMessage[],
+  local: readonly ChatMessage[],
+): ChatMessage[] {
+  const receipts = new Map<string, NormalizedFailedTerminalReceipt>();
+  let localTurnId: string | null = null;
+  for (const message of local) {
+    if (message.role === "user") {
+      localTurnId = message.message_id;
+      continue;
+    }
+    const receipt = normalizeFailedTerminalReceipt(message);
+    if (localTurnId && receipt?.terminalReportId) receipts.set(localTurnId, receipt);
+  }
+  const next = [...incoming];
+  for (const [turnId, receipt] of receipts) {
+    const userIndex = next.findIndex((message) =>
+      message.role === "user" && message.message_id === turnId);
+    if (userIndex < 0) continue;
+    let turnEnd = userIndex + 1;
+    while (turnEnd < next.length && next[turnEnd].role === "assistant") turnEnd += 1;
+    let failedIndex = -1;
+    for (let index = turnEnd - 1; index > userIndex; index -= 1) {
+      if (next[index].role === "assistant" && normalizeFailedTerminalReceipt(next[index])) {
+        failedIndex = index;
+        break;
+      }
+    }
+    if (failedIndex >= 0) {
+      next[failedIndex] = {
+        ...next[failedIndex],
+        terminalReportId: receipt.terminalReportId,
+      };
+      continue;
+    }
+    if (turnEnd > userIndex + 1) continue;
+    next.splice(turnEnd, 0, {
+      role: "assistant",
+      message_id: `failure-${receipt.terminalReportId}`,
+      content: "",
+      terminalOutcome: "failed",
+      terminalReportId: receipt.terminalReportId,
+      terminalFailureCode: receipt.terminalFailureCode,
+      terminalRetryable: receipt.terminalRetryable,
+    });
+  }
+  return next;
 }
