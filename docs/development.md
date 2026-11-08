@@ -292,7 +292,10 @@ detach on cancellation; waits that can approve UI actions retain queue ownership
 
 Chat structure uses repeated `chat.turn` and `chat.part` identities, qualified
 by `data-role`, `data-active`, `data-kind`, and each tool’s displayed
-`data-state`. `data-part-key` keeps a part’s execution identity. Tool labels,
+`data-state`. `data-part-key` keeps a part’s execution identity. Tools expose
+`data-tool-name` and a single displayed target as `data-tool-path`; exact write
+approvals cross-check it against `chat.diff.file` and its `data-path`, even
+when the preview header is hidden. Tool labels,
 summaries and status icons use `chat.tool.label`, `chat.tool.summary`, and
 `chat.tool.state`; `chat.tail-status` retains `data-status` and exposes
 `data-phase`. Settings use `settings.surface`, `settings.tab-bar`, and

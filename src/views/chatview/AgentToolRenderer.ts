@@ -162,6 +162,9 @@ export class AgentToolRenderer {
     node.dataset.testid = "chat.part";
     node.dataset.kind = "tool";
     node.dataset.state = presentation.displayState;
+    node.dataset.toolName = presentation.canonicalName;
+    if (presentation.targetPath) node.dataset.toolPath = presentation.targetPath;
+    else delete node.dataset.toolPath;
     node.dataset.toolGrouped = "false";
     node.dataset.agentActivityRow = "";
     node.dataset.activityKind = "tool";

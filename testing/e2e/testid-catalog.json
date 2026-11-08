@@ -68,6 +68,7 @@
     "chat.credits-offer",
     "chat.credits-offer.link",
     "chat.diff.content",
+    "chat.diff.file",
     "chat.diff.filename",
     "chat.diff.line",
     "chat.editor.cancel",

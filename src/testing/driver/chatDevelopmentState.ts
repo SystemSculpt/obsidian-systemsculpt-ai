@@ -1627,14 +1627,17 @@ function assertAllowedApproval(
   allowedText?: unknown,
 ): string {
   const expectedPath = developmentMarkerFromPath(allowedPath).path;
-  const tool = approvalButton.closest("[data-testid='chat.part'][data-kind='tool']");
-  const label = tool?.querySelector("[data-testid='chat.tool.label']")?.textContent?.trim();
-  const summary = tool?.querySelector("[data-testid='chat.tool.summary']")?.textContent?.trim();
-  const previewPath = tool
-    ?.querySelector("[data-testid='chat.approval.preview'] [data-testid='chat.diff.filename']")
-    ?.textContent
-    ?.trim();
-  if (label !== "Write file" || summary !== expectedPath || previewPath !== expectedPath) {
+  const tool = approvalButton.closest<HTMLElement>("[data-testid='chat.part'][data-kind='tool']");
+  const previews = tool?.querySelectorAll<HTMLElement>(
+    "[data-testid='chat.approval.preview'] [data-testid='chat.diff.file']",
+  );
+  if (
+    tool?.dataset.toolName !== "write"
+    || tool.dataset.toolPath !== expectedPath
+    || tool.dataset.state !== "approval-required"
+    || previews?.length !== 1
+    || previews[0]?.dataset.path !== expectedPath
+  ) {
     throw new DriverActionError(
       "Refusing an approval that is not the exact owned development-test write.",
     );

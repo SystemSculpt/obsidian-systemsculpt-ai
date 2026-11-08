@@ -5,6 +5,9 @@
 import { App, type WorkspaceLeaf } from "obsidian";
 
 import { AgentWorkspace } from "../../../views/chatview/AgentWorkspace";
+import { AgentConversationRenderer } from "../../../views/chatview/AgentConversationRenderer";
+import { presentAgentConversation } from "../../../views/chatview/AgentConversationPresentation";
+import type { AgentConversationSnapshot } from "../../../chat/ChatConversation";
 
 import type { ChatMessage } from "../../../types";
 import type { SupportDiagnosticEvent } from "../../../utils/PluginLogger";
@@ -517,13 +520,15 @@ function renderWriteApproval(
   tool.dataset.kind = "tool";
   tool.dataset.toolGrouped = "false";
   tool.innerHTML = [
-    '<strong data-testid="chat.tool.label">Write file</strong>',
-    `<span data-testid="chat.tool.summary">${path}</span>`,
+    `<strong data-testid="chat.tool.label">Create ${path.split("/").pop()}</strong>`,
     '<div data-testid="chat.approval.preview">',
-    `<div data-testid="chat.diff.filename">${path}</div>`,
+    `<div data-testid="chat.diff.file" data-path="${path}">`,
     `<div data-testid="chat.diff.line" data-change="added"><span data-testid="chat.diff.content">${text}</span></div>`,
-    "</div>",
+    "</div></div>",
   ].join("");
+  tool.dataset.toolName = "write";
+  tool.dataset.toolPath = path;
+  tool.dataset.state = "approval-required";
   const allowOnce = document.createElement("button");
   allowOnce.dataset.testid = "chat.approval.allow-once";
   allowOnce.getBoundingClientRect = () => rect();
@@ -1981,6 +1986,65 @@ describe("guarded development driver actions", () => {
     expect(activityDrawer.getAttribute("aria-expanded")).toBe("true");
 
     await runDriverAction(harness.ctx, "chat.resetDevelopmentState", { marker });
+  });
+
+  it("approves an actual rendered write without a preview header or cosmetic tool label", async () => {
+    const marker = "SS-DEV-TEST-AB";
+    const harness = makeDevelopmentHarness();
+    await runDriverAction(harness.ctx, "chat.beginDevelopmentState", { marker });
+    await runDriverAction(harness.ctx, "chat.typeDevelopmentDraft", { text: "approval check" });
+    const path = `${DEVELOPMENT_TEST_ROOT}/${marker}/round-trip.md`;
+    const onApprove = jest.fn(() => true);
+    let previewCommitted!: () => void;
+    const previewReady = new Promise<void>((resolve) => { previewCommitted = resolve; });
+    const renderer = new AgentConversationRenderer(harness.container, {
+      app: harness.ctx.app, sourcePath: () => "", onApprove,
+      onOpenArtifact: jest.fn(), onCopyArtifactPath: jest.fn(),
+      beginLayoutMutation: (_control, target) => () => {
+        if (target?.matches('[data-testid="chat.approval.preview"]')) previewCommitted();
+      },
+    });
+    renderer.load();
+    try {
+      const snapshot: AgentConversationSnapshot = {
+        runId: "owned-write-run", turnId: "owned-write-turn", status: "waiting", phase: "waiting", waitingReason: "approval",
+        messages: [{ id: "owned-write-message", role: "assistant", partIds: ["owned-write-part"] }],
+        parts: [{ id: "owned-write-part", kind: "tool", order: 1, callId: "owned-write-call", messageId: "owned-write-message",
+          name: "write", location: "vault", input: { path, content: "EXACT" }, state: "approval-required", approvalId: "owned-write-approval" }],
+      };
+      await renderer.renderActive(snapshot, presentAgentConversation(snapshot, true));
+      await previewReady;
+      const tool = harness.container.querySelector<HTMLElement>('[data-testid="chat.part"][data-kind="tool"]')!;
+      expect(tool.dataset).toMatchObject({ toolName: "write", toolPath: path });
+      expect(tool.querySelector('[data-testid="chat.tool.label"]')?.textContent).toBe("Create round-trip.md");
+      expect(tool.querySelector('[data-testid="chat.diff.filename"]')).toBeNull();
+      const file = tool.querySelector<HTMLElement>('[data-testid="chat.diff.file"]')!;
+      expect(file.dataset.path).toBe(path);
+      const approve = tool.querySelector<HTMLElement>('[data-testid="chat.approval.allow-once"]')!;
+      approve.getBoundingClientRect = () => rect();
+      for (const [name, value] of [["toolName", "edit"], ["toolPath", `${path}.other`], ["state", "running"]] as const) {
+        const original = tool.dataset[name];
+        tool.dataset[name] = value;
+        await expect(runDriverAction(harness.ctx, "chat.approveDevelopmentWriteOnce", { path, text: "EXACT" }))
+          .rejects.toThrow(/not the exact owned/);
+        tool.dataset[name] = original;
+      }
+      file.dataset.path = `${path}.other`;
+      await expect(runDriverAction(harness.ctx, "chat.approveDevelopmentWriteOnce", { path, text: "EXACT" }))
+        .rejects.toThrow(/not the exact owned/);
+      file.dataset.path = path;
+      await expect(runDriverAction(harness.ctx, "chat.approveDevelopmentWriteOnce", { path, text: "WRONG" }))
+        .rejects.toThrow(/does not exactly match/);
+      expect(onApprove).not.toHaveBeenCalled();
+      tool.querySelector('[data-testid="chat.tool.label"]')!.textContent = "Restyled action label";
+      await expect(runDriverAction(harness.ctx, "chat.approveDevelopmentWriteOnce", { path, text: "EXACT" }))
+        .resolves.toEqual({ approved: true, path });
+      expect(onApprove).toHaveBeenCalledTimes(1);
+      expect(onApprove.mock.calls[0]?.slice(0, 2)).toEqual(["owned-write-approval", true]);
+    } finally {
+      renderer.unload();
+      await runDriverAction(harness.ctx, "chat.resetDevelopmentState", { marker });
+    }
   });
 
   it("keeps approval and cleanup byte-exact across boundary whitespace", async () => {
