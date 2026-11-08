@@ -6130,7 +6130,7 @@ describe("AgentWorkspace", () => {
     expect(stateIcons).toEqual(["ban", "minus", "x"]);
     const groupLabel = parent.querySelector("details[data-agent-turn-fold] > summary")!.textContent!;
     expect(groupLabel).toContain("Denied");
-    expect(groupLabel).toContain("1 uncertain"); // Only the uncertain outcome, not the denial, and not called failed.
+    expect(groupLabel).toMatch(/\s·\sUncertain$/u); // Only the uncertain outcome, not the denial, and not called failed.
     expect(groupLabel).not.toContain("failed");
     expect(groupLabel).not.toContain("2 failed");
     const tools = [...parent.querySelectorAll<HTMLElement>(".systemsculpt-agent-part.is-tool")];
