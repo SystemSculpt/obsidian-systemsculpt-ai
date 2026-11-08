@@ -71,7 +71,7 @@ describe('Operations preview (grouping + dedup)', () => {
     await renderOperationsInlinePreview(host, tc);
     const items = Array.from(host.querySelectorAll<HTMLLIElement>('.systemsculpt-inline-ops li'));
     expect(items.map((li) => [
-      li.querySelector(':scope > code')?.textContent,
+      li.querySelector('.systemsculpt-inline-ops__move-from')?.textContent,
       li.querySelector('.systemsculpt-inline-ops__move-to')?.textContent,
     ])).toEqual([
       ['docs/old/a.md', '→docs/new/a.md'],

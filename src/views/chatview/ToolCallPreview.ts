@@ -343,7 +343,7 @@ export async function renderOperationsInlinePreview(hostElement: HTMLElement, to
     list.addClass("is-moves");
     preview.items.forEach((it) => {
       const li = list.createEl("li", { cls: "systemsculpt-inline-ops__move" });
-      li.createEl("code", { cls: "ss-modal__inline-code", text: it.source });
+      li.createDiv({ cls: "systemsculpt-inline-ops__move-from" }).createEl("code", { cls: "ss-modal__inline-code", text: it.source });
       const to = li.createDiv({ cls: "systemsculpt-inline-ops__move-to" });
       to.createSpan({ cls: "systemsculpt-inline-ops__arrow", text: "→" });
       to.createEl("code", { cls: "ss-modal__inline-code", text: it.destination });
