@@ -173,6 +173,42 @@ describe("AudioProcessorDeviceStaging", () => {
     expect([...adapter.files.keys()].some((path) => path.includes(descriptor.stagingId))).toBe(false);
   });
 
+  it("does not expose a partial device source as restartable while its tail is still staging", async () => {
+    const adapter = new MemoryAdapter();
+    const plugin = installedPlugin(adapter);
+    const staging = new AudioProcessorDeviceStaging(plugin, { chunkSizeBytes: 4 });
+    const original = source(new Uint8Array([1, 2, 3, 4, 5]));
+    const readSlice = original.readSlice;
+    let tailRequested!: () => void;
+    const tailStarted = new Promise<void>(resolve => { tailRequested = resolve; });
+    let releaseTail!: () => void;
+    const tailReady = new Promise<void>(resolve => { releaseTail = resolve; });
+    original.readSlice = async (start, end) => {
+      if (start === 4) {
+        tailRequested();
+        await tailReady;
+      }
+      return await readSlice(start, end);
+    };
+    const pending = staging.stage("audio_job_partial_tail", original);
+    try {
+      await tailStarted;
+      expect(adapter.binaryWriteSizes).toEqual([4]);
+      const restarted = new AudioProcessorDeviceStaging(plugin);
+      await expect(restarted.openForJob("audio_job_partial_tail")).resolves.toBeNull();
+      await expect(restarted.hasReadyForJob("audio_job_partial_tail")).resolves.toBe(false);
+    } finally {
+      releaseTail();
+    }
+    const staged = await pending;
+    expect(staged.resumeDescriptor).toMatchObject({ kind: "staged" });
+    const restarted = await new AudioProcessorDeviceStaging(plugin).openForJob("audio_job_partial_tail");
+    await expect(restarted!.readSlice(0, 5)).resolves.toEqual(new Uint8Array([1, 2, 3, 4, 5]).buffer);
+    restarted!.release();
+    staged.release();
+    original.release();
+  });
+
   it("rejects a corrupt chunk instead of uploading it", async () => {
     const adapter = new MemoryAdapter();
     const staging = new AudioProcessorDeviceStaging(installedPlugin(adapter), {
