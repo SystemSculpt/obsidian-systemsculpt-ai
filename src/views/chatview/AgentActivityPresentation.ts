@@ -5,7 +5,8 @@ import { gatedSystemSculptTurn, presentAgentTool, refusedSystemSculptCall } from
 /** denied: the person declined an action, so the turn is not marked done with a check. */
 export type AgentActivitySummary = Readonly<{ label: string; failedCount: number; refused?: true; gated?: true; denied?: true }>;
 
-type ActivityGroup = { label: string; items: Set<string>; uncounted: number };
+/** rows: how many activity rows the group stands for. "N more" counts rows, as the person sees them, and a repeat of the same note once. */
+type ActivityGroup = { label: string; items: Set<string>; uncounted: number; rows: number };
 
 const groupSize = (group: ActivityGroup): number => group.items.size + group.uncounted;
 
@@ -14,8 +15,9 @@ export function summarizeAgentActivity(parts: readonly AgentPart[]): AgentActivi
   const groups = new Map<string, ActivityGroup>();
   let failedCount = 0, blockedCount = 0, uncertainCount = 0, refused = false, gated = false, denied = false;
   const add = (kind: string, label: string, items: readonly string[] = [], count = 1): void => {
-    const group = groups.get(kind) ?? { label, items: new Set<string>(), uncounted: 0 };
+    const group = groups.get(kind) ?? { label, items: new Set<string>(), uncounted: 0, rows: 0 };
     group.label = label;
+    group.rows += 1;
     if (items.length) for (const item of items) group.items.add(item);
     else group.uncounted += count;
     groups.set(kind, group);
@@ -61,7 +63,7 @@ export function summarizeAgentActivity(parts: readonly AgentPart[]): AgentActivi
     return group.label;
   });
   const visible = labels.slice(0, 3).map((label, index) => index ? label.charAt(0).toLowerCase() + label.slice(1) : label).join(", ");
-  const more = Array.from(groups.values()).slice(3).reduce((count, group) => count + groupSize(group), 0);
+  const more = Array.from(groups.values()).slice(3).reduce((count, group) => count + Math.min(group.rows, groupSize(group)), 0);
   const failed = failedCount - blockedCount - uncertainCount;
   const outcomes = [[failed, "failed"], [blockedCount, "blocked"], [uncertainCount, "uncertain"]]
     .filter(([count]) => count).map(([count, word]) => ` · ${count} ${word}`).join("");

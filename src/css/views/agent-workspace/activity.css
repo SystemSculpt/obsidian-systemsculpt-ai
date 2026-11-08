@@ -83,7 +83,10 @@ summary.systemsculpt-agent-activity-header {
 
 button.systemsculpt-agent-activity-overflow-header {
   gap: var(--ss-space-1);
+  /* A summary can wrap; Obsidian's fixed button height must not clip it. */
+  height: auto;
   padding: 0 var(--ss-space-1);
+  padding-block: var(--ss-space-0);
   border: 0;
   border-radius: var(--ss-radius-sm);
   font-family: inherit;
