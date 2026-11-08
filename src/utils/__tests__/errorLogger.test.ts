@@ -18,7 +18,7 @@ describe("errorLogger", () => {
 
   it.each<ErrorLevel>(["error", "warn", "info", "debug"])("routes %s with its context", (level) => {
     errorLogger.setMinimumLevel("debug");
-    const context: ErrorContext = { source: "Test", method: "run", metadata: { count: 1 } };
+    const context: ErrorContext = { source: "Test", method: "run", userId: "user", providerId: "provider", metadata: { count: 1 } };
 
     if (level === "error") errorLogger.error("message", undefined, context);
     else errorLogger[level]("message", context);
@@ -100,12 +100,35 @@ describe("errorLogger", () => {
 
   it("falls back to debug if a console method is unavailable", () => {
     const original = console.error;
+    const error = new Error("original");
+    const context = { source: "Test" };
     try {
       console.error = undefined as any;
-      expect(() => errorLogger.error("fallback")).not.toThrow();
-      expect(console.debug).toHaveBeenCalledWith("[SystemSculpt][ERROR] fallback");
+      expect(() => errorLogger.error("fallback", error, context)).not.toThrow();
+      expect(console.debug).toHaveBeenCalledTimes(1);
+      expect(console.debug).toHaveBeenCalledWith("[SystemSculpt][ERROR] fallback", context, error);
     } finally {
       console.error = original;
+    }
+  });
+
+  it("does not retry a console hook that throws after emission", () => {
+    (console.error as jest.Mock).mockImplementation(() => { throw new Error("console hook failed"); });
+
+    expect(() => errorLogger.error("failed")).not.toThrow();
+
+    expect(console.error).toHaveBeenCalledTimes(1);
+    expect(console.debug).not.toHaveBeenCalled();
+    expect(console.warn).not.toHaveBeenCalled();
+  });
+
+  it("is inert when the console is unavailable", () => {
+    const original = globalThis.console;
+    try {
+      globalThis.console = undefined as any;
+      expect(() => errorLogger.error("unavailable")).not.toThrow();
+    } finally {
+      globalThis.console = original;
     }
   });
 });

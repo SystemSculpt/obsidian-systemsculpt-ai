@@ -4,6 +4,7 @@ import {
   type DesktopCpuUsage,
 } from "../platform/desktopOnly";
 import type { PluginLogger } from "../utils/PluginLogger";
+import { formatFileTimestamp } from "../utils/fileTimestamp";
 import { FreezeMonitor, type FreezeMonitorOptions, type FreezeReport } from "./FreezeMonitor";
 
 export interface ResourceSample {
@@ -732,17 +733,4 @@ function normalizeBoundedWholeNumber(value: number | undefined, fallback: number
     return fallback;
   }
   return Math.min(maximum, Math.max(0, Math.floor(value)));
-}
-
-function formatFileTimestamp(date: Date): string {
-  const pad = (value: number): string => value.toString().padStart(2, "0");
-  return [
-    date.getFullYear(),
-    pad(date.getMonth() + 1),
-    pad(date.getDate()),
-    "-",
-    pad(date.getHours()),
-    pad(date.getMinutes()),
-    pad(date.getSeconds()),
-  ].join("");
 }

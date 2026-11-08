@@ -94,7 +94,7 @@ describe("SystemSculptPlugin diagnostics session wiring", () => {
   it.each([
     { isAndroidApp: true, isIosApp: false, operatingSystem: "Android" },
     { isAndroidApp: false, isIosApp: true, operatingSystem: "iOS" },
-  ])("records the exact mobile metadata allowlist to both session files on $operatingSystem", async ({ isAndroidApp, isIosApp, operatingSystem }) => {
+  ])("records the exact mobile metadata allowlist to one session file on $operatingSystem", async ({ isAndroidApp, isIosApp, operatingSystem }) => {
     jest.useFakeTimers();
     jest.setSystemTime(new Date(2026, 7, 13, 16, 0, 0));
     platform.isAndroidApp = isAndroidApp;
@@ -125,10 +125,8 @@ describe("SystemSculptPlugin diagnostics session wiring", () => {
     await expect((plugin as any).getDiagnosticsSessionLifecycle().recordSession()).resolves.toBeUndefined();
 
     expect(writeFile.mock.calls).toEqual([
-      ["diagnostics", "session-latest.json", metadata],
       ["diagnostics", `session-${metadata.sessionId}.json`, metadata],
     ]);
-    expect(writeFile.mock.calls[0]?.[2]).toEqual(writeFile.mock.calls[1]?.[2]);
     expect(JSON.stringify(writeFile.mock.calls)).not.toMatch(/PRIVATE_VAULT_CANARY|private-config-canary|private-plugin-canary/u);
   });
 
@@ -168,7 +166,6 @@ describe("SystemSculptPlugin diagnostics session wiring", () => {
     expect(monitor.isRecording()).toBe(true);
     expect(JSON.parse(plugin.buildDiagnosticsSnapshot()).status.resource_monitor_running).toBe(true);
     expect(writeFile.mock.calls.map(([, name]) => name)).toEqual([
-      "session-latest.json",
       expect.stringMatching(/^session-\d{8}-\d{6}\.json$/u),
     ]);
 

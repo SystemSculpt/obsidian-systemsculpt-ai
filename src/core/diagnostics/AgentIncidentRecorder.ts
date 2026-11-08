@@ -1053,55 +1053,67 @@ export class AgentIncidentRecorder {
   }
 
   private buildBoundedReport(active: ActiveIncident, reportId: string, createdAt: string): AgentIncidentReport {
+    const timeline = active.timeline.map(({ ordinal, event }) => projectObservedTimeline(event, ordinal));
     const state: ReportIncident = {
       ...active,
-      timeline: active.timeline.map(({ ordinal, event }) => projectObservedTimeline(event, ordinal)),
+      timeline: timelineForReport({ ...active, timeline }),
       terminal: projectObservedTimeline(active.terminal!.event, active.terminal!.ordinal),
+      transportSegments: transportSegmentsForReport(active),
+      resources: [...active.resources],
     };
-    let report = buildReport(state, reportId, createdAt, 0);
-    let size = jsonBytes(report);
+    const tools = toolsForReport(state);
+    let report = buildReport(state, tools, reportId, createdAt, 0);
+    // Validate the complete projection once. Subsequent passes only encode the
+    // changing envelope; each removed item is measured once, never its peers.
+    let retainedSectionBytes = jsonBytes(report) - jsonBytes(reportSizeEnvelope(report));
+    const measureReport = (): number => reportBytesWithSelfSize(
+      retainedSectionBytes + jsonBytes(reportSizeEnvelope(report)),
+    );
+    let size = measureReport();
     while (
       size > AGENT_INCIDENT_MAX_REPORT_BYTES
       && state.timeline.length > AGENT_INCIDENT_TIMELINE_PREFIX_EVENTS + 1
     ) {
+      const removed = state.timeline[AGENT_INCIDENT_TIMELINE_PREFIX_EVENTS];
+      retainedSectionBytes -= jsonBytes(removed) + 1;
       this.dropTimelineEvent(state, "byte_limit");
       incrementFailure(state, "report_size_reduction");
-      report = buildReport(state, reportId, createdAt, 0);
-      size = jsonBytes(report);
+      report = buildReport(state, tools, reportId, createdAt, 0);
+      size = measureReport();
     }
     while (
       size > AGENT_INCIDENT_MAX_REPORT_BYTES
       && state.transportSegments.length > AGENT_INCIDENT_TRANSPORT_PREFIX_SEGMENTS
     ) {
-      state.transportSegments.splice(AGENT_INCIDENT_TRANSPORT_PREFIX_SEGMENTS, 1);
+      const [removed] = state.transportSegments.splice(AGENT_INCIDENT_TRANSPORT_PREFIX_SEGMENTS, 1);
+      retainedSectionBytes -= jsonBytes(removed) + 1;
       state.droppedTransportSegmentCount = addBoundedCount(
         state.droppedTransportSegmentCount,
         1,
       );
       incrementFailure(state, "report_size_reduction");
-      report = buildReport(state, reportId, createdAt, 0);
-      size = jsonBytes(report);
+      report = buildReport(state, tools, reportId, createdAt, 0);
+      size = measureReport();
     }
     while (size > AGENT_INCIDENT_MAX_REPORT_BYTES && state.resources.length > 0) {
-      state.resources.shift();
+      const removed = state.resources.shift();
+      retainedSectionBytes -= jsonBytes(removed) + (state.resources.length > 0 ? 1 : 0);
       state.droppedResourceSampleCount = addBoundedCount(state.droppedResourceSampleCount, 1);
       incrementFailure(state, "report_size_reduction");
-      report = buildReport(state, reportId, createdAt, 0);
-      size = jsonBytes(report);
+      report = buildReport(state, tools, reportId, createdAt, 0);
+      size = measureReport();
     }
     if (size > AGENT_INCIDENT_MAX_REPORT_BYTES && state.rendering) {
+      retainedSectionBytes -= jsonBytes(state.rendering) - 4; // The envelope used null.
       state.rendering = undefined;
       incrementFailure(state, "report_size_reduction");
-      report = buildReport(state, reportId, createdAt, 0);
-      size = jsonBytes(report);
+      report = buildReport(state, tools, reportId, createdAt, 0);
+      size = measureReport();
     }
-    for (let attempt = 0; attempt < 6; attempt += 1) {
-      report = buildReport(state, reportId, createdAt, size);
-      const nextSize = jsonBytes(report);
-      if (nextSize === size) break;
-      size = nextSize;
-    }
-    return deepFreeze(report);
+    return deepFreeze({
+      ...report,
+      capture_quality: { ...report.capture_quality, report_bytes: size },
+    });
   }
 
   private allocateReportId(): string {
@@ -1385,8 +1397,30 @@ function projectLifecycleEvent(event: ThinAgentLifecycleEvent): ProjectedLifecyc
   }
 }
 
+function reportSizeEnvelope(report: AgentIncidentReport): unknown {
+  return {
+    ...report,
+    tools: [],
+    timeline: [],
+    transport_segments: [],
+    resource_samples: [],
+    ...(report.rendering ? { rendering: null } : {}),
+  };
+}
+
+/** The input includes a one-byte report_bytes value of zero. */
+function reportBytesWithSelfSize(zeroSize: number): number {
+  const otherBytes = zeroSize - 1;
+  let size = zeroSize;
+  while (otherBytes + String(size).length !== size) {
+    size = otherBytes + String(size).length;
+  }
+  return size;
+}
+
 function buildReport(
   state: ReportIncident,
+  tools: readonly AgentIncidentToolSummary[],
   reportId: string,
   createdAt: string,
   reportBytes: number,
@@ -1407,25 +1441,6 @@ function buildReport(
     || state.runState?.elapsed_ms_truncated === true
     || state.transportSegments.some((segment) => segment.metrics_truncated);
   const terminalServerLatencyCorrelationId = serverLatencyCorrelationIdForTerminal(state);
-  const tools = [...state.tools.values()]
-    .sort((left, right) => left.ordinal - right.ordinal)
-    .map((tool): AgentIncidentToolSummary => ({
-      ordinal: tool.ordinal,
-      ...(tool.tool_name ? { tool_name: tool.tool_name } : {}),
-      ...(tool.started_at ? { started_at: tool.started_at } : {}),
-      ...(tool.completed_at ? { completed_at: tool.completed_at } : {}),
-      ...(tool.outcome ? { outcome: tool.outcome } : {}),
-      ...(tool.failure_class ? { failure_class: tool.failure_class } : {}),
-      ...(tool.requested_item_count === undefined ? {} : { requested_item_count: tool.requested_item_count }),
-      ...(tool.completed_item_count === undefined ? {} : { completed_item_count: tool.completed_item_count }),
-      ...(tool.failed_item_count === undefined ? {} : { failed_item_count: tool.failed_item_count }),
-      result_delivery: tool.result_delivery ?? "not_observed",
-      result_acknowledgement: tool.result_acknowledgement ?? "not_observed",
-      terminal_dom_committed: tool.terminal_dom_committed,
-      terminal_paint_opportunity_observed: tool.terminal_paint_opportunity_observed,
-      lifecycle_event_count: tool.lifecycle_event_count,
-    }));
-
   const report: AgentIncidentReport = {
     schema_version: AGENT_INCIDENT_SCHEMA_VERSION,
     report_id: reportId,
@@ -1526,10 +1541,10 @@ function buildReport(
     },
     ...(state.runState ? { run_state: state.runState } : {}),
     tools,
-    timeline: timelineForReport(state),
-    transport_segments: transportSegmentsForReport(state),
+    timeline: state.timeline,
+    transport_segments: state.transportSegments,
     ...(state.rendering ? { rendering: state.rendering } : {}),
-    resource_samples: [...state.resources],
+    resource_samples: state.resources,
     capture_quality: {
       complete: false,
       truncated,
@@ -1606,7 +1621,30 @@ function isRunStateCompatibleWithFailureAuthority(
   return failureAuthority !== "client";
 }
 
-function timelineForReport(state: ReportIncident): AgentIncidentTimelineEvent[] {
+function toolsForReport(state: Pick<ActiveIncident, "tools">): AgentIncidentToolSummary[] {
+  return [...state.tools.values()]
+    .sort((left, right) => left.ordinal - right.ordinal)
+    .map((tool): AgentIncidentToolSummary => ({
+      ordinal: tool.ordinal,
+      ...(tool.tool_name ? { tool_name: tool.tool_name } : {}),
+      ...(tool.started_at ? { started_at: tool.started_at } : {}),
+      ...(tool.completed_at ? { completed_at: tool.completed_at } : {}),
+      ...(tool.outcome ? { outcome: tool.outcome } : {}),
+      ...(tool.failure_class ? { failure_class: tool.failure_class } : {}),
+      ...(tool.requested_item_count === undefined ? {} : { requested_item_count: tool.requested_item_count }),
+      ...(tool.completed_item_count === undefined ? {} : { completed_item_count: tool.completed_item_count }),
+      ...(tool.failed_item_count === undefined ? {} : { failed_item_count: tool.failed_item_count }),
+      result_delivery: tool.result_delivery ?? "not_observed",
+      result_acknowledgement: tool.result_acknowledgement ?? "not_observed",
+      terminal_dom_committed: tool.terminal_dom_committed,
+      terminal_paint_opportunity_observed: tool.terminal_paint_opportunity_observed,
+      lifecycle_event_count: tool.lifecycle_event_count,
+    }));
+}
+
+function timelineForReport(
+  state: Pick<ReportIncident, "timeline" | "conflictedIdentifiers" | "conflictedServerLatencyCorrelationSegments">,
+): AgentIncidentTimelineEvent[] {
   if (
     state.conflictedIdentifiers.size === 0
     && state.conflictedServerLatencyCorrelationSegments.size === 0
