@@ -68,8 +68,10 @@ export function summarizeAgentActivity(parts: readonly AgentPart[]): AgentActivi
   const visible = labels.slice(0, 3).map((label, index) => index ? label.charAt(0).toLowerCase() + label.slice(1) : label).join(", ");
   const more = Array.from(groups.values()).slice(3).reduce((count, group) => count + Math.min(group.rows, groupSize(group)), 0);
   const failed = failedCount - blockedCount - uncertainCount;
-  // Uncertain work already says so in its own clause.
-  const outcomes = [[failed, "failed"], [blockedCount, "blocked"]]
+  // Uncertain work says so in its own clause; when that clause is past the
+  // three shown, its tally keeps the uncertainty visible.
+  const uncertainHidden = Array.from(groups.keys()).indexOf("uncertain") >= 3;
+  const outcomes = [[failed, "failed"], [blockedCount, "blocked"], [uncertainHidden ? uncertainCount : 0, "uncertain"]]
     .filter(([count]) => count).map(([count, word]) => ` · ${count} ${word}`).join("");
   return {
     label: `${visible || "Activity"}${more ? ` · ${more} more` : ""}${outcomes}`,

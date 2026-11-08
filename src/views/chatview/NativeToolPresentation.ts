@@ -146,7 +146,7 @@ export function nativeToolPresentation(part: AgentToolPart): NativeToolPresentat
     const input = systemSculptArguments(part);
     const workflow = text(input.path) ? basename(text(input.path)!).replace(/\.systemsculpt$/iu, "") : text(input.name) ?? "workflow";
     const [verb, completed, running, target, icon] = ({
-      generate_image: ["Generate", "Generated", "Generating", typeof input.count === "number" && input.count > 1 ? "images" : "image", "image"],
+      generate_image: ["Generate", "Generated", "Generating", imageCountTarget(part, input), "image"],
       generate_video: ["Generate", "Generated", "Generating", "video", "film"],
       studio_list_workflows: ["List", "Listed", "Listing", "Studio workflows", "layout-dashboard"],
       studio_create_workflow: ["Create", "Created", "Creating", workflow, "layout-dashboard"],
@@ -646,4 +646,11 @@ export async function renderNativeToolPreview(app: App, host: HTMLElement, part:
   host.querySelector(":scope > .ss-native-tool-preview")?.remove();
   host.appendChild(container);
   return true;
+}
+
+/** "image", or "3 images": what a batch saved once it finished, else what it asked for. */
+export function imageCountTarget(part: AgentToolPart, input: Record<string, unknown>): string {
+  const saved = part.state === "succeeded" ? decodeSystemSculptToolOutput(part.output?.data)?.media?.length : undefined;
+  const count = saved || (typeof input.count === "number" ? input.count : 1);
+  return count > 1 ? `${count} images` : "image";
 }
