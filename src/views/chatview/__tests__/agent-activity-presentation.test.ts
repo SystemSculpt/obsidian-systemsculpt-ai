@@ -82,7 +82,8 @@ describe("AgentActivityPresentation", () => {
       tool("list_items", { paths: ["Notes"] }),
       tool("edit", { path: "Plan.md" }),
       tool("edit", { path: "Plan.md" }, { id: "again", callId: "again" }),
-    ])).toEqual({ label: "Searched 1 pattern, read One.md, listed Notes · 1 more", failedCount: 0 });
+    // "More" counts the rows behind it: two edits of one note are two rows.
+    ])).toEqual({ label: "Searched 1 pattern, read One.md, listed Notes · 2 more", failedCount: 0 });
   });
 
   it("matches the resolved approval fixture: repeated approvals, two denials and a withdrawn edit", () => {
