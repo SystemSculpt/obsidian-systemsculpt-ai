@@ -13,7 +13,10 @@ test("public plugin metadata describes configurable approvals, not approval for 
   const manifest = JSON.parse(readFileSync(new URL("../manifest.json", import.meta.url), "utf8"));
   const packageMetadata = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   assert.equal(manifest.description, packageMetadata.description);
-  assert.match(manifest.description, /configurable approval modes/);
+  const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
+  assert.match(readme, /Approval modes decide which changes ask first/);
+  assert.ok(manifest.description.length <= 200);
+  assert.match(manifest.description, /Pro adds images, videos and Studio tools in chat/);
   assert.doesNotMatch(manifest.description, /edits notes with your approval/i);
 });
 
