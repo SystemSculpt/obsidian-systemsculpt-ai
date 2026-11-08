@@ -26,19 +26,19 @@ describe("copy experiments", () => {
   it("assigns arms exactly as Trellis' scorer does (@trellisbyte/analytics/experiment 0.5.0)", () => {
     // Reference values from trellis tools/experiments.mjs variantFor and fnv1a.
     const variants = [{ key: "a" }, { key: "b" }];
-    expect(fnv1a("ss-plugin-upgrade-2026-11:0123456789abcdef")).toBe(3083112640);
-    expect(variantFor("ss-plugin-upgrade-2026-11", "0123456789abcdef", variants)).toBe("b");
-    expect(variantFor("ss-plugin-upgrade-2026-11", "2222222222222222", variants)).toBe("a");
-    expect(variantFor("ss-plugin-upgrade-2026-11", "4444444444444444", variants)).toBe("a");
-    expect(variantFor("ss-plugin-upgrade-2026-11", "5555555555555555", variants)).toBe("b");
+    expect(fnv1a("ss-plugin-upgrade-pro-2026-11:0123456789abcdef")).toBe(3914063310);
+    expect(variantFor("ss-plugin-upgrade-pro-2026-11", "0123456789abcdef", variants)).toBe("b");
+    expect(variantFor("ss-plugin-upgrade-pro-2026-11", "2222222222222222", variants)).toBe("a");
+    expect(variantFor("ss-plugin-upgrade-pro-2026-11", "4444444444444444", variants)).toBe("a");
+    expect(variantFor("ss-plugin-upgrade-pro-2026-11", "6666666666666666", variants)).toBe("b");
   });
 
   it("keeps one sticky arm per vault from a device-local unit", () => {
     const app = vaultApp({ "systemsculpt-experiment-unit": "2222222222222222" });
     expect(upgradePromptCopy(app)).toEqual({
-      title: "Use your own AI",
-      subtitle: "Subscribe for image and video generation, smart search and Studio.",
-      arm: { experiment: "ss-plugin-upgrade-2026-11", variant: "a" },
+      title: "SystemSculpt Pro: images and video in your vault",
+      subtitle: "Plus smart search and Studio. $9 a month.",
+      arm: { experiment: "ss-plugin-upgrade-pro-2026-11", variant: "a" },
     });
     const challenger = vaultApp({ "systemsculpt-experiment-unit": "0123456789abcdef" });
     expect(upgradePromptCopy(challenger)).toMatchObject({
@@ -60,8 +60,8 @@ describe("copy experiments", () => {
 
   it("shows the control and joins no test without vault local storage", () => {
     expect(upgradePromptCopy({} as any)).toEqual({
-      title: "Use your own AI",
-      subtitle: "Subscribe for image and video generation, smart search and Studio.",
+      title: "SystemSculpt Pro: images and video in your vault",
+      subtitle: "Plus smart search and Studio. $9 a month.",
       arm: null,
     });
     jest.mocked(requireApiVersion).mockReturnValueOnce(false);
@@ -69,9 +69,9 @@ describe("copy experiments", () => {
   });
 
   it("tags only systemsculpt.com links with the arm", () => {
-    const arm = { experiment: "ss-plugin-upgrade-2026-11", variant: "b" };
+    const arm = { experiment: "ss-plugin-upgrade-pro-2026-11", variant: "b" };
     const tagged = new URL(withExperimentArm("https://systemsculpt.com/pricing?utm_campaign=upgrade&utm_medium=modal", arm));
-    expect(tagged.searchParams.get("utm_campaign")).toBe("ss-plugin-upgrade-2026-11");
+    expect(tagged.searchParams.get("utm_campaign")).toBe("ss-plugin-upgrade-pro-2026-11");
     expect(tagged.searchParams.get("utm_content")).toBe("b");
     expect(tagged.searchParams.get("utm_medium")).toBe("modal");
     const patreon = "https://www.patreon.com/SystemSculpt?utm_source=plugin_upgrade_modal";

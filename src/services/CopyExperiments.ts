@@ -63,11 +63,11 @@ function experimentUnit(app: App): string | null {
   return unit;
 }
 
-/** The upgrade prompt's title and subtitle (UpgradePlanModal), control first. */
+/** The upgrade prompt's title and subtitle (UpgradePlanModal), control first; copy picked by CMO T-5831. */
 export const UPGRADE_PROMPT_EXPERIMENT = {
-  key: "ss-plugin-upgrade-2026-11",
+  key: "ss-plugin-upgrade-pro-2026-11",
   variants: [
-    { key: "a", title: "Use your own AI", subtitle: "Subscribe for image and video generation, smart search and Studio." },
+    { key: "a", title: "SystemSculpt Pro: images and video in your vault", subtitle: "Plus smart search and Studio. $9 a month." },
     { key: "b", title: "Get SystemSculpt Pro", subtitle: "Image and video generation, smart search and Studio for $9 a month." },
   ],
 } as const;

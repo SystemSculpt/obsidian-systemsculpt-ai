@@ -192,8 +192,8 @@ describe("UpgradePlanModal", () => {
     const modal = new UpgradePlanModal(plugin, { feature: "Chat" });
     modal.onOpen();
 
-    expect(modal.modalEl.textContent).toContain("Use your own AI");
-    expect(modal.modalEl.textContent).toContain("Subscribe for image and video generation, smart search and Studio.");
+    expect(modal.modalEl.textContent).toContain("SystemSculpt Pro: images and video in your vault");
+    expect(modal.modalEl.textContent).toContain("Plus smart search and Studio. $9 a month.");
     expect(modal.modalEl.textContent).toContain("Claude Code and Codex stay free on desktop.");
     expect(findButtonByText(modal.modalEl, "Sign in")).toBeTruthy();
     const start = modal.modalEl.querySelector<HTMLButtonElement>('[data-testid="upgrade-plan.create-account"]')!;
@@ -217,7 +217,7 @@ describe("UpgradePlanModal", () => {
       modal.onOpen();
       expect(modal.modalEl.textContent).toContain("Get SystemSculpt Pro");
       expect(modal.modalEl.textContent).toContain("Image and video generation, smart search and Studio for $9 a month.");
-      expect(modal.modalEl.textContent).not.toContain("Use your own AI");
+      expect(modal.modalEl.textContent).not.toContain("SystemSculpt Pro: images and video in your vault");
       findButtonByText(modal.modalEl, "Compare plans").click();
       findButtonByText(modal.modalEl, "Subscribe yearly").click();
       const tags = hrefs.map((href) => {
@@ -225,13 +225,13 @@ describe("UpgradePlanModal", () => {
         return [url.pathname, url.searchParams.get("utm_campaign"), url.searchParams.get("utm_content")];
       });
       expect(tags).toEqual([
-        ["/pricing", "ss-plugin-upgrade-2026-11", "b"],
-        ["/checkout", "ss-plugin-upgrade-2026-11", "b"],
+        ["/pricing", "ss-plugin-upgrade-pro-2026-11", "b"],
+        ["/checkout", "ss-plugin-upgrade-pro-2026-11", "b"],
       ]);
       findButtonByText(modal.modalEl, "Back").click();
       findButtonByText(modal.modalEl, "Already paid? Sync").click();
       await flushPromises();
-      expect(plugin.begin).toHaveBeenCalledWith("sign-in", expect.anything(), { experiment: "ss-plugin-upgrade-2026-11", variant: "b" });
+      expect(plugin.begin).toHaveBeenCalledWith("sign-in", expect.anything(), { experiment: "ss-plugin-upgrade-pro-2026-11", variant: "b" });
       modal.onClose();
     } finally {
       spy.mockRestore();
@@ -257,7 +257,7 @@ describe("UpgradePlanModal", () => {
     modal.onOpen();
 
     expect(modal.modalEl.textContent).toContain("Signed in as user@example.com.");
-    expect(modal.modalEl.textContent).toContain("Subscribe for image and video generation, smart search and Studio.");
+    expect(modal.modalEl.textContent).toContain("Plus smart search and Studio. $9 a month.");
     expect(modal.modalEl.textContent).toContain("Claude Code and Codex stay free on desktop.");
     expect(findButtonByText(modal.modalEl, "Subscribe yearly")).toBeTruthy();
     expect(findButtonByText(modal.modalEl, "Subscribe monthly")).toBeTruthy();
@@ -516,7 +516,7 @@ describe("UpgradePlanModal", () => {
     UpgradePlanModal.showConnectOutcome({ kind: "no-license", name: null, email: "user@example.test" });
 
     expect(modal.modalEl.textContent).toContain("Signed in as user@example.test.");
-    expect(modal.modalEl.textContent).toContain("Subscribe for image and video generation, smart search and Studio.");
+    expect(modal.modalEl.textContent).toContain("Plus smart search and Studio. $9 a month.");
     expect(modal.modalEl.textContent).toContain("Claude Code and Codex stay free on desktop.");
     expect(findButtonByText(modal.modalEl, "Subscribe yearly")).toBeTruthy();
     modal.onClose();
@@ -700,7 +700,7 @@ describe("plan gate helpers", () => {
   it("requireActivePlan opens the modal and blocks when no plan is active", () => {
     const plugin = createPlugin();
     expect(requireActivePlan(plugin, "Chat")).toBe(false);
-    expect(document.body.textContent).toContain("Use your own AI");
+    expect(document.body.textContent).toContain("SystemSculpt Pro: images and video in your vault");
     closeOpenModal();
 
     expect(requireActivePlan(createPlugin({ licenseKey: "skss-1" }), "Chat")).toBe(true);

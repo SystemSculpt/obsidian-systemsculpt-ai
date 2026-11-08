@@ -102,7 +102,7 @@ describe("AccountConnectService browser sign-in", () => {
 
   it("carries the upgrade prompt's copy-test arm on the sign-up page link, reopen included (T-5852)", async () => {
     const { service, openedUrls } = createService();
-    const arm = { experiment: "ss-plugin-upgrade-2026-11", variant: "b" };
+    const arm = { experiment: "ss-plugin-upgrade-pro-2026-11", variant: "b" };
 
     await service.begin("sign-up", undefined, arm);
     await service.reopen();
@@ -114,7 +114,7 @@ describe("AccountConnectService browser sign-in", () => {
       expect(Object.fromEntries([...parsed.searchParams].filter(([key]) => key.startsWith("utm_")))).toEqual({
         utm_source: "obsidian-plugin",
         utm_medium: "modal",
-        utm_campaign: "ss-plugin-upgrade-2026-11",
+        utm_campaign: "ss-plugin-upgrade-pro-2026-11",
         utm_content: "b",
       });
     }
