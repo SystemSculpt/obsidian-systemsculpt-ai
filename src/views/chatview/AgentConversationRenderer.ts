@@ -22,6 +22,8 @@ import {
   groupAdjacentAgentActivity,
   splitPreviousAgentActivity,
   summarizeAgentActivity,
+  setActivityLabelText,
+  unbreakableActivityLabel,
 } from "./AgentActivityPresentation";
 import { presentTurnChanges } from "./TurnChangeSummary";
 import { renderTurnMedia } from "./TurnMedia";
@@ -1112,7 +1114,7 @@ export class AgentConversationRenderer extends Component {
     const label = cancelled ? this.workedLabel(elapsedMs, true) : summary.label;
     // Keep the action summary while closed; once open, name the whole-turn
     // container instead of repeating the activity labels below it.
-    header.dataset.closedLabel = label.replace(/ · /gu, " ·\u00a0");
+    header.dataset.closedLabel = unbreakableActivityLabel(label);
     header.dataset.openLabel = cancelled ? header.dataset.closedLabel : "Activity";
     this.syncCompletedActivityLabel(element);
     let icon = header.querySelector<HTMLElement>(".systemsculpt-agent-activity-state");
@@ -1129,7 +1131,8 @@ export class AgentConversationRenderer extends Component {
   private syncCompletedActivityLabel(element: HTMLDetailsElement): void {
     const header = element.querySelector<HTMLElement>(":scope > summary");
     const label = element.open ? header?.dataset.openLabel : header?.dataset.closedLabel;
-    if (label) header?.querySelector(".systemsculpt-agent-activity-label")?.setText(label);
+    const target = header?.querySelector<HTMLElement>(".systemsculpt-agent-activity-label");
+    if (label && target) setActivityLabelText(target, label);
   }
 
   private createActivityOverflow(
@@ -1234,11 +1237,11 @@ export class AgentConversationRenderer extends Component {
     const count = Number(element.dataset.hiddenCount);
     const expanded = this.activityOverflowExpanded(element);
     // Same as the turn summary: "· 2 failed" never strands its dot at a line end.
-    const label = (element.dataset.activitySummary ?? this.activityOverflowLabel(
+    const label = unbreakableActivityLabel((element.dataset.activitySummary ?? this.activityOverflowLabel(
       Number.isFinite(count) ? count : 0,
       state.latestNode,
-    )).replace(/ · /gu, " ·\u00a0");
-    if (state.label.textContent !== label) state.label.setText(label);
+    )));
+    setActivityLabelText(state.label, label);
     if (Number(element.dataset.failedCount) > 0) {
       setIcon(state.icon, "circle-alert");
       state.icon.dataset.iconName = "circle-alert";

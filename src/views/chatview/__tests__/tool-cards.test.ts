@@ -8,7 +8,7 @@ import { presentAgentTool, presentAgentToolFailure, agentToolNoticeTone } from "
 import { mediaDisplayName, renderMedia } from "../ToolCardBlocks";
 import { renderTurnMedia } from "../TurnMedia";
 import { presentTurnChanges } from "../TurnChangeSummary";
-import { summarizeAgentActivity } from "../AgentActivityPresentation";
+import { setActivityLabelText, summarizeAgentActivity } from "../AgentActivityPresentation";
 
 jest.mock("../../../platform/hostCapabilities", () => ({ hasHostCapability: jest.fn(() => true) }));
 jest.mock("../../../platform/desktopOnly", () => ({ desktopHost: { fs: jest.fn(async () => ({ realpath: async (path: string) => path })) } }));
@@ -231,5 +231,14 @@ describe("studio and gated summaries", () => {
     expect(summary.label).toBe("Generated image, generate image · Needs credits, couldn't generate image · 1 failed");
     expect(summary.failedCount).toBe(1);
     expect(summary.gated).toBe(true);
+  });
+});
+
+describe("activity label wrapping", () => {
+  it("keeps each count with its word without changing the text", () => {
+    const label = document.createElement("strong");
+    setActivityLabelText(label, "Couldn't complete 2 actions · 5 more · 1 blocked");
+    expect(label.textContent).toBe("Couldn't complete 2 actions · 5 more · 1 blocked");
+    expect(Array.from(label.querySelectorAll(".ss-activity-count"), span => span.textContent)).toEqual(["2 actions", "5 more", "1 blocked"]);
   });
 });
