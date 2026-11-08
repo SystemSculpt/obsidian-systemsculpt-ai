@@ -359,11 +359,20 @@ export class ActiveConversationRenderer {
     }
     const laneNodes = visibleLanes.map((lane) => lane.node);
     if (media) {
-      // While the turn runs, media sits just above the activity that makes it: the steps that follow
-      // (and that row growing) land below it, so the frame never moves under the reader.
+      // While the turn runs, media sits right after whatever came before the call that makes it, so the
+      // steps that follow (even once they fold into an activity group) land below it, never above.
       const source = presentation.busy && media.dataset.firstTool !== undefined ? toolParts[Number(media.dataset.firstTool)] : undefined;
-      const sourceNode = source ? this.activeNodes.get(toolPartKey(source.callId)) : undefined;
-      const anchor = sourceNode ? laneNodes.findIndex((node) => node === sourceNode || node.contains(sourceNode)) : -1;
+      const sourceIndex = source ? orderedParts.indexOf(source) : -1;
+      const partIndex = new Map(orderedParts.map((part, index) => [part.kind === "tool" ? toolPartKey(part.callId) : part.id, index]));
+      let anchor = -1;
+      if (sourceIndex >= 0) {
+        anchor = 0;
+        for (const lane of visibleLanes) {
+          const index = partIndex.get(lane.key.replace(/^overflow:/u, ""));
+          if (index === undefined || index >= sourceIndex) break;
+          anchor += 1;
+        }
+      }
       laneNodes.splice(anchor >= 0 ? anchor : tailStatus ? laneNodes.length - 1 : laneNodes.length, 0, media);
     }
     reconcileConversationChildren(body, [...laneNodes, ...(receipt ? [receipt] : [])]);
