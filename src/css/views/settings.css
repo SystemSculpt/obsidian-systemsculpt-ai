@@ -71,8 +71,8 @@
   display: block;
 }
 
-/* Native rows with no detail still align their label with the taller control. */
-.ss-settings-surface .setting-item:has(.setting-item-description:empty) {
+/* The Studio launcher has no detail; center its label with the taller button. */
+.ss-settings-surface .setting-item[data-ss-setting="studio.open"] {
   align-items: center;
 }
 

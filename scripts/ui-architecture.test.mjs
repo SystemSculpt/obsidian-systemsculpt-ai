@@ -712,9 +712,9 @@ test("custom buttons outrank Obsidian controls without styling native Setting bu
   );
 });
 
-test("settings omit empty spacing slots and center action-only row labels", () => {
+test("settings omit empty spacing slots and center the Studio launcher label", () => {
   const settingsCss = read("src/css/views/settings.css");
-  assert.match(settingsCss, /\.ss-settings-surface \.setting-item:has\(\.setting-item-description:empty\)\s*\{[^}]*align-items:\s*center/s);
+  assert.match(settingsCss, /\.ss-settings-surface \.setting-item\[data-ss-setting="studio\.open"\]\s*\{[^}]*align-items:\s*center/s);
   assert.match(settingsCss, /\.ss-settings-surface \.setting-item-description:empty\s*\{[^}]*display:\s*none/s);
   assert.match(settingsCss, /\.ss-settings-search-meta:empty\s*\{[^}]*display:\s*none/s);
 });
