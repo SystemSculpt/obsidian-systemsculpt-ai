@@ -1,7 +1,7 @@
 {
   "author": "SystemSculpt",
   "authorUrl": "https://systemsculpt.com/?utm_source=obsidian&utm_medium=plugin-manifest&utm_campaign=evergreen&utm_content=author",
-  "description": "Chat with your vault using your own Claude Code or Codex on desktop, or hosted AI. Edit notes with configurable approval modes, transcribe audio and find related notes. Free to start.",
+  "description": "Chat with your vault using your own Claude Code or Codex on desktop, or hosted AI. Edit notes, transcribe audio and find related notes. Pro adds images, videos and Studio tools in chat. Free to start.",
   "fundingUrl": "https://www.patreon.com/SystemSculpt?utm_source=plugin_funding&utm_campaign=patreon_everywhere",
   "id": "systemsculpt-ai",
   "isDesktopOnly": false,
