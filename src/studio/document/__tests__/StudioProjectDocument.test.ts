@@ -3,12 +3,18 @@ import { join } from "path";
 import { performance } from "perf_hooks";
 import { StudioProjectStore } from "../../StudioProjectStore";
 import { StudioProjectSession } from "../../StudioProjectSession";
-import { serializeStudioProject } from "../../schema";
+import { parseStudioProject, serializeStudioProject } from "../../schema";
+import { StudioGraphCompiler } from "../../StudioGraphCompiler";
 import { cloneStudioProjectSnapshot } from "../../StudioProjectSnapshots";
 import type { StudioProjectV1 } from "../../types";
 import { studioDocumentRevision, type StudioLegacyOriginalCopy } from "../StudioProjectDocument";
 import { mergeStudioText } from "../StudioTextMerge";
 import { STUDIO_MERGE_RETENTION_MS, StudioHybridClock, emptyStudioClock, pruneStudioClock, readStudioMergeBlock, studioStamp } from "../StudioDocumentClock";
+
+jest.mock("../../schema", () => {
+  const actual = jest.requireActual<typeof import("../../schema")>("../../schema");
+  return {...actual, parseStudioProject: jest.fn(actual.parseStudioProject)};
+});
 
 let now = Date.UTC(2026, 8, 25, 9);
 const tick = (ms = 1000) => { now += ms; };
@@ -662,6 +668,144 @@ describe("text merge", () => {
     expect(mergeStudioText("one two", "one 2", "one TWO")).toBeNull();
     // Never splits a surrogate pair.
     expect(mergeStudioText("a😀b", "a😁b", "a😀b!")).toBe("a😁b!");
+  });
+});
+
+describe("accepted document admission", () => {
+  it("adopts an external current-format file once and reuses it for unchanged reads", async () => {
+    const device = vault();
+    await project(device.store, [node("a", "Alpha")]);
+    const reopened = device.restart();
+    const compile = jest.spyOn(StudioGraphCompiler.prototype, "compile");
+    const parse = jest.mocked(parseStudioProject).mockClear();
+    try {
+      const opened = await reopened.loadProject(path);
+      expect(opened.graph.nodes[0].config.value).toBe("Alpha");
+      expect(compile).toHaveBeenCalledTimes(1);
+      expect(parse).not.toHaveBeenCalled();
+      await reopened.loadProject(path);
+      await reopened.readDocument(path);
+      expect(compile).toHaveBeenCalledTimes(1);
+      expect(parse).not.toHaveBeenCalled();
+    } finally { compile.mockRestore(); parse.mockClear(); }
+  });
+
+  it.each(["v1", "v2"])("keeps accepted %s content and its revision identical to a canonical reopen", async dialect => {
+    const device = vault();
+    const seed = await project(device.store, [node("a", "Alpha"), {...node("b", "Beta"), kind: "studio.text_output"}]);
+    seed.graph.edges = [{id: "legacy-edge", fromNodeId: "a", fromPortId: "text", toNodeId: "b", toPortId: "text"}];
+    seed.graph.layout = {mode: "manual", direction: "right", columnGap: 120};
+    const readable = JSON.parse(serializeStudioProject(seed));
+    // Both explicit layout hints and an omitted layout have the same accepted form.
+    delete readable.canvas.layout;
+    delete readable.canvas.nodes[0].title;
+    readable.canvas.edges = ["a -> b"];
+    device.files.set(path, dialect === "v1" ? JSON.stringify(seed) : JSON.stringify(readable));
+    const reopened = device.restart();
+    const opened = await reopened.readDocument(path);
+    const canonical = serializeStudioProject(opened.project);
+    const parsed = parseStudioProject(canonical);
+    expect(opened.project.graph).toEqual(parsed.graph);
+    expect(opened.project.diagram).toEqual(parsed.diagram);
+    expect(opened.project.graph.edges[0].id).toBe("a.text->b.text");
+    expect(opened.project.graph.layout).toEqual({mode: "manual"});
+    expect(opened.revision).toBe(await studioDocumentRevision(canonical));
+    if (dialect === "v1") {
+      expect(device.copies).toHaveLength(1);
+      expect(device.files.get(device.copies[0].copyPath)).toBe(JSON.stringify(seed));
+      expect(opened.project.settings).toEqual(seed.settings);
+    }
+  });
+
+  it("validates a merged canvas once after admitting the incoming file", async () => {
+    const {a, b} = await pair();
+    await edit(a, draft => { find(draft, "a")!.position.x = 400; });
+    tick();
+    await edit(b, draft => { find(draft, "a")!.title = "Peer title"; });
+    deliver(b, a);
+    const compile = jest.spyOn(StudioGraphCompiler.prototype, "compile");
+    const parse = jest.mocked(parseStudioProject).mockClear();
+    try {
+      const merged = await receive(a);
+      expect(find(merged.project, "a")).toMatchObject({title: "Peer title", position: {x: 400}});
+      expect(compile).toHaveBeenCalledTimes(2);
+      expect(parse).toHaveBeenCalledTimes(1);
+    } finally { compile.mockRestore(); parse.mockClear(); }
+  });
+
+  it("validates scoped agent edits once without re-parsing their normalized result", async () => {
+    const device = vault();
+    await project(device.store, [node("a", "Alpha")]);
+    const {revision} = await device.store.readDocument(path);
+    const compile = jest.spyOn(StudioGraphCompiler.prototype, "compile");
+    const parse = jest.mocked(parseStudioProject).mockClear();
+    try {
+      const edited = await device.store.editDocument(path, revision, [{entityId: "node:a", path: ["title"], value: "Renamed"}]);
+      expect(edited.project.graph.nodes[0].title).toBe("Renamed");
+      expect(compile).toHaveBeenCalledTimes(1);
+      expect(parse).toHaveBeenCalledTimes(1);
+      expect(edited.revision).toBe(await studioDocumentRevision(serializeStudioProject(edited.project)));
+      expect(parseStudioProject(device.files.get(path)!).graph).toEqual(edited.project.graph);
+    } finally { compile.mockRestore(); parse.mockClear(); }
+  });
+
+  it.each(["from", "to"])("preserves compatibility when a %s endpoint can also name a complete node", async direction => {
+    const device = vault();
+    const seed = await project(device.store, [node("a", "Alpha"), {...node("b", "Beta"), kind: "studio.text_output"}]);
+    const dotted = direction === "from" ? "a.text" : "b.text";
+    seed.graph.nodes.push({...node(dotted, "Dotted ID"), kind: direction === "from" ? "studio.text" : "studio.text_output"});
+    const raw = JSON.parse(serializeStudioProject(seed));
+    raw.canvas.edges = ["a -> b"];
+    device.files.set(path, JSON.stringify(raw));
+    const reopened = device.restart();
+    const opened = await reopened.readDocument(path);
+    expect(opened.project.graph.edges[0]).toMatchObject({fromNodeId: direction === "from" ? dotted : "a", toNodeId: direction === "to" ? dotted : "b"});
+    expect(parseStudioProject(serializeStudioProject(opened.project)).graph).toEqual(opened.project.graph);
+    const edited = await reopened.editDocument(path, opened.revision, [{entityId: "project", path: ["name"], value: "Renamed"}]);
+    expect(edited.project.graph.edges).toEqual(opened.project.graph.edges);
+    expect(parseStudioProject(device.files.get(path)!).graph).toEqual(edited.project.graph);
+  });
+
+  it.each(["save", "agent"])("normalizes output-group references after %s reconciliation cleans orphan outputs", async operation => {
+    const device = vault();
+    const raw = {
+      schema: "studio.project.v2", id: "test", name: "Test",
+      canvas: {
+        nodes: [
+          {id: "p", kind: "media_ingest", x: 0, y: 0, config: {__studio_managed_by: "studio.image_generation_output.v1", __studio_source_node_id: "gone", __studio_source_output_index: 0, __studio_pending: true}},
+          {id: "b", kind: "text", x: 0, y: 0, title: "Original"},
+        ],
+        groups: [{id: "g", name: "Group", nodes: ["b"], outputFor: "p"}],
+      },
+    };
+    device.files.set(path, JSON.stringify(raw));
+    const opened = await device.store.readDocument(path);
+    raw.canvas.nodes[1].title = "External";
+    device.files.set(path, JSON.stringify(raw));
+    tick(); device.mtimes.set(path, now);
+    const result = operation === "save"
+      ? await device.store.saveProject(path, {...opened.project, name: "Renamed"}, {baseProject: opened.project})
+      : await device.store.editDocument(path, opened.revision, [{entityId: "project", path: ["name"], value: "Renamed"}]);
+    expect(result.project.graph.nodes.map(item => item.id)).toEqual(["b"]);
+    expect(result.project.graph.groups?.[0].outputForNodeId).toBeUndefined();
+    expect((await device.restart().loadProject(path)).graph).toEqual(result.project.graph);
+  });
+
+  it("keeps the last accepted state when external bytes or agent edits fail validation", async () => {
+    const device = vault();
+    const opened = await project(device.store, [node("a", "Alpha")]);
+    const {revision} = await device.store.readDocument(path);
+    await expect(device.store.editDocument(path, revision, [{entityId: "node:a", path: ["kind"], value: "unknown_kind"}])).rejects.toThrow();
+    const damaged = JSON.parse(device.files.get(path)!);
+    damaged.canvas.nodes[0].x = "not a coordinate";
+    const raw = JSON.stringify(damaged);
+    device.files.set(path, raw);
+    tick(); device.mtimes.set(path, now);
+    const retained = await device.store.refreshDocument(path);
+    expect(retained.conflicts).toEqual(["Studio is waiting for a complete valid file edit. Your open document remains intact."]);
+    expect(retained.project.graph).toEqual(opened.graph);
+    expect(device.files.get(path)).toBe(raw);
+    await expect(device.restart().loadProject(path)).rejects.toThrow();
   });
 });
 

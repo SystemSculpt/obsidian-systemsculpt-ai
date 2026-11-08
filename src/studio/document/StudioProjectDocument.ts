@@ -56,6 +56,12 @@ const RESERVED_KEYS = ["__proto__", "constructor", "prototype"];
 class StudioWriteRace extends Error {}
 class StudioOriginalCopyError extends Error {}
 
+/** Full node IDs take precedence over port suffixes in the compatibility reader. */
+function hasAmbiguousStudioEndpoints(project: StudioProjectV1): boolean {
+  const ids = new Set(project.graph.nodes.map(node => node.id));
+  return project.graph.edges.some(edge => ids.has(`${edge.fromNodeId}.${edge.fromPortId}`) || ids.has(`${edge.toNodeId}.${edge.toPortId}`));
+}
+
 /**
  * The project a file's text opens as, older dialects migrated: the gate every import passes.
  * Throws when Studio can't open it. It reads and writes nothing.
@@ -225,12 +231,19 @@ export class StudioProjectDocument {
     const at = now();
     return {source: await this.bytes(project, text, clock, at), text, project, entities, clock, at, pending, legacy: false, documentState: false, rewrite: false};
   }
-  /** Adopt authored content onto the file's runtime fields in the canonical form a reopen yields. */
+  /** UI drafts and post-reconciliation cleanup still require authored normalization. */
   private canonical(template: StudioProjectV1, content: StudioProjectV1): {project: StudioProjectV1; text: string} {
-    const text = serializeStudioProject(content), parsed = parseStudioProject(text);
-    const project = {...template, name: parsed.name, graph: parsed.graph, diagram: parsed.diagram};
+    return this.validatedContent(template, parseStudioProject(serializeStudioProject(content)));
+  }
+  /** A normalized projection skips the round trip unless the legacy edge grammar would reinterpret it. */
+  private normalizedContent(template: StudioProjectV1, content: StudioProjectV1): {project: StudioProjectV1; text: string} {
+    return hasAmbiguousStudioEndpoints(content) ? this.canonical(template, content) : this.validatedContent(template, content);
+  }
+  /** Validate already normalized authored content, retaining the file's runtime fields. */
+  private validatedContent(template: StudioProjectV1, content: StudioProjectV1): {project: StudioProjectV1; text: string} {
+    const project = {...template, name: content.name, graph: content.graph, diagram: content.diagram};
     validateStudioProjectDocument(project);
-    return {project, text};
+    return {project, text: serializeStudioProject(project)};
   }
   /**
    * Accept file bytes this device did not just write. Against the state this device accepted before:
@@ -278,13 +291,18 @@ export class StudioProjectDocument {
     }
     let result = candidate;
     if (merged) {
-      try { result = this.canonical(candidate, entitiesToProject(merged, candidate)).project; rewrite = true; }
+      try { result = this.normalizedContent(candidate, entitiesToProject(merged, candidate)).project; rewrite = true; }
       catch {
         clock = block ? cloneStudioClock(block) : cloneStudioClock(previous!.clock);
         notices.push("Studio could not combine this device's changes with a copy of this file from elsewhere and kept the file's version.");
       }
     }
-    const {project, text} = this.canonical(candidate, result);
+    // Ordinary current-format admission already normalized and validated the
+    // canvas. Keep the old normalization stage for legacy imports and edge
+    // strings whose port suffix can also name a complete node ID.
+    const {project, text} = legacy || hasAmbiguousStudioEndpoints(result)
+      ? this.canonical(candidate, result)
+      : {project: result, text: serializeStudioProject(result)};
     const entities = projectToEntities(project);
     pruneStudioClock(clock, new Set(Object.keys(entities)), this.clock.wallNow());
     if (previous && block && block.at !== previous.at) {
@@ -389,7 +407,11 @@ export class StudioProjectDocument {
         if (merged.conflicts.length) throw new Error(`Studio changed ${merged.conflicts.join(", ")} after this revision. Read the document again and retry.`);
         content = merged.project;
       }
-      const {project, text} = this.canonical(current.project, content);
+      // Reconciliation cleans orphan outputs after parsing, so its result
+      // still needs normalization of references before publication.
+      const {project, text} = latest
+        ? this.normalizedContent(current.project, content)
+        : this.canonical(current.project, content);
       const next = await this.successor(current, project, text);
       if (!await this.publish(entry, current, next)) throw new StudioWriteRace("Studio file changed during the edit; retry with the same revision and edits.");
       this.cache.set(this.path, next);
