@@ -1,7 +1,7 @@
 import { App, TFile, TFolder, normalizePath } from "obsidian";
 import { FindFilesParams, GrepVaultParams } from "../types";
 import { FILESYSTEM_LIMITS } from "../constants";
-import { countTextTokens } from "../../../utils/tokenCounting";
+import { estimateTextTokens } from "../../../utils/tokenCounting";
 import { SearchResponsePage } from "../SearchResponsePage";
 import {
   createLineCalculator,
@@ -408,6 +408,7 @@ export class SearchOperations {
       exclusions,
       signal,
     });
+    if (signal?.aborted) throw new DOMException("Search aborted", "AbortError");
     const response = pager.build(scan, searchPaths);
     // Keep the scan only while a cursor can still reach it, and never one the
     // vault changed under while it ran.
@@ -700,6 +701,7 @@ export class SearchOperations {
 
       // Yield control to prevent UI freeze (critical for performance)
       await new Promise(resolve => window.setTimeout(resolve, 0));
+      checkCancelled();
     }
 
     // Add performance summary if processing took significant time or had issues
@@ -785,7 +787,7 @@ export class SearchOperations {
           const key = `${r.path}|${line}|${c.context}`;
           if (seen.has(key)) continue;
           seen.add(key);
-          snippets.push({ text, tokens: countTextTokens(text) });
+          snippets.push({ text, tokens: estimateTextTokens(text) });
         }
       }
       return snippets;

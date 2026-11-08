@@ -50,6 +50,7 @@ jest.mock("../../../services/search/searchScoring", () => ({
 // Mock tokenCounting
 jest.mock("../../../utils/tokenCounting", () => ({
   countTextTokens: jest.fn((text: string) => Math.ceil(text.length / 4)),
+  estimateTextTokens: jest.fn((text: string) => Math.ceil(text.length / 4)),
 }));
 
 // Search tools return untyped tool output; read it the way a tool caller does.
@@ -990,7 +991,7 @@ Body content here`;
         expect(app.vault.on).toHaveBeenCalledTimes(4);
       });
 
-      it("advances past an oversized first match with an explicitly shortened preview", async () => {
+      it("continues an oversized first match losslessly before reaching the next match", async () => {
         const files = pagedVault().slice(0, 2);
         (app.vault.getFiles as jest.Mock).mockReturnValue(files);
         (app.vault.cachedRead as jest.Mock).mockImplementation(async (file: TFile) =>
@@ -999,25 +1000,35 @@ Body content here`;
 
         const first = await searchOps.grepVault(query) as any;
 
-        expect(first.snippets).toHaveLength(1);
-        expect(first.snippets[0]).toContain("[preview shortened; read the note for the full match]");
-        expect(first.truncated).toBe(true);
-        expect(first.page.tokensUsed).toBeLessThanOrEqual(first.page.bodyTokenBudget);
+        expect(first.page.snippet_continues).toBe(true);
         expect(first.page.next_cursor).toEqual(expect.any(String));
-        expect(first.page.returned_matches).toBe(1);
-        expect(JSON.stringify(first).length).toBeLessThanOrEqual(FILESYSTEM_LIMITS.MAX_RESPONSE_CHARS);
-
-        const second = await searchOps.grepVault({ ...query, cursor: first.page.next_cursor }) as any;
-        expect(second.snippets).toEqual([expect.stringContaining("next match")]);
-        expect(second.page.next_cursor).toBeNull();
+        const complete: string[] = [];
+        let continuing = false;
+        let response = first;
+        do {
+          for (const snippet of response.snippets) {
+            if (continuing) complete[complete.length - 1] += snippet;
+            else complete.push(snippet);
+            continuing = false;
+          }
+          if (response.snippets.length > 0) continuing = response.page.snippet_continues ?? false;
+          expect(response.page.tokensUsed).toBeLessThanOrEqual(response.page.tokensBudget);
+          expect(JSON.stringify(response).length).toBeLessThanOrEqual(FILESYSTEM_LIMITS.MAX_RESPONSE_CHARS);
+          if (!response.page.next_cursor) break;
+          response = await searchOps.grepVault({ ...query, cursor: response.page.next_cursor }) as any;
+        } while (true);
+        expect(complete).toEqual([
+          `${files[0].path}:1  【needle ${"words ".repeat(2500)}】`,
+          `${files[1].path}:1  【needle next match】`,
+        ]);
         expect(app.vault.cachedRead).toHaveBeenCalledTimes(files.length);
       });
 
       it("keeps a match when result metadata fills the response character budget", async () => {
         pagedVault();
-        const scoring = jest.requireMock("../searchScoring");
+        const scoring = jest.requireMock("../../../services/search/searchScoring");
         scoring.formatScoredResults.mockReturnValueOnce({
-          results: [{ path: "x".repeat(FILESYSTEM_LIMITS.MAX_RESPONSE_CHARS - 100) }],
+          results: [{ path: "notes/note-00.md", reasoning: "x".repeat(FILESYSTEM_LIMITS.MAX_RESPONSE_CHARS - 100) }],
           totalCount: 12,
         });
 

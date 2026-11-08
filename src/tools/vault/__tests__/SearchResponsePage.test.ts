@@ -6,9 +6,9 @@ import * as tokenCounting from "../../../utils/tokenCounting";
 
 jest.mock("../../../utils/tokenCounting", () => {
   const actual = jest.requireActual<typeof import("../../../utils/tokenCounting")>("../../../utils/tokenCounting");
-  return { ...actual, countTextTokens: jest.fn(actual.countTextTokens) };
+  return { ...actual, countTextTokens: jest.fn(actual.countTextTokens), estimateTextTokens: jest.fn(actual.estimateTextTokens) };
 });
-const realCountTextTokens = jest.requireActual<typeof import("../../../utils/tokenCounting")>("../../../utils/tokenCounting").countTextTokens;
+const realTokenCounting = jest.requireActual<typeof import("../../../utils/tokenCounting")>("../../../utils/tokenCounting");
 
 type Scan = Parameters<SearchResponsePage["build"]>[0];
 type Response = ReturnType<SearchResponsePage["build"]>;
@@ -25,7 +25,7 @@ function result(path: string, index = 0): Scan["results"]["results"][number] {
 function scan(texts: string[], paths: string[] = []): Scan {
   return {
     id: "kept-scan", revision: 1, truncated: false, metaResults: [],
-    snippets: texts.map((text) => ({ text, tokens: tokenCounting.countTextTokens(text) })),
+    snippets: texts.map((text) => ({ text, tokens: tokenCounting.estimateTextTokens(text) })),
     results: {
       results: paths.map(result), totalFound: paths.length,
       searchSummary: { topScore: 80, averageScore: 70, confidenceLevel: "high" },
@@ -36,7 +36,7 @@ function scan(texts: string[], paths: string[] = []): Scan {
 function expectBudget(response: Response, budget: number): void {
   const serialized = JSON.stringify(response);
   expect(response.page.tokensBudget).toBe(budget);
-  expect(response.page.tokensUsed).toBe(tokenCounting.countTextTokens(serialized));
+  expect(response.page.tokensUsed).toBe(tokenCounting.estimateTextTokens(serialized));
   expect(response.page.tokensUsed).toBeLessThanOrEqual(budget);
   expect(serialized.length).toBeLessThanOrEqual(FILESYSTEM_LIMITS.MAX_RESPONSE_CHARS);
 }
@@ -59,7 +59,22 @@ function pages(kept: Scan, budget: number, paths: string[] | null = null, queryI
 }
 
 describe("SearchResponsePage", () => {
-  afterEach(() => jest.mocked(tokenCounting.countTextTokens).mockImplementation(realCountTextTokens));
+  afterEach(() => {
+    jest.mocked(tokenCounting.countTextTokens).mockImplementation(realTokenCounting.countTextTokens);
+    jest.mocked(tokenCounting.estimateTextTokens).mockImplementation(realTokenCounting.estimateTextTokens);
+  });
+
+  it("never memoizes disposable trial pages or remaining snippet text", () => {
+    const kept = scan(["needle words ".repeat(4000)]);
+    jest.mocked(tokenCounting.countTextTokens).mockClear().mockImplementation(() => {
+      throw new Error("Disposable page text must not enter the shared token cache");
+    });
+    const first = new SearchResponsePage({ queryId: "needle", pageTokens: 512 }).build(kept, null);
+    const next = new SearchResponsePage({ queryId: "needle", pageTokens: 512, cursor: first.page.next_cursor }).build(kept, null);
+    expectBudget(first, 512);
+    expectBudget(next, 512);
+    expect(tokenCounting.countTextTokens).not.toHaveBeenCalled();
+  });
 
   it.each([512, 2048, 4096])("counts the whole serialized response within %i tokens", (budget) => {
     const paths = Array.from({ length: 30 }, (_, index) => `Notes/${index}.md`);
@@ -150,7 +165,7 @@ describe("SearchResponsePage", () => {
   });
 
   it("honors the character cap even when the token counter allows much more text", () => {
-    jest.mocked(tokenCounting.countTextTokens).mockImplementation((text) => Math.ceil(text.length / 100));
+    jest.mocked(tokenCounting.estimateTextTokens).mockImplementation((text) => Math.ceil(text.length / 100));
     const text = `Note.md:1  ${"x".repeat(FILESYSTEM_LIMITS.MAX_RESPONSE_CHARS * 3)}`;
     const responses = pages(scan([text]), 4096);
 

@@ -106,6 +106,45 @@ describe("shared search candidates", () => {
     expect(f.app.vault.cachedRead).not.toHaveBeenCalled();
   });
 
+  it("stops queued candidate reads when cancellation arrives during the first read", async () => {
+    const f = fixture(Object.fromEntries(Array.from({ length: 50 }, (_, index) => [`${index}.md`, "needle"])));
+    engine = f.engine;
+    const controller = new AbortController();
+    f.app.vault.cachedRead.mockImplementation(async (file: TFile) => {
+      controller.abort();
+      return f.contents[file.path];
+    });
+    await expect(engine.getContentCandidates(f.files, ["needle"], controller.signal)).rejects.toMatchObject({ name: "AbortError" });
+    expect(f.app.vault.cachedRead).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps filename results when an initial note read fails transiently", async () => {
+    const f = fixture({ "needle.md": "body restored" });
+    engine = f.engine;
+    f.app.vault.cachedRead.mockRejectedValueOnce(new Error("temporarily unavailable"));
+    const response = await engine.search("needle", { mode: "lexical" });
+    expect(response.results.map((hit) => hit.path)).toEqual(["needle.md"]);
+    expect(response.stats.indexedCount).toBe(1);
+  });
+
+  it("rejects cancellation during the last scan yield instead of returning a kept page", async () => {
+    const f = fixture({ "note.md": "needle" });
+    engine = f.engine;
+    const controller = new AbortController();
+    await engine.startIndexing();
+    const operations = new SearchOperations(f.app, ["/"], f.plugin as never);
+    const nativeTimeout = window.setTimeout;
+    const timeout = jest.spyOn(window, "setTimeout").mockImplementation(((callback: () => void, delay?: number) => {
+      if (delay === 0) controller.abort();
+      return nativeTimeout(callback, delay);
+    }) as typeof window.setTimeout);
+    try {
+      await expect(operations.grepVault({ patterns: ["needle"] }, controller.signal)).rejects.toMatchObject({ name: "AbortError" });
+    } finally {
+      timeout.mockRestore();
+    }
+  });
+
   it("agent search confirms only shared candidates while retaining filename hits", async () => {
     const f = fixture({ "irrelevant.md": "haystack", "hit.md": "needle", "needle.md": "haystack" });
     engine = f.engine;

@@ -414,8 +414,8 @@ export class SystemSculptSearchEngine {
             || note.mtime !== this.modifiedTime(file) || note.size !== this.fileSize(file);
         });
         const revision = this.vaultRevision;
-        if (stale.length > 0) await this.buildIndex(stale, true, this.indexGeneration);
-        if (revision === this.vaultRevision) {
+        if (stale.length > 0) await this.buildIndex(stale, true, this.indexGeneration, signal);
+        if (!signal?.aborted && revision === this.vaultRevision) {
           for (const file of stale) this.dirtyPaths.delete(file.path);
         }
       });
@@ -656,11 +656,11 @@ export class SystemSculptSearchEngine {
     this.textIndex = this.textIndex.commit();
   }
 
-  private async buildIndex(files: TFile[], incremental = false, generation = this.indexGeneration): Promise<boolean> {
+  private async buildIndex(files: TFile[], incremental = false, generation = this.indexGeneration, signal?: AbortSignal): Promise<boolean> {
     const index = incremental ? this.textIndex : new SearchTextIndex();
     const tasks = files.map((file) => async () => {
       try {
-        if (generation !== this.indexGeneration) return;
+        if (signal?.aborted || generation !== this.indexGeneration) return;
         const doc = await this.indexFile(file);
         if (!doc || generation !== this.indexGeneration) return;
         index.upsert(doc.note, doc.tokens);
@@ -686,7 +686,14 @@ export class SystemSculptSearchEngine {
     }
     const mtime = this.modifiedTime(file);
     const size = this.fileSize(file);
-    const content = this.isStudioFile(file) ? "" : await this.app.vault.cachedRead(file);
+    let content = "";
+    let readSucceeded = true;
+    try {
+      if (!this.isStudioFile(file)) content = await this.app.vault.cachedRead(file);
+    } catch {
+      // Keep filename/path search available even when note text is unreadable.
+      readSucceeded = false;
+    }
     const extracted = this.getIndexText(file, content);
     const metadata = this.metadataTokenCache.get(file.path) ?? this.createMetadataTokenSnapshot(file);
     const body = extracted.slice(0, this.MAX_INDEX_CHARS).toLowerCase();
@@ -710,7 +717,7 @@ export class SystemSculptSearchEngine {
         preview: copyFlat(this.buildPreviewFromText(extracted, this.isMarkdownFile(file))),
         mtime,
         size,
-        completeRawText: !this.isStudioFile(file) && content === extracted && content.length <= this.MAX_INDEX_CHARS,
+        completeRawText: readSucceeded && !this.isStudioFile(file) && content === extracted && content.length <= this.MAX_INDEX_CHARS,
       },
       tokens,
     };

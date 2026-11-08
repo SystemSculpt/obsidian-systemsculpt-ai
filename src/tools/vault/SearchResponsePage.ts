@@ -1,6 +1,6 @@
 import { base64ToUtf8, utf8ToBase64 } from "../../utils/base64";
 import { sha256HexFromBytesPortable } from "../../utils/sha256";
-import { countTextTokens } from "../../utils/tokenCounting";
+import { estimateTextTokens } from "../../utils/tokenCounting";
 import { FILESYSTEM_LIMITS } from "./constants";
 import type { FormattedScoredResults } from "../../services/search/searchScoring";
 
@@ -176,7 +176,7 @@ export class SearchResponsePage {
         : scan.results.results.length - at.r;
       let omittedTokens = remainingSnippetTokens[at.o];
       if (at.c > 0) {
-        omittedTokens += countTextTokens(scan.snippets[at.o].text.slice(at.c)) - scan.snippets[at.o].tokens;
+        omittedTokens += estimateTextTokens(scan.snippets[at.o].text.slice(at.c)) - scan.snippets[at.o].tokens;
       }
       const more = hasMore(at);
       const response: SearchResponse = {
@@ -205,10 +205,10 @@ export class SearchResponsePage {
           : more ? "More search result metadata follows." : "",
       };
       // The number's own serialized digits are part of the response budget.
-      let measured = countTextTokens(JSON.stringify(response));
+      let measured = estimateTextTokens(JSON.stringify(response));
       while (response.page.tokensUsed !== measured) {
         response.page.tokensUsed = measured;
-        measured = countTextTokens(JSON.stringify(response));
+        measured = estimateTextTokens(JSON.stringify(response));
       }
       return response;
     };

@@ -1,4 +1,5 @@
 import type { TFile } from "obsidian";
+import { containsNonAscii } from "../../utils/characterValidation";
 
 /** Field bits stored with every posting: which of a note's fields hold the token. */
 export const TITLE_FIELD = 1;
@@ -176,7 +177,7 @@ export class SearchTextIndex {
     const words = patterns.map((pattern) => {
       // /i is not Unicode case folding. Non-ASCII case mappings and punctuation
       // need direct confirmation rather than a potentially lossy normalization.
-      if (/[^\x00-\x7f]/.test(pattern)) return null;
+      if (containsNonAscii(pattern)) return null;
       return (pattern.toLowerCase().match(/[a-z0-9]+/g) ?? [])
         .sort((left, right) => right.length - left.length)[0] ?? null;
     });
