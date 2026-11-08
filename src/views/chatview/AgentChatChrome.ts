@@ -475,6 +475,21 @@ type EmptyStateHint = Readonly<{
   after: string;
 }>;
 
+export type ProCapability = "media" | "search" | "studio";
+
+/**
+ * What a subscription adds, under the starters (T-5585). "offer" names each
+ * capability in one line with one Subscribe tap; "try" gives a subscriber one
+ * tap into each. Own-AI chat stays free either way.
+ */
+export type EmptyStatePro = Readonly<{
+  kind: "offer" | "try";
+  title: string;
+  rows: readonly Readonly<{ id: ProCapability; label: string; icon: string }>[];
+  /** The Subscribe link; null where the composer already offers Pro. */
+  subscribe: string | null;
+}>;
+
 export type EmptyStatePresentation = Readonly<{
   title: string;
   lead: string | null;
@@ -482,7 +497,67 @@ export type EmptyStatePresentation = Readonly<{
   offer: Readonly<{ text: string; actions: readonly ("start-free" | "sign-in" | "see-plans")[] }> | null;
   hints: readonly EmptyStateHint[];
   starters: readonly ChromeStarter[];
+  pro: EmptyStatePro | null;
 }>;
+
+const PRO_ICONS: Readonly<Record<ProCapability, string>> = {
+  media: "image",
+  search: "search",
+  studio: "workflow",
+};
+
+const PRO_OFFER_ROWS: Readonly<Record<ProCapability, string>> = {
+  media: "Image and video generation in chat",
+  search: "Smart search across your vault",
+  studio: "Studio for visual AI workflows",
+};
+
+const PRO_TRY_ROWS: Readonly<Record<ProCapability, string>> = {
+  media: "Make an image",
+  search: "Smart search your vault",
+  studio: "Open Studio",
+};
+
+const PRO_SUBSCRIBE = "Get Pro for $9/month";
+
+/**
+ * Whether this account has the subscription the image, video, search and
+ * Studio tools need: "subscribed", "free", or null while it is not known (a
+ * key whose balance has not loaded, or a failed renewal, which the payment
+ * line handles). A valid key alone proves nothing: starter keys validate too.
+ */
+function proStanding(state: AgentChromeState): "subscribed" | "free" | null {
+  const credits = state.credits;
+  if (!credits) return state.account === "signed-out" || state.account === "no-plan" ? "free" : null;
+  if (needsPaymentFix(credits)) return null;
+  if (credits.usageClass === "master_auth" || credits.includedCreditsEntitled === true) return "subscribed";
+  return isStarterBalance(credits) ? "free" : null;
+}
+
+function presentPro(state: AgentChromeState): EmptyStatePro | null {
+  const standing = proStanding(state);
+  if (!standing) return null;
+  const ids: readonly ProCapability[] = ["media", "search", "studio"];
+  if (standing === "subscribed") {
+    return {
+      kind: "try",
+      title: "Included with Pro",
+      rows: ids.map((id) => ({
+        id,
+        label: id === "media" && state.activeNote ? `Make an image for ${state.activeNote.name}` : PRO_TRY_ROWS[id],
+        icon: PRO_ICONS[id],
+      })),
+      subscribe: null,
+    };
+  }
+  return {
+    kind: "offer",
+    title: "With SystemSculpt Pro",
+    rows: ids.map((id) => ({ id, label: PRO_OFFER_ROWS[id], icon: PRO_ICONS[id] })),
+    // Hosted Chat already shows "Get Pro for $9/month" above the composer (T-5452).
+    subscribe: presentCreditsOffer(state) ? null : PRO_SUBSCRIBE,
+  };
+}
 
 function localHints(state: AgentChromeState): readonly EmptyStateHint[] {
   if (!state.localAgents || !state.detection) return [];
@@ -520,7 +595,7 @@ export function presentEmptyState(state: AgentChromeState): EmptyStatePresentati
       action: { id: "back-to-previous", label: "Back to previous chat" },
     });
   }
-  const empty = { title: EMPTY_TITLE, offer: null, hints: [] as EmptyStateHint[] };
+  const empty = { title: EMPTY_TITLE, offer: null, hints: [] as EmptyStateHint[], pro: null };
   if (state.detecting) return { ...empty, lead: null, notes, starters: [] };
 
   const backend = state.backend;
@@ -533,8 +608,8 @@ export function presentEmptyState(state: AgentChromeState): EmptyStatePresentati
       && state.detection?.preferred === backend;
     const name = LOCAL_AGENTS[backend];
     const lead = mostUsed
-      ? `Using ${name}, your most used agent. No credits needed.`
-      : `Using ${name}. No credits needed.`;
+      ? `Using ${name}, your most used agent. Free, no credits needed.`
+      : `Using ${name}. Free, no credits needed.`;
     if (state.localAgents && usable(agents?.[other])) {
       notes.push({
         id: "also-ready",
@@ -542,7 +617,7 @@ export function presentEmptyState(state: AgentChromeState): EmptyStatePresentati
         action: { id: "switch-below", label: "Switch below", after: "." },
       });
     }
-    return { ...empty, lead, notes, starters: starters(state.activeNote) };
+    return { ...empty, lead, notes, starters: starters(state.activeNote), pro: presentPro(state) };
   }
 
   if (!state.localAgents && state.prefersLocalAgent) {
@@ -577,6 +652,7 @@ export function presentEmptyState(state: AgentChromeState): EmptyStatePresentati
     lead: "Ask about your notes.",
     notes,
     starters: starters(state.activeNote),
+    pro: presentPro(state),
   };
 }
 

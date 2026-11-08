@@ -2386,11 +2386,36 @@ export class AgentChatView extends ItemView {
     UpgradePlanModal.openConnect(this.plugin, mode, { feature: "Chat" });
   }
 
+  /** The empty chat's Subscribe link: the $9 Monthly checkout, or Billing for a failed renewal (T-5348). */
+  private async openProCheckout(): Promise<void> {
+    const ownerWindow = this.containerEl.ownerDocument.defaultView ?? undefined;
+    if (needsPaymentFix(this.creditsBalance)) {
+      await this.openBillingPortal();
+      return;
+    }
+    await openExternalUrl(SYSTEMSCULPT_WEBSITE.MONTHLY_CHAT_EMPTY, ownerWindow);
+  }
+
+  /** A subscriber's "Make an image" tap: a prompt for the open note, ready to finish or send. */
+  private imageStarterPrompt(): string {
+    const note = this.activeNoteForStarters();
+    return note ? `Make an image for [[${note.link}]]` : "Make an image of ";
+  }
+
+  private runPluginCommand(id: "open-systemsculpt-search" | "open-systemsculpt-studio"): void {
+    const commands = (this.app as typeof this.app & { commands?: { executeCommandById(id: string): boolean } }).commands;
+    commands?.executeCommandById(`${this.plugin.manifest.id}:${id}`);
+  }
+
   private handleEmptyStateAction(action: AgentEmptyStateAction): void {
     if (action === "start-free") this.beginAccountConnect("sign-up");
     else if (action === "sign-in") this.beginAccountConnect("sign-in");
     else if (action === "see-plans") void this.viewPlans();
     else if (action === "detect-again") void this.detectAgain();
+    else if (action === "subscribe-pro") void this.openProCheckout();
+    else if (action === "try-media") this.setInputText(this.imageStarterPrompt(), { focus: true });
+    else if (action === "try-search") this.runPluginCommand("open-systemsculpt-search");
+    else if (action === "try-studio") this.runPluginCommand("open-systemsculpt-studio");
     else if (action === "switch-below") this.openBackendMenu();
     else if (action === "back-to-previous") {
       const previous = this.switchedFrom?.chatId;

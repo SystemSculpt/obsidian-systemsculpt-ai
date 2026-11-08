@@ -473,7 +473,8 @@
   margin-top: var(--ss-space-4);
 }
 
-.systemsculpt-agent-starters .systemsculpt-agent-starter {
+.systemsculpt-agent-starters .systemsculpt-agent-starter,
+.systemsculpt-agent-pro .systemsculpt-agent-starter {
   justify-content: flex-start;
   width: 100%;
   min-height: var(--ss-control-height);
@@ -483,6 +484,82 @@
   text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/*
+ * What a subscription adds (T-5585): a hairline under the starters, a quiet
+ * title, one line per capability and one Subscribe link. Text starts on the
+ * starters' label edge (border plus padding) so the column reads as one.
+ */
+.systemsculpt-agent-pro {
+  --ss-agent-pro-inset: calc(var(--ss-space-3) + 1px);
+  display: grid;
+  justify-items: start;
+  gap: var(--ss-space-1);
+  width: min(100%, 22rem);
+  margin-top: var(--ss-space-5);
+  padding-top: var(--ss-space-4);
+  border-top: 1px solid var(--ss-line);
+  text-align: left;
+}
+
+.systemsculpt-agent-pro .systemsculpt-agent-pro-title {
+  margin: 0 0 var(--ss-space-1);
+  padding-inline: var(--ss-agent-pro-inset);
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-sm);
+  font-weight: var(--ss-weight-medium);
+  line-height: var(--ss-leading-tight);
+}
+
+.systemsculpt-agent-pro .systemsculpt-agent-pro-rows {
+  display: grid;
+  gap: var(--ss-space-2);
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.systemsculpt-agent-pro .systemsculpt-agent-pro-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--ss-space-2);
+  margin: 0;
+  padding-inline: var(--ss-agent-pro-inset);
+  color: var(--ss-ink);
+  font-size: var(--ss-text-base);
+  line-height: var(--ss-leading-tight);
+}
+
+.systemsculpt-agent-pro .systemsculpt-agent-pro-icon {
+  display: inline-flex;
+  flex: none;
+  /* One line box tall, so the icon centres on the first line when a label wraps. */
+  height: calc(var(--ss-text-base) * var(--ss-leading-tight));
+  align-items: center;
+  color: var(--ss-ink-muted);
+}
+
+.systemsculpt-agent-pro .systemsculpt-agent-pro-icon svg {
+  width: var(--ss-icon-size);
+  height: var(--ss-icon-size);
+}
+
+.systemsculpt-agent-pro .systemsculpt-agent-pro-label {
+  min-width: 0;
+  text-wrap: pretty;
+}
+
+.systemsculpt-agent-pro .systemsculpt-agent-pro-try .ss-button__icon {
+  color: var(--ss-ink-muted);
+}
+
+.systemsculpt-agent-empty .systemsculpt-agent-pro-subscribe {
+  margin-top: var(--ss-space-2);
+  margin-inline: var(--ss-agent-pro-inset);
+  font-size: var(--ss-text-base);
+  line-height: var(--ss-leading-tight);
 }
 
 .systemsculpt-agent-empty :where(button) {

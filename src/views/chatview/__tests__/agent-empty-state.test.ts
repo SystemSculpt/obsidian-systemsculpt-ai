@@ -11,6 +11,7 @@ function presentation(overrides: Partial<EmptyStatePresentation> = {}): EmptySta
     offer: null,
     hints: [],
     starters: [],
+    pro: null,
     ...overrides,
   };
 }
@@ -25,6 +26,49 @@ function mount() {
 
 describe("AgentEmptyState", () => {
   afterEach(() => document.body.empty());
+
+  it("lists what Pro adds, one line each, with one Subscribe tap", () => {
+    const { empty, button, onAction } = mount();
+    empty.render(presentation({
+      pro: {
+        kind: "offer",
+        title: "With SystemSculpt Pro",
+        rows: [
+          { id: "media", label: "Image and video generation in chat", icon: "image" },
+          { id: "search", label: "Smart search across your vault", icon: "search" },
+        ],
+        subscribe: "Get Pro for $9/month",
+      },
+    }));
+    const section = empty.element.querySelector<HTMLElement>('[data-testid="chat.empty.pro"]')!;
+    const list = section.querySelector("ul")!;
+    expect(list.getAttribute("aria-labelledby")).toBe(section.querySelector("p")!.id);
+    expect(Array.from(list.querySelectorAll("li"), (row) => row.textContent)).toEqual([
+      "Image and video generation in chat", "Smart search across your vault",
+    ]);
+    expect(section.querySelectorAll("li button")).toHaveLength(0);
+    button("pro.subscribe").click();
+    expect(onAction.mock.calls).toEqual([["subscribe-pro"]]);
+  });
+
+  it("gives a subscriber one tap into each capability", () => {
+    const { empty, button, onAction } = mount();
+    empty.render(presentation({
+      pro: {
+        kind: "try",
+        title: "Included with Pro",
+        rows: [
+          { id: "media", label: "Make an image", icon: "image" },
+          { id: "search", label: "Smart search your vault", icon: "search" },
+          { id: "studio", label: "Open Studio", icon: "workflow" },
+        ],
+        subscribe: null,
+      },
+    }));
+    expect(button("pro.subscribe")).toBeNull();
+    for (const id of ["media", "search", "studio"]) button(`pro.${id}`).click();
+    expect(onAction.mock.calls).toEqual([["try-media"], ["try-search"], ["try-studio"]]);
+  });
 
   it("renders only the title while no guidance or actions are available", () => {
     const { empty } = mount();

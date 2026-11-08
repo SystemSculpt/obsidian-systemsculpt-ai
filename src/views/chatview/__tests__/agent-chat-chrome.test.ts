@@ -285,6 +285,53 @@ describe("mode and model menus", () => {
   });
 });
 
+describe("empty state: what Pro adds (T-5585)", () => {
+  const starter = credits({
+    includedRemaining: 0, includedPerMonth: 0, totalRemaining: 420, availableUnreserved: 420,
+    includedCreditsEntitled: false, usageClass: "customer", subscriptionStatus: null,
+  });
+  const paid = credits({ includedCreditsEntitled: true, usageClass: "customer", subscriptionStatus: "active" });
+
+  it("own AI without a plan: one line per capability and one Subscribe link", () => {
+    expect(presentEmptyState(state()).pro).toEqual({
+      kind: "offer",
+      title: "With SystemSculpt Pro",
+      rows: [
+        { id: "media", label: "Image and video generation in chat", icon: "image" },
+        { id: "search", label: "Smart search across your vault", icon: "search" },
+        { id: "studio", label: "Studio for visual AI workflows", icon: "workflow" },
+      ],
+      subscribe: "Get Pro for $9/month",
+    });
+    expect(presentEmptyState(state({ account: "signed-in", credits: starter })).pro?.subscribe)
+      .toBe("Get Pro for $9/month");
+  });
+
+  it("a subscriber gets one tap into each, the image one naming the open note", () => {
+    const pro = presentEmptyState(state({ account: "paid", credits: paid, activeNote: { name: "Plan", link: "Projects/Plan" } })).pro;
+    expect(pro?.kind).toBe("try");
+    expect(pro?.subscribe).toBeNull();
+    expect(pro?.rows.map((row) => row.label)).toEqual(["Make an image for Plan", "Smart search your vault", "Open Studio"]);
+  });
+
+  it("hosted starter: the composer already offers Pro, so the lines carry no second link", () => {
+    const pro = presentEmptyState(state({ backend: "systemsculpt", account: "signed-in", credits: starter })).pro;
+    expect(pro?.kind).toBe("offer");
+    expect(pro?.subscribe).toBeNull();
+  });
+
+  it("says nothing while a key's plan is unknown or its renewal failed", () => {
+    expect(presentEmptyState(state({ account: "paid", credits: null })).pro).toBeNull();
+    expect(presentEmptyState(state({ account: "signed-in", credits: null })).pro).toBeNull();
+    expect(presentEmptyState(state({ account: "paid", credits: credits({ ...paid, subscriptionStatus: "past_due" }) })).pro).toBeNull();
+  });
+
+  it("stays off the sign-in, plan and detection screens", () => {
+    expect(presentEmptyState(state({ backend: "systemsculpt" })).pro).toBeNull();
+    expect(presentEmptyState(state({ detecting: true })).pro).toBeNull();
+  });
+});
+
 describe("empty states (spec 3.1)", () => {
   const note = { name: "Plan", link: "Projects/Plan" };
 
@@ -292,7 +339,7 @@ describe("empty states (spec 3.1)", () => {
     const empty = presentEmptyState(state({ detection: detection(ready, ready, "claude"), activeNote: note }));
     expect(empty.title).toBe("What should we work on?");
     expect(empty.lead).toBe(
-      "Using Claude Code, your most used agent. No credits needed.",
+      "Using Claude Code, your most used agent. Free, no credits needed.",
     );
     expect(empty.starters.map((starter) => [starter.label, starter.prompt])).toEqual([
       ["Summarize Plan", "Summarize [[Projects/Plan]]"],
@@ -303,9 +350,9 @@ describe("empty states (spec 3.1)", () => {
 
   it("A: drops the used-most clause when it is the only agent or the person chose it", () => {
     const only = presentEmptyState(state({ detection: detection(ready, missing, "claude") }));
-    expect(only.lead).toBe("Using Claude Code. No credits needed.");
+    expect(only.lead).toBe("Using Claude Code. Free, no credits needed.");
     const chosen = presentEmptyState(state({ chosen: true, detection: detection(ready, ready, "claude") }));
-    expect(chosen.lead).toMatch(/^Using Claude Code\. No credits/);
+    expect(chosen.lead).toMatch(/^Using Claude Code\. Free, no credits/);
     expect(only.starters.map((starter) => starter.label)).toEqual([
       "Summarize my latest daily note", "Find notes I haven't linked yet", "Plan my week from my notes",
     ]);
@@ -399,6 +446,7 @@ describe("empty states (spec 3.1)", () => {
       offer: null,
       hints: [],
       starters: [],
+      pro: null,
     });
   });
 
