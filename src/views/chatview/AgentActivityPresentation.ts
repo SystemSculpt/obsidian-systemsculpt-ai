@@ -35,7 +35,9 @@ export function summarizeAgentActivity(parts: readonly AgentPart[]): AgentActivi
       // own clause, and a withdrawn request is not a failure.
       if (tool.displayState === "denied") { denied = true; add("denied", `${tool.label} · Denied`); }
       else if (tool.displayState === "cancelled" || part.approvalDecision === "withdrawn") add("withdrawn", `${tool.label} · Withdrawn`);
-      else if (tool.displayState === "failed" || tool.displayState === "outcome-unknown") add("failed", tool.label);
+      // An uncertain result may have happened: it is never folded into "couldn't".
+      else if (tool.displayState === "outcome-unknown") add("uncertain", `${tool.label} · Uncertain`);
+      else if (tool.displayState === "failed") add("failed", tool.label);
       else add(tool.groupKind, tool.label.replace(/…$/u, ""), tool.groupItems, tool.groupCount);
       if (part.approvalDecision !== "withdrawn" && ["failed", "partial", "outcome-unknown"].includes(tool.displayState)) {
         failedCount += 1;
@@ -49,6 +51,7 @@ export function summarizeAgentActivity(parts: readonly AgentPart[]): AgentActivi
     const count = groupSize(group);
     if (kind === "denied") return count === 1 ? group.label : `Denied ${count} actions`;
     if (kind === "withdrawn") return count === 1 ? group.label : `${count} actions withdrawn`;
+    if (kind === "uncertain") return count === 1 ? group.label : `${count} actions uncertain`;
     if (kind === "failed") return count === 1 ? group.label : `Couldn't complete ${count} actions`;
     // One read names its note (spec 3.2: "Read Plan.md, searched 2 patterns").
     if (kind === "read") return count === 1 ? group.label : `Read ${count} notes`;
@@ -65,7 +68,8 @@ export function summarizeAgentActivity(parts: readonly AgentPart[]): AgentActivi
   const visible = labels.slice(0, 3).map((label, index) => index ? label.charAt(0).toLowerCase() + label.slice(1) : label).join(", ");
   const more = Array.from(groups.values()).slice(3).reduce((count, group) => count + Math.min(group.rows, groupSize(group)), 0);
   const failed = failedCount - blockedCount - uncertainCount;
-  const outcomes = [[failed, "failed"], [blockedCount, "blocked"], [uncertainCount, "uncertain"]]
+  // Uncertain work already says so in its own clause.
+  const outcomes = [[failed, "failed"], [blockedCount, "blocked"]]
     .filter(([count]) => count).map(([count, word]) => ` · ${count} ${word}`).join("");
   return {
     label: `${visible || "Activity"}${more ? ` · ${more} more` : ""}${outcomes}`,
