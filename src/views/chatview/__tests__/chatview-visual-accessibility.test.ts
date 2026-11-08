@@ -293,6 +293,18 @@ describe("ChatView activity alignment", () => {
     expect(detect).toMatch(/justify-self:\s*start/);
   });
 
+  test("matches narrow native dropdowns to full-width text fields", () => {
+    const settings = readCss("views/settings.css");
+    const narrow = settings.slice(settings.indexOf("@container ss-surface (max-width: 520px)"), settings.indexOf("/* Mobile settings"));
+    const dropdown = rule(narrow, ".systemsculpt-tab-content .setting-item-control > select");
+    expect(dropdown).toMatch(/width:\s*100%/);
+    expect(dropdown).toMatch(/text-align:\s*start/);
+    expect(dropdown).toMatch(/text-align-last:\s*start/);
+    expect(dropdown).toMatch(/padding-inline-start:\s*var\(--ss-space-2\)/);
+    expect(dropdown).toMatch(/border:\s*var\(--input-border-width\) solid var\(--background-modifier-border\)/);
+    expect(dropdown).toMatch(/background-color:\s*var\(--background-modifier-form-field\)/);
+  });
+
   test("matches Provider card padding to the native preference cards", () => {
     expect(rule(readCss("views/settings.css"), ".ss-settings-surface .ss-codex-controls"))
       .toMatch(/padding:\s*calc\(var\(--ss-space-4\) - 1px\)/);

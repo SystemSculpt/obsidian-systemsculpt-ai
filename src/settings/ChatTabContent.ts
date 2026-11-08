@@ -25,7 +25,7 @@ export async function displayChatTabContent(containerEl: HTMLElement, tabInstanc
     createCatalogSetting(containerEl, "chat.default-tag")
         .addText((text) => {
             text
-                .setPlaceholder("Ai-chat")
+                .setPlaceholder("For example, notes")
                 .setValue(plugin.settings.defaultChatTag || "");
             bindTextSetting("defaultChatTag", text.inputEl, async (value) => {
                 const normalized = normalizeDefaultChatTag(value);
