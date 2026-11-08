@@ -81,11 +81,21 @@ body:not(.ss-mobile-layout) .ss-upgrade-plan-modal.is-compact .ss-modal__footer 
   font-size: var(--ss-text-base);
 }
 
-.ss-upgrade-plan__link {
+/* Balanced lines: a two-line title never strands one word. */
+.ss-upgrade-plan-modal .ss-modal__title {
+  text-wrap: balance;
+}
+
+/* Text links, not buttons: the element and modal qualifiers outrank
+ * Obsidian's own button background, radius and hover fill. */
+.ss-upgrade-plan-modal button.ss-upgrade-plan__link,
+.ss-upgrade-plan-modal button.ss-upgrade-plan__link:hover {
+  height: auto;
   background: transparent;
   border: none;
+  border-radius: 0;
   box-shadow: none;
-  padding: var(--ss-space-1);
+  padding: var(--ss-space-1) var(--ss-space-2);
   color: var(--ss-accent);
   font-size: var(--ss-text-sm);
   text-decoration: underline;
@@ -135,6 +145,6 @@ body:not(.ss-mobile-layout) .ss-upgrade-plan-modal.is-compact .ss-modal__footer 
   min-height: var(--ss-touch-target);
 }
 
-.ss-mobile-layout .ss-upgrade-plan__link {
+.ss-mobile-layout .ss-upgrade-plan-modal button.ss-upgrade-plan__link {
   min-height: var(--ss-touch-target);
 }

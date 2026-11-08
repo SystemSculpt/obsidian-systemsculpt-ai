@@ -192,7 +192,7 @@ describe("UpgradePlanModal", () => {
     const modal = new UpgradePlanModal(plugin, { feature: "Chat" });
     modal.onOpen();
 
-    expect(modal.modalEl.textContent).toContain("SystemSculpt Pro: images and video in your vault");
+    expect(modal.modalEl.textContent).toContain("SystemSculpt Pro: AI images and video in your vault");
     expect(modal.modalEl.textContent).toContain("Plus smart search and Studio. $9 a month.");
     expect(modal.modalEl.textContent).toContain("Claude Code and Codex stay free on desktop.");
     expect(findButtonByText(modal.modalEl, "Sign in")).toBeTruthy();
@@ -215,9 +215,9 @@ describe("UpgradePlanModal", () => {
     try {
       const modal = new UpgradePlanModal(plugin);
       modal.onOpen();
-      expect(modal.modalEl.textContent).toContain("Get SystemSculpt Pro");
+      expect(modal.modalEl.textContent).toContain("Get SystemSculpt Pro, AI for your vault");
       expect(modal.modalEl.textContent).toContain("Image and video generation, smart search and Studio for $9 a month.");
-      expect(modal.modalEl.textContent).not.toContain("SystemSculpt Pro: images and video in your vault");
+      expect(modal.modalEl.textContent).not.toContain("SystemSculpt Pro: AI images and video in your vault");
       findButtonByText(modal.modalEl, "Compare plans").click();
       findButtonByText(modal.modalEl, "Subscribe yearly").click();
       const tags = hrefs.map((href) => {
@@ -700,7 +700,7 @@ describe("plan gate helpers", () => {
   it("requireActivePlan opens the modal and blocks when no plan is active", () => {
     const plugin = createPlugin();
     expect(requireActivePlan(plugin, "Chat")).toBe(false);
-    expect(document.body.textContent).toContain("SystemSculpt Pro: images and video in your vault");
+    expect(document.body.textContent).toContain("SystemSculpt Pro: AI images and video in your vault");
     closeOpenModal();
 
     expect(requireActivePlan(createPlugin({ licenseKey: "skss-1" }), "Chat")).toBe(true);
