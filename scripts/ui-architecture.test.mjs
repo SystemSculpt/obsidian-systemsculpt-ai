@@ -712,6 +712,13 @@ test("custom buttons outrank Obsidian controls without styling native Setting bu
   );
 });
 
+test("settings omit empty spacing slots and center action-only row labels", () => {
+  const settingsCss = read("src/css/views/settings.css");
+  assert.match(settingsCss, /\.ss-settings-surface \.setting-item:has\(\.setting-item-description:empty\)\s*\{[^}]*align-items:\s*center/s);
+  assert.match(settingsCss, /\.ss-settings-surface \.setting-item-description:empty\s*\{[^}]*display:\s*none/s);
+  assert.match(settingsCss, /\.ss-settings-search-meta:empty\s*\{[^}]*display:\s*none/s);
+});
+
 test("operation progress styles stay co-located and adapt inside the named surface container", () => {
   const progressCss = read("src/css/modals/progress-toast.css");
   const miscellaneousCss = read("src/css/modals/misc-modals.css");
