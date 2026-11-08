@@ -111,6 +111,8 @@
     "chat.tail-status.label",
     "chat.tool.file.copy-path",
     "chat.tool.file.open",
+    "chat.tool.image.open",
+    "chat.tool.image.path",
     "chat.tool.label",
     "chat.tool.open-path",
     "chat.tool.show-items",

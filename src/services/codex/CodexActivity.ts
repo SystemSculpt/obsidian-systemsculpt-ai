@@ -29,8 +29,11 @@ export function codexToolActivity(activity: CodexActivity, item: CodexJson | und
     : ['cancelled', 'interrupted'].includes(activity.status) ? 'cancelled'
     : ['failed', 'error'].includes(activity.status) || item.success === false || item.error != null || item.failure != null ? 'failed'
     : ['completed', 'succeeded'].includes(activity.status) ? 'succeeded' : 'running';
-  const output = item.aggregatedOutput ?? item.result ?? item.contentItems ?? item.error ?? item.failure;
-  return { callId: activity.id, name: String(item.tool || item.type), input: item, state,
+  // A generated image arrives as base64 in result; Chat saves it to the vault instead of the transcript.
+  const image = item.type === 'imageGeneration';
+  const input = image ? Object.fromEntries(Object.entries(item).filter(([key]) => key !== 'result')) : item;
+  const output = item.aggregatedOutput ?? (image ? undefined : item.result) ?? item.contentItems ?? item.error ?? item.failure;
+  return { callId: activity.id, name: String(item.tool || item.type), input, state,
     native: { agent: 'codex', workingDirectory: typeof item.cwd === 'string' ? item.cwd : workingDirectory },
     ...(output === undefined ? {} : { output: { data: output, ...(typeof output === 'string' ? { summary: output } : {}) } }) };
 }

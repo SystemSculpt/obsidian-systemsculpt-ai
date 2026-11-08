@@ -509,6 +509,12 @@
 .ss-native-tool-preview .ss-agent-tool-details {
   margin: 0;
 }
+.ss-native-tool-preview .ss-native-tool-image {
+  margin-block: 0 var(--ss-space-2);
+}
+.ss-native-tool-preview .ss-native-tool-image .systemsculpt-agent-media-frame {
+  max-height: 16rem;
+}
 .ss-native-tool-preview .ss-agent-tool-details dt {
   color: var(--ss-ink-muted);
   font-size: var(--ss-text-xs);

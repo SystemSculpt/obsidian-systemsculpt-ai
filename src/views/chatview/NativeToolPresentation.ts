@@ -1,5 +1,6 @@
 import { decodeSystemSculptToolOutput, systemSculptToolName } from "../../tools/systemsculpt/SystemSculptTools";
-import { MarkdownRenderer, type App, type Component } from "obsidian";
+import { MarkdownRenderer, TFile, type App, type Component } from "obsidian";
+import { codexImageLocalPath, codexImageMedia, isCodexGeneratedImagePath } from "../../services/codex/CodexImages";
 import type { AgentToolPart } from "../../chat/ChatConversation";
 import { DiffViewer } from "../../components/DiffViewer";
 import { createSurfaceElement, createUiAction } from "../../core/ui/surface";
@@ -194,6 +195,13 @@ export function nativeToolPresentation(part: AgentToolPart): NativeToolPresentat
         path: source, meta: [folder, size].filter(Boolean).join(" · ") || undefined,
       }), changeSize: size };
     }
+    case "imageGeneration": return presentation("Generate", "Generated", "Generating", "image", "image", "image");
+    case "imageView": {
+      const image = codexImageLocalPath(input.path);
+      // Codex names its generated files by internal id, so those read as "image".
+      const name = image && !isCodexGeneratedImagePath(image) ? basename(image) : "image";
+      return presentation("View", "Viewed", "Viewing", name, "image", "image-view", image ? { path: image } : {});
+    }
     case "permissions": return presentation("Allow", "Allowed", "Requesting", "additional access", "shield-check", "permission", {
       meta: cwdMeta(part, text(input.cwd)),
     });
@@ -253,6 +261,7 @@ function previewDetails(part: AgentToolPart): Detail[] {
   if (toolKind === "Bash" || toolKind === "commandExecution") add("Command", command(input) ? `$ ${command(input)}` : undefined, true);
   if (toolKind === "WebFetch") { add("Address", input.url); add("Look for", input.prompt); }
   if (["WebSearch", "webSearch"].includes(toolKind)) add("Search for", input.query);
+  if (toolKind === "imageGeneration") add("Prompt", input.revisedPrompt);
   if (["Read", "LS", "Glob", "Grep"].includes(toolKind)) {
     const path = text(input.file_path) ?? text(input.path);
     if (path) details.push({ label: "File or folder", value: displayPath(part, path), path: resolvedPath(part, path).vaultPath ?? undefined });
@@ -320,6 +329,24 @@ function renderRequestedWriteEdit(container: HTMLElement, part: AgentToolPart): 
   }
 }
 
+/** The image itself, opening its vault file on click. */
+function renderImage(app: App, container: HTMLElement, path: string): void {
+  const figure = container.createEl("figure", { cls: "systemsculpt-agent-media ss-native-tool-image", attr: { "data-kind": "image" } });
+  const file = app.vault.getAbstractFileByPath(path);
+  const name = basename(path);
+  if (!(file instanceof TFile)) {
+    figure.addClass("is-missing");
+    figure.createDiv({ cls: "systemsculpt-agent-media-missing", text: `${name} was moved or deleted.` });
+    return;
+  }
+  const open = figure.createEl("button", { cls: "systemsculpt-agent-media-open", attr: { type: "button", "aria-label": `Open ${name}`, "data-testid": "chat.tool.image.open" } });
+  open.createEl("img", { cls: "systemsculpt-agent-media-frame", attr: { src: app.vault.getResourcePath(file), alt: name, loading: "lazy", decoding: "async" } });
+  open.onclick = () => void app.workspace.openLinkText(path, "");
+  const link = figure.createEl("figcaption", { cls: "systemsculpt-agent-media-caption" })
+    .createEl("a", { text: path, cls: "internal-link", attr: { href: path, "data-href": path, title: path, "data-testid": "chat.tool.image.path" } });
+  link.onclick = event => { event.preventDefault(); void app.workspace.openLinkText(path, ""); };
+}
+
 /** Renders only the preview. Approval controls and raw Details belong to the caller. */
 export async function renderNativeToolPreview(app: App, host: HTMLElement, part: AgentToolPart, component?: Component): Promise<boolean> {
   if (!part.native) return false;
@@ -340,6 +367,8 @@ export async function renderNativeToolPreview(app: App, host: HTMLElement, part:
       } else value.textContent = detail.value;
     }
   }
+  const image = codexImageMedia(part);
+  if (image) renderImage(app, container, image.media.path);
   const approval = part.state === "approval-required";
   if (approval) {
     const preview = await prepareNativeWriteEditPreview(app, part);
