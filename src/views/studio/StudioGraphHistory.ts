@@ -67,6 +67,13 @@ export class StudioGraphHistory {
     const prior = grouped
       ? snapshot(rebase(grouped.after, grouped.before, previous), grouped.before.selectedNodeIds, grouped.before.project)
       : previous;
+    if (grouped && equal(prior, next)) {
+      this.undoEdits.pop();
+      this.redoEdits = this.redoBeforeLatestEdit;
+      this.current = next;
+      this.clearLatestEdit();
+      return;
+    }
     const edit = { before: prior, after: next };
     if (grouped) this.undoEdits.pop();
     else this.redoBeforeLatestEdit = this.redoEdits;

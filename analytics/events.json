@@ -10,7 +10,7 @@
     "studio-field-history": {
       "events": [],
       "not_measured": "Studio field edits, blur boundaries and undo/redo stay in the vault. No server call or client telemetry is sent.",
-      "where": ["src/views/studio/StudioGraphHistory.ts", "src/views/studio/canvas/StudioGraphInlineConfigPanel.ts"]
+      "where": ["src/views/studio/StudioGraphHistory.ts", "src/views/studio/canvas/StudioGraphInlineConfigPanel.ts", "src/views/studio/canvas/StudioGraphTextInlineEditor.ts"]
     },
     "vault-search-pagination": {
       "events": [],

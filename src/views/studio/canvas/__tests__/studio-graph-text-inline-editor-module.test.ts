@@ -84,6 +84,31 @@ describe("StudioGraphTextInlineEditor module", () => {
     expect(textarea?.value).toContain("---");
   });
 
+  it.each(["studio.text_output", "studio.text_generation", "studio.transcription"])("groups raw %s edits until blur or a display-mode action", kind => {
+    const nodeEl = document.createElement("div");
+    const node = nodeFixture(kind, { value: "Before" });
+    const committed = jest.fn();
+    renderTextNodeInlineEditor({ nodeEl, node, nodeRunState: IDLE_NODE_RUN_STATE, interactionLocked: false, onNodeConfigValueChange: committed });
+    const raw = nodeEl.querySelector<HTMLButtonElement>('[data-testid="studio.text.mode.raw"]')!;
+    const rendered = nodeEl.querySelector<HTMLButtonElement>('[data-testid="studio.text.mode.rendered"]')!;
+    const textarea = nodeEl.querySelector("textarea")!;
+    const input = (value: string) => {
+      textarea.value = value;
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+      return committed.mock.calls[committed.mock.calls.length - 1][3].historyGroup;
+    };
+    click(raw);
+    const first = input("First");
+    expect(first).toEqual(expect.any(Symbol));
+    expect(input("Second")).toBe(first);
+    textarea.dispatchEvent(new Event("blur"));
+    const afterBlur = input("Third");
+    expect(afterBlur).not.toBe(first);
+    click(rendered);
+    click(raw);
+    expect(input("Fourth")).not.toBe(afterBlur);
+  });
+
   it("uses config value change callbacks for display mode and text edits", () => {
     const nodeEl = document.createElement("div");
     const node = nodeFixture("studio.text_output", { value: "Hello" });
