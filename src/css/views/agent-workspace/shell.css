@@ -390,9 +390,9 @@
   inset: 0;
   z-index: var(--ss-z-raised);
   display: grid;
-  /* Safe: a block taller than a short pane starts at its top instead of overflowing out of reach. */
+  /* Safe: in a short pane the block starts below the header with its inset and scrolls, never behind it. */
   place-items: safe center;
-  min-height: var(--ss-agent-empty-height);
+  min-height: 0;
   padding: var(--ss-space-4) var(--ss-space-3);
   overflow-y: auto;
   color: var(--ss-ink-muted);
@@ -563,7 +563,8 @@
   line-height: var(--ss-leading-tight);
 }
 
-.systemsculpt-agent-empty :where(button) {
+/* The body takes the wheel so a short pane scrolls; the empty margin around it stays click-through. */
+.systemsculpt-agent-empty :where(.systemsculpt-agent-empty-body, button) {
   pointer-events: auto;
 }
 
