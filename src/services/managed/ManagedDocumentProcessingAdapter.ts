@@ -1,3 +1,6 @@
+import { managedAbortError, throwIfManagedAborted } from "./ManagedAbort";
+import { ManagedJobDispatch } from "./ManagedJobDispatch";
+import { uploadManagedRecoveryParts } from "./ManagedMultipartUpload";
 import type { ManagedFileSource } from "./ManagedFileSource";
 import { sha256HexFromBytesPortable } from "../../utils/sha256";
 import type { ManagedAdmission } from "./ManagedAdmission";
@@ -6,8 +9,6 @@ import { isRetiredManagedRecoveryRecord, ManagedJobRecoveryStore } from "./Manag
 import type {
   ManagedJobRecoveryRecord,
   ManagedJobStatus,
-  ManagedMultipartCreateRequest,
-  ManagedPendingDispatch,
   ManagedRecoveryPhase,
 } from "./ManagedTypes";
 import {
@@ -73,16 +74,12 @@ function defaultOperationId(): string {
   return `document-${random}`.slice(0, 128);
 }
 
-function defaultRequestId(): string {
-  return window.crypto?.randomUUID?.() ?? `dispatch-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
-
 function abortError(): DOMException {
-  return new DOMException("Document conversion was cancelled locally.", "AbortError");
+  return managedAbortError("Document conversion was cancelled locally.");
 }
 
 function throwIfAborted(signal: AbortSignal): void {
-  if (signal.aborted) throw abortError();
+  throwIfManagedAborted(signal, "Document conversion was cancelled locally.");
 }
 
 // Records written before byte fingerprints hashed only their path identity,
@@ -144,14 +141,12 @@ function readUpload(value: unknown): { partSize: number; totalParts: number } {
 
 export class ManagedDocumentProcessingAdapter {
   private readonly createOperationId: () => string;
-  private readonly createRequestId: () => string;
-  private readonly now: () => string;
+  private readonly dispatch: ManagedJobDispatch;
   private readonly wait: (milliseconds: number, signal: AbortSignal) => Promise<void>;
 
   constructor(private readonly dependencies: ManagedDocumentProcessingDependencies) {
     this.createOperationId = dependencies.createOperationId ?? defaultOperationId;
-    this.createRequestId = dependencies.createRequestId ?? defaultRequestId;
-    this.now = dependencies.now ?? (() => new Date().toISOString());
+    this.dispatch = new ManagedJobDispatch(dependencies.recovery, dependencies.createRequestId, dependencies.now);
     this.wait = dependencies.wait ?? waitForManagedJob;
   }
 
@@ -405,7 +400,7 @@ export class ManagedDocumentProcessingAdapter {
       if (record.phase === "content_ready" || record.phase === "create_dispatching") {
         context.onProgress?.(5, "Preparing document upload…");
         if (record.phase === "content_ready") {
-          record = await this.beginDispatch(record, "create", undefined, createRequest);
+          record = await this.dispatch.begin(record, "create", undefined, createRequest);
           throwIfAborted(signal);
         }
         // Replay the recorded request with the original supported create key.
@@ -433,36 +428,23 @@ export class ManagedDocumentProcessingAdapter {
       if (upload.totalParts !== Math.ceil(loaded.sizeBytes / upload.partSizeBytes)) {
         throw new Error("Managed document multipart layout does not match the document size.");
       }
-      const completedParts = new Map((record.completedParts ?? []).map((part) => [part.partNumber, part]));
-      for (let partNumber = 1; partNumber <= upload.totalParts; partNumber += 1) {
-        if (completedParts.has(partNumber)) continue;
-        throwIfAborted(signal);
-        const offset = (partNumber - 1) * upload.partSizeBytes;
-        const end = Math.min(offset + upload.partSizeBytes, loaded.sizeBytes);
-        const bytes = await loaded.readSlice(offset, end);
-        throwIfAborted(signal);
-        if (bytes.byteLength !== end - offset) throw new Error("The selected document changed while it was being read.");
-        if (record.phase === "part_dispatching") {
-          if (record.pendingDispatch?.partNumber !== partNumber) {
-            throw new Error("Managed document pending part does not match the next unacknowledged part.");
-          }
-        } else {
-          record = await this.beginDispatch(record, "part", partNumber);
-          throwIfAborted(signal);
-        }
-        // A fresh signed URL targets the same document/part with the same bytes.
-        const part = await dispatchManagedJob({
-          send: () => this.dependencies.jobs.uploadPart(documentId, partNumber, bytes, signal),
-          signal,
-          wait: this.wait,
-        });
-        throwIfAborted(signal);
-        record = await this.dependencies.recovery.acknowledgePart(CAPABILITY, operationId, record.revision, part);
-        throwIfAborted(signal);
-        completedParts.set(part.partNumber, part);
-        context.onProgress?.(10 + Math.floor((partNumber / upload.totalParts) * 55), `Uploading document (${partNumber}/${upload.totalParts})…`);
-      }
-      record = await this.beginDispatch(record, "complete");
+      record = await uploadManagedRecoveryParts({
+        record,
+        source: loaded,
+        dispatch: this.dispatch,
+        recovery: this.dependencies.recovery,
+        sendPart: (partNumber, bytes) => this.dependencies.jobs.uploadPart(documentId, partNumber, bytes, signal),
+        signal,
+        wait: this.wait,
+        sourceChangedMessage: "The selected document changed while it was being read.",
+        onProgress: (partNumber, state) => {
+          if (state === "uploaded") context.onProgress?.(
+            10 + Math.floor((partNumber / upload.totalParts) * 55),
+            `Uploading document (${partNumber}/${upload.totalParts})…`,
+          );
+        },
+      });
+      record = await this.dispatch.begin(record, "complete");
       throwIfAborted(signal);
     }
     if (!record.jobId || !["complete_dispatching", "upload_completed", "start_dispatching", "processing", "result_ready", "local_commit_pending"].includes(record.phase)) {
@@ -485,7 +467,7 @@ export class ManagedDocumentProcessingAdapter {
     }
     if (record.phase === "upload_completed") {
       context.onProgress?.(70, "Starting document processing…");
-      record = await this.beginDispatch(record, "start");
+      record = await this.dispatch.begin(record, "start");
       throwIfAborted(signal);
     }
     if (record.phase === "start_dispatching") {
@@ -533,22 +515,6 @@ export class ManagedDocumentProcessingAdapter {
       if (current && reached.includes(current.phase)) return current;
       throw error;
     }
-  }
-
-  private beginDispatch(
-    record: ManagedJobRecoveryRecord,
-    operation: ManagedPendingDispatch["operation"],
-    partNumber?: number,
-    createRequest?: ManagedMultipartCreateRequest,
-  ): Promise<ManagedJobRecoveryRecord> {
-    return this.dependencies.recovery.beginDispatch(CAPABILITY, record.operationId, record.revision, {
-      operation,
-      requestId: this.createRequestId(),
-      ...(partNumber === undefined ? {} : { partNumber }),
-      ...(createRequest === undefined ? {} : { createRequest }),
-      ...(["create", "complete", "start"].includes(operation) ? { idempotencyKey: `${record.operationId}:${operation}` } : {}),
-      dispatchedAt: this.now(),
-    });
   }
 
   private async pollAndDownload(record: ManagedJobRecoveryRecord, context: ManagedDocumentProcessingContext, signal: AbortSignal): Promise<ManagedDocumentProcessingResult> {

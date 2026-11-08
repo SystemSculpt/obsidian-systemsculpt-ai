@@ -93,7 +93,7 @@
       "name": "api_request",
       "feature": "transcription",
       "kind": "server",
-      "description": "Audio transcription job created, uploaded or started, including inbox arrivals after their on-disk size and mtime settle. HTTP status measures unreadable or audio-free sources; local sync waits send no telemetry.",
+      "description": "Audio transcription job created, uploaded, resumed or started through shared multipart recovery, including inbox arrivals after their on-disk size and mtime settle. HTTP status measures unreadable or audio-free sources; local staging and sync waits send no telemetry.",
       "endpoints": [
         "/api/plugin/audio/transcriptions/jobs"
       ],
@@ -108,7 +108,7 @@
       "name": "api_request",
       "feature": "audio_processing",
       "kind": "server",
-      "description": "Audio processor job (audio file or YouTube URL) created, resumed or acknowledged.",
+      "description": "Audio processor job (audio file or YouTube URL) created, resumed or acknowledged. File uploads share slice retry and durable part checkpoints with managed transcription and documents; local staging sends no telemetry.",
       "endpoints": [
         "/audio-processor/jobs"
       ],
@@ -122,7 +122,7 @@
       "name": "api_request",
       "feature": "document_processing",
       "kind": "server",
-      "description": "Document conversion job created or started.",
+      "description": "Document conversion job created, uploaded, resumed or started through shared multipart recovery. Local staging and integrity verification send no telemetry.",
       "endpoints": [
         "/api/plugin/documents/jobs"
       ],

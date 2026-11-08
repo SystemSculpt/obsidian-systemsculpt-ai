@@ -1,5 +1,5 @@
 /** @jest-environment jsdom */
-import { App, Platform, TFile } from "obsidian";
+import { App, Platform, TFile, TFolder } from "obsidian";
 import {
   ManagedTranscriptionRetryError,
   TranscriptionResumeRequiredError,
@@ -61,7 +61,8 @@ function harness(overrides: HarnessOverrides = {}) {
   (app.vault.getAbstractFileByPath as jest.Mock).mockImplementation(
     (path: string) => path === file.path ? file : null,
   );
-  (app.vault.getFiles as jest.Mock).mockReturnValue([]);
+  (app.vault.getFiles as jest.Mock).mockImplementation(() => { throw new Error("Vault-wide output scans are forbidden."); });
+  app.vault.getFolderByPath = jest.fn(() => null);
   (app.vault as unknown as { readBinary: jest.Mock }).readBinary = jest.fn(async () => {
     throw new Error("Whole-file audio reads are forbidden.");
   });
@@ -541,7 +542,7 @@ describe("TranscriptionCoordinator", () => {
     const { app, coordinator, file } = harness();
     const existing = new TFile({ path: "Recordings/demo.md" });
     (existing as any).parent = { path: "Recordings" };
-    (app.vault.getFiles as jest.Mock).mockReturnValue([existing]);
+    jest.mocked(app.vault.getFolderByPath).mockReturnValue(new TFolder({ path: "Recordings", children: [existing] }));
     (app.vault.read as jest.Mock).mockResolvedValue("unrelated notes");
     (app.vault.getAbstractFileByPath as jest.Mock).mockImplementation((path: string) => {
       if (path === file.path) return file;
@@ -567,7 +568,7 @@ describe("TranscriptionCoordinator", () => {
     const extension = timestamped ? "srt" : "md";
     const existing = new TFile({ path: `Recordings/demo.${extension}` });
     (existing as any).parent = { path: "Recordings" };
-    (app.vault.getFiles as jest.Mock).mockReturnValue([existing]);
+    jest.mocked(app.vault.getFolderByPath).mockReturnValue(new TFolder({ path: "Recordings", children: [existing] }));
     (app.vault.read as jest.Mock).mockResolvedValue("managed transcript");
     (app.vault.getAbstractFileByPath as jest.Mock).mockImplementation((path: string) => {
       if (path === file.path) return file;
@@ -586,7 +587,7 @@ describe("TranscriptionCoordinator", () => {
     const extension = timestamped ? "srt" : "md";
     const existing = new TFile({ path: `Recordings/demo (2).${extension}` });
     (existing as any).parent = { path: "Recordings" };
-    (app.vault.getFiles as jest.Mock).mockReturnValue([existing]);
+    jest.mocked(app.vault.getFolderByPath).mockReturnValue(new TFolder({ path: "Recordings", children: [existing] }));
     (app.vault.read as jest.Mock).mockResolvedValue("managed transcript");
 
     const result = await coordinator.start({ filePath: file.path, destination: "note", timestamped });
@@ -612,7 +613,7 @@ describe("TranscriptionCoordinator", () => {
     const { app, coordinator, file } = harness({ clean: true });
     const unrelated = new TFile({ path: "Recordings/demo notes.md" });
     (unrelated as any).parent = { path: "Recordings" };
-    (app.vault.getFiles as jest.Mock).mockReturnValue([unrelated]);
+    jest.mocked(app.vault.getFolderByPath).mockReturnValue(new TFolder({ path: "Recordings", children: [unrelated] }));
     (app.vault.read as jest.Mock).mockResolvedValue("managed transcript");
 
     const result = await coordinator.start({ filePath: file.path, destination: "note" });
@@ -675,7 +676,7 @@ describe("TranscriptionCoordinator", () => {
     const operationId = "transcription-resume-1";
     const existing = new TFile({ path: "Recordings/demo - transcript - Existing.md" });
     (existing as any).parent = { path: "Recordings" };
-    (app.vault.getFiles as jest.Mock).mockReturnValue([existing]);
+    jest.mocked(app.vault.getFolderByPath).mockReturnValue(new TFolder({ path: "Recordings", children: [existing] }));
     (app.vault.read as jest.Mock).mockResolvedValue(
       `managed transcript\n\n<!-- systemsculpt-transcription:${operationId} -->\n`,
     );
@@ -698,7 +699,7 @@ describe("TranscriptionCoordinator", () => {
     const operationId = "transcription-clean-resume-1";
     const existing = new TFile({ path: `Recordings/${name}` });
     (existing as any).parent = { path: "Recordings" };
-    (app.vault.getFiles as jest.Mock).mockReturnValue([existing]);
+    jest.mocked(app.vault.getFolderByPath).mockReturnValue(new TFolder({ path: "Recordings", children: [existing] }));
     (app.vault.read as jest.Mock).mockResolvedValue("managed transcript");
 
     const result = await coordinator.start({
@@ -713,11 +714,30 @@ describe("TranscriptionCoordinator", () => {
     expect(adapter.completeLocalCommit).toHaveBeenCalledWith(operationId);
   });
 
+  it("recovers a root-folder output without scanning the vault or nested folders", async () => {
+    const { app, coordinator, file } = harness({ clean: true });
+    file.path = "demo.webm";
+    (file as any).parent = null;
+    const existing = new TFile({ path: "demo.md" });
+    const nested = new TFolder({ path: "Nested", children: [new TFile({ path: "Nested/demo.md" })] });
+    jest.mocked(app.vault.getRoot).mockReturnValue(new TFolder({ path: "/", children: [nested, existing] }));
+    (app.vault.read as jest.Mock).mockResolvedValue("managed transcript");
+
+    const result = await coordinator.start({ filePath: file.path, destination: "note", resumeOperationId: "root-operation" });
+
+    expect(result.outputPath).toBe(existing.path);
+    expect(app.vault.read).toHaveBeenCalledWith(existing);
+    expect(app.vault.read).toHaveBeenCalledTimes(1);
+    expect(app.vault.getFolderByPath).not.toHaveBeenCalled();
+    expect(app.vault.getFiles).not.toHaveBeenCalled();
+    expect(app.vault.create).not.toHaveBeenCalled();
+  });
+
   it("recovers exact clean output after the adapter explicitly adopts a preserved operation", async () => {
     const { adapter, app, coordinator, file } = harness({ clean: true });
     const existing = new TFile({ path: "Recordings/demo.md" });
     (existing as any).parent = { path: "Recordings" };
-    (app.vault.getFiles as jest.Mock).mockReturnValue([existing]);
+    jest.mocked(app.vault.getFolderByPath).mockReturnValue(new TFolder({ path: "Recordings", children: [existing] }));
     (app.vault.read as jest.Mock).mockResolvedValue("managed transcript");
     adapter.transcribe.mockImplementation(async (_source: unknown, context: any) => {
       await context.onOperationIdAdopted("preserved-operation");
@@ -734,7 +754,7 @@ describe("TranscriptionCoordinator", () => {
     const { adapter, app, coordinator, file } = harness({ clean: true });
     const existing = new TFile({ path: "Recordings/demo.md" });
     (existing as any).parent = { path: "Recordings" };
-    (app.vault.getFiles as jest.Mock).mockReturnValue([existing]);
+    jest.mocked(app.vault.getFolderByPath).mockReturnValue(new TFolder({ path: "Recordings", children: [existing] }));
     (app.vault.read as jest.Mock).mockResolvedValue("managed transcript");
     (app.vault.getAbstractFileByPath as jest.Mock).mockImplementation((path: string) => {
       if (path === file.path) return file;
@@ -753,7 +773,7 @@ describe("TranscriptionCoordinator", () => {
     const operationId = "transcription-srt-resume-1";
     const existing = new TFile({ path: "Recordings/demo.srt" });
     (existing as any).parent = { path: "Recordings" };
-    (app.vault.getFiles as jest.Mock).mockReturnValue([existing]);
+    jest.mocked(app.vault.getFolderByPath).mockReturnValue(new TFolder({ path: "Recordings", children: [existing] }));
     (app.vault.read as jest.Mock).mockResolvedValue("managed transcript");
     (app.vault.getAbstractFileByPath as jest.Mock).mockImplementation((path: string) => {
       if (path === file.path) return file;

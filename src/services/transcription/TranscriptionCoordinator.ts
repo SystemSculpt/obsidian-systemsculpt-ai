@@ -887,10 +887,9 @@ export class TranscriptionCoordinator {
     marker: string,
     signal: AbortSignal,
   ): Promise<TFile | null> {
-    const candidates = this.app.vault.getFiles().filter((candidate) => (
-      candidate.extension === extension
-      && (candidate.parent?.path ?? "") === folderPath
-      && ownsName(candidate.basename)
+    const folder = folderPath ? this.app.vault.getFolderByPath(folderPath) : this.app.vault.getRoot();
+    const candidates = (folder?.children ?? []).filter((candidate): candidate is TFile => (
+      candidate instanceof TFile && candidate.extension === extension && ownsName(candidate.basename)
     ));
     for (const candidate of candidates) {
       throwIfAborted(signal);
@@ -907,10 +906,9 @@ export class TranscriptionCoordinator {
     content: string,
     signal: AbortSignal,
   ): Promise<TFile | null> {
-    const candidates = this.app.vault.getFiles().filter((candidate) => (
-      candidate.extension === extension
-      && (candidate.parent?.path ?? "") === folderPath
-      && ownsName(candidate.basename)
+    const folder = folderPath ? this.app.vault.getFolderByPath(folderPath) : this.app.vault.getRoot();
+    const candidates = (folder?.children ?? []).filter((candidate): candidate is TFile => (
+      candidate instanceof TFile && candidate.extension === extension && ownsName(candidate.basename)
     ));
     for (const candidate of candidates) {
       throwIfAborted(signal);
