@@ -358,8 +358,10 @@ function renderRequestedWriteEdit(container: HTMLElement, part: AgentToolPart): 
     }
     return;
   }
-  container.createEl("p", { cls: "ss-tool-caption", text: "Requested text changes only. Original file line numbers are unavailable." });
   const edits = part.name === "MultiEdit" ? records(input.edits) : [input];
+  if (edits.some(edit => typeof edit.old_string === "string" && typeof edit.new_string === "string")) {
+    container.createEl("p", { cls: "ss-tool-caption", text: "Requested text changes only. Original file line numbers are unavailable." });
+  }
   for (const [index, edit] of edits.entries()) {
     if (typeof edit.old_string !== "string" || typeof edit.new_string !== "string") continue;
     const body = container.createDiv({ cls: "systemsculpt-inline-diff__body" });

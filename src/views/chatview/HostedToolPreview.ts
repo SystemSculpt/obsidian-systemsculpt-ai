@@ -210,8 +210,10 @@ function renderSearch(app: App, host: HTMLElement, output: RecordValue, options:
 }
 
 function renderEdit(app: App, host: HTMLElement, input: RecordValue, output: RecordValue, options: HostedToolPreviewOptions, multiple: boolean): void {
-  caption(host, "Requested text changes only. Original file line numbers are unavailable.");
   const files = multiple ? records(input.files) : [input];
+  // The disclaimer describes a preview, so it shows only when there is one.
+  const literal = (edit: RecordValue) => typeof edit.oldText === "string" && typeof edit.newText === "string";
+  if (files.some(file => records(file.edits).some(literal))) caption(host, "Requested text changes only. Original file line numbers are unavailable.");
   const results = multiple ? records(output.results) : [output];
   for (const file of files) {
     const section = host.createDiv({ cls: "systemsculpt-inline-diff__body ss-tool-section" });
