@@ -125,7 +125,9 @@ export class StudioShapeController {
     if (additive) {
       this.selection.toggle(target.type, target.id);
     } else {
-      if (this.selection.ids(target.type).has(target.id) && this.shapeIds.size + this.arrowIds.size === 1) return;
+      // Pointerdown on a selected shape starts a drag of the whole selection.
+      if (this.selection.ids(target.type).has(target.id)
+        && (target.type === "shape" || this.shapeIds.size + this.arrowIds.size === 1)) return;
       this.selection.selectOnly(target.type, target.id);
     }
     this.host.requestRender();

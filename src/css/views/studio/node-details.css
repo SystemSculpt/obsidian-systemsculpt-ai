@@ -30,8 +30,7 @@
 }
 
 .ss-studio-node-text-rendered-empty {
-  color: var(--ss-ink-faint);
-  font-style: italic;
+  color: var(--ss-ink-muted);
 }
 
 .ss-studio-node-text-display-mode-label {

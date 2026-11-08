@@ -87,6 +87,7 @@ export class StudioGraphInteractionEngine {
       getCurrentProject: () => this.host.getCurrentProject(),
       getGraphZoom: () => this.selectionController.getGraphZoom(),
       getSelectedNodeIds: () => this.selectionController.getSelectedNodeIds(),
+      hasDiagramSelection: () => this.selection.ids("shape").size > 0 || this.selection.ids("arrow").size > 0,
       getNodeElement: (nodeId) => this.selectionController.getNodeElement(nodeId),
       onSelectionResize: (patches, options) => this.host.onSelectionResize?.(patches, options),
     }, this.selectionController.geometry);
@@ -106,6 +107,10 @@ export class StudioGraphInteractionEngine {
 
   clearMovementGuides(): void {
     this.selectionController.clearAlignmentGuides();
+  }
+
+  refreshAlignmentGuides(): void {
+    this.selectionController.refreshAlignmentGuides();
   }
 
   getGraphZoom(): number {

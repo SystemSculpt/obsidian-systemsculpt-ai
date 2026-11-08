@@ -50,7 +50,7 @@
 
 .ss-studio-shape-outline-body {
   fill: var(--ss-surface-1);
-  stroke: var(--ss-line-strong, var(--ss-line));
+  stroke: var(--ss-ink-muted);
   stroke-width: 1.5;
   stroke-linejoin: round;
 }
@@ -58,7 +58,7 @@
 /* Cylinder rim and sticky-note fold: interior lines, never filled. */
 .ss-studio-shape-outline-detail {
   fill: none;
-  stroke: var(--ss-line-strong, var(--ss-line));
+  stroke: var(--ss-ink-muted);
   stroke-width: 1.5;
   stroke-linecap: round;
   stroke-linejoin: round;
@@ -70,7 +70,7 @@
 
 .ss-studio-shape:hover .ss-studio-shape-outline-body,
 .ss-studio-shape:hover .ss-studio-shape-outline-detail {
-  stroke: var(--ss-line-accent);
+  stroke: var(--ss-accent);
 }
 
 .ss-studio-shape.is-selected .ss-studio-shape-outline-body,
@@ -224,6 +224,7 @@
 .ss-studio-shape-arrow-label {
   position: absolute;
   transform: translate(-50%, -50%);
+  width: max-content;
   max-width: 220px;
   padding: 0 var(--ss-space-1);
   border-radius: var(--ss-radius-xs);

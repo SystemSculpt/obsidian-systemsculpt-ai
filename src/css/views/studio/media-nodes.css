@@ -224,7 +224,7 @@
   content: "";
   position: absolute;
   inset: 2px;
-  border: 1px solid var(--ss-line-strong);
+  border: 1px solid var(--ss-accent);
   border-radius: var(--ss-radius-xs);
   background-color: var(--ss-surface-0);
   opacity: 0;

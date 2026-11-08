@@ -11,6 +11,7 @@ import {
   type StudioArrowAnchor,
 } from "./StudioShapeGeometry";
 import { buildStudioShapeOutline } from "./StudioShapeOutline";
+import type { StudioCanvasGeometry, StudioCanvasLabelBinding } from "../canvas/StudioCanvasGeometry";
 
 /**
  * The diagram layer: shapes and visual arrows between canvas items. Node card
@@ -46,6 +47,8 @@ export type StudioShapeLayerOptions = {
   getSelection?: () => StudioShapeSelection;
   getGraphZoom: () => number;
   getNodeAnchor?: (nodeId: string) => StudioArrowAnchor | null;
+  geometry?: Pick<StudioCanvasGeometry, "registerArrowLabelElement">;
+  onArrowGeometryChanged?: () => void;
   onSelect: (target: StudioShapeTarget, options: { additive: boolean }) => void;
   /**
    * A drag started on a shape. The delta applies to the whole canvas selection
@@ -82,6 +85,7 @@ type ArrowElements = {
   head: SVGPathElement;
   /** HTML div at the arrow's midpoint; empty labels are hidden by CSS. */
   label: HTMLElement;
+  labelBinding?: StudioCanvasLabelBinding;
 };
 
 /** A shape is drawn as its own SVG outline, so every kind gets a true border. */
@@ -147,6 +151,7 @@ export function renderStudioShapeLayer(options: StudioShapeLayerOptions): Studio
   let previewPath: SVGPathElement | null = null;
   let cancelArrowGesture = (): void => {};
   let cancelMoveGesture: (() => void) | null = null;
+  let cancelResizeGesture: (() => void) | null = null;
 
   const resolveAnchor = (itemId: string): StudioArrowAnchor | null =>
     shapesById.get(itemId) ?? options.getNodeAnchor?.(itemId) ?? null;
@@ -177,6 +182,7 @@ export function renderStudioShapeLayer(options: StudioShapeLayerOptions): Studio
 
   const removeArrow = (arrowId: string): void => {
     const elements = arrowElements.get(arrowId);
+    elements?.labelBinding?.dispose();
     elements?.group.remove();
     elements?.label.remove();
     arrowElements.delete(arrowId);
@@ -202,6 +208,7 @@ export function renderStudioShapeLayer(options: StudioShapeLayerOptions): Studio
       if (!elements) {
         const created = createArrowElements(arrowsLayer, layerEl, arrow.id);
         elements = created;
+        created.labelBinding = options.geometry?.registerArrowLabelElement(arrow.id, created.label, options.onArrowGeometryChanged);
         arrowElements.set(arrow.id, created);
         arrowsLayer.appendChild(created.group);
         created.hit.addEventListener("pointerdown", (event) => {
@@ -245,7 +252,9 @@ export function renderStudioShapeLayer(options: StudioShapeLayerOptions): Studio
       if (!elements.label.classList.contains("is-editing")) {
         elements.label.textContent = arrow.label || "";
       }
+      elements.labelBinding?.updatePosition(path.mid);
     }
+    options.onArrowGeometryChanged?.();
   };
 
   const cancelArrowFrame = (): void => {
@@ -302,19 +311,8 @@ export function renderStudioShapeLayer(options: StudioShapeLayerOptions): Studio
   };
 
   const startMoveGesture = (shape: StudioShapeInstance, startEvent: PointerEvent): void => {
-    const origin = graphPointFromClient(startEvent.clientX, startEvent.clientY);
-    // Dragging a member of the selection drags the whole selection; dragging
-    // anything else is that shape alone.
-    cancelMoveGesture?.();
-    const dragShapeIds = selection().shapeIds.includes(shape.id) ? [...selection().shapeIds] : [shape.id];
-    dragShapeIds.forEach(shapeId => activeGestureShapeIds.add(shapeId));
+    let dragShapeIds: string[] = [];
     const startPositions = new Map<string, { x: number; y: number }>();
-    for (const shapeId of dragShapeIds) {
-      const dragged = shapesById.get(shapeId);
-      if (dragged) {
-        startPositions.set(shapeId, { ...dragged.position });
-      }
-    }
     let activated = false;
     let lastDelta = { x: 0, y: 0 };
 
@@ -355,6 +353,21 @@ export function renderStudioShapeLayer(options: StudioShapeLayerOptions): Studio
       onFinish: () => finish(true),
       onCancel: () => finish(false),
     });
+    // Capture origins only after the previous gesture has restored its preview.
+    if (!shapesById.has(shape.id)) {
+      cancelMoveGesture();
+      return;
+    }
+    const origin = graphPointFromClient(startEvent.clientX, startEvent.clientY);
+    // Dragging a member moves the whole selection; anything else moves alone.
+    dragShapeIds = selection().shapeIds.includes(shape.id) ? [...selection().shapeIds] : [shape.id];
+    for (const shapeId of dragShapeIds) {
+      const dragged = shapesById.get(shapeId);
+      if (dragged) {
+        activeGestureShapeIds.add(shapeId);
+        startPositions.set(shapeId, { ...dragged.position });
+      }
+    }
   };
 
   const startResizeGesture = (
@@ -362,19 +375,8 @@ export function renderStudioShapeLayer(options: StudioShapeLayerOptions): Studio
     corner: ResizeCorner,
     startEvent: PointerEvent
   ): void => {
-    activeGestureShapeIds.add(shape.id);
-    const origin = graphPointFromClient(startEvent.clientX, startEvent.clientY);
-    const startRect: StudioShapeRect = {
-      x: shape.position.x,
-      y: shape.position.y,
-      width: shape.size.width,
-      height: shape.size.height,
-    };
-
     const finish = (commit: boolean): void => {
-      ownerWindow.removeEventListener("pointermove", onMove);
-      ownerWindow.removeEventListener("pointerup", onUp);
-      ownerWindow.removeEventListener("pointercancel", onCancel);
+      cancelResizeGesture = null;
       activeGestureShapeIds.delete(shape.id);
       if (!commit) {
         // Refreshes received during the gesture deferred this shape and its handles.
@@ -416,23 +418,27 @@ export function renderStudioShapeLayer(options: StudioShapeLayerOptions): Studio
       refreshArrows([shape.id]);
     }
 
-    function onUp(event: PointerEvent): void {
-      if (event.pointerId !== startEvent.pointerId) {
-        return;
-      }
-      finish(true);
+    cancelResizeGesture = startStudioPointerGesture({
+      // Handles are rebuilt during document refreshes; capture their stable root.
+      element: shapeElements.get(shape.id)?.root ?? canvasEl,
+      event: startEvent,
+      onMove,
+      onFinish: event => finish(event?.type === "pointerup"),
+      onCancel: () => finish(false),
+    });
+    // Superseding another gesture may restore or delete this working shape.
+    if (!shapesById.has(shape.id)) {
+      cancelResizeGesture();
+      return;
     }
-
-    function onCancel(event: PointerEvent): void {
-      if (event.pointerId !== startEvent.pointerId) {
-        return;
-      }
-      finish(false);
-    }
-
-    ownerWindow.addEventListener("pointermove", onMove);
-    ownerWindow.addEventListener("pointerup", onUp);
-    ownerWindow.addEventListener("pointercancel", onCancel);
+    activeGestureShapeIds.add(shape.id);
+    const origin = graphPointFromClient(startEvent.clientX, startEvent.clientY);
+    const startRect: StudioShapeRect = {
+      x: shape.position.x,
+      y: shape.position.y,
+      width: shape.size.width,
+      height: shape.size.height,
+    };
   };
 
   const startArrowGesture = (itemId: string, startEvent: PointerEvent): void => {
@@ -545,10 +551,12 @@ export function renderStudioShapeLayer(options: StudioShapeLayerOptions): Studio
   const handle: StudioShapeLayerHandle = {
     el: layerEl,
     dispose: () => {
+      cancelResizeGesture?.();
       cancelMoveGesture?.();
       cancelArrowGesture();
       disposed = true;
       cancelArrowFrame();
+      for (const elements of arrowElements.values()) elements.labelBinding?.dispose();
     },
     startArrowGesture,
     cancelArrowGesture: () => cancelArrowGesture(),

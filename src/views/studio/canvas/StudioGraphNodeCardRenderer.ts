@@ -21,6 +21,7 @@ import { mountStudioImageBoardEditor } from './image-board/StudioImageBoardEdito
 import {
   isStudioExpandedTextNodeKind,
   isStudioFillTextNode,
+  isStudioTextNodeAutoWidth,
   resolveStudioGraphNodeMinHeight,
   resolveStudioGraphNodeWidth,
 } from '../../../studio/StudioNodeGeometry';
@@ -94,7 +95,10 @@ export function renderStudioGraphNodeCard(options: RenderStudioGraphNodeCardOpti
     element: nodeEl,
     updateGeometry: (nextNode) => {
       nodeEl.style.transform = `translate(${nextNode.position.x}px, ${nextNode.position.y}px)`;
-      nodeEl.style.width = `${resolveStudioGraphNodeWidth(nextNode)}px`;
+      // Intrinsic text owns its measured glyph width, including on selection refresh.
+      if (!isStudioTextNodeAutoWidth(nextNode)) {
+        nodeEl.style.width = `${resolveStudioGraphNodeWidth(nextNode)}px`;
+      }
       const nextMinimum = resolveStudioGraphNodeMinHeight(nextNode);
       nodeEl.style.minHeight = nextMinimum > 0 ? `${nextMinimum}px` : "";
     },

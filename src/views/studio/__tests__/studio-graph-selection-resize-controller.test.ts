@@ -77,6 +77,7 @@ type Harness = {
   commits: CommitCall[];
   history: StudioProjectV1[];
   selection: string[];
+  hasDiagramSelection: boolean;
   setBusy: (busy: boolean) => void;
 };
 
@@ -99,12 +100,13 @@ function createHarness(options: {
   const commits: CommitCall[] = [];
   const history: StudioProjectV1[] = [];
   let busy = false;
-  const harness: Partial<Harness> = { selection: [...options.selection] };
+  const harness: Partial<Harness> = { selection: [...options.selection], hasDiagramSelection: false };
   const controller = new StudioGraphSelectionResizeController({
     isBusy: () => busy,
     getCurrentProject: () => project,
     getGraphZoom: () => options.zoom ?? 1,
     getSelectedNodeIds: () => harness.selection ?? [],
+    hasDiagramSelection: () => harness.hasDiagramSelection === true,
     getNodeElement: (nodeId) => elements.get(nodeId) ?? null,
     onSelectionResize: (patches, commitOptions) => {
       if (commitOptions?.captureHistory) {
@@ -215,6 +217,20 @@ function dragZone(
 }
 
 describe("StudioGraphSelectionResizeController", () => {
+  it("does not present node-only resize bounds as the extent of a mixed selection", () => {
+    const harness = createTwoNodeHarness();
+    harness.controller.refreshSelectionFrame();
+    expect(queryFrame(harness.canvas).classList.contains("is-visible")).toBe(true);
+    harness.hasDiagramSelection = true;
+    harness.controller.refreshSelectionFrame();
+    expect(queryFrame(harness.canvas).classList.contains("is-visible")).toBe(false);
+    expect(harness.canvas.classList.contains("is-multi-select-active")).toBe(false);
+    harness.hasDiagramSelection = false;
+    harness.controller.refreshSelectionFrame();
+    expect(queryFrame(harness.canvas).classList.contains("is-visible")).toBe(true);
+    harness.controller.clearRenderBindings();
+  });
+
   beforeEach(() => {
     jest
       .spyOn(window, "requestAnimationFrame")

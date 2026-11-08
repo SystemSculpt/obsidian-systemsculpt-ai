@@ -43,6 +43,7 @@ function options(currentProject: StudioProjectV1): StudioGraphWorkspaceRendererO
     registerViewportElement: no, handleGraphViewportWheel: no, startMarqueeSelection: no, startCanvasPan: no,
     getGraphZoom: () => 1, registerSurfaceElement: no, registerCanvasElement: no, registerMarqueeElement: no,
     registerAlignmentGuidesElement: no, registerZoomLabelElement: no, registerEdgesLayerElement: no,
+    refreshAlignmentGuides: no,
     clearGraphElementMaps: no, registerNodeElement: no, registerPortElement: no, renderGroupLayer: no,
     refreshNodeSelectionClasses: no, applyGraphZoom: no, refreshSelectionResizeFrame: no,
     isNodeSelected: () => false, onNodeRemoved: no, notifyNodePositionsChanged: no,
@@ -62,6 +63,28 @@ function options(currentProject: StudioProjectV1): StudioGraphWorkspaceRendererO
 }
 
 describe("persistent Studio graph workspace", () => {
+  it("preserves measured automatic text width on unrelated selection refresh", () => {
+    const text: StudioNodeInstance = { ...node("Notes", 40), kind: "studio.text", position: { x: 40, y: 420 }, config: { value: "Research and ideas" } };
+    const initial = options(project([text]));
+    initial.graphInteraction.getGraphZoom = () => 0.83;
+    document.body.appendChild(initial.root);
+    const handle = renderStudioGraphWorkspace(initial);
+    try {
+      const card = initial.root.querySelector<HTMLElement>('[data-node-id="Notes"]')!;
+      card.style.width = "145px"; // Settled fitAutoWidth measurement.
+      const transform = card.style.transform;
+      initial.shapeLayer.selection = { shapeIds: ["plan"], arrowIds: [] };
+      expect(handle.refresh(initial)).toBe(true);
+      expect(initial.root.querySelector('[data-node-id="Notes"]')).toBe(card);
+      expect(card.style.transform).toBe(transform);
+      expect(text.config).toEqual({ value: "Research and ideas" });
+      expect(card.style.width).toBe("145px");
+    } finally {
+      handle.dispose();
+      initial.root.remove();
+    }
+  });
+
   it("refreshes shape-only peer geometry for group bounds and subsequent snapping", () => {
     const current = project([node("moving")]);
     current.diagram = { shapes: [{ id: "shape", shape: "rectangle", position: { x: 500, y: 3 }, size: { width: 100, height: 100 } } as any], arrows: [] };

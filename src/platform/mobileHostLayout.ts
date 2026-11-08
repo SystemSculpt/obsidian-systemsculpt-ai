@@ -263,8 +263,11 @@ export function ensureMobileHostLayoutState(owner?: MobileLayoutOwner): void {
 export function readMobileHostLayout(owner?: MobileLayoutOwner): MobileHostLayoutSnapshot {
   const document = resolveMobileLayoutDocument(owner);
   const ownerWindow = document?.defaultView;
-  const viewportBottom = ownerWindow?.innerHeight
+  const layoutBottom = ownerWindow?.innerHeight
     ?? (typeof window !== "undefined" ? window.innerHeight : 0);
+  const visualViewport = ownerWindow?.visualViewport;
+  const visualBottom = visualViewport ? visualViewport.offsetTop + visualViewport.height : layoutBottom;
+  const viewportBottom = Number.isFinite(visualBottom) ? Math.min(layoutBottom, visualBottom) : layoutBottom;
   if (!document?.body) {
     return { isMobile: false, navbarVisible: false, navbarTop: null, viewportBottom };
   }
