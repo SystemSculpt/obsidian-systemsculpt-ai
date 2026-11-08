@@ -1,3 +1,4 @@
+import { startStudioPointerGesture } from "./StudioPointerGesture";
 import { isManagedOutputPlaceholderNode } from "../../studio/StudioManagedOutputNodes";
 import {
   resolveStudioCanvasDelta,
@@ -86,6 +87,7 @@ export class StudioGraphSelectionResizeController {
   private canvasEl: HTMLElement | null = null;
   private frameEl: HTMLElement | null = null;
   private gesture: GestureState | null = null;
+  private cancelPointerGesture: (() => void) | null = null;
 
   constructor(
     private readonly host: StudioGraphSelectionResizeControllerHost,
@@ -126,6 +128,7 @@ export class StudioGraphSelectionResizeController {
   clearRenderBindings(): void {
     // A re-render mid-gesture finalizes at the last applied state, exactly
     // like unmounting the single-node frame does.
+    this.cancelPointerGesture?.();
     this.finishGesture("finalize");
     this.frameEl?.remove();
     this.frameEl = null;
@@ -261,17 +264,13 @@ export class StudioGraphSelectionResizeController {
     };
 
     zoneEl.classList.add("is-active");
-    if (typeof zoneEl.setPointerCapture === "function") {
-      try {
-        zoneEl.setPointerCapture(event.pointerId);
-      } catch {
-        // Ignore capture errors; window listeners are fallback.
-      }
-    }
-    this.gesture.ownerWindow.addEventListener("pointermove", this.onPointerMove);
-    this.gesture.ownerWindow.addEventListener("pointerup", this.onPointerFinish);
-    this.gesture.ownerWindow.addEventListener("pointercancel", this.onPointerFinish);
-    this.gesture.ownerWindow.addEventListener("keydown", this.onKeyDown);
+    this.cancelPointerGesture = startStudioPointerGesture({
+      element: zoneEl,
+      event,
+      onMove: this.onPointerMove,
+      onFinish: () => { this.cancelPointerGesture = null; this.finishGesture("finalize"); },
+      onCancel: reason => { this.cancelPointerGesture = null; this.finishGesture(reason === "escape" ? "abort" : "finalize"); },
+    });
   }
 
   private readonly onPointerMove = (event: PointerEvent): void => {
@@ -289,23 +288,6 @@ export class StudioGraphSelectionResizeController {
     gesture.pendingDeltaX = delta.deltaX;
     gesture.pendingDeltaY = delta.deltaY;
     this.scheduleApply();
-  };
-
-  private readonly onPointerFinish = (event: PointerEvent): void => {
-    const gesture = this.gesture;
-    if (!gesture || event.pointerId !== gesture.pointerId) {
-      return;
-    }
-    this.finishGesture("finalize");
-  };
-
-  private readonly onKeyDown = (event: KeyboardEvent): void => {
-    if (!this.gesture || event.key !== "Escape") {
-      return;
-    }
-    event.preventDefault();
-    event.stopPropagation();
-    this.finishGesture("abort");
   };
 
   private scheduleApply(): void {
@@ -463,18 +445,7 @@ export class StudioGraphSelectionResizeController {
         this.applyPendingFrame();
       }
     }
-    gesture.ownerWindow.removeEventListener("pointermove", this.onPointerMove);
-    gesture.ownerWindow.removeEventListener("pointerup", this.onPointerFinish);
-    gesture.ownerWindow.removeEventListener("pointercancel", this.onPointerFinish);
-    gesture.ownerWindow.removeEventListener("keydown", this.onKeyDown);
     gesture.zoneEl.classList.remove("is-active");
-    if (typeof gesture.zoneEl.releasePointerCapture === "function") {
-      try {
-        gesture.zoneEl.releasePointerCapture(gesture.pointerId);
-      } catch {
-        // Ignore release errors from detached pointers.
-      }
-    }
 
     if (gesture.didMutate) {
       if (outcome === "finalize") {

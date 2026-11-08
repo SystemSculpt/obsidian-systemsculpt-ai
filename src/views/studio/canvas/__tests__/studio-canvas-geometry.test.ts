@@ -48,6 +48,27 @@ describe("StudioCanvasGeometry", () => {
     geometry.clearNodeElements();
   });
 
+  it("refreshes shape-only external moves and same-count replacements without measuring cards", () => {
+    const current = project([node("a", 0, 0)]);
+    const geometry = new StudioCanvasGeometry(() => current);
+    const a = card();
+    geometry.registerNodeElement("a", a.element);
+    const revision = geometry.revision;
+    a.width.mockClear(); a.height.mockClear();
+    current.diagram!.shapes[0].position.y = 900;
+    expect(geometry.refreshShapes()).toEqual(["shape"]);
+    expect(geometry.getShapeRects().get("shape")?.top).toBe(900);
+    expect(geometry.revision).toBeGreaterThan(revision);
+    expect(geometry.refreshShapes()).toEqual([]);
+    current.diagram!.shapes[0] = shape("replacement", 100, 200);
+    expect(geometry.refreshShapes()).toEqual(["shape", "replacement"]);
+    expect(geometry.getShape("shape")).toBeNull();
+    expect(geometry.getShapeRect("replacement")?.top).toBe(200);
+    expect(a.width).not.toHaveBeenCalled();
+    expect(a.height).not.toHaveBeenCalled();
+    geometry.clearNodeElements();
+  });
+
   it("resolves cloned mutation drafts without writing to live nodes, including reordered drafts", () => {
     const current = project([node("a", 10, 20), node("b", 400, 300)]);
     const geometry = new StudioCanvasGeometry(() => current);

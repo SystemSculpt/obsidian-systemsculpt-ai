@@ -109,6 +109,34 @@ export class StudioCanvasGeometry {
     return this.nodeRects;
   }
 
+  /** External diagram edits can change in place without touching any node card. */
+  refreshShapes(): string[] {
+    const project = this.getCurrentProject();
+    if (project !== this.project || project?.graph.nodes !== this.nodes ||
+      (project?.graph.nodes.length ?? 0) !== this.nodeCount) {
+      this.refresh();
+      return [...this.shapeById.keys()];
+    }
+    const shapes = project?.diagram?.shapes;
+    const incoming = new Set((shapes ?? []).map(shape => shape.id));
+    const changed: string[] = [];
+    for (const shapeId of this.shapeById.keys()) {
+      if (incoming.has(shapeId)) continue;
+      this.shapeById.delete(shapeId);
+      this.shapeRects.delete(shapeId);
+      changed.push(shapeId);
+    }
+    for (const shape of shapes ?? []) {
+      const previous = this.shapeRects.get(shape.id);
+      this.shapeById.set(shape.id, shape);
+      if (this.updateShapeRect(shape.id) !== previous) changed.push(shape.id);
+    }
+    this.shapes = shapes;
+    this.shapeCount = shapes?.length ?? 0;
+    if (changed.length) this.geometryRevision++;
+    return changed;
+  }
+
   getShape(shapeId: string): StudioShapeInstance | null {
     this.ensureProject();
     return this.shapeById.get(shapeId) ?? null;

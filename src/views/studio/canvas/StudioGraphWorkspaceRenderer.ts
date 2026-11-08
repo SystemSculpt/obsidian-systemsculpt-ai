@@ -664,10 +664,13 @@ export function renderStudioGraphWorkspace(
     }
     if (registrationsChanged) rebuildElementRegistrations();
 
+    const changedShapeIds = graphInteraction.geometry.refreshShapes();
     const nextEdgesSignature = studioCollectionSignature(project.graph.edges);
     if (registrationsChanged || geometryChanged || nextEdgesSignature !== edgesSignature) {
       edgesSignature = nextEdgesSignature;
       graphInteraction.notifyNodePositionsChanged();
+    } else if (changedShapeIds.length) {
+      graphInteraction.notifyNodePositionsChanged({ recomputeCanvasBounds: false, translating: true, shapeIds: changedShapeIds });
     }
     const nextGroupsSignature = studioCollectionSignature(project.graph.groups);
     if (registrationsChanged || nextGroupsSignature !== groupsSignature) {

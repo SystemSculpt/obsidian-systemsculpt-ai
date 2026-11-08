@@ -1,4 +1,6 @@
 /** @jest-environment jsdom */
+
+import { StudioCanvasGeometry } from "../StudioCanvasGeometry";
 import type { App } from "obsidian";
 import {
   createEmptyStudioImageBoard,
@@ -77,6 +79,7 @@ function harness(node: StudioNodeInstance, initial: { previewReady?: boolean } =
   });
   const root = document.body.createDiv();
   const graphInteraction = {
+    geometry: new StudioCanvasGeometry(() => state.project),
     registerViewportElement: no, handleGraphViewportWheel: no, startMarqueeSelection: no, startCanvasPan: no,
     getGraphZoom: () => 1, registerSurfaceElement: no, registerCanvasElement: no, registerMarqueeElement: no,
     registerAlignmentGuidesElement: no, registerZoomLabelElement: no, registerEdgesLayerElement: no,

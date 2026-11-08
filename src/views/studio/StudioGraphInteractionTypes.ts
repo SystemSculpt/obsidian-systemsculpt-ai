@@ -50,6 +50,14 @@ export type StudioGraphProjectMutationOptions = {
   captureHistory?: boolean;
 };
 
+export type NotifyNodePositionsChangedOptions = {
+  nodeIds?: readonly string[];
+  shapeIds?: readonly string[];
+  recomputeCanvasBounds?: boolean;
+  /** A drag frame: nodes only moved, so edges reuse their measured port offsets. */
+  translating?: boolean;
+};
+
 type StudioGraphProjectMutator = (project: StudioProjectV1) => boolean | void;
 
 export type StudioGraphInteractionHost = {

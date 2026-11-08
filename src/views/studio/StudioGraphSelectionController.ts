@@ -8,6 +8,7 @@ import {
   STUDIO_GRAPH_MAX_ZOOM,
   STUDIO_GRAPH_MIN_ZOOM,
   STUDIO_GRAPH_OVERVIEW_MIN_ZOOM,
+  type NotifyNodePositionsChangedOptions,
   type StudioGraphProjectMutationOptions,
   type StudioGraphZoomChangeContext,
   type StudioGraphZoomMode,
@@ -84,13 +85,6 @@ type StudioGraphSelectionHost = {
   finishDiagramTranslation?: () => void;
 };
 
-export type NotifyNodePositionsChangedOptions = {
-  nodeIds?: readonly string[];
-  shapeIds?: readonly string[];
-  recomputeCanvasBounds?: boolean;
-  /** A drag frame: nodes only moved, so edges reuse their measured port offsets. */
-  translating?: boolean;
-};
 
 export class StudioGraphSelectionController {
   readonly geometry: StudioCanvasGeometry;
@@ -998,7 +992,7 @@ export class StudioGraphSelectionController {
   }
 
   previewSelectionTranslation(): void {
-    if (this.nodeTranslationOrigins.size === 0) {
+    if (this.nodeTranslationOrigins.size === 0 && !this.host.getSelectedShapeIds?.().length) {
       return;
     }
     for (const nodeId of this.nodeTranslationOrigins.keys()) {
@@ -1013,7 +1007,7 @@ export class StudioGraphSelectionController {
   }
 
   finishSelectionTranslation(): void {
-    if (this.nodeTranslationOrigins.size === 0) {
+    if (this.nodeTranslationOrigins.size === 0 && !this.host.getSelectedShapeIds?.().length) {
       return;
     }
     this.nodeTranslationOrigins = new Map();

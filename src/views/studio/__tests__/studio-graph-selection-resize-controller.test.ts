@@ -4,6 +4,7 @@
 import { MANAGED_OUTPUT_PENDING_KEY, MANAGED_TEXT_OWNER, MANAGED_TEXT_OWNER_KEY } from '../../../studio/StudioManagedOutputMetadata';
 import type { StudioNodeInstance, StudioProjectV1 } from "../../../studio/types";
 import type { StudioGraphNodeMutationOptions } from "../canvas/StudioGraphNodeCardTypes";
+import { startStudioPointerGesture } from "../StudioPointerGesture";
 import { StudioCanvasGeometry } from "../canvas/StudioCanvasGeometry";
 import {
   StudioGraphSelectionResizeController,
@@ -465,6 +466,24 @@ describe("StudioGraphSelectionResizeController", () => {
   });
 
   describe("gesture teardown", () => {
+    it.each(["blur", "lostpointercapture", "superseded"])("settles a multi-node resize on %s without leaving stale listeners", reason => {
+      const harness = createTwoNodeHarness();
+      harness.controller.refreshSelectionFrame();
+      dragZone(harness.canvas, "e", { to: { x: 90, y: 0 }, release: false });
+      let cancelNext: (() => void) | undefined;
+      if (reason === "blur") window.dispatchEvent(new Event("blur"));
+      if (reason === "lostpointercapture") harness.canvas.querySelector<HTMLElement>('[data-resize-zone="e"]')!.dispatchEvent(createPointerEvent("lostpointercapture", { pointerId: 7, clientX: 90, clientY: 0 }));
+      if (reason === "superseded") cancelNext = startStudioPointerGesture({ element: harness.canvas, event: createPointerEvent("pointerdown", { pointerId: 99, clientX: 0, clientY: 0 }), onMove: () => {}, onFinish: () => {}, onCancel: () => {} });
+      const count = harness.commits.length;
+      expect(harness.commits[count - 1].options?.mode).toBe("discrete");
+      window.dispatchEvent(createPointerEvent("pointermove", { pointerId: 7, clientX: 300, clientY: 0 }));
+      window.dispatchEvent(createPointerEvent("pointerup", { pointerId: 7, clientX: 300, clientY: 0 }));
+      expect(harness.commits).toHaveLength(count);
+      dragZone(harness.canvas, "e", { to: { x: 90, y: 0 } });
+      expect(harness.commits.length).toBeGreaterThan(count);
+      cancelNext?.();
+    });
+
     it("aborts on Escape: reverts DOM and commits the pre-gesture geometry", () => {
       const harness = createTwoNodeHarness();
       harness.controller.refreshSelectionFrame();

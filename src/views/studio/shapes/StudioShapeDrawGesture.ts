@@ -1,4 +1,5 @@
-import { createStudioSvgElement, getStudioOwnerWindow } from "../StudioDomContext";
+import { startStudioPointerGesture } from "../StudioPointerGesture";
+import { createStudioSvgElement } from "../StudioDomContext";
 import { buildStudioShapeOutline } from "./StudioShapeOutline";
 import { resolveStudioGraphSafeZoom } from "../../../studio/StudioNodeGeometry";
 import type { StudioShapeKind } from "../../../studio/types";
@@ -59,7 +60,6 @@ export function startStudioShapeDrawGesture(options: StudioShapeDrawGestureOptio
     onCancel,
   } = options;
 
-  const ownerWindow = getStudioOwnerWindow(canvasEl);
   const startPoint = graphPointFromClient(
     canvasEl,
     resolveStudioGraphSafeZoom(getGraphZoom()),
@@ -115,10 +115,6 @@ export function startStudioShapeDrawGesture(options: StudioShapeDrawGestureOptio
 
   const cleanup = (): void => {
     previewEl.remove();
-    ownerWindow.removeEventListener("pointermove", onMove);
-    ownerWindow.removeEventListener("pointerup", onEnd);
-    ownerWindow.removeEventListener("pointercancel", onCancelled);
-    ownerWindow.removeEventListener("keydown", onKeyDown);
   };
 
   function onMove(event: PointerEvent): void {
@@ -158,34 +154,19 @@ export function startStudioShapeDrawGesture(options: StudioShapeDrawGestureOptio
     });
   }
 
-  function onCancelled(event: PointerEvent): void {
-    if (settled || event.pointerId !== startEvent.pointerId) {
-      return;
-    }
+  const cancel = (notify: boolean): void => {
+    if (settled) return;
     settled = true;
     cleanup();
-    onCancel?.();
-  }
-
-  function onKeyDown(event: KeyboardEvent): void {
-    if (settled || event.key !== "Escape") {
-      return;
-    }
-    settled = true;
-    cleanup();
-    onCancel?.();
-  }
-
-  ownerWindow.addEventListener("pointermove", onMove);
-  ownerWindow.addEventListener("pointerup", onEnd);
-  ownerWindow.addEventListener("pointercancel", onCancelled);
-  ownerWindow.addEventListener("keydown", onKeyDown);
-  // Tool switches and view teardown own their next render and tool state.
-  return () => {
-    if (settled) {
-      return;
-    }
-    settled = true;
-    cleanup();
+    if (notify) onCancel?.();
   };
+
+  return startStudioPointerGesture({
+    element: canvasEl,
+    event: startEvent,
+    onMove,
+    onFinish: event => event?.type === "pointerup" ? onEnd(event) : cancel(true),
+    // Tool switches and view teardown own their next render and tool state.
+    onCancel: reason => cancel(reason !== "dispose"),
+  });
 }

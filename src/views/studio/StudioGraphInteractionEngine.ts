@@ -5,6 +5,7 @@ import { StudioGraphSelectionController } from "./StudioGraphSelectionController
 import { StudioGraphSelectionResizeController } from "./StudioGraphSelectionResizeController";
 import type { StudioProjectV1 } from "../../studio/types";
 import type {
+  NotifyNodePositionsChangedOptions,
   PendingConnection,
   StudioGraphInteractionHost,
   StudioGraphZoomMode,
@@ -401,7 +402,7 @@ export class StudioGraphInteractionEngine {
     this.connectionEngine.setEdgeActivity(edges);
   }
 
-  notifyNodePositionsChanged(options?: { recomputeCanvasBounds?: boolean; translating?: boolean; nodeIds?: readonly string[]; shapeIds?: readonly string[] }): void {
+  notifyNodePositionsChanged(options?: NotifyNodePositionsChangedOptions): void {
     this.selectionController.notifyNodePositionsChanged(options);
   }
 }

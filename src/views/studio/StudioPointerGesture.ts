@@ -1,6 +1,7 @@
 import { getStudioOwnerWindow } from "./StudioDomContext";
 
-const activeGestures = new WeakMap<Window, () => void>();
+type GestureCancelReason = "dispose" | "pointercancel" | "escape" | "superseded";
+const activeGestures = new WeakMap<Window, (reason?: GestureCancelReason) => void>();
 
 /** The latest sample in a coalesced pointer event, retaining the original when unsupported. */
 export function latestStudioPointerEvent(event: PointerEvent): PointerEvent {
@@ -19,23 +20,23 @@ export function startStudioPointerGesture(options: {
   element: HTMLElement;
   event: PointerEvent;
   onMove: (event: PointerEvent) => void;
-  onFrame: () => void;
+  onFrame?: () => void;
   onFinish: (event?: PointerEvent) => void;
-  onCancel: () => void;
+  onCancel: (reason: GestureCancelReason) => void;
   onKeyChange?: (event: KeyboardEvent) => boolean;
 }): () => void {
   const { element, event, onMove, onFrame, onFinish, onCancel, onKeyChange } = options;
   const ownerWindow = getStudioOwnerWindow(element);
-  activeGestures.get(ownerWindow)?.();
+  activeGestures.get(ownerWindow)?.("superseded");
   const pointerId = event.pointerId;
   let frame: number | null = null;
   let active = true;
   const flush = (): void => {
     frame = null;
-    if (active) onFrame();
+    if (active) onFrame?.();
   };
   const schedule = (): void => {
-    if (!active || frame !== null) return;
+    if (!active || !onFrame || frame !== null) return;
     if (typeof ownerWindow.requestAnimationFrame !== "function") { flush(); return; }
     let synchronous = false;
     const id = ownerWindow.requestAnimationFrame(() => { synchronous = true; flush(); });
@@ -50,7 +51,7 @@ export function startStudioPointerGesture(options: {
     if (next.type === "keydown" && next.key === "Escape") {
       next.preventDefault();
       next.stopPropagation();
-      cancel();
+      cancel("escape");
     } else if (onKeyChange?.(next)) schedule();
   };
   const cleanup = (): void => {
@@ -81,13 +82,13 @@ export function startStudioPointerGesture(options: {
     } finally { cleanup(); }
     onFinish(next);
   };
-  const cancel = (): void => {
+  const cancel = (reason: GestureCancelReason = "dispose"): void => {
     if (!active) return;
     cleanup();
-    onCancel();
+    onCancel(reason);
   };
   const interrupt = (next: PointerEvent): void => {
-    if (next.pointerId === pointerId) cancel();
+    if (next.pointerId === pointerId) cancel("pointercancel");
   };
   activeGestures.set(ownerWindow, cancel);
   try { element.setPointerCapture?.(pointerId); } catch { /* Window listeners are the fallback. */ }

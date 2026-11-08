@@ -1,4 +1,4 @@
-export type StudioCanvasItemKind = "node" | "shape" | "arrow" | "group";
+type StudioCanvasItemKind = "node" | "shape" | "arrow" | "group";
 
 const EMPTY_SELECTION: ReadonlySet<string> = new Set<string>();
 

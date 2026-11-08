@@ -4,7 +4,7 @@ import type { StudioMovementSnap } from "./canvas/StudioGraphAlignmentGuides";
 import { latestStudioPointerEvent, startStudioPointerGesture } from "./StudioPointerGesture";
 import type { StudioProjectSessionMutationReason } from "../../studio/StudioProjectSession";
 import type { StudioNodeGroup, StudioProjectV1 } from "../../studio/types";
-import type { StudioGraphProjectMutationOptions } from "./StudioGraphInteractionTypes";
+import type { NotifyNodePositionsChangedOptions, StudioGraphProjectMutationOptions } from "./StudioGraphInteractionTypes";
 import {
   computeStudioGraphGroupBounds,
   type StudioGraphGroupBounds,
@@ -71,7 +71,7 @@ type StudioGraphGroupControllerHost = {
   getCurrentProject: () => StudioProjectV1 | null;
   getGraphZoom: () => number;
   getNodeElement: (nodeId: string) => HTMLElement | null;
-  notifyNodePositionsChanged: (options?: { recomputeCanvasBounds?: boolean; translating?: boolean; nodeIds?: readonly string[]; shapeIds?: readonly string[] }) => void;
+  notifyNodePositionsChanged: (options?: NotifyNodePositionsChangedOptions) => void;
   onNodeDragStateChange?: (isDragging: boolean) => void;
   requestRender: () => void;
   createMovementSnap?: (nodes: readonly string[], shapes: readonly string[]) => StudioMovementSnap;

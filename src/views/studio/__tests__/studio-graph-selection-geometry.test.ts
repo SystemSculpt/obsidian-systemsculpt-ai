@@ -8,7 +8,7 @@ function node(id: string, x: number, y: number): StudioNodeInstance {
   return { id, title: id, version: "1.0.0", kind: "studio.input", position: { x, y }, config: {} };
 }
 
-function harness(nodes: StudioNodeInstance[]) {
+function harness(nodes: StudioNodeInstance[], selectedShapeIds: string[] = []) {
   const project = { graph: { nodes }, diagram: { shapes: [], arrows: [] } } as unknown as StudioProjectV1;
   const renderEdgeLayer = jest.fn(), onNodePositionsChanged = jest.fn(), selectDiagramInBounds = jest.fn();
   const controller = new StudioGraphSelectionController({
@@ -17,6 +17,7 @@ function harness(nodes: StudioNodeInstance[]) {
     renderEdgeLayer,
     onNodePositionsChanged,
     selectDiagramInBounds,
+    getSelectedShapeIds: () => selectedShapeIds,
     commitProjectMutation: (_reason, mutator) => mutator(project) !== false,
   });
   const cards = nodes.map(current => {
@@ -52,6 +53,22 @@ function pointer(clientX: number, clientY: number, extra: Partial<PointerEvent> 
 }
 
 describe("StudioGraphSelectionController shared geometry", () => {
+  it("refreshes moved shapes and groups even when no nodes participate in their drag", () => {
+    const current = harness([node("node", 0, 0)], ["shape"]);
+    current.project.diagram!.shapes.push({ id: "shape", shape: "rectangle", position: { x: 500, y: 3 }, size: { width: 100, height: 100 } } as any);
+    current.controller.notifyNodePositionsChanged();
+    current.controller.beginSelectionTranslation();
+    current.clearMeasurements();
+    current.project.diagram!.shapes[0].position.y = 500;
+    current.controller.previewSelectionTranslation();
+    expect(current.controller.geometry.getShapeRects().get("shape")?.top).toBe(500);
+    expect(current.onNodePositionsChanged).toHaveBeenLastCalledWith({ recomputeCanvasBounds: false, translating: true, nodeIds: [], shapeIds: ["shape"] });
+    expect(current.controller.createMovementSnap(["node"], [])({ x: 100, y: 0 })).toEqual({ x: 100, y: 0 });
+    current.expectNoMeasurements();
+    current.controller.finishSelectionTranslation();
+    current.controller.clearRenderBindings();
+  });
+
   it("pans, scrolls, and zooms without remeasuring cards or reading whole-graph positions", () => {
     const current = harness(Array.from({ length: 30 }, (_, index) => node(`node-${index}`, index * 400, index * 200)));
     const positionReads = current.project.graph.nodes.map(value => {

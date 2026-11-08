@@ -297,7 +297,6 @@ export function renderStudioShapeLayer(options: StudioShapeLayerOptions): Studio
       element: shapeElements.get(shape.id)?.root ?? canvasEl,
       event: startEvent,
       onMove,
-      onFrame: () => {},
       onFinish: () => finish(true),
       onCancel: () => finish(false),
     });
@@ -418,7 +417,6 @@ export function renderStudioShapeLayer(options: StudioShapeLayerOptions): Studio
       element: canvasEl,
       event: startEvent,
       onMove,
-      onFrame: () => {},
       onFinish: event => finish(event?.type === "pointerup" ? event : null),
       onCancel: () => finish(null),
     });

@@ -1,5 +1,7 @@
 /** @jest-environment jsdom */
 
+import { StudioCanvasGeometry } from "../StudioCanvasGeometry";
+import { StudioGraphInteractionEngine } from "../../StudioGraphInteractionEngine";
 import type { StudioNodeInstance, StudioProjectV1 } from "../../../../studio/types";
 import { cloneStudioProjectSnapshot } from "../../../../studio/StudioProjectSnapshots";
 import { reconcileStudioProject } from "../../../../studio/StudioProjectReconciliation";
@@ -37,6 +39,7 @@ function project(nodes: StudioNodeInstance[]): StudioProjectV1 {
 function options(currentProject: StudioProjectV1): StudioGraphWorkspaceRendererOptions {
   const no = jest.fn();
   const graphInteraction = {
+    geometry: new StudioCanvasGeometry(() => currentProject),
     registerViewportElement: no, handleGraphViewportWheel: no, startMarqueeSelection: no, startCanvasPan: no,
     getGraphZoom: () => 1, registerSurfaceElement: no, registerCanvasElement: no, registerMarqueeElement: no,
     registerAlignmentGuidesElement: no, registerZoomLabelElement: no, registerEdgesLayerElement: no,
@@ -59,6 +62,24 @@ function options(currentProject: StudioProjectV1): StudioGraphWorkspaceRendererO
 }
 
 describe("persistent Studio graph workspace", () => {
+  it("refreshes shape-only peer geometry for group bounds and subsequent snapping", () => {
+    const current = project([node("moving")]);
+    current.diagram = { shapes: [{ id: "shape", shape: "rectangle", position: { x: 500, y: 3 }, size: { width: 100, height: 100 } } as any], arrows: [] };
+    current.graph.groups = [{ id: "shape-group", name: "Shape", nodeIds: [], shapeIds: ["shape"] }];
+    const engine = new StudioGraphInteractionEngine({ getCurrentProject: () => current, isBusy: () => false, setError: jest.fn(), requestRender: jest.fn(), commitProjectMutation: () => false, getPortType: () => null, portTypeCompatible: () => false });
+    const initial = { ...options(current), graphInteraction: engine };
+    document.body.appendChild(initial.root);
+    const handle = renderStudioGraphWorkspace(initial);
+    try {
+      expect(engine.createMovementSnap(["moving"], [])({ x: 100, y: 0 }).y).toBe(3);
+      current.diagram.shapes[0].position.y = 500;
+      expect(handle.refresh(initial)).toBe(true);
+      expect(engine.geometry.getShapeRects().get("shape")?.top).toBe(500);
+      expect(initial.root.querySelector<HTMLElement>('.ss-studio-group-frame[data-group-id="shape-group"]')!.style.top).toBe("482px");
+      expect(engine.createMovementSnap(["moving"], [])({ x: 100, y: 0 }).y).toBe(0);
+    } finally { handle.dispose(); engine.clearRenderBindings(); initial.root.remove(); }
+  });
+
   it("keeps unaffected cards mounted and patches geometry in place", () => {
     const initial = options(project([node("moving", 10), node("other", 100)]));
     document.body.appendChild(initial.root);
