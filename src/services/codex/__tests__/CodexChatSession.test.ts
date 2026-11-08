@@ -254,3 +254,28 @@ it('cancels and detaches the active native request', async () => {
   const running = session.start(input()); for (let i = 0; i < 12; i++) await Promise.resolve();
   await session.detach(); await expect(running).resolves.toMatchObject({ kind: 'cancelled' });
 });
+
+it('saves a generated image into the vault before the turn is saved, keeping its base64 out of the transcript', async () => {
+  setup();
+  const files = new Map<string, ArrayBuffer>();
+  const app = { vault: {
+    getAbstractFileByPath: (path: string) => files.has(path) ? { path } : null,
+    createFolder: async () => {},
+    createBinary: async (path: string, bytes: ArrayBuffer) => { files.set(path, bytes); },
+    adapter: { exists: async (path: string) => files.has(path) },
+  } };
+  const persistAssistant = jest.fn(async (_message: ChatMessage) => {});
+  const session = new CodexChatSession(app as never, { persistAssistant });
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1]).toString('base64');
+  const item = { type: 'imageGeneration', id: 'ig_1', status: 'completed', revisedPrompt: 'old photo', result: png };
+  native.mockImplementationOnce(async (_input, _signal, callbacks) => {
+    callbacks.activity(codexActivity('item/completed', { item }), item);
+    callbacks.text('Done.');
+    return { text: 'Done.', threadId: 't', turnId: 'turn', status: 'completed' };
+  });
+  await session.start(input());
+  expect(files.size).toBe(1);
+  const saved = JSON.stringify(persistAssistant.mock.calls[0][0].messageParts);
+  expect(saved).toContain('SystemSculpt/Images/');
+  expect(saved).not.toContain(png);
+});

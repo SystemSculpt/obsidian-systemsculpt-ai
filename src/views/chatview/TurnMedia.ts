@@ -1,6 +1,7 @@
 import { TFile, type App } from "obsidian";
 import type { AgentToolPart } from "../../chat/ChatConversation";
 import { decodeSystemSculptToolOutput, systemSculptToolName, type SystemSculptMedia } from "../../tools/systemsculpt/SystemSculptTools";
+import { codexImageMedia, rememberCodexImage } from "../../services/codex/CodexImages";
 
 type TurnMedia = Readonly<{
   media: readonly SystemSculptMedia[];
@@ -29,6 +30,14 @@ export function presentTurnMedia(parts: readonly AgentToolPart[], answer = ""): 
   const media = new Map<string, SystemSculptMedia>();
   const notices = new Map<string, { text: string; label: string; url: string }>();
   for (const part of parts) {
+    // Codex's own image tools: a generated image always shows; a viewed one shows when the reply points at it.
+    const image = codexImageMedia(part);
+    if (image) {
+      // Codex names each image file uniquely, so its file name alone finds a link to it.
+      const linked = [image.media.path, image.sourcePath?.split(/[\\/]/u).pop()].some(path => path && (answer.includes(path) || answer.includes(encodeURI(path))));
+      if ((image.item === "imageGeneration" || linked) && !embeddedInAnswer(answer, image.media.path)) media.set(image.media.path, image.media);
+      continue;
+    }
     if (!systemSculptToolName(part.name) || (part.state !== "succeeded" && part.state !== "failed")) continue;
     const result = decodeSystemSculptToolOutput(part.output?.data);
     if (!result) continue;
@@ -53,6 +62,11 @@ type TurnMediaActions = Readonly<{
  */
 export function renderTurnMedia(app: App, parent: HTMLElement, parts: readonly AgentToolPart[], actions: TurnMediaActions, answer = ""): HTMLElement | null {
   const existing = parent.querySelector<HTMLElement>(":scope > .systemsculpt-agent-turn-media");
+  // A saved chat's reply can still link Codex's own copy; its link opens the vault copy.
+  for (const part of parts) {
+    const image = codexImageMedia(part);
+    if (image?.sourcePath) rememberCodexImage(image.sourcePath, image.media.path);
+  }
   const presented = presentTurnMedia(parts, answer);
   if (!presented.media.length && !presented.notices.length) {
     existing?.remove();

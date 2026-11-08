@@ -25,6 +25,7 @@ import {
 } from "./AgentActivityPresentation";
 import { presentTurnChanges } from "./TurnChangeSummary";
 import { renderTurnMedia } from "./TurnMedia";
+import { codexImageVaultPath } from "../../services/codex/CodexImages";
 import { openExternalUrl } from "../../utils/externalUrl";
 import { enhanceMarkdownCodeBlocks } from "./MarkdownCodeBlocks";
 import {
@@ -278,10 +279,12 @@ export class AgentConversationRenderer extends Component {
     const openSourceLink = (event: MouseEvent): void => {
       if (event.defaultPrevented || (event.type === "click" ? event.button !== 0 : event.button !== 1)) return;
       const link = (event.target as Element | null)?.closest?.("a.internal-link");
-      const href = link?.getAttribute("data-href") ?? link?.getAttribute("href");
-      if (!href) return;
+      const linked = link?.getAttribute("data-href") ?? link?.getAttribute("href");
+      if (!linked) return;
       event.preventDefault();
       event.stopPropagation();
+      // A reply linking an image Codex saved outside the vault opens the vault copy.
+      const href = codexImageVaultPath(linked) ?? linked;
       void this.options.app.workspace.openLinkText(href, this.options.sourcePath(), Keymap.isModEvent(event));
     };
     this.registerDomEvent(this.element, "click", openSourceLink);

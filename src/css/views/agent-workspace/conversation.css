@@ -316,7 +316,8 @@
   flex-direction: column;
   gap: var(--ss-space-1);
   width: fit-content;
-  min-width: 0;
+  /* Before a lazy image loads, the caption still has room for its name. */
+  min-width: min(100%, 12rem);
   max-width: 100%;
   margin: 0;
 }
