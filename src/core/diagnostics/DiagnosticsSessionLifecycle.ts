@@ -1,6 +1,7 @@
 import type { DataAdapter } from "obsidian";
 import { getHostDeviceType, getHostOperatingSystem } from "../../platform/hostCapabilities";
 import { isMissingPathError } from "../../utils/errors";
+import { formatFileTimestamp } from "../../utils/fileTimestamp";
 
 const AUTOMATIC_DIAGNOSTICS_ARCHIVE_PATTERN = /^(?:systemsculpt-\d{8}-\d{6}\.log|resource-metrics-\d{8}-\d{6}\.ndjson|session-\d{8}-\d{6}\.json)$/u;
 const DIAGNOSTICS_ARCHIVE_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1_000;
@@ -88,11 +89,7 @@ export class DiagnosticsSessionLifecycle {
 
   constructor(private readonly options: DiagnosticsSessionLifecycleOptions) {
     const startedAt = new Date();
-    const pad = (value: number): string => value.toString().padStart(2, "0");
-    this.activeSessionId = [
-      startedAt.getFullYear(), pad(startedAt.getMonth() + 1), pad(startedAt.getDate()),
-      "-", pad(startedAt.getHours()), pad(startedAt.getMinutes()), pad(startedAt.getSeconds()),
-    ].join("");
+    this.activeSessionId = formatFileTimestamp(startedAt);
     this.startedAt = startedAt;
   }
 
@@ -176,7 +173,6 @@ export class DiagnosticsSessionLifecycle {
     };
 
     try {
-      await storage.writeFile("diagnostics", "session-latest.json", metadata);
       await storage.writeFile("diagnostics", `session-${sessionId}.json`, metadata);
     } catch {
       warnDiagnostics("Failed to write session metadata");

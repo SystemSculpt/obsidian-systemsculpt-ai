@@ -573,22 +573,16 @@ export class FileContextMenuService {
   }
 
   private info(message: string, metadata?: Record<string, unknown>): void {
-    errorLogger.info(message, {
-      source: "FileContextMenuService",
-      metadata,
-    });
-    this.pluginLogger?.info(message, {
+    const logger = this.pluginLogger ?? errorLogger;
+    logger.info(message, {
       source: "FileContextMenuService",
       metadata,
     });
   }
 
   private debug(message: string, metadata?: Record<string, unknown>): void {
-    errorLogger.debug(message, {
-      source: "FileContextMenuService",
-      metadata,
-    });
-    this.pluginLogger?.debug(message, {
+    const logger = this.pluginLogger ?? errorLogger;
+    logger.debug(message, {
       source: "FileContextMenuService",
       metadata,
     });
@@ -599,10 +593,6 @@ export class FileContextMenuService {
     error: unknown,
     metadata?: Record<string, unknown>
   ): void {
-    errorLogger.error(message, error, {
-      source: "FileContextMenuService",
-      metadata,
-    });
     if (this.pluginLogger) {
       this.pluginLogger.error(
         message,
@@ -615,6 +605,11 @@ export class FileContextMenuService {
           },
         }
       );
+    } else {
+      errorLogger.error(message, error, {
+        source: "FileContextMenuService",
+        metadata,
+      });
     }
   }
 }

@@ -55,7 +55,12 @@ immutable snapshot provenance. `AgentLifecycle` normalizes once; the logger
 reuses that metadata rather than validating another copy. Its frozen support
 event passes unchanged through the incident coordinator into the recorder.
 Only a failed report projects retained events into the exported timeline and
-canonicalizes them. During recording, exact scalar-byte arithmetic (no JSON,
+canonicalizes them. The incident store owns atomic commit and exact-byte
+read-back. Retention reuses validation only when freshly read bytes match a
+validated report; timestamps alone never establish validity. Session recording
+writes one timestamped metadata file, pruned with automatic archives. Session
+and export filename dates share `utils/fileTimestamp.ts`.
+During recording, exact scalar-byte arithmetic (no JSON,
 key sorting, or UTF-8 allocation) preserves the existing arrival-order byte and
 event eviction policy and counters. Arbitrary public events, even frozen ones,
 still cross the full admission allowlist; freezing alone is not provenance.

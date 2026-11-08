@@ -4,6 +4,7 @@
 import { PluginLogger } from "../PluginLogger";
 import { LogLevel } from "../errorHandling";
 import { THIN_AGENT_LIFECYCLE_CODES } from "../ThinAgentLifecycleSchema";
+import { errorLogger } from "../errorLogger";
 
 const FIRST_PARTY_LIFECYCLE_CODES = THIN_AGENT_LIFECYCLE_CODES.filter(
   (code) => !code.startsWith("response_resume_"),
@@ -119,7 +120,67 @@ describe("PluginLogger", () => {
     });
   });
 
+  describe("shared console sink", () => {
+    it("persists and emits each ordinary entry once through the shared console sink", async () => {
+      mockPlugin.settings.debugMode = true;
+      const context = { source: "Test", metadata: { count: 1 } };
+      const error = new Error("failure");
+
+      logger.info("Info", context);
+      logger.debug("Debug", context);
+      logger.warn("Warning", context);
+      logger.error("Error", error, context);
+      await logger.flushNow();
+
+      expect(consoleSpy.debug).toHaveBeenCalledTimes(2);
+      expect(consoleSpy.warn).toHaveBeenCalledTimes(1);
+      expect(consoleSpy.error).toHaveBeenCalledTimes(1);
+      expect(consoleSpy.error).toHaveBeenCalledWith("[SystemSculpt][ERROR] Error", context, error);
+      expect(consoleSpy.info).not.toHaveBeenCalled();
+      expect(consoleSpy.log).not.toHaveBeenCalled();
+      expect(mockStorage.appendToFile).toHaveBeenCalledTimes(1);
+      const entries = mockStorage.appendToFile.mock.calls[0][2].trim().split("\n").map((line: string) => JSON.parse(line));
+      expect(entries.map((entry: { message: string }) => entry.message)).toEqual(["Info", "Debug", "Warning", "Error"]);
+    });
+
+    it("keeps compatibility logs console-only when a persisted logger exists", async () => {
+      errorLogger.error("Compatibility failure", new Error("failure"), { source: "Test" });
+      await logger.flushNow();
+
+      expect(consoleSpy.error).toHaveBeenCalledTimes(1);
+      expect(logger.getRecentEntries()).toEqual([]);
+      expect(mockStorage.appendToFile).not.toHaveBeenCalled();
+    });
+
+    it("contains a throwing console hook without retrying or duplicating persistence", async () => {
+      consoleSpy.error.mockImplementation(() => { throw new Error("console hook failed"); });
+
+      expect(() => logger.error("Accepted error")).not.toThrow();
+      await logger.flushNow();
+
+      expect(consoleSpy.error).toHaveBeenCalledTimes(1);
+      expect(consoleSpy.debug).not.toHaveBeenCalled();
+      expect(consoleSpy.warn).not.toHaveBeenCalled();
+      expect(logger.getRecentEntries()).toHaveLength(1);
+      expect(mockStorage.appendToFile).toHaveBeenCalledTimes(1);
+      expect(mockStorage.appendToFile.mock.calls[0][2].trim().split("\n")).toHaveLength(1);
+    });
+  });
+
   describe("log level filtering", () => {
+    it("defaults to warnings when settings are unavailable", async () => {
+      mockPlugin.settings = undefined;
+
+      logger.debug("Suppressed debug");
+      logger.info("Suppressed info");
+      logger.warn("Default warning");
+      await logger.flushNow();
+
+      expect(consoleSpy.debug).not.toHaveBeenCalled();
+      expect(consoleSpy.warn).toHaveBeenCalledTimes(1);
+      expect(logger.getRecentEntries().map((entry) => entry.message)).toEqual(["Default warning"]);
+      expect(mockStorage.appendToFile.mock.calls[0][2]).toContain("Default warning");
+    });
     it("logs all levels when debugMode is true", () => {
       mockPlugin.settings.debugMode = true;
 

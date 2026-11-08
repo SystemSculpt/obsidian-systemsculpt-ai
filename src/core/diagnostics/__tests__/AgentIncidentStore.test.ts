@@ -1,3 +1,4 @@
+import * as IncidentJson from "../AgentIncidentCanonicalJson";
 import {
   AGENT_INCIDENT_MAX_DIRECTORY_ENTRIES,
   AGENT_INCIDENT_MAX_SCAN_BYTES,
@@ -23,6 +24,11 @@ import {
   type AgentIncidentFailureMechanism,
   type AgentIncidentFailureStage,
 } from "../AgentIncidentSchema";
+
+jest.mock("../AgentIncidentCanonicalJson", () => {
+  const actual = jest.requireActual<typeof import("../AgentIncidentCanonicalJson")>("../AgentIncidentCanonicalJson");
+  return { ...actual, canonicalJsonStringify: jest.fn(actual.canonicalJsonStringify) };
+});
 
 interface MemoryFile {
   data: string;
@@ -725,6 +731,59 @@ describe("AgentIncidentStore", () => {
 
     expect(restart).toMatchObject({ retainedReports: 1, corruptReports: 0, removedReports: 0 });
     expect(adapter.files.get(reportPath(1))?.data).toBe(saved.serialized);
+  });
+
+  it("scans once on the first save and reuses validation only for identical disk bytes", async () => {
+    const adapter = new MemoryAdapter();
+    const seed = new AgentIncidentStore(adapter);
+    for (const sequence of [1, 2]) adapter.put(reportPath(sequence), seed.serialize(incidentReport(sequence)));
+    const store = new AgentIncidentStore(adapter, { now: () => adapter.clock });
+    const list = jest.spyOn(adapter, "list");
+    const canonicalize = jest.mocked(IncidentJson.canonicalJsonStringify);
+    canonicalize.mockClear();
+    try {
+      await store.save(incidentReport(3));
+      expect(list).toHaveBeenCalledTimes(1);
+      // One input report and the two previously unknown reports. Commit and
+      // retention read-backs compare those exact validated bytes instead.
+      expect(canonicalize).toHaveBeenCalledTimes(3);
+      canonicalize.mockClear();
+      await store.save(incidentReport(4));
+      expect(list).toHaveBeenCalledTimes(2);
+      expect(canonicalize).toHaveBeenCalledTimes(1);
+    } finally {
+      canonicalize.mockClear();
+    }
+  });
+
+  it("does not trust cached validation when disk bytes change without filesystem stamp changes", async () => {
+    const adapter = new MemoryAdapter();
+    const store = new AgentIncidentStore(adapter);
+    await store.save(incidentReport(1));
+    const file = adapter.files.get(reportPath(1))!;
+    const changed = file.data.replace('"not_established"', '"PRIVATE_CANARY_"');
+    expect(changed.length).toBe(file.data.length);
+    adapter.files.set(reportPath(1), { ...file, data: changed });
+
+    const saved = await store.save(incidentReport(2));
+
+    expect(saved.retention.corruptReports).toBe(1);
+    expect(adapter.files.has(reportPath(1))).toBe(false);
+    expect(adapter.files.has(`${reportPath(1)}.corrupt`)).toBe(true);
+    expect(await store.hasReport(reportId(1))).toBe(false);
+  });
+
+  it("verifies the committed report again after retention side effects", async () => {
+    const adapter = new MemoryAdapter();
+    const store = new AgentIncidentStore(adapter, { maxReports: 1 });
+    await store.save(incidentReport(1));
+    const remove = adapter.remove.bind(adapter);
+    jest.spyOn(adapter, "remove").mockImplementation(async (path) => {
+      await remove(path);
+      if (path === reportPath(1)) adapter.files.get(reportPath(2))!.data = "corrupt-after-scan";
+    });
+
+    await expect(store.save(incidentReport(2))).rejects.toMatchObject({ code: "persistence_unavailable" });
   });
 
   it("fails closed before writing when atomic rename is unavailable", async () => {
