@@ -154,8 +154,8 @@
   font-size: var(--ss-text-sm);
 }
 
-.ss-studio-node-context-menu-search-input::placeholder {
-  color: var(--ss-ink-muted);
+input.ss-studio-node-context-menu-search-input::placeholder {
+  color: var(--ss-ink);
   opacity: 1;
 }
 
