@@ -3,6 +3,7 @@
  */
 import { App, TFile, TFolder } from "obsidian";
 import { SearchOperations } from "../tools/SearchOperations";
+import { SystemSculptSearchEngine } from "../../../services/search/SystemSculptSearchEngine";
 import { FILESYSTEM_LIMITS } from "../constants";
 import * as utils from "../utils";
 import {
@@ -22,7 +23,7 @@ jest.mock("../utils", () => {
 });
 
 // Mock searchScoring module
-jest.mock("../searchScoring", () => ({
+jest.mock("../../../services/search/searchScoring", () => ({
   extractSearchTerms: jest.fn((query: string) => query.split(/\s+/).filter(Boolean)),
   calculateScore: jest.fn((path: string, _content: string, options: any) => ({
     path,
@@ -49,6 +50,7 @@ jest.mock("../searchScoring", () => ({
 // Mock tokenCounting
 jest.mock("../../../utils/tokenCounting", () => ({
   countTextTokens: jest.fn((text: string) => Math.ceil(text.length / 4)),
+  estimateTextTokens: jest.fn((text: string) => Math.ceil(text.length / 4)),
 }));
 
 // Search tools return untyped tool output; read it the way a tool caller does.
@@ -74,6 +76,9 @@ describe("SearchOperations", () => {
   let searchOps: SearchOperations;
   let mockFiles: TFile[];
   let mockFolders: TFolder[];
+  let engine: SystemSculptSearchEngine | undefined;
+
+  afterEach(() => engine?.destroy());
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -123,6 +128,15 @@ describe("SearchOperations", () => {
       },
     };
 
+    engine = undefined;
+    plugin.getSearchEngine = () => {
+      if (!engine) {
+        engine = new SystemSculptSearchEngine(app, plugin);
+        // Candidate/index integration has its own public-boundary suite.
+        jest.spyOn(engine, "getContentCandidates").mockResolvedValue(null);
+      }
+      return engine;
+    };
     searchOps = new SearchOperations(app, ["/"], plugin);
   });
 
@@ -562,7 +576,7 @@ Body content here`;
       expect(result).toBeDefined();
     });
 
-    it("respects MAX_FILE_SIZE limit", async () => {
+    it("searches notes larger than the former file-size cutoff", async () => {
       const largeFile = new TFile({ path: "large.md" });
       (largeFile.stat as any) = {
         ctime: Date.now(),
@@ -573,11 +587,11 @@ Body content here`;
 
       const result = await searchOps.grepVault({ patterns: ["test"] });
 
-      // Large file should be skipped
-      expect(result).toBeDefined();
+      expect(app.vault.cachedRead).toHaveBeenCalledWith(largeFile);
+      expect(resultPaths(result)).toContain("large.md");
     });
 
-    it("respects MAX_SEARCH_RESULTS limit", async () => {
+    it("ranks every matching file instead of stopping at the former result cutoff", async () => {
       const manyFiles = Array.from({ length: 100 }, (_, i) => {
         const file = new TFile({ path: `file${i}.md` });
         (file.stat as any) = { ctime: Date.now(), mtime: Date.now(), size: 100 };
@@ -588,7 +602,8 @@ Body content here`;
 
       const result = await searchOps.grepVault({ patterns: ["test"] });
 
-      expect(list(field(result, "results")).length).toBeLessThanOrEqual(FILESYSTEM_LIMITS.MAX_SEARCH_RESULTS);
+      expect(field(result, "totalCount")).toBe(100);
+      expect(app.vault.cachedRead).toHaveBeenCalledTimes(100);
     });
 
     it("handles empty files", async () => {
@@ -831,9 +846,8 @@ Body content here`;
 
         expect(readPaths()[0]).toBe(large.path);
         expect(resultPaths(result)).toContain(large.path);
-        expect(field(result, "metaInfo")).toEqual(expect.arrayContaining([
-          expect.objectContaining({ file: "_summary" }),
-        ]));
+        expect(readPaths()).toHaveLength(61);
+        expect(field(result, "totalCount")).toBe(61);
       });
 
       it("reads a note whose title matches before newer notes that only mention the term", async () => {
@@ -844,7 +858,14 @@ Body content here`;
         const result = await searchOps.grepVault({ patterns: ["launch"] });
 
         expect(readPaths()[0]).toBe(titled.path);
-        expect(resultPaths(result)).toContain(titled.path);
+        const paths = [...resultPaths(result)];
+        let cursor = field(field(result, "page"), "next_cursor");
+        while (typeof cursor === "string") {
+          const next = await searchOps.grepVault({ patterns: ["launch"], cursor });
+          paths.push(...resultPaths(next));
+          cursor = field(field(next, "page"), "next_cursor");
+        }
+        expect(paths).toContain(titled.path);
       });
 
       it("ranks a title hit, then a folder hit, then recency, then path", async () => {
@@ -934,9 +955,19 @@ Body content here`;
         pagedVault();
         const first = await page();
         expect(first.page.next_cursor).toEqual(expect.any(String));
-        expect(plugin.registerEvent).toHaveBeenCalledTimes(4);
+        expect(app.vault.on).toHaveBeenCalledTimes(4);
 
-        const seen = [...first.snippets];
+        const seen: string[] = [];
+        let continuing = false;
+        const collect = (response: any) => {
+          for (const snippet of response.snippets) {
+            if (continuing) seen[seen.length - 1] += snippet;
+            else seen.push(snippet);
+            continuing = false;
+          }
+          if (response.snippets.length > 0) continuing = response.page.snippet_continues ?? false;
+        };
+        collect(first);
         let cursor: string | null = first.page.next_cursor;
         let pages = 1;
         (app.vault.cachedRead as jest.Mock).mockClear();
@@ -947,7 +978,7 @@ Body content here`;
           expect(next.metaInfo ?? []).not.toEqual(expect.arrayContaining([
             expect.objectContaining({ file: "_new_search" }),
           ]));
-          seen.push(...next.snippets);
+          collect(next);
           cursor = next.page.next_cursor;
           pages++;
         }
@@ -957,10 +988,10 @@ Body content here`;
         expect(app.vault.getFiles).not.toHaveBeenCalled();
         expect(new Set(seen).size).toBe(seen.length);
         expect(seen).toHaveLength(first.page.total_matches);
-        expect(plugin.registerEvent).toHaveBeenCalledTimes(4);
+        expect(app.vault.on).toHaveBeenCalledTimes(4);
       });
 
-      it("advances past an oversized first match with an explicitly shortened preview", async () => {
+      it("continues an oversized first match losslessly before reaching the next match", async () => {
         const files = pagedVault().slice(0, 2);
         (app.vault.getFiles as jest.Mock).mockReturnValue(files);
         (app.vault.cachedRead as jest.Mock).mockImplementation(async (file: TFile) =>
@@ -969,25 +1000,35 @@ Body content here`;
 
         const first = await searchOps.grepVault(query) as any;
 
-        expect(first.snippets).toHaveLength(1);
-        expect(first.snippets[0]).toContain("[preview shortened; read the note for the full match]");
-        expect(first.truncated).toBe(true);
-        expect(first.page.tokensUsed).toBeLessThanOrEqual(first.page.bodyTokenBudget);
+        expect(first.page.snippet_continues).toBe(true);
         expect(first.page.next_cursor).toEqual(expect.any(String));
-        expect(first.page.returned_matches).toBe(1);
-        expect(JSON.stringify(first).length).toBeLessThanOrEqual(FILESYSTEM_LIMITS.MAX_RESPONSE_CHARS);
-
-        const second = await searchOps.grepVault({ ...query, cursor: first.page.next_cursor }) as any;
-        expect(second.snippets).toEqual([expect.stringContaining("next match")]);
-        expect(second.page.next_cursor).toBeNull();
+        const complete: string[] = [];
+        let continuing = false;
+        let response = first;
+        do {
+          for (const snippet of response.snippets) {
+            if (continuing) complete[complete.length - 1] += snippet;
+            else complete.push(snippet);
+            continuing = false;
+          }
+          if (response.snippets.length > 0) continuing = response.page.snippet_continues ?? false;
+          expect(response.page.tokensUsed).toBeLessThanOrEqual(response.page.tokensBudget);
+          expect(JSON.stringify(response).length).toBeLessThanOrEqual(FILESYSTEM_LIMITS.MAX_RESPONSE_CHARS);
+          if (!response.page.next_cursor) break;
+          response = await searchOps.grepVault({ ...query, cursor: response.page.next_cursor }) as any;
+        } while (true);
+        expect(complete).toEqual([
+          `${files[0].path}:1  【needle ${"words ".repeat(2500)}】`,
+          `${files[1].path}:1  【needle next match】`,
+        ]);
         expect(app.vault.cachedRead).toHaveBeenCalledTimes(files.length);
       });
 
       it("keeps a match when result metadata fills the response character budget", async () => {
         pagedVault();
-        const scoring = jest.requireMock("../searchScoring");
+        const scoring = jest.requireMock("../../../services/search/searchScoring");
         scoring.formatScoredResults.mockReturnValueOnce({
-          results: [{ path: "x".repeat(FILESYSTEM_LIMITS.MAX_RESPONSE_CHARS - 100) }],
+          results: [{ path: "notes/note-00.md", reasoning: "x".repeat(FILESYSTEM_LIMITS.MAX_RESPONSE_CHARS - 100) }],
           totalCount: 12,
         });
 

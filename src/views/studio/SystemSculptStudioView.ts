@@ -106,6 +106,7 @@ import {
 } from "./canvas/StudioGraphNodeDetailMode";
 import type {
   StudioGraphNodeResizePatch,
+  StudioGraphNodeMutationOptions,
 } from "./canvas/StudioGraphNodeCardTypes";
 import { readStudioTextNodeValue } from "./canvas/StudioGraphTextNodeCard";
 import {
@@ -1236,7 +1237,7 @@ export class SystemSculptStudioView extends ItemView {
     mutator: (project: StudioProjectV1) => boolean | void,
     options?: {
       captureHistory?: boolean;
-      historyGroup?: string;
+      historyGroup?: string | symbol;
       mode?: StudioProjectSessionAutosaveMode;
     }
   ): boolean {
@@ -1248,7 +1249,7 @@ export class SystemSculptStudioView extends ItemView {
     mutator: (project: StudioProjectV1) => Promise<boolean | void>,
     options?: {
       captureHistory?: boolean;
-      historyGroup?: string;
+      historyGroup?: string | symbol;
       mode?: StudioProjectSessionAutosaveMode;
     }
   ): Promise<boolean> {
@@ -1454,10 +1455,7 @@ export class SystemSculptStudioView extends ItemView {
     nodeId: string,
     key: string,
     value: StudioJsonValue,
-    options?: {
-      mode?: StudioProjectSessionAutosaveMode;
-      captureHistory?: boolean;
-    }
+    options?: StudioGraphNodeMutationOptions
   ): void {
     const currentNode = this.currentProject
       ? this.findNode(this.currentProject, nodeId)
@@ -1495,7 +1493,7 @@ export class SystemSculptStudioView extends ItemView {
         // Each real mutation has an origin; native typing coalesces into one
         // transaction while independent changes in other views remain outside it.
         captureHistory: isActiveTextEdit ? true : options?.captureHistory,
-        historyGroup: isActiveTextEdit ? `text:${nodeId}` : undefined,
+        historyGroup: isActiveTextEdit ? `text:${nodeId}` : options?.historyGroup,
         mode: options?.mode,
       }
     );

@@ -1,9 +1,10 @@
 import type SystemSculptPlugin from "../main";
 import { LogLevel } from "./errorHandling";
+import { emitLogToConsole, type LogConsoleLevel } from "./logConsole";
 import { isAgentLifecyclePhase, isThinAgentIncidentId } from "./ThinAgentLifecycleSchema";
 import { lifecycleSupportSnapshot, projectLifecycleMetadata, type SupportDiagnosticEvent } from "./SupportDiagnosticEvent";
 
-export type PluginLogLevel = "info" | "warn" | "error" | "debug";
+export type PluginLogLevel = LogConsoleLevel;
 
 export interface PluginLoggerOptions {
   logFileName?: string;
@@ -443,9 +444,6 @@ export class PluginLogger {
   }
 
   private emitToConsole(entry: PluginLogEntry, error?: unknown) {
-    if (typeof console === "undefined") {
-      return;
-    }
     const prefix = `[SystemSculpt][${entry.level.toUpperCase()}] ${entry.message}`;
     const parts: unknown[] = [prefix];
     if (entry.context) {
@@ -454,8 +452,7 @@ export class PluginLogger {
     if (error) {
       parts.push(error);
     }
-    const method = resolveConsoleMethod(entry.level);
-    method(...parts);
+    emitLogToConsole(entry.level, ...parts);
   }
 }
 
@@ -700,21 +697,4 @@ function serializeError(error: unknown) {
     }
   }
   return { message: String(error) };
-}
-
-function resolveConsoleMethod(level: PluginLogLevel): (...args: unknown[]) => void {
-  if (typeof console === "undefined") {
-    return () => {};
-  }
-  switch (level) {
-    case "error":
-      return console.error ? console.error.bind(console) : console.warn.bind(console);
-    case "warn":
-      return console.warn ? console.warn.bind(console) : console.debug.bind(console);
-    case "info":
-      return console.debug ? console.debug.bind(console) : console.warn.bind(console);
-    case "debug":
-    default:
-      return console.debug ? console.debug.bind(console) : console.warn.bind(console);
-  }
 }

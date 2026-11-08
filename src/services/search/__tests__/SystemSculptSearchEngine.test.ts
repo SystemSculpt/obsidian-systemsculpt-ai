@@ -134,7 +134,7 @@ describe("SystemSculptSearchEngine lexical mode", () => {
     await engine.startIndexing();
     const notes = Array.from((engine as any).textIndex.docIds(), (docId: number) => (engine as any).textIndex.note(docId));
     for (const note of notes) {
-      expect(Object.keys(note).sort()).toEqual(["file", "lowerPath", "lowerTitle", "mtime", "path", "preview", "size", "title"]);
+      expect(Object.keys(note).sort()).toEqual(["completeRawText", "file", "lowerPath", "lowerTitle", "mtime", "path", "preview", "size", "title"]);
       expect(note.preview.length).toBeLessThanOrEqual(243);
     }
 

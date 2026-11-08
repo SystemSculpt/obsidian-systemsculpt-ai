@@ -1,5 +1,7 @@
+import { emitLogToConsole, type LogConsoleLevel } from "./logConsole";
+
 /** @internal Tests type their fixtures with this. */
-export type ErrorLevel = 'error' | 'warn' | 'info' | 'debug';
+export type ErrorLevel = LogConsoleLevel;
 
 /** @internal Tests type their fixtures with this. */
 export interface ErrorContext {
@@ -17,6 +19,7 @@ const LEVEL_ORDER: Record<ErrorLevel, number> = {
   debug: 3
 };
 
+/** Console-only compatibility logging; PluginLogger owns persisted diagnostics. */
 class ErrorLogger {
   private static instance: ErrorLogger;
   private debugMode = false;
@@ -50,12 +53,7 @@ class ErrorLogger {
       consoleArgs.push(error);
     }
 
-    try {
-      this.resolveConsoleMethod(level).apply(console, consoleArgs);
-    } catch {
-      // Fallback to console.debug if the target console method is unavailable.
-      console.debug(`[SystemSculpt][${level.toUpperCase()}] ${message}`);
-    }
+    emitLogToConsole(level, ...consoleArgs);
   }
 
   error(message: string, error?: unknown, context?: ErrorContext): void {
@@ -77,22 +75,6 @@ class ErrorLogger {
   private shouldEmit(level: ErrorLevel): boolean {
     if (this.debugMode) return true;
     return LEVEL_ORDER[level] <= LEVEL_ORDER[this.minimumLevel];
-  }
-
-  private resolveConsoleMethod(level: ErrorLevel): (...args: unknown[]) => void {
-    if (typeof console === 'undefined') {
-      return () => {};
-    }
-    switch (level) {
-      case 'error':
-        return (...args) => console.error(...args);
-      case 'warn':
-        return (...args) => console.warn(...args);
-      case 'info':
-        return (...args) => console.debug(...args);
-      default:
-        return (...args) => console.debug(...args);
-    }
   }
 }
 

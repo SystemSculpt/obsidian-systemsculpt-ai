@@ -36,6 +36,14 @@ export function countTextTokens(text: string): number {
   const cached = tokenCache.get(text);
   if (cached !== undefined) return cached;
 
+  const estimate = estimateTextTokens(text);
+  tokenCache.set(text, estimate);
+  return estimate;
+}
+
+/** Same estimate without retaining disposable strings such as trial tool pages. */
+export function estimateTextTokens(text: string): number {
+  if (!text) return 0;
   const words = text.trim().split(/\s+/).filter((word) => word.length > 0);
   const urls = (text.match(/https?:\/\/[^\s)]+/gi) ?? []) as string[];
   const urlCharacters = urls.reduce<number>((sum, match) => sum + match.length, 0);
@@ -55,6 +63,5 @@ export function countTextTokens(text: string): number {
   const wordEstimate = words.length * 1.3;
   const estimate = Math.ceil(Math.max(wordEstimate, characterEstimate));
 
-  tokenCache.set(text, estimate);
   return estimate;
 }

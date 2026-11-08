@@ -344,7 +344,9 @@ describe("EmbeddingsManager exclusions", () => {
       jest.spyOn(app.vault, "getAbstractFileByPath").mockImplementation((path: string) => files.find((file) => file.path === path) ?? null);
       (app.workspace as any).offref = jest.fn();
 
-      // Agent vault tools: find by name and search by content.
+      const engine = new SystemSculptSearchEngine(app as any, toolPlugin);
+      toolPlugin.getSearchEngine = () => engine;
+      // Agent vault tools: find by name and search by content, sharing the modal index.
       const tools = new SearchOperations(app as any, ["/"], toolPlugin);
       const name = includedPath.split("/").pop()!.replace(/\.[^.]+$/, "");
       const found = (await tools.findFiles({ patterns: [name] }) as { results: Array<{ path: string }> })
@@ -357,7 +359,6 @@ describe("EmbeddingsManager exclusions", () => {
       expect(searched).not.toContain(excludedPath);
 
       // Search modal engine.
-      const engine = new SystemSculptSearchEngine(app as any, toolPlugin);
       try {
         const hits = (await engine.search("shared keyword", { mode: "lexical", limit: 10 })).results.map((hit) => hit.path);
         const eligible = (engine as any).getEligibleFiles().map((file: TFile) => file.path);

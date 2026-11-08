@@ -190,10 +190,15 @@ interface StoreLimits {
   maxScanBytes: number;
 }
 
-interface ReportEntry extends StoredAgentIncidentReport {
-  path: string;
+interface ValidatedReportBytes {
+  serialized: string;
+  sizeBytes: number;
   reportId: string;
   createdAtMs: number;
+}
+
+interface ReportEntry extends ValidatedReportBytes {
+  path: string;
   ctimeMs: number;
   mtimeMs: number;
   diskBytes: number;
@@ -235,6 +240,9 @@ export class AgentIncidentStore {
   private readonly coordination: AdapterCoordination;
   private readonly yieldToHost: () => Promise<void>;
   private initialized = false;
+  // Cache only validated bytes from the bounded retention inventory. Every
+  // disk read still compares exact bytes; filesystem stamps never prove validity.
+  private readonly verifiedReports = new Map<string, ValidatedReportBytes>();
 
   constructor(
     private readonly adapter: AgentIncidentStoreAdapter,
@@ -272,11 +280,15 @@ export class AgentIncidentStore {
   ): Promise<AgentIncidentStoreSaveResult<TReport>> {
     const stored = this.canonicalize<TReport>(report);
     return this.exclusive(async () => {
-      await this.ensureInitialized();
+      // The post-commit scan also performs initial retention. Scanning before
+      // the first save would read and validate the same inventory twice.
+      if (!this.initialized) await this.ensureDirectoryWithRetry();
       const path = this.reportPath(stored.report.report_id);
-      const created = await this.persistWithRetry(path, stored.serialized, stored.report.report_id);
+      const created = await this.persistWithRetry(path, stored);
+      this.verifiedReports.set(path, validatedReportBytes(stored));
       const retention = await this.enforceRetentionInternal(path);
-      const retained = await this.readCandidate(path, stored.report.report_id, false);
+      this.initialized = true;
+      const retained = await this.readCandidate(path, stored.report.report_id, false, undefined, stored);
       if (retained.kind !== "valid" || retained.entry.serialized !== stored.serialized) {
         throw new AgentIncidentStoreError("persistence_unavailable", "The incident report did not survive local retention.");
       }
@@ -336,11 +348,12 @@ export class AgentIncidentStore {
     }
   }
 
-  private async persistWithRetry(path: string, serialized: string, reportId: string): Promise<boolean> {
+  private async persistWithRetry(path: string, stored: StoredAgentIncidentReport): Promise<boolean> {
+    const { serialized, report: { report_id: reportId } } = stored;
     for (let attempt = 0; attempt < this.limits.writeAttempts; attempt += 1) {
       const tempPath = `${path}.tmp`;
       try {
-        const existing = await this.readCandidate(path, reportId, true);
+        const existing = await this.readCandidate(path, reportId, true, undefined, stored);
         if (existing.kind === "valid") {
           if (existing.entry.serialized !== serialized) {
             throw new AgentIncidentStoreError("duplicate_report_id", "A different incident report already uses this report ID.");
@@ -360,7 +373,7 @@ export class AgentIncidentStore {
         if (await this.adapter.exists(path)) throw new Error("target-created-concurrently");
         await this.adapter.rename(tempPath, path);
 
-        const verified = await this.readCandidate(path, reportId, false);
+        const verified = await this.readCandidate(path, reportId, false, undefined, stored);
         if (verified.kind !== "valid" || verified.entry.serialized !== serialized) {
           throw new Error("write-verification-failed");
         }
@@ -463,6 +476,8 @@ export class AgentIncidentStore {
 
     reports.sort((left, right) => compareNewestFirst(left, right, nowMs));
     const retainedBytes = sumDiskBytes(reports) + sumDiskBytes(artifacts);
+    this.verifiedReports.clear();
+    for (const entry of reports) this.verifiedReports.set(entry.path, entry);
     const limitsSatisfied = !scan.scanFailed
       && cleanupFailures === 0
       && reports.length <= this.limits.maxReports
@@ -613,14 +628,22 @@ export class AgentIncidentStore {
     };
   }
 
-  private async readCandidate(path: string, expectedReportId: string, isolate: boolean, knownStat?: Stat): Promise<CandidateRead> {
-    let exists: boolean;
-    try {
-      exists = await this.adapter.exists(path);
-    } catch {
-      return { kind: "unavailable" };
+  private async readCandidate(
+    path: string,
+    expectedReportId: string,
+    isolate: boolean,
+    knownStat?: Stat,
+    expected?: StoredAgentIncidentReport,
+  ): Promise<CandidateRead> {
+    if (!knownStat) {
+      let exists: boolean;
+      try {
+        exists = await this.adapter.exists(path);
+      } catch {
+        return { kind: "unavailable" };
+      }
+      if (!exists) return { kind: "missing" };
     }
-    if (!exists) return { kind: "missing" };
 
     let stat: Stat | null = knownStat ?? null;
     if (!stat) {
@@ -643,24 +666,28 @@ export class AgentIncidentStore {
     } catch {
       return { kind: "unavailable" };
     }
-    if (utf8ByteLength(raw) > this.limits.maxReportBytes) {
+    const known = expected && expected.serialized === raw ? validatedReportBytes(expected) : this.verifiedReports.get(path);
+    const sizeBytes = known && known.serialized === raw ? known.sizeBytes : utf8ByteLength(raw);
+    if (sizeBytes > this.limits.maxReportBytes) {
       return isolate ? { kind: "corrupt", artifact: await this.isolateCorrupt(path, stat) } : { kind: "corrupt", artifact: null };
     }
 
     try {
-      const parsed = this.parseSerialized(raw);
-      if (parsed.serialized !== raw) throw new Error("noncanonical-report");
-      if (parsed.report.report_id !== expectedReportId) throw new Error("identity-mismatch");
+      let validated = known;
+      if (!validated || validated.serialized !== raw) {
+        const parsed = this.parseSerialized(raw);
+        if (parsed.serialized !== raw) throw new Error("noncanonical-report");
+        validated = validatedReportBytes(parsed);
+      }
+      if (validated.reportId !== expectedReportId) throw new Error("identity-mismatch");
       return {
         kind: "valid",
         entry: {
-          ...parsed,
+          ...validated,
           path,
-          reportId: parsed.report.report_id,
-          createdAtMs: Date.parse(parsed.report.created_at),
           ctimeMs: finiteTimestamp(stat.ctime),
           mtimeMs: finiteTimestamp(stat.mtime),
-          diskBytes: utf8ByteLength(raw),
+          diskBytes: sizeBytes,
         },
       };
     } catch {
@@ -799,6 +826,15 @@ export class AgentIncidentStore {
       release?.();
     }
   }
+}
+
+function validatedReportBytes(stored: StoredAgentIncidentReport): ValidatedReportBytes {
+  return {
+    serialized: stored.serialized,
+    sizeBytes: stored.sizeBytes,
+    reportId: stored.report.report_id,
+    createdAtMs: Date.parse(stored.report.created_at),
+  };
 }
 
 function validateEnvelope(value: CanonicalJson): asserts value is AgentIncidentStoreReport & CanonicalJson {

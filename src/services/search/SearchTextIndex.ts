@@ -1,4 +1,5 @@
 import type { TFile } from "obsidian";
+import { containsNonAscii } from "../../utils/characterValidation";
 
 /** Field bits stored with every posting: which of a note's fields hold the token. */
 export const TITLE_FIELD = 1;
@@ -17,6 +18,8 @@ export interface IndexedNote {
   preview: string;
   mtime: number;
   size: number;
+  /** True only when body postings cover every character of the raw file. */
+  completeRawText?: boolean;
 }
 
 /** A note's tokens, each with the field bits it appears in. */
@@ -163,6 +166,30 @@ export class SearchTextIndex {
       }
     }
     return mask;
+  }
+
+  /**
+   * A conservative OR of literal substring queries against raw note text.
+   * Null means at least one pattern has no safe required word: scan all files.
+   * Notes without complete raw coverage must always be read by the caller.
+   */
+  literalCandidates(patterns: readonly string[]): Set<string> | null {
+    const words = patterns.map((pattern) => {
+      // /i is not Unicode case folding. Non-ASCII case mappings and punctuation
+      // need direct confirmation rather than a potentially lossy normalization.
+      if (containsNonAscii(pattern)) return null;
+      return (pattern.toLowerCase().match(/[a-z0-9]+/g) ?? [])
+        .sort((left, right) => right.length - left.length)[0] ?? null;
+    });
+    if (words.some((word) => word === null)) return null;
+    const paths = new Set<string>();
+    for (const word of new Set(words)) {
+      const mask = this.bodyContainsWord(word!);
+      for (const docId of this.docIds()) {
+        if (mask[docId]) paths.add(this.notes[docId]!.path);
+      }
+    }
+    return paths;
   }
 
   /** Drops a note now; its postings go at the next `commit`. */

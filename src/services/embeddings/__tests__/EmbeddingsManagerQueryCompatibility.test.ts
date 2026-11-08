@@ -66,6 +66,23 @@ describe("EmbeddingsManager query generation compatibility", () => {
     );
   });
 
+  it("refines merged semantic candidates with metadata coverage after limiting", async () => {
+    const manager = harness(queryResult("semantic-v1", 4, new Float32Array([1, 0])));
+    manager.searchIndexedNamespace.mockResolvedValueOnce([[
+      { path: "Unrelated.md", score: 0.9, metadata: { title: "", excerpt: "", lastModified: 1 } },
+      { path: "Alpha.md", score: 0.8, metadata: { title: "Alpha", excerpt: "Beta", lastModified: 2 } },
+      { path: "Omitted.md", score: 0.7, metadata: { title: "Alpha beta", excerpt: "", lastModified: 3 } },
+    ]]);
+
+    const results = await manager.searchSimilar("alpha beta", 2);
+
+    expect(results.map((result: { path: string }) => result.path)).toEqual(["Alpha.md", "Unrelated.md"]);
+    expect(results[0].score).toBeCloseTo(0.85 * (0.65 * 0.8 + 0.35 * (61 / 62)) + 0.15);
+    expect(results[0].metadata.lexicalScore).toBe(1);
+    expect(results[1].score).toBeCloseTo(0.85 * (0.65 * 0.9 + 0.35));
+    expect(results[1].metadata.lexicalScore).toBe(0);
+  });
+
   it("reuses a same-generation query vector without another managed request", async () => {
     const manager = harness(queryResult("semantic-v1", 4, new Float32Array([1, 0])));
 

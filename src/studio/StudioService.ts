@@ -11,7 +11,6 @@ import { toSafeVaultFileName } from "../utils/vaultFileName";
 import { StudioAssetStore } from "./StudioAssetStore";
 import { registerBuiltInStudioNodes } from "./StudioBuiltInNodes";
 import { StudioGraphCompiler } from "./StudioGraphCompiler";
-import { migrateStudioProjectToPathOnlyPorts } from "./StudioGraphMigrations";
 import { StudioNodeRegistry } from "./StudioNodeRegistry";
 import { StudioProjectStore } from "./StudioProjectStore";
 import { desktopHost } from "../platform/desktopOnly";
@@ -224,18 +223,15 @@ export class StudioService {
     readOnlyReason?: string;
   }> {
     void this.agentReferenceFile.ensureCurrent();
-    let project = options
+    const project = options
       ? await this.projectStore.loadProject(projectPath, options)
       : await this.projectStore.loadProject(projectPath);
     const readOnlyReason = this.projectStore.getReadOnlyReason(projectPath);
     if (readOnlyReason) {
       return { project, rawText: await this.projectStore.readVisibleProjectRawText(projectPath), readOnlyReason };
     }
-    const migration = migrateStudioProjectToPathOnlyPorts(project);
-    if (migration.changed) {
-      project = migration.project;
-      await this.projectStore.saveProject(projectPath, project);
-    }
+    // The store admits and migrates external bytes before accepting them.
+    // A session adopts that accepted state; it never reruns legacy rewrites.
     await this.ensureDefaultPolicy(project);
     const rawText = await this.projectStore.readProjectRawText(projectPath);
     return {
