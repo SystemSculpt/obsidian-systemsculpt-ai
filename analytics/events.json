@@ -55,6 +55,15 @@
   },
   "events": [
     {
+      "name": "copy_experiment_referral",
+      "kind": "attribution-only",
+      "description": "In-app copy A/B tests (T-5852). Each vault gets a sticky arm by variantFor(experiment, device-local random unit), the FNV-1a assignment of @trellisbyte/analytics/experiment 0.5.0; the unit never leaves the device. The plugin sends no exposure event (Obsidian bans client telemetry): systemsculpt.com links opened from the tested copy carry utm_campaign=<experiment> and utm_content=<arm>, so the website's own pageviews record the arm (checkout_view also carries utm_campaign). Plugin sign-ups end on /plugin/connect and are not yet tied to the arm. Live: ss-plugin-upgrade-pro-2026-11, the upgrade prompt title and subtitle, a (SystemSculpt Pro: AI images and video in your vault) vs b (Get SystemSculpt Pro, AI for your vault; all four features, $9 a month), copy from CMO T-5831; Trellis company/experiments.json scores it as link_split. Hosts without vault local storage (Obsidian before 1.8.7) see the control and join no test.",
+      "endpoints": ["utm_content"],
+      "where": ["src/services/CopyExperiments.ts"],
+      "owner": "analytics",
+      "added": "2026-11-07"
+    },
+    {
       "name": "patreon_support_referral",
       "kind": "attribution-only",
       "description": "Direct Patreon support links carry utm_campaign=patreon_everywhere and utm_source=plugin_settings, plugin_upgrade_modal, plugin_funding or plugin_readme. Patreon may use these campaign tags; plugin clicks are not measured and no client telemetry or redirect is sent. Patreon support does not activate SystemSculpt Pro.",

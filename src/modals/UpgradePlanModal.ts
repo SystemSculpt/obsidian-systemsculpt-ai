@@ -17,6 +17,7 @@ import {
 import { showActionNotice } from "../core/ui/notifications";
 import type SystemSculptPlugin from "../main";
 import type { AccountConnectMode, ConnectOutcome } from "../services/AccountConnectService";
+import { upgradePromptCopy, withExperimentArm, type UpgradePromptCopy } from "../services/CopyExperiments";
 
 export type UpgradePlanOptions = Readonly<{
   /** Request context; all features share the same Pro positioning in this prompt. */
@@ -76,6 +77,8 @@ export class UpgradePlanModal extends StandardModal {
   /** The browser handoff is on screen and its sign-in has not finished. */
   private awaitingSignIn = false;
   private connectMode: AccountConnectMode = "sign-in";
+  /** This vault's arm of the upgrade-prompt copy test; links it opens carry the arm. */
+  private readonly copy: UpgradePromptCopy;
 
   /** Opens the modal unless one is already on screen (gate calls can race). */
   static openOnce(plugin: SystemSculptPlugin, options: UpgradePlanOptions = {}): UpgradePlanModal {
@@ -109,6 +112,7 @@ export class UpgradePlanModal extends StandardModal {
     _options: UpgradePlanOptions = {},
   ) {
     super(plugin.app);
+    this.copy = upgradePromptCopy(plugin.app);
     this.setSize("small");
     this.modalEl.addClass("ss-upgrade-plan-modal", "ss-modal--scrollable");
   }
@@ -201,7 +205,7 @@ export class UpgradePlanModal extends StandardModal {
   }
 
   private renderSignedOut(): void {
-    this.addTitle("Use your own AI", "Subscribe for image and video generation, smart search and Studio.");
+    this.addTitle(this.copy.title, this.copy.subtitle);
     this.renderIcon("sparkles");
     this.addDetail("Claude Code and Codex stay free on desktop.");
     this.addLink("upgrade-plan.pricing", "Compare plans", SYSTEMSCULPT_WEBSITE.LICENSE);
@@ -215,7 +219,7 @@ export class UpgradePlanModal extends StandardModal {
   }
 
   private renderChoosePlan(): void {
-    this.addTitle("Use your own AI", "Subscribe for image and video generation, smart search and Studio.");
+    this.addTitle(this.copy.title, this.copy.subtitle);
     this.renderIcon("sparkles");
     const email = this.signedInEmail();
     if (email) {
@@ -248,15 +252,20 @@ export class UpgradePlanModal extends StandardModal {
       "external-link",
     );
     this.addActionButton("upgrade-plan.pricing", "Compare plans", () => {
-      void openExternalUrl(withPluginAttribution(SYSTEMSCULPT_WEBSITE.LICENSE, "modal"), getSurfaceOwnerWindow(this.modalEl));
+      void openExternalUrl(this.attributed(SYSTEMSCULPT_WEBSITE.LICENSE), getSurfaceOwnerWindow(this.modalEl));
     });
   }
 
   /** Opens checkout, then keeps guiding: purchase completes in the browser,
    * so the modal switches to the "come back and activate" state. */
   private openPurchase(url: string): void {
-    void openExternalUrl(withPluginAttribution(url, "modal"), getSurfaceOwnerWindow(this.modalEl));
+    void openExternalUrl(this.attributed(url), getSurfaceOwnerWindow(this.modalEl));
     this.renderAfterPurchase();
+  }
+
+  /** Plugin attribution plus this vault's copy-test arm, for pricing and checkout links. */
+  private attributed(url: string): string {
+    return withExperimentArm(withPluginAttribution(url, "modal"), this.copy.arm);
   }
 
   private renderAfterPurchase(): void {
@@ -288,9 +297,9 @@ export class UpgradePlanModal extends StandardModal {
     this.connectMode = mode;
     const status = this.renderHandoff(mode);
     const ownerWindow = getSurfaceOwnerWindow(this.modalEl);
-    void this.plugin
-      .getAccountConnectService()
-      .begin(mode, ownerWindow)
+    const service = this.plugin.getAccountConnectService();
+    const begun = this.copy.arm ? service.begin(mode, ownerWindow, this.copy.arm) : service.begin(mode, ownerWindow);
+    void begun
       .then((opened) => {
         if (opened !== false || !this.contentEl.contains(status)) return;
         status.empty();
@@ -330,7 +339,7 @@ export class UpgradePlanModal extends StandardModal {
       if (service.hasPendingRequest()) {
         void service.reopen(ownerWindow);
       } else {
-        void service.begin(mode, ownerWindow);
+        void (this.copy.arm ? service.begin(mode, ownerWindow, this.copy.arm) : service.begin(mode, ownerWindow));
       }
     });
     this.addActionButton(
@@ -371,7 +380,7 @@ export class UpgradePlanModal extends StandardModal {
       if (typeof target === "function") {
         target();
       } else {
-        void openExternalUrl(withPluginAttribution(target, "modal"), getSurfaceOwnerWindow(this.modalEl));
+        void openExternalUrl(this.attributed(target), getSurfaceOwnerWindow(this.modalEl));
       }
     });
   }

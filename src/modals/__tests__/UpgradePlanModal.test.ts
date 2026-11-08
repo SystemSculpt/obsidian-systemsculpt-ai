@@ -1,5 +1,5 @@
 import { JSDOM } from "jsdom";
-import { Notice } from "obsidian";
+import { Notice, requireApiVersion } from "obsidian";
 import { UpgradePlanModal, hasActivePlan, presentAccountConnectOutcome, requireActivePlan } from "../UpgradePlanModal";
 
 jest.mock("../../platform/hostCapabilities", () => ({
@@ -192,8 +192,8 @@ describe("UpgradePlanModal", () => {
     const modal = new UpgradePlanModal(plugin, { feature: "Chat" });
     modal.onOpen();
 
-    expect(modal.modalEl.textContent).toContain("Use your own AI");
-    expect(modal.modalEl.textContent).toContain("Subscribe for image and video generation, smart search and Studio.");
+    expect(modal.modalEl.textContent).toContain("SystemSculpt\u00a0Pro: AI images and video in your vault");
+    expect(modal.modalEl.textContent).toContain("Plus smart search and Studio. $9 a month.");
     expect(modal.modalEl.textContent).toContain("Claude Code and Codex stay free on desktop.");
     expect(findButtonByText(modal.modalEl, "Sign in")).toBeTruthy();
     const start = modal.modalEl.querySelector<HTMLButtonElement>('[data-testid="upgrade-plan.create-account"]')!;
@@ -203,6 +203,40 @@ describe("UpgradePlanModal", () => {
     await flushPromises();
     expect(plugin.begin).toHaveBeenCalledWith("sign-up", expect.anything());
     modal.onClose();
+  });
+
+  it("shows a vault's copy-test arm and tags the links it opens with that arm (T-5852)", async () => {
+    const plugin = createPlugin({ userEmail: "user@example.com" });
+    const store: Record<string, unknown> = { "systemsculpt-experiment-unit": "0123456789abcdef" };
+    plugin.app = { loadLocalStorage: (key: string) => store[key] ?? null, saveLocalStorage: jest.fn() };
+    const hostVersionCheck = jest.mocked(requireApiVersion).getMockImplementation()!;
+    jest.mocked(requireApiVersion).mockImplementation(() => true);
+    const { hrefs, spy } = spyOnAnchorClicks();
+    try {
+      const modal = new UpgradePlanModal(plugin);
+      modal.onOpen();
+      expect(modal.modalEl.textContent).toContain("Get SystemSculpt\u00a0Pro, AI for your vault");
+      expect(modal.modalEl.textContent).toContain("Image and video generation, smart search and Studio for $9 a month.");
+      expect(modal.modalEl.textContent).not.toContain("SystemSculpt\u00a0Pro: AI images and video in your vault");
+      findButtonByText(modal.modalEl, "Compare plans").click();
+      findButtonByText(modal.modalEl, "Subscribe yearly").click();
+      const tags = hrefs.map((href) => {
+        const url = new URL(href);
+        return [url.pathname, url.searchParams.get("utm_campaign"), url.searchParams.get("utm_content")];
+      });
+      expect(tags).toEqual([
+        ["/pricing", "ss-plugin-upgrade-pro-2026-11", "b"],
+        ["/checkout", "ss-plugin-upgrade-pro-2026-11", "b"],
+      ]);
+      findButtonByText(modal.modalEl, "Back").click();
+      findButtonByText(modal.modalEl, "Already paid? Sync").click();
+      await flushPromises();
+      expect(plugin.begin).toHaveBeenCalledWith("sign-in", expect.anything(), { experiment: "ss-plugin-upgrade-pro-2026-11", variant: "b" });
+      modal.onClose();
+    } finally {
+      spy.mockRestore();
+      jest.mocked(requireApiVersion).mockImplementation(hostVersionCheck);
+    }
   });
 
   it("opens Account settings for an existing license key", () => {
@@ -223,7 +257,7 @@ describe("UpgradePlanModal", () => {
     modal.onOpen();
 
     expect(modal.modalEl.textContent).toContain("Signed in as user@example.com.");
-    expect(modal.modalEl.textContent).toContain("Subscribe for image and video generation, smart search and Studio.");
+    expect(modal.modalEl.textContent).toContain("Plus smart search and Studio. $9 a month.");
     expect(modal.modalEl.textContent).toContain("Claude Code and Codex stay free on desktop.");
     expect(findButtonByText(modal.modalEl, "Subscribe yearly")).toBeTruthy();
     expect(findButtonByText(modal.modalEl, "Subscribe monthly")).toBeTruthy();
@@ -482,7 +516,7 @@ describe("UpgradePlanModal", () => {
     UpgradePlanModal.showConnectOutcome({ kind: "no-license", name: null, email: "user@example.test" });
 
     expect(modal.modalEl.textContent).toContain("Signed in as user@example.test.");
-    expect(modal.modalEl.textContent).toContain("Subscribe for image and video generation, smart search and Studio.");
+    expect(modal.modalEl.textContent).toContain("Plus smart search and Studio. $9 a month.");
     expect(modal.modalEl.textContent).toContain("Claude Code and Codex stay free on desktop.");
     expect(findButtonByText(modal.modalEl, "Subscribe yearly")).toBeTruthy();
     modal.onClose();
@@ -666,7 +700,7 @@ describe("plan gate helpers", () => {
   it("requireActivePlan opens the modal and blocks when no plan is active", () => {
     const plugin = createPlugin();
     expect(requireActivePlan(plugin, "Chat")).toBe(false);
-    expect(document.body.textContent).toContain("Use your own AI");
+    expect(document.body.textContent).toContain("SystemSculpt\u00a0Pro: AI images and video in your vault");
     closeOpenModal();
 
     expect(requireActivePlan(createPlugin({ licenseKey: "skss-1" }), "Chat")).toBe(true);

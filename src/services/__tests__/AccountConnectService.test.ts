@@ -100,6 +100,30 @@ describe("AccountConnectService browser sign-in", () => {
     jest.restoreAllMocks();
   });
 
+  it("carries the upgrade prompt's copy-test arm on the sign-up page link, reopen included (T-5852)", async () => {
+    const { service, openedUrls } = createService();
+    const arm = { experiment: "ss-plugin-upgrade-pro-2026-11", variant: "b" };
+
+    await service.begin("sign-up", undefined, arm);
+    await service.reopen();
+
+    for (const url of openedUrls) {
+      const parsed = new URL(url);
+      expect(parsed.pathname).toBe("/sign-up");
+      expect(parseConnectUrl(url).redirectPath).toBe("/plugin/connect");
+      expect(Object.fromEntries([...parsed.searchParams].filter(([key]) => key.startsWith("utm_")))).toEqual({
+        utm_source: "obsidian-plugin",
+        utm_medium: "modal",
+        utm_campaign: "ss-plugin-upgrade-pro-2026-11",
+        utm_content: "b",
+      });
+    }
+    expect(openedUrls).toHaveLength(2);
+
+    await service.begin("sign-in");
+    expect([...new URL(openedUrls[2]).searchParams.keys()]).toEqual(["redirect_url"]);
+  });
+
   it("begins sign-in with fresh base64url state and challenge and opens the website", async () => {
     const { service, openedUrls } = createService();
 
