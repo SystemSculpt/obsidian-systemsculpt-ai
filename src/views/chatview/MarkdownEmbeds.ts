@@ -1,4 +1,5 @@
 import { setIcon } from "obsidian";
+import { mediaDisplayName } from "./ToolCardBlocks";
 
 /**
  * Embedded PDFs, audio and video in an answer play in place; their controls
@@ -32,7 +33,8 @@ export function enhanceMarkdownEmbeds(parent: HTMLElement): void {
     });
     const icon = link.createSpan({ cls: "ss-embed-source-icon", attr: { "aria-hidden": "true" } });
     setIcon(icon, match[1]);
-    link.appendText(name);
+    // The same name the chat gives the file everywhere else; the icon says what kind it is.
+    link.appendText(mediaDisplayName(target));
     embed.after(link);
   }
 }

@@ -10,6 +10,15 @@ function record(value: unknown): Record<string, unknown> {
 function rows(value: unknown): Record<string, unknown>[] { return Array.isArray(value) ? value.map(record) : []; }
 function paths(value: unknown): string[] { return typeof value === "string" ? [value] : Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []; }
 function name(path: string): string { return path.split(/[\\/]/u).filter(Boolean).pop() ?? path; }
+const COUNTS = /^\+(\d+) −(\d+)$/u;
+/** A note changed more than once in a turn reads its whole change: counts add up, an uncounted change leaves none. */
+function mergedMeta(earlier: TurnChange | undefined, meta: string | undefined): string | undefined {
+  if (!earlier || earlier.deleted) return meta;
+  if (earlier.meta === "new" || earlier.meta === "written") return earlier.meta;
+  const before = earlier.meta?.match(COUNTS), after = meta?.match(COUNTS);
+  if (before && after) return `+${Number(before[1]) + Number(after[1])} −${Number(before[2]) + Number(after[2])}`;
+  return meta === "new" || meta === "written" ? meta : undefined;
+}
 function nativePath(part: AgentToolPart, path: string): ReturnType<typeof nativeToolPath> {
   const { workingDirectory, vaultRoot, vaultRootAlias, homeDirectory } = part.native!;
   return nativeToolPath(path, workingDirectory, vaultRoot, vaultRootAlias, homeDirectory);
@@ -26,7 +35,8 @@ export function presentTurnChanges(parts: readonly AgentToolPart[]): readonly Tu
       const target = part.native ? nativePath(part, path) : { displayPath: path, vaultPath: path };
       // External native changes aren't links into the user's vault.
       if (!target.vaultPath) return;
-      changes.set(target.vaultPath, { path: target.vaultPath, label, ...(meta ? { meta } : {}), ...(deleted ? { deleted: true } : {}) });
+      const merged = deleted ? meta : mergedMeta(changes.get(target.vaultPath), meta);
+      changes.set(target.vaultPath, { path: target.vaultPath, label, ...(merged ? { meta: merged } : {}), ...(deleted ? { deleted: true } : {}) });
     };
     // A note made or changed earlier in the turn and then moved is one note: it is listed once, where it ended up.
     const move = (source: string, destination: string, label: string) => {

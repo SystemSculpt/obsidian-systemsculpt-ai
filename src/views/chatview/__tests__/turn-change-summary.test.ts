@@ -90,6 +90,14 @@ describe("turn change receipts", () => {
     ]);
   });
 
+  it("adds up the counts of a note changed twice and drops a count it cannot know", () => {
+    const change = (diff: string) => part("fileChange", { changes: [{ path: "Notes/Plan.md", kind: "update", diff }] }, codex);
+    expect(presentTurnChanges([change("@@ -1 +1 @@\n-old\n+new\n"), change("@@ -1 +1,2 @@\n new\n+more\n")]))
+      .toEqual([{ path: "Notes/Plan.md", label: "Plan.md", meta: "+2 −1" }]);
+    expect(presentTurnChanges([part("edit", { path: "Notes/Plan.md" }), change("@@ -1 +1,2 @@\n new\n+more\n")]))
+      .toEqual([{ path: "Notes/Plan.md", label: "Plan.md" }]);
+  });
+
   it("resolves native receipts from a nested cwd against the vault root and its alias", () => {
     const native = { agent: "claude" as const, workingDirectory: "/vault/Notes", vaultRoot: "/vault", vaultRootAlias: "/alias/vault" };
     expect(presentTurnChanges([
