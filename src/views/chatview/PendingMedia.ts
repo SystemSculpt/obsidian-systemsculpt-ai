@@ -208,7 +208,8 @@ const FAILED_ICONS: Readonly<Record<PendingMedia["kind"], string>> = { image: "i
 
 /** What to do next: a refused prompt needs new words, anything else another try. */
 export function retryHint(error: string): string {
-  return /\b(safety|flagged|moderation|content policy|not allowed)\b/iu.test(error) ? "Change the prompt and ask again." : "Ask again to retry.";
+  if (/\b(safety|flagged|moderation|content policy|not allowed)\b/iu.test(error)) return "Change the prompt and ask again.";
+  return /\blimit reached\b/iu.test(error) ? "Try again once it resets." : "Ask again to retry.";
 }
 
 /**
@@ -228,11 +229,22 @@ export function fitToLine(element: HTMLElement, full: string): void {
   element.textContent = `${words.slice(0, Math.max(1, high)).join(" ").replace(/[\s,.;:–—-]+$/u, "")}…`;
 }
 
-/** Fits every one-line text in a freshly drawn block once it has a size. */
+/** Fits every one-line text in a freshly drawn block once it has a size, and again whenever its width changes. */
 export function fitPendingText(block: HTMLElement): void {
-  const view = block.ownerDocument.defaultView;
+  if (!block.querySelector("[data-fit]")) return;
   const fit = () => block.querySelectorAll<HTMLElement>("[data-fit]").forEach(element => fitToLine(element, element.dataset.fit ?? ""));
-  if (view?.requestAnimationFrame) view.requestAnimationFrame(fit); else fit();
+  const view = block.ownerDocument.defaultView;
+  if (!view?.ResizeObserver) {
+    fit();
+    return;
+  }
+  let width = -1;
+  new view.ResizeObserver(entries => {
+    const next = Math.round(entries[0]?.contentRect.width ?? 0);
+    if (next === width) return;
+    width = next;
+    fit();
+  }).observe(block);
 }
 
 /** One placeholder or failure tile; its live line and bar update from the block's clock. */
