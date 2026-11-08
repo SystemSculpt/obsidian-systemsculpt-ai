@@ -18,6 +18,10 @@ export class SystemSculptSearchModal extends StandardModal {
   private searchInputEl: HTMLInputElement | null = null;
   private statusEl: HTMLElement | null = null;
   private listEl: HTMLElement | null = null;
+  /** Each excerpt's full text, so a narrower or wider list can fit it again. */
+  private readonly excerptSources = new WeakMap<HTMLElement, { text: string; query: string }>();
+  private listResizeObserver: ResizeObserver | null = null;
+  private excerptWidth = 0;
   private combobox: SurfaceCombobox<SearchHit> | null = null;
 
   private readonly SEARCH_LIMIT = 30;
@@ -70,6 +74,17 @@ export class SystemSculptSearchModal extends StandardModal {
     this.listEl = shell.createDiv({ cls: "ss-search__list" });
     this.listEl.id = this.listId;
     this.registerDomEvent(this.listEl, "scroll", () => this.syncListFade());
+    const listEl = this.listEl;
+    const Observer = (this.ownerWindow as Window & { ResizeObserver?: typeof ResizeObserver }).ResizeObserver;
+    if (Observer) {
+      this.listResizeObserver = new Observer((entries: ResizeObserverEntry[]) => {
+        const width = Math.round(entries[0]?.contentRect.width ?? 0);
+        if (width === this.excerptWidth) return;
+        this.excerptWidth = width;
+        this.listEl?.querySelectorAll<HTMLElement>(".ss-search__excerpt").forEach((el) => this.fitExcerpt(el));
+      });
+      this.listResizeObserver.observe(listEl);
+    }
     this.registerDomEvent(this.listEl, "pointermove", () => {
       this.pointerOverResults = true;
     });
@@ -94,6 +109,8 @@ export class SystemSculptSearchModal extends StandardModal {
     }
     this.combobox?.destroy();
     this.combobox = null;
+    this.listResizeObserver?.disconnect();
+    this.listResizeObserver = null;
     this.releaseEngine?.();
     this.releaseEngine = null;
     super.onClose();
@@ -437,9 +454,36 @@ export class SystemSculptSearchModal extends StandardModal {
 
     if (result.excerpt) {
       const excerpt = item.createDiv({ cls: "ss-search__excerpt" });
-      this.appendHighlightedText(excerpt, result.excerpt, query);
+      this.excerptSources.set(excerpt, { text: result.excerpt, query });
+      this.fitExcerpt(excerpt);
     }
     return item;
+  }
+
+  /**
+   * An excerpt longer than its lines ends on the last whole word that fits,
+   * then an ellipsis. CSS line-clamp alone cuts through a word ("hea…"); it
+   * stays as the fallback while the list is not laid out yet.
+   */
+  private fitExcerpt(el: HTMLElement) {
+    const source = this.excerptSources.get(el);
+    if (!source) return;
+    const render = (text: string) => {
+      el.empty();
+      this.appendHighlightedText(el, text, source.query);
+    };
+    const fits = () => el.scrollHeight <= el.clientHeight + 1;
+    render(source.text);
+    if (el.clientHeight === 0 || fits()) return;
+    const words = source.text.split(" ");
+    const cut = (count: number) => `${words.slice(0, count).join(" ").replace(/[\s.,;:·…—-]+$/u, "")}…`;
+    let low = 1, high = words.length - 1, best = 0;
+    while (low <= high) {
+      const mid = (low + high) >> 1;
+      render(cut(mid));
+      if (fits()) { best = mid; low = mid + 1; } else { high = mid - 1; }
+    }
+    render(best ? cut(best) : source.text);
   }
 
   private scheduleRecentPreviewHydration(results: SearchHit[], serial: number) {

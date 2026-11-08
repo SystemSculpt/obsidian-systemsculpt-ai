@@ -572,6 +572,28 @@ describe("SystemSculptSearchModal", () => {
       expect((modal as any).listEl?.textContent).not.toContain("1.0 KB");
     });
 
+    it("ends an overflowing excerpt on the last whole word that fits", async () => {
+      // Lay out 40 characters per line, one line visible.
+      const isExcerpt = (el: Element) => el.classList.contains("ss-search__excerpt");
+      const client = jest.spyOn(HTMLElement.prototype, "clientHeight", "get").mockImplementation(function (this: HTMLElement) {
+        return isExcerpt(this) ? 18 : 0;
+      });
+      const scroll = jest.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(function (this: HTMLElement) {
+        return isExcerpt(this) ? Math.ceil((this.textContent ?? "").length / 40) * 18 : 0;
+      });
+      try {
+        modal.onOpen();
+        const item = (modal as any).renderResult({
+          path: "notes/walk.md", title: "Walk", score: 1, origin: "lexical",
+          excerpt: "Follow the harbour quay to a grassy headland, with fishing boats below and gannets out at sea.",
+        }, "harbour");
+        expect(item.querySelector(".ss-search__excerpt")?.textContent).toBe("Follow the harbour quay to a grassy…");
+      } finally {
+        client.mockRestore();
+        scroll.mockRestore();
+      }
+    });
+
     it("escapes note content while still highlighting matching terms", async () => {
       modal.onOpen();
       plugin._testEngine.search.mockResolvedValue(
