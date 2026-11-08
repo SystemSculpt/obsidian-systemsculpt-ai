@@ -187,6 +187,10 @@ export function renderNotice(card: HTMLElement, notice: ToolCardNotice): HTMLEle
 export function renderMedia(app: App, card: HTMLElement, media: readonly ToolCardMedia[]): void {
   if (!media.length) return;
   const strip = card.createDiv({ cls: "ss-tool-media", attr: { "data-testid": "chat.tool.media" } });
+  if (media.length > 1) {
+    strip.addClass("is-multiple");
+    strip.setCssProps({ "--ss-tool-media-columns": String(Math.min(media.length, 4)) });
+  }
   for (const item of media) {
     const name = item.label ?? item.path.split("/").pop() ?? item.path;
     const file = app.vault.getAbstractFileByPath(item.path);

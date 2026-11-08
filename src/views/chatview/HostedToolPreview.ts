@@ -174,15 +174,19 @@ function renderDirectory(app: App, host: HTMLElement, input: RecordValue, output
 
 function renderSearch(app: App, host: HTMLElement, output: RecordValue, options: HostedToolPreviewOptions, snippets: boolean): void {
   const results = records(output.results);
-  if (results.length) renderList(host, results, (row, result) => renderPath(app, row, result.path, options));
   const matches = snippets ? strings(output.snippets) : [];
+  // SearchOperations emits `${path}:${line}  ${context}`. Only associate a
+  // snippet with a path present in the recorded result, never a guessed path.
+  const paths = results.flatMap(result => text(result.path) ?? []).sort((a, b) => b.length - a.length);
+  const snippetPath = (snippet: string): string | undefined => paths.find(candidate => snippet.startsWith(`${candidate}:`)
+    && /^\d+ {2}/u.test(snippet.slice(candidate.length + 1)));
+  // A file shown with its matching lines is not listed a second time on its own.
+  const matched = new Set(matches.flatMap(snippet => snippetPath(snippet) ?? []));
+  const unmatched = results.filter(result => !matched.has(text(result.path) ?? ""));
+  if (unmatched.length) renderList(host, unmatched, (row, result) => renderPath(app, row, result.path, options));
   if (matches.length) {
-    // SearchOperations emits `${path}:${line}  ${context}`. Only associate a
-    // snippet with a path present in the recorded result, never a guessed path.
-    const paths = results.flatMap(result => text(result.path) ?? []).sort((a, b) => b.length - a.length);
     renderList(host, matches, (row, snippet) => {
-      const path = paths.find(candidate => snippet.startsWith(`${candidate}:`)
-        && /^\d+ {2}/u.test(snippet.slice(candidate.length + 1)));
+      const path = snippetPath(snippet);
       if (path) {
         const suffix = snippet.slice(path.length + 1);
         const separator = suffix.indexOf("  ");
