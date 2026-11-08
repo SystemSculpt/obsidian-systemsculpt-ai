@@ -12,6 +12,11 @@
       "not_measured": "Studio batches local diagram-arrow geometry for touched nodes and shapes per frame. Movement, resize and peer reconciliation send no client telemetry or server calls.",
       "where": ["src/views/studio/shapes/StudioShapeLayer.ts", "src/views/studio/StudioGraphInteractionEngine.ts"]
     },
+    "chat-empty-pro-try": {
+      "events": [],
+      "not_measured": "Empty-chat try taps for subscribers and starters with credits (image and video fills the composer with an image prompt, smart search opens search or, with embeddings off, their setting, Studio opens Studio) stay local; Obsidian's policies ban client telemetry. What follows is measured where it reaches the API: the image tool's job and search's semantic query as api_request.",
+      "where": ["src/views/chatview/AgentEmptyState.ts", "src/views/chatview/AgentChatView.ts"]
+    },
     "studio-photo-export": {
       "events": [],
       "not_measured": "Studio encodes new opaque JPEG/WebP edits as verified lossless WebP, with PNG for transparency or unsupported encoders and clipboard copies. Encoding and saved-artifact reuse stay local; no client telemetry or server call is sent.",
@@ -475,6 +480,36 @@
         "src/tools/systemsculpt/SystemSculptToolHost.ts"
       ],
       "owner": "engineer",
+      "added": "2026-11-07"
+    },
+    {
+      "name": "checkout_view",
+      "feature": "plugin_chat_empty_monthly",
+      "kind": "browser",
+      "description": "Website checkout viewed from the empty chat's \"Get Pro for $9/month\" link under \"With SystemSculpt Pro\" (image and video generation in chat, smart search, Studio), shown to own-AI chats without a plan (T-5585). utm_source=plugin, utm_medium=chat, cta=plugin_chat_empty_monthly, utm_campaign=plugin_chat_empty_nov2026. Website/Stripe attribution only under existing consent; no plugin client telemetry or measured offer impressions.",
+      "endpoints": ["MONTHLY_CHAT_EMPTY"],
+      "where": ["src/constants/externalServices.ts", "src/views/chatview/AgentChatView.ts"],
+      "owner": "design",
+      "added": "2026-11-07"
+    },
+    {
+      "name": "begin_checkout",
+      "feature": "plugin_chat_empty_monthly",
+      "kind": "server",
+      "description": "Server begin_checkout after Stripe Session creation from the empty chat's \"Get Pro for $9/month\" link (T-5585). utm_source=plugin, utm_medium=chat, cta=plugin_chat_empty_monthly, utm_campaign=plugin_chat_empty_nov2026. Website/Stripe attribution only under existing consent; no plugin client telemetry or measured offer impressions.",
+      "endpoints": ["MONTHLY_CHAT_EMPTY"],
+      "where": ["src/constants/externalServices.ts", "src/views/chatview/AgentChatView.ts"],
+      "owner": "design",
+      "added": "2026-11-07"
+    },
+    {
+      "name": "purchase",
+      "feature": "plugin_chat_empty_monthly",
+      "kind": "server",
+      "description": "Server purchase at paid fulfillment (not a return URL or client handoff) from the empty chat's \"Get Pro for $9/month\" link (T-5585). utm_source=plugin, utm_medium=chat, cta=plugin_chat_empty_monthly, utm_campaign=plugin_chat_empty_nov2026. Website/Stripe attribution only under existing consent; no plugin client telemetry or measured offer impressions.",
+      "endpoints": ["MONTHLY_CHAT_EMPTY"],
+      "where": ["src/constants/externalServices.ts", "src/views/chatview/AgentChatView.ts"],
+      "owner": "design",
       "added": "2026-11-07"
     },
     {

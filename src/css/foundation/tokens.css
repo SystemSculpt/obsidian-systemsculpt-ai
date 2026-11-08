@@ -225,7 +225,6 @@ body {
   /* Agent workspace layout bounds. */
   --ss-agent-content-width: 780px;
   --ss-agent-user-width: 620px;
-  --ss-agent-empty-height: 320px;
   --ss-agent-tool-details-height: 240px;
   --ss-agent-attachment-width: 240px;
 }
