@@ -323,10 +323,21 @@ export function renderStudioShapeLayer(options: StudioShapeLayerOptions): Studio
       height: shape.size.height,
     };
 
-    const finish = (): void => {
+    const finish = (commit: boolean): void => {
       ownerWindow.removeEventListener("pointermove", onMove);
       ownerWindow.removeEventListener("pointerup", onUp);
+      ownerWindow.removeEventListener("pointercancel", onCancel);
       activeGestureShapeIds.delete(shape.id);
+      if (!commit) {
+        // Refreshes received during the gesture deferred this shape and its handles.
+        handle.update({
+          diagram: currentDiagram,
+          busy: currentBusy,
+          activeCanvasTool: currentActiveCanvasTool,
+          selection: { shapeIds: [...selectedShapeIds], arrowIds: [...selectedArrowIds] },
+        });
+        return;
+      }
       options.onResizeShape(shape.id, {
         x: shape.position.x,
         y: shape.position.y,
@@ -361,11 +372,19 @@ export function renderStudioShapeLayer(options: StudioShapeLayerOptions): Studio
       if (event.pointerId !== startEvent.pointerId) {
         return;
       }
-      finish();
+      finish(true);
+    }
+
+    function onCancel(event: PointerEvent): void {
+      if (event.pointerId !== startEvent.pointerId) {
+        return;
+      }
+      finish(false);
     }
 
     ownerWindow.addEventListener("pointermove", onMove);
     ownerWindow.addEventListener("pointerup", onUp);
+    ownerWindow.addEventListener("pointercancel", onCancel);
   };
 
   const startArrowGesture = (itemId: string, startEvent: PointerEvent): void => {
@@ -493,7 +512,7 @@ export function renderStudioShapeLayer(options: StudioShapeLayerOptions): Studio
   for (const shape of shapesById.values()) mountShape(shape);
 
   renderArrows();
-  return {
+  const handle: StudioShapeLayerHandle = {
     el: layerEl,
     startArrowGesture,
     cancelArrowGesture: () => cancelArrowGesture(),
@@ -567,6 +586,7 @@ export function renderStudioShapeLayer(options: StudioShapeLayerOptions): Studio
       renderArrows();
     },
   };
+  return handle;
 }
 
 /**

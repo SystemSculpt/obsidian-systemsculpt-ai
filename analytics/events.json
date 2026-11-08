@@ -7,6 +7,21 @@
     "x-systemsculpt-platform": "macos | windows | linux | ios | android"
   },
   "local_interactions": {
+    "vault-search-pagination": {
+      "events": [],
+      "not_measured": "Vault search and cursor paging run locally. Shortening an oversized preview or rejecting oversized response metadata sends no telemetry or server call.",
+      "where": ["src/tools/vault/tools/SearchOperations.ts"]
+    },
+    "studio-shape-resize-cancel": {
+      "events": [],
+      "not_measured": "Cancelling a local shape resize restores canvas geometry and releases pointer listeners without a server call or client telemetry.",
+      "where": ["src/views/studio/shapes/StudioShapeLayer.ts"]
+    },
+    "audio-processor-run-lifetime": {
+      "events": [],
+      "not_measured": "Local run teardown and unload-safe resume admission send no telemetry. Existing audio_processing API events measure only requests that are actually sent.",
+      "where": ["src/features/audio-processor/AudioProcessorModal.ts", "src/features/audio-processor/AudioProcessorResume.ts"]
+    },
     "chat-source-citation-open": {
       "events": [],
       "not_measured": "Opening a cited source note stays in the vault through Obsidian openLinkText. No server call or client telemetry is sent.",
