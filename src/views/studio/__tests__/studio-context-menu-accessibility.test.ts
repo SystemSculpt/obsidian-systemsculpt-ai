@@ -1,6 +1,8 @@
 /**
  * @jest-environment jsdom
  */
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import type { StudioNodeDefinition } from "../../../studio/types";
 import { disposeMobileHostLayoutStates } from "../../../platform/mobileHostLayout";
 import { StudioNodeContextMenuOverlay } from "../StudioNodeContextMenuOverlay";
@@ -118,6 +120,7 @@ describe("Studio context menu accessibility", () => {
     Object.defineProperty(controls, "getBoundingClientRect", {
       configurable: true, value: () => ({ bottom: 207 }),
     });
+    viewport.createDiv({ cls: "ss-studio-graph-canvas" }).style.transform = "scale(0.83)";
     const overlay = new StudioNodeContextMenuOverlay();
     const hide = jest.spyOn(overlay, "hide");
     try {
@@ -136,6 +139,8 @@ describe("Studio context menu accessibility", () => {
       search.dispatchEvent(new Event("input", { bubbles: true }));
       search.focus();
       expect(root.style.maxHeight).toBe("589px");
+      expect(root.parentElement).toBe(viewport);
+      expect(root.style.width).toBe("306px");
       // Initial and unchanged ResizeObserver deliveries must leave the menu open.
       if (target !== "pane-before-initial") { callbacks[0](); callbacks[0](); }
       expect(root.getAttribute("aria-hidden")).toBe("false");
@@ -281,7 +286,7 @@ describe("Studio context menu accessibility", () => {
     overlay.destroy();
   });
 
-  it("keeps the mobile node menu visible in a scrolled viewport without opening the keyboard", async () => {
+  it.each([0.5, 0.83, 1, 2])("keeps the scrolled mobile picker below the toolbar without opening the keyboard at graph zoom %s", async zoom => {
     document.body.addClass("is-mobile");
     const workspace = document.body.createDiv();
     const controls = workspace.createDiv({ cls: "ss-studio-graph-workspace-controls" });
@@ -317,6 +322,7 @@ describe("Studio context menu accessibility", () => {
       }),
     });
     const focus = jest.spyOn(HTMLInputElement.prototype, "focus");
+    viewport.createDiv({ cls: "ss-studio-graph-canvas" }).style.transform = `scale(${zoom})`;
     const overlay = new StudioNodeContextMenuOverlay();
 
     overlay.mount(viewport);
@@ -354,7 +360,7 @@ describe("Studio context menu accessibility", () => {
     overlay.destroy();
   });
 
-  it("bounds a compact desktop popup below the toolbar and lets its list use the remaining height", () => {
+  it.each([0.5, 0.83, 1, 2])("bounds the compact desktop picker in screen pixels at graph zoom %s", zoom => {
     const viewportHeight = jest.replaceProperty(window, "innerHeight", 844);
     const workspace = document.body.createDiv();
     const controls = workspace.createDiv({ cls: "ss-studio-graph-workspace-controls" });
@@ -368,6 +374,7 @@ describe("Studio context menu accessibility", () => {
     Object.defineProperty(controls, "getBoundingClientRect", {
       configurable: true, value: () => ({ bottom: 207 }),
     });
+    viewport.createDiv({ cls: "ss-studio-graph-canvas" }).style.transform = `scale(${zoom})`;
     const overlay = new StudioNodeContextMenuOverlay();
     overlay.mount(viewport);
     overlay.open({
@@ -395,13 +402,13 @@ describe("Studio context menu accessibility", () => {
       Object.defineProperty(viewport, "getBoundingClientRect", {
         configurable: true, value: () => ({ top: 90, bottom: 287 }),
       });
-      overlay.setGraphZoom(0.5);
-      expect(root.style.maxHeight).toBe("128px");
+      window.dispatchEvent(new Event("resize"));
+      expect(root.style.maxHeight).toBe("64px");
       expect(Number.parseFloat(root.style.top) - viewport.scrollTop + 90
-        + Number.parseFloat(root.style.maxHeight) * 0.5).toBe(279);
+        + Number.parseFloat(root.style.maxHeight)).toBe(279);
 
       Object.defineProperty(viewport, "clientWidth", { configurable: true, value: 900 });
-      overlay.setGraphZoom(1);
+      window.dispatchEvent(new Event("resize"));
       expect(root.classList.contains("is-compact-width")).toBe(false);
       expect(root.style.width).toBe("360px");
       expect(root.style.maxHeight).toBe("");
@@ -410,6 +417,70 @@ describe("Studio context menu accessibility", () => {
       viewportHeight.restore();
     }
   });
+
+  it.each(["node", "simple"].flatMap(kind => [0.5, 0.83, 1, 2].map(zoom => ({ kind, zoom }))))(
+    "keeps $kind menu UI unscaled and anchors in scroll-box pixels at graph zoom $zoom", ({ kind, zoom }) => {
+      const viewportHeight = jest.replaceProperty(window, "innerHeight", 844);
+      const viewport = document.body.createDiv();
+      let paneWidth = 900;
+      Object.defineProperties(viewport, {
+        clientWidth: { configurable: true, get: () => paneWidth },
+        clientHeight: { configurable: true, value: 700 },
+        getBoundingClientRect: { configurable: true, value: () => ({ left: 180, top: 90, right: 180 + paneWidth, bottom: 790 }) },
+      });
+      const canvas = viewport.createDiv({ cls: "ss-studio-graph-canvas" });
+      canvas.style.transform = `scale(${zoom})`;
+      const className = `ss-studio-${kind === "node" ? "node" : "simple"}-context-menu`;
+      // Read the owning root rule: jsdom cannot parse the later @container block.
+      const style = document.createElement("style");
+      const rootRule = readFileSync(resolve(__dirname, "../../../css/views/studio/menus.css"), "utf8")
+        .match(new RegExp(`\\.${className} \\{[^}]*\\}`))?.[0];
+      expect(rootRule).toBeDefined();
+      style.textContent = rootRule!;
+      document.head.appendChild(style);
+      const overlay = kind === "node" ? new StudioNodeContextMenuOverlay() : new StudioSimpleContextMenuOverlay();
+      try {
+        overlay.mount(viewport);
+        const root = viewport.querySelector<HTMLElement>(`.${className}`)!;
+        const height = kind === "node" ? 400 : 80;
+        Object.defineProperty(root, "offsetHeight", { configurable: true, value: height });
+        const openAt = (anchorX: number, anchorY: number) => {
+          if (overlay instanceof StudioNodeContextMenuOverlay) {
+            overlay.open({ anchorX, anchorY,
+              items: [{ definition: definition("studio.alpha"), title: "Alpha", summary: "First node" }],
+              onSelectDefinition: jest.fn() });
+          } else {
+            overlay.open({ anchorX, anchorY, items: [{ id: "run", title: "Run", onSelect: jest.fn() }] });
+          }
+        };
+        for (paneWidth of [900, 322]) {
+          const width = kind === "node" ? Math.min(360, paneWidth - 16) : 220;
+          for (const [scrollLeft, scrollTop] of [[0, 0], [340, 500]]) {
+            viewport.scrollLeft = scrollLeft;
+            viewport.scrollTop = scrollTop;
+            // The caller converts world/client anchors once; only these pixels enter the menu.
+            openAt(scrollLeft + 120 * zoom, scrollTop + 160 * zoom);
+            expect(root.parentElement).toBe(viewport);
+            expect(canvas.contains(root)).toBe(false);
+            expect(root.style.width).toBe(`${width}px`);
+            expect(getComputedStyle(root).transform || "none").toBe("none");
+            expect(root.style.left).toBe(`${scrollLeft + Math.min(paneWidth - width - 8, 120 * zoom + 8)}px`);
+            expect(root.style.top).toBe(`${scrollTop + Math.min(700 - height - 8, 160 * zoom + 8)}px`);
+
+            openAt(scrollLeft + paneWidth - 5, scrollTop + 695);
+            expect(root.style.left).toBe(`${scrollLeft + paneWidth - width - 8}px`);
+            expect(root.style.top).toBe(`${scrollTop + 700 - height - 8}px`);
+            expect(Number.parseFloat(root.style.left) - scrollLeft + width).toBe(paneWidth - 8);
+            expect(Number.parseFloat(root.style.top) - scrollTop + height).toBe(692);
+          }
+        }
+      } finally {
+        overlay.destroy();
+        style.remove();
+        viewportHeight.restore();
+      }
+    }
+  );
 
   it("uses roving focus for keyboard navigation in action menus", () => {
     const viewport = document.body.createDiv();
