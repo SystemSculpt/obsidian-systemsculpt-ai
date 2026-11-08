@@ -129,5 +129,5 @@
     "release:plugin": "node scripts/release-plugin.mjs --require-clean --require-tag"
   },
   "type": "module",
-  "version": "6.19.1"
+  "version": "6.19.2"
 }
