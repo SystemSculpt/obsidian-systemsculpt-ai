@@ -157,7 +157,8 @@
   white-space: nowrap;
 }
 .systemsculpt-agent-conversation .systemsculpt-agent-tool-summary.is-compact {
-  flex: 0 0 auto;
+  /* Short meta still yields to the label on a narrow row, with an ellipsis. */
+  flex: 0 1 auto;
   margin-inline-start: auto;
 }
 .systemsculpt-agent-conversation .systemsculpt-agent-tool-controls {

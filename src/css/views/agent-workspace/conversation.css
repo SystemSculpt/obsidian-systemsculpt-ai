@@ -732,3 +732,7 @@ video.systemsculpt-agent-media-frame {
 .systemsculpt-agent-conversation .pdf-embed :is(.pdf-container, .pdf-content-container) {
   min-width: 0;
 }
+.systemsculpt-agent-conversation .pdf-embed .pdf-toolbar {
+  /* The viewer's column would otherwise squeeze the toolbar and cut its icons. */
+  flex-shrink: 0;
+}
