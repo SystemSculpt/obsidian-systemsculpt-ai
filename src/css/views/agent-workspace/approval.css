@@ -26,9 +26,11 @@
   outline: none;
   box-shadow: var(--ss-ring);
 }
-/* The subtitle belongs to its title: close under it, a wider gap before the panel. */
+/* The subtitle belongs to its title: close under it. The panel follows it as it follows a
+ * lone title, so every card has one gap from its header to its panel: the smaller line has
+ * less room under its baseline, and half the size difference makes that up. */
 .systemsculpt-agent-approval-meta {
-  margin-block: calc(var(--ss-space-0) - var(--ss-space-2)) var(--ss-space-1);
+  margin-block: calc(var(--ss-space-0) - var(--ss-space-2)) calc((var(--ss-text-base) - var(--ss-text-xs)) / 2);
   margin-inline-start: 22px;
   color: var(--ss-ink-muted);
   font-size: var(--ss-text-xs);
@@ -37,11 +39,29 @@
 .systemsculpt-agent-approval-meta > span + span::before {
   content: " · ";
 }
-.systemsculpt-agent-approval-copy a {
-  color: inherit;
+/* One link style in every card, as tools.css sets it: the title's note and the plan's links
+ * are accent and underlined. */
+.systemsculpt-agent-approval a:is(.internal-link, .external-link) {
+  color: var(--ss-ink-accent);
+  font-weight: inherit;
+  text-decoration-line: underline;
+  text-underline-offset: 2px;
+}
+.systemsculpt-agent-approval a.external-link {
+  padding-inline-end: 0;
+  background-image: none;
+}
+.systemsculpt-agent-approval a:is(.internal-link, .external-link):hover {
+  color: var(--ss-ink);
+}
+/* A short note name stays whole; the title wraps before it instead. */
+.systemsculpt-agent-approval-target.is-whole {
+  white-space: nowrap;
 }
 /* Every shortcut hint (Approve, Deny, Approve all, Send, option numbers, the Review pill)
- * reads one way: its control's own ink, quieter, in the interface font, never boxed. */
+ * reads one way: quieter than its control's words, in the interface font, never boxed. On
+ * a plain control it is the muted ink of the meta line; on a filled one, its own white a step
+ * down, still over 4.5:1 on the fill in both default themes. */
 .systemsculpt-agent-approval kbd,
 .systemsculpt-agent-approval-review-key {
   margin: 0 0 0 var(--ss-space-1);
@@ -50,13 +70,16 @@
   border-radius: 0;
   background: none;
   box-shadow: none;
-  color: inherit;
-  opacity: 0.65;
+  color: var(--ss-ink-muted);
   font-family: var(--ss-font);
   font-size: var(--ss-text-xs);
   font-weight: 400;
   line-height: inherit;
   white-space: nowrap;
+}
+.systemsculpt-agent-approval .ss-button--primary kbd {
+  color: inherit;
+  opacity: 0.85;
 }
 .systemsculpt-agent-approval-header {
   display: flex;
@@ -83,6 +106,8 @@
   flex: 1;
   min-width: 0;
   overflow-wrap: anywhere;
+  /* No word alone on a wrapped title's last line. */
+  text-wrap: pretty;
   font-weight: var(--ss-weight-semibold);
 }
 .systemsculpt-agent-approval-counter {
@@ -165,11 +190,6 @@
     align-items: stretch;
   }
 
-  /* A lone action (Skip, with Send beside the answer) keeps its own width. */
-  .systemsculpt-agent-approval-actions > .ss-button:only-child {
-    align-self: flex-start;
-  }
-
   /* One rule for every hint at this width, the Review pill's included: the
    * controls' words carry it, as on touch. */
   .systemsculpt-agent-approval kbd,
@@ -187,27 +207,8 @@
   overflow-wrap: anywhere;
   font-family: var(--ss-font-mono);
 }
-/* Details JSON: the block every tool card ends with. A long value wraps under its own
- * indent (.ss-json-line); the block stops between lines and fades out at the bottom until it is
- * scrolled to its end. A scroller shows overflow in its bottom padding, so the
- * height is the top inset and twelve whole lines: the thirteenth starts at the edge. */
-.systemsculpt-agent-approval-details > pre {
-  box-sizing: border-box;
-  max-height: calc(12 * 18px + var(--ss-space-2) + 2px);
-  margin: var(--ss-space-2) 0 0;
-  padding: var(--ss-space-2) var(--ss-space-3);
-  overflow: auto;
-  border: 1px solid var(--ss-line);
-  border-radius: var(--ss-radius-sm);
-  background: var(--ss-surface-0);
-  color: var(--ss-ink-muted);
-  font-family: var(--ss-font-mono);
-  font-size: var(--ss-text-xs);
-  line-height: 18px;
-}
-.systemsculpt-agent-approval-details > pre.is-overflowing:not(.is-at-end) {
-  mask-image: linear-gradient(to bottom, #000 calc(100% - 40px), transparent);
-}
+/* Details JSON is the box every tool card ends with (.systemsculpt-agent-tool-raw in tools.css):
+ * the code scrolls and fades inside the frame, which keeps its border and inset at both ends. */
 /* The question's options and answer field sit in the page-colour panel every card's
  * body uses (diff, command, plan). */
 .systemsculpt-agent-approval-question {

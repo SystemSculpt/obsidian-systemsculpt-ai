@@ -5,7 +5,7 @@ import {
 } from "../../tools/LocalToolOutcome";
 import type { AgentToolPart } from "../../chat/ChatConversation";
 import { isActiveAgentToolState } from "./AgentConversationPresentation";
-import { editsImages, studioWorkflowName, imageCountTarget, nativeToolPresentation, noteDisplayName, systemSculptGateNeed, type LabelTarget } from "./NativeToolPresentation";
+import { editChangeSize, editsImages, studioWorkflowName, imageCountTarget, nativeToolPresentation, noteDisplayName, systemSculptGateNeed, writeChangeSize, type LabelTarget } from "./NativeToolPresentation";
 import { decodeSystemSculptToolOutput, systemSculptToolName } from "../../tools/systemsculpt/SystemSculptTools";
 import { toolOutputText } from "./ToolCardBlocks";
 
@@ -251,14 +251,13 @@ function actionState(displayState: AgentToolDisplayState): ToolActionState {
 function actionLabel(label: string, state: ToolActionState): string {
   if (state === "base") return label;
   if (label === UNKNOWN_SERVER_TOOL_LABEL) {
-    return state === "active" ? "Running SystemSculpt action…" : "Ran SystemSculpt action";
+    return state === "active" ? "Running SystemSculpt action" : "Ran SystemSculpt action";
   }
   const verb = label.split(" ", 1)[0] ?? "";
   const forms = TOOL_ACTION_FORMS[verb];
   if (!forms) return label;
-  const tense = state === "active" ? forms[0] : forms[1];
-  const result = `${tense}${label.slice(verb.length)}`;
-  return state === "active" ? `${result}…` : result;
+  // "Reading Plan", never "Reading Plan…": the spinner says it is running, and a trailing "…" reads as a cut name.
+  return `${state === "active" ? forms[0] : forms[1]}${label.slice(verb.length)}`;
 }
 
 function countedLabel(counted: CountedTool, state: ToolActionState): string {
@@ -353,12 +352,6 @@ function webSearchQuery(part: AgentToolPart): string | null {
   return part.state === "succeeded"
     ? firstString(record(part.input).query)
     : null;
-}
-
-function webSearchResultCount(part: AgentToolPart): number | undefined {
-  if (!isWebSearchTool(part)) return undefined;
-  const count = record(part.output?.data).result_count;
-  return typeof count === "number" && Number.isSafeInteger(count) && count >= 0 ? count : undefined;
 }
 
 function displayedToolState(part: AgentToolPart): AgentToolPart["state"] {
@@ -515,6 +508,28 @@ export function presentToolRowLabel(
   return label;
 }
 
+/** A change a row counts went ahead or is going ahead; a failed, declined, stopped or uncertain one counts nothing. */
+const COUNTED_CHANGE_STATES: ReadonlySet<AgentToolDisplayState> = new Set<AgentToolDisplayState>(["succeeded", "partial", "input-ready", "approved", "running"]);
+
+/**
+ * A vault edit's or write's lines, counted from the diff its card draws ("+1 −1", "+4"). An edit that
+ * didn't apply (skipped, or in a note that failed) counts nothing; a regular expression's text isn't
+ * the change it makes, so a request with one has no count.
+ */
+function hostedChangeSize(canonicalName: string, input: Record<string, unknown>, output: Record<string, unknown>): string | undefined {
+  // A write told to keep an existing note ("skip") may have written nothing.
+  if (canonicalName === "write") return input.ifExists === "skip" ? undefined : writeChangeSize(input.content);
+  if (canonicalName !== "edit" && canonicalName !== "multi_edit") return undefined;
+  const list = (value: unknown): Record<string, unknown>[] => Array.isArray(value) ? value.map(record) : [];
+  const edits = (canonicalName === "multi_edit" ? list(input.files) : [input]).flatMap((file) => {
+    const result = canonicalName === "edit" ? output : list(output.results).find((entry) => entry.path === file.path) ?? {};
+    if (result.success === false) return [];
+    const skipped = new Set(list(result.skipped).map((entry) => entry.index));
+    return list(file.edits).filter((_, index) => !skipped.has(index));
+  });
+  return edits.some((edit) => edit.isRegex === true) ? undefined : editChangeSize(edits, "oldText", "newText");
+}
+
 /** A command's exit status: Codex reports it; Claude Code states "Exit code N" first or last in a failed result. */
 function commandExitCode(part: AgentToolPart): number | undefined {
   const reported = record(part.output?.data).exitCode ?? record(part.input).exitCode;
@@ -540,7 +555,8 @@ export function presentAgentToolDetails(
   if (part.location === "server") {
     if (canonicalName !== "web_search") return [];
     const query = webSearchQuery(part);
-    // The result count is the row's meta; the query is the one thing the row may cut.
+    // The query is the one thing the row may cut. Its result count is never shown: the public result
+    // lists no results (its sources reach the answer's Sources), and a row counts only what its card lists.
     return [
       ...(query ? [{ label: "Query", value: detailValue(query)! }] : []),
     ];
@@ -641,9 +657,10 @@ export function presentAgentTool(part: AgentToolPart): AgentToolPresentation {
   if (native) {
     const active = isActiveAgentToolState(part.state) && part.state !== "approval-required";
     const exitCode = native.groupKind === "command" ? commandExitCode(part) : undefined;
-    // One meta per kind: a command's exit status when it failed, a plan's progress, an edit's size.
-    // The agent's description of a call is never meta.
-    const meta = exitCode ? `exit ${exitCode}` : native.groupKind === "plan" ? native.meta : native.changeSize;
+    // One meta per kind: a command's exit status when it failed, a plan's progress, an edit's size,
+    // a web search's result count. The agent's description of a call is never meta.
+    const meta = exitCode ? `exit ${exitCode}` : native.groupKind === "plan" ? native.meta
+      : native.resultCount ?? (COUNTED_CHANGE_STATES.has(part.state) ? native.changeSize : undefined);
     const blocked = /(?:^|_)(?:AUTO_BLOCKED|REVIEW_BLOCKED|BLOCKED_BY_REVIEW)(?:_|$)/u.test(part.error?.code ?? "");
     // A command that exited non-zero did run: it says what ran, and its exit status how it ended.
     const ran = part.state === "failed" && Boolean(exitCode);
@@ -740,9 +757,13 @@ export function presentAgentTool(part: AgentToolPart): AgentToolPresentation {
           : canonicalName === "find" || canonicalName === "search" ? (counted && counted.items.length > 1 || !pattern ? undefined : `“${pattern}”`)
             : workflow ?? target;
   const output = record(part.output?.data);
-  const resultCount = serverTool ? webSearchResultCount(part)
+  // A search counts only results its card lists: a vault search's matches. A SystemSculpt web search's
+  // public result lists none, so it shows no count.
+  const resultCount = serverTool ? undefined
     : typeof output.totalMatches === "number" ? output.totalMatches
       : Array.isArray(output.matches) ? output.matches.length : undefined;
+  // An edit or write row counts the lines its card draws, as Claude Code's and Codex's rows do.
+  const changeSize = !serverTool && COUNTED_CHANGE_STATES.has(displayState) ? hostedChangeSize(canonicalName, input, output) : undefined;
   return {
     canonicalName: presentedName, label,
     actionIcon: TOOL_ACTION_ICONS[presentedName] ?? "wrench",
@@ -751,7 +772,7 @@ export function presentAgentTool(part: AgentToolPart): AgentToolPresentation {
     icon: gateNeed ? "lock" : refusedSystemSculptCall(part) ? "x" : STATE_ICONS[displayState],
     summary,
     ...(partialSummary && summary === partialSummary ? { summaryCountsOutcomes: true as const } : {}),
-    ...(resultCount !== undefined ? { meta: `${resultCount} result${resultCount === 1 ? "" : "s"}` } : {}),
+    ...(resultCount !== undefined ? { meta: `${resultCount} result${resultCount === 1 ? "" : "s"}` } : changeSize ? { meta: changeSize } : {}),
     ...(targetPath ? { targetPath } : {}),
     groupKind: canonicalName === "multi_edit" ? "edit" : canonicalName === "find" ? "search" : canonicalName === "list_items" ? "list"
       : canonicalName === "web_search" ? "web-search" : presentedName,

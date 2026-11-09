@@ -376,9 +376,34 @@ export function renderJsonLines(code: HTMLElement, text: string): void {
   const lines = text.split("\n");
   lines.forEach((line, index) => {
     const indent = /^ */u.exec(line)?.[0].length ?? 0;
-    const block = code.createSpan({ cls: "ss-json-line", text: index < lines.length - 1 ? `${line}\n` : line });
+    const content = index < lines.length - 1 ? `${line}\n` : line;
+    const block = code.createSpan({ cls: "ss-json-line" });
+    // A path breaks after a "/" and an escape ("\n") stays whole, so a wrapped value never splits
+    // a name or reads as a new path; only a run with no such place breaks where it must.
+    if (content.length > 32 && /[/\\]/u.test(content)) appendBreakableValue(block, content);
+    else block.setText(content);
     if (indent) block.setCssProps({ "--ss-json-indent": String(indent) });
   });
+}
+
+function appendBreakableValue(block: HTMLElement, content: string): void {
+  // A short name with a hyphen ("T-5957") is kept whole too: it breaks only where a slash allows.
+  const appendSegment = (segment: string): void => {
+    if (!segment) return;
+    if (segment.length <= 24 && !/\s/u.test(segment) && segment.includes("-")) block.createSpan({ cls: "ss-json-whole", text: segment });
+    else block.appendText(segment);
+  };
+  let start = 0;
+  for (const match of content.matchAll(/\\[^\n]|\//gu)) {
+    const at = match.index ?? 0;
+    appendSegment(content.slice(start, at));
+    if (match[0] === "/") block.appendText("/");
+    else block.createSpan({ cls: "ss-json-whole", text: match[0] });
+    // After a slash or a line break escape, a wrapped line may start; never inside either.
+    if (match[0] === "/" || /^\\[nrt]$/u.test(match[0])) block.createEl("wbr");
+    start = at + match[0].length;
+  }
+  appendSegment(content.slice(start));
 }
 
 /** The text inside a tool result as each agent saves it: a string, content blocks or content items. */

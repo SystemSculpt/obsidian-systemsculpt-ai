@@ -2,7 +2,7 @@ import { Component, setIcon } from "obsidian";
 import { createSurfaceElement, createUiAction, updateUiAction } from "../../core/ui/surface";
 import type { AgentToolPart } from "../../chat/ChatConversation";
 import { presentAgentTool } from "./AgentToolPresentation";
-import { nativeToolPresentation } from "./NativeToolPresentation";
+import { nativeToolPresentation, noteDisplayName } from "./NativeToolPresentation";
 import { getHostOperatingSystem } from "../../platform/hostCapabilities";
 import { renderJsonLines } from "./ToolCardBlocks";
 
@@ -61,6 +61,18 @@ function shortcut(key: string, ...modifiers: readonly ("Mod" | "Alt" | "Shift")[
   const mac = getHostOperatingSystem() === "macOS";
   const names = mac ? { Mod: "⌘", Alt: "⌥", Shift: "⇧" } : { Mod: "Ctrl", Alt: "Alt", Shift: "Shift" };
   return [...modifiers.map(modifier => names[modifier]), key].join(mac ? " " : " + ");
+}
+
+/** A name this short never breaks across lines, as in rows. */
+const WHOLE_NAME_LENGTH = 32;
+
+/** The file a title names, as Obsidian and its row name a note ("Garden", not "Garden.md"); Details keeps the path. */
+function namedTarget(title: string, targetPath: string | undefined): { before: string; name: string; after: string } | undefined {
+  const file = targetPath?.split(/[\\/]/u).pop();
+  const offset = file ? title.lastIndexOf(file) : -1;
+  return file && offset >= 0
+    ? { before: title.slice(0, offset), name: noteDisplayName(file), after: title.slice(offset + file.length) }
+    : undefined;
 }
 
 function folderOf(path: string | undefined): string | undefined {
@@ -189,15 +201,16 @@ export class AgentApprovalCards extends Component {
     const header = card.createDiv({ cls: "systemsculpt-agent-approval-header" });
     setIcon(header.createSpan({ cls: "systemsculpt-agent-approval-icon", attr: { "aria-hidden": "true" } }), icon);
     const heading = header.createEl("strong", { cls: "systemsculpt-agent-approval-copy", text: title, attr: { id: titleId } });
-    if (targetPath && this.options.onOpenPath) {
-      const target = targetPath.split(/[\\/]/u).pop()!;
-      const offset = title.lastIndexOf(target);
-      if (offset >= 0) {
-        heading.empty(); heading.appendText(title.slice(0, offset));
-        const link = heading.createEl("a", { text: target, cls: "internal-link", attr: { href: targetPath, "data-href": targetPath } });
+    const target = namedTarget(title, targetPath);
+    if (target && targetPath) {
+      heading.empty(); heading.appendText(target.before);
+      const cls = `systemsculpt-agent-approval-target${target.name.length <= WHOLE_NAME_LENGTH ? " is-whole" : ""}`;
+      // A note that isn't there yet is plain text: opening it would create it.
+      if (this.options.onOpenPath && this.options.exists?.(targetPath) !== false) {
+        const link = heading.createEl("a", { text: target.name, cls: `internal-link ${cls}`, attr: { href: targetPath, "data-href": targetPath } });
         link.onclick = event => { event.preventDefault(); void this.options.onOpenPath?.(targetPath); };
-        heading.appendText(title.slice(offset + target.length));
-      }
+      } else heading.createSpan({ cls, text: target.name });
+      heading.appendText(target.after);
     }
     header.createSpan({ cls: "systemsculpt-agent-approval-counter" });
     const meta = placeMeta(native?.meta ?? folderOf(targetPath), native?.meta ? folderOf(native.path) : folderOf(targetPath));
@@ -263,17 +276,18 @@ export class AgentApprovalCards extends Component {
     const raw = JSON.stringify(part.native?.permissionSuggestions?.length
       ? { input: part.input, permissionSuggestions: part.native.permissionSuggestions }
       : part.input ?? {}, null, 2);
-    const pre = details.createEl("pre", { attr: { tabindex: "0" } });
+    // The tool cards' Details box: the code scrolls inside the frame's padding, so the frame keeps
+    // its border and inset at both ends while the code fades out above its bottom edge.
+    const code = details.createEl("pre").createEl("code", { attr: { tabindex: "0" } });
     // Line by line, as in tool cards: a long value wraps under its own indent, never back to the edge.
-    renderJsonLines(pre, raw.length > RAW_DISPLAY_CHARACTERS ? `${raw.slice(0, RAW_DISPLAY_CHARACTERS)}\n… Preview shortened; the full request is sent unchanged.` : raw);
-    // JSON keeps its indentation and scrolls; a block taller than its frame fades out at the
-    // bottom until it is scrolled to its end, so a cut line reads as more below.
+    renderJsonLines(code, raw.length > RAW_DISPLAY_CHARACTERS ? `${raw.slice(0, RAW_DISPLAY_CHARACTERS)}\n… Preview shortened; the full request is sent unchanged.` : raw);
+    // A block taller than its frame fades out at the bottom until it is scrolled to its end, so a cut line reads as more below.
     const syncOverflow = (): void => {
-      const overflowing = pre.scrollHeight > pre.clientHeight + 1;
-      pre.classList.toggle("is-overflowing", overflowing);
-      pre.classList.toggle("is-at-end", !overflowing || pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 1);
+      const overflowing = code.scrollHeight > code.clientHeight + 1;
+      code.classList.toggle("is-overflowing", overflowing);
+      code.classList.toggle("is-at-end", !overflowing || code.scrollTop + code.clientHeight >= code.scrollHeight - 1);
     };
-    pre.addEventListener("scroll", syncOverflow, { passive: true });
+    code.addEventListener("scroll", syncOverflow, { passive: true });
     details.addEventListener("toggle", () => { if (details.open) syncOverflow(); });
     const actions = card.createDiv({ cls: "systemsculpt-agent-approval-actions" });
     const action = (label: string, hint: string, identity: { testId: string }, focusKey: string, keys: string, approved: boolean, remember = false) => {
@@ -337,10 +351,12 @@ export class AgentApprovalCards extends Component {
     const native = nativeToolPresentation(first);
     const tool = presentAgentTool(first);
     const title = native?.approvalTitle ?? tool.label.charAt(0).toLowerCase() + tool.label.slice(1);
+    // The note is named as on its card.
+    const target = namedTarget(title, native?.targetPath ?? tool.targetPath);
     const questionList = questions(first);
     const announcement = first.name === "ExitPlanMode" ? `${native?.agentName ?? "Claude Code"} has a plan. Enter to start, Escape to keep planning.`
       : questionList.length ? `${native?.agentName ?? "Codex"} asks: ${questionList[0].question}`
-        : `${native?.agentName ?? "SystemSculpt"} wants to ${title}. Enter to approve, Escape to deny.`;
+        : `${native?.agentName ?? "SystemSculpt"} wants to ${target ? `${target.before}${target.name}${target.after}` : title}. Enter to approve, Escape to deny.`;
     this.announce(announcement);
     if (this.options.isVisible?.() === false) {
       this.options.onHiddenApproval?.(first);

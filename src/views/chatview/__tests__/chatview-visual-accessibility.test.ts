@@ -83,11 +83,13 @@ const textPairs = [
 ];
 
 describe("ChatView text contrast (WCAG AA, default Obsidian themes)", () => {
-  test("open tool and reasoning disclosures rotate their right chevrons downward", () => {
+  test("open tool and reasoning disclosures rotate their right chevrons downward, ink still on the edge", () => {
+    // Pointing down, the ink is 3/24 of the box wider each side; the shift keeps its right end in place.
+    const downOnEdge = /transform:\s*translateX\(calc\(var\(--ss-icon-size-sm\) \* -3 \/ 24\)\) rotate\(90deg\)/;
     expect(rule(readCss("views/agent-workspace/tools.css"), ".systemsculpt-agent-conversation .systemsculpt-agent-tool.is-disclosure[open] > .systemsculpt-agent-tool-header .systemsculpt-agent-tool-disclosure"))
-      .toMatch(/transform:\s*rotate\(90deg\)/);
+      .toMatch(downOnEdge);
     expect(rule(readCss("views/agent-workspace/reasoning.css"), ".systemsculpt-agent-reasoning-details[open] .systemsculpt-agent-reasoning-disclosure"))
-      .toMatch(/transform:\s*rotate\(90deg\)/);
+      .toMatch(downOnEdge);
   });
 
   test("lone activity rows share the turn-summary gutter", () => {

@@ -36,19 +36,38 @@ it("renders recorded read paths and partial/error states, not note contents", ()
   expect(onOpenPath).toHaveBeenCalledWith("Notes/Read.md");
 });
 
+it("says only how much one note's read got, never the note again", () => {
+  const { host, render } = setup();
+  const read = (file: Record<string, unknown>) => part("read", { paths: ["Notes/Garden.md"] }, { files: [{ path: "Notes/Garden.md", ...file }] });
+  expect(render(read({ content: "# Garden plan\n\nTomatoes go in the south bed.", metadata: {} }))).toBe(true);
+  // The same muted line a native read's card shows.
+  expect(host.querySelector(".ss-tool-caption")?.textContent).toBe("3 lines");
+  expect(host.textContent).toBe("3 lines");
+  expect(host.querySelector("a")).toBeNull();
+  render(read({ content: "# Launch", metadata: { hasMore: true } }));
+  expect(host.textContent).toBe("Partly read");
+  render(read({ content: "", error: "File not found" }));
+  expect(host.querySelector(".ss-tool-notice-text")?.textContent).toBe("File not found");
+  expect(host.textContent).not.toContain("Garden");
+  // Nothing read yet: the row names the note, and the card has nothing to add.
+  expect(render(part("read", { paths: ["Notes/Garden.md"] }, undefined, { state: "running" }))).toBe(false);
+});
+
 it.each([
   "/private/Note.md", "C:\\Private\\Note.md", "../Note.md", "Notes/../Note.md",
   "file:///private/Note.md", "https://example.com", "~/Note.md", "Note.md\u0000",
 ])("keeps ambiguous path %s as literal non-clickable text", path => {
   const { host, render, onOpenPath } = setup();
-  render(part("read", { paths: [path] }));
-  expect(host.querySelector("a")).toBeNull();
-  expect(onOpenPath).not.toHaveBeenCalled();
+  // Several notes keep their list: only the vault note beside the ambiguous path is a link.
+  render(part("read", { paths: [path, "Notes/Other.md"] }));
+  expect(host.querySelectorAll("a")).toHaveLength(1);
+  host.querySelector<HTMLAnchorElement>("a")!.click();
+  expect(onOpenPath.mock.calls).toEqual([["Notes/Other.md"]]);
 });
 
 it.each(["Notes/#Ideas.md", "Notes/100%.md", "Notes/[Draft].md", "~Ideas.md", "%2e%2e/Note.md"])("preserves literal vault filename %s", path => {
   const { host, render, onOpenPath } = setup();
-  render(part("read", { paths: [path] }));
+  render(part("read", { paths: [path, "Notes/Other.md"] }));
   host.querySelector<HTMLAnchorElement>("a")!.click();
   expect(onOpenPath).toHaveBeenCalledWith(path);
 });
@@ -57,7 +76,7 @@ it("normalizes relative separators and opens an exact file without parsing link 
   const { app, host, openFile, getAbstractFileByPath } = setup();
   const file = Object.assign(Object.create(TFile.prototype), { path: "Notes/#Read.md" });
   getAbstractFileByPath.mockReturnValue(file);
-  renderHostedToolPreview(app, host, part("read", { paths: ["Notes\\#Read.md"] }));
+  renderHostedToolPreview(app, host, part("read", { paths: ["Notes\\#Read.md", "Notes/Other.md"] }));
   host.querySelector<HTMLAnchorElement>("a")!.click();
   expect(getAbstractFileByPath).toHaveBeenCalledWith("Notes/#Read.md");
   expect(openFile).toHaveBeenCalledWith(file);
@@ -224,8 +243,8 @@ it("replaces only its own preview and uses the host owner document", () => {
   const host = ownerDocument.createElement("div");
   const details = host.appendChild(ownerDocument.createElement("details"));
   details.textContent = "Raw Details";
-  renderHostedToolPreview(app, host, part("read", { paths: ["First.md"] }));
-  renderHostedToolPreview(app, host, part("read", { paths: ["Second.md"] }));
+  renderHostedToolPreview(app, host, part("read", { paths: ["First.md", "First other.md"] }));
+  renderHostedToolPreview(app, host, part("read", { paths: ["Second.md", "Second other.md"] }));
   expect(host.querySelectorAll(".ss-hosted-tool-preview")).toHaveLength(1);
   expect(host.textContent).not.toContain("First");
   expect(host.textContent).toContain("Second");

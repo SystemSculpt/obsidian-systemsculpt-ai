@@ -191,6 +191,17 @@
   margin-bottom: 0;
 }
 
+/* A live turn's first row stands on the line its finished fold will take (activity.css, is-settled),
+   so the row does not move when the turn ends. */
+.systemsculpt-agent-turn.is-assistant .systemsculpt-agent-turn-body > :is(
+  .systemsculpt-agent-part.is-tool,
+  .systemsculpt-agent-part.is-reasoning,
+  button.systemsculpt-agent-activity-overflow,
+  .systemsculpt-agent-tail-status
+):first-child {
+  margin-top: calc((var(--ss-text-base) * var(--ss-leading-relaxed) - var(--ss-control-height-sm)) / 2);
+}
+
 /* No one-word last lines in finished replies, or in text a later step already
  * follows; only the text still growing keeps plain wrap so read lines never reflow. */
 .systemsculpt-agent-part.is-text:not(.is-streaming) :is(p, li),

@@ -88,8 +88,9 @@
     transform var(--ss-dur-fast) var(--ss-ease);
 }
 
+/* Pointing down, the ink is 3/24 of the box wider each side; the shift keeps its right end on the edge. */
 .systemsculpt-agent-reasoning-details[open] .systemsculpt-agent-reasoning-disclosure {
-  transform: rotate(90deg);
+  transform: translateX(calc(var(--ss-icon-size-sm) * -3 / 24)) rotate(90deg);
 }
 
 .systemsculpt-agent-reasoning-header:hover .systemsculpt-agent-reasoning-disclosure {

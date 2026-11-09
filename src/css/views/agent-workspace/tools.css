@@ -113,30 +113,26 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* An open card reads its whole header: the label wraps and the meta drops below instead of
-   either being cut. Icons stay on the first line. A closed row stays one line. */
+/* An open card reads its whole header: the label wraps instead of being cut, and its icons and meta
+   stay on the first line, as a wrapped fold summary keeps its time. A closed row stays one line. */
 .systemsculpt-agent-conversation details.systemsculpt-agent-tool[open] > .systemsculpt-agent-tool-header {
   align-items: flex-start;
   padding-block: 3px;
 }
 .systemsculpt-agent-conversation details.systemsculpt-agent-tool[open] > .systemsculpt-agent-tool-header .systemsculpt-agent-tool-copy {
-  flex-wrap: wrap;
-  /* Meta that fits stays at the right of the label; meta that wraps starts its own line
-     under the label instead of hanging at the right edge. */
-  justify-content: space-between;
   column-gap: var(--ss-space-2);
-  row-gap: 0;
 }
 .systemsculpt-agent-conversation details.systemsculpt-agent-tool[open] > .systemsculpt-agent-tool-header .systemsculpt-agent-tool-label {
   flex-shrink: 1;
   white-space: normal;
   overflow-wrap: anywhere;
+  text-wrap: pretty;
 }
+/* The meta keeps its words whole at the right of the label's first line. */
 .systemsculpt-agent-conversation details.systemsculpt-agent-tool[open] > .systemsculpt-agent-tool-header .systemsculpt-agent-tool-summary {
-  flex: 0 1 auto;
-  margin-inline-start: 0;
-  text-align: start;
-  white-space: normal;
+  flex: 0 0 auto;
+  max-width: 50%;
+  margin-inline-start: auto;
 }
 .systemsculpt-agent-conversation .systemsculpt-agent-tool-summary.is-compact {
   /* Short meta still yields to the label on a narrow row, with an ellipsis. */
@@ -158,8 +154,9 @@
     opacity var(--ss-dur-fast) var(--ss-ease),
     transform var(--ss-dur-fast) var(--ss-ease);
 }
+/* Pointing down, the ink is 3/24 of the box wider each side; the shift keeps its right end on the edge. */
 .systemsculpt-agent-conversation .systemsculpt-agent-tool.is-disclosure[open] > .systemsculpt-agent-tool-header .systemsculpt-agent-tool-disclosure {
-  transform: rotate(90deg);
+  transform: translateX(calc(var(--ss-icon-size-sm) * -3 / 24)) rotate(90deg);
 }
 .systemsculpt-agent-conversation .systemsculpt-agent-tool-header:hover .systemsculpt-agent-tool-disclosure {
   opacity: 1;
@@ -470,6 +467,8 @@
   color: var(--ss-ink);
   line-height: var(--ss-leading-relaxed);
   white-space: pre-wrap;
+  /* No one-word last line, as in replies. */
+  text-wrap: pretty;
   overflow-wrap: anywhere;
   user-select: text;
 }
@@ -722,8 +721,9 @@
   width: 12px;
   height: 12px;
 }
+/* Pointing down, the ink is 3/24 of its 12px box wider each side; the shift keeps its left end on the text edge. */
 .systemsculpt-agent-tool-raw[open] .systemsculpt-agent-tool-raw-chevron {
-  transform: rotate(90deg);
+  transform: translateX(calc(12px * 3 / 24)) rotate(90deg);
 }
 .systemsculpt-agent-tool-raw > pre {
   box-sizing: border-box;
@@ -759,6 +759,10 @@
   padding-inline-start: calc((var(--ss-json-indent) + 2) * 1ch);
   text-indent: calc((var(--ss-json-indent) + 2) * -1ch);
 }
+/* An escape ("\n") or a short hyphenated name ("T-5957") is one token: a wrapped value never splits it. */
+.ss-json-whole {
+  white-space: nowrap;
+}
 @media (prefers-reduced-motion: reduce) {
   .systemsculpt-agent-tool-raw-chevron { transition: none; }
 }
@@ -785,15 +789,6 @@
 .ss-native-plan-preview.is-collapsed {
   max-height: 25.6em;
   overflow: hidden;
-}
-.systemsculpt-inline-diff__new-file {
-  width: fit-content;
-  margin: var(--ss-space-2);
-  padding: 0 var(--ss-space-1);
-  border: 1px solid var(--ss-line);
-  border-radius: var(--ss-radius-sm);
-  color: var(--ss-ink-muted);
-  font-size: var(--ss-text-xs);
 }
 .systemsculpt-inline-diff__file > summary {
   padding: var(--ss-space-2);

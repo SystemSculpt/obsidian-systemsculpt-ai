@@ -48,7 +48,8 @@ describe("live generation placeholders", () => {
     // Codex keeps a dynamic call's arguments inside the item.
     const part = tool({ name: "generate_image", state: "running", input: { type: "dynamicToolCall", arguments: { prompt: "Owls", count: 3, aspect_ratio: "4:3" } } });
     const tiles = presentPendingMedia([part], true);
-    expect(tiles.map(tile => tile.label)).toEqual(["Image 1 of 3", "Image 2 of 3", "Image 3 of 3"]);
+    // Each tile is the single tile: its words, and the prompt on one line where its file name lands.
+    expect(tiles.map(tile => [tile.label, tile.caption, tile.captionLine])).toEqual(Array(3).fill(["Generating image", "Owls", true]));
     expect(tiles[0].ratio).toBeCloseTo(4 / 3);
     // A restored chat whose call never finished shows no spinner.
     expect(presentPendingMedia([part], false)).toEqual([]);

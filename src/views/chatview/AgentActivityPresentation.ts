@@ -1,5 +1,4 @@
 import type { AgentPart, AgentToolPart } from "../../chat/ChatConversation";
-import { isActiveAgentToolState } from "./AgentConversationPresentation";
 import {
   gatedSystemSculptTurn,
   labelTargetClass,
@@ -150,9 +149,8 @@ export function summarizeAgentActivity(parts: readonly AgentPart[]): AgentActivi
       // A partly done batch says how far it got ("Moved 1 of 2 notes to trash"), never the whole request.
       else if (state === "partial") add("partial", tool.label, { target: tool.target });
       // Any other tool (a server's, an unknown one) counts as a tool: "Used 2 tools", "Used weather forecast twice".
-      // A running call's "…" doesn't belong mid-sentence; a long command's own "…" stays.
-      else add(/^(?:mcp|unknown):|^server_action$/u.test(tool.groupKind) ? "tool" : tool.groupKind,
-        isActiveAgentToolState(part.state) ? tool.label.replace(/…$/u, "") : tool.label,
+      // A running call's label has no trailing "…"; a long command's own "…" is part of its name.
+      else add(/^(?:mcp|unknown):|^server_action$/u.test(tool.groupKind) ? "tool" : tool.groupKind, tool.label,
         { items: tool.groupItems, count: tool.groupCount, target: tool.target });
       if (part.approvalDecision !== "withdrawn" && (refusal || ["failed", "partial", "outcome-unknown"].includes(state))) failedCount += 1;
     }

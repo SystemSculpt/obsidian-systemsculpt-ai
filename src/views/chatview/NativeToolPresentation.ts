@@ -38,6 +38,8 @@ export type NativeToolPresentation = Readonly<{
   description?: string;
   meta?: string;
   changeSize?: string;
+  /** "2 results": how many results a web search lists. */
+  resultCount?: string;
   path?: string;
   targetPath?: string;
   icon: string;
@@ -131,10 +133,30 @@ function changeSize(input: Record<string, unknown>): string | undefined {
     const parsed = patch ? parseUnifiedDiff(patch) : null;
     return parsed ? [parsed.stats] : [];
   });
-  const added = diffs.reduce((sum, diff) => sum + diff.additions, 0);
-  const removed = diffs.reduce((sum, diff) => sum + diff.deletions, 0);
-  // A zero says nothing: "+3", "−2" or "+3 −2".
+  return changeCountText(diffs.reduce((sum, diff) => sum + diff.additions, 0), diffs.reduce((sum, diff) => sum + diff.deletions, 0));
+}
+/** A change's lines as an edit row counts them: "+3 −2", "+3" or "−2"; a zero says nothing. */
+export function changeCountText(added: number, removed: number): string | undefined {
   return [added ? `+${added}` : "", removed ? `−${removed}` : ""].filter(Boolean).join(" ") || undefined;
+}
+/**
+ * What requested edits add and remove, counted from the same diff their card draws. `before` and
+ * `after` name each edit's text fields (Claude Code's old_string/new_string, a vault edit's oldText/newText).
+ */
+export function editChangeSize(edits: readonly Record<string, unknown>[], before: string, after: string): string | undefined {
+  let added = 0, removed = 0;
+  for (const edit of edits) {
+    const old = edit[before], next = edit[after];
+    if (typeof old !== "string" || typeof next !== "string") continue;
+    const { stats } = generateDiff(old, next, 0);
+    added += stats.additions;
+    removed += stats.deletions;
+  }
+  return changeCountText(added, removed);
+}
+/** "+4": a write adds every line its card draws. */
+export function writeChangeSize(content: unknown): string | undefined {
+  return typeof content === "string" ? changeCountText(content ? content.split("\n").length - (content.endsWith("\n") ? 1 : 0) : 0, 0) : undefined;
 }
 function realReason(part: AgentToolPart, target: string, title: string): string | undefined {
   const input = record(part.input);
@@ -164,7 +186,8 @@ export function nativeToolPresentation(part: AgentToolPart): NativeToolPresentat
     const folder = path?.displayPath.includes("/") ? path.displayPath.slice(0, path.displayPath.lastIndexOf("/")) : undefined;
     const items = options.items ?? (path ? [path.vaultPath ?? path.displayPath] : []);
     return {
-      title, completedTitle: `${completed} ${shown}`, runningTitle: `${running} ${shown}…`,
+      // The spinner says it is running; a trailing "…" would read as a cut target.
+      title, completedTitle: `${completed} ${shown}`, runningTitle: `${running} ${shown}`,
       approvalTitle: options.approval ?? `${verb.toLowerCase()} ${target}`,
       ...(options.mark && !approving ? { target: options.mark } : {}),
       ...(description ? { description } : {}),
@@ -202,9 +225,13 @@ export function nativeToolPresentation(part: AgentToolPart): NativeToolPresentat
   const target = path ? basename(path) : "file";
   const note = path ? { shown: noteDisplayName(target), mark: { text: noteDisplayName(target) } } : {};
   switch (kind(part)) {
+    // Counted from the change the card draws: "+1 −1", or "+4" for a write of four lines.
     case "Edit":
-    case "MultiEdit": return presentation("Edit", "Edited", "Editing", target, "file-pen-line", "edit", { path: rawPath, ...note });
-    case "Write": return presentation("Create", "Created", "Creating", target, "file-plus-2", "write", { path: rawPath, ...note });
+    case "MultiEdit": return {
+      ...presentation("Edit", "Edited", "Editing", target, "file-pen-line", "edit", { path: rawPath, ...note }),
+      changeSize: editChangeSize(part.name === "MultiEdit" ? records(input.edits) : [input], "old_string", "new_string"),
+    };
+    case "Write": return { ...presentation("Create", "Created", "Creating", target, "file-plus-2", "write", { path: rawPath, ...note }), changeSize: writeChangeSize(input.content) };
     case "Read": return presentation("Read", "Read", "Reading", target, "file-text", "read", { path: rawPath, ...note });
     // "Listed the Notes folder": a folder named like a note count ("read 2 notes") still reads as a folder.
     case "LS": return path && path !== "Vault root"
@@ -227,19 +254,29 @@ export function nativeToolPresentation(part: AgentToolPart): NativeToolPresentat
       const url = text(action.url);
       if (url && action.type === "openPage") return presentation("Open", "Opened", "Opening", host(url), "globe-2", "web", { approval: "open a web page", mark: { text: host(url) } });
       if (url && action.type === "findInPage") return presentation("Find in", "Found in", "Finding in", host(url), "globe-2", "web", { approval: "search a web page", mark: { text: host(url) } });
-      const query = text(input.query) ?? text(action.query) ?? strings(action.queries)[0];
-      return presentation("Search the web for", "Searched the web for", "Searching the web for", query ? `“${query}”` : "information", "globe-2", "web-search", {
-        approval: "search the web", ...(query ? { mark: { text: `“${query}”` } } : {}),
-      });
+      // Codex can run several queries in one call: the row names the first and counts the rest, and each
+      // query counts as one search in the turn's summary ("Searched the web 4 times").
+      const queries = webSearchQueries(input);
+      const query = queries[0];
+      const more = queries.length > 1 ? ` and ${queries.length - 1}\u00a0more` : "";
+      // A count only for results the card lists (20 at most): Claude Code's links. Codex lists none.
+      const results = part.state === "succeeded" ? Math.min(webSearchLinks(toolOutputText(part.output?.data)).links.length, 20) : 0;
+      return {
+        ...presentation("Search the web for", "Searched the web for", "Searching the web for", query ? `“${query}”${more}` : "information", "globe-2", "web-search", {
+          approval: "search the web", count: Math.max(queries.length, 1), ...(query ? { mark: { text: `“${query}”` } } : {}),
+        }),
+        ...(results ? { resultCount: `${results} result${results === 1 ? "" : "s"}` } : {}),
+      };
     }
     case "Grep": return presentation("Search", "Searched", "Searching", `“${text(input.pattern) ?? "text"}”`, "search", "search", text(input.pattern) ? { mark: { text: `“${text(input.pattern)}”` } } : {});
     // A name pattern finds files: a search of names, not of text ("Searched for 2 patterns") nor a folder listing.
-    case "Glob": return presentation("Find", "Found", "Finding", `files matching ${text(input.pattern) ?? "a pattern"}`, "file-search", "find", text(input.pattern) ? { mark: { text: text(input.pattern)! } } : {});
+    // Its pattern is code ("**/*.md"), set as code like a command, never read as Markdown.
+    case "Glob": return presentation("Find", "Found", "Finding", `files matching ${text(input.pattern) ?? "a pattern"}`, "file-search", "find", text(input.pattern) ? { mark: { text: text(input.pattern)!, command: true } } : {});
     case "TodoWrite":
     case "plan": {
       const todos = records(input.todos ?? input.plan);
       const done = todos.filter(todo => todo.status === "completed").length;
-      return { ...presentation("Update", "Updated", "Updating", "plan", "list-checks", "plan"), runningTitle: "Planning…", meta: todos.length ? `${done} of ${todos.length} done` : undefined };
+      return { ...presentation("Update", "Updated", "Updating", "plan", "list-checks", "plan"), runningTitle: "Planning", meta: todos.length ? `${done} of ${todos.length} done` : undefined };
     }
     case "ExitPlanMode": return { ...presentation("Approve", "Approved", "Preparing", "plan", "list-checks", "plan"), approvalTitle: "has a plan", completedTitle: "Plan approved" };
     case "fileChange": {
@@ -427,8 +464,6 @@ function renderFileChanges(container: HTMLElement, part: AgentToolPart, approval
     // Each file is named once: by its row, or by its summary when one change holds several files.
     if (changes.length > 1) section.createEl("summary", { text: `${verb} ${fileName}${destination ? ` → ${displayPath(part, destination)}` : ""}${diff ? ` · ${changeCounts(diff.stats)}` : ""}` });
     const body = section.createDiv({ cls: "systemsculpt-inline-diff__body" });
-    // Before it happens, a new file is worth saying; afterwards the row says "Created".
-    if (verb === "Create" && approval) body.createDiv({ cls: "systemsculpt-inline-diff__new-file", text: "New file" });
     if (diff && (diff.stats.additions || diff.stats.deletions)) {
       new DiffViewer({ container: body, diffResult: diff, fileName, maxContextLines: 3, hideHeader: true, ...(approval ? { maxVisibleLines: 12 } : {}) }).render();
     } else {
@@ -440,7 +475,8 @@ function renderFileChanges(container: HTMLElement, part: AgentToolPart, approval
 }
 
 async function renderPlan(app: App, container: HTMLElement, part: AgentToolPart, component?: Component): Promise<void> {
-  const plan = text(record(part.input).plan);
+  // The card's title already says "plan": a first heading that only says "Plan" would say it twice.
+  const plan = text(record(part.input).plan)?.replace(/^\s*#{1,6}[ \t]+plan[ \t]*\r?\n(?:[ \t]*\r?\n)*/iu, "");
   if (!plan) return;
   const body = container.createDiv({ cls: "ss-native-plan-preview" });
   if (component) await MarkdownRenderer.render(app, plan, body, "", component);
@@ -481,6 +517,14 @@ function renderQuestions(container: HTMLElement, part: AgentToolPart): void {
     if (options.length) item.createDiv({ cls: "ss-tool-question-options", text: options.join(" · ") });
   }
   if (!list.childElementCount) list.remove();
+}
+
+/** A web search's queries, as its card lists them: Codex can run several in one call. */
+function webSearchQueries(input: Record<string, unknown>): string[] {
+  const action = record(input.action);
+  const queries = strings(action.queries).filter(query => query.trim());
+  const query = text(input.query) ?? text(action.query);
+  return queries.length ? queries : query ? [query] : [];
 }
 
 /** `Links: [{"title","url"}]` inside Claude Code's WebSearch result. */
@@ -557,9 +601,10 @@ async function renderResolvedNative(app: App, card: HTMLElement, part: AgentTool
         ? [{ label: "In", value: scope.displayPath, ...(scope.vaultPath ? { path: scope.vaultPath } : {}) }]
         : [];
       if (toolKind === "Read" && path) {
-        const resolved = resolvedPath(part, path);
-        const lines = output ? output.replace(/\n+$/u, "").split("\n").length : 0;
-        renderPathList(app, card, [{ path: resolved.vaultPath ?? resolved.displayPath, link: Boolean(resolved.vaultPath), ...(lines ? { note: `${lines} ${lines === 1 ? "line" : "lines"}` } : {}) }]);
+        // The row names and links the note; its card says how much was read, never the note again, in
+        // the same muted line a SystemSculpt read uses. A failed read's output is its error, not lines.
+        const lines = output && part.state === "succeeded" ? output.replace(/\n+$/u, "").split("\n").length : 0;
+        if (lines) card.createEl("p", { cls: "ss-tool-caption", text: `${lines} ${lines === 1 ? "line" : "lines"}` });
       } else if (toolKind === "LS") {
         renderTerminal(card, { output });
       } else if (output) {
@@ -578,7 +623,7 @@ async function renderResolvedNative(app: App, card: HTMLElement, part: AgentTool
     case "WebSearch":
     case "webSearch": {
       const action = record(input.action);
-      const queries = strings(action.queries).length ? strings(action.queries) : [text(input.query) ?? text(action.query)].filter((value): value is string => Boolean(value));
+      const queries = webSearchQueries(input);
       // "Query", as every web search card says it; several are listed one per line.
       const fields: ToolCardField[] = queries.length > 1
         ? [{ label: "Queries", value: "", list: queries.map(query => ({ path: query, link: false })) }]

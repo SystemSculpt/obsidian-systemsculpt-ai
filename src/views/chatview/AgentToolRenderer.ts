@@ -247,7 +247,8 @@ export class AgentToolRenderer {
       });
       createdShell.addEventListener("toggle", () => {
         createdShell.querySelector("summary")?.setAttribute("aria-expanded", String(createdShell.open));
-        if (createdShell.open) this.toolDetailHydrators.get(node)?.();
+        // The toggle lands a task later (a settled fold opens its one card): a card gone from the page by then has nothing to fill.
+        if (createdShell.open && node.isConnected) this.toolDetailHydrators.get(node)?.();
         this.options.updateDisclosure(
           createdShell,
           createdShell.classList.contains("is-disclosure"),

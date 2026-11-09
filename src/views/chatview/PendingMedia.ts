@@ -25,6 +25,8 @@ export type PendingMedia = Readonly<{
   state: "working" | "saving" | "failed";
   label: string;
   caption?: string;
+  /** A grid tile's caption keeps to one line, as the file name that replaces it does, so the rows hold still. */
+  captionLine?: true;
   error?: string;
   /** Key of the live progress the call reports here. */
   progressKey: string | null;
@@ -114,7 +116,8 @@ export function presentPendingMedia(parts: readonly AgentToolPart[], live: boole
       const base = { order, progressKey, callId: part.callId };
       if (tool === "studio_run_workflow") {
         const path = text(args.path);
-        const name = path ? (path.split("/").pop() ?? path).replace(/\.systemsculpt$/iu, "") : "workflow";
+        // "Running Poster workflow", as its row says when it is done ("Ran Poster workflow").
+        const name = path ? `${(path.split("/").pop() ?? path).replace(/\.systemsculpt$/iu, "")} workflow` : "the workflow";
         if (active) pending.push({ ...base, id: `${part.callId}:0`, kind: "workflow", ratio: 0, state: "working", label: `Running ${name}` });
         const outcome = finished ? decodeSystemSculptToolOutput(part.output?.data) : null;
         const reason = outcome && !outcome.ok && !outcome.link && !QUIET_RESULTS.some(pattern => pattern.test(outcome.message))
@@ -127,11 +130,12 @@ export function presentPendingMedia(parts: readonly AgentToolPart[], live: boole
       const count = tool === "generate_image" && typeof args.count === "number" ? Math.min(4, Math.max(1, Math.floor(args.count))) : 1;
       if (active) {
         for (let index = 0; index < count; index += 1) {
+          // A grid's tiles are the single tile, four times: the same words, each with its prompt on one
+          // line where its file's name will land, so no row moves when the pictures arrive.
           pending.push({
             ...base, id: `${part.callId}:${index}`, kind, ratio, state: "working",
-            label: count > 1 ? `Image ${index + 1} of ${count}` : `${editing(args) ? "Editing" : "Generating"} ${kind}`,
-            // A grid's tiles share one prompt; the call's row names it, not four captions.
-            ...(prompt && count === 1 ? { caption: prompt } : {}),
+            label: `${editing(args) ? "Editing" : "Generating"} ${kind}`,
+            ...(prompt ? { caption: prompt, ...(count > 1 ? { captionLine: true as const } : {}) } : {}),
           });
         }
         return;
@@ -256,9 +260,9 @@ export function renderPendingMedia(grid: HTMLElement, tile: PendingMedia): HTMLE
     updatePendingTile(figure, tile, Date.now());
   }
   if (tile.kind !== "workflow" && tile.caption) {
-    // The prompt wraps under its frame (up to three lines), so its words are read, not cut at one line.
-    // A grid's tiles have none: an empty caption would still add its gap under each tile.
-    figure.createEl("figcaption", { cls: "systemsculpt-agent-media-caption is-prompt", text: tile.caption, attr: { title: tile.caption } });
+    // The prompt wraps under its frame (up to three lines), so its words are read, not cut at one line;
+    // a grid tile's stays on one line, the height of the file name that replaces it.
+    figure.createEl("figcaption", { cls: `systemsculpt-agent-media-caption ${tile.captionLine ? "is-single-line" : "is-prompt"}`, text: tile.caption, attr: { title: tile.caption } });
   }
   pendingTiles.set(figure, tile);
   return figure;

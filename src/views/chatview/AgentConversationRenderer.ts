@@ -1138,12 +1138,21 @@ export class AgentConversationRenderer extends Component {
    */
   private settleFold(fold: HTMLDetailsElement): void {
     const body = fold.querySelector<HTMLElement>(":scope > .systemsculpt-agent-activity-body");
+    const cards = ":scope > .systemsculpt-agent-activity-body > .systemsculpt-agent-part.is-tool > details.systemsculpt-agent-tool";
+    if (fold.hasAttribute("data-single-tool")) {
+      const card = fold.querySelector<HTMLDetailsElement>(cards);
+      if (card && !card.open) {
+        card.open = true;
+        card.dataset.foldOpened = "";
+      }
+    } else {
+      // A live fold that held one call opened its card; once it holds more, that call is a row again.
+      for (const card of Array.from(fold.querySelectorAll<HTMLDetailsElement>(`${cards}[data-fold-opened]`))) {
+        card.open = false;
+        delete card.dataset.foldOpened;
+      }
+    }
     if (body) syncFoldEnd(body);
-    if (!fold.hasAttribute("data-single-tool")) return;
-    const card = fold.querySelector<HTMLDetailsElement>(
-      ":scope > .systemsculpt-agent-activity-body > .systemsculpt-agent-part.is-tool > details.systemsculpt-agent-tool",
-    );
-    if (card && !card.open) card.open = true;
   }
 
   private createActivityOverflow(
@@ -1274,6 +1283,13 @@ export class AgentConversationRenderer extends Component {
     // the steps before it; the drawer holds only those earlier steps.
     reconcileConversationChildren(state.body, visiblePrevious);
     state.body.toggleAttribute("hidden", visiblePrevious.length === 0);
+    // A drawer of one step with a card opens to that card, as a one-call fold does: no second row
+    // naming the step again (activity.css hides it). With more steps, each is a row again.
+    const lone = expanded && state.previousNodes.length === 1 && awaitingApproval.length === 0
+      ? state.previousNodes[0].querySelector<HTMLDetailsElement>(":scope > details.systemsculpt-agent-tool.is-disclosure")
+      : null;
+    state.body.toggleAttribute("data-single-step", lone !== null);
+    if (lone && !lone.open) lone.open = true;
   }
 
   private hasPendingApproval(node: HTMLElement): boolean {
@@ -1682,10 +1698,10 @@ export class AgentConversationRenderer extends Component {
         const presented = presentAgentError(
           part.error, part.retryable, this.options.showPlanOffer?.(), this.options.showPaymentFix?.() ?? false,
         );
-        // Credits, plans and a usage limit are a gate with a way through, not a failure: calm, with a lock
-        // (as on a tool row). Red stays for things that broke.
+        // Credits, plans, a usage limit and a sign-in are a gate with a way through, not a failure: calm,
+        // with a lock (as on a tool row). Red stays for things that broke.
         if (presented.action === "see-plans" || presented.action === "monthly" || presented.action === "add-credits"
-          || presented.action === "use-hosted") {
+          || presented.action === "use-hosted" || presented.action === "sign-in") {
           node.addClass("is-gate");
           setIcon(errorIcon, "lock");
         }

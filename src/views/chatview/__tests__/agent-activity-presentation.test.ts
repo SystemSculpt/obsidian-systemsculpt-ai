@@ -25,6 +25,18 @@ describe("AgentActivityPresentation", () => {
     ])).toEqual({ label: "Read 3 notes, searched for 2 patterns, edited Plan · 2 more", failedCount: 0 });
   });
 
+  it("counts each web query as one search, a Codex call's several included", () => {
+    const claude = { agent: "claude" as const, workingDirectory: "/vault" };
+    const codex = { agent: "codex" as const, workingDirectory: "/vault" };
+    expect(summarizeAgentActivity([
+      tool("web_search", { query: "when to plant tomatoes outside" }, { location: "server", output: { data: { query: "when to plant tomatoes outside", result_count: 6 } } }),
+      tool("WebSearch", { query: "last frost date portland" }, { id: "claude-search", callId: "claude-search", native: claude }),
+      tool("webSearch", { type: "webSearch", query: "tomato soil temperature", action: { type: "search", query: "tomato soil temperature", queries: ["tomato soil temperature", "tomato night temperature"] } },
+        { id: "codex-search", callId: "codex-search", native: codex }),
+      tool("WebFetch", { url: "https://example.org/grow/hardening-off", prompt: "How long to harden off?" }, { id: "claude-fetch", callId: "claude-fetch", native: claude }),
+    ]).label).toBe("Searched the web 4 times, read example.org");
+  });
+
   it("says how far a partly done batch got and counts one tool used twice", () => {
     const partial = tool("trash", { paths: ["Notes/Old.md", "Notes/Draft.md"] }, {
       state: "failed",

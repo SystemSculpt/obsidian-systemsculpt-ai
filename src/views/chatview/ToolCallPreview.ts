@@ -134,7 +134,8 @@ export async function prepareNativeWriteEditPreview(app: App, part: AgentToolPar
     if (typeof input.content !== "string") return result(original, original, "unavailable", 0, [], "The file content is not available yet.");
     const status = file && input.content === original ? "identical" : "changed";
     const preview = result(original, input.content, status);
-    if (!file) { preview.notice = "Create a new file."; preview.isNewFile = true; }
+    // A new note's lines are its diff, under a title that says "create"; only an empty one needs words.
+    if (!file) { preview.isNewFile = true; if (!input.content) preview.notice = "Create a new file."; }
     else if (status === "changed" && !preview.diff.stats.additions && !preview.diff.stats.deletions) preview.notice = "Change the final line break.";
     return preview;
   }
@@ -201,7 +202,6 @@ export function renderPreparedWriteEditPreviews(hostElement: HTMLElement, previe
       body.createDiv({ cls: "systemsculpt-diff-no-changes-notice", text: preview.notice ?? "The change preview is unavailable. Review Details before approving." });
       continue;
     }
-    if (preview.isNewFile) body.createDiv({ cls: "systemsculpt-inline-diff__new-file", text: "New file" });
     if (preview.notice) body.createDiv({ cls: "systemsculpt-diff-no-changes-notice", text: preview.notice });
     // The same box as every edit card: no patch ranges or line-number gutter, markers on the shared inset.
     const viewer = new DiffViewer({

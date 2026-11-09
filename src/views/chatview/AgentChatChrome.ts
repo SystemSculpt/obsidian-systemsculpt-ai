@@ -210,8 +210,10 @@ function hostedDetail(state: AgentChromeState): RunLineSegment {
     return { ...base, label: "Internal QA", ariaLabel: "Internal testing mode. Open credits", action: "credits" };
   }
   if (!credits) {
+    // The account's state, amber like "Out of credits": the turn's card or the banner offers See plans,
+    // so the footer never says the same action twice. It still opens the plans.
     return state.account === "no-plan"
-      ? { ...base, label: "See plans", ariaLabel: "See SystemSculpt plans", action: "see-plans" }
+      ? { ...base, label: "No plan", ariaLabel: "No SystemSculpt plan. See plans", tone: "warning", action: "see-plans" }
       : { ...base, label: "Credits", ariaLabel: "Open credits", action: "credits" };
   }
   if (credits.totalRemaining <= 0) {

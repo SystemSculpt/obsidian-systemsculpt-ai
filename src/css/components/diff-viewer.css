@@ -4,8 +4,10 @@
  */
 
 .systemsculpt-diff-viewer {
-  /* Every code box in a card starts its first glyph 12 px in: diff markers, file text, terminal. */
+  /* Every code box in a card starts its first glyph 12 px in: diff markers, file text, terminal.
+   * Its first and last lines keep the 8 px above and below that file text keeps. */
   --ss-diff-inset: var(--ss-space-3);
+  --ss-diff-inset-block: var(--ss-space-2);
   border: 1px solid var(--ss-line);
   border-radius: var(--ss-radius-sm);
   overflow: hidden;
@@ -15,6 +17,7 @@
 /* A diff fenced in a reply sits inside the code block's own inset. */
 .systemsculpt-diff-viewer.systemsculpt-agent-fenced-diff {
   --ss-diff-inset: 0px;
+  --ss-diff-inset-block: 0px;
 }
 
 .systemsculpt-diff-header {
@@ -56,7 +59,13 @@
 
 .systemsculpt-diff-content {
   max-height: clamp(120px, 30vh, 200px);
+  padding-block: var(--ss-diff-inset-block);
   overflow: auto;
+}
+
+/* A notice in place of the lines takes that inset as its own. */
+.systemsculpt-diff-content > .systemsculpt-diff-no-changes-notice {
+  padding-block: 0;
 }
 
 .systemsculpt-diff-content.is-disclosed {

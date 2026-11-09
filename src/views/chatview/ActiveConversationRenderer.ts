@@ -8,6 +8,7 @@ import { agentPartsEqual, historicalAgentPart, partitionHistoricalParts, termina
 import { presentMessageContent, type PresentedMessageAttachment } from "./ChatMessagePresentation";
 import { presentAgentTool } from "./AgentToolPresentation";
 import { presentPendingMedia } from "./PendingMedia";
+import { presentTurnMedia } from "./TurnMedia";
 import { captureDetailsState, findFocusKey, focusedElementWithin, reconcileConversationChildren, restoreDetailsState } from "./ConversationDomState";
 import type { AgentApprovalCards } from "./AgentApprovalCards";
 import type { AgentToolRenderer } from "./AgentToolRenderer";
@@ -334,6 +335,12 @@ export class ActiveConversationRenderer {
     );
     const shownIndexes = orderedParts.flatMap((part, index) =>
       part.kind === "tool" && liveTileCalls.has(part.callId) ? [] : [index]);
+    // While a picture, video or Studio run is made, the steps and words before it already fold into
+    // the turn's one row, so its tile sits where the finished file lands (no jump when it does).
+    const mediaSourceIndex = presentation.phase === "completed" || !presentation.busy ? -1 : this.mediaSourceIndex(orderedParts);
+    const foldedIndexes = shownIndexes.filter((index) => index < mediaSourceIndex);
+    const restIndexes = shownIndexes.filter((index) => index >= mediaSourceIndex);
+    const foldLive = foldedIndexes.some((index) => isAgentActivityPart(orderedParts[index]));
     const visibleLanes = presentation.phase === "completed"
       ? this.completedActiveLanes(
         body,
@@ -342,7 +349,12 @@ export class ActiveConversationRenderer {
         finalAnswerPartIds,
         snapshot.elapsedMs,
       )
-      : this.groupActiveTimeline(body, shownIndexes.map((index) => lanes[index]), shownIndexes.map((index) => orderedParts[index]));
+      : foldLive
+        ? [
+          this.liveFold(body, foldedIndexes.map((index) => lanes[index]), foldedIndexes.map((index) => orderedParts[index])),
+          ...this.groupActiveTimeline(body, restIndexes.map((index) => lanes[index]), restIndexes.map((index) => orderedParts[index])),
+        ]
+        : this.groupActiveTimeline(body, shownIndexes.map((index) => lanes[index]), shownIndexes.map((index) => orderedParts[index]));
     if (tailStatus) {
       visibleLanes.push({
         key: "tail-status",
@@ -380,6 +392,11 @@ export class ActiveConversationRenderer {
       if (sourceIndex >= 0) {
         anchor = 0;
         for (const lane of visibleLanes) {
+          // The live fold holds only steps from before the call; it always sits above its tile.
+          if (lane.key === "turn-fold") {
+            anchor += 1;
+            continue;
+          }
           // A group's header and its drawer both stand for the steps the group starts with.
           const index = partIndex.get(lane.key.replace(/^overflow:/u, "").replace(/:body$/u, ""));
           if (index === undefined || index >= sourceIndex) break;
@@ -449,11 +466,45 @@ export class ActiveConversationRenderer {
     ];
   }
 
+  /** Where in the turn the first picture, video or Studio run (live or saved) comes from; -1 if none. */
+  private mediaSourceIndex(parts: readonly AgentPart[]): number {
+    const tools = parts.filter((part): part is AgentToolPart => part.kind === "tool");
+    const answer = parts.flatMap((part) => part.kind === "text" ? [part.markdown] : []).join("\n");
+    const media = presentTurnMedia(tools, answer, true);
+    const first = Math.min(...media.media.map((item) => item.order ?? Infinity), ...media.pending.map((tile) => tile.order));
+    return Number.isFinite(first) ? parts.indexOf(tools[first]) : -1;
+  }
+
+  /**
+   * The turn's fold, made early: while a generation runs, what came before it is already the one row
+   * the finished turn shows, so the tile below it is where the file lands. The same element settles
+   * when the turn ends.
+   */
+  private liveFold(
+    body: HTMLElement,
+    lanes: readonly Readonly<{ key: string; node: HTMLElement }>[],
+    parts: readonly AgentPart[],
+  ): Readonly<{ key: string; node: HTMLElement }> {
+    if (!this.activeCompletedFold || !this.activeCompletedFoldBody) {
+      const created = this.options.createCompletedActivity(body);
+      this.activeCompletedFold = created.element;
+      this.activeCompletedFoldBody = created.body;
+    }
+    // No time beside it: the tile keeps the clock while the turn runs.
+    this.options.setCompletedActivitySummary(this.activeCompletedFold, parts);
+    const rendered = this.groupActiveTimeline(this.activeCompletedFoldBody, lanes, parts, true, false);
+    reconcileConversationChildren(this.activeCompletedFoldBody, rendered.map(({ node }) => node));
+    this.options.settleFold(this.activeCompletedFold);
+    return { key: "turn-fold", node: this.activeCompletedFold };
+  }
+
   private groupActiveTimeline(
     parent: HTMLElement,
     lanes: readonly Readonly<{ key: string; node: HTMLElement }>[],
     parts: readonly AgentPart[],
     flat = false,
+    // The live fold groups only its own steps; the rows after it decide which drawers stay.
+    dropUnusedDrawers = true,
   ): Array<Readonly<{ key: string; node: HTMLElement }>> {
     const result: Array<Readonly<{ key: string; node: HTMLElement }>> = [];
     const timeline = groupAdjacentAgentActivity(
@@ -502,6 +553,7 @@ export class ActiveConversationRenderer {
       }
       if (split.latest) result.push(split.latest.lane);
     }
+    if (!dropUnusedDrawers) return result;
     for (const [key, overflow] of this.activeOverflowNodes) {
       if (wantedOverflowKeys.has(key)) continue;
       this.options.overflowBody(overflow)?.remove();
@@ -658,7 +710,7 @@ export class ActiveConversationRenderer {
       ? backend === "SystemSculpt" ? "Connecting…" : `Starting ${backend}…`
       : latestActivity && ["acting", "reasoning", "responding"].includes(presentation.phase)
         // The row adds its own elapsed time (spec 3.3: "Editing Plan.md · 12s").
-        ? latestActivity.kind === "tool" ? presentAgentTool(latestActivity).label.replace(/…$/u, "")
+        ? latestActivity.kind === "tool" ? presentAgentTool(latestActivity).label
           : latestActivity.kind === "text" ? "Writing" : "Thinking"
         : presentation.activityStatus;
     status.dataset.activityLabel = activity;

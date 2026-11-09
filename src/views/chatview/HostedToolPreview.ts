@@ -122,17 +122,33 @@ function renderUnknown(app: App, host: HTMLElement, input: RecordValue, output: 
   if (result) renderText(host, result, 6);
 }
 
+/** How much of a note was read, as a native read says it: "3 lines", "Partly read". */
+function readAmount(file: RecordValue): string | undefined {
+  const lines = typeof file.content === "string" && file.content ? file.content.replace(/\n+$/u, "").split("\n").length : 0;
+  return record(file.metadata).hasMore === true ? "Partly read" : lines ? `${lines} ${lines === 1 ? "line" : "lines"}` : undefined;
+}
+
 function renderRead(app: App, host: HTMLElement, input: RecordValue, output: RecordValue, options: HostedToolPreviewOptions): void {
-  if (Array.isArray(output.files)) {
-    const files = records(output.files);
-    if (!files.length) caption(host, "No file results were recorded.");
-    else renderList(host, files, (row, file) => {
+  const files = records(output.files);
+  if (Array.isArray(output.files) && !files.length) {
+    caption(host, "No file results were recorded.");
+    return;
+  }
+  // The row names and links one note: its card says only how much was read, or why not, never the note again.
+  const requested = [...strings(input.paths), ...(text(input.path) ? [input.path as string] : [])];
+  if (requested.length === 1 && files.length <= 1) {
+    const amount = files[0] ? readAmount(files[0]) : undefined;
+    if (files[0] && text(files[0].error)) renderNotice(host, { tone: "warning", text: files[0].error as string });
+    else if (amount) caption(host, amount);
+    return;
+  }
+  if (files.length) {
+    renderList(host, files, (row, file) => {
       renderPath(app, row, file.path, options, !text(file.error));
-      const lines = typeof file.content === "string" && file.content ? file.content.replace(/\n+$/u, "").split("\n").length : 0;
-      // The same note as a native read: its reason, how much was read, or its length.
+      // Each note with its reason, or how much was read.
+      const amount = readAmount(file);
       if (text(file.error)) note(row, file.error as string, "warning");
-      else if (record(file.metadata).hasMore === true) note(row, "Partly read");
-      else if (lines) note(row, `${lines} ${lines === 1 ? "line" : "lines"}`);
+      else if (amount) note(row, amount);
     });
   } else {
     renderList(host, strings(input.paths), (row, path) => renderPath(app, row, path, options));

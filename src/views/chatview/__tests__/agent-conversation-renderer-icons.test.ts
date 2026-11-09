@@ -2887,7 +2887,7 @@ describe("AgentConversationRenderer tail status", () => {
     expect(setIcon).toHaveBeenCalledWith(stateIcon, "loader-circle");
     expect(actionIcon.classList).toContain("is-animated");
     expect(actionIcon.getAttribute("aria-hidden")).toBe("true");
-    expect(label.textContent).toBe("Reading Plan…");
+    expect(label.textContent).toBe("Reading Plan");
     expect(stateIcon.classList).not.toContain("is-animated");
     expect(header.querySelector(".systemsculpt-agent-tool-state")).toBeNull();
     expect(details.open).toBe(false);
@@ -4434,7 +4434,7 @@ describe("AgentConversationRenderer tail status", () => {
       ".systemsculpt-agent-approval-preview",
     )!;
     expect(approval.querySelector(".systemsculpt-agent-approval-copy")?.textContent)
-      .toBe("SystemSculpt wants to replace Plan.md");
+      .toBe("SystemSculpt wants to replace Plan");
     expect(approval.querySelector(".systemsculpt-agent-approval-meta")?.textContent).toBe("In Projects");
     expect(approval.querySelector('[data-testid="chat.approval.deny"]')).not.toBeNull();
     expect(approval.querySelector('[data-testid="chat.approval.allow-once"]')).not.toBeNull();

@@ -381,7 +381,7 @@ describe("AgentWorkspace chrome", () => {
       await rendered;
       await jest.advanceTimersByTimeAsync(50);
       const region = parent.querySelector('[data-testid="chat.announcer"]')!;
-      expect(region.textContent).toContain("Claude Code wants to edit Plan.md. Enter to approve, Escape to deny.");
+      expect(region.textContent).toContain("Claude Code wants to edit Plan. Enter to approve, Escape to deny.");
       parent.querySelector<HTMLButtonElement>(`[data-testid="chat.approval.${approved ? "allow-once" : "deny"}"]`)!.click();
       await jest.advanceTimersByTimeAsync(50);
       expect(region.textContent).toBe(approved ? "Approved" : "Denied");

@@ -64,17 +64,17 @@ describe("inline approval keyboard ownership", () => {
     expect(document.activeElement).toBe(primary(card));
     expect(card.getAttribute("role")).toBe("group");
     expect(card.querySelector<HTMLElement>('[data-testid="chat.approval.preview"]')?.hidden).toBe(true);
-    expect(document.getElementById(card.getAttribute("aria-labelledby")!)?.textContent).toBe("Claude Code wants to edit Plan.md");
+    expect(document.getElementById(card.getAttribute("aria-labelledby")!)?.textContent).toBe("Claude Code wants to edit Plan");
     expect(document.getElementById(card.getAttribute("aria-describedby")!)?.textContent).toBe("In Notes");
-    expect(ui.root.querySelector('[role="status"]')?.textContent).toBe("Claude Code wants to edit Plan.md. Enter to approve, Escape to deny.");
+    expect(ui.root.querySelector('[role="status"]')?.textContent).toBe("Claude Code wants to edit Plan. Enter to approve, Escape to deny.");
     expect(card.querySelector('[data-focus-key="tool-allow-once"]')?.getAttribute("aria-keyshortcuts")).toContain("Enter");
     ui.dispose();
   });
 
   // Spec 3.5 / product review item 1: the basename titles the card, the folder is the meta line.
   it.each([
-    ["/tmp/vault/Notes/Plan.md", "Plan.md", "In Notes"],
-    ["/private/tmp/vault/Notes/Plan.md", "Plan.md", "In Notes"],
+    ["/tmp/vault/Notes/Plan.md", "Plan", "In Notes"],
+    ["/private/tmp/vault/Notes/Plan.md", "Plan", "In Notes"],
     ["/external/Notes/Plan.md", "Plan.md (outside vault)", "In /external/Notes"],
   ])("presents %s consistently without changing the request or approval answer", async (file_path, displayed, folder) => {
     const ui = setup();
@@ -436,7 +436,7 @@ describe("inline approval keyboard ownership", () => {
     const part = tool("one"), card = cards.create(part, "edit"); root.appendChild(card);
     cards.sync([part]);
     expect(root.querySelector('[role="status"]')).toBeNull();
-    expect(onAnnounce).toHaveBeenCalledWith("Claude Code wants to edit Plan.md. Enter to approve, Escape to deny.");
+    expect(onAnnounce).toHaveBeenCalledWith("Claude Code wants to edit Plan. Enter to approve, Escape to deny.");
     card.querySelector<HTMLAnchorElement>("strong a")!.click();
     expect(onOpenPath).toHaveBeenCalledWith("Notes/Plan.md");
     cards.unload();
@@ -555,15 +555,24 @@ describe("inline approval keyboard ownership", () => {
 
   it("draws a write over an existing note with the edit glyph, as its title says replace", () => {
     const root = document.body.createDiv();
-    const cards = new AgentApprovalCards(root, { onApprove: jest.fn(), exists: path => path === "Notes/Garden.md" });
+    const cards = new AgentApprovalCards(root, { onApprove: jest.fn(), onOpenPath: jest.fn(), exists: path => path === "Notes/Garden.md" });
     cards.load();
     const write = (id: string, path: string) => tool(id, { name: "write", native: undefined, input: { path, content: "# Garden" } });
     const replace = cards.create(write("one", "Notes/Garden.md"), "write");
     const create = cards.create(write("two", "Notes/Basil care.md"), "write");
-    expect(replace.querySelector(".systemsculpt-agent-approval-copy")?.textContent).toBe("SystemSculpt wants to replace Garden.md");
+    // A note is named as its row and Obsidian name it; Details keeps the full path.
+    expect(replace.querySelector(".systemsculpt-agent-approval-copy")?.textContent).toBe("SystemSculpt wants to replace Garden");
     expect(iconOf(replace.querySelector(".systemsculpt-agent-approval-icon"))).toBe("file-pen-line");
-    expect(create.querySelector(".systemsculpt-agent-approval-copy")?.textContent).toBe("SystemSculpt wants to create Basil care.md");
+    expect(create.querySelector(".systemsculpt-agent-approval-copy")?.textContent).toBe("SystemSculpt wants to create Basil care");
     expect(iconOf(create.querySelector(".systemsculpt-agent-approval-icon"))).toBe("file-plus-2");
+    expect(create.querySelector("details pre")?.textContent).toContain('"path": "Notes/Basil care.md"');
+    // The existing note is a link; the note that isn't there yet is plain text, and a short name stays whole.
+    expect(replace.querySelector(".systemsculpt-agent-approval-copy a.internal-link")?.getAttribute("data-href")).toBe("Notes/Garden.md");
+    expect(create.querySelector(".systemsculpt-agent-approval-copy a")).toBeNull();
+    expect(create.querySelector(".systemsculpt-agent-approval-target.is-whole")?.textContent).toBe("Basil care");
+    // Only a Markdown note drops its extension.
+    const data = cards.create(write("three", "Data/Plants.json"), "write");
+    expect(data.querySelector(".systemsculpt-agent-approval-copy")?.textContent).toBe("SystemSculpt wants to create Plants.json");
     cards.unload();
   });
 });

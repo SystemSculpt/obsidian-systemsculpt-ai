@@ -172,15 +172,17 @@ button.systemsculpt-agent-activity-overflow-header:focus-visible {
     transform var(--ss-dur-fast) var(--ss-ease);
 }
 
+/* Pointing down, a chevron's ink is 3/24 of its box wider on each side: the shift keeps the ink's
+   right end on the column's edge in both states. */
 details.systemsculpt-agent-activity[open]
   > summary.systemsculpt-agent-activity-header
   .systemsculpt-agent-activity-disclosure {
-  transform: rotate(90deg);
+  transform: translateX(calc(var(--ss-icon-size-sm) * -3 / 24)) rotate(90deg);
 }
 
 button.systemsculpt-agent-activity-overflow[aria-expanded="true"]
   .systemsculpt-agent-activity-overflow-disclosure {
-  transform: rotate(90deg);
+  transform: translateX(calc(var(--ss-icon-size-sm) * -3 / 24)) rotate(90deg);
 }
 
 summary.systemsculpt-agent-activity-header:hover .systemsculpt-agent-activity-disclosure,
@@ -280,12 +282,23 @@ details.systemsculpt-agent-activity[data-single-tool]
   display: none;
 }
 
+/* Its card ends as far above what follows as a longer fold's last card does (12px in all). */
 details.systemsculpt-agent-activity[data-single-tool]
   > .systemsculpt-agent-activity-body
   > .systemsculpt-agent-part.is-tool
   > details.systemsculpt-agent-tool
   > .systemsculpt-agent-tool-support {
-  margin: var(--ss-space-0) 0 var(--ss-space-1);
+  margin: var(--ss-space-0) 0 var(--ss-space-2);
+}
+
+/* Under the words said before the call, the card is a frame: 16px under their line. */
+details.systemsculpt-agent-activity[data-single-tool]
+  > .systemsculpt-agent-activity-body
+  > .systemsculpt-agent-part.is-text
+  + .systemsculpt-agent-part.is-tool
+  > details.systemsculpt-agent-tool
+  > .systemsculpt-agent-tool-support {
+  margin-top: calc(var(--ss-space-4) - var(--ss-space-0));
 }
 
 /* One summary drawer owns each adjacent group; its rows keep their own detail disclosures. */
@@ -309,6 +322,26 @@ button.systemsculpt-agent-activity-overflow {
 
 .systemsculpt-agent-activity-overflow-body[hidden] {
   display: none;
+}
+
+/* A drawer of one step opens to its card (code opens it), under the drawer's label like a one-call
+   fold's card: no second row naming the step, no guide line. */
+.systemsculpt-agent-activity-overflow-body[data-single-step] {
+  border-left-color: transparent;
+}
+
+.systemsculpt-agent-activity-overflow-body[data-single-step]
+  > .systemsculpt-agent-part.is-tool
+  > details.systemsculpt-agent-tool
+  > .systemsculpt-agent-tool-header {
+  display: none;
+}
+
+.systemsculpt-agent-activity-overflow-body[data-single-step]
+  > .systemsculpt-agent-part.is-tool
+  > details.systemsculpt-agent-tool
+  > .systemsculpt-agent-tool-support {
+  margin: var(--ss-space-0) 0 var(--ss-space-2);
 }
 
 @media (pointer: coarse) {

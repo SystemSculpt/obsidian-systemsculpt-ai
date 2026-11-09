@@ -141,7 +141,7 @@ describe("presentAgentTool", () => {
   it("concentrates labels, state, and compact target summaries", () => {
     expect(presentAgentTool(part())).toMatchObject({
       canonicalName: "read",
-      label: "Reading Plan…",
+      label: "Reading Plan",
       actionIcon: "file-text",
       icon: "loader-circle",
       targetPath: "Projects/Plan.md",
@@ -202,7 +202,7 @@ describe("presentAgentTool", () => {
     expect(presentAgentTool(part({ name: "write", input: { path: "Note.md" } })))
       .toMatchObject({
         canonicalName: "write",
-        label: "Creating Note…",
+        label: "Creating Note",
         actionIcon: "file-plus-2",
         summary: null,
       });
@@ -218,7 +218,7 @@ describe("presentAgentTool", () => {
       input: { action: "add", paths: ["Project.md"] },
     }))).toMatchObject({
       canonicalName: "context",
-      label: "Pinning files…",
+      label: "Pinning files",
       summary: "Project.md",
     });
     expect(presentAgentTool(part({
@@ -226,14 +226,14 @@ describe("presentAgentTool", () => {
       input: { action: "remove", paths: ["Project.md"] },
     }))).toMatchObject({
       canonicalName: "context",
-      label: "Unpinning files…",
+      label: "Unpinning files",
     });
     expect(presentAgentTool(part({
       name: "context",
       input: { paths: ["Project.md"] },
     }))).toMatchObject({
       canonicalName: "context",
-      label: "Managing pinned files…",
+      label: "Managing pinned files",
     });
   });
 
@@ -252,16 +252,41 @@ describe("presentAgentTool", () => {
     }))).toEqual([{ label: "Query", value: "Completed public query" }]);
   });
 
-  it("uses only the public result count for hosted web search", () => {
+  it("never counts a hosted web search's results, which its card cannot list", () => {
     const search = part({ name: "web_search", location: "server", state: "succeeded", input: {},
       output: { data: { query: "Public query", result_count: 3, matches: ["private"] } } });
-    // The count is the row's meta ("3 results"), not a repeated field.
+    // Its sources reach the answer's Sources list, not the call: a row counts only results its card lists.
     expect(presentAgentToolDetails(search)).toEqual([{ label: "Query", value: "Public query" }]);
-    expect(presentAgentTool(search).meta).toBe("3 results");
-    for (const count of [-1, 1.5, "3", NaN, Infinity]) {
-      expect(presentAgentTool({ ...search, output: { data: { result_count: count, matches: ["private"] } } }).meta).toBeUndefined();
-    }
+    expect(presentAgentTool(search).meta).toBeUndefined();
     expect(presentAgentTool({ ...search, name: "private_server_tool" }).meta).toBeUndefined();
+  });
+
+  it("counts a vault edit's or write's lines from the diff its card draws", () => {
+    const edit = part({ name: "edit", state: "succeeded",
+      input: { path: "Notes/Garden.md", edits: [{ oldText: "Tomatoes go in the south bed.", newText: "Tomatoes and basil go in the south bed." }] },
+      output: { data: { path: "Notes/Garden.md", success: true, appliedCount: 1, requestedCount: 1, skipped: [] } } });
+    expect(presentAgentTool(edit).meta).toBe("+1 \u22121");
+    const write = part({ name: "write", state: "succeeded",
+      input: { path: "Notes/Basil.md", content: "# Basil\n\nSow after the last frost.\nPinch the tips weekly." },
+      output: { data: { path: "Notes/Basil.md", success: true } } });
+    expect(presentAgentTool(write).meta).toBe("+4");
+    const multi = part({ name: "multi_edit", state: "succeeded",
+      input: { files: [
+        { path: "A.md", edits: [{ oldText: "a", newText: "b" }, { oldText: "c", newText: "c\nd" }] },
+        { path: "B.md", edits: [{ oldText: "x", newText: "y" }] },
+      ] },
+      output: { data: { results: [
+        { path: "A.md", success: true, appliedCount: 1, requestedCount: 2, skipped: [{ index: 0, reason: "Not found" }] },
+        { path: "B.md", success: false, error: "File not found" },
+      ] } } });
+    // Only what applied counts: A.md's second edit; the skipped edit and the failed note count nothing.
+    expect(presentAgentTool(multi).meta).toBe("+1");
+    // A regular expression isn't the text it changes; a write that may have kept the old note claims nothing.
+    expect(presentAgentTool({ ...edit, input: { path: "Notes/Garden.md", edits: [{ oldText: "a+", newText: "b", isRegex: true }] } }).meta).toBeUndefined();
+    expect(presentAgentTool({ ...write, input: { ...(write.input as object), ifExists: "skip" } }).meta).toBeUndefined();
+    for (const state of ["approval-required", "failed", "denied", "cancelled", "outcome-unknown"] as const) {
+      expect(presentAgentTool({ ...edit, state }).meta).toBeUndefined();
+    }
   });
 
   it("presents capped, known vault details without exposing file or edit content", () => {
@@ -356,7 +381,7 @@ describe("presentAgentTool", () => {
 
     expect(presentation).toMatchObject({
       canonicalName: "server_action",
-      label: "Running SystemSculpt action…",
+      label: "Running SystemSculpt action",
       actionIcon: "wand-sparkles",
       summary: null,
     });
@@ -368,7 +393,7 @@ describe("presentAgentTool", () => {
       location: "server",
       input: { paths: ["Private provider path"] },
     }))).toMatchObject({
-      label: "Running SystemSculpt action…",
+      label: "Running SystemSculpt action",
       summary: null,
     });
   });
@@ -381,7 +406,7 @@ describe("presentAgentTool", () => {
       approvalId: "server-approval",
     }))).toMatchObject({
       canonicalName: "server_action",
-      label: "Running SystemSculpt action…",
+      label: "Running SystemSculpt action",
       icon: "loader-circle",
     });
   });
@@ -390,7 +415,7 @@ describe("presentAgentTool", () => {
     expect(presentAgentTool(part({ name: "find", input: { patterns: ["meeting", "notes"] } })).summary)
       .toBeNull();
     expect(presentAgentTool(part({ name: "search", input: { patterns: ["TODO"] } }))).toMatchObject({
-      label: "Searching “TODO”…", summary: null, target: { text: "“TODO”" },
+      label: "Searching “TODO”", summary: null, target: { text: "“TODO”" },
     });
     expect(presentAgentTool(part({
       name: "open",

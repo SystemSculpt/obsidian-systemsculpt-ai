@@ -207,7 +207,9 @@ describe("AgentWorkspace", () => {
       input: { query: "Obsidian agents" },
       state: "running",
     });
-    expect(node.textContent).toContain("Searching the web…");
+    // The spinner says it is running: no trailing "…" that reads as a cut name.
+    expect(node.textContent).toContain("Searching the web");
+    expect(node.textContent).not.toContain("Searching the web…");
     expect(node.textContent).not.toContain("Obsidian agents");
     expect(node.textContent).not.toContain("web_search");
     expect(node.querySelector(":scope > .systemsculpt-agent-tool")?.tagName)
@@ -3499,7 +3501,7 @@ describe("AgentWorkspace", () => {
     expect(toolNode.firstElementChild).toBe(shell);
     expect(toolNode.querySelector(".systemsculpt-agent-tool-icon")).toBe(icon);
     expect(icon.firstElementChild).toBe(svg);
-    expect(toolNode.textContent).toContain("Searching the web…");
+    expect(toolNode.textContent).toContain("Searching the web");
     expect(toolNode.textContent).not.toContain("cloudflare official documentation");
     workspace.unload();
   });
