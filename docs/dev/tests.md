@@ -76,9 +76,10 @@ npm run check:compat
   real isolated Obsidian smoke and three-asset SHA-256 comparison.
 - Unpublished tags 6.19.6–6.19.8 stay immutable and unpublished. The next daily
   version exceeds every existing semantic version tag and supersedes them.
-- Main's four version files always name the latest published release. Obsidian
-  installs the release files of HEAD manifest.json's version, so an unpublished
-  version there breaks every install and update. Only the daily tool bumps them.
+- Obsidian installs the release files of HEAD manifest.json's version, so an
+  unpublished version on main breaks every install and update. Only the daily
+  tool bumps the four version files. Trellis setup-health checks daily that
+  HEAD's version has downloadable release files.
 
 - Release validation records the SHA-256 and size of manifest.json, main.js, and styles.css plus the source revision and build environment identity. The published-release workflow rebuilds the tag, requires exact asset bytes, and attests those published bytes before announcing the release through first-party metadata.
 
