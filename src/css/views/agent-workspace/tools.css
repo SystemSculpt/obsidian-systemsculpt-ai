@@ -752,9 +752,6 @@
   flex-direction: column;
   min-height: calc(12 * 18px);
 }
-.ss-json-line.is-pending {
-  color: var(--ss-ink-faint);
-}
 /* The result still being made: bars at its children's indent, swept by the live tile's sheen. */
 .ss-json-pending {
   position: relative;
