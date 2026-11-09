@@ -150,7 +150,7 @@ describe("AgentWorkspace chrome", () => {
       workspace.setBanner(null);
 
       const rendered = workspace.setAgentSnapshot({ runId: "run", turnId: "turn", status: "failed", messages: [], parts: [
-        { kind: "error", id: "spent", messageId: "answer", order: 0, retryable: false,
+        { kind: "error", id: "spent", order: 0, retryable: false,
           error: { code: "out_of_credits", message: "Out of credits", retryable: false } },
       ] });
       await jest.advanceTimersByTimeAsync(20);
