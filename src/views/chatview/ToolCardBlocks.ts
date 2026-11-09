@@ -62,7 +62,7 @@ export function createToolCard(parent: HTMLElement, kind: string): HTMLElement {
   return parent.createDiv({ cls: "ss-tool-card", attr: { "data-card": kind } });
 }
 
-export function openVaultPath(app: App, path: string, event?: MouseEvent): void {
+function openVaultPath(app: App, path: string, event?: MouseEvent): void {
   event?.preventDefault();
   event?.stopPropagation();
   void app.workspace.openLinkText(path, "", false);
@@ -72,7 +72,7 @@ export function openVaultPath(app: App, path: string, event?: MouseEvent): void 
  * A vault file that opens on click. A file that isn't there (not found, never
  * written, since deleted) is plain text: opening it would create an empty note.
  */
-export function vaultLink(app: App, parent: HTMLElement, path: string, text = notePathText(path)): HTMLElement {
+function vaultLink(app: App, parent: HTMLElement, path: string, text = notePathText(path)): HTMLElement {
   if (app.vault.getAbstractFileByPath(path) === null) return parent.createSpan({ cls: "ss-tool-missing-path", text });
   const link = parent.createEl("a", {
     text,
@@ -110,7 +110,7 @@ export async function revealFolder(app: App, folder: TFolder): Promise<void> {
   if (typeof explorer.revealInFolder === "function") explorer.revealInFolder(folder);
 }
 
-export function externalLink(parent: HTMLElement, url: string, text = url): HTMLAnchorElement {
+function externalLink(parent: HTMLElement, url: string, text = url): HTMLAnchorElement {
   const link = parent.createEl("a", {
     text,
     cls: "external-link",
@@ -176,7 +176,7 @@ export function renderLinks(card: HTMLElement, links: readonly ToolCardLink[]): 
   }
 }
 
-export function hostOf(url: string): string {
+function hostOf(url: string): string {
   try { return new URL(url).host.replace(/^www\./u, ""); } catch { return url; }
 }
 
@@ -616,7 +616,7 @@ const KEY_LABELS: Readonly<Record<string, string>> = {
 };
 
 /** "file_path" → "File", "maxResults" → "Max results". */
-export function humanizeKey(key: string): string {
+function humanizeKey(key: string): string {
   if (KEY_LABELS[key]) return KEY_LABELS[key];
   const words = key.replace(/([a-z\d])([A-Z])/gu, "$1 $2").replace(/[_-]+/gu, " ").trim().toLowerCase();
   return words ? words.charAt(0).toUpperCase() + words.slice(1) : key;
