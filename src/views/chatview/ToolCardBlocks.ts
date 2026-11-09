@@ -387,23 +387,43 @@ export function renderJsonLines(code: HTMLElement, text: string): void {
 }
 
 function appendBreakableValue(block: HTMLElement, content: string): void {
-  // A short name with a hyphen ("T-5957") is kept whole too: it breaks only where a slash allows.
-  const appendSegment = (segment: string): void => {
-    if (!segment) return;
-    if (segment.length <= 24 && !/\s/u.test(segment) && segment.includes("-")) block.createSpan({ cls: "ss-json-whole", text: segment });
-    else block.appendText(segment);
+  // A short hyphenated word ("2026-11-08", "T-5957") never breaks at its hyphen.
+  const appendWords = (parent: HTMLElement, text: string): void => {
+    for (const piece of text.split(/(\s+)/u)) {
+      if (!piece) continue;
+      if (piece.length <= 24 && !/\s/u.test(piece) && piece.includes("-")) parent.createSpan({ cls: "ss-json-whole", text: piece });
+      else parent.appendText(piece);
+    }
+  };
+  // A name between separators ("lighthouse take 1.png,") moves to the next line whole when it fits
+  // there, rather than leaving its last word behind; the key that opens the line flows as it is.
+  let opening = true;
+  const appendChunk = (chunk: string): void => {
+    if (!chunk) return;
+    // The space before a name is where a line may break, and the line's own end stays outside it.
+    const lead = opening ? "" : /^\s*/u.exec(chunk)![0];
+    const trail = /\s*$/u.exec(chunk.slice(lead.length))![0];
+    const name = chunk.slice(lead.length, chunk.length - trail.length);
+    if (lead) block.appendText(lead);
+    if (!opening && name.length <= 48 && /\S\s+\S/u.test(name)) appendWords(block.createSpan({ cls: "ss-json-name" }), name);
+    else appendWords(block, name);
+    if (trail) block.appendText(trail);
+    opening = false;
   };
   let start = 0;
-  for (const match of content.matchAll(/\\[^\n]|\//gu)) {
+  for (const match of content.matchAll(/\\[^\n]|\/|,(?= )/gu)) {
     const at = match.index ?? 0;
-    appendSegment(content.slice(start, at));
+    const end = at + match[0].length;
+    // A list's comma stays on its name; the space after it is where the next line may start.
+    if (match[0] === ",") { appendChunk(content.slice(start, end)); start = end; continue; }
+    appendChunk(content.slice(start, at));
     if (match[0] === "/") block.appendText("/");
     else block.createSpan({ cls: "ss-json-whole", text: match[0] });
     // After a slash or a line break escape, a wrapped line may start; never inside either.
     if (match[0] === "/" || /^\\[nrt]$/u.test(match[0])) block.createEl("wbr");
-    start = at + match[0].length;
+    start = end;
   }
-  appendSegment(content.slice(start));
+  appendChunk(content.slice(start));
 }
 
 /** The text inside a tool result as each agent saves it: a string, content blocks or content items. */

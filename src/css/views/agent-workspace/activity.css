@@ -196,7 +196,8 @@ button.systemsculpt-agent-activity-overflow-header svg {
   height: var(--ss-icon-size-sm);
 }
 
-.systemsculpt-agent-activity-overflow-icon.is-animated svg {
+.systemsculpt-agent-activity-overflow-icon.is-animated svg,
+.systemsculpt-agent-activity-state.is-animated svg {
   animation: ss-spin 0.9s linear infinite;
 }
 
@@ -230,9 +231,10 @@ strong.systemsculpt-agent-activity-label {
   flex: 0 1 auto;
 }
 
+/* Open, the label darkens but keeps its weight: a bolder one would wrap at other words and move
+   everything under it. */
 details.systemsculpt-agent-activity[open] > summary strong.systemsculpt-agent-activity-label {
   color: var(--ss-ink);
-  font-weight: var(--ss-weight-medium);
 }
 
 strong.systemsculpt-agent-activity-overflow-label {
@@ -266,6 +268,13 @@ details.systemsculpt-agent-activity:not([open]) > .systemsculpt-agent-activity-b
 
 details.systemsculpt-agent-activity:not([data-single-tool]) > .systemsculpt-agent-activity-body.is-card-last {
   margin-bottom: calc(var(--ss-space-1) + var(--ss-space-2));
+}
+
+/* A framed block under that card (a picture, a live tile, a whole-turn card) keeps one 16 px gap
+   from it, not the fold's 12 px plus the turn's 8 px plus its own 8 px. Code sets is-card-last on the fold. */
+.systemsculpt-agent-turn-body > details.systemsculpt-agent-activity[open].is-card-last + .systemsculpt-agent-turn-media,
+.systemsculpt-agent-turn-body > details.systemsculpt-agent-activity[open].is-card-last + .systemsculpt-agent-part.is-error {
+  margin-top: calc(var(--ss-space-4) - var(--ss-space-3) - var(--ss-space-2));
 }
 
 /* A fold that holds one call is that call's row: open, it shows the card under its label,

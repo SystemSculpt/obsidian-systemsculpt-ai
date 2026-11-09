@@ -328,18 +328,24 @@ export class ActiveConversationRenderer {
       : new Set<string>();
     // A generation that is drawing its live tile is that tile: its row would say the same
     // words and run a second spinner, so it steps aside until the call finishes.
-    const liveTileCalls = presentation.phase === "completed" ? new Set<string>() : new Set(
-      presentPendingMedia(orderedParts.filter((part): part is AgentToolPart => part.kind === "tool"), presentation.busy)
-        .filter((tile) => tile.state !== "failed")
-        .map((tile) => tile.callId),
-    );
+    const liveTiles = presentation.phase === "completed" ? [] : presentPendingMedia(
+      orderedParts.filter((part): part is AgentToolPart => part.kind === "tool"), presentation.busy,
+    ).filter((tile) => tile.state !== "failed");
+    const liveTileCalls = new Set(liveTiles.map((tile) => tile.callId));
+    // A picture or video in the making is named on the turn's fold row, as it will be once it lands;
+    // its frame keeps only its clock and bar. A Studio run's slim tile is its own row.
+    const frameCalls = new Set(liveTiles.filter((tile) => tile.kind !== "workflow").map((tile) => tile.callId));
     const shownIndexes = orderedParts.flatMap((part, index) =>
       part.kind === "tool" && liveTileCalls.has(part.callId) ? [] : [index]);
-    // While a picture, video or Studio run is made, the steps and words before it already fold into
-    // the turn's one row, so its tile sits where the finished file lands (no jump when it does).
+    // While a picture, video or Studio run is made, the steps and words before it (and the call
+    // itself, for a picture or video) already sit in the turn's one row, one call or several, so its
+    // tile sits where the finished file lands and nothing above it moves when the turn ends.
     const mediaSourceIndex = presentation.phase === "completed" || !presentation.busy ? -1 : this.mediaSourceIndex(orderedParts);
-    const foldedIndexes = shownIndexes.filter((index) => index < mediaSourceIndex);
-    const restIndexes = shownIndexes.filter((index) => index >= mediaSourceIndex);
+    const foldEnd = mediaSourceIndex < 0 ? -1 : Math.max(mediaSourceIndex, ...orderedParts.flatMap((part, index) =>
+      part.kind === "tool" && frameCalls.has(part.callId) ? [index] : []));
+    const foldedIndexes = orderedParts.flatMap((part, index) => index > foldEnd ? []
+      : part.kind === "tool" && liveTileCalls.has(part.callId) && !frameCalls.has(part.callId) ? [] : [index]);
+    const restIndexes = shownIndexes.filter((index) => index > foldEnd);
     const foldLive = foldedIndexes.some((index) => isAgentActivityPart(orderedParts[index]));
     const visibleLanes = presentation.phase === "completed"
       ? this.completedActiveLanes(

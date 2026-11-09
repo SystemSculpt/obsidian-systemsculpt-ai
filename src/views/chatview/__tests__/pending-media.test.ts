@@ -129,7 +129,9 @@ describe("live generation placeholders", () => {
     const placeholder = pending.querySelector<HTMLElement>("[data-testid='chat.turn.media.pending']")!;
     expect(placeholder.getAttribute("aria-busy")).toBe("true");
     expect(placeholder.style.getPropertyValue("--ss-media-ratio")).toBe(String(3 / 2));
-    expect(placeholder.textContent).toContain("Generating image");
+    // The turn's row above names it; the frame keeps its name for a screen reader, not in its words.
+    expect(placeholder.getAttribute("aria-label")).toBe("Generating image");
+    expect(placeholder.textContent).not.toContain("Generating image");
 
     const done = tool({ ...running, state: "succeeded", output: { data: encodeSystemSculptToolResult({ ok: true, message: "Saved", media: [{ kind: "image", path: PATH }] }) } });
     const block = renderTurnMedia(app([PATH]), parent, [done], actions, "", true)!;

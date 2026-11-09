@@ -254,7 +254,10 @@ export function renderPendingMedia(grid: HTMLElement, tile: PendingMedia): HTMLE
     const next = nextStep(reason);
     if (next) status.createSpan({ cls: "ss-media-pending-meta", text: next });
   } else {
-    status.createSpan({ cls: "ss-media-pending-label", text: tile.label });
+    // A picture or video in the making is named on the turn's row above it; its frame keeps only its
+    // clock and bar, so the two never say the same words. A Studio run's slim tile is its own row.
+    if (tile.kind === "workflow") status.createSpan({ cls: "ss-media-pending-label", text: tile.label });
+    else figure.setAttribute("aria-label", tile.label);
     status.createSpan({ cls: "ss-media-pending-meta", attr: { "data-testid": "chat.turn.media.pending.meta" } });
     frame.createSpan({ cls: "ss-media-pending-bar", attr: { "aria-hidden": "true" } }).createSpan({ cls: "ss-media-pending-fill" });
     updatePendingTile(figure, tile, Date.now());
@@ -262,7 +265,10 @@ export function renderPendingMedia(grid: HTMLElement, tile: PendingMedia): HTMLE
   if (tile.kind !== "workflow" && tile.caption) {
     // The prompt wraps under its frame (up to three lines), so its words are read, not cut at one line;
     // a grid tile's stays on one line, the height of the file name that replaces it.
-    figure.createEl("figcaption", { cls: `systemsculpt-agent-media-caption ${tile.captionLine ? "is-single-line" : "is-prompt"}`, text: tile.caption, attr: { title: tile.caption } });
+    const caption = figure.createEl("figcaption", { cls: `systemsculpt-agent-media-caption ${tile.captionLine ? "is-single-line is-words" : "is-prompt"}`, attr: { title: tile.caption } });
+    // On one line, each word is one box (its space leading it), so the ellipsis ends on a whole word.
+    if (tile.captionLine) tile.caption.split(/(?=\s)/u).forEach(word => caption.createSpan({ text: word }));
+    else caption.setText(tile.caption);
   }
   pendingTiles.set(figure, tile);
   return figure;

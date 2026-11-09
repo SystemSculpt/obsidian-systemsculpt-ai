@@ -758,10 +758,19 @@
   display: block;
   padding-inline-start: calc((var(--ss-json-indent) + 2) * 1ch);
   text-indent: calc((var(--ss-json-indent) + 2) * -1ch);
+  /* A wrapped value never ends on one word alone. */
+  text-wrap: pretty;
 }
-/* An escape ("\n") or a short hyphenated name ("T-5957") is one token: a wrapped value never splits it. */
+/* An escape ("\n") or a short hyphenated word ("2026-11-08", "T-5957") is one token: a wrapped value never splits it. */
 .ss-json-whole {
   white-space: nowrap;
+}
+/* A name with spaces ("lighthouse take 1.png") moves to the next line whole when it fits there,
+   and wraps inside itself only when it is wider than the line. */
+.ss-json-name {
+  display: inline-block;
+  text-indent: 0;
+  text-wrap: pretty;
 }
 @media (prefers-reduced-motion: reduce) {
   .systemsculpt-agent-tool-raw-chevron { transition: none; }

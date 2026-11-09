@@ -13,7 +13,7 @@ const read: AgentToolPart = {
 };
 const narration: AgentPart = { id: "say", kind: "text", messageId: "answer", order: 1, state: "complete", markdown: "Drawing it now." };
 const generate: AgentToolPart = {
-  id: "gen", kind: "tool", messageId: "answer", callId: "call-gen", order: 2, name: "generate_image", location: "server",
+  id: "gen", kind: "tool", messageId: "answer", callId: "call-gen", order: 2, name: "generate_image", location: "vault",
   input: { prompt: "A lighthouse at night" }, state: "running",
 };
 
@@ -47,6 +47,35 @@ describe("a live generation's turn", () => {
       await renderer.renderActive(done, presentAgentConversation(done, false));
       // The finished turn keeps that same row first.
       expect(body.firstElementChild).toBe(fold);
+    } finally { renderer.unload(); host.remove(); }
+  });
+
+  it("names a lone picture in the making on that row, so the words before it fold and the frame never repeats them", async () => {
+    const host = document.body.createDiv();
+    const renderer = new AgentConversationRenderer(host, {
+      app: new App(), sourcePath: () => "", onApprove: jest.fn(), onOpenArtifact: jest.fn(), onCopyArtifactPath: jest.fn(),
+    });
+    renderer.load();
+    try {
+      const running = snapshot([narration, generate]);
+      await renderer.renderActive(running, presentAgentConversation(running, true));
+      const body = host.querySelector<HTMLElement>(".systemsculpt-agent-active-run .systemsculpt-agent-turn-body")!;
+      const fold = body.firstElementChild as HTMLDetailsElement;
+      const label = (): string => fold.querySelector(":scope > summary .systemsculpt-agent-activity-label")!.textContent ?? "";
+      const state = (): HTMLElement => fold.querySelector<HTMLElement>(":scope > summary .systemsculpt-agent-activity-state")!;
+      expect(fold.matches("details[data-agent-turn-fold][data-single-tool]")).toBe(true);
+      expect(label()).toBe("Generating image");
+      expect(state().classList.contains("is-animated")).toBe(true);
+      expect(fold.textContent).toContain("Drawing it now.");
+      const tile = fold.nextElementSibling?.querySelector<HTMLElement>("[data-testid='chat.turn.media.pending']");
+      expect(tile?.textContent).not.toContain("Generating image");
+
+      const saved = { ...generate, state: "succeeded" as const, output: { data: encodeSystemSculptToolResult({ ok: true, message: "Saved", media: [{ kind: "image", path: "SystemSculpt/Images/night.png" }] }) } };
+      const done = snapshot([narration, saved], true);
+      await renderer.renderActive(done, presentAgentConversation(done, false));
+      expect(body.firstElementChild).toBe(fold);
+      expect(label()).toBe("Generated image");
+      expect(state().classList.contains("is-animated")).toBe(false);
     } finally { renderer.unload(); host.remove(); }
   });
 });

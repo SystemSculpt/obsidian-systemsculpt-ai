@@ -31,6 +31,7 @@ import { enhanceMarkdownCodeBlocks } from "./MarkdownCodeBlocks";
 import { embedTarget, enhanceMarkdownEmbeds, markUnresolvedLinks } from "./MarkdownEmbeds";
 import { fitRequestBubbles } from "./RequestBubbleFit";
 import {
+  isActiveAgentToolState,
   presentAgentError,
   type AgentConversationPresentation,
 } from "./AgentConversationPresentation";
@@ -221,9 +222,12 @@ function messageTimeFormat(): Intl.DateTimeFormat {
  * (lint-css bans :has()), and the space under that card moves outside the body.
  */
 function syncFoldEnd(body: HTMLElement): void {
-  body.toggleClass("is-card-last", Boolean(body.querySelector(
+  const cardLast = Boolean(body.querySelector(
     ":scope > .systemsculpt-agent-part:last-child > details.systemsculpt-agent-tool[open]",
-  )));
+  ));
+  body.toggleClass("is-card-last", cardLast);
+  // The fold says it too, so a framed block after it (a picture, a whole-turn card) can keep one 16 px gap from that card.
+  body.parentElement?.toggleClass("is-card-last", cardLast);
 }
 
 export class AgentConversationRenderer extends Component {
@@ -1114,6 +1118,8 @@ export class AgentConversationRenderer extends Component {
     const target = header.querySelector<HTMLElement>(".systemsculpt-agent-activity-label");
     if (target) setActivityLabelText(target, unbreakableActivityLabel(label));
     let icon = header.querySelector<HTMLElement>(".systemsculpt-agent-activity-state");
+    const loneTool = single ? tools[0] : undefined;
+    if (target && loneTool) this.linkLoneTarget(target, loneTool);
     if (!icon) {
       icon = header.createSpan({ cls: "systemsculpt-agent-activity-state", attr: { "aria-hidden": "true" } });
       header.prepend(icon);
@@ -1121,7 +1127,15 @@ export class AgentConversationRenderer extends Component {
     // A lone call's fold is its row: the row's own state icon and colour, so one failure
     // never shows one glyph closed and another open.
     const lone = single ? presentAgentTool(tools[0]) : null;
-    setIcon(icon, lone ? lone.icon : summary.failedCount ? "circle-alert" : summary.gated ? "lock" : summary.refused ? "circle-alert" : cancelled ? "circle-stop" : summary.denied ? "ban" : "check");
+    // While a picture or video is made, the fold already names it: it spins until the step inside ends.
+    const running = !cancelled && tools.some((part) => isActiveAgentToolState(part.state));
+    const iconName = lone ? lone.icon : summary.failedCount ? "circle-alert" : summary.gated ? "lock" : summary.refused ? "circle-alert" : cancelled ? "circle-stop" : summary.denied ? "ban" : running ? "loader-circle" : "check";
+    // The same glyph is kept, so a spinning one never restarts its turn on a refresh.
+    if (icon.dataset.iconName !== iconName) {
+      setIcon(icon, iconName);
+      icon.dataset.iconName = iconName;
+    }
+    icon.classList.toggle("is-animated", running && iconName === "loader-circle");
     if (lone) {
       icon.dataset.toolState = gatedSystemSculptTurn(tools[0]) ? "gated"
         : refusedSystemSculptCall(tools[0]) ? "refused" : lone.displayState;
@@ -1130,6 +1144,27 @@ export class AgentConversationRenderer extends Component {
     if (!meta) meta = header.createSpan({ cls: "systemsculpt-agent-activity-duration" });
     // A lone call shows its own meta, like its row would; a bare time beside a video reads as its length.
     meta.setText(lone ? presentToolLineMeta(lone) ?? "" : !cancelled && duration ? duration : "");
+  }
+
+  /** A lone call's fold is its row: the note it names, when it exists, is a link there too, as on the row. */
+  private linkLoneTarget(label: HTMLElement, part: AgentToolPart): void {
+    const presentation = presentAgentTool(part);
+    const path = presentation.targetPath;
+    const text = presentation.target?.text ?? path?.split("/").pop();
+    if (!path || !text || label.querySelector("a") || !this.options.app.vault.getAbstractFileByPath(path)) return;
+    const span = Array.from(label.children).find((child) => child.tagName === "SPAN" && child.textContent === text);
+    if (!span) return;
+    const link = createSurfaceElement(label.ownerDocument, "a");
+    link.className = span.className;
+    link.setText(text);
+    link.setAttribute("href", path);
+    link.setAttribute("data-href", path);
+    link.setAttribute("data-testid", "chat.tool.open-path");
+    link.onclick = (event) => {
+      event.preventDefault(); event.stopPropagation();
+      void this.options.onOpenArtifact({ id: path, path, title: text, kind: "vault_file" });
+    };
+    span.replaceWith(link);
   }
 
   /**

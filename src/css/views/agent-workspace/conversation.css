@@ -661,6 +661,12 @@ video.systemsculpt-agent-media-frame {
   white-space: nowrap;
 }
 
+/* A one-line prompt ends on a whole word: each word is one box, hidden whole when it doesn't fit. */
+.systemsculpt-agent-media-caption.is-words > span {
+  display: inline-block;
+  white-space: pre;
+}
+
 /* The failure keeps the frame; the reason is the headline. */
 .systemsculpt-agent-media.is-failed .ss-media-pending-frame {
   justify-content: center;
