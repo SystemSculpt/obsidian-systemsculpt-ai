@@ -101,6 +101,10 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* A row's label is a <strong>, and Obsidian bolds links inside one: its target keeps the label's weight. */
+.systemsculpt-agent-conversation :is(.systemsculpt-agent-tool-label, .systemsculpt-agent-activity-label) a {
+  font-weight: inherit;
+}
 /* Spec 3.4: muted meta sits at the right. On a narrow pane it gives way first,
    so the verb and target stay readable. */
 .systemsculpt-agent-conversation .systemsculpt-agent-tool-summary {
