@@ -763,16 +763,18 @@
   overflow: hidden;
   padding-inline-start: 4ch;
 }
+/* Each bar is one 18px line, centered in it; padding, not a margin, so the line keeps its height. */
 .ss-json-pending > span {
   display: block;
+  box-sizing: border-box;
   height: 18px;
+  padding-top: 5px;
 }
 .ss-json-pending > span::before {
   content: "";
   display: block;
   width: 62%;
   height: 8px;
-  margin-top: 5px;
   border-radius: var(--ss-radius-full);
   background: color-mix(in srgb, var(--ss-ink) 7%, transparent);
 }
