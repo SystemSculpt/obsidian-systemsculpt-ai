@@ -45,8 +45,29 @@ describe("renderJsonLines", () => {
       "2026-11-08 093100 lighthouse take 2.png\"",
     ]);
     expect(Array.from(value.querySelectorAll(".ss-json-name .ss-json-whole"), (token) => token.textContent)).toEqual(["2026-11-08", "2026-11-08"]);
+    // Each listed path is one piece with its comma: a line breaks between paths, never pairing one
+    // file's name with the next file's folder, and inside a path only when it is wider than the line.
+    expect(Array.from(value.querySelectorAll(".ss-json-path"), (path) => path.textContent)).toEqual([
+      "SystemSculpt/Images/2026-11-08 093100 lighthouse take 1.png,",
+      "SystemSculpt/Images/2026-11-08 093100 lighthouse take 2.png\"",
+    ]);
+    expect(value.querySelectorAll(".ss-json-path wbr")).toHaveLength(4);
     // The key that opens the line flows as it is: it is no name of its own.
     expect(value.querySelector(".ss-json-name")?.previousSibling?.nodeName).toBe("WBR");
+    const range = document.createRange();
+    range.setStartBefore(value.firstChild!);
+    range.setEndBefore(value.querySelector(".ss-json-path")!);
+    expect(range.toString()).toBe('  "message": "Saved 2 images: ');
+  });
+
+  it("keeps a value that is one path on its key's line, breaking it after a slash", () => {
+    const code = document.createElement("code");
+    const text = JSON.stringify({ path: "SystemSculpt/Images/2026-11-08 093100 lighthouse take 1.png" }, null, 2);
+    renderJsonLines(code, text);
+    expect(code.textContent).toBe(text);
+    const value = code.querySelectorAll<HTMLElement>(".ss-json-line")[1];
+    expect(value.querySelector(".ss-json-path")).toBeNull();
+    expect(value.querySelectorAll("wbr")).toHaveLength(2);
   });
 
   it("keeps a command's flags whole on a line with no path", () => {
@@ -64,6 +85,7 @@ describe("renderJsonLines", () => {
     renderJsonLines(code, text);
     expect(code.textContent).toBe(text);
     const value = code.querySelectorAll<HTMLElement>(".ss-json-line")[1];
-    expect(value.querySelector(".ss-json-name")?.textContent).toBe("Poster image.png");
+    expect(value.querySelector(".ss-json-path")?.textContent).toBe("SystemSculpt/Studio/Outputs/Poster image.png.");
+    expect(value.querySelector(".ss-json-name")?.textContent).toBe("Poster image.png.");
   });
 });

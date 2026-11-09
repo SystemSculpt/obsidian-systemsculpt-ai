@@ -344,8 +344,15 @@ export function detailsOutput(data: unknown): unknown {
   return inner === record.data ? outer : { ...record, data: inner };
 }
 
-export function renderRawDetails(card: HTMLElement, payload: () => unknown): void {
+export function renderRawDetails(
+  card: HTMLElement,
+  payload: () => unknown,
+  options: Readonly<{ open?: boolean; awaitingResult?: boolean }> = {},
+): HTMLDetailsElement {
   const raw = card.createEl("details", { cls: "systemsculpt-agent-tool-raw" });
+  // While a picture, video or Studio run is made, an open frame already has the height its result
+  // fills, so nothing under it moves when the files land.
+  raw.toggleClass("is-awaiting-result", Boolean(options.awaitingResult));
   const summary = raw.createEl("summary", { attr: { "data-testid": "chat.tool.raw" } });
   const chevron = summary.createSpan({ cls: "systemsculpt-agent-tool-raw-chevron", attr: { "aria-hidden": "true" } });
   setIcon(chevron, "chevron-right");
@@ -367,6 +374,12 @@ export function renderRawDetails(card: HTMLElement, payload: () => unknown): voi
     if (raw.open && !code.hasChildNodes()) renderJsonLines(code, JSON.stringify(payload(), null, 2));
     if (raw.open) syncOverflow();
   });
+  // Opened before the result landed: it stays open, with the result in it.
+  if (options.open) {
+    raw.open = true;
+    renderJsonLines(code, JSON.stringify(payload(), null, 2));
+  }
+  return raw;
 }
 
 /**
@@ -430,7 +443,25 @@ function appendJsonWords(parent: HTMLElement, text: string): void {
   }
 }
 
+/** A path listed after a colon or a comma ("…vault: Images/take 1.png, Images/take 2.png"), to its file name. */
+const LISTED_PATH = /(: |, )((?:[^\s"/,:\\][^"/,:\\\n]{0,40}\/)+[^\s"/\\][^"/\\\n]*?\.[\p{L}\d]{1,5})(?=[,.;]?(?:$|[\s"'),\]]))/gu;
+
 function appendBreakableValue(block: HTMLElement, content: string): void {
+  // Each listed path is one piece with its comma or full stop: it moves to the next line whole when it
+  // fits there, so a line never pairs one file's name with the next one's folder. Only a path wider
+  // than the line breaks inside, after a "/". A value that is one path keeps its key on its line.
+  let start = 0;
+  for (const match of content.matchAll(LISTED_PATH)) {
+    const at = (match.index ?? 0) + match[1].length;
+    const end = at + match[2].length + (/^(?:[,.;]|"[,.;]?)/u.exec(content.slice(at + match[2].length))?.[0].length ?? 0);
+    appendBreakableRun(block, content.slice(start, at));
+    appendBreakableRun(block.createSpan({ cls: "ss-json-path" }), content.slice(at, end));
+    start = end;
+  }
+  appendBreakableRun(block, content.slice(start));
+}
+
+function appendBreakableRun(block: HTMLElement, content: string): void {
   // The name after a "/" ("lighthouse take 1.png,") moves to the next line whole when it fits there,
   // rather than leaving its last word behind. Prose (the key, a sentence after a comma) flows as it is.
   const appendChunk = (chunk: string, afterSlash: boolean): void => {

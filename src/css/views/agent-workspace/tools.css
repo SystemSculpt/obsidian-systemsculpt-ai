@@ -745,6 +745,11 @@
   font-size: inherit;
   line-height: inherit;
 }
+/* While a picture, video or Studio run is made, the open frame already has the twelve lines its
+   result fills, so the files land where their tiles were. */
+.systemsculpt-agent-tool-raw.is-awaiting-result > pre > code {
+  min-height: calc(12 * 18px);
+}
 /* One JSON line: a value too long for the pane wraps two characters in from its own start.
    renderJsonLines sets --ss-json-indent on each indented line; this is its default. */
 .ss-json-line {
@@ -759,9 +764,10 @@
 .ss-json-whole {
   white-space: nowrap;
 }
-/* A name with spaces ("lighthouse take 1.png") moves to the next line whole when it fits there,
-   and wraps inside itself only when it is wider than the line. */
-.ss-json-name {
+/* A name with spaces ("lighthouse take 1.png"), or a path listed with others, moves to the next line
+   whole when it fits there, and wraps inside itself only when it is wider than the line. */
+.ss-json-name,
+.ss-json-path {
   display: inline-block;
   text-indent: 0;
   text-wrap: pretty;

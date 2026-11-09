@@ -7,6 +7,7 @@ import { renderOperationsInlinePreview, renderWriteEditInlineDiff } from "./Tool
 import { agentToolNoticeTone, gatedSystemSculptTurn, labelTargetClass, presentAgentTool, presentAgentToolDetails, presentToolLineMeta, presentToolRowLabel, refusedSystemSculptCall } from "./AgentToolPresentation";
 import type { AgentApprovalCards } from "./AgentApprovalCards";
 import { renderNativeToolPreview } from "./NativeToolPresentation";
+import { presentPendingMedia } from "./PendingMedia";
 import { renderHostedToolPreview } from "./HostedToolPreview";
 import { detailsOutput, renderNotice, renderRawDetails, syncToolMediaWithReply } from "./ToolCardBlocks";
 import { ACTIONABLE_ARTIFACT_TOOLS, toolCallForPart, visibleToolError } from "./ConversationPartPresentation";
@@ -130,7 +131,15 @@ export class AgentToolRenderer {
       }
     }
     if (supportNeedsRender && hasReadablePayload && !retainedNativePreview) {
-      renderRawDetails(stagedSupport, () => ({ input: part.input, ...(!isQuestion && part.output ? { output: detailsOutput(part.output.data) } : {}) }));
+      // Details opened while the call ran stay open when its result lands; while it makes a picture,
+      // video or Studio run, the open frame already holds the height its result will fill.
+      const openDetails = node.querySelector<HTMLDetailsElement>(
+        ":scope > .systemsculpt-agent-tool > .systemsculpt-agent-tool-support > .systemsculpt-agent-tool-raw",
+      )?.open ?? false;
+      renderRawDetails(stagedSupport, () => ({ input: part.input, ...(!isQuestion && part.output ? { output: detailsOutput(part.output.data) } : {}) }), {
+        open: openDetails,
+        awaitingResult: presentPendingMedia([part], true).some(tile => tile.state !== "failed"),
+      });
     }
 
     const approvalFingerprint = approvalRequired
