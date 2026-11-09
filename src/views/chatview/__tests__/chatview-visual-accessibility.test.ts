@@ -132,13 +132,13 @@ describe("ChatView text contrast (WCAG AA, default Obsidian themes)", () => {
 
   test("a pending result's sheen crosses only its bars, never the empty line beside them", () => {
     const css = readCss("views/agent-workspace/tools.css");
-    for (const selector of [".ss-tool-terminal-pending > span::before", ".ss-json-pending > span::before"]) {
-      const bar = rule(css, selector);
-      expect(bar).toMatch(/clip-path:\s*inset\(0 calc\(100% - var\(--ss-pending-bar\)\) 0 0 round var\(--ss-radius-full\)\)/);
-      expect(bar).toMatch(/animation:\s*ss-sheen-sweep/);
+    for (const pending of [".ss-tool-terminal-pending", ".ss-json-pending"]) {
+      expect(rule(css, `${pending} > span`)).toMatch(/clip-path:\s*inset\(var\(--ss-pending-pad\) calc\(100% - var\(--ss-pending-bar\)\) var\(--ss-pending-pad\) 0 round var\(--ss-radius-full\)\)/);
+      const sheen = rule(css, `${pending} > span::after`);
+      expect(sheen).toMatch(/position:\s*absolute/);
+      expect(sheen).toMatch(/animation:\s*ss-shimmer/);
     }
     expect(css).not.toMatch(/\.ss-(?:tool-terminal|json)-pending::after/);
-    expect(readCss("foundation/motion.css")).toMatch(/@keyframes ss-sheen-sweep/);
   });
 
   test("raw tool Details wraps long values instead of clipping paths", () => {

@@ -790,48 +790,57 @@
 .ss-tool-terminal-pending {
   display: block;
 }
-/* Each bar is one 18px line, centered in it; padding, not a margin, so the line keeps its height. */
+/* Each bar is one 18px line, centered in it; padding, not a margin, so the line keeps its height.
+   The line is cut to its bar's shape, so the sheen crossing it lights the bar alone, never the
+   empty line beside it. */
 .ss-json-pending > span,
 .ss-tool-terminal-pending > span {
+  --ss-pending-bar: 62%;
+  --ss-pending-pad: 5px;
+  position: relative;
   display: block;
   box-sizing: border-box;
   height: 18px;
-  padding-top: 5px;
+  padding-top: var(--ss-pending-pad);
+  clip-path: inset(var(--ss-pending-pad) calc(100% - var(--ss-pending-bar)) var(--ss-pending-pad) 0 round var(--ss-radius-full));
 }
 .ss-tool-terminal-pending > span {
+  --ss-pending-pad: calc((var(--ss-text-xs) * 1.55 - 8px) / 2);
   height: calc(var(--ss-text-xs) * 1.55);
-  padding-top: calc((var(--ss-text-xs) * 1.55 - 8px) / 2);
 }
-/* Each bar is its whole line cut to its length, so the sheen crosses every bar in step and shows only
-   on the bars, never as a box over the empty line beside them. */
 .ss-json-pending > span::before,
 .ss-tool-terminal-pending > span::before {
-  --ss-pending-bar: 62%;
   content: "";
   display: block;
   height: 8px;
-  clip-path: inset(0 calc(100% - var(--ss-pending-bar)) 0 0 round var(--ss-radius-full));
-  background-color: color-mix(in srgb, var(--ss-ink) 7%, transparent);
-  background-image: linear-gradient(
-    100deg,
-    transparent 40%,
-    color-mix(in srgb, var(--ss-ink) 5%, transparent) 50%,
-    transparent 60%
-  );
-  background-repeat: no-repeat;
-  /* Three lines wide, so its band starts and ends past both ends of the line. */
-  background-size: 300% 100%;
-  animation: ss-sheen-sweep calc(var(--ss-dur-slow) * 7) var(--ss-ease) infinite;
+  background: color-mix(in srgb, var(--ss-ink) 7%, transparent);
 }
-.ss-json-pending > span:nth-child(4n + 2)::before,
-.ss-tool-terminal-pending > span:nth-child(2)::before {
+.ss-json-pending > span:nth-child(4n + 2),
+.ss-tool-terminal-pending > span:nth-child(2) {
   --ss-pending-bar: 44%;
 }
-.ss-json-pending > span:nth-child(4n + 3)::before {
+.ss-json-pending > span:nth-child(4n + 3) {
   --ss-pending-bar: 70%;
 }
-.ss-json-pending > span:nth-child(4n)::before {
+.ss-json-pending > span:nth-child(4n) {
   --ss-pending-bar: 36%;
+}
+/* The sheen: one band crossing every line in step, as the live tile's crosses its frame. */
+.ss-json-pending > span::after,
+.ss-tool-terminal-pending > span::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -100%;
+  width: 100%;
+  background: linear-gradient(
+    100deg,
+    transparent 20%,
+    color-mix(in srgb, var(--ss-ink) 5%, transparent) 50%,
+    transparent 80%
+  );
+  animation: ss-shimmer calc(var(--ss-dur-slow) * 7) var(--ss-ease) infinite;
 }
 /* One JSON line: a value too long for the pane wraps two characters in from its own start.
    renderJsonLines sets --ss-json-indent on each indented line; this is its default. */
