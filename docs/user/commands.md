@@ -5,21 +5,25 @@ Source of truth:
 - `src/core/plugin/commands.ts` (normal command registrations)
 - `src/main.ts` (safe-mode load diagnostics only)
 
+The command palette lists each command after the plugin name, for example
+**SystemSculpt AI: Open chat**. SystemSculpt sets no default hotkeys; assign
+your own in **Settings → Hotkeys**.
+
 `Mod` means `Cmd` on macOS and `Ctrl` on Windows/Linux.
 
 ## Core and navigation
 
-| Command | Default hotkey | Command ID | Notes |
-| --- | --- | --- | --- |
-| Open SystemSculpt Chat |  | `open-systemsculpt-chat` | Opens a new chat view |
-| Open SystemSculpt History |  | `open-systemsculpt-history` | Opens unified history modal (Chats + Studio sessions) |
-| Resume Chat from Current History File |  | `resume-chat-from-history` | Only when active file is a chat history file |
-| Open SystemSculpt AI Settings |  | `open-systemsculpt-settings` | Opens plugin settings tab |
-| Open Credits & Usage |  | `open-credits-balance` | Opens the credits/usage modal |
-| Sign in |  | `sign-in` | Opens browser sign-in and Account settings |
-| View plans / buy credits |  | `view-plans` | Opens the plan comparison page |
-| Check for updates |  | `check-for-updates` | Reports whether a newer SystemSculpt release is available; **Open plugin updates** opens Obsidian's plugin page |
-| Copy Vault-Relative File Path |  | `copy-current-file-path` | Copies the focused note or Studio file's path relative to the vault (a notice appears only if copying fails); assign a shortcut in Obsidian Hotkeys |
+| Command | Command ID | Notes |
+| --- | --- | --- |
+| Open chat | `open-systemsculpt-chat` | Opens a new chat view |
+| Open history | `open-systemsculpt-history` | Opens unified history modal (Chats + Studio sessions) |
+| Resume chat from current history file | `resume-chat-from-history` | Only when active file is a chat history file |
+| Open AI settings | `open-systemsculpt-settings` | Opens plugin settings tab |
+| Open credits & usage | `open-credits-balance` | Opens the credits/usage modal |
+| Sign in | `sign-in` | Opens browser sign-in and Account settings |
+| View plans / buy credits | `view-plans` | Opens the plan comparison page |
+| Check for updates | `check-for-updates` | Reports whether a newer SystemSculpt release is available; **Open plugin updates** opens Obsidian's plugin page |
+| Copy vault-relative file path | `copy-current-file-path` | Copies the focused note or Studio file's path relative to the vault (a notice appears only if copying fails) |
 
 ## Chat and writing
 
@@ -32,17 +36,17 @@ notice and reset time when provided. **Use SystemSculpt instead** offers hosted
 chat without retrying the exhausted plan. The notice is not saved as an answer;
 any real work already received stays in the transcript.
 
-| Command | Default hotkey | Command ID | Notes |
-| --- | --- | --- | --- |
-| Create Title from Content | `Mod+Shift+T` | `change-chat-title` | Works in chat and markdown notes |
-| Chat with File |  | `chat-with-file` | Opens chat with current file preloaded |
-| Chat: New chat |  | `chat-new-chat` | In the active or most recent chat; opens one if none |
-| Chat: Open chat history |  | `chat-open-history` | History inside the chat view |
-| Chat: Focus message box |  | `chat-focus-message-box` | |
-| Chat: Stop response |  | `chat-stop-response` | Only while a chat is working |
-| Chat: Change mode |  | `chat-change-mode` | Opens the run line's mode menu |
-| Chat: Change backend |  | `chat-change-backend` | Opens the run line's backend menu |
-| Chat: Review pending approval |  | `chat-review-pending-approval` | Focuses the oldest waiting approval card |
+| Command | Command ID | Notes |
+| --- | --- | --- |
+| Create title from content | `change-chat-title` | Works in chat and markdown notes |
+| Chat with file | `chat-with-file` | Opens chat with current file preloaded |
+| Chat: New chat | `chat-new-chat` | In the active or most recent chat; opens one if none |
+| Chat: Open chat history | `chat-open-history` | History inside the chat view |
+| Chat: Focus message box | `chat-focus-message-box` | |
+| Chat: Stop response | `chat-stop-response` | Only while a chat is working |
+| Chat: Change mode | `chat-change-mode` | Opens the run line's mode menu |
+| Chat: Change backend | `chat-change-backend` | Opens the run line's backend menu |
+| Chat: Review pending approval | `chat-review-pending-approval` | Focuses the oldest waiting approval card |
 
 ### Keys inside the chat view
 
@@ -75,34 +79,34 @@ closing history restores your draft.
 
 ## Search and embeddings
 
-| Command | Default hotkey | Command ID | Notes |
-| --- | --- | --- | --- |
-| Open SystemSculpt Search | `Mod+K` | `open-systemsculpt-search` | Searches notes, canvases, and Studio projects; an empty query shows recently modified files |
-| Open Similar Notes Panel |  | `open-embeddings-view` | Opens embeddings/similar-notes view |
-| Rebuild SystemSculpt embeddings |  | `rebuild-embeddings-current-model` | Replaces the Similar notes index and processes eligible notes again, after one confirmation |
-| Show Embeddings Database Statistics (Debug) |  | `embeddings-database-stats` | Visible only when embeddings are enabled |
+| Command | Command ID | Notes |
+| --- | --- | --- |
+| Open search | `open-systemsculpt-search` | Searches notes, canvases, and Studio projects; an empty query shows recently modified files |
+| Open similar notes panel | `open-embeddings-view` | Opens embeddings/similar-notes view |
+| Rebuild SystemSculpt embeddings | `rebuild-embeddings-current-model` | Replaces the Similar notes index and processes eligible notes again, after one confirmation |
+| Show embeddings database statistics (debug) | `embeddings-database-stats` | Visible only when embeddings are enabled |
 
 ## Audio and media
 
-| Command | Default hotkey | Command ID | Notes |
-| --- | --- | --- | --- |
-| Toggle Audio Recorder |  | `toggle-audio-recorder` | Starts/stops recording |
-| Transcribe an audio file |  | `transcribe-audio-file` | Transcribes a vault audio file through SystemSculpt |
-| Resume inbox transcription |  | `resume-inbox-transcription` | Only after **Not now** on a bulk inbox transcription; sends the audio files left waiting |
-| Open audio processor |  | `open-audio-processor` | Processes audio or YouTube into a detailed note, meeting brief, or clean transcript |
-| Process YouTube video |  | `process-youtube-video` | Opens Audio Processor on the YouTube input |
-| Save audio summary |  | `save-audio-summary` | Creates or opens a summary-only note for detailed and meeting brief outputs |
-| Save audio transcript |  | `save-audio-transcript` | Opens or restores the linked transcript for the active Audio Processor note |
+| Command | Command ID | Notes |
+| --- | --- | --- |
+| Toggle audio recorder | `toggle-audio-recorder` | Starts/stops recording |
+| Transcribe an audio file | `transcribe-audio-file` | Transcribes a vault audio file through SystemSculpt |
+| Resume inbox transcription | `resume-inbox-transcription` | Only after **Not now** on a bulk inbox transcription; sends the audio files left waiting |
+| Open audio processor | `open-audio-processor` | Processes audio or YouTube into a detailed note, meeting brief, or clean transcript |
+| Process YouTube video | `process-youtube-video` | Opens Audio Processor on the YouTube input |
+| Save audio summary | `save-audio-summary` | Creates or opens a summary-only note for detailed and meeting brief outputs |
+| Save audio transcript | `save-audio-transcript` | Opens or restores the linked transcript for the active Audio Processor note |
 
 ## Studio
 
-| Command | Default hotkey | Command ID | Notes |
-| --- | --- | --- | --- |
-| New SystemSculpt Studio Project |  | `new-systemsculpt-studio-project` | Creates a new `.systemsculpt` project and opens Studio |
-| Open SystemSculpt Studio |  | `open-systemsculpt-studio` | Opens the current/first available `.systemsculpt` project in Studio, or creates one automatically when none exists |
-| Run Current SystemSculpt Studio Project |  | `run-systemsculpt-studio-project` | Runs the active/current Studio project |
-| SystemSculpt Studio: Fit Selection in Viewport |  | `fit-systemsculpt-studio-selection-in-viewport` | Frames selected Studio nodes |
-| SystemSculpt Studio: Overview Graph in Viewport |  | `overview-systemsculpt-studio-graph-in-viewport` | Frames the full Studio graph |
+| Command | Command ID | Notes |
+| --- | --- | --- |
+| New Studio project | `new-systemsculpt-studio-project` | Creates a new `.systemsculpt` project and opens Studio |
+| Open Studio | `open-systemsculpt-studio` | Opens the current/first available `.systemsculpt` project in Studio, or creates one automatically when none exists |
+| Run current Studio project | `run-systemsculpt-studio-project` | Runs the active/current Studio project |
+| Studio: fit selection in viewport | `fit-systemsculpt-studio-selection-in-viewport` | Frames selected Studio nodes |
+| Studio: overview graph in viewport | `overview-systemsculpt-studio-graph-in-viewport` | Frames the full Studio graph |
 
 While the Studio canvas is active:
 
@@ -125,11 +129,12 @@ there never change the canvas.
 
 ## Diagnostics
 
-| Command | Default hotkey | Command ID | Notes |
-| --- | --- | --- | --- |
-| Open SystemSculpt Janitor |  | `open-systemsculpt-janitor` | Reviews cleanup candidates before moving them to Trash |
-| Copy Resource Usage Report |  | `systemsculpt-copy-resource-report` | Copies/saves resource report |
-| Save iOS captures now |  | `save-ios-captures` | Saves captures waiting from the SystemSculpt iOS app; asks again about captures you chose not to save. Listed only after your account has used the iOS app |
+| Command | Command ID | Notes |
+| --- | --- | --- |
+| Open janitor | `open-systemsculpt-janitor` | Reviews cleanup candidates before moving them to Trash |
+| Copy resource usage report | `systemsculpt-copy-resource-report` | Copies/saves resource report |
+| Save iOS captures now | `save-ios-captures` | Saves captures waiting from the SystemSculpt iOS app; asks again about captures you chose not to save. Listed only after your account has used the iOS app |
+| Show load diagnostics (safe mode) | `systemsculpt-show-load-diagnostics` | Listed only when SystemSculpt could not finish loading; shows a support snapshot |
 
 ### Studio cards
 

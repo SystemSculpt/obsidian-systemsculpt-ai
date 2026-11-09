@@ -35,7 +35,7 @@
 1. Enable embeddings in `Knowledge`.
 2. Confirm your SystemSculpt license is active and embeddings processing has a healthy status.
 3. Review exclusions (chat history, folders, patterns).
-4. Run `Show Embeddings Database Statistics (Debug)`.
+4. Run `Show embeddings database statistics (debug)`.
 5. If needed, run `Rebuild SystemSculpt embeddings`.
 
 ## Audio/transcription failures
@@ -68,6 +68,6 @@
   fails, `Report unavailable` and `Retry report` let you try saving it again
   without rerunning the chat turn. Reopened chats check that the report is still
   available on this device; an ID in chat history alone is not a saved report.
-- `Copy Resource Usage Report`
+- `Copy resource usage report`
 - Advanced tab: `Copy diagnostics snapshot`
 - Advanced tab: `Open diagnostics folder`
