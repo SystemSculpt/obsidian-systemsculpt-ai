@@ -1,0 +1,66 @@
+/**
+ * Whole-turn notices: a failure card (red) or a credits/plan gate (calm, with a lock), with its actions.
+ */
+.systemsculpt-agent-part.is-error {
+  display: flex;
+  gap: var(--ss-space-2);
+  align-items: flex-start;
+  overflow: hidden;
+  padding: var(--ss-space-3);
+  border: 1px solid var(--ss-danger-line);
+  border-radius: var(--ss-radius-md);
+  background: var(--ss-danger-tint);
+}
+.systemsculpt-agent-error-icon {
+  display: flex;
+  flex: none;
+  align-items: center;
+  /* Optically centers the icon against the heading's cap height. */
+  height: calc(var(--ss-text-sm) * 1.5);
+  color: var(--ss-danger);
+}
+/* A credits or plan gate: the tool rows' calm notice, not the failure red. */
+.systemsculpt-agent-part.is-error.is-gate {
+  border-color: var(--ss-line);
+  background: var(--ss-surface-1);
+  color: var(--ss-ink);
+}
+.systemsculpt-agent-part.is-error.is-gate .systemsculpt-agent-error-icon {
+  color: var(--ss-warning);
+}
+.systemsculpt-agent-part.is-error.is-gate .systemsculpt-agent-error-heading {
+  color: var(--ss-ink);
+}
+.systemsculpt-agent-error-copy {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-1);
+  min-width: 0;
+}
+.systemsculpt-agent-error-heading {
+  color: var(--ss-danger);
+  font-size: var(--ss-text-sm);
+  font-weight: var(--ss-weight-semibold);
+  line-height: 1.5;
+}
+.systemsculpt-agent-error-message {
+  text-wrap: pretty;
+  overflow-wrap: anywhere;
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-sm);
+  line-height: 1.5;
+}
+.systemsculpt-agent-error-report {
+  overflow-wrap: anywhere;
+  color: var(--ss-ink-muted);
+  font-family: var(--ss-font-mono);
+  font-size: var(--ss-text-xs);
+  line-height: 1.5;
+  user-select: text;
+}
+.systemsculpt-agent-error-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ss-space-2);
+  margin-top: var(--ss-space-2);
+}

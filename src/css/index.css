@@ -46,6 +46,8 @@
 @import 'views/agent-workspace/activity.css';
 @import 'views/agent-workspace/reasoning.css';
 @import 'views/agent-workspace/tools.css';
+@import 'views/agent-workspace/approval.css';
+@import 'views/agent-workspace/turn-errors.css';
 @import 'views/agent-workspace/states.css';
 @import 'views/agent-workspace/composer.css';
 @import 'views/agent-workspace/history.css';

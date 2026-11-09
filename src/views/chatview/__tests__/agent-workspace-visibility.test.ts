@@ -219,7 +219,7 @@ describe("chat leaf visibility", () => {
     shown(true);
     await tick();
     expect(workspace.renderer.element.textContent).toContain("Partial response");
-    expect(workspace.renderer.element.querySelector(".systemsculpt-agent-active-run")?.textContent).toContain("Retry this message to continue.");
+    expect(workspace.renderer.element.querySelector(".systemsculpt-agent-active-run")?.textContent).toContain("Check you're online, then retry.");
   });
 
   it("does not stop a shown split pane when another leaf or window takes focus", async () => {

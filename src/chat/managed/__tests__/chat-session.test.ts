@@ -4470,7 +4470,8 @@ describe("AgentChatSession", () => {
           expectedToolState: "failed",
           expectedProjectedState: "failed",
           expectedDisplayState: "partial",
-          expectedIcon: "x",
+          // Partly done is a warning, never the failure X.
+          expectedIcon: "triangle-alert",
           expectedSummary: "1 completed, 1 failed",
         },
         {
@@ -4829,9 +4830,10 @@ describe("AgentChatSession", () => {
       ],
       resultCode: "TOOL_PARTIAL_FAILURE",
       expectedDisplayState: "partial",
-      expectedIcon: "x",
+      expectedIcon: "triangle-alert",
       expectedSummary: "1 completed, 1 failed",
-      expectedFailureCopy: "Some requested items failed; successful items were kept.",
+      // The card lists each note's own outcome; no generic notice repeats it.
+      expectedFailureCopy: "",
     },
     {
       outcome: "all-failed",
@@ -4854,7 +4856,7 @@ describe("AgentChatSession", () => {
       expectedDisplayState: "failed",
       expectedIcon: "x",
       expectedSummary: "0 completed, 2 failed",
-      expectedFailureCopy: "This vault action could not be completed.",
+      expectedFailureCopy: "",
     },
   ])(
     "presents a sanitized $outcome mutation batch honestly without failing the run",

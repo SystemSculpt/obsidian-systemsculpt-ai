@@ -12,6 +12,7 @@ import {
   type AgentPresentationPhase,
 } from "../AgentConversationPresentation";
 import { AgentConversationRenderer } from "../AgentConversationRenderer";
+import { summarizeAgentActivity } from "../AgentActivityPresentation";
 import { incidentMonotonicNow } from "../RenderIncidentMetrics";
 import { historicalToolPart } from "../ConversationPartPresentation";
 import { activeRendererFor, historyHydrationFor } from "./fixtures/conversation-rendering";
@@ -1342,18 +1343,14 @@ describe("AgentConversationRenderer tail status", () => {
     expect(beginLayoutMutation).toHaveBeenCalledWith(firstSummary, firstBody);
     expect(finishLayoutMutation).toHaveBeenCalledTimes(1);
     expect(firstBody.querySelectorAll(":scope > .systemsculpt-agent-part.is-tool"))
-      .toHaveLength(1);
-    const firstOverflow = firstBody.querySelector<HTMLButtonElement>(
-      "button[data-agent-activity-overflow]",
-    )!;
-    expect(firstOverflow.getAttribute("aria-expanded")).toBe("false");
-    expect(firstOverflow.nextElementSibling?.classList)
-      .toContain("systemsculpt-agent-activity-overflow-body");
-    expect(firstOverflow.nextElementSibling?.hasAttribute("hidden")).toBe(true);
-    expect(firstBody.querySelector('[data-part-key="reasoning-cold-one"]')).toBeNull();
+      .toHaveLength(2);
+    // A settled fold lists its work flat and in order: no nested previous-calls header.
+    expect(firstBody.querySelector("button[data-agent-activity-overflow]")).toBeNull();
     expect(Array.from(firstBody.querySelectorAll<HTMLElement>(
       ":scope > [data-agent-activity-row]",
     )).map((row) => row.dataset.partKey)).toEqual([
+      "reasoning-cold-one",
+      "tool:call-cold-one",
       "tool:call-cold-two",
     ]);
     expect(firstBody.querySelectorAll("details.systemsculpt-agent-tool[open]"))
@@ -1380,234 +1377,7 @@ describe("AgentConversationRenderer tail status", () => {
     markdownRender.mockRestore();
   });
 
-  it("hydrates historical overflow once in chronology with closed nested drawers", async () => {
-    const parent = document.body.createDiv();
-    const finishLayoutMutation = jest.fn();
-    const beginLayoutMutation = jest.fn(() => finishLayoutMutation);
-    const renderer = new AgentConversationRenderer(parent, {
-      app: new App(),
-      sourcePath: () => "SystemSculpt/Chats/chat.md",
-      beginLayoutMutation,
-      onApprove: jest.fn(),
-      onOpenArtifact: jest.fn(),
-      onCopyArtifactPath: jest.fn(),
-    });
-    renderer.load();
-    const markdownRender = jest.spyOn(MarkdownRenderer, "render").mockImplementation(
-      async (_app, markdown, staging) => {
-        staging.setText(String(markdown));
-      },
-    );
-    const tool = (id: string, timestamp: number): ToolCall => ({
-      id,
-      messageId: "assistant-lazy-overflow",
-      request: {
-        id,
-        type: "function",
-        function: { name: "read", arguments: JSON.stringify({ paths: [`${id}.md`] }) },
-      },
-      state: "completed",
-      result: { success: true, data: { summary: `Read ${id}.md` } },
-      timestamp,
-    });
-    const firstTool = tool("call-lazy-one", 2);
-    const latestTool = tool("call-lazy-two", 3);
-
-    await renderer.renderHistory([{
-      role: "assistant",
-      message_id: "assistant-lazy-overflow",
-      content: "Visible final answer",
-      messageParts: [{
-        id: "reasoning-lazy-overflow",
-        type: "reasoning",
-        timestamp: 1,
-        data: "Older reasoning",
-      }, {
-        id: "tool-lazy-one",
-        type: "tool_call",
-        timestamp: 2,
-        data: firstTool,
-      }, {
-        id: "tool-lazy-two",
-        type: "tool_call",
-        timestamp: 3,
-        data: latestTool,
-      }, {
-        id: "answer-lazy-overflow",
-        type: "content",
-        timestamp: 4,
-        data: "Visible final answer",
-      }],
-    }]);
-    const worked = parent.querySelector<HTMLDetailsElement>("details[data-agent-turn-fold]")!;
-
-    worked.open = true;
-    worked.dispatchEvent(new Event("toggle"));
-    await historyHydrationFor(renderer).hydrate(worked);
-
-    const body = worked.querySelector<HTMLElement>(
-      ":scope > .systemsculpt-agent-activity-body",
-    )!;
-    const overflow = body.querySelector<HTMLButtonElement>(
-      "button[data-agent-activity-overflow]",
-    )!;
-    const overflowHydration = historyHydrationFor(renderer);
-    expect(body.querySelector('[data-part-key="reasoning-lazy-overflow"]')).toBeNull();
-    expect(body.querySelector('[data-part-key="tool:call-lazy-one"]')).toBeNull();
-    expect(body.querySelector('[data-part-key="tool:call-lazy-two"]')).not.toBeNull();
-    expect(parent.querySelector('[data-part-key="answer-lazy-overflow"]')?.closest(
-      "details[data-agent-turn-fold]",
-    )).toBeNull();
-
-    const internals = renderer as unknown as {
-      renderHistoricalPart(parent: HTMLElement, part: MessagePart): Promise<void>;
-    };
-    const originalRenderHistoricalPart = internals.renderHistoricalPart.bind(renderer);
-    let releaseFirstAttempt!: () => void;
-    let markFirstAttemptStarted!: () => void;
-    const firstAttemptGate = new Promise<void>((resolve) => {
-      releaseFirstAttempt = resolve;
-    });
-    const firstAttemptStarted = new Promise<void>((resolve) => {
-      markFirstAttemptStarted = resolve;
-    });
-    let failedOnce = false;
-    const historicalPartRender = jest.spyOn(internals, "renderHistoricalPart").mockImplementation(
-      async (staging, part) => {
-        if (!failedOnce && part.id === "reasoning-lazy-overflow") {
-          failedOnce = true;
-          markFirstAttemptStarted();
-          await firstAttemptGate;
-          throw new Error("Transient historical render failure");
-        }
-        await originalRenderHistoricalPart(staging, part);
-      },
-    );
-
-    overflow.click();
-    await firstAttemptStarted;
-    const firstHydration = overflowHydration.hydrate(overflow)!;
-    overflow.click();
-    overflow.click();
-    expect(overflowHydration.hydrate(overflow)).toBe(firstHydration);
-    releaseFirstAttempt();
-    await expect(firstHydration).rejects.toThrow("Transient historical render failure");
-    await Promise.resolve();
-    expect(overflowHydration.wasHydrated(overflow)).toBe(false);
-    expect(body.querySelector('[data-part-key="reasoning-lazy-overflow"]')).toBeNull();
-    expect(body.querySelector('[data-part-key="tool:call-lazy-one"]')).toBeNull();
-
-    overflow.click();
-    overflow.click();
-    const retryHydration = overflowHydration.hydrate(overflow)!;
-    expect(retryHydration).not.toBe(firstHydration);
-    await retryHydration;
-    await Promise.resolve();
-    const drawer = overflow.nextElementSibling as HTMLElement;
-    const rows = Array.from(drawer.querySelectorAll<HTMLElement>(
-      ":scope > [data-agent-activity-row]",
-    ));
-    expect(rows.map((row) => row.dataset.partKey)).toEqual([
-      "reasoning-lazy-overflow",
-      "tool:call-lazy-one",
-      "tool:call-lazy-two",
-    ]);
-    expect(drawer.querySelectorAll("details.systemsculpt-agent-reasoning-details[open]"))
-      .toHaveLength(0);
-    expect(drawer.querySelectorAll("details.systemsculpt-agent-tool[open]"))
-      .toHaveLength(0);
-    expect(beginLayoutMutation).toHaveBeenLastCalledWith(overflow, drawer);
-    expect(finishLayoutMutation).toHaveBeenCalledTimes(6);
-    expect(overflowHydration.wasHydrated(overflow)).toBe(true);
-    const olderNodes = rows.slice(0, 2);
-    const callsAfterFirstExpansion = markdownRender.mock.calls.length;
-
-    overflow.click();
-    expect(olderNodes.every((node) => !node.isConnected)).toBe(true);
-    overflow.click();
-    await Promise.resolve();
-    expect(Array.from(drawer.querySelectorAll<HTMLElement>(
-      ":scope > [data-agent-activity-row]",
-    )).slice(0, 2)).toEqual(olderNodes);
-    expect(markdownRender).toHaveBeenCalledTimes(callsAfterFirstExpansion);
-    historicalPartRender.mockRestore();
-    renderer.unload();
-    markdownRender.mockRestore();
-  });
-
-  it("drops stale historical overflow hydration on unload", async () => {
-    const parent = document.body.createDiv();
-    const renderer = new AgentConversationRenderer(parent, {
-      app: new App(),
-      sourcePath: () => "SystemSculpt/Chats/chat.md",
-      onApprove: jest.fn(),
-      onOpenArtifact: jest.fn(),
-      onCopyArtifactPath: jest.fn(),
-    });
-    renderer.load();
-    const markdownRender = jest.spyOn(MarkdownRenderer, "render").mockImplementation(
-      async (_app, markdown, staging) => {
-        staging.setText(String(markdown));
-      },
-    );
-    const tool = (id: string, timestamp: number): ToolCall => ({
-      id,
-      messageId: "assistant-lazy-unload",
-      request: {
-        id,
-        type: "function",
-        function: { name: "read", arguments: JSON.stringify({ paths: [`${id}.md`] }) },
-      },
-      state: "completed",
-      result: { success: true, data: { summary: `Read ${id}.md` } },
-      timestamp,
-    });
-    const latestTool = tool("call-lazy-unload-two", 2);
-    await renderer.renderHistory([{
-      role: "assistant",
-      message_id: "assistant-lazy-unload",
-      content: "Final answer",
-      messageParts: [{
-        id: "reasoning-lazy-unload",
-        type: "reasoning",
-        timestamp: 1,
-        data: "Older reasoning",
-      }, {
-        id: "tool-lazy-unload-two",
-        type: "tool_call",
-        timestamp: 2,
-        data: latestTool,
-      }, {
-        id: "answer-lazy-unload",
-        type: "content",
-        timestamp: 3,
-        data: "Final answer",
-      }],
-    }]);
-    const worked = parent.querySelector<HTMLDetailsElement>("details[data-agent-turn-fold]")!;
-
-    worked.open = true;
-    worked.dispatchEvent(new Event("toggle"));
-    await historyHydrationFor(renderer).hydrate(worked);
-    const overflow = worked.querySelector<HTMLButtonElement>(
-      "button[data-agent-activity-overflow]",
-    )!;
-    const overflowHydration = historyHydrationFor(renderer);
-    overflow.click();
-    const hydration = overflowHydration.hydrate(overflow)!;
-
-    renderer.unload();
-    await hydration;
-
-    expect(worked.querySelector('[data-part-key="reasoning-lazy-unload"]')).toBeNull();
-    expect((renderer as unknown as {
-      liveMarkdown: { states: Map<HTMLElement, unknown> };
-    }).liveMarkdown.states.size).toBe(0);
-    expect(overflowHydration.hydrate(overflow)).toBeNull();
-    markdownRender.mockRestore();
-  });
-
-  it("rejects an older overflow hydration when history is corrected", async () => {
+  it("rejects an older restored-fold hydration when history is corrected", async () => {
     const parent = document.body.createDiv();
     const renderer = new AgentConversationRenderer(parent, {
       app: new App(),
@@ -1663,12 +1433,6 @@ describe("AgentConversationRenderer tail status", () => {
       renderHistoricalPart(parent: HTMLElement, part: MessagePart): Promise<void>;
     };
 
-    worked.open = true;
-    worked.dispatchEvent(new Event("toggle"));
-    await historyHydrationFor(renderer).hydrate(worked);
-    const overflow = worked.querySelector<HTMLButtonElement>(
-      "button[data-agent-activity-overflow]",
-    )!;
     const originalRenderHistoricalPart = internals.renderHistoricalPart.bind(renderer);
     let releaseFirstPart!: () => void;
     let markFirstPartStarted!: () => void;
@@ -1690,10 +1454,10 @@ describe("AgentConversationRenderer tail status", () => {
       },
     );
 
-    overflow.click();
+    worked.open = true;
+    worked.dispatchEvent(new Event("toggle"));
     await firstPartStarted;
-    const staleHydration = historyHydrationFor(renderer).hydrate(overflow)!;
-    overflow.click();
+    const staleHydration = historyHydrationFor(renderer).hydrate(worked)!;
     const corrected = [{
       ...initial[0]!,
       content: "Corrected final answer",
@@ -1709,22 +1473,26 @@ describe("AgentConversationRenderer tail status", () => {
     const currentWorked = parent.querySelector<HTMLDetailsElement>(
       "details[data-agent-turn-fold]",
     )!;
-    const currentOverflow = currentWorked.querySelector<HTMLButtonElement>(
-      "button[data-agent-activity-overflow]",
-    )!;
     expect(currentWorked).not.toBe(worked);
-    expect(currentOverflow.getAttribute("aria-expanded")).toBe("false");
-    expect(currentWorked.querySelector('[data-part-key="reasoning-lazy-stale"]')).toBeNull();
-    expect(currentWorked.querySelector('[data-part-key="tool:call-lazy-stale-one"]')).toBeNull();
+    // The stale render never lands in the replaced fold; the corrected fold renders its own rows.
+    expect(worked.querySelector('[data-part-key="reasoning-lazy-stale"]')).toBeNull();
+    expect(currentWorked.open).toBe(true);
+    expect(Array.from(currentWorked.querySelectorAll<HTMLElement>(
+      ":scope > .systemsculpt-agent-activity-body > [data-agent-activity-row]",
+    )).map((row) => row.dataset.partKey)).toEqual([
+      "reasoning-lazy-stale",
+      "tool:call-lazy-stale-one",
+      "tool:call-lazy-stale-two",
+    ]);
     expect(parent.textContent).toContain("Corrected final answer");
     expect(parent.textContent).not.toContain("Initial final answer");
-    expect(historyHydrationFor(renderer).hydrate(overflow)).toBeNull();
-    expect(historyHydrationFor(renderer).wasHydrated(currentOverflow)).toBe(false);
+    expect(historyHydrationFor(renderer).hydrate(worked)).toBeNull();
+    expect(historyHydrationFor(renderer).wasHydrated(currentWorked)).toBe(true);
     historicalPartRender.mockRestore();
     renderer.unload();
   });
 
-  it("finishes pending overflow hydration across an unchanged history refresh", async () => {
+  it("finishes a pending restored-fold hydration across an unchanged history refresh", async () => {
     const parent = document.body.createDiv();
     const renderer = new AgentConversationRenderer(parent, {
       app: new App(),
@@ -1778,12 +1546,6 @@ describe("AgentConversationRenderer tail status", () => {
       renderHistoricalPart(parent: HTMLElement, part: MessagePart): Promise<void>;
     };
 
-    worked.open = true;
-    worked.dispatchEvent(new Event("toggle"));
-    await historyHydrationFor(renderer).hydrate(worked);
-    const overflow = worked.querySelector<HTMLButtonElement>(
-      "button[data-agent-activity-overflow]",
-    )!;
     const originalRenderHistoricalPart = internals.renderHistoricalPart.bind(renderer);
     let releaseFirstPart!: () => void;
     let markFirstPartStarted!: () => void;
@@ -1803,17 +1565,18 @@ describe("AgentConversationRenderer tail status", () => {
       },
     );
 
-    overflow.click();
+    worked.open = true;
+    worked.dispatchEvent(new Event("toggle"));
     await firstPartStarted;
-    const hydration = historyHydrationFor(renderer).hydrate(overflow)!;
+    const hydration = historyHydrationFor(renderer).hydrate(worked)!;
     await renderer.renderHistory(history);
-    expect(parent.querySelector("button[data-agent-activity-overflow]")).toBe(overflow);
+    expect(parent.querySelector("details[data-agent-turn-fold]")).toBe(worked);
     releaseFirstPart();
     await hydration;
 
-    expect(historyHydrationFor(renderer).wasHydrated(overflow)).toBe(true);
+    expect(historyHydrationFor(renderer).wasHydrated(worked)).toBe(true);
     expect(Array.from(worked.querySelectorAll<HTMLElement>(
-      ":scope > .systemsculpt-agent-activity-body > .systemsculpt-agent-activity-overflow-body > [data-agent-activity-row]",
+      ":scope > .systemsculpt-agent-activity-body > [data-agent-activity-row]",
     )).map((row) => row.dataset.partKey)).toEqual([
       "reasoning-lazy-refresh",
       "tool:call-lazy-refresh-one",
@@ -1890,11 +1653,6 @@ describe("AgentConversationRenderer tail status", () => {
     worked.open = true;
     worked.dispatchEvent(new Event("toggle"));
     await historyHydrationFor(renderer).hydrate(worked);
-    const overflow = parent.querySelector<HTMLButtonElement>(
-      "button[data-agent-activity-overflow-key]",
-    )!;
-    overflow.click();
-    await historyHydrationFor(renderer).hydrate(overflow);
     const reasoningPart = parent.querySelector<HTMLElement>(
       '[data-part-key="reasoning-late-correction"]',
     )!;
@@ -1941,18 +1699,13 @@ describe("AgentConversationRenderer tail status", () => {
     const correctedWorkedBody = correctedWorked.querySelector<HTMLElement>(
       ":scope > .systemsculpt-agent-activity-body",
     )!;
-    const correctedOverflow = parent.querySelector<HTMLButtonElement>(
-      "button[data-agent-activity-overflow-key]",
-    )!;
     expect(beginLayoutMutation).toHaveBeenCalledTimes(1);
     expect(beginLayoutMutation).toHaveBeenCalledWith(undefined, correctedWorkedBody);
     expect(finishLayoutMutation).toHaveBeenCalledTimes(1);
     expect(correctedWorked).not.toBe(worked);
     expect(correctedWorked.open).toBe(true);
-    expect(correctedOverflow).not.toBe(overflow);
-    expect(correctedOverflow.dataset.agentActivityOverflowKey)
-      .toBe("overflow:reasoning-late-correction");
-    expect(correctedOverflow.getAttribute("aria-expanded")).toBe("true");
+    // A settled fold lists its rows flat: no nested previous-calls header to restore.
+    expect(correctedWorked.querySelector("button[data-agent-activity-overflow]")).toBeNull();
     expect(parent.querySelector('[data-part-key="reasoning-late-correction"]'))
       .toBe(reasoningPart);
     expect(reasoning.open).toBe(true);
@@ -1964,22 +1717,6 @@ describe("AgentConversationRenderer tail status", () => {
     expect(parent.textContent).not.toContain("Initial answer");
 
     selection.removeAllRanges();
-    correctedOverflow.focus();
-    await renderer.renderHistory([{
-      ...initial[0]!,
-      content: "Second corrected answer",
-      messageParts: initial[0]!.messageParts!.map((part) =>
-        part.type === "content" && part.id === "answer-late-correction"
-          ? { ...part, data: "Second corrected answer" }
-          : { ...part }),
-    }]);
-    const focusedOverflow = parent.querySelector<HTMLButtonElement>(
-      "button[data-agent-activity-overflow-key]",
-    )!;
-    expect(focusedOverflow).not.toBe(correctedOverflow);
-    expect(focusedOverflow.getAttribute("aria-expanded")).toBe("true");
-    expect(document.activeElement).toBe(focusedOverflow);
-
     const focusedWorked = parent.querySelector<HTMLDetailsElement>(
       "details[data-agent-turn-fold]",
     )!;
@@ -2132,16 +1869,11 @@ describe("AgentConversationRenderer tail status", () => {
       disclosure: Readonly<{
         workedOpen: boolean;
         hydrateWorked: boolean;
-        overflowOpen: ReadonlyMap<string, boolean>;
         reasoningOpen: ReadonlyMap<string, boolean>;
         toolOpen: ReadonlyMap<string, boolean>;
       }>;
     }>;
     const internals = renderer as unknown as {
-      activityOverflowStates: WeakMap<
-        HTMLButtonElement,
-        { body: HTMLElement; icon: HTMLElement; label: HTMLElement; latestNode: HTMLElement | null; previousNodes: HTMLElement[] }
-      >;
       captureHistoricalDisclosureState(row: HTMLElement): unknown;
       prepareHistoricalRowReplacement(replacement: Replacement): Promise<void>;
       commitHistoricalRowReplacement(replacement: Replacement): void;
@@ -2159,17 +1891,6 @@ describe("AgentConversationRenderer tail status", () => {
     worked.createEl("summary", { attr: { "data-focus-key": "activity-summary" } });
     const workedBody = worked.createDiv({ cls: "systemsculpt-agent-activity-body" });
     workedBody.createDiv({ text: "Already hydrated" });
-    workedBody.createEl("button", { attr: { "data-agent-activity-overflow": "" } });
-    const mappedOverflow = workedBody.createEl("button", {
-      attr: { "data-agent-activity-overflow": "" },
-    });
-    internals.activityOverflowStates.set(mappedOverflow, {
-      body: workedBody.createDiv(),
-      icon: mappedOverflow.createSpan(),
-      label: mappedOverflow.createSpan(),
-      latestNode: null,
-      previousNodes: [],
-    });
     const previousPart = workedBody.createDiv({ attr: { "data-part-key": "stable-part" } });
 
     const disclosure = internals.captureHistoricalDisclosureState(previousRow) as {
@@ -2178,7 +1899,6 @@ describe("AgentConversationRenderer tail status", () => {
     expect(disclosure.hydrateWorked).toBe(true);
 
     const nextRow = document.createElement("div");
-    nextRow.createEl("button", { attr: { "data-agent-activity-overflow": "" } });
     const detachedNextPart = document.createElement("div");
     detachedNextPart.dataset.partKey = "stable-part";
     const replacement: Replacement = {
@@ -2195,7 +1915,6 @@ describe("AgentConversationRenderer tail status", () => {
       disclosure: {
         workedOpen: false,
         hydrateWorked: false,
-        overflowOpen: new Map(),
         reasoningOpen: new Map([["closed-reasoning", false], ["missing-reasoning", true]]),
         toolOpen: new Map([["missing-tool", true]]),
       },
@@ -2249,7 +1968,6 @@ describe("AgentConversationRenderer tail status", () => {
       applyActivityOverflowLayout(element: HTMLButtonElement): void;
       captureHistoricalDisclosureState(row: HTMLElement): {
         workedOpen: boolean;
-        overflowOpen: ReadonlyMap<string, boolean>;
       };
       setTextNode(element: HTMLElement | null, text: string): void;
       updateActivityOverflow(element: HTMLButtonElement, hiddenCount: number): void;
@@ -2266,12 +1984,6 @@ describe("AgentConversationRenderer tail status", () => {
     const untrackedOverflow = document.createElement("button");
     internals.updateActivityOverflow(untrackedOverflow, 2);
     expect(untrackedOverflow.dataset.hiddenCount).toBe("2");
-
-    const disclosureRow = document.createElement("div");
-    disclosureRow.createEl("button", {
-      attr: { "data-agent-activity-overflow-key": "" },
-    });
-    expect(internals.captureHistoricalDisclosureState(disclosureRow).overflowOpen.size).toBe(0);
 
     const overflow = document.createElement("button");
     internals.activityOverflowStates.set(overflow, {
@@ -2558,7 +2270,7 @@ describe("AgentConversationRenderer tail status", () => {
     expect(tail.hasAttribute("aria-atomic")).toBe(false);
     expect(tail.closest(".systemsculpt-agent-turn")?.getAttribute("data-message-id"))
       .toBe("assistant-cancel-restored");
-    expect(setIcon).toHaveBeenCalledWith(tail.querySelector(".systemsculpt-agent-tail-status-icon"), "square");
+    expect(setIcon).toHaveBeenCalledWith(tail.querySelector(".systemsculpt-agent-tail-status-icon"), "circle-stop");
     expect(Array.from(parent.querySelectorAll<HTMLElement>(
       ".systemsculpt-agent-activity-label",
     )).map((label) => label.textContent)).toEqual([
@@ -3175,7 +2887,7 @@ describe("AgentConversationRenderer tail status", () => {
     expect(setIcon).toHaveBeenCalledWith(stateIcon, "loader-circle");
     expect(actionIcon.classList).toContain("is-animated");
     expect(actionIcon.getAttribute("aria-hidden")).toBe("true");
-    expect(label.textContent).toBe("Reading Plan.md…");
+    expect(label.textContent).toBe("Reading Plan…");
     expect(stateIcon.classList).not.toContain("is-animated");
     expect(header.querySelector(".systemsculpt-agent-tool-state")).toBeNull();
     expect(details.open).toBe(false);
@@ -3193,11 +2905,12 @@ describe("AgentConversationRenderer tail status", () => {
     expect(actionIcon.dataset.iconName).toBe("check");
     expect(setIcon).toHaveBeenCalledWith(actionIcon, "check");
     expect(actionIcon.classList).not.toContain("is-animated");
-    expect(label.textContent).toBe("Read Plan.md");
+    expect(label.textContent).toBe("Read Plan");
     expect(stateIcon.dataset.iconState).toBe("check");
     expect(setIcon).toHaveBeenCalledWith(stateIcon, "check");
     expect(stateIcon.classList).not.toContain("is-animated");
-    expect(summary.textContent).toBe("Read Projects/Plan.md");
+    // A result that only repeats the label and the note's path isn't meta; the card shows the path.
+    expect(summary.textContent).toBe("");
     expect(details.open).toBe(false);
     const disclosureGlyph = disclosure.firstChild;
     details.open = true;
@@ -3251,7 +2964,8 @@ describe("AgentConversationRenderer tail status", () => {
     )!;
     disclosure.appendChild(document.createElementNS("http://www.w3.org/2000/svg", "svg"));
     expect(shell.classList).toContain("is-disclosure");
-    expect(summary.textContent).toBe("Projects/Plan.md");
+    // The label names the note; its path is the card's, never repeated as meta.
+    expect(summary.textContent).toBe("");
     expect(disclosure.hasChildNodes()).toBe(true);
     expect(firstApproval.isConnected).toBe(true);
 
@@ -3506,7 +3220,7 @@ describe("AgentConversationRenderer tail status", () => {
     renderer.unload();
   });
 
-  it("expands previous activity in order, updates the open group, and removes it when no longer needed", async () => {
+  it("expands previous activity in order, keeps the latest step level below it, and removes the group when no longer needed", async () => {
     const parent = document.body.createDiv();
     const renderer = new AgentConversationRenderer(parent, {
       app: new App(),
@@ -3569,23 +3283,28 @@ describe("AgentConversationRenderer tail status", () => {
     const drawer = overflow.nextElementSibling as HTMLElement;
     expect(overflow.getAttribute("aria-controls")).toBe(drawer.id);
 
+    // The latest step is its own row under the drawer, so the header names only the steps before it.
+    expect(drawer.hidden).toBe(true);
+    expect(drawer.nextElementSibling?.getAttribute("data-part-key")).toBe("tool:call-overflow-three");
+    expect(overflow.querySelector(".systemsculpt-agent-activity-overflow-label")?.textContent)
+      .toBe(summarizeAgentActivity(tools.slice(0, 2)).label);
+
     overflow.click();
     expect(rows()).toEqual([
       "tool:call-overflow-one",
       "tool:call-overflow-two",
       "tool:call-overflow-three",
     ]);
-    expect(drawer.lastElementChild?.getAttribute("data-part-key"))
-      .toBe("tool:call-overflow-three");
-    expect(overflow.querySelector(".systemsculpt-agent-activity-overflow-label")?.textContent)
-      .toBe("Read 3 notes");
+    expect(Array.from(drawer.children).map((row) => row.getAttribute("data-part-key")))
+      .toEqual(["tool:call-overflow-one", "tool:call-overflow-two"]);
+    expect(drawer.nextElementSibling?.getAttribute("data-part-key")).toBe("tool:call-overflow-three");
 
     drawer.insertBefore(drawer.lastElementChild!, drawer.firstElementChild);
     (renderer as unknown as {
       applyActivityOverflowLayout(element: HTMLButtonElement): void;
     }).applyActivityOverflowLayout(overflow);
     expect(drawer.lastElementChild?.getAttribute("data-part-key"))
-      .toBe("tool:call-overflow-three");
+      .toBe("tool:call-overflow-two");
 
     overflow.focus();
     await render([tools[0]!, tools[2]!]);
@@ -3605,10 +3324,11 @@ describe("AgentConversationRenderer tail status", () => {
     };
     await render([tools[0]!, finalReasoning]);
     expect(overflow.querySelector(".systemsculpt-agent-activity-overflow-label")?.textContent)
-      .toBe("Read One.md, thought");
+      .toBe(summarizeAgentActivity([tools[0]!]).label);
+    // The header wears the state of the steps it names, not the latest step's icon.
     expect(overflow.querySelector<HTMLElement>(
       ".systemsculpt-agent-activity-overflow-icon",
-    )?.dataset.iconName).toBe("sparkles");
+    )?.dataset.iconName).toBe("check");
     expect(overflow.lastElementChild?.classList)
       .toContain("systemsculpt-agent-activity-overflow-disclosure");
 
@@ -3628,7 +3348,7 @@ describe("AgentConversationRenderer tail status", () => {
     renderer.unload();
   });
 
-  it("releases Markdown owned by a reasoning row hidden behind historical overflow", async () => {
+  it("releases Markdown owned by a reasoning row inside a restored fold", async () => {
     const parent = document.body.createDiv();
     const renderer = new AgentConversationRenderer(parent, {
       app: new App(),
@@ -3668,11 +3388,6 @@ describe("AgentConversationRenderer tail status", () => {
     worked.open = true;
     worked.dispatchEvent(new Event("toggle"));
     await historyHydrationFor(renderer).hydrate(worked);
-    const overflow = parent.querySelector<HTMLButtonElement>(
-      "button[data-agent-activity-overflow]",
-    )!;
-    overflow.click();
-    await historyHydrationFor(renderer).hydrate(overflow);
     const older = parent.querySelector<HTMLElement>(
       '[data-part-key="reasoning-overflow-old"]',
     )!;
@@ -3687,9 +3402,8 @@ describe("AgentConversationRenderer tail status", () => {
     }).liveMarkdown;
     expect(liveMarkdown.states.size).toBe(2);
 
-    overflow.click();
-    expect(older.isConnected).toBe(false);
     await renderer.renderHistory([]);
+    expect(older.isConnected).toBe(false);
     expect(liveMarkdown.states.size).toBe(0);
     renderer.unload();
   });
@@ -3804,25 +3518,16 @@ describe("AgentConversationRenderer tail status", () => {
     const worked = row.querySelector<HTMLDetailsElement>("details[data-agent-turn-fold]")!;
     expect(worked.open).toBe(false);
     expect(worked.querySelector(".systemsculpt-agent-activity-label")?.textContent)
-      .toBe("Thought, read Plan.md");
+      .toBe("Thought, read Plan");
     expect(worked.querySelector(".systemsculpt-agent-activity-duration")?.textContent)
       .toBe("1m 2s");
-    const overflow = worked.querySelector<HTMLButtonElement>(
-      "button[data-agent-activity-overflow]",
-    )!;
-    expect(overflow.getAttribute("aria-expanded")).toBe("false");
-    expect(liveReasoning.isConnected).toBe(false);
-    expect(worked.contains(liveTool)).toBe(true);
+    // The adopted fold keeps the live rows, flat and in order: no nested previous-calls header.
+    expect(worked.querySelector("button[data-agent-activity-overflow]")).toBeNull();
+    expect(Array.from(worked.querySelectorAll<HTMLElement>(
+      ":scope > .systemsculpt-agent-activity-body > [data-agent-activity-row]",
+    ))).toEqual([liveReasoning, liveTool]);
     expect(worked.contains(liveAnswer)).toBe(false);
     expect(row.querySelector('[data-part-key="answer-adopt-work"]')).toBe(liveAnswer);
-    overflow.click();
-    expect(overflow.getAttribute("aria-expanded")).toBe("true");
-    expect(worked.contains(liveReasoning)).toBe(true);
-    expect(worked.contains(liveTool)).toBe(true);
-    expect(Array.from(worked.querySelectorAll<HTMLElement>(
-      ":scope > .systemsculpt-agent-activity-body > .systemsculpt-agent-activity-overflow-body > [data-agent-activity-row]",
-    ))).toEqual([liveReasoning, liveTool]);
-    expect(overflow.nextElementSibling?.lastElementChild).toBe(liveTool);
     expect(parent.querySelector(".systemsculpt-agent-active-run")?.childElementCount).toBe(0);
     renderer.unload();
   });
@@ -4061,12 +3766,13 @@ describe("AgentConversationRenderer tail status", () => {
     )!;
     const worked = row.querySelector<HTMLDetailsElement>("details[data-agent-turn-fold]")!;
     expect(worked.open).toBe(false);
-    expect(worked.textContent).not.toContain("Custom action complete");
+    const workedBody = worked.querySelector<HTMLElement>(":scope > .systemsculpt-agent-activity-body")!;
+    expect(workedBody.childElementCount).toBe(0);
 
     worked.open = true;
     worked.dispatchEvent(new Event("toggle"));
     await historyHydrationFor(renderer).hydrate(worked);
-    expect(worked.textContent).toContain("Custom action complete");
+    expect(workedBody.textContent).toContain("Custom action complete");
     expect(worked.textContent).not.toContain("### Sources");
     expect(row.textContent).toContain("### Sources");
     expect(parent.querySelector(".systemsculpt-agent-active-run")?.childElementCount).toBe(0);
@@ -4729,7 +4435,7 @@ describe("AgentConversationRenderer tail status", () => {
     )!;
     expect(approval.querySelector(".systemsculpt-agent-approval-copy")?.textContent)
       .toBe("SystemSculpt wants to replace Plan.md");
-    expect(approval.querySelector(".systemsculpt-agent-approval-meta")?.textContent).toBe("Projects");
+    expect(approval.querySelector(".systemsculpt-agent-approval-meta")?.textContent).toBe("In Projects");
     expect(approval.querySelector('[data-testid="chat.approval.deny"]')).not.toBeNull();
     expect(approval.querySelector('[data-testid="chat.approval.allow-once"]')).not.toBeNull();
     expect(approval.querySelector('[data-testid="chat.approval.allow-for-chat"]')).not.toBeNull();
@@ -5236,17 +4942,16 @@ describe("AgentConversationRenderer tail status", () => {
     await renderer.renderActive(snapshot, presentation("completed", false, "Done", snapshot));
 
     expect(parent.querySelector("details[data-agent-turn-fold] > summary .systemsculpt-agent-activity-label")?.textContent)
-      .toBe("Edited Launch plan.md, denied 2 actions, edit Launch plan.md ·\u00a0Withdrawn");
-    expect(parent.querySelector('[data-testid="chat.turn.changes"]')?.textContent).toBe("Changed 1 note: Launch plan.md");
-    const overflow = parent.querySelector<HTMLButtonElement>("button[data-agent-activity-overflow]")!;
-    expect(overflow.dataset.activitySummary).toBe("Edited Launch plan.md, denied 2 actions, edit Launch plan.md · Withdrawn");
-    overflow.click();
+      .toBe("Edited Launch plan ·\u00a02 denied ·\u00a01 withdrawn");
+    expect(parent.querySelector('[data-testid="chat.turn.changes"]')?.textContent).toBe("Changed 1 note: Launch\u00a0plan");
+    // The fold's rows sit flat inside it: the summary lives on the fold alone.
+    expect(parent.querySelector("button[data-agent-activity-overflow]")).toBeNull();
     // Rows keep their order, decisions and approval scope.
     expect([...parent.querySelectorAll(".systemsculpt-agent-part.is-tool .systemsculpt-agent-tool-label")].map(label => label.textContent)).toEqual([
-      "Edited Launch plan.md · Approved",
-      "Edited Launch plan.md · Approved for this chat",
-      "Edit Launch plan.md · Denied",
-      "Edit Launch plan.md · Withdrawn",
+      "Edited Launch plan · Approved",
+      "Edited Launch plan · Approved for this chat",
+      "Edit Launch plan · Denied",
+      "Edit Launch plan · Withdrawn",
       "Kept planning",
     ]);
     renderer.unload();

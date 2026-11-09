@@ -7,14 +7,10 @@ type ActivityTarget = Readonly<{
   body: HTMLElement;
 }>;
 
-type HydrationTarget =
-  | Readonly<{ kind: "activity"; activity: ActivityTarget }>
-  | Readonly<{ kind: "overflow"; element: HTMLButtonElement }>;
-
 type HydrationStatus = "cold" | "hydrating" | "hydrated" | "disposed";
 
 type DeferredHistory = {
-  target: HydrationTarget;
+  activity: ActivityTarget;
   parts: readonly MessagePart[];
   status: HydrationStatus;
   staging: HTMLElement | null;
@@ -22,14 +18,14 @@ type DeferredHistory = {
 };
 
 type HistoryHydrationOptions = Readonly<{
-  renderPart: (parent: HTMLElement, part: MessagePart) => Promise<void>;
   renderTimeline: (
     parent: HTMLElement,
     parts: readonly MessagePart[],
     isCurrent: () => boolean,
   ) => Promise<boolean>;
-  commitOverflow: (element: HTMLButtonElement, nodes: HTMLElement[]) => boolean;
   forgetMarkdown: (target: HTMLElement) => void;
+  /** Runs once a fold's rows are in place. */
+  activityHydrated?: (element: HTMLDetailsElement) => void;
   beginLayoutMutation?: (
     control?: HTMLElement,
     target?: HTMLElement,
@@ -57,14 +53,10 @@ export class ConversationHistoryHydration {
   }
 
   public deferActivity(activity: ActivityTarget, parts: readonly MessagePart[]): void {
-    this.defer(activity.element, { kind: "activity", activity }, parts);
+    this.defer(activity, parts);
     activity.element.addEventListener("toggle", () => {
       if (activity.element.open) void this.hydrate(activity.element)?.catch(() => undefined);
     });
-  }
-
-  public deferOverflow(element: HTMLButtonElement, parts: readonly MessagePart[]): void {
-    this.defer(element, { kind: "overflow", element }, parts);
   }
 
   public hydrate(element: HTMLElement): Promise<void> | null {
@@ -89,23 +81,12 @@ export class ConversationHistoryHydration {
     let hydration!: Promise<void>;
     hydration = (async (): Promise<void> => {
       try {
-        const rendered = state.target.kind === "activity"
-          ? await this.options.renderTimeline(staging, state.parts, isCurrent)
-          : await this.renderOverflow(staging, state.parts, isCurrent);
+        const rendered = await this.options.renderTimeline(staging, state.parts, isCurrent);
         if (!rendered || !isCurrent()) {
           discardStaging();
           return;
         }
-        if (state.target.kind === "overflow") {
-          if (!this.options.commitOverflow(state.target.element, Array.from(staging.children) as HTMLElement[])) {
-            this.forget(element);
-            return;
-          }
-          state.staging = null;
-          this.setStatus(state, "hydrated");
-          return;
-        }
-        const { summary, body } = state.target.activity;
+        const { summary, body } = state.activity;
         const finishLayoutMutation = this.options.beginLayoutMutation?.(
           summary.isConnected ? summary : undefined,
           body,
@@ -118,6 +99,7 @@ export class ConversationHistoryHydration {
           body.replaceChildren(...Array.from(staging.childNodes));
           state.staging = null;
           this.setStatus(state, "hydrated");
+          this.options.activityHydrated?.(state.activity.element);
         } finally {
           finishLayoutMutation?.();
         }
@@ -151,21 +133,9 @@ export class ConversationHistoryHydration {
     for (const element of this.entries.keys()) this.forget(element);
   }
 
-  private defer(element: HTMLElement, target: HydrationTarget, parts: readonly MessagePart[]): void {
-    this.forget(element);
-    this.entries.set(element, { target, parts, status: "cold", staging: null, hydration: null });
-  }
-
-  private async renderOverflow(
-    parent: HTMLElement,
-    parts: readonly MessagePart[],
-    isCurrent: () => boolean,
-  ): Promise<boolean> {
-    for (const part of parts) {
-      if (!isCurrent()) return false;
-      await this.options.renderPart(parent, part);
-    }
-    return isCurrent();
+  private defer(activity: ActivityTarget, parts: readonly MessagePart[]): void {
+    this.forget(activity.element);
+    this.entries.set(activity.element, { activity, parts, status: "cold", staging: null, hydration: null });
   }
 
   private forget(element: HTMLElement): void {

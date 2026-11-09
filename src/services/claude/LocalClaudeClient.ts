@@ -54,7 +54,8 @@ export const CLAUDE_SIGN_IN_MESSAGE = 'Claude Code is not signed in. Open a term
 const SESSION_PATTERN = /^[A-Za-z0-9][A-Za-z0-9-]{7,79}$/;
 const MAX_LINE = 16 * 1024 * 1024;
 const activeSessions = new Set<string>();
-const CLAUDE_AUTO_FALLBACK_NOTICE = "Claude Code's Auto mode isn't available here, so edits are accepted automatically and other actions ask. Update Claude Code to use Auto.";
+// A no-break space keeps the product's name on one line.
+const CLAUDE_AUTO_FALLBACK_NOTICE = "Your Claude\u00a0Code has no Auto mode, so edits apply without asking. Update it to use Auto.";
 class ClaudeAutoUnavailable extends Error {}
 function rejectsAutoMode(message: string): boolean {
   return /(?:permission.?mode[^\n]*auto|auto[^\n]*(?:mode|permission))/i.test(message)

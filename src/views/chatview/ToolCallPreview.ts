@@ -10,6 +10,7 @@ import { extractPrimaryPathArg, splitToolName } from "../../utils/toolPolicy";
 import { generateDiff, DiffResult } from "../../utils/diffUtils";
 import { VaultMutationPreparation, type PreparedVaultMutation } from "../../tools/vault/VaultMutationPreparation";
 import type { FileEdit, MultiEditParams, SkippedEdit, WriteFileParams } from "../../tools/vault/types";
+import { changeCounts } from "./ToolCardBlocks";
 
 /**
  * Why a preview shows no diff. Only "identical" means the change is genuinely
@@ -183,11 +184,14 @@ export function renderPreparedWriteEditPreviews(hostElement: HTMLElement, previe
   const container = hostElement.createDiv({ cls: "systemsculpt-inline-diff" });
 
   if (previews.length > 1) renderInlineDiffSummary(container, previews);
-  if (options.approval) hostElement.dataset.changeSize = `+${previews.reduce((sum, preview) => sum + preview.diff.stats.additions, 0)} −${previews.reduce((sum, preview) => sum + preview.diff.stats.deletions, 0)}`;
+  if (options.approval) hostElement.dataset.changeSize = changeCounts({
+    additions: previews.reduce((sum, preview) => sum + preview.diff.stats.additions, 0),
+    deletions: previews.reduce((sum, preview) => sum + preview.diff.stats.deletions, 0),
+  });
 
   for (const preview of previews) {
     const section = options.approval && previews.length > 1 ? container.createEl("details", { cls: "systemsculpt-inline-diff__file" }) : container;
-    if (section !== container) section.createEl("summary", { text: `${preview.path} · +${preview.diff.stats.additions} −${preview.diff.stats.deletions}` });
+    if (section !== container) section.createEl("summary", { text: `${preview.path} · ${changeCounts(preview.diff.stats)}` });
     const body = section.createDiv({
       cls: "systemsculpt-inline-diff__body",
       attr: { "data-testid": "chat.diff.file", "data-path": preview.path },
@@ -199,12 +203,12 @@ export function renderPreparedWriteEditPreviews(hostElement: HTMLElement, previe
     }
     if (preview.isNewFile) body.createDiv({ cls: "systemsculpt-inline-diff__new-file", text: "New file" });
     if (preview.notice) body.createDiv({ cls: "systemsculpt-diff-no-changes-notice", text: preview.notice });
+    // The same box as every edit card: no patch ranges or line-number gutter, markers on the shared inset.
     const viewer = new DiffViewer({
       container: body.createDiv(),
       diffResult: preview.diff,
       fileName: preview.path,
       maxContextLines: 3,
-      showLineNumbers: true,
       hideHeader: options.approval === true,
       ...(options.approval ? { maxVisibleLines: 12 } : {}),
       emptyReason: preview.status === "changed" ? "identical" : preview.status,
@@ -242,7 +246,7 @@ function renderInlineDiffSummary(container: HTMLElement, previews: readonly Writ
     summary.createSpan({ cls: "systemsculpt-diff-additions", text: `+${additions}` });
   }
   if (deletions > 0) {
-    summary.createSpan({ cls: "systemsculpt-diff-deletions", text: `-${deletions}` });
+    summary.createSpan({ cls: "systemsculpt-diff-deletions", text: `−${deletions}` });
   }
   if (blocked.length > 0) {
     summary.createSpan({

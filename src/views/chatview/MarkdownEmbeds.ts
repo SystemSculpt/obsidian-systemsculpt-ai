@@ -18,6 +18,13 @@ export function embedTarget(embed: Element): string | null {
 }
 
 export function enhanceMarkdownEmbeds(parent: HTMLElement): void {
+  // Media written after text in the same paragraph ("A picture: ![[x.png]]") starts on its own
+  // line, a paragraph's space below that text, as media in a paragraph of its own does.
+  for (const embed of Array.from(parent.querySelectorAll<HTMLElement>("p > .internal-embed"))) {
+    let previous = embed.previousSibling;
+    while (previous?.nodeType === Node.TEXT_NODE && !previous.textContent?.trim()) previous = previous.previousSibling;
+    embed.classList.toggle("is-after-text", previous !== null);
+  }
   for (const embed of Array.from(parent.querySelectorAll<HTMLElement>(".internal-embed[src]"))) {
     if (embed.closest(".internal-embed") !== embed || embed.parentElement?.closest(".markdown-embed")) continue;
     const target = embedTarget(embed);
@@ -36,5 +43,18 @@ export function enhanceMarkdownEmbeds(parent: HTMLElement): void {
     // The same name the chat gives the file everywhere else; the icon says what kind it is.
     link.appendText(mediaDisplayName(target));
     embed.after(link);
+  }
+}
+
+/**
+ * Obsidian's renderer draws a wikilink to a missing note like any other link in a reply; mark
+ * it the way Obsidian marks it in a note, so the reply shows that a click would create it.
+ */
+export function markUnresolvedLinks(parent: HTMLElement, exists: (linkpath: string) => boolean): void {
+  for (const link of Array.from(parent.querySelectorAll<HTMLElement>("a.internal-link:not(.ss-embed-source)"))) {
+    const href = link.getAttribute("data-href") ?? link.getAttribute("href") ?? "";
+    // A link to a heading of this same note ("#Plan") has no note to look for.
+    const linkpath = href.split("#")[0].split("|")[0].trim();
+    link.classList.toggle("is-unresolved", Boolean(linkpath) && !exists(linkpath));
   }
 }

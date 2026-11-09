@@ -2,6 +2,7 @@ import type { AgentToolPart } from "../../chat/ChatConversation";
 import { splitToolName } from "../../utils/toolPolicy";
 import { parseUnifiedDiff } from "../../utils/diffUtils";
 import { nativeToolPath } from "../../utils/nativeToolPath";
+import { noteDisplayName } from "./NativeToolPresentation";
 
 export type TurnChange = Readonly<{ path: string; label: string; meta?: string; deleted?: true }>;
 function record(value: unknown): Record<string, unknown> {
@@ -9,14 +10,32 @@ function record(value: unknown): Record<string, unknown> {
 }
 function rows(value: unknown): Record<string, unknown>[] { return Array.isArray(value) ? value.map(record) : []; }
 function paths(value: unknown): string[] { return typeof value === "string" ? [value] : Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []; }
-function name(path: string): string { return path.split(/[\\/]/u).filter(Boolean).pop() ?? path; }
-const COUNTS = /^\+(\d+) −(\d+)$/u;
+/** A note as Obsidian names it ("Launch plan", not "Launch plan.md"); a short name never breaks across lines. */
+function name(path: string): string {
+  const shown = noteDisplayName(path.split(/[\\/]/u).filter(Boolean).pop() ?? path);
+  return shown.length <= 32 ? shown.replace(/ /gu, "\u00a0") : shown;
+}
+/** "Moved Old to Archive" when only its folder changed, as its row says; else "Moved Old → Archive/Older". */
+function moved(source: string, destination: string): string {
+  const slash = destination.search(/[\\/][^\\/]*$/u);
+  if (destination.slice(slash + 1) !== source.split(/[\\/]/u).filter(Boolean).pop()) return `Moved ${name(source)} → ${noteDisplayName(destination)}`;
+  return `Moved ${name(source)} to ${slash > 0 ? destination.slice(0, slash) : "the vault root"}`;
+}
+/** "+3 −1", "+3" or "−1": a zero says nothing. */
+function size(added: number, removed: number): string | undefined {
+  return [added ? `+${added}` : "", removed ? `−${removed}` : ""].filter(Boolean).join(" ") || undefined;
+}
+const COUNTS = /^(?:\+(\d+))?(?: ?−(\d+))?$/u;
+function counts(meta: string | undefined): readonly [number, number] | null {
+  const match = meta ? COUNTS.exec(meta) : null;
+  return match && (match[1] || match[2]) ? [Number(match[1] ?? 0), Number(match[2] ?? 0)] : null;
+}
 /** A note changed more than once in a turn reads its whole change: counts add up, an uncounted change leaves none. */
 function mergedMeta(earlier: TurnChange | undefined, meta: string | undefined): string | undefined {
   if (!earlier || earlier.deleted) return meta;
   if (earlier.meta === "new" || earlier.meta === "written") return earlier.meta;
-  const before = earlier.meta?.match(COUNTS), after = meta?.match(COUNTS);
-  if (before && after) return `+${Number(before[1]) + Number(after[1])} −${Number(before[2]) + Number(after[2])}`;
+  const before = counts(earlier.meta), after = counts(meta);
+  if (before && after) return size(before[0] + after[0], before[1] + after[1]);
   return meta === "new" || meta === "written" ? meta : undefined;
 }
 function nativePath(part: AgentToolPart, path: string): ReturnType<typeof nativeToolPath> {
@@ -58,8 +77,8 @@ export function presentTurnChanges(parts: readonly AgentToolPart[]): readonly Tu
           const destination = paths(kind.move_path)[0];
           const diff = typeof change.diff === "string" ? parseUnifiedDiff(change.diff) : null;
           const meta = operation === "add" ? "new" : operation === "delete" ? undefined
-            : diff ? `+${diff.stats.additions} −${diff.stats.deletions}` : undefined;
-          if (destination) move(path, destination, `Moved ${name(path)} → ${nativePath(part, destination).displayPath}`);
+            : diff ? size(diff.stats.additions, diff.stats.deletions) : undefined;
+          if (destination) move(path, destination, moved(path, nativePath(part, destination).displayPath));
           else add(path, meta, operation === "delete" ? `Deleted ${name(path)}` : name(path), operation === "delete");
         }
       }
@@ -73,18 +92,19 @@ export function presentTurnChanges(parts: readonly AgentToolPart[]): readonly Tu
       for (const result of successful) {
         const path = paths(result.path)[0];
         const source = paths(result.source)[0], destination = paths(result.destination)[0];
-        if (canonicalName === "move" && source && destination) move(source, destination, `Moved ${name(source)} → ${destination}`);
-        else if (path) add(path, canonicalName === "trash" ? "in trash" : undefined, canonicalName === "trash" ? `Deleted ${name(path)}` : name(path), canonicalName === "trash");
+        if (canonicalName === "move" && source && destination) move(source, destination, moved(source, destination));
+        // Trash keeps the note: it was moved there, as the row says, not deleted.
+        else if (path) add(path, undefined, canonicalName === "trash" ? `Moved ${name(path)} to trash` : name(path), canonicalName === "trash");
       }
     } else if (part.state !== "succeeded" || output.success === false || Array.isArray(output.results)) {
       continue;
     } else if (canonicalName === "move") {
       for (const item of rows(input.items)) {
         const source = paths(item.source)[0], destination = paths(item.destination)[0];
-        if (source && destination) move(source, destination, `Moved ${name(source)} → ${destination}`);
+        if (source && destination) move(source, destination, moved(source, destination));
       }
     } else if (canonicalName === "trash") {
-      for (const path of paths(input.paths)) add(path, "in trash", `Deleted ${name(path)}`, true);
+      for (const path of paths(input.paths)) add(path, undefined, `Moved ${name(path)} to trash`, true);
     } else if (canonicalName === "multi_edit") {
       for (const file of rows(input.files)) for (const path of paths(file.path)) add(path);
     } else {

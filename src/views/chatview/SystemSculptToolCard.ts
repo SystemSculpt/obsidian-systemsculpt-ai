@@ -12,6 +12,7 @@ import {
   renderNotice,
   mediaDisplayName,
   renderPathList,
+  savedMediaField,
   type ToolCardField,
 } from "./ToolCardBlocks";
 
@@ -72,27 +73,20 @@ export function renderSystemSculptToolCard(app: App, host: HTMLElement, part: Ag
 
   if (result?.media?.length) renderMedia(app, card, result.media);
 
+  // The workflow first, then what was asked, then what came of it: one grid, one rhythm.
   const fields: ToolCardField[] = [];
-  const prompt = text(args.prompt);
-  if (prompt) fields.push({ label: "Prompt", value: prompt });
   const workflow = text(args.path) ?? text(data.path);
   if (workflow && name.startsWith("studio_")) fields.push({ label: "Workflow", value: workflowName(workflow), path: workflow });
   if (name === "studio_create_workflow" && !workflow && text(args.name)) fields.push({ label: "Name", value: text(args.name)! });
+  const prompt = text(args.prompt);
+  if (prompt) fields.push({ label: "Prompt", value: prompt });
   if (name === "studio_edit_workflow" && Array.isArray(args.edits)) {
-    // Each change in words: what happened to which node or connection, and which setting.
-    const changes = args.edits.flatMap((edit: unknown) => {
-      if (!edit || typeof edit !== "object") return [];
-      const { kind, entityId, path, remove, value } = edit as Record<string, unknown>;
-      if (typeof entityId !== "string" || !entityId.trim()) return [];
-      const verb = remove === true || kind === "delete" ? "Remove" : kind === "create" ? "Add" : kind === "restore" ? "Restore" : "Set";
-      const entity = entityId.replace(/^(node|edge|group):/u, "");
-      const setting = Array.isArray(path) ? path.filter((part): part is string => typeof part === "string").join(".") : "";
-      const shown = verb === "Set" || verb === "Add" ? studioValue(value) : "";
-      return [`${verb} ${entity}${setting && verb === "Set" ? ` · ${setting}` : ""}${shown ? `: ${shown}` : ""}`];
-    });
+    // Each change as a result, in words, one per line.
+    const changes = args.edits.flatMap((edit: unknown) => studioChange(edit) ?? []);
     const shown = changes.slice(0, 8);
     if (changes.length > shown.length) shown.push(`${changes.length - shown.length} more`);
-    fields.push({ label: "Changes", value: shown.length ? shown.join("\n") : `${args.edits.length} ${args.edits.length === 1 ? "edit" : "edits"}` });
+    if (shown.length) fields.push({ label: "Changes", value: "", list: shown.map(change => ({ path: change, link: false })) });
+    else fields.push({ label: "Changes", value: `${args.edits.length} ${args.edits.length === 1 ? "change" : "changes"}` });
   }
   const references = Array.isArray(args.reference_images) ? args.reference_images.filter((value): value is string => typeof value === "string") : [];
   // A reference reads by its name, as the saved files do ("lighthouse at dusk"); the link opens the file.
@@ -101,43 +95,70 @@ export function renderSystemSculptToolCard(app: App, host: HTMLElement, part: Ag
     const frame = text(args[key]);
     if (frame) fields.push({ label, value: mediaDisplayName(frame), path: frame });
   }
+  const outputs = name === "studio_list_outputs" && Array.isArray(data.nodes)
+    ? data.nodes.map(record).flatMap(node => Array.isArray(node.files) ? node.files.map(record) : [])
+      .flatMap(file => text(file.path) ? [{ path: text(file.path)!, text: mediaDisplayName(text(file.path)!) }] : [])
+    : [];
+  if (outputs.length) fields.push({ label: "Outputs", value: "", list: outputs });
+  const workflows = name === "studio_list_workflows" && Array.isArray(data.workflows)
+    ? data.workflows.map(record).flatMap(entry => text(entry.path) ? [{ path: text(entry.path)!, text: workflowName(text(entry.path)!) }] : [])
+    : [];
+  // Only outcomes nothing else here says ("Run completed.", "No Studio workflows yet.").
+  const outcome = result?.ok && (name === "studio_run_workflow" && !result.media?.length
+    || name === "studio_list_workflows" && !workflows.length
+    || name === "studio_list_outputs" && !outputs.length) ? personFacingMessage(result) : "";
+  // A result beside other fields gets its label, so it never reads as one.
+  if (outcome && fields.length) fields.push({ label: "Result", value: outcome });
+  if (result?.media?.length) fields.push(savedMediaField(result.media));
   renderFields(app, card, fields);
-
-  if (name === "studio_list_workflows" && Array.isArray(data.workflows)) {
-    const rows = data.workflows.map(record).flatMap(entry => text(entry.path) ? [{ path: text(entry.path)!, text: workflowName(text(entry.path)!) }] : []);
-    renderPathList(app, card, rows);
-  }
-  if (name === "studio_list_outputs" && Array.isArray(data.nodes)) {
-    const files = data.nodes.map(record).flatMap(node => Array.isArray(node.files) ? node.files.map(record) : []);
-    renderPathList(app, card, files.flatMap(file => text(file.path) ? [{ path: text(file.path)!, text: mediaDisplayName(text(file.path)!) }] : []));
-  }
+  if (outcome && !fields.length) card.createDiv({ cls: "ss-tool-result", text: outcome });
+  renderPathList(app, card, workflows);
 
   if (result && !result.ok) {
     const message = personFacingMessage(result) || "SystemSculpt couldn't finish this.";
-    renderNotice(card, result.link
-      ? { tone: "warning", text: message, action: result.link }
+    // A plan or credits stop, in the words systemSculptGateNeed reads (saved chats keep the older words).
+    const gate = ["See plans", "Subscribe", "Add credits", "Buy credits"].includes(result.link?.label ?? "");
+    const notice = renderNotice(card, result.link
+      ? { tone: gate ? "gate" : "warning", text: message, action: result.link }
       : { tone: "danger", text: message });
-  } else if (result && (name === "studio_run_workflow" && !result.media?.length
-    || name === "studio_list_workflows" && !Array.isArray(data.workflows)
-    || name === "studio_list_outputs" && !Array.isArray(data.nodes))) {
-    // Only outcomes the fields above don't already say ("Run completed.", "No Studio workflows yet.").
-    const message = personFacingMessage(result);
-    if (message) card.createDiv({ cls: "ss-tool-result", text: message });
+    // A failed picture or video says why on its own tile in the reply; the card then doesn't repeat it.
+    if (!result.link) notice.setAttribute("data-media-failure", part.callId);
   }
   if (!card.childElementCount && card !== host) card.remove();
   return true;
 }
 
-/** The requested value of a Studio edit, short enough for one line. */
-function studioValue(value: unknown): string {
+/** "Poster image", "Prompt": a Studio node as the person reads it, never its node:/edge: id. */
+function studioNodeName(id: string): string {
+  const words = id.replace(/^(?:node|edge|group):/u, "").replace(/[_-]+/gu, " ").trim();
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : "A step";
+}
+
+/**
+ * One Studio edit as its result, in words: "Prompt set to “A lighthouse at dusk”",
+ * "Added Poster image", "Connected Prompt to Img". No field paths, ids or node kinds.
+ */
+function studioChange(edit: unknown): string | null {
+  if (!edit || typeof edit !== "object") return null;
+  const { kind, entityId, path, remove, value } = edit as Record<string, unknown>;
+  if (typeof entityId !== "string" || !entityId.trim()) return null;
   const clip = (line: string) => line.length > 80 ? `${line.slice(0, 79).trimEnd()}…` : line;
-  if (typeof value === "string") return value.trim() ? `“${clip(value.trim().replace(/\s+/gu, " "))}”` : "empty";
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-  if (!value || typeof value !== "object" || Array.isArray(value)) return "";
-  // A new node or connection: its title and kind say what it is.
-  const { title, kind, from, to } = value as Record<string, unknown>;
-  if (typeof from === "string" && typeof to === "string") return `${from} to ${to}`;
-  const name = typeof title === "string" && title.trim() ? title.trim() : "";
-  const type = typeof kind === "string" ? kind.replace(/_/gu, " ") : "";
-  return clip([name, type && name ? `(${type})` : type].filter(Boolean).join(" "));
+  const connection = entityId.startsWith("edge:");
+  const node = studioNodeName(entityId);
+  const details = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  if (remove === true || kind === "delete") return connection ? "Removed a connection" : `Removed ${node}`;
+  if (kind === "restore") return connection ? "Restored a connection" : `Restored ${node}`;
+  if (kind === "create") {
+    if (typeof details.from === "string" && typeof details.to === "string") return `Connected ${studioNodeName(details.from)} to ${studioNodeName(details.to)}`;
+    const title = typeof details.title === "string" && details.title.trim() ? clip(details.title.trim()) : "";
+    const type = typeof details.kind === "string" ? details.kind.replace(/_/gu, " ") : "";
+    return `Added ${title || (type ? `${type} step` : connection ? "a connection" : node)}`;
+  }
+  // The setting by its own name ("model"); a node's main value is just the node ("Prompt").
+  const setting = (Array.isArray(path) ? path.filter((part): part is string => typeof part === "string") : [])
+    .filter(part => part !== "config").pop();
+  const subject = setting && setting !== "value" ? `${node} ${setting.replace(/[_-]+/gu, " ")}` : node;
+  if (typeof value === "string") return value.trim() ? `${subject} set to “${clip(value.trim().replace(/\s+/gu, " "))}”` : `${subject} cleared`;
+  if (typeof value === "number" || typeof value === "boolean") return `${subject} set to ${String(value)}`;
+  return `Changed ${subject}`;
 }

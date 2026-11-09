@@ -107,6 +107,17 @@
 
 .systemsculpt-agent-notice > span { flex: 1; }
 
+/* The X sits on the first line's centre, its glyph inset like the text on the other side. */
+.systemsculpt-agent-notice > .ss-button--icon {
+  flex: none;
+  margin-block: calc((var(--ss-text-base) * var(--ss-leading-relaxed) - 32px) / 2);
+  margin-inline-end: -8px;
+}
+
+/* Details sits nearer its own output (8px) than the buttons above it (12px). */
+.systemsculpt-agent-error-details {
+  margin-top: var(--ss-space-2);
+}
 .systemsculpt-agent-error-details pre {
   max-width: 100%;
   overflow: auto;

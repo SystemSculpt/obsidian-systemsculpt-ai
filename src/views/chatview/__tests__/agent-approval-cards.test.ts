@@ -1,4 +1,5 @@
 /** @jest-environment jsdom */
+import { setIcon } from "obsidian";
 import { AgentApprovalCards } from "../AgentApprovalCards";
 import type { AgentToolPart } from "../../../chat/ChatConversation";
 import { claudePermissionResponse } from "../../../services/claude/LocalClaudeClient";
@@ -33,6 +34,25 @@ function key(target: HTMLElement, name: string, options: KeyboardEventInit = {})
 
 const tick = async () => { await Promise.resolve(); await Promise.resolve(); };
 
+/** The icon Obsidian was last asked to draw in an element. */
+function iconOf(element: Element | null): string | undefined {
+  return (setIcon as jest.Mock).mock.calls.filter(([target]) => target === element).at(-1)?.[1];
+}
+
+/** jsdom has no IntersectionObserver: this one reports what a test says is on screen. */
+class CardObserver {
+  static last: CardObserver | undefined;
+  readonly targets = new Set<Element>();
+  constructor(private readonly callback: IntersectionObserverCallback) { CardObserver.last = this; }
+  observe(target: Element) { this.targets.add(target); }
+  unobserve(target: Element) { this.targets.delete(target); }
+  disconnect() { this.targets.clear(); }
+  takeRecords() { return []; }
+  show(target: Element, isIntersecting: boolean) {
+    this.callback([{ target, isIntersecting } as IntersectionObserverEntry], this as unknown as IntersectionObserver);
+  }
+}
+
 afterEach(() => { document.body.empty(); });
 
 describe("inline approval keyboard ownership", () => {
@@ -45,7 +65,7 @@ describe("inline approval keyboard ownership", () => {
     expect(card.getAttribute("role")).toBe("group");
     expect(card.querySelector<HTMLElement>('[data-testid="chat.approval.preview"]')?.hidden).toBe(true);
     expect(document.getElementById(card.getAttribute("aria-labelledby")!)?.textContent).toBe("Claude Code wants to edit Plan.md");
-    expect(document.getElementById(card.getAttribute("aria-describedby")!)?.textContent).toBe("Notes");
+    expect(document.getElementById(card.getAttribute("aria-describedby")!)?.textContent).toBe("In Notes");
     expect(ui.root.querySelector('[role="status"]')?.textContent).toBe("Claude Code wants to edit Plan.md. Enter to approve, Escape to deny.");
     expect(card.querySelector('[data-focus-key="tool-allow-once"]')?.getAttribute("aria-keyshortcuts")).toContain("Enter");
     ui.dispose();
@@ -53,9 +73,9 @@ describe("inline approval keyboard ownership", () => {
 
   // Spec 3.5 / product review item 1: the basename titles the card, the folder is the meta line.
   it.each([
-    ["/tmp/vault/Notes/Plan.md", "Plan.md", "Notes"],
-    ["/private/tmp/vault/Notes/Plan.md", "Plan.md", "Notes"],
-    ["/external/Notes/Plan.md", "Plan.md (outside vault)", "/external/Notes"],
+    ["/tmp/vault/Notes/Plan.md", "Plan.md", "In Notes"],
+    ["/private/tmp/vault/Notes/Plan.md", "Plan.md", "In Notes"],
+    ["/external/Notes/Plan.md", "Plan.md (outside vault)", "In /external/Notes"],
   ])("presents %s consistently without changing the request or approval answer", async (file_path, displayed, folder) => {
     const ui = setup();
     try {
@@ -399,8 +419,9 @@ describe("inline approval keyboard ownership", () => {
     const part = tool("plan", { name: "ExitPlanMode", input: { plan: "## Plan\nCreate the note" } });
     const card = ui.add(part); ui.cards.sync([part]);
     expect(card.querySelector("strong")?.textContent).toBe("Claude Code has a plan");
-    expect(primary(card).textContent).toBe("Start⏎");
-    expect(card.querySelector('[data-focus-key="tool-deny"]')?.textContent).toBe("Keep planningesc");
+    // Every hint names its key one way, as Obsidian lists hotkeys.
+    expect(primary(card).textContent).toBe("StartEnter");
+    expect(card.querySelector('[data-focus-key="tool-deny"]')?.textContent).toBe("Keep planningEsc");
     expect(card.querySelector('[data-focus-key="tool-allow-chat"]')).toBeNull();
     key(card, "Escape"); await tick();
     expect(ui.onApprove).toHaveBeenCalledWith("plan", false);
@@ -470,5 +491,79 @@ describe("inline approval keyboard ownership", () => {
     expect(part.input).toEqual({ file_path: "/vault/Long.md", content });
     expect(ui.onApprove).not.toHaveBeenCalled();
     ui.dispose();
+  });
+
+  it("names a waiting question as an answer on the review pill, and an approval once one joins it", () => {
+    const ui = setup();
+    const pill = () => ui.composer.querySelector<HTMLButtonElement>('[data-testid="chat.approval.review"]')!;
+    const question = tool("question", { name: "AskUserQuestion", input: { questions: [{ question: "Which bed?", header: "Bed", multiSelect: false, options: [{ label: "South" }] }] } });
+    ui.add(question); ui.cards.sync([question]);
+    expect(pill().querySelector(".ss-button__label")?.textContent).toBe("Answer needed · Review");
+    expect(iconOf(pill().querySelector(".ss-button__icon"))).toBe("message-circle-question");
+    const edit = tool("edit"); ui.add(edit); ui.cards.sync([question, edit]);
+    expect(pill().querySelector(".ss-button__label")?.textContent).toBe("Approval needed · Review");
+    expect(iconOf(pill().querySelector(".ss-button__icon"))).toBe("shield-question");
+    ui.dispose();
+  });
+
+  it("hides the review pill while every waiting card is on screen", () => {
+    const view = window as unknown as { IntersectionObserver?: unknown };
+    const original = view.IntersectionObserver;
+    view.IntersectionObserver = CardObserver;
+    const ui = setup();
+    try {
+      const pill = () => ui.composer.querySelector<HTMLButtonElement>('[data-testid="chat.approval.review"]')!;
+      ui.input.value = "Still typing";
+      ui.input.focus();
+      const part = tool("one"), card = ui.add(part);
+      ui.cards.sync([part]);
+      // Typing would bring the pill, but the card is in view: it is its own prompt.
+      expect(CardObserver.last?.targets.has(card)).toBe(true);
+      expect(pill().hidden).toBe(true);
+      CardObserver.last!.show(card, false);
+      expect(pill().hidden).toBe(false);
+      CardObserver.last!.show(card, true);
+      expect(pill().hidden).toBe(true);
+      // An answered card is no longer watched.
+      ui.cards.sync([]);
+      expect(CardObserver.last?.targets.has(card)).toBe(false);
+    } finally {
+      ui.dispose();
+      if (original) view.IntersectionObserver = original;
+      else delete view.IntersectionObserver;
+    }
+  });
+
+  it("puts Send beside the typed answer when a click on an option answers, held until words are typed", async () => {
+    const ui = setup();
+    const part = tool("question", { name: "AskUserQuestion", input: { questions: [{ question: "Which bed?", header: "Bed", multiSelect: false, options: [{ label: "South" }, { label: "North" }] }] } });
+    const card = ui.add(part); ui.cards.sync([part]);
+    const send = card.querySelector<HTMLButtonElement>('[data-testid="chat.approval.allow-once"]')!;
+    const input = card.querySelector("input")!;
+    expect(send.parentElement).toBe(input.parentElement);
+    expect(input.getAttribute("aria-label")).toBe("Or type an answer");
+    expect(send.getAttribute("aria-disabled")).toBe("true");
+    send.click(); await tick();
+    expect(ui.onApprove).not.toHaveBeenCalled();
+    input.value = "By the fence";
+    input.dispatchEvent(new Event("input"));
+    expect(send.getAttribute("aria-disabled")).toBe("false");
+    send.click(); await tick();
+    expect(ui.onApprove.mock.calls).toEqual([["question", true, false, { "Which bed?": ["By the fence"] }]]);
+    ui.dispose();
+  });
+
+  it("draws a write over an existing note with the edit glyph, as its title says replace", () => {
+    const root = document.body.createDiv();
+    const cards = new AgentApprovalCards(root, { onApprove: jest.fn(), exists: path => path === "Notes/Garden.md" });
+    cards.load();
+    const write = (id: string, path: string) => tool(id, { name: "write", native: undefined, input: { path, content: "# Garden" } });
+    const replace = cards.create(write("one", "Notes/Garden.md"), "write");
+    const create = cards.create(write("two", "Notes/Basil care.md"), "write");
+    expect(replace.querySelector(".systemsculpt-agent-approval-copy")?.textContent).toBe("SystemSculpt wants to replace Garden.md");
+    expect(iconOf(replace.querySelector(".systemsculpt-agent-approval-icon"))).toBe("file-pen-line");
+    expect(create.querySelector(".systemsculpt-agent-approval-copy")?.textContent).toBe("SystemSculpt wants to create Basil care.md");
+    expect(iconOf(create.querySelector(".systemsculpt-agent-approval-icon"))).toBe("file-plus-2");
+    cards.unload();
   });
 });

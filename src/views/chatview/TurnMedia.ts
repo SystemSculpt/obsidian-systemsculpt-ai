@@ -112,6 +112,8 @@ function buildTurnMedia(app: App, parent: HTMLElement, presented: ReturnType<typ
     ...presented.media.map(item => ({ order: item.order ?? -1, item, pending: null })),
     ...presented.pending.map(tile => ({ order: tile.order, item: null, pending: tile })),
   ].sort((left, right) => left.order - right.order);
+  // Gate lines alone are text, so they sit a text line's gap under the row.
+  if (!tiles.length) block.addClass("is-text-only");
   if (tiles.length) {
     const grid = block.createDiv({ cls: "systemsculpt-agent-media-grid" });
     if (tiles.length > 1) grid.addClass("is-multiple");

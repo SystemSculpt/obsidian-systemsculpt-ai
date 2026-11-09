@@ -94,7 +94,7 @@ describe('Auto compatibility', () => {
     expect(spawn).toHaveBeenCalledTimes(2);
     expect(spawn.mock.calls[1][1]).toEqual(expect.arrayContaining(['--permission-mode', 'acceptEdits']));
     expect(cb.notice).toHaveBeenCalledTimes(1);
-    expect(cb.notice).toHaveBeenCalledWith(expect.stringContaining("Auto mode isn't available"));
+    expect(cb.notice).toHaveBeenCalledWith(expect.stringContaining("has no Auto mode, so edits apply without asking"));
   });
   it.each(['stderr', 'result', 'pipe'])('retains the chat fallback process across follow-up turns after %s rejection', async source => {
     const fallback = host();

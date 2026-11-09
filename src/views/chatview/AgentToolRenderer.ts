@@ -4,7 +4,7 @@ import { createSurfaceElement } from "../../core/ui/surface";
 import type { ToolCall } from "../../types/toolCalls";
 import type { AgentArtifact, AgentToolPart } from "../../chat/ChatConversation";
 import { renderOperationsInlinePreview, renderWriteEditInlineDiff } from "./ToolCallPreview";
-import { agentToolNoticeTone, gatedSystemSculptTurn, presentAgentTool, presentAgentToolDetails, presentToolLineMeta, refusedSystemSculptCall } from "./AgentToolPresentation";
+import { agentToolNoticeTone, gatedSystemSculptTurn, labelTargetClass, presentAgentTool, presentAgentToolDetails, presentToolLineMeta, presentToolRowLabel, refusedSystemSculptCall } from "./AgentToolPresentation";
 import type { AgentApprovalCards } from "./AgentApprovalCards";
 import { renderNativeToolPreview } from "./NativeToolPresentation";
 import { renderHostedToolPreview } from "./HostedToolPreview";
@@ -119,7 +119,10 @@ export class AgentToolRenderer {
       stagedSupport.createDiv({ cls: "systemsculpt-agent-tool-preview" });
     }
     if (supportNeedsRender && toolError) {
-      renderNotice(stagedSupport, { tone: agentToolNoticeTone(part, presentation.displayState), text: toolError }).addClass("systemsculpt-agent-tool-error");
+      const notice = renderNotice(stagedSupport, { tone: agentToolNoticeTone(part, presentation.displayState), text: toolError });
+      notice.addClass("systemsculpt-agent-tool-error");
+      // A failed picture or video says why on its own tile in the reply; the card then doesn't repeat it.
+      notice.setAttribute("data-media-failure", part.callId);
     }
     if (supportNeedsRender) {
       for (const artifact of actionableArtifacts) {
@@ -291,35 +294,32 @@ export class AgentToolRenderer {
       setIcon(stateIcon, presentation.icon);
       stateIcon.dataset.iconState = presentation.icon;
     }
-    const decision = part.approvalDecision ?? (part.approvalId && !approvalRequired
-      ? part.state === "denied" ? "denied"
-        : part.state === "cancelled" || part.state === "outcome-unknown" ? "withdrawn"
-          : part.state === "approved" || part.state === "running" || part.state === "succeeded" ? "approved" : undefined
-      : undefined);
-    const decisionLabel = decision === "withdrawn" ? "Withdrawn" : decision === "denied" ? "Denied"
-      : part.approvalScope === "session" ? "Approved for this chat" : "Approved";
-    const planDecision = part.name === "ExitPlanMode" && decision;
-    const displayLabel = planDecision
-      ? decision === "denied" ? "Kept planning" : decision === "withdrawn" ? "Plan withdrawn" : "Plan started"
-      : isQuestion && decision ? decision === "denied" ? "Skipped" : "Answered question"
-        : decision ? `${presentation.label} · ${decisionLabel}`
-          // Stopped while running, as the activity summary and the card's notice say.
-          : part.state === "cancelled" ? `${presentation.label} · Stopped` : presentation.label;
-    if (label.textContent !== displayLabel) {
+    // The label's outcome ("· Denied", "· Uncertain") is worded once, where the summary reads it too.
+    const displayLabel = presentToolRowLabel(part, presentation, Boolean(approvalRequired));
+    // Its target is set apart: a note is its link, a command reads as code, a short name stays on one line.
+    const targetPath = presentation.targetPath;
+    const target = presentation.target ?? (targetPath ? { text: targetPath.split("/").pop()! } : undefined);
+    // Only a note that exists is a link: opening a missing one would create it, even one the person denied.
+    const linkPath = targetPath && this.options.app.vault.getAbstractFileByPath(targetPath) ? targetPath : "";
+    const targetKey = target ? JSON.stringify([target.text, target.command ?? false, linkPath]) : "";
+    if (label.textContent !== displayLabel || (label.dataset.target ?? "") !== targetKey) {
       label.setText(displayLabel);
-      const target = presentation.targetPath;
-      const basename = target?.split("/").pop();
-      const index = basename ? displayLabel.indexOf(basename) : -1;
-      if (target && basename && index >= 0) {
+      if (targetKey) label.dataset.target = targetKey;
+      else delete label.dataset.target;
+      const index = target ? displayLabel.indexOf(target.text, displayLabel.indexOf(" ") + 1) : -1;
+      if (target && index >= 0) {
         label.setText(displayLabel.slice(0, index));
-        const link = label.createEl("a", {
-          text: basename, attr: { href: target, "data-href": target, "data-testid": "chat.tool.open-path" },
-        });
-        link.onclick = (event) => {
-          event.preventDefault(); event.stopPropagation();
-          void this.options.onOpenArtifact({ id: target, path: target, title: basename, kind: "vault_file" });
-        };
-        label.appendText(displayLabel.slice(index + basename.length));
+        const cls = labelTargetClass(target);
+        if (linkPath) {
+          const link = label.createEl("a", {
+            cls, text: target.text, attr: { href: linkPath, "data-href": linkPath, "data-testid": "chat.tool.open-path" },
+          });
+          link.onclick = (event) => {
+            event.preventDefault(); event.stopPropagation();
+            void this.options.onOpenArtifact({ id: linkPath, path: linkPath, title: target.text, kind: "vault_file" });
+          };
+        } else label.createSpan({ cls, text: target.text });
+        label.appendText(displayLabel.slice(index + target.text.length));
       }
     }
     shell.toggleAttribute("hidden", Boolean(approvalRequired));
@@ -337,6 +337,7 @@ export class AgentToolRenderer {
     if (supportNeedsRender || rebuiltShell) {
       support.replaceChildren(...Array.from(stagedSupport.childNodes));
       node.dataset.toolSupportFingerprint = supportFingerprint;
+      syncToolMediaWithReply(support.closest(".systemsculpt-agent-turn-body"));
     }
     if (retainedNativePreview && retainedNativePreview.parentElement !== support) {
       support.appendChild(retainedNativePreview);

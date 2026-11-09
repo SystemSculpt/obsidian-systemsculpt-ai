@@ -94,7 +94,7 @@ function madeUp(later: AgentToolPart): boolean {
 /**
  * The generations to draw as placeholders (live turns only) and the ones that
  * failed. A failed call that a later call of the same kind made up for shows
- * nothing; the gated ones (Subscribe, Buy credits) already have their own line.
+ * nothing; the gated ones (See plans, Add credits) already have their own line.
  */
 function editing(args: Readonly<Record<string, unknown>>): boolean {
   return Array.isArray(args.reference_images) && args.reference_images.some(path => typeof path === "string" && path.trim() !== "");
@@ -212,13 +212,15 @@ function pendingStatus(tile: PendingMedia, now: number): Readonly<{ meta: string
   return { meta, fraction };
 }
 
-const ICONS: Readonly<Record<PendingMedia["kind"], string>> = { image: "image", video: "film", workflow: "workflow" };
-const FAILED_ICONS: Readonly<Record<PendingMedia["kind"], string>> = { image: "image-off", video: "video-off", workflow: "workflow" };
 
-/** What to do next: a refused prompt needs new words, anything else another try. */
-function retryHint(error: string): string {
-  if (/\b(safety|flagged|moderation|content policy|not allowed)\b/iu.test(error)) return "Change the prompt and ask again.";
-  return /\blimit reached\b/iu.test(error) ? "Try again once it resets." : "Ask again to retry.";
+/**
+ * What to do next, only when the reason does not say it already: a refused prompt
+ * needs new words and a limit needs its reset. Anything else is the agent's to say.
+ */
+function nextStep(reason: string): string | null {
+  if (/\b(try|change|reword|different words|resets?)\b/iu.test(reason)) return null;
+  if (/\b(safety|flagged|moderation|content policy|not allowed|refused)\b/iu.test(reason)) return "Change the prompt and ask again.";
+  return /\blimit reached\b/iu.test(reason) ? "Try again once it resets." : null;
 }
 
 /** One placeholder or failure tile; its live line and bar update from the block's clock. */
@@ -234,26 +236,29 @@ export function renderPendingMedia(grid: HTMLElement, tile: PendingMedia): HTMLE
   if (tile.state !== "failed") figure.setAttribute("aria-busy", "true");
   const frame = figure.createDiv({ cls: "ss-media-pending-frame" });
   if (tile.state !== "failed") frame.createSpan({ cls: "ss-media-pending-sheen", attr: { "aria-hidden": "true" } });
-  const icon = frame.createSpan({ cls: "ss-media-pending-icon", attr: { "aria-hidden": "true" } });
-  setIcon(icon, tile.state === "failed" ? FAILED_ICONS[tile.kind] : ICONS[tile.kind]);
+  // Only a live Studio run, a slim row, carries a glyph; a picture's frame is its own sign, and a
+  // failure's reason is the whole message (the row above already marks it failed).
+  if (tile.kind === "workflow" && tile.state !== "failed") {
+    setIcon(frame.createSpan({ cls: "ss-media-pending-icon", attr: { "aria-hidden": "true" } }), "workflow");
+  }
   const status = frame.createDiv({ cls: "ss-media-pending-status" });
   if (tile.state === "failed") {
-    // The reason is the headline; what to do next is the one line under it.
     figure.setAttribute("role", "status");
     // The reason wraps and is read whole: the frame has the room, and a cut reason hides what to change.
     const reason = tile.error ?? tile.label;
     status.createSpan({ cls: "ss-media-pending-label", text: reason, attr: { title: reason } });
-    status.createSpan({ cls: "ss-media-pending-meta", text: retryHint(reason) });
+    const next = nextStep(reason);
+    if (next) status.createSpan({ cls: "ss-media-pending-meta", text: next });
   } else {
     status.createSpan({ cls: "ss-media-pending-label", text: tile.label });
     status.createSpan({ cls: "ss-media-pending-meta", attr: { "data-testid": "chat.turn.media.pending.meta" } });
     frame.createSpan({ cls: "ss-media-pending-bar", attr: { "aria-hidden": "true" } }).createSpan({ cls: "ss-media-pending-fill" });
     updatePendingTile(figure, tile, Date.now());
   }
-  if (tile.kind !== "workflow") {
-    const caption = tile.caption ?? "";
+  if (tile.kind !== "workflow" && tile.caption) {
     // The prompt wraps under its frame (up to three lines), so its words are read, not cut at one line.
-    figure.createEl("figcaption", { cls: "systemsculpt-agent-media-caption is-prompt", text: caption, attr: { title: caption } });
+    // A grid's tiles have none: an empty caption would still add its gap under each tile.
+    figure.createEl("figcaption", { cls: "systemsculpt-agent-media-caption is-prompt", text: tile.caption, attr: { title: tile.caption } });
   }
   pendingTiles.set(figure, tile);
   return figure;

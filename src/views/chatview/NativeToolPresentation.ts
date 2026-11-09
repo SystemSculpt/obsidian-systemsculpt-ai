@@ -13,15 +13,18 @@ import {
 } from "./ToolCallPreview";
 import { renderSystemSculptToolCard, systemSculptToolArguments as systemSculptArguments } from "./SystemSculptToolCard";
 import {
+  changeCounts,
   createToolCard,
   inputFields,
   renderFields,
+  renderFileContent,
   renderLinks,
   mediaDisplayName,
   renderMedia,
   renderPathList,
   renderTerminal,
   renderText,
+  savedMediaField,
   toolOutputText,
   type ToolCardField,
   type ToolCardLink,
@@ -43,7 +46,33 @@ export type NativeToolPresentation = Readonly<{
   groupCount: number;
   /** Distinct notes or folders the group counts, so a repeated path counts once. */
   groupItems?: readonly string[];
+  /** The words in the title that name what the call acted on: a note, a query, a command. */
+  target?: LabelTarget;
+  /** A call stopped at the plan or credits gate: what it would have made, and what it needs. */
+  gate?: Readonly<{ subject: string; need: string }>;
 }>;
+
+/** The words a tool label sets apart; a shell command reads in the code font. */
+export type LabelTarget = Readonly<{ text: string; command?: true }>;
+
+/** A Markdown note is named as Obsidian names it, without ".md"; other files keep their extension. */
+export function noteDisplayName(name: string): string {
+  return /.\.md$/iu.test(name) ? name.slice(0, -3) : name;
+}
+
+/** A tool server's tool as people read it ("weather forecast"); a tool already named for its server isn't repeated. */
+/** What a gated SystemSculpt call needs, from its link's words; saved chats keep the older words. */
+export function systemSculptGateNeed(label: string | undefined): string | null {
+  return label === "See plans" || label === "Subscribe" ? "Needs a plan"
+    : label === "Add credits" || label === "Buy credits" ? "Needs credits" : null;
+}
+
+function serverToolName(server: string | undefined, tool: string): string {
+  const name = tool.replace(/[_-]+/gu, " ").trim();
+  // Claude names its connectors "claude_ai_<Service>"; the service is the server people know.
+  const owner = server?.replace(/[_-]+/gu, " ").replace(/^claude ai /iu, "").trim();
+  return owner && !name.toLowerCase().startsWith(owner.toLowerCase()) ? `${owner} ${name}` : name;
+}
 
 type Detail = { label: string; value: string; code?: boolean; path?: string };
 
@@ -102,8 +131,10 @@ function changeSize(input: Record<string, unknown>): string | undefined {
     const parsed = patch ? parseUnifiedDiff(patch) : null;
     return parsed ? [parsed.stats] : [];
   });
-  if (!diffs.length) return undefined;
-  return `+${diffs.reduce((sum, diff) => sum + diff.additions, 0)} −${diffs.reduce((sum, diff) => sum + diff.deletions, 0)}`;
+  const added = diffs.reduce((sum, diff) => sum + diff.additions, 0);
+  const removed = diffs.reduce((sum, diff) => sum + diff.deletions, 0);
+  // A zero says nothing: "+3", "−2" or "+3 −2".
+  return [added ? `+${added}` : "", removed ? `−${removed}` : ""].filter(Boolean).join(" ") || undefined;
 }
 function realReason(part: AgentToolPart, target: string, title: string): string | undefined {
   const input = record(part.input);
@@ -122,15 +153,20 @@ export function nativeToolPresentation(part: AgentToolPart): NativeToolPresentat
   if (!part.native) return null;
   const input = record(part.input);
   const agentName = part.native.agent === "claude" ? "Claude Code" : "Codex";
-  const presentation = (verb: string, completed: string, running: string, target: string, icon: string, groupKind: string, options: { path?: string; approval?: string; count?: number; items?: readonly string[]; meta?: string } = {}): NativeToolPresentation => {
+  // shown: the target as the row names it (a note without ".md"); an approval keeps the file name its card links.
+  // mark: the words in the title that name the target, set apart when the row is drawn.
+  const presentation = (verb: string, completed: string, running: string, target: string, icon: string, groupKind: string, options: { path?: string; approval?: string; count?: number; items?: readonly string[]; meta?: string; shown?: string; mark?: LabelTarget } = {}): NativeToolPresentation => {
     const path = options.path ? resolvedPath(part, options.path) : undefined;
-    const title = `${verb} ${target}`;
+    const approving = part.state === "approval-required" && options.shown !== undefined;
+    const shown = approving ? target : options.shown ?? target;
+    const title = `${verb} ${shown}`;
     const description = realReason(part, path?.displayPath ?? target, title);
     const folder = path?.displayPath.includes("/") ? path.displayPath.slice(0, path.displayPath.lastIndexOf("/")) : undefined;
     const items = options.items ?? (path ? [path.vaultPath ?? path.displayPath] : []);
     return {
-      title, completedTitle: `${completed} ${target}`, runningTitle: `${running} ${target}…`,
+      title, completedTitle: `${completed} ${shown}`, runningTitle: `${running} ${shown}…`,
       approvalTitle: options.approval ?? `${verb.toLowerCase()} ${target}`,
+      ...(options.mark && !approving ? { target: options.mark } : {}),
       ...(description ? { description } : {}),
       ...(path ? { path: path.displayPath, ...(path.vaultPath ? { targetPath: path.vaultPath } : {}) } : {}),
       meta: [options.meta ?? folder, description].filter(Boolean).join(" · ") || undefined,
@@ -156,42 +192,49 @@ export function nativeToolPresentation(part: AgentToolPart): NativeToolPresentat
     // A refused call (no subscription, no credits) finished normally but did nothing.
     const result = part.state === "succeeded" ? decodeSystemSculptToolOutput(part.output?.data) : null;
     const refused = result?.ok === false;
-    // Needing a subscription or credits is an expected gate, not a failure.
-    const gate = refused && result?.link?.label === "Subscribe" ? "Needs a subscription" : refused && result?.link?.label === "Buy credits" ? "Needs credits" : null;
-    if (gate) return presentation(verb, verb, running, `${target} · ${gate}`, icon, `systemsculpt:${systemsculpt}`);
+    // Needing a plan or credits is an expected gate, not a failure.
+    const gate = refused ? systemSculptGateNeed(result?.link?.label) : null;
+    if (gate) return { ...presentation(verb, verb, running, `${target} · ${gate}`, icon, `systemsculpt:${systemsculpt}`), gate: { subject: target, need: gate.replace(/^Needs /u, "") } };
     return presentation(verb, refused ? `Couldn't ${verb.toLowerCase()}` : completed, running, target, icon, `systemsculpt:${systemsculpt}`);
   }
   const rawPath = text(input.file_path) ?? text(input.path);
   const path = rawPath ? displayPath(part, rawPath) : undefined;
   const target = path ? basename(path) : "file";
+  const note = path ? { shown: noteDisplayName(target), mark: { text: noteDisplayName(target) } } : {};
   switch (kind(part)) {
     case "Edit":
-    case "MultiEdit": return presentation("Edit", "Edited", "Editing", target, "file-pen-line", "edit", { path: rawPath });
-    case "Write": return presentation("Create", "Created", "Creating", target, "file-plus-2", "write", { path: rawPath });
-    case "Read": return presentation("Read", "Read", "Reading", target, "file-text", "read", { path: rawPath });
-    case "LS": return presentation("List", "Listed", "Listing", path ?? "vault", "list-tree", "list", { path: rawPath });
+    case "MultiEdit": return presentation("Edit", "Edited", "Editing", target, "file-pen-line", "edit", { path: rawPath, ...note });
+    case "Write": return presentation("Create", "Created", "Creating", target, "file-plus-2", "write", { path: rawPath, ...note });
+    case "Read": return presentation("Read", "Read", "Reading", target, "file-text", "read", { path: rawPath, ...note });
+    // "Listed the Notes folder": a folder named like a note count ("read 2 notes") still reads as a folder.
+    case "LS": return path && path !== "Vault root"
+      ? presentation("List", "Listed", "Listing", `the ${path} folder`, "list-tree", "list", { path: rawPath, mark: { text: path } })
+      : presentation("List", "Listed", "Listing", "the vault", "list-tree", "list", { path: rawPath });
     case "Bash":
     case "commandExecution": {
       if (input.kind === "writeStdin") return presentation("Send input to", "Sent input to", "Sending input to", "a running command", "terminal", "command");
       const cmd = command(input)?.replace(/\s+/gu, " ").trim() ?? "command";
-      return presentation("Run", "Ran", "Running", cmd.length > 40 ? `${cmd.slice(0, 39)}…` : cmd, "terminal", "command", {
-        approval: "run a command", meta: cwdMeta(part, text(input.cwd)),
+      const shown = cmd.length > 40 ? `${cmd.slice(0, 39)}…` : cmd;
+      return presentation("Run", "Ran", "Running", shown, "terminal", "command", {
+        approval: "run a command", meta: cwdMeta(part, text(input.cwd)), ...(command(input) ? { mark: { text: shown, command: true } } : {}),
       });
     }
-    case "WebFetch": return presentation("Read", "Read", "Opening", host(text(input.url)), "globe-2", "web", { approval: `fetch ${host(text(input.url))}` });
+    case "WebFetch": return presentation("Read", "Read", "Opening", host(text(input.url)), "globe-2", "web", { approval: `fetch ${host(text(input.url))}`, mark: { text: host(text(input.url)) } });
     case "WebSearch":
     case "webSearch": {
       // Codex reports opening a page and finding in it as web searches; title them as what happened.
       const action = record(input.action);
       const url = text(action.url);
-      if (url && action.type === "openPage") return presentation("Open", "Opened", "Opening", host(url), "globe-2", "web", { approval: "open a web page" });
-      if (url && action.type === "findInPage") return presentation("Find in", "Found in", "Finding in", host(url), "globe-2", "web", { approval: "search a web page" });
+      if (url && action.type === "openPage") return presentation("Open", "Opened", "Opening", host(url), "globe-2", "web", { approval: "open a web page", mark: { text: host(url) } });
+      if (url && action.type === "findInPage") return presentation("Find in", "Found in", "Finding in", host(url), "globe-2", "web", { approval: "search a web page", mark: { text: host(url) } });
       const query = text(input.query) ?? text(action.query) ?? strings(action.queries)[0];
-      return presentation("Search the web for", "Searched the web for", "Searching the web for", query ? `“${query}”` : "information", "globe-2", "web-search", { approval: "search the web" });
+      return presentation("Search the web for", "Searched the web for", "Searching the web for", query ? `“${query}”` : "information", "globe-2", "web-search", {
+        approval: "search the web", ...(query ? { mark: { text: `“${query}”` } } : {}),
+      });
     }
-    case "Grep": return presentation("Search", "Searched", "Searching", `“${text(input.pattern) ?? "text"}”`, "search", "search");
-    // A name pattern finds files; it is a search, not a folder listing.
-    case "Glob": return presentation("Find", "Found", "Finding", `files matching ${text(input.pattern) ?? "a pattern"}`, "file-search", "search");
+    case "Grep": return presentation("Search", "Searched", "Searching", `“${text(input.pattern) ?? "text"}”`, "search", "search", text(input.pattern) ? { mark: { text: `“${text(input.pattern)}”` } } : {});
+    // A name pattern finds files: a search of names, not of text ("Searched for 2 patterns") nor a folder listing.
+    case "Glob": return presentation("Find", "Found", "Finding", `files matching ${text(input.pattern) ?? "a pattern"}`, "file-search", "find", text(input.pattern) ? { mark: { text: text(input.pattern)! } } : {});
     case "TodoWrite":
     case "plan": {
       const todos = records(input.todos ?? input.plan);
@@ -215,8 +258,11 @@ export function nativeToolPresentation(part: AgentToolPart): NativeToolPresentat
       const size = changeSize(input);
       const sourcePath = source ? displayPath(part, source) : "";
       const folder = sourcePath.includes("/") ? sourcePath.slice(0, sourcePath.lastIndexOf("/")) : undefined;
+      const shown = source ? noteDisplayName(name) : name;
       return { ...presentation(verb, completed, running, destination ? `${name} → ${displayPath(part, destination)}` : name, icon, verb === "Create" ? "write" : verb === "Delete" ? "trash" : "edit", {
         path: source, meta: [folder, size].filter(Boolean).join(" · ") || undefined,
+        shown: destination ? `${shown} → ${noteDisplayName(displayPath(part, destination))}` : shown,
+        ...(source ? { mark: { text: shown } } : {}),
       }), changeSize: size };
     }
     case "imageGeneration": return presentation("Generate", "Generated", "Generating", "image", "image", "image");
@@ -224,7 +270,7 @@ export function nativeToolPresentation(part: AgentToolPart): NativeToolPresentat
       const image = codexImageLocalPath(input.path);
       // Codex names its generated files by internal id, so those read as "image".
       const name = image && !isCodexGeneratedImagePath(image) ? mediaDisplayName(image) : "image";
-      return presentation("View", "Viewed", "Viewing", name, "image", "image-view", image ? { path: image } : {});
+      return presentation("View", "Viewed", "Viewing", name, "image", "image-view", image ? { path: image, mark: { text: name } } : {});
     }
     case "permissions": return presentation("Allow", "Allowed", "Requesting", "additional access", "shield-check", "permission", {
       meta: cwdMeta(part, text(input.cwd)),
@@ -236,16 +282,16 @@ export function nativeToolPresentation(part: AgentToolPart): NativeToolPresentat
     case "Agent": return presentation("Run", "Ran", "Running", "an agent", "bot", "agent");
     case "NotebookEdit": {
       const notebook = text(input.notebook_path);
-      return presentation("Edit", "Edited", "Editing", notebook ? basename(displayPath(part, notebook)) : "notebook", "file-pen-line", "edit", { path: notebook });
+      return presentation("Edit", "Edited", "Editing", notebook ? basename(displayPath(part, notebook)) : "notebook", "file-pen-line", "edit", notebook ? { path: notebook, mark: { text: basename(displayPath(part, notebook)) } } : {});
     }
     case "BashOutput": return presentation("Check", "Checked", "Checking", "a running command", "terminal", "command");
     case "KillShell":
     case "KillBash": return presentation("Stop", "Stopped", "Stopping", "a running command", "terminal", "command");
     case "Skill": return presentation("Use", "Used", "Using", `the ${text(input.skill) ?? text(input.command) ?? ""} skill`.replace(/\s+/gu, " "), "sparkles", "skill");
-    case "SlashCommand": return presentation("Run", "Ran", "Running", text(input.command) ?? "a command", "terminal", "command");
-    case "ToolSearch": return presentation("Find", "Found", "Finding", "tools", "search", "search");
+    case "SlashCommand": return presentation("Run", "Ran", "Running", text(input.command) ?? "a command", "terminal", "command", text(input.command) ? { mark: { text: text(input.command)!, command: true } } : {});
+    case "ToolSearch": return presentation("Find", "Found", "Finding", "tools", "search", "tools");
     case "ListMcpResourcesTool": return presentation("List", "Listed", "Listing", "resources", "list-tree", "list");
-    case "ReadMcpResourceTool": return presentation("Read", "Read", "Reading", text(input.uri) ?? "a resource", "file-text", "read");
+    case "ReadMcpResourceTool": return presentation("Read", "Read", "Reading", text(input.uri) ?? "a resource", "file-text", "read", text(input.uri) ? { mark: { text: text(input.uri)! } } : {});
     case "collabAgentToolCall": {
       const tool = text(input.tool);
       return tool === "spawnAgent" ? presentation("Start", "Started", "Starting", "an agent", "bot", "agent")
@@ -254,11 +300,17 @@ export function nativeToolPresentation(part: AgentToolPart): NativeToolPresentat
             : presentation("Message", "Messaged", "Messaging", "an agent", "bot", "agent");
     }
     case "sleep": return presentation("Wait", "Waited", "Waiting", duration(input.durationMs), "timer", "wait");
-    case "mcpToolCall": return presentation("Use", "Used", "Using", (text(input.tool) ?? part.name).replace(/[_-]+/gu, " "), "plug", `mcp:${part.name}`, { meta: text(input.server) });
+    // A server's tool is named with its server ("Used weather forecast"), and the same tool from Claude
+    // Code or Codex is one group, so the summary can count its calls.
+    case "mcpToolCall": {
+      const name = serverToolName(text(input.server), text(input.tool) ?? part.name);
+      return presentation("Use", "Used", "Using", name, "plug", `mcp:${name}`, { meta: text(input.server), mark: { text: name } });
+    }
     default: {
       const mcp = bridgedToolName(part.name);
-      if (mcp) return presentation("Use", "Used", "Using", mcp.tool, "plug", `mcp:${part.name}`, { meta: mcp.server });
-      return presentation("Use", "Used", "Using", part.name, "wrench", `unknown:${part.name}`);
+      const name = mcp ? serverToolName(mcp.server, mcp.tool) : part.name;
+      if (mcp) return presentation("Use", "Used", "Using", name, "plug", `mcp:${name}`, { meta: mcp.server, mark: { text: name } });
+      return presentation("Use", "Used", "Using", part.name, "wrench", `unknown:${part.name}`, { mark: { text: part.name } });
     }
   }
 }
@@ -335,36 +387,18 @@ function previewDetails(part: AgentToolPart): Detail[] {
   }
   return details;
 }
-function renderOutput(container: HTMLElement, output: unknown): void {
-  const content = toolOutputText(output);
-  if (!content) return;
-  const lines = content.split("\n");
-  const pre = container.createEl("pre", { cls: "ss-native-tool-output", attr: { tabindex: "0" } });
-  pre.createEl("code", { text: lines.length > 20 ? lines.slice(-20).join("\n") : content });
-  if (lines.length > 20) {
-    const all = createUiAction(container, { label: `Show all ${lines.length} lines`, testId: "chat.tool.show-output", size: "small", tooltip: false });
-    all.onclick = () => { pre.firstChild!.textContent = content; all.remove(); };
-  }
-}
-
+/** What the agent wrote or changed, in the one box every edit card uses; the row already names the note. */
 function renderRequestedWriteEdit(container: HTMLElement, part: AgentToolPart): void {
   const input = record(part.input);
   if (part.name === "Write") {
-    container.createEl("p", { cls: "ss-tool-caption", text: "Requested content, not a before-and-after diff." });
-    if (typeof input.content === "string") {
-      if (input.content) renderOutput(container, input.content);
-      else container.createEl("p", { cls: "ss-tool-caption", text: "The requested content is empty." });
-    }
+    if (typeof input.content === "string") renderFileContent(container, input.content);
     return;
   }
   const edits = part.name === "MultiEdit" ? records(input.edits) : [input];
-  if (edits.some(edit => typeof edit.old_string === "string" && typeof edit.new_string === "string")) {
-    container.createEl("p", { cls: "ss-tool-caption", text: "Requested text changes only. Original file line numbers are unavailable." });
-  }
   for (const [index, edit] of edits.entries()) {
     if (typeof edit.old_string !== "string" || typeof edit.new_string !== "string") continue;
-    const body = container.createDiv({ cls: "systemsculpt-inline-diff__body" });
-    if (edits.length > 1) body.createEl("p", { cls: "ss-tool-caption", text: `Requested edit ${index + 1}` });
+    const body = container.createDiv({ cls: "systemsculpt-inline-diff__body ss-tool-edit" });
+    if (edits.length > 1) body.createEl("p", { cls: "ss-tool-caption", text: `Edit ${index + 1}` });
     const context = Math.max(edit.old_string.split("\n").length, edit.new_string.split("\n").length);
     const diff = generateDiff(edit.old_string, edit.new_string, context);
     if (!diff.stats.additions && !diff.stats.deletions) {
@@ -390,11 +424,13 @@ function renderFileChanges(container: HTMLElement, part: AgentToolPart, approval
     const patch = text(change.diff);
     const diff = patch ? parseUnifiedDiff(patch) : null;
     const section = changes.length > 1 ? diffContainer.createEl("details", { cls: "systemsculpt-inline-diff__file" }) : diffContainer;
-    if (changes.length > 1) section.createEl("summary", { text: `${verb} ${fileName}${destination ? ` → ${displayPath(part, destination)}` : ""}${diff ? ` · +${diff.stats.additions} −${diff.stats.deletions}` : ""}` });
+    // Each file is named once: by its row, or by its summary when one change holds several files.
+    if (changes.length > 1) section.createEl("summary", { text: `${verb} ${fileName}${destination ? ` → ${displayPath(part, destination)}` : ""}${diff ? ` · ${changeCounts(diff.stats)}` : ""}` });
     const body = section.createDiv({ cls: "systemsculpt-inline-diff__body" });
-    if (verb === "Create") body.createDiv({ cls: "systemsculpt-inline-diff__new-file", text: "New file" });
+    // Before it happens, a new file is worth saying; afterwards the row says "Created".
+    if (verb === "Create" && approval) body.createDiv({ cls: "systemsculpt-inline-diff__new-file", text: "New file" });
     if (diff && (diff.stats.additions || diff.stats.deletions)) {
-      new DiffViewer({ container: body, diffResult: diff, fileName, maxContextLines: 3, showLineNumbers: true, hideHeader: approval && changes.length === 1, ...(approval ? { maxVisibleLines: 12 } : {}) }).render();
+      new DiffViewer({ container: body, diffResult: diff, fileName, maxContextLines: 3, hideHeader: true, ...(approval ? { maxVisibleLines: 12 } : {}) }).render();
     } else {
       body.createDiv({ cls: "systemsculpt-diff-no-changes-notice", text: "A line-by-line preview is not available. Review Details for the requested file change." });
       if (patch) body.createEl("pre").createEl("code", { text: patch });
@@ -515,13 +551,11 @@ async function renderResolvedNative(app: App, card: HTMLElement, part: AgentTool
     case "Glob":
     case "Grep": {
       const path = text(input.file_path) ?? text(input.path);
-      // The title already names the pattern; the card adds where it looked.
-      const fields: ToolCardField[] = [];
-      if (path && toolKind !== "Read") {
-        const resolved = resolvedPath(part, path);
-        fields.push({ label: "In", value: resolved.displayPath, ...(resolved.vaultPath ? { path: resolved.vaultPath } : {}) });
-      }
-      renderFields(app, card, fields);
+      // The title names the pattern or folder; the card adds where a search looked only when that narrows it.
+      const scope = path && (toolKind === "Glob" || toolKind === "Grep") ? resolvedPath(part, path) : null;
+      const fields: ToolCardField[] = scope && scope.displayPath !== "Vault root"
+        ? [{ label: "In", value: scope.displayPath, ...(scope.vaultPath ? { path: scope.vaultPath } : {}) }]
+        : [];
       if (toolKind === "Read" && path) {
         const resolved = resolvedPath(part, path);
         const lines = output ? output.replace(/\n+$/u, "").split("\n").length : 0;
@@ -532,17 +566,23 @@ async function renderResolvedNative(app: App, card: HTMLElement, part: AgentTool
         // Grep and Glob list one path per line; content matches keep their own lines.
         const lines = output.trim().split("\n");
         const looksLikePaths = lines.every(line => !line.includes(":") || /^[A-Za-z]:[\\/]/u.test(line) || line.startsWith("Found "));
-        if (looksLikePaths) renderPathList(app, card, pathRows(part, lines));
-        else renderTerminal(card, { output });
-      }
+        const rows = looksLikePaths ? pathRows(part, lines) : [];
+        // Found files sit in the value column beside their scope, never under it where they'd read as labels.
+        if (rows.length && fields.length) fields.push({ label: "Found", value: "", list: rows });
+        renderFields(app, card, fields);
+        if (!looksLikePaths) renderTerminal(card, { output });
+        else if (rows.length && fields.length === 0) renderPathList(app, card, rows);
+      } else renderFields(app, card, fields);
       return;
     }
     case "WebSearch":
     case "webSearch": {
       const action = record(input.action);
       const queries = strings(action.queries).length ? strings(action.queries) : [text(input.query) ?? text(action.query)].filter((value): value is string => Boolean(value));
-      // One query is already the title; several are listed.
-      const fields: ToolCardField[] = queries.length > 1 ? [{ label: "Searches", value: queries.join("\n") }] : [];
+      // "Query", as every web search card says it; several are listed one per line.
+      const fields: ToolCardField[] = queries.length > 1
+        ? [{ label: "Queries", value: "", list: queries.map(query => ({ path: query, link: false })) }]
+        : queries.length ? [{ label: "Query", value: queries[0] }] : [];
       const url = text(action.url);
       if (url) fields.push({ label: "Page", value: url, url });
       if (text(action.pattern)) fields.push({ label: "Find", value: text(action.pattern)! });
@@ -568,7 +608,10 @@ async function renderResolvedNative(app: App, card: HTMLElement, part: AgentTool
       // Codex's own image tools: the saved vault copy, like every generated image.
       const image = codexImageMedia(part);
       if (image) renderMedia(app, card, [image.media]);
-      if (toolKind === "imageGeneration" && text(input.revisedPrompt)) renderFields(app, card, [{ label: "Prompt", value: text(input.revisedPrompt)! }]);
+      renderFields(app, card, [
+        ...(toolKind === "imageGeneration" && text(input.revisedPrompt) ? [{ label: "Prompt", value: text(input.revisedPrompt)! }] : []),
+        ...(image ? [savedMediaField([image.media])] : []),
+      ]);
       return;
     }
     case "TodoWrite":
@@ -631,7 +674,7 @@ export async function renderNativeToolPreview(app: App, host: HTMLElement, part:
     if (preview) {
       renderPreparedWriteEditPreviews(container, [preview], { approval: true });
       if (preview.diff.stats.additions || preview.diff.stats.deletions) {
-        host.dataset.changeSize = `+${preview.diff.stats.additions} −${preview.diff.stats.deletions}`;
+        host.dataset.changeSize = changeCounts(preview.diff.stats);
       }
     }
     if (kind(part) === "fileChange") renderFileChanges(container, part, true);

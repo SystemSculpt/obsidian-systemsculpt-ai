@@ -136,7 +136,7 @@ describe("run line (spec 4.1)", () => {
     expect(`${claude.label}${claude.wideSuffix}`).toBe("Accept edits · Auto unavailable");
     expect(claude.icon).toBe("circle-alert");
     expect(claude.ariaLabel).toMatch(/^Mode: Accept edits · Auto unavailable\. Change mode\./);
-    expect(claude.ariaLabel).toContain("Update Claude Code to use Auto.");
+    expect(claude.ariaLabel).toContain("Update Claude\u00a0Code to use Auto.");
     const codex = segments(state({ backend: "codex", codex: { ...state().codex, autoUnavailable: true } }))[1];
     expect(`${codex.label}${codex.wideSuffix}`).toBe("Ask · Auto unavailable");
     expect(codex.ariaLabel).toContain("Update Codex to use Auto.");

@@ -4,7 +4,7 @@ import type {
   AgentPart,
   AgentToolPart,
 } from "../../chat/ChatConversation";
-import { isPlanAccessError, PLAN_REQUIRED_MESSAGE } from "../../utils/errors";
+import { isPlanAccessError } from "../../utils/errors";
 
 const INTERRUPTED_ERROR_CODE =
   /(?:connection|socket|stream|resume|recover|interrupt|transport)/i;
@@ -15,7 +15,10 @@ const NOT_STARTED_ERROR =
 
 export type PresentedAgentError = Readonly<{
   heading: string;
+  /** The whole message, as a banner shows it alone. */
   message: string;
+  /** What a card shows under its heading, when the message would repeat the heading. */
+  body?: string;
   action?: "see-plans" | "monthly" | "update-card" | "add-credits" | "detect" | "sign-in" | "use-hosted";
   details?: string;
   /** Local report id, or a legacy server incident id while capture settles. */
@@ -33,7 +36,7 @@ export function presentAgentErrorMessage(
   // Service messages are not a product copy contract. Keep implementation,
   // transport, and upstream identities behind the first-party boundary.
   return interrupted
-    ? "Retry this message to continue."
+    ? "Check you're online, then retry."
     : "SystemSculpt could not complete the response.";
 }
 
@@ -48,16 +51,25 @@ export function presentAgentError(
   if (nativeAgent) {
     const name = nativeAgent === "claude" ? "Claude Code" : "Codex";
     if (error.code === `local_${nativeAgent}_usage_limit`) {
-      return { heading: `${name} usage limit reached`, message: error.message, action: "use-hosted" };
+      // The title already says the limit was reached: the body adds only when it resets.
+      const reset = /\bresets?\s+([^.\n·]+)/iu.exec(error.message)?.[1]
+        ?.replace(/\s*\([A-Za-z_]+\/[A-Za-z_/+-]+\)\s*$/u, "").trim();
+      return {
+        heading: `${name} usage limit reached`,
+        message: reset ? `It resets ${reset}.` : "Try again once it resets.",
+        action: "use-hosted",
+      };
     }
+    // Both things to type are commands, set alike; Retry is the button that sends again.
+    const then = retryable ? "Then retry." : "Then send your message again.";
     const login = nativeAgent === "claude"
-      ? "Open a terminal, run `claude` and type /login. Then send your message again."
-      : "Open a terminal and run `codex login`. Then send your message again.";
+      ? `In a terminal, run \`claude\` and type \`/login\`. ${then}`
+      : `In a terminal, run \`codex login\`. ${then}`;
     if (/not installed|not on PATH|executable.*not found|ENOENT/i.test(error.message)) {
       return {
         heading: `${name} isn't installed on this computer`,
         message: nativeAgent === "claude"
-          ? "Install Claude Code, then run `claude` in a terminal and type /login. Then choose Detect again."
+          ? "Install Claude Code, then run `claude` in a terminal and type `/login`. Then choose Detect again."
           : "Install Codex, then run `codex login` in a terminal. Then choose Detect again.",
         action: "detect",
       };
@@ -65,8 +77,10 @@ export function presentAgentError(
     if (/not (?:signed|logged) in|authentication[_ ]failed|requires? (?:authentication|login)|please (?:sign|log) in/i.test(error.message)) {
       return { heading: `${name} isn't signed in`, message: login, action: "sign-in" };
     }
+    // A run that never began (the CLI exited or its thread failed to start) did not stop partway.
+    const neverStarted = /\b(?:start(?:up)? failed|failed to start|could ?n[o']t start|spawn)\b/iu.test(error.message);
     return {
-      heading: `${name} stopped before finishing`,
+      heading: neverStarted ? `${name} couldn't start` : `${name} stopped before finishing`,
       message: `Retry this message. If it keeps failing, run \`${nativeAgent}\` in a terminal to check it works.`,
       details: error.message,
     };
@@ -75,6 +89,7 @@ export function presentAgentError(
     return {
       heading: "Payment failed",
       message: "Your last payment failed. Update your card to get your monthly credits.",
+      body: "Update your card to get your monthly credits.",
       // Fix the card on the existing plan, never a second checkout (T-5348).
       action: "update-card",
     };
@@ -109,7 +124,7 @@ export function presentAgentError(
   }
   // A missing or rejected plan is a way in, not a failure: say what is needed (no license detail).
   if (isPlanAccessError(error)) {
-    return { heading: "SystemSculpt plan needed", message: PLAN_REQUIRED_MESSAGE, action: "see-plans" };
+    return { heading: "SystemSculpt plan needed", message: "Choose a plan to keep chatting.", action: "see-plans" };
   }
   const interrupted = retryable
     && !NOT_STARTED_ERROR.test(`${error.code} ${error.message}`)

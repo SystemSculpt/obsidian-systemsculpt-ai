@@ -23,19 +23,19 @@ describe("AgentConversationPresentation product-copy boundary", () => {
       code: "agent_connection_closed",
       message: "The agent connection ticket is invalid.",
       heading: "Response interrupted",
-      visibleMessage: "Retry this message to continue.",
+      visibleMessage: "Check you're online, then retry.",
     },
     {
       code: "agent_stream_error",
       message: "The WebSocket closed unexpectedly.",
       heading: "Response interrupted",
-      visibleMessage: "Retry this message to continue.",
+      visibleMessage: "Check you're online, then retry.",
     },
     {
       code: "response_interrupted",
       message: "Stream error",
       heading: "Response interrupted",
-      visibleMessage: "Retry this message to continue.",
+      visibleMessage: "Check you're online, then retry.",
     },
     {
       code: "agent_bootstrap_failed",
@@ -123,7 +123,7 @@ describe("AgentConversationPresentation product-copy boundary", () => {
       retryable: true,
     }, true)).toEqual({
       heading: "Response interrupted",
-      message: "Retry this message to continue.",
+      message: "Check you're online, then retry.",
       reportId: "incident_0123456789abcdef0123456789abcdef",
     });
   });
@@ -158,7 +158,7 @@ describe("AgentConversationPresentation product-copy boundary", () => {
         reportId: "report_0123456789abcdef0123456789abcdef",
       }, false, showPlanOffer)).toEqual({
         heading: "SystemSculpt plan needed",
-        message: "Start free with 500 credits, or choose a plan.",
+        message: "Choose a plan to keep chatting.",
         action: "see-plans",
       });
     }
@@ -209,6 +209,7 @@ describe("AgentConversationPresentation product-copy boundary", () => {
       expect(presentAgentError({ code, message: "Remote billing detail." }, false, true, true)).toEqual({
         heading: "Payment failed",
         message: "Your last payment failed. Update your card to get your monthly credits.",
+        body: "Update your card to get your monthly credits.",
         action: "update-card",
       });
     },
@@ -218,11 +219,11 @@ describe("AgentConversationPresentation product-copy boundary", () => {
     expect(presentAgentErrorMessage(
       "Agent connection closed: WebSocket closed with code 4001",
       true,
-    )).toBe("Retry this message to continue.");
+    )).toBe("Check you're online, then retry.");
     expect(presentAgentErrorMessage(
       "Connection lost.",
       true,
-    )).toBe("Retry this message to continue.");
+    )).toBe("Check you're online, then retry.");
     expect(presentAgentErrorMessage(
       "The cf_agent protocol frame was invalid.",
       false,

@@ -18,12 +18,20 @@ export type ToolCardField = Readonly<{
   /** http(s) address: the value opens in the browser. */
   url?: string;
   mono?: boolean;
+  /** Several values (files, changes, queries), one per line in the value column. */
+  list?: readonly ToolCardPathRow[];
+  /** The saved files' names: shown only while the reply below shows the media itself. */
+  saved?: boolean;
 }>;
+
+/** One row of a list: a vault path that opens (link false: plain text), with an optional muted note. */
+export type ToolCardPathRow = Readonly<{ path: string; text?: string; note?: string; link?: boolean }>;
 
 export type ToolCardMedia = Readonly<{ kind: "image" | "video"; path: string; label?: string }>;
 
 export type ToolCardNotice = Readonly<{
-  tone: "danger" | "warning" | "info";
+  /** gate: a plan or credits stop, the calm lock the whole-turn gate uses. */
+  tone: "danger" | "warning" | "info" | "gate";
   text: string;
   action?: Readonly<{ label: string; url: string }>;
 }>;
@@ -34,7 +42,18 @@ const NOTICE_ICONS: Readonly<Record<ToolCardNotice["tone"], string>> = {
   danger: "circle-alert",
   warning: "circle-alert",
   info: "info",
+  gate: "lock",
 };
+
+/** "+3 −1", "+1", "−2": a change's added and removed lines, without a count of zero. */
+export function changeCounts(stats: Readonly<{ additions: number; deletions: number }>): string {
+  return [stats.additions ? `+${stats.additions}` : "", stats.deletions ? `−${stats.deletions}` : ""].filter(Boolean).join(" ") || "No changes";
+}
+
+/** A note as Obsidian names it, without ".md" ("Notes/Garden"); other files keep their extension. */
+export function notePathText(path: string): string {
+  return /.\.md$/iu.test(path) ? path.slice(0, -3) : path;
+}
 
 function record(value: unknown): RecordValue {
   return value && typeof value === "object" && !Array.isArray(value) ? value as RecordValue : {};
@@ -51,11 +70,15 @@ export function openVaultPath(app: App, path: string, event?: MouseEvent): void 
   void app.workspace.openLinkText(path, "", false);
 }
 
-export function vaultLink(app: App, parent: HTMLElement, path: string, text = path): HTMLAnchorElement {
-  const exists = app.vault.getAbstractFileByPath(path) !== null;
+/**
+ * A vault file that opens on click. A file that isn't there (not found, never
+ * written, since deleted) is plain text: opening it would create an empty note.
+ */
+export function vaultLink(app: App, parent: HTMLElement, path: string, text = notePathText(path)): HTMLElement {
+  if (app.vault.getAbstractFileByPath(path) === null) return parent.createSpan({ cls: "ss-tool-missing-path", text });
   const link = parent.createEl("a", {
     text,
-    cls: `internal-link${exists ? "" : " is-unresolved"}`,
+    cls: "internal-link",
     attr: { href: path, "data-href": path, title: path },
   });
   link.onclick = event => openVaultPath(app, path, event);
@@ -107,11 +130,14 @@ export function externalLink(parent: HTMLElement, url: string, text = url): HTML
 export function renderFields(app: App, card: HTMLElement, fields: readonly ToolCardField[]): void {
   if (!fields.length) return;
   const list = card.createEl("dl", { cls: "ss-tool-fields" });
+  // "Saved" rows start hidden (syncToolMediaWithReply shows them); a grid of only those takes no room until then.
+  list.toggleClass("is-empty", fields.every(field => field.saved));
   for (const field of fields) {
-    const row = list.createDiv({ cls: "ss-tool-field" });
+    const row = list.createDiv({ cls: `ss-tool-field${field.saved ? " is-saved" : ""}` });
     row.createEl("dt", { text: field.label });
     const value = row.createEl("dd");
-    if (field.path) vaultLink(app, value, field.path, field.value);
+    if (field.list?.length) renderPathList(app, value, field.list);
+    else if (field.path) vaultLink(app, value, field.path, field.value);
     else if (field.url) externalLink(value, field.url, field.value);
     else if (field.mono) value.createEl("code", { text: field.value });
     else value.setText(field.value);
@@ -122,7 +148,7 @@ export function renderFields(app: App, card: HTMLElement, fields: readonly ToolC
 export function renderPathList(
   app: App,
   card: HTMLElement,
-  rows: readonly Readonly<{ path: string; text?: string; note?: string; link?: boolean }>[],
+  rows: readonly ToolCardPathRow[],
   limit = 50,
 ): void {
   if (!rows.length) return;
@@ -131,7 +157,7 @@ export function renderPathList(
     for (const row of entries) {
       const item = list.createEl("li");
       if (row.link === false) item.createSpan({ cls: "ss-tool-path", text: row.text ?? row.path });
-      else vaultLink(app, item, row.path, row.text ?? row.path).addClass("ss-tool-path");
+      else vaultLink(app, item, row.path, row.text ?? notePathText(row.path)).addClass("ss-tool-path");
       if (row.note) item.createSpan({ cls: "ss-tool-path-note", text: ` ·\u00a0${row.note}` });
     }
   };
@@ -196,6 +222,22 @@ export function renderText(card: HTMLElement, text: string, lineLimit = 8): void
   }
 }
 
+/** A file's content as written, from its first line: the box every card shows file text in. */
+export function renderFileContent(card: HTMLElement, content: string, lineLimit = 20): void {
+  if (!content) {
+    card.createEl("p", { cls: "ss-tool-caption", text: "Empty" });
+    return;
+  }
+  const lines = content.replace(/\n$/u, "").split("\n");
+  const pre = card.createEl("pre", { cls: "ss-tool-file-text", attr: { tabindex: "0" } });
+  const code = pre.createEl("code", { text: lines.slice(0, lineLimit).join("\n") });
+  if (lines.length > lineLimit) {
+    const all = createUiAction(card, { label: `Show all ${lines.length} lines`, testId: "chat.tool.show-output", size: "small", tooltip: false });
+    all.addClass("ss-tool-more");
+    all.onclick = () => { code.textContent = content; all.remove(); };
+  }
+}
+
 /** One calm line for errors, gates and partial results: an icon, plain words and at most one action. */
 export function renderNotice(card: HTMLElement, notice: ToolCardNotice): HTMLElement {
   const line = card.createDiv({ cls: `ss-tool-notice is-${notice.tone}`, attr: { "data-testid": "chat.tool.notice" } });
@@ -237,19 +279,38 @@ export function syncToolMediaWithReply(turnBody: Element | null): void {
   } catch { /* An unreadable list hides nothing. */ }
   for (const media of Array.from(turnBody.querySelectorAll<HTMLElement>(".ss-tool-media"))) {
     const paths = Array.from(media.querySelectorAll("[data-media-path]"), tile => tile.getAttribute("data-media-path"));
-    media.classList.toggle("is-shown-in-reply", paths.length > 0 && paths.every(path => below.has(path)));
+    const shown = paths.length > 0 && paths.every(path => below.has(path));
+    media.classList.toggle("is-shown-in-reply", shown);
+    // The card's "Saved" row names the files in the thumbnails' place.
+    for (const field of Array.from(media.parentElement?.querySelectorAll(".ss-tool-field.is-saved") ?? [])) {
+      field.classList.toggle("is-shown", shown);
+      const grid = field.parentElement;
+      if (grid) grid.classList.toggle("is-empty", Array.from(grid.children).every(row => row.matches(".is-saved:not(.is-shown)")));
+    }
   }
+  // A failed generation's reason is its slim row under the call; the card doesn't say it again.
+  const failed = new Set(Array.from(
+    turnBody.querySelectorAll(":scope > .systemsculpt-agent-turn-media [data-pending-id$=':failed']"),
+    tile => (tile.getAttribute("data-pending-id") ?? "").slice(0, -":failed".length),
+  ));
+  for (const notice of Array.from(turnBody.querySelectorAll<HTMLElement>(".ss-tool-notice[data-media-failure]"))) {
+    notice.classList.toggle("is-shown-in-reply", failed.has(notice.getAttribute("data-media-failure") ?? ""));
+  }
+}
+
+/** The saved files' names, one per line: the card shows them while the reply shows the media itself. */
+export function savedMediaField(media: readonly ToolCardMedia[]): ToolCardField {
+  return {
+    label: "Saved", value: "", saved: true,
+    list: media.map(item => ({ path: item.path, text: mediaDisplayName(item.path, item.label) })),
+  };
 }
 
 /** Thumbnails of generated or viewed media; each opens its vault file. */
 export function renderMedia(app: App, card: HTMLElement, media: readonly ToolCardMedia[]): void {
   if (!media.length) return;
+  // When the reply below shows the same files, the strip hides and the card's "Saved" field (savedMediaField) shows.
   const strip = card.createDiv({ cls: "ss-tool-media", attr: { "data-testid": "chat.tool.media" } });
-  // Shown instead of the thumbnails when the reply below already shows the same files.
-  const files = card.createEl("dl", { cls: "ss-tool-fields ss-tool-media-files" }).createDiv({ cls: "ss-tool-field" });
-  files.createEl("dt", { text: "Saved" });
-  const links = files.createEl("dd");
-  for (const item of media) vaultLink(app, links, item.path, mediaDisplayName(item.path, item.label));
   if (media.length > 1) {
     strip.addClass("is-multiple");
     strip.setCssProps({ "--ss-tool-media-columns": String(Math.min(media.length, 4)) });
@@ -285,9 +346,38 @@ export function renderRawDetails(card: HTMLElement, payload: () => unknown): voi
   const chevron = summary.createSpan({ cls: "systemsculpt-agent-tool-raw-chevron", attr: { "aria-hidden": "true" } });
   setIcon(chevron, "chevron-right");
   summary.appendText("Details");
-  const code = raw.createEl("pre", { attr: { tabindex: "0" } }).createEl("code");
+  const pre = raw.createEl("pre");
+  // The code scrolls inside the frame's padding, so the frame never cuts a line and keeps its inset at both ends.
+  const code = pre.createEl("code", { attr: { tabindex: "0" } });
+  // A block taller than its frame fades at the bottom until scrolled to its end, so a cut line reads as "more below".
+  const syncOverflow = (): void => {
+    const overflowing = code.scrollHeight > code.clientHeight + 1;
+    code.toggleClass("is-overflowing", overflowing);
+    code.toggleClass("is-at-end", !overflowing || code.scrollTop + code.clientHeight >= code.scrollHeight - 1);
+  };
+  code.addEventListener("scroll", syncOverflow, { passive: true });
+  // Measured again once it is laid out: opened inside a closed fold, it has no size yet.
+  const view = pre.ownerDocument.defaultView as (Window & { ResizeObserver?: typeof ResizeObserver }) | null;
+  if (view?.ResizeObserver) new view.ResizeObserver(syncOverflow).observe(code);
   raw.addEventListener("toggle", () => {
-    if (raw.open && !code.hasChildNodes()) code.setText(JSON.stringify(payload(), null, 2));
+    if (raw.open && !code.hasChildNodes()) renderJsonLines(code, JSON.stringify(payload(), null, 2));
+    if (raw.open) syncOverflow();
+  });
+}
+
+/**
+ * Indented text (JSON) one line per block, each keeping its leading spaces. A
+ * long line wraps under its own start, two characters in, instead of falling
+ * back to the left edge and breaking the tree. Copying keeps lines and spaces.
+ */
+export function renderJsonLines(code: HTMLElement, text: string): void {
+  code.empty();
+  code.addClass("ss-json-lines");
+  const lines = text.split("\n");
+  lines.forEach((line, index) => {
+    const indent = /^ */u.exec(line)?.[0].length ?? 0;
+    const block = code.createSpan({ cls: "ss-json-line", text: index < lines.length - 1 ? `${line}\n` : line });
+    if (indent) block.setCssProps({ "--ss-json-indent": String(indent) });
   });
 }
 

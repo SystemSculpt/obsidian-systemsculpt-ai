@@ -19,8 +19,6 @@ import {
   formatAgentActivityDuration,
   formatAgentWorkingDuration,
   finalAgentAnswerPartIds,
-  groupAdjacentAgentActivity,
-  splitPreviousAgentActivity,
   summarizeAgentActivity,
   setActivityLabelText,
   unbreakableActivityLabel,
@@ -30,7 +28,8 @@ import { renderTurnMedia } from "./TurnMedia";
 import { codexImageVaultPath } from "../../services/codex/CodexImages";
 import { openExternalUrl } from "../../utils/externalUrl";
 import { enhanceMarkdownCodeBlocks } from "./MarkdownCodeBlocks";
-import { embedTarget, enhanceMarkdownEmbeds } from "./MarkdownEmbeds";
+import { embedTarget, enhanceMarkdownEmbeds, markUnresolvedLinks } from "./MarkdownEmbeds";
+import { fitRequestBubbles } from "./RequestBubbleFit";
 import {
   presentAgentError,
   type AgentConversationPresentation,
@@ -59,6 +58,7 @@ import { AgentApprovalCards, type ApprovalAnswer } from "./AgentApprovalCards";
 import { MessagePartNormalizer } from "./utils/MessagePartNormalizer";
 
 import { AgentToolRenderer } from "./AgentToolRenderer";
+import { gatedSystemSculptTurn, presentAgentTool, presentToolLineMeta, refusedSystemSculptCall } from "./AgentToolPresentation";
 import {
   classifyHistoricalTurn,
   durableFailedReceipt,
@@ -184,7 +184,6 @@ function sameHistoricalRow(
 type HistoricalDisclosureSnapshot = Readonly<{
   workedOpen: boolean;
   hydrateWorked: boolean;
-  overflowOpen: ReadonlyMap<string, boolean>;
   reasoningOpen: ReadonlyMap<string, boolean>;
   toolOpen: ReadonlyMap<string, boolean>;
 }>;
@@ -215,6 +214,16 @@ let cachedMessageTimeFormat: Intl.DateTimeFormat | null = null;
 function messageTimeFormat(): Intl.DateTimeFormat {
   cachedMessageTimeFormat ??= new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
   return cachedMessageTimeFormat;
+}
+
+/**
+ * The fold's hairline stops at the edge of a card its body ends on: CSS reads this class
+ * (lint-css bans :has()), and the space under that card moves outside the body.
+ */
+function syncFoldEnd(body: HTMLElement): void {
+  body.toggleClass("is-card-last", Boolean(body.querySelector(
+    ":scope > .systemsculpt-agent-part:last-child > details.systemsculpt-agent-tool[open]",
+  )));
 }
 
 export class AgentConversationRenderer extends Component {
@@ -296,6 +305,13 @@ export class AgentConversationRenderer extends Component {
     this.registerDomEvent(this.element, "click", openSourceLink);
     this.registerDomEvent(this.element, "auxclick", openSourceLink);
     this.historyRoot = this.element.createDiv({ cls: "systemsculpt-agent-history" });
+    // Request bubbles hug their longest line; a new chat width fits them again.
+    const BubbleObserver = (getSurfaceOwnerWindow(this.element) as Window & { ResizeObserver?: typeof ResizeObserver }).ResizeObserver;
+    if (typeof BubbleObserver === "function") {
+      const bubbleObserver = new BubbleObserver(() => fitRequestBubbles(this.historyRoot));
+      bubbleObserver.observe(this.historyRoot);
+      this.register(() => bubbleObserver.disconnect());
+    }
     this.activeRoot = this.element.createDiv({ cls: "systemsculpt-agent-active-run" });
     this.inlineEditor = new InlineMessageEditor(this.element, {
       onResubmitMessage: options.onResubmitMessage,
@@ -313,6 +329,11 @@ export class AgentConversationRenderer extends Component {
         );
         this.enhanceCodeBlocks(staging);
         enhanceMarkdownEmbeds(staging);
+        const cache = this.options.app.metadataCache;
+        if (typeof cache?.getFirstLinkpathDest === "function") {
+          markUnresolvedLinks(staging, (linkpath) =>
+            Boolean(cache.getFirstLinkpathDest(codexImageVaultPath(linkpath) ?? linkpath, this.options.sourcePath())));
+        }
       },
     });
     this.addChild(this.liveMarkdown);
@@ -343,16 +364,9 @@ export class AgentConversationRenderer extends Component {
       untrackDisclosures: (target) => this.untrackIncidentDisclosuresWithin(target),
     });
     this.historyHydration = new ConversationHistoryHydration({
-      renderPart: (parent, part) => this.renderHistoricalPart(parent, part),
       renderTimeline: (parent, parts, isCurrent) => this.renderHistoricalTimeline(parent, parts, isCurrent),
-      commitOverflow: (element, nodes) => {
-        const overflow = this.activityOverflowStates.get(element);
-        if (!overflow) return false;
-        overflow.previousNodes = nodes;
-        this.applyActivityOverflowLayout(element);
-        return true;
-      },
       forgetMarkdown: (target) => this.forgetMarkdown(target),
+      activityHydrated: (element) => this.settleFold(element),
       beginLayoutMutation: (control, target) => this.options.beginLayoutMutation?.(control, target),
     });
     this.active = new ActiveConversationRenderer(this.activeRoot, {
@@ -374,6 +388,7 @@ export class AgentConversationRenderer extends Component {
       addTurnHeading: (row, user) => this.addTurnHeading(row, user),
       createCompletedActivity: (parent, elapsed, cancelled) => this.createCompletedActivity(parent, elapsed, cancelled),
       setCompletedActivitySummary: (element, parts, elapsed, cancelled) => this.setCompletedActivitySummary(element, parts, elapsed, cancelled),
+      settleFold: (fold) => this.settleFold(fold),
       workedLabel: (elapsed, cancelled) => this.workedLabel(elapsed, cancelled),
       createActivityOverflow: (parent, count, key) => this.createActivityOverflow(parent, count, key),
       updateActivityOverflow: (element, count) => this.updateActivityOverflow(element, count),
@@ -825,6 +840,7 @@ export class AgentConversationRenderer extends Component {
     }
     reconcileConversationChildren(this.historyRoot, desiredRows);
     for (const commitHandoff of handoffs) commitHandoff();
+    fitRequestBubbles(this.historyRoot);
     const historicalFocus = historicalInteraction?.focusElement;
     const restoredHistoricalFocus = historicalFocus?.isConnected
       ? historicalFocus
@@ -964,6 +980,8 @@ export class AgentConversationRenderer extends Component {
         cls: "systemsculpt-agent-part is-text",
         attr: { "data-testid": "chat.part", "data-kind": "text", "data-part-key": part.id },
       });
+      // The Sources list a web answer appends reads as its footnote, not a second headline.
+      node.classList.toggle("is-sources", isNativeSourcesPart(part));
       await this.renderMarkdown(content.markdown, node);
     }
     if (content.attachments.length > 0) this.renderMessageAttachments(parent, content.attachments);
@@ -985,6 +1003,7 @@ export class AgentConversationRenderer extends Component {
       this.setCompletedActivitySummary(activity.element, workParts.flatMap(part => historicalAgentPart(part) ?? []), elapsedMs, cancelled);
       if (workParts.some((part) => this.hasActiveHistoricalPart(part))) {
         await this.renderHistoricalTimeline(activity.body, workParts);
+        this.settleFold(activity.element);
       } else {
         this.historyHydration.deferActivity(activity, workParts);
       }
@@ -1005,46 +1024,12 @@ export class AgentConversationRenderer extends Component {
     parts: readonly MessagePart[],
     isCurrent: () => boolean = () => true,
   ): Promise<boolean> {
-    const timeline = groupAdjacentAgentActivity(
-      parts,
-      (part) => part.type === "reasoning" || part.type === "tool_call",
-    );
-    for (const entry of timeline) {
+    // Only a settled fold's body comes here: the fold is already its rows' summary, so
+    // they sit flat inside it, with no second group header.
+    for (const part of parts) {
       if (!isCurrent()) return false;
-      if (entry.kind === "item") {
-        await this.renderHistoricalPart(parent, entry.item);
-        if (!isCurrent()) return false;
-        continue;
-      }
-      const split = splitPreviousAgentActivity(entry.items);
-      if (split.previous.length > 0) {
-        if (split.latest) {
-          await this.renderHistoricalPart(parent, split.latest);
-          if (!isCurrent()) return false;
-        }
-        const latestNode = parent.lastElementChild as HTMLElement | null;
-        const overflow = this.createActivityOverflow(
-          parent,
-          split.previous.length,
-          `overflow:${historicalPartKey(split.previous[0])}`,
-        );
-        const summary = summarizeAgentActivity(entry.items.flatMap(part => historicalAgentPart(part) ?? []));
-        overflow.element.dataset.activitySummary = summary.label;
-        overflow.element.dataset.failedCount = String(summary.failedCount);
-        // A finished turn folds completely; only a running one keeps its newest line.
-        overflow.element.dataset.activitySettled = "";
-        this.setActivityOverflowItems(
-          overflow.element,
-          latestNode,
-          [],
-        );
-        this.historyHydration.deferOverflow(overflow.element, split.previous);
-        continue;
-      }
-      if (split.latest) {
-        await this.renderHistoricalPart(parent, split.latest);
-        if (!isCurrent()) return false;
-      }
+      await this.renderHistoricalPart(parent, part);
+      if (!isCurrent()) return false;
     }
     return true;
   }
@@ -1100,9 +1085,10 @@ export class AgentConversationRenderer extends Component {
     this.trackIncidentDisclosure(element, "activity", true, false);
     element.addEventListener("toggle", () => {
       header.setAttribute("aria-expanded", String(element.open));
-      this.syncCompletedActivityLabel(element);
       this.updateIncidentDisclosure(element, true, element.open);
     });
+    // Toggle does not bubble: the capture phase sees every card the body holds open or close.
+    body.addEventListener("toggle", () => syncFoldEnd(body), true);
     return { element, summary: header, body };
   }
 
@@ -1116,27 +1102,48 @@ export class AgentConversationRenderer extends Component {
     const header = element.querySelector<HTMLElement>(":scope > summary")!;
     const duration = formatAgentActivityDuration(elapsedMs);
     const label = cancelled ? this.workedLabel(elapsedMs, true) : summary.label;
-    // Keep the action summary while closed; once open, name the whole-turn
-    // container instead of repeating the activity labels below it.
-    header.dataset.closedLabel = unbreakableActivityLabel(label);
-    header.dataset.openLabel = cancelled ? header.dataset.closedLabel : "Activity";
-    this.syncCompletedActivityLabel(element);
+    // One call, with at most the words said before it (no thinking): the fold is that call's row.
+    // It keeps the call's name and meta, and opening it shows those words and the call's card,
+    // not a second row naming the call again.
+    const tools = parts.filter((part): part is AgentToolPart => part.kind === "tool");
+    const single = !cancelled && tools.length === 1 && parts.every((part) =>
+      part.kind === "tool" || part.kind === "text");
+    element.toggleAttribute("data-single-tool", single);
+    // The line keeps its words when it opens: the person clicked that summary, and the
+    // rows under it are its detail, not a reason to rename it.
+    const target = header.querySelector<HTMLElement>(".systemsculpt-agent-activity-label");
+    if (target) setActivityLabelText(target, unbreakableActivityLabel(label));
     let icon = header.querySelector<HTMLElement>(".systemsculpt-agent-activity-state");
     if (!icon) {
       icon = header.createSpan({ cls: "systemsculpt-agent-activity-state", attr: { "aria-hidden": "true" } });
       header.prepend(icon);
     }
-    setIcon(icon, summary.failedCount ? "circle-alert" : summary.gated ? "lock" : summary.refused ? "circle-alert" : cancelled ? "square" : summary.denied ? "ban" : "check");
+    // A lone call's fold is its row: the row's own state icon and colour, so one failure
+    // never shows one glyph closed and another open.
+    const lone = single ? presentAgentTool(tools[0]) : null;
+    setIcon(icon, lone ? lone.icon : summary.failedCount ? "circle-alert" : summary.gated ? "lock" : summary.refused ? "circle-alert" : cancelled ? "circle-stop" : summary.denied ? "ban" : "check");
+    if (lone) {
+      icon.dataset.toolState = gatedSystemSculptTurn(tools[0]) ? "gated"
+        : refusedSystemSculptCall(tools[0]) ? "refused" : lone.displayState;
+    } else delete icon.dataset.toolState;
     let meta = header.querySelector<HTMLElement>(".systemsculpt-agent-activity-duration");
     if (!meta) meta = header.createSpan({ cls: "systemsculpt-agent-activity-duration" });
-    meta.setText(!cancelled && duration ? duration : "");
+    // A lone call shows its own meta, like its row would; a bare time beside a video reads as its length.
+    meta.setText(lone ? presentToolLineMeta(lone) ?? "" : !cancelled && duration ? duration : "");
   }
 
-  private syncCompletedActivityLabel(element: HTMLDetailsElement): void {
-    const header = element.querySelector<HTMLElement>(":scope > summary");
-    const label = element.open ? header?.dataset.openLabel : header?.dataset.closedLabel;
-    const target = header?.querySelector<HTMLElement>(".systemsculpt-agent-activity-label");
-    if (label && target) setActivityLabelText(target, label);
+  /**
+   * A filled fold settles: one that holds one call opens straight to that call's card (its row
+   * would only repeat the fold), and its body marks whether it ends on an open card.
+   */
+  private settleFold(fold: HTMLDetailsElement): void {
+    const body = fold.querySelector<HTMLElement>(":scope > .systemsculpt-agent-activity-body");
+    if (body) syncFoldEnd(body);
+    if (!fold.hasAttribute("data-single-tool")) return;
+    const card = fold.querySelector<HTMLDetailsElement>(
+      ":scope > .systemsculpt-agent-activity-body > .systemsculpt-agent-part.is-tool > details.systemsculpt-agent-tool",
+    );
+    if (card && !card.open) card.open = true;
   }
 
   private createActivityOverflow(
@@ -1195,14 +1202,7 @@ export class AgentConversationRenderer extends Component {
       element.setAttribute("aria-expanded", String(expanded));
       this.updateIncidentDisclosure(element, true, expanded);
       this.applyActivityOverflowLayout(element);
-      const hydration = expanded
-        ? this.historyHydration.hydrate(element)
-        : null;
-      if (!hydration) {
-        finishLayoutMutation?.();
-        return;
-      }
-      void hydration.catch(() => undefined).finally(() => finishLayoutMutation?.());
+      finishLayoutMutation?.();
     };
     this.updateActivityOverflow(element, hiddenCount);
     return { element };
@@ -1246,7 +1246,17 @@ export class AgentConversationRenderer extends Component {
       state.latestNode,
     )));
     setActivityLabelText(state.label, label);
-    if (Number(element.dataset.failedCount) > 0) {
+    // The header speaks for the steps above the latest row, so it wears their state, not the latest's.
+    const summaryIcon = element.dataset.summaryIcon;
+    if (summaryIcon) {
+      if (state.icon.dataset.iconName !== summaryIcon) {
+        setIcon(state.icon, summaryIcon);
+        state.icon.dataset.iconName = summaryIcon;
+      }
+      // It spins only while one of those steps' own rows does, so a frozen turn freezes it too.
+      state.icon.classList.toggle("is-animated", summaryIcon === "loader-circle" && state.previousNodes.some((node) =>
+        node.querySelector(".systemsculpt-agent-tool-icon.is-animated, .systemsculpt-agent-reasoning-icon.is-animated") !== null));
+    } else if (Number(element.dataset.failedCount) > 0) {
       setIcon(state.icon, "circle-alert");
       state.icon.dataset.iconName = "circle-alert";
       state.icon.classList.remove("is-animated");
@@ -1260,12 +1270,10 @@ export class AgentConversationRenderer extends Component {
     const visiblePrevious = expanded
       ? state.previousNodes
       : state.previousNodes.filter((node) => awaitingApproval.includes(node));
-    const desired = state.latestNode
-      ? [...visiblePrevious, state.latestNode]
-      : [...visiblePrevious];
-    reconcileConversationChildren(state.body, desired);
-    const showsLatest = Boolean(state.latestNode) && element.dataset.activitySettled === undefined;
-    state.body.toggleAttribute("hidden", !expanded && awaitingApproval.length === 0 && !showsLatest);
+    // The latest step stays a row of its own under the drawer, level with the header that names
+    // the steps before it; the drawer holds only those earlier steps.
+    reconcileConversationChildren(state.body, visiblePrevious);
+    state.body.toggleAttribute("hidden", visiblePrevious.length === 0);
   }
 
   private hasPendingApproval(node: HTMLElement): boolean {
@@ -1323,8 +1331,9 @@ export class AgentConversationRenderer extends Component {
       },
     });
     const icon = status.createSpan({ cls: "systemsculpt-agent-tail-status-icon" });
-    setIcon(icon, "square");
-    icon.dataset.iconState = "square";
+    // One glyph for a stop: the stopped row, its fold and this marker.
+    setIcon(icon, "circle-stop");
+    icon.dataset.iconState = "circle-stop";
     status.createSpan({ cls: "systemsculpt-agent-tail-status-label", text: "Stopped", attr: { "data-testid": "chat.tail-status.label" } });
   }
 
@@ -1384,13 +1393,6 @@ export class AgentConversationRenderer extends Component {
       ":scope > .systemsculpt-agent-activity-body",
     ) ?? null;
     const wasHydrated = worked ? this.historyHydration.wasHydrated(worked) : false;
-    const overflowOpen = new Map<string, boolean>();
-    for (const overflow of row.querySelectorAll<HTMLButtonElement>(
-      "button[data-agent-activity-overflow-key]",
-    )) {
-      const key = overflow.dataset.agentActivityOverflowKey;
-      if (key) overflowOpen.set(key, this.activityOverflowExpanded(overflow));
-    }
     const reasoningOpen = new Map<string, boolean>();
     const toolOpen = new Map<string, boolean>();
     for (const [key, part] of this.collectHistoricalPartNodes(row)) {
@@ -1413,7 +1415,6 @@ export class AgentConversationRenderer extends Component {
           || (workedBody?.childElementCount ?? 0) > 0
         )
       ),
-      overflowOpen,
       reasoningOpen,
       toolOpen,
     };
@@ -1431,30 +1432,6 @@ export class AgentConversationRenderer extends Component {
     if (nextWorked) {
       nextWorked.open = replacement.disclosure.workedOpen;
       this.updateIncidentDisclosureOpen(nextWorked, nextWorked.open);
-    }
-
-    const previousOverflows = new Map<string, HTMLButtonElement>();
-    for (const overflow of replacement.previous.node.querySelectorAll<HTMLButtonElement>(
-      "button[data-agent-activity-overflow-key]",
-    )) {
-      const key = overflow.dataset.agentActivityOverflowKey;
-      if (key) previousOverflows.set(key, overflow);
-    }
-    for (const overflow of replacement.next.node.querySelectorAll<HTMLButtonElement>(
-      "button[data-agent-activity-overflow-key]",
-    )) {
-      const key = overflow.dataset.agentActivityOverflowKey;
-      if (!key) continue;
-      const expanded = replacement.disclosure.overflowOpen.get(key) === true;
-      const previous = previousOverflows.get(key);
-      const previousWasHydrated = previous
-        ? (this.activityOverflowStates.get(previous)?.previousNodes.length ?? 0) > 0
-        : false;
-      if (!expanded && !previousWasHydrated) continue;
-      overflow.setAttribute("aria-expanded", String(expanded));
-      this.updateIncidentDisclosureOpen(overflow, expanded);
-      const hydration = this.historyHydration.hydrate(overflow);
-      if (hydration) await hydration;
     }
 
     const previousParts = this.collectHistoricalPartNodes(replacement.previous.node);
@@ -1558,16 +1535,6 @@ export class AgentConversationRenderer extends Component {
         details.open = open;
         this.updateIncidentDisclosureOpen(details, open);
       }
-    }
-    for (const overflow of replacement.next.node.querySelectorAll<HTMLButtonElement>(
-      "button[data-agent-activity-overflow-key]",
-    )) {
-      const key = overflow.dataset.agentActivityOverflowKey;
-      const open = key ? replacement.disclosure.overflowOpen.get(key) : undefined;
-      if (open === undefined) continue;
-      overflow.setAttribute("aria-expanded", String(open));
-      this.updateIncidentDisclosureOpen(overflow, open);
-      this.applyActivityOverflowLayout(overflow);
     }
   }
 
@@ -1675,6 +1642,7 @@ export class AgentConversationRenderer extends Component {
       const streaming = progressActive && part.state === "streaming";
       node.className = "systemsculpt-agent-part is-text";
       node.classList.toggle("is-streaming", streaming);
+      node.classList.toggle("is-sources", part.id.startsWith("sources:"));
       if (streaming) {
         this.liveMarkdown.stream(node, part.markdown);
         return true;
@@ -1714,8 +1682,10 @@ export class AgentConversationRenderer extends Component {
         const presented = presentAgentError(
           part.error, part.retryable, this.options.showPlanOffer?.(), this.options.showPaymentFix?.() ?? false,
         );
-        // Credits and plans are a gate with a way through, not a failure: calm, with a lock (as on a tool row).
-        if (presented.action === "see-plans" || presented.action === "monthly" || presented.action === "add-credits") {
+        // Credits, plans and a usage limit are a gate with a way through, not a failure: calm, with a lock
+        // (as on a tool row). Red stays for things that broke.
+        if (presented.action === "see-plans" || presented.action === "monthly" || presented.action === "add-credits"
+          || presented.action === "use-hosted") {
           node.addClass("is-gate");
           setIcon(errorIcon, "lock");
         }
@@ -1724,7 +1694,11 @@ export class AgentConversationRenderer extends Component {
           text: presented.heading,
         });
         const message = copy.createDiv({ cls: "systemsculpt-agent-error-message" });
-        for (const segment of presented.message.split(/(`[^`]+`)/u)) {
+        // A banner shows the message alone; under its heading, the card drops the words the heading says.
+        const shown = presented.body ?? (presented.message.startsWith(`${presented.heading}.`)
+          ? presented.message.slice(presented.heading.length + 1).trim() || presented.message
+          : presented.message);
+        for (const segment of shown.split(/(`[^`]+`)/u)) {
           if (segment.startsWith("`") && segment.endsWith("`")) message.createEl("code", { text: segment.slice(1, -1) });
           else message.appendText(segment);
         }
@@ -1763,7 +1737,8 @@ export class AgentConversationRenderer extends Component {
           const credits = createUiAction(actions, { label: "Add credits", testId: "chat.turn.add-credits", tone: "primary", size: "small" });
           credits.onclick = () => void this.options.onOpenCredits?.();
         }
-        if (actions && (presented.action === "detect" || presented.action === "sign-in") && this.options.onDetectAgain) {
+        // Signing in is finished with Retry, which the card's words name; Detect again is for a fresh install.
+        if (actions && presented.action === "detect" && this.options.onDetectAgain) {
           const detect = createUiAction(actions, { label: "Detect again", testId: "chat.turn.detect-again", size: "small" });
           detect.onclick = async () => {
             const ready = await this.options.onDetectAgain?.();

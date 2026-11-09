@@ -6,7 +6,7 @@ import { generateDiff } from "../../utils/diffUtils";
 import { splitToolName } from "../../utils/toolPolicy";
 import { isAbsoluteFilesystemPath, normalizeVaultRelativePath } from "../../utils/vaultPathUtils";
 import { renderSystemSculptToolCard } from "./SystemSculptToolCard";
-import { createToolCard, folderLink, inputFields, renderFields, renderNotice, renderText, toolOutputText } from "./ToolCardBlocks";
+import { createToolCard, folderLink, inputFields, notePathText, renderFields, renderFileContent, renderNotice, renderText, toolOutputText } from "./ToolCardBlocks";
 
 type RecordValue = Record<string, unknown>;
 export type HostedToolPreviewOptions = Readonly<{
@@ -39,16 +39,19 @@ function safeVaultPath(value: string): string | null {
   return normalizeVaultRelativePath(raw) || null;
 }
 
-function renderPath(app: App, host: HTMLElement, value: unknown, options: HostedToolPreviewOptions, link = true): void {
+function renderPath(app: App, host: HTMLElement, value: unknown, options: HostedToolPreviewOptions, link = true, label?: string): void {
   if (typeof value !== "string") return;
   const root = !value.trim() || value === "." || value === "/";
   const display = root ? "Vault root" : value;
   const path = link && !root ? safeVaultPath(display) : null;
-  if (!path) {
-    host.createSpan({ cls: "ss-tool-path", text: display });
+  // Notes go by their name, as Obsidian shows them ("Notes/Garden").
+  const shown = label ?? (root ? display : notePathText(display));
+  // A file that isn't there stays plain text: opening it would create the very note that was denied or not found.
+  if (!path || app.vault.getAbstractFileByPath(path) === null) {
+    host.createSpan({ cls: "ss-tool-path", text: shown });
     return;
   }
-  const anchor = host.createEl("a", { text: display, cls: "internal-link ss-tool-path", attr: { href: path, "data-href": path, title: path } });
+  const anchor = host.createEl("a", { text: shown, cls: "internal-link ss-tool-path", attr: { href: path, "data-href": path, title: path } });
   anchor.onclick = event => {
     event.preventDefault();
     event.stopPropagation();
@@ -70,21 +73,6 @@ function renderList<T>(host: HTMLElement, items: readonly T[], render: (row: HTM
     const all = createUiAction(host, { label: `Show all ${items.length} items`, testId: "chat.tool.show-items", size: "small", tooltip: false });
     all.addClass("ss-tool-more");
     all.onclick = () => { append(items.slice(50)); all.remove(); };
-  }
-}
-
-function renderContent(host: HTMLElement, content: string): void {
-  if (!content) {
-    caption(host, "The requested content is empty.");
-    return;
-  }
-  const lines = content.split("\n");
-  const pre = host.createEl("pre", { cls: "ss-native-tool-output", attr: { tabindex: "0" } });
-  const code = pre.createEl("code", { text: lines.slice(0, 20).join("\n") });
-  if (lines.length > 20) {
-    const all = createUiAction(host, { label: `Show all ${lines.length} lines`, testId: "chat.tool.show-output", size: "small", tooltip: false });
-    all.addClass("ss-tool-more");
-    all.onclick = () => { code.textContent = content; all.remove(); };
   }
 }
 
@@ -139,9 +127,12 @@ function renderRead(app: App, host: HTMLElement, input: RecordValue, output: Rec
     const files = records(output.files);
     if (!files.length) caption(host, "No file results were recorded.");
     else renderList(host, files, (row, file) => {
-      renderPath(app, row, file.path, options);
+      renderPath(app, row, file.path, options, !text(file.error));
+      const lines = typeof file.content === "string" && file.content ? file.content.replace(/\n+$/u, "").split("\n").length : 0;
+      // The same note as a native read: its reason, how much was read, or its length.
       if (text(file.error)) note(row, file.error as string, "warning");
-      else if (record(file.metadata).hasMore === true) note(row, "Partial file read");
+      else if (record(file.metadata).hasMore === true) note(row, "Partly read");
+      else if (lines) note(row, `${lines} ${lines === 1 ? "line" : "lines"}`);
     });
   } else {
     renderList(host, strings(input.paths), (row, path) => renderPath(app, row, path, options));
@@ -153,20 +144,28 @@ function renderDirectory(app: App, host: HTMLElement, input: RecordValue, output
     renderList(host, strings(input.paths), (row, path) => renderPath(app, row, path, options, false));
     return;
   }
-  if (!output.results.length) caption(host, "No folder results were recorded.");
-  for (const result of records(output.results)) {
+  const results = records(output.results);
+  if (!results.length) caption(host, "No folder results were recorded.");
+  for (const result of results) {
     const section = host.createDiv({ cls: "ss-tool-section" });
-    renderPath(app, section.createDiv({ cls: "ss-tool-section-title" }), result.path, options, false);
+    // The row names the one folder listed; only a listing of several heads each with its folder.
+    if (results.length > 1) renderPath(app, section.createDiv({ cls: "ss-tool-section-title" }), result.path, options, false);
     renderNotices(section, result);
     const entries: Array<RecordValue & { folder: boolean }> = [
       ...records(result.directories).map(entry => ({ ...entry, folder: true })),
       ...records(result.files).map(entry => ({ ...entry, folder: false })),
     ];
+    // Entries read by their name inside the folder ("Garden", not "Notes/Garden.md"); links keep the full path.
+    const folder = typeof result.path === "string" ? result.path.replace(/^\.?\/*|\/+$/gu, "") : "";
+    const inside = (path: unknown): string | undefined => typeof path === "string" && folder && path.startsWith(`${folder}/`) ? path.slice(folder.length + 1) : undefined;
     renderList(section, entries, (row, entry) => {
       if (entry.folder && typeof entry.path === "string") {
-        folderLink(app, row, entry.path);
+        folderLink(app, row, entry.path, inside(entry.path) ?? entry.path);
         note(row, "Folder");
-      } else renderPath(app, row, entry.path, options);
+      } else {
+        const name = inside(entry.path);
+        renderPath(app, row, entry.path, options, true, name === undefined ? undefined : notePathText(name));
+      }
     });
     const total = count(result.totalItems);
     const offset = count(result.offset) ?? 0;
@@ -197,8 +196,8 @@ function renderSearch(app: App, host: HTMLElement, output: RecordValue, options:
         const separator = suffix.indexOf("  ");
         renderPath(app, row, path, options);
         note(row, `Line ${suffix.slice(0, separator)}`);
-        renderContent(row, suffix.slice(separator + 2));
-      } else renderContent(row, snippet);
+        renderFileContent(row, suffix.slice(separator + 2));
+      } else renderFileContent(row, snippet);
     });
   }
   const total = count(output.totalFound);
@@ -214,25 +213,24 @@ function renderSearch(app: App, host: HTMLElement, output: RecordValue, options:
 
 function renderEdit(app: App, host: HTMLElement, input: RecordValue, output: RecordValue, options: HostedToolPreviewOptions, multiple: boolean): void {
   const files = multiple ? records(input.files) : [input];
-  // The disclaimer describes a preview, so it shows only when there is one.
-  const literal = (edit: RecordValue) => typeof edit.oldText === "string" && typeof edit.newText === "string";
-  if (files.some(file => records(file.edits).some(literal))) caption(host, "Requested text changes only. Original file line numbers are unavailable.");
   const results = multiple ? records(output.results) : [output];
   for (const file of files) {
     const section = host.createDiv({ cls: "systemsculpt-inline-diff__body ss-tool-section" });
-    renderPath(app, section.createDiv({ cls: "ss-tool-section-title" }), file.path, options);
+    // The row names a single note; only several notes need each one's name over its changes.
+    if (files.length > 1) renderPath(app, section.createDiv({ cls: "ss-tool-section-title" }), file.path, options);
     const result = results.find(entry => entry.path === file.path) ?? {};
     const applied = count(result.appliedCount);
     const requested = count(result.requestedCount);
-    if (applied !== undefined && requested !== undefined) caption(section, `${applied} of ${requested} requested edits applied.`);
+    // A count only when something didn't apply.
+    if (applied !== undefined && requested !== undefined && applied < requested) caption(section, `${applied} of ${requested} edits applied.`);
     renderNotices(section, result);
     for (const skipped of records(result.skipped)) {
       if (text(skipped.reason)) caption(section, `Skipped${count(skipped.index) !== undefined ? ` edit ${(skipped.index as number) + 1}` : ""}: ${skipped.reason as string}`);
     }
     for (const [index, edit] of records(file.edits).entries()) {
       if (typeof edit.oldText !== "string" || typeof edit.newText !== "string") continue;
-      const body = section.createDiv();
-      if (records(file.edits).length > 1) caption(body, `Requested edit ${index + 1}`);
+      const body = section.createDiv({ cls: "ss-tool-edit" });
+      if (records(file.edits).length > 1) caption(body, `Edit ${index + 1}`);
       if (edit.isRegex === true) caption(body, "Regular expression and replacement, not literal removed and added file text.");
       if (edit.mode === "loose") caption(body, "Loose matching may change whitespace beyond the requested text shown here.");
       if (text(edit.occurrence)) caption(body, `Requested occurrence: ${edit.occurrence as string}.`);
@@ -265,11 +263,12 @@ function renderMutationList(app: App, host: HTMLElement, input: RecordValue, out
       row.createSpan({ cls: "ss-tool-path-arrow", text: " → " });
       renderPath(app, row, item.destination, options, success);
     } else renderPath(app, row, item.path, options, false);
+    const failed = hasResults && item.success === false;
+    // A failure gives its own reason after the dot ("File not found"), as a read does.
     const status = success ? name === "trash" ? "In trash" : name === "move" ? "Moved" : "Folder ready"
-      : hasResults && item.success === false ? "Failed" : "Requested";
-    note(row, status, hasResults && item.success === false ? "warning" : undefined);
-    // A row's own reason stays on its row; the card-level notice says what it means.
-    for (const value of [item.error, item.notice]) if (text(value)) row.createDiv({ cls: "ss-tool-caption", text: value as string });
+      : failed ? text(item.error) ?? "Failed" : "Requested";
+    note(row, status, failed ? "warning" : undefined);
+    if (text(item.notice)) row.createDiv({ cls: "ss-tool-caption", text: item.notice as string });
   });
 }
 
@@ -297,13 +296,17 @@ export function renderHostedToolPreview(
       case "find":
       case "search": renderSearch(app, card, output, options, name === "search"); break;
       case "write":
-        renderPath(app, card.createDiv({ cls: "ss-tool-section-title" }), output.path ?? input.path, options);
-        caption(card, "Requested content, not a before-and-after diff.");
+        // The row names the note; the card names it again only when it was saved under another name.
+        if (text(output.path) && text(input.path) && output.path !== input.path) {
+          const saved = card.createEl("dl", { cls: "ss-tool-fields" }).createDiv({ cls: "ss-tool-field" });
+          saved.createEl("dt", { text: "Saved as" });
+          renderPath(app, saved.createEl("dd"), output.path, options);
+        }
         if (input.ifExists === "append") caption(card, "Append to an existing file, or create it if missing.");
         if (input.ifExists === "skip") caption(card, "Skip an existing file. A successful request does not confirm that this content was written.");
         if (input.ifExists === "error") caption(card, "Create only if the file does not already exist.");
         renderNotices(card, output);
-        if (typeof input.content === "string") renderContent(card, input.content);
+        if (typeof input.content === "string") renderFileContent(card, input.content);
         break;
       case "edit":
       case "multi_edit": renderEdit(app, card, input, output, options, name === "multi_edit"); break;

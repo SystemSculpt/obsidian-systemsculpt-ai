@@ -9,63 +9,6 @@
   font-size: var(--ss-text-sm);
   line-height: 20px;
 }
-.systemsculpt-agent-part.is-error {
-  display: flex;
-  gap: var(--ss-space-2);
-  align-items: flex-start;
-  overflow: hidden;
-  padding: var(--ss-space-3);
-  border: 1px solid var(--ss-danger-line);
-  border-radius: var(--ss-radius-md);
-  background: var(--ss-danger-tint);
-}
-.systemsculpt-agent-error-icon {
-  display: flex;
-  flex: none;
-  align-items: center;
-  /* Optically centers the icon against the heading's cap height. */
-  height: calc(var(--ss-text-sm) * 1.5);
-  color: var(--ss-danger);
-}
-/* A credits or plan gate: the tool rows' calm notice, not the failure red. */
-.systemsculpt-agent-part.is-error.is-gate {
-  border-color: var(--ss-line);
-  background: var(--ss-surface-1);
-  color: var(--ss-ink);
-}
-.systemsculpt-agent-part.is-error.is-gate .systemsculpt-agent-error-icon {
-  color: var(--ss-warning);
-}
-.systemsculpt-agent-part.is-error.is-gate .systemsculpt-agent-error-heading {
-  color: var(--ss-ink);
-}
-.systemsculpt-agent-error-copy {
-  display: flex;
-  flex-direction: column;
-  gap: var(--ss-space-1);
-  min-width: 0;
-}
-.systemsculpt-agent-error-heading {
-  color: var(--ss-danger);
-  font-size: var(--ss-text-sm);
-  font-weight: var(--ss-weight-semibold);
-  line-height: 1.5;
-}
-.systemsculpt-agent-error-message {
-  text-wrap: pretty;
-  overflow-wrap: anywhere;
-  color: var(--ss-ink-muted);
-  font-size: var(--ss-text-sm);
-  line-height: 1.5;
-}
-.systemsculpt-agent-error-report {
-  overflow-wrap: anywhere;
-  color: var(--ss-ink-muted);
-  font-family: var(--ss-font-mono);
-  font-size: var(--ss-text-xs);
-  line-height: 1.5;
-  user-select: text;
-}
 /* Tool rows share the same 26px rhythm and keep successful work neutral. */
 .systemsculpt-agent-conversation .systemsculpt-agent-tool {
   border: 0;
@@ -79,10 +22,12 @@
   box-sizing: border-box;
   display: flex;
   align-items: center;
-  gap: var(--ss-space-1);
-  width: 100%;
+  gap: var(--ss-space-2);
+  width: calc(100% + 2 * var(--ss-space-1));
   min-width: 0;
   min-height: var(--ss-control-height-sm);
+  /* Same columns as the activity summary: icon on the column edge, label 22px in. */
+  margin-inline: calc(-1 * var(--ss-space-1));
   padding: 0 var(--ss-space-1);
   border-radius: var(--ss-radius-sm);
   cursor: default;
@@ -113,10 +58,10 @@
 .systemsculpt-agent-conversation .systemsculpt-agent-tool-icon,
 .systemsculpt-agent-conversation .systemsculpt-agent-tool-state-icon {
   display: inline-flex;
-  flex: 0 0 20px;
+  flex: 0 0 var(--ss-icon-size-sm);
   align-items: center;
   justify-content: center;
-  width: 20px;
+  width: var(--ss-icon-size-sm);
   height: 20px;
   color: var(--ss-ink-muted);
 }
@@ -176,7 +121,10 @@
 }
 .systemsculpt-agent-conversation details.systemsculpt-agent-tool[open] > .systemsculpt-agent-tool-header .systemsculpt-agent-tool-copy {
   flex-wrap: wrap;
-  column-gap: 6px;
+  /* Meta that fits stays at the right of the label; meta that wraps starts its own line
+     under the label instead of hanging at the right edge. */
+  justify-content: space-between;
+  column-gap: var(--ss-space-2);
   row-gap: 0;
 }
 .systemsculpt-agent-conversation details.systemsculpt-agent-tool[open] > .systemsculpt-agent-tool-header .systemsculpt-agent-tool-label {
@@ -185,6 +133,9 @@
   overflow-wrap: anywhere;
 }
 .systemsculpt-agent-conversation details.systemsculpt-agent-tool[open] > .systemsculpt-agent-tool-header .systemsculpt-agent-tool-summary {
+  flex: 0 1 auto;
+  margin-inline-start: 0;
+  text-align: start;
   white-space: normal;
 }
 .systemsculpt-agent-conversation .systemsculpt-agent-tool-summary.is-compact {
@@ -200,6 +151,8 @@
   margin-left: auto;
 }
 .systemsculpt-agent-conversation .systemsculpt-agent-tool-disclosure {
+  /* The chevron's ink, not its box, ends on the column's right edge. */
+  margin-inline-end: calc(-1 * var(--ss-space-1));
   opacity: 0.72;
   transition:
     opacity var(--ss-dur-fast) var(--ss-ease),
@@ -253,292 +206,33 @@
 .systemsculpt-agent-conversation .systemsculpt-agent-tool-raw pre,
 .systemsculpt-agent-conversation .systemsculpt-agent-tool-raw code {
   max-width: 100%;
+  /* A long value wraps under its own line's indent (.ss-json-line), never back to the left edge. */
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+/* A block taller than its frame fades out at the bottom until it is scrolled to its end. */
+.systemsculpt-agent-conversation .systemsculpt-agent-tool-raw > pre > code.is-overflowing:not(.is-at-end) {
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 36px), transparent);
 }
 .systemsculpt-agent-conversation .systemsculpt-agent-part.is-tool.is-partial .systemsculpt-agent-tool-icon,
 .systemsculpt-agent-conversation .systemsculpt-agent-part.is-tool.is-outcome-unknown .systemsculpt-agent-tool-icon,
 .systemsculpt-agent-conversation .systemsculpt-agent-part.is-tool.is-approval-required .systemsculpt-agent-tool-icon {
   color: var(--ss-warning);
 }
-.systemsculpt-agent-conversation .systemsculpt-agent-part.is-tool.is-failed .systemsculpt-agent-tool-icon,
-.systemsculpt-agent-conversation .systemsculpt-agent-part.is-tool.is-denied .systemsculpt-agent-tool-icon {
+/* Red is only for breakage. A denial is the person's own choice and a stop is theirs too:
+   both keep the calm muted icon. */
+.systemsculpt-agent-conversation .systemsculpt-agent-part.is-tool.is-failed .systemsculpt-agent-tool-icon {
   color: var(--ss-danger);
 }
-.systemsculpt-agent-error-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--ss-space-2);
-  margin-top: var(--ss-space-2);
-}
-.systemsculpt-agent-approval {
-  display: flex;
-  flex-direction: column;
-  gap: var(--ss-space-2);
-  margin-block: var(--ss-space-2);
-  padding: var(--ss-space-3);
-  border: 1px solid var(--ss-line-strong);
-  box-shadow: inset 3px 0 var(--ss-warning);
-  border-radius: var(--ss-radius-md);
-  background: var(--ss-surface-1);
-  color: var(--ss-ink);
-}
-.systemsculpt-agent-approval:focus-within {
-  border-color: var(--ss-line-accent);
-  box-shadow: inset 3px 0 var(--ss-warning), var(--ss-ring);
-}
-.systemsculpt-agent-approval button:focus-visible,
-.systemsculpt-agent-approval input:focus-visible,
-.systemsculpt-agent-approval a:focus-visible,
-.systemsculpt-agent-approval summary:focus-visible {
-  outline: none;
-  box-shadow: var(--ss-ring);
-}
-.systemsculpt-agent-approval-meta {
-  margin-inline-start: 22px;
-  color: var(--ss-ink-muted);
-  font-size: var(--ss-text-xs);
-  overflow-wrap: anywhere;
-}
-.systemsculpt-agent-approval-meta > span + span::before {
-  content: " · ";
-}
-.systemsculpt-agent-approval-copy a {
-  color: inherit;
-}
-.systemsculpt-agent-approval kbd {
-  margin-inline-start: var(--ss-space-1);
-  color: var(--ss-ink-muted);
-  font-size: var(--ss-text-xs);
-}
-.systemsculpt-agent-approval-header {
-  display: flex;
-  align-items: baseline;
-  gap: var(--ss-space-2);
-  min-width: 0;
-}
-.systemsculpt-agent-approval-icon {
-  align-self: center;
-  display: inline-flex;
-  flex: none;
-  color: var(--ss-ink-muted);
-}
-.systemsculpt-agent-approval-icon svg {
-  width: var(--ss-icon-size-sm);
-  height: var(--ss-icon-size-sm);
-}
-.systemsculpt-agent-approval-copy {
-  flex: 1;
-  min-width: 0;
-  overflow-wrap: anywhere;
-  font-weight: var(--ss-weight-semibold);
-}
-.systemsculpt-agent-approval-counter {
-  flex: none;
-  color: var(--ss-ink-muted);
-  font-size: var(--ss-text-xs);
-}
-.systemsculpt-agent-approval-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--ss-space-2);
-  order: 1;
-}
-.systemsculpt-agent-approval-actions > .ss-button {
-  padding-inline: var(--ss-space-2);
-  white-space: normal;
-  height: auto;
-}
-.systemsculpt-agent-approval-preview {
-  min-width: 0;
-  overflow: auto;
-  border: 1px solid var(--ss-line);
-  border-radius: var(--ss-radius-sm);
-  background: var(--ss-surface-0);
-}
-/* The plan sits inside the native preview wrapper, so match it at any depth. */
-.systemsculpt-agent-approval-preview .ss-native-plan-preview {
-  padding: var(--ss-space-2) var(--ss-space-3);
-}
-.systemsculpt-agent-approval-preview dl {
-  margin: 0;
-  padding: var(--ss-space-2);
-}
-.systemsculpt-agent-approval-preview dt {
-  color: var(--ss-ink-muted);
-  font-size: var(--ss-text-xs);
-}
-.systemsculpt-agent-approval-preview dd {
-  margin: 0 0 var(--ss-space-2);
-  overflow-wrap: anywhere;
-}
-.systemsculpt-agent-approval-details {
-  order: 2;
-  color: var(--ss-ink-muted);
-  font-size: var(--ss-text-xs);
-}
-.systemsculpt-agent-approval-details > summary {
-  text-align: end;
-}
-@container ss-surface (max-width: 379px) {
-  .systemsculpt-agent-approval-actions [data-focus-key="tool-allow-chat"] {
-    flex-basis: 100%;
-  }
-
-  /* A pane this narrow has no room for shortcut glyphs beside a full-width
-   * button; the button's words carry it, as on touch. */
-  .systemsculpt-agent-approval kbd {
-    display: none;
-  }
-}
-.systemsculpt-agent-approval-details summary {
-  cursor: pointer;
-}
-.systemsculpt-agent-approval-details pre,
-.systemsculpt-agent-approval-preview pre {
-  margin: 0;
-  padding: var(--ss-space-2);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
+/* A row's or summary's target: a command reads as code ("ls", never "Is"); a short name or
+   command never breaks across lines, not even at its hyphen. */
+.ss-tool-target.is-command {
   font-family: var(--ss-font-mono);
-}
-.systemsculpt-agent-approval-question {
-  min-width: 0;
-  margin: 0;
-  padding: var(--ss-space-2);
-  border: 1px solid var(--ss-line);
-  border-radius: var(--ss-radius-sm);
-}
-.systemsculpt-agent-approval-options {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--ss-space-2);
-  margin-bottom: var(--ss-space-2);
-}
-/* An option reads as one line, its shortcut number then its label, with the description under the label. */
-.systemsculpt-agent-approval .systemsculpt-agent-approval-options button.ss-button {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  /* The gap rides on the number, so a hidden number (touch, narrow) leaves no indent. */
-  column-gap: 0;
-  row-gap: 2px;
-  align-items: baseline;
-  justify-items: start;
-  height: auto;
-  padding-block: var(--ss-space-1);
-  white-space: normal;
-  text-align: start;
-}
-.systemsculpt-agent-approval-options button > .ss-button__label {
-  grid-column: 2;
-  grid-row: 1;
-}
-.systemsculpt-agent-approval-options button > kbd {
-  grid-column: 1;
-  grid-row: 1;
-  margin-inline: 0 var(--ss-space-2);
-}
-.systemsculpt-agent-approval-options button > .systemsculpt-agent-approval-option-description {
-  grid-column: 2;
-  grid-row: 2;
-}
-.systemsculpt-agent-approval-options button[aria-pressed="true"] {
-  outline: 2px solid var(--ss-accent);
-}
-.systemsculpt-agent-approval-option-description,
-.systemsculpt-agent-approval-answer-label {
-  display: block;
-  color: var(--ss-ink-muted);
+  /* One step down from the sm label and summary, so mono's wide glyphs sit level with the words. */
   font-size: var(--ss-text-xs);
 }
-.systemsculpt-agent-approval-question input {
-  width: 100%;
-}
-.systemsculpt-agent-approval-review {
-  align-self: flex-start;
-  margin-bottom: var(--ss-space-2);
-}
-@media (pointer: coarse) {
-  .systemsculpt-agent-approval-details > summary {
-    min-height: var(--ss-touch-target);
-    align-content: center;
-  }
-
-  .systemsculpt-agent-approval kbd {
-    display: none;
-  }
-}
-.systemsculpt-agent-approval-review[hidden],
-.systemsculpt-agent-tool[hidden],
-.systemsculpt-agent-approval-preview[hidden] {
-  display: none;
-}
-.systemsculpt-agent-approval-announcement,
-.systemsculpt-agent-approval-question-legend {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
+.ss-tool-target.is-whole {
   white-space: nowrap;
-}
-.systemsculpt-agent-approval-notice-surface {
-  /* Notices size to their content; inline-size containment collapses them. */
-  container-type: normal;
-}
-.systemsculpt-agent-approval-notice {
-  width: 100%;
-  white-space: normal;
-  height: auto;
-}
-.systemsculpt-agent-approval-preview .systemsculpt-inline-ops__body {
-  padding: var(--ss-space-2) var(--ss-space-3);
-}
-.systemsculpt-agent-approval-preview .systemsculpt-inline-diff__body + .systemsculpt-inline-diff__body {
-  border-top: 1px solid var(--ss-warning-line);
-}
-.systemsculpt-inline-diff__summary {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--ss-space-2);
-  padding: var(--ss-space-2) var(--ss-space-3);
-  border-bottom: 1px solid var(--ss-warning-line);
-  font-size: var(--ss-text-sm);
-}
-.systemsculpt-inline-diff__summary-count {
-  font-weight: var(--ss-weight-medium);
-}
-.systemsculpt-inline-diff__summary-blocked {
-  color: var(--ss-warning);
-}
-.systemsculpt-agent-approval-preview .systemsculpt-inline-ops ul {
-  margin: 0;
-  padding-left: var(--ss-space-4);
-}
-.systemsculpt-inline-ops ul.is-moves {
-  display: grid;
-  gap: var(--ss-space-2);
-  padding-left: 0;
-  list-style: none;
-}
-/* Both paths sit in a flex row, so their chips get the same height. */
-.systemsculpt-inline-ops__move-from,
-.systemsculpt-inline-ops__move-to {
-  display: flex;
-  align-items: baseline;
-  gap: var(--ss-space-1);
-}
-.systemsculpt-inline-ops__move-to {
-  margin-top: var(--ss-space-0);
-}
-.systemsculpt-inline-ops__arrow {
-  flex: none;
-  color: var(--ss-ink-muted);
-}
-.systemsculpt-agent-approval-preview code {
-  overflow-wrap: anywhere;
 }
 /* One card for every tool result (T-5956): fields, paths, sources, terminal,
    text, media and one calm notice, with raw JSON last behind Details. */
@@ -588,6 +282,17 @@
   color: var(--ss-ink);
   text-wrap: pretty;
 }
+/* A card's first and last lines of text sit as far from its border as a boxed block does: the space
+   a line keeps above its capitals and below its baseline is taken back. */
+.systemsculpt-agent-tool-support .ss-tool-card > :is(.ss-tool-fields, .ss-tool-paths, .ss-tool-result):first-child,
+.systemsculpt-agent-tool-support .ss-tool-card > .ss-tool-media.is-shown-in-reply:first-child + :is(.ss-tool-fields, .ss-tool-paths, .ss-tool-result),
+.systemsculpt-agent-tool-support .ss-tool-card > .ss-tool-section:first-child > :is(.ss-tool-fields, .ss-tool-paths, .ss-tool-section-title):first-child {
+  margin-top: -4px;
+}
+.systemsculpt-agent-tool-support > .ss-tool-card:last-child > :is(.ss-tool-fields, .ss-tool-paths, .ss-tool-result):last-child,
+.systemsculpt-agent-tool-support > .systemsculpt-agent-tool-preview:last-child > :only-child > .ss-tool-card > :is(.ss-tool-fields, .ss-tool-paths, .ss-tool-result):last-child {
+  margin-bottom: -4px;
+}
 
 /* Label and value rows. */
 .ss-tool-fields {
@@ -614,6 +319,14 @@
 }
 .ss-tool-fields dd code {
   font-size: var(--ss-text-xs);
+}
+/* The "Saved" row names the files only while the reply shows the pictures themselves. */
+.ss-tool-field.is-saved:not(.is-shown) {
+  display: none;
+}
+/* A grid holding only such hidden rows takes no room, not even its gap, in the card. */
+.ss-tool-fields.is-empty {
+  display: none;
 }
 @container ss-surface (max-width: 379px) {
   .ss-tool-fields {
@@ -654,22 +367,33 @@
   color: var(--ss-ink-muted);
   font-size: var(--ss-text-xs);
 }
+/* One link style in every card, as replies and row labels set it: accent and underlined. */
 .ss-tool-card a.internal-link,
-.ss-tool-card a.external-link {
+.ss-tool-card a.external-link,
+.ss-tool-card a.ss-tool-folder-link,
+.ss-hosted-tool-preview a.ss-tool-path,
+.systemsculpt-agent-tool-support a.ss-tool-notice-action {
   color: var(--ss-ink-accent);
-  text-decoration: none;
+  font-weight: inherit;
+  text-decoration-line: underline;
+  text-underline-offset: 2px;
 }
-.ss-tool-card a.external-link {
+.ss-tool-card a.external-link,
+.systemsculpt-agent-tool-support a.ss-tool-notice-action {
   padding-inline-end: 0;
   background-image: none;
 }
 .ss-tool-card a.internal-link:hover,
-.ss-tool-card a.external-link:hover {
-  text-decoration: underline;
-  text-underline-offset: 2px;
+.ss-tool-card a.external-link:hover,
+.ss-tool-card a.ss-tool-folder-link:hover,
+.ss-hosted-tool-preview a.ss-tool-path:hover,
+.systemsculpt-agent-tool-support a.ss-tool-notice-action:hover {
+  color: var(--ss-ink);
 }
-.ss-tool-card a.internal-link.is-unresolved {
-  color: var(--ss-ink-muted);
+/* A file that isn't there reads as a name, not a link: opening it would create an empty note. */
+.ss-tool-missing-path {
+  color: var(--ss-ink);
+  overflow-wrap: anywhere;
 }
 .ss-tool-paths .ss-tool-path-note.is-warning {
   color: var(--ss-ink);
@@ -684,8 +408,9 @@
   font-size: var(--ss-text-xs);
 }
 
-/* A command and its output. */
+/* A command and its output, and file text: one box, its first glyph 12 px in, as diffs and Details. */
 .ss-tool-terminal pre,
+.ss-tool-file-text,
 .ss-native-tool-preview pre,
 .ss-hosted-tool-preview pre {
   max-height: var(--ss-agent-tool-details-height);
@@ -704,13 +429,18 @@
   overflow-wrap: anywhere;
   user-select: text;
 }
-.ss-tool-terminal pre code {
+.ss-tool-terminal pre code,
+.ss-tool-file-text code {
   display: block;
   padding: 0;
   background: none;
   color: inherit;
   font-size: inherit;
   white-space: inherit;
+}
+/* File text is what was written, so it reads at full strength. */
+.ss-tool-file-text {
+  color: var(--ss-ink);
 }
 .ss-tool-terminal-command {
   color: var(--ss-ink);
@@ -722,9 +452,12 @@
   color: var(--ss-ink-muted);
   user-select: none;
 }
-.ss-native-tool-preview .systemsculpt-diff-prefix:first-child,
-.ss-hosted-tool-preview .systemsculpt-diff-prefix:first-child {
-  margin-inline-start: var(--ss-space-2);
+/* An edit: its number when there are several, then its changes. */
+.ss-tool-edit {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-1);
+  min-width: 0;
 }
 .systemsculpt-agent-tool-support .systemsculpt-diff-viewer pre,
 .systemsculpt-agent-tool-support .systemsculpt-inline-diff pre {
@@ -814,19 +547,24 @@
 .ss-tool-notice.is-danger .ss-tool-notice-icon { color: var(--ss-danger); }
 .ss-tool-notice.is-warning .ss-tool-notice-icon { color: var(--ss-warning); }
 .ss-tool-notice.is-info .ss-tool-notice-icon { color: var(--ss-ink-muted); }
+/* A subscription or credits stop: the lock and calm surface of the turn's own gate, never a warning box. */
+.ss-tool-notice.is-gate {
+  border-color: var(--ss-line);
+  background: var(--ss-surface-1);
+  color: var(--ss-ink);
+}
+.ss-tool-notice.is-gate .ss-tool-notice-icon { color: var(--ss-warning); }
+/* The reply's own failed tile already says why this picture or video failed. */
+.ss-tool-notice[data-media-failure].is-shown-in-reply {
+  display: none;
+}
 .ss-tool-notice-text {
   min-width: 0;
   overflow-wrap: anywhere;
   text-wrap: pretty;
 }
-.ss-tool-card a.ss-tool-notice-action,
 .systemsculpt-agent-tool-support a.ss-tool-notice-action {
-  color: var(--ss-ink-accent);
-  font-weight: var(--ss-weight-medium);
   white-space: nowrap;
-  text-decoration: none;
-  background-image: none;
-  padding-inline-end: 0;
 }
 
 /* Media a tool made or viewed: thumbnails that open the vault file. */
@@ -917,46 +655,49 @@
   line-height: var(--ss-leading-base);
   cursor: default;
 }
-@container ss-surface (max-width: 379px) {
-  .ss-tool-media-tile img {
+@container ss-surface (max-width: 500px) {
+  /* On a phone one picture or video fills the card's width, never stopping just short of it. */
+  .ss-tool-media:not(.is-multiple) {
+    display: block;
+  }
+  .ss-tool-media:not(.is-multiple) > .ss-tool-media-tile {
+    width: 100%;
+  }
+  .ss-tool-media:not(.is-multiple) .ss-tool-media-tile img {
+    width: 100%;
+    /* A tall picture shows whole inside a bounded box instead of running down the screen. */
+    max-height: 320px;
+    object-fit: contain;
+  }
+  .ss-tool-media:not(.is-multiple) .ss-tool-media-tile video {
+    width: 100%;
+    height: auto;
+  }
+  .ss-tool-media.is-multiple .ss-tool-media-tile img {
     max-height: 144px;
   }
-  .ss-tool-media-tile video {
+  .ss-tool-media.is-multiple .ss-tool-media-tile video {
     height: 144px;
   }
 }
 
-.ss-tool-folder-link {
-  color: var(--ss-ink-accent);
-  text-decoration: none;
-}
-.ss-tool-folder-link:hover {
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-
-/* The reply below shows these full size: the card keeps only their links. */
-.ss-tool-media-files,
+/* The reply below shows these full size: the card's "Saved" row names them instead. */
 .ss-tool-media.is-shown-in-reply {
   display: none;
-}
-.ss-tool-media.is-shown-in-reply + .ss-tool-media-files {
-  display: grid;
-}
-.ss-tool-media-files dd {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--ss-space-1);
 }
 
 /* Raw request and result, last and quiet. */
 .systemsculpt-agent-conversation .systemsculpt-agent-tool-raw > summary {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: var(--ss-space-1);
+  width: fit-content;
   color: var(--ss-ink-muted);
   font-size: var(--ss-text-xs);
+  /* A 16 px target that takes 10 px of the stack: its capitals sit as far below the block above, and its
+     baseline as far above the border, as a boxed block sits from its neighbours. */
+  line-height: 16px;
+  margin-block: -3px;
   cursor: pointer;
   list-style: none;
 }
@@ -973,6 +714,8 @@
 }
 .systemsculpt-agent-tool-raw-chevron {
   display: inline-flex;
+  /* The chevron's ink, not its 12px box, starts on the card's text column. */
+  margin-inline-start: -4px;
   transition: transform var(--ss-dur-fast) var(--ss-ease);
 }
 .systemsculpt-agent-tool-raw-chevron svg {
@@ -983,16 +726,38 @@
   transform: rotate(90deg);
 }
 .systemsculpt-agent-tool-raw > pre {
-  max-height: var(--ss-agent-tool-details-height);
-  margin: var(--ss-space-2) 0 0;
-  padding: var(--ss-space-2) var(--ss-space-3);
-  overflow: auto;
+  box-sizing: border-box;
+  margin: calc(var(--ss-space-2) + 2px) 0 0;
+  /* The frame keeps its inset at both ends; the code scrolls inside it. */
+  padding: var(--ss-space-2) 0;
+  overflow: hidden;
+  line-height: 18px;
   border: 1px solid var(--ss-line);
   border-radius: var(--ss-radius-sm);
   background: var(--ss-surface-0);
   color: var(--ss-ink-muted);
   font-family: var(--ss-font-mono);
   font-size: var(--ss-text-xs);
+}
+.systemsculpt-agent-tool-raw > pre > code {
+  display: block;
+  /* Twelve whole lines: a long block stops between two lines, never through one. */
+  max-height: calc(12 * 18px);
+  padding: 0 var(--ss-space-3);
+  overflow: auto;
+  overscroll-behavior: contain;
+  background: none;
+  color: inherit;
+  font-size: inherit;
+  line-height: inherit;
+}
+/* One JSON line: a value too long for the pane wraps two characters in from its own start.
+   renderJsonLines sets --ss-json-indent on each indented line; this is its default. */
+.ss-json-line {
+  --ss-json-indent: 0;
+  display: block;
+  padding-inline-start: calc((var(--ss-json-indent) + 2) * 1ch);
+  text-indent: calc((var(--ss-json-indent) + 2) * -1ch);
 }
 @media (prefers-reduced-motion: reduce) {
   .systemsculpt-agent-tool-raw-chevron { transition: none; }

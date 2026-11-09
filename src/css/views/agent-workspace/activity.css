@@ -10,9 +10,10 @@
 .systemsculpt-agent-tail-status {
   display: flex;
   align-items: center;
-  gap: var(--ss-space-1);
+  gap: var(--ss-space-2);
   min-height: var(--ss-control-height-sm);
-  padding: 0 var(--ss-space-1);
+  /* Every row's icon sits on the column edge and its label on one shared column (22px in). */
+  padding: 0;
   color: var(--ss-ink-muted);
   font-size: var(--ss-text-xs);
   font-variant-numeric: tabular-nums;
@@ -24,7 +25,7 @@
   flex: 0 0 auto;
   align-items: center;
   justify-content: center;
-  width: 20px;
+  width: var(--ss-icon-size-sm);
   height: var(--ss-icon-size-sm);
   color: var(--ss-ink-muted);
 }
@@ -63,9 +64,11 @@ button.systemsculpt-agent-activity-overflow-header {
   display: flex;
   /* A wrapped summary keeps its icon, time and chevron on its first line. */
   align-items: flex-start;
-  gap: var(--ss-space-1);
-  width: 100%;
+  gap: var(--ss-space-2);
+  width: calc(100% + 2 * var(--ss-space-1));
   min-height: var(--ss-control-height-sm);
+  /* The hover pill bleeds 4px past the column, so the icon sits on the column edge. */
+  margin-inline: calc(-1 * var(--ss-space-1));
   padding: 0 var(--ss-space-1);
   padding-block: calc((var(--ss-control-height-sm) - 20px) / 2);
   background: transparent;
@@ -79,12 +82,25 @@ button.systemsculpt-agent-activity-overflow-header {
 }
 
 summary.systemsculpt-agent-activity-header {
-  width: 100%;
   border-radius: var(--ss-radius-sm);
 }
 
+/* A finished turn's closed fold takes one reply line in the flow: the line said before a
+   live picture folds into it, so the picture lands exactly where its tile was. The header
+   keeps its full control height for clicks and the focus ring; only its flow box shrinks. */
+details.systemsculpt-agent-activity.is-settled {
+  padding-top: 0;
+}
+
+details.systemsculpt-agent-activity.is-settled > summary.systemsculpt-agent-activity-header {
+  margin-block-start: calc((var(--ss-text-base) * var(--ss-leading-relaxed) - var(--ss-control-height-sm)) / 2);
+}
+
+details.systemsculpt-agent-activity.is-settled:not([open]) > summary.systemsculpt-agent-activity-header {
+  margin-block-end: calc((var(--ss-text-base) * var(--ss-leading-relaxed) - var(--ss-control-height-sm)) / 2);
+}
+
 button.systemsculpt-agent-activity-overflow-header {
-  gap: var(--ss-space-1);
   /* A summary can wrap; Obsidian's fixed button height must not clip it. */
   height: auto;
   padding: 0 var(--ss-space-1);
@@ -126,16 +142,30 @@ button.systemsculpt-agent-activity-overflow-header:focus-visible {
 .systemsculpt-agent-activity-overflow-icon,
 .systemsculpt-agent-activity-overflow-disclosure {
   display: inline-flex;
-  flex: 0 0 20px;
+  flex: 0 0 var(--ss-icon-size-sm);
   align-items: center;
   justify-content: center;
-  width: 20px;
+  width: var(--ss-icon-size-sm);
   height: 20px;
   color: var(--ss-ink-muted);
 }
 
+/* A lone call's fold is its row: its icon keeps the row's state colour (tools.css). */
+.systemsculpt-agent-activity-state[data-tool-state="failed"],
+.systemsculpt-agent-activity-state[data-tool-state="refused"] {
+  color: var(--ss-danger);
+}
+.systemsculpt-agent-activity-state[data-tool-state="gated"],
+.systemsculpt-agent-activity-state[data-tool-state="partial"],
+.systemsculpt-agent-activity-state[data-tool-state="outcome-unknown"],
+.systemsculpt-agent-activity-state[data-tool-state="approval-required"] {
+  color: var(--ss-warning);
+}
+
 .systemsculpt-agent-activity-disclosure,
 .systemsculpt-agent-activity-overflow-disclosure {
+  /* The chevron's ink, not its box, ends on the column's right edge. */
+  margin-inline-end: calc(-1 * var(--ss-space-1));
   opacity: 0.72;
   transition:
     opacity var(--ss-dur-fast) var(--ss-ease),
@@ -198,6 +228,11 @@ strong.systemsculpt-agent-activity-label {
   flex: 0 1 auto;
 }
 
+details.systemsculpt-agent-activity[open] > summary strong.systemsculpt-agent-activity-label {
+  color: var(--ss-ink);
+  font-weight: var(--ss-weight-medium);
+}
+
 strong.systemsculpt-agent-activity-overflow-label {
   color: var(--ss-ink);
   font-weight: var(--ss-weight-medium);
@@ -208,13 +243,49 @@ strong.systemsculpt-agent-activity-overflow-label {
   flex-direction: column;
   gap: 2px;
   min-width: 0;
-  margin: 0;
-  /* Each row owns the same icon, label and disclosure columns as the summary. */
-  padding: var(--ss-space-0) 0 var(--ss-space-1);
+  /* Children hang from the fold's label column (22px), under a hairline at its icon's centre. */
+  margin: var(--ss-space-0) 0 var(--ss-space-1) calc(var(--ss-icon-size-sm) / 2 - 0.5px);
+  padding: 0 0 0 calc(var(--ss-icon-size-sm) / 2 + var(--ss-space-2) - 0.5px);
+  border-left: 1px solid var(--ss-line);
 }
 
 details.systemsculpt-agent-activity:not([open]) > .systemsculpt-agent-activity-body {
   display: none;
+}
+
+/* The hairline stops at the last open card's edge; the space under that card moves outside it.
+   Code sets is-card-last on the body; both rules change together, so the space never jumps. */
+.systemsculpt-agent-activity-body.is-card-last
+  > .systemsculpt-agent-part:last-child
+  > details.systemsculpt-agent-tool[open]
+  > .systemsculpt-agent-tool-support {
+  margin-bottom: 0;
+}
+
+details.systemsculpt-agent-activity:not([data-single-tool]) > .systemsculpt-agent-activity-body.is-card-last {
+  margin-bottom: calc(var(--ss-space-1) + var(--ss-space-2));
+}
+
+/* A fold that holds one call is that call's row: open, it shows the card under its label,
+   without a second row naming the call again. */
+details.systemsculpt-agent-activity[data-single-tool] > .systemsculpt-agent-activity-body {
+  border-left-color: transparent;
+}
+
+details.systemsculpt-agent-activity[data-single-tool]
+  > .systemsculpt-agent-activity-body
+  > .systemsculpt-agent-part.is-tool
+  > details.systemsculpt-agent-tool
+  > .systemsculpt-agent-tool-header {
+  display: none;
+}
+
+details.systemsculpt-agent-activity[data-single-tool]
+  > .systemsculpt-agent-activity-body
+  > .systemsculpt-agent-part.is-tool
+  > details.systemsculpt-agent-tool
+  > .systemsculpt-agent-tool-support {
+  margin: var(--ss-space-0) 0 var(--ss-space-1);
 }
 
 /* One summary drawer owns each adjacent group; its rows keep their own detail disclosures. */
@@ -231,8 +302,8 @@ button.systemsculpt-agent-activity-overflow {
   align-items: stretch;
   gap: 2px;
   min-width: 0;
-  margin: var(--ss-space-0) 0 var(--ss-space-0) var(--ss-space-2);
-  padding-left: var(--ss-space-1);
+  margin: var(--ss-space-0) 0 var(--ss-space-0) calc(var(--ss-icon-size-sm) / 2 - 0.5px);
+  padding-left: calc(var(--ss-icon-size-sm) / 2 + var(--ss-space-2) - 0.5px);
   border-left: 1px solid var(--ss-line);
 }
 

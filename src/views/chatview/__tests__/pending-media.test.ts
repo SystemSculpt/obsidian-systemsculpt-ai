@@ -148,15 +148,18 @@ describe("live generation placeholders", () => {
     expect(rebuilt.querySelector("figure[data-media-path]")).toBe(figure);
   });
 
-  it("shows a failed generation's reason with the retry hint", () => {
+  it("shows a failed generation's reason, with a next step only where the reason lacks one", () => {
     const parent = document.createElement("div");
     const failed = tool({ name: "generate_video", state: "failed", input: { prompt: "Waves" }, output: { data: encodeSystemSculptToolResult({ ok: false, message: "The video model timed out." }) } });
     const block = renderTurnMedia(app([]), parent, [failed], actions, "", false)!;
     const tile = block.querySelector<HTMLElement>(".is-failed")!;
     expect(tile.textContent).toContain("The video model timed out.");
-    expect(tile.textContent).toContain("Ask again to retry.");
+    // "Ask again to retry" said nothing the reply doesn't: a plain failure is its reason alone.
+    expect(tile.querySelector(".ss-media-pending-status")!.textContent).toBe("The video model timed out.");
     expect(tile.hasAttribute("aria-busy")).toBe(false);
     const refused = tool({ name: "generate_image", state: "failed", input: { prompt: "Owls" }, output: { data: encodeSystemSculptToolResult({ ok: false, message: "The prompt was flagged by the provider's safety system." }) } });
     expect(renderTurnMedia(app([]), document.createElement("div"), [refused], actions, "", false)!.textContent).toContain("Change the prompt and ask again.");
+    const advised = tool({ name: "generate_image", state: "failed", input: { prompt: "Owls" }, output: { data: encodeSystemSculptToolResult({ ok: false, message: "The image model refused this prompt. Try different words." }) } });
+    expect(renderTurnMedia(app([]), document.createElement("div"), [advised], actions, "", false)!.querySelector(".ss-media-pending-status")!.textContent).toBe("The image model refused this prompt. Try different words.");
   });
 });

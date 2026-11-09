@@ -89,8 +89,9 @@ export const MODE_CHOICES: Readonly<Record<TextExecutionBackend, readonly Chrome
   ],
 };
 
+// A no-break space keeps the product's name on one line.
 const CLAUDE_AUTO_UNAVAILABLE =
-  "Update Claude Code to use Auto. Until then, edits run and other actions ask.";
+  "Update Claude\u00a0Code to use Auto. Until then, edits apply without asking.";
 const CODEX_AUTO_UNAVAILABLE =
   "Update Codex to use Auto. Until then, Codex asks.";
 const MODE_APPLIES_NEXT = "Applies from your next message.";

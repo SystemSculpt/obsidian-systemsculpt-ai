@@ -125,12 +125,14 @@ describe("R3 conversation semantics", () => {
     renderer.unload();
   });
 
-  it("keeps retry before detection in signed-out errors", async () => {
+  it("finishes a signed-out error with Retry alone, as its words say", async () => {
     const { renderer, parent } = setup();
     await render(renderer, snapshot([{ kind: "error", id: "signed-out", order: 0, retryable: true,
       error: { code: "local_codex_failed", message: "Not signed in" } }], "failed"));
     expect([...parent.querySelectorAll('.systemsculpt-agent-error-actions button')].map(button => button.textContent))
-      .toEqual(["Retry", "Detect again"]);
+      .toEqual(["Retry"]);
+    expect(parent.querySelector(".systemsculpt-agent-error-message")?.textContent)
+      .toBe("In a terminal, run codex login. Then retry.");
     renderer.unload();
   });
 

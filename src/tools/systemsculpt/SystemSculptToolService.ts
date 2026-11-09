@@ -122,15 +122,17 @@ export class SystemSculptToolService {
   private subscribe(feature: string): SystemSculptToolResult {
     return {
       ok: false,
-      message: `${feature} comes with a SystemSculpt subscription. Subscribe: ${this.host.links.subscribe} ${LINK_SHOWN}`,
-      link: { label: "Subscribe", url: this.host.links.subscribe },
+      // The same words as the chat's own plan gate: "plan" and "See plans".
+      message: `${feature} comes with a SystemSculpt plan. See plans: ${this.host.links.subscribe} ${LINK_SHOWN}`,
+      link: { label: "See plans", url: this.host.links.subscribe },
     };
   }
 
   private failure(error: unknown): SystemSculptToolResult {
     const code = errorCode(error), message = errorText(error);
     if (code === "payment_required" || /insufficient_credits|not enough credits/i.test(message)) {
-      return { ok: false, message: `Not enough SystemSculpt credits for this. Buy credits: ${this.host.links.credits} ${LINK_SHOWN}`, link: { label: "Buy credits", url: this.host.links.credits } };
+      // The same words as the chat's credits banner and card: "credits" and "Add credits".
+      return { ok: false, message: `Not enough credits for this. Add credits: ${this.host.links.credits} ${LINK_SHOWN}`, link: { label: "Add credits", url: this.host.links.credits } };
     }
     if (/Operation already exists/.test(message)) {
       return { ok: false, message: "This request already generated, or is generating, its result; it is not run twice. Look in SystemSculpt/Images or SystemSculpt/Videos." };

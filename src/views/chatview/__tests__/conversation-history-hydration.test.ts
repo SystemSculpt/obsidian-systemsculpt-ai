@@ -21,21 +21,18 @@ function activity() {
 }
 
 function harness() {
-  const renderPart = jest.fn(async (parent: HTMLElement, part: MessagePart) => {
-    parent.createDiv({ text: String(part.data) });
-  });
   const renderTimeline = jest.fn(async (parent: HTMLElement) => {
     parent.createDiv({ text: "Saved activity" });
     return true;
   });
-  const commitOverflow = jest.fn((_element: HTMLButtonElement, _nodes: HTMLElement[]) => true);
   const forgetMarkdown = jest.fn();
+  const activityHydrated = jest.fn();
   const finishLayout = jest.fn();
   const beginLayoutMutation = jest.fn(() => finishLayout);
   const hydration = new ConversationHistoryHydration({
-    renderPart, renderTimeline, commitOverflow, forgetMarkdown, beginLayoutMutation,
+    renderTimeline, forgetMarkdown, activityHydrated, beginLayoutMutation,
   });
-  return { hydration, renderPart, renderTimeline, commitOverflow, forgetMarkdown, beginLayoutMutation, finishLayout };
+  return { hydration, renderTimeline, forgetMarkdown, activityHydrated, beginLayoutMutation, finishLayout };
 }
 
 describe("ConversationHistoryHydration", () => {
@@ -64,68 +61,63 @@ describe("ConversationHistoryHydration", () => {
     expect(h.beginLayoutMutation).toHaveBeenCalledWith(target.summary, target.body);
     expect(h.finishLayout).toHaveBeenCalledTimes(1);
     expect(target.body.textContent).toBe("Saved activity");
+    expect(h.activityHydrated).toHaveBeenCalledWith(target.element);
     expect(h.hydration.hydrate(target.element)).toBeNull();
   });
 
-  it.each(["activity", "overflow"] as const)("rejects hidden %s work and retries on show", async (kind) => {
+  it("rejects hidden activity work and retries on show", async () => {
     const h = harness();
     const target = activity();
-    const overflow = document.body.createEl("button");
     const gate = deferred();
-    if (kind === "activity") {
-      h.hydration.deferActivity(target, parts);
-      h.renderTimeline.mockImplementationOnce(async (staging) => {
-        staging.createDiv({ text: "Stale activity" });
-        await gate.promise;
-        return true;
-      });
-    } else {
-      h.hydration.deferOverflow(overflow, parts);
-      h.renderPart.mockImplementationOnce(async (staging) => {
-        staging.createDiv({ text: "Stale overflow" });
-        await gate.promise;
-      });
-    }
-    const element = kind === "activity" ? target.element : overflow;
-    const pending = h.hydration.hydrate(element);
+    h.hydration.deferActivity(target, parts);
+    h.renderTimeline.mockImplementationOnce(async (staging) => {
+      staging.createDiv({ text: "Stale activity" });
+      await gate.promise;
+      return true;
+    });
+    const pending = h.hydration.hydrate(target.element);
     h.hydration.setVisible(false);
     gate.resolve();
     await pending;
     expect(h.hydration.pendingCount).toBe(0);
-    expect(h.hydration.wasHydrated(element)).toBe(false);
+    expect(h.hydration.wasHydrated(target.element)).toBe(false);
     expect(target.body.childElementCount).toBe(0);
-    expect(h.commitOverflow).not.toHaveBeenCalled();
+    expect(h.activityHydrated).not.toHaveBeenCalled();
     expect(h.forgetMarkdown).toHaveBeenCalledTimes(1);
-    expect(h.hydration.hydrate(element)).toBeNull();
+    expect(h.hydration.hydrate(target.element)).toBeNull();
     h.hydration.setVisible(true);
-    await h.hydration.hydrate(element);
-    expect(h.hydration.wasHydrated(element)).toBe(true);
+    await h.hydration.hydrate(target.element);
+    expect(h.hydration.wasHydrated(target.element)).toBe(true);
     expect(h.hydration.pendingCount).toBe(0);
   });
 
-  it("disposes removed work and all remaining entries without publishing late overflow nodes", async () => {
+  it("disposes removed work and all remaining entries without publishing late rows", async () => {
     const h = harness();
     const row = document.body.createDiv();
-    const overflow = row.createEl("button");
-    const other = document.body.createEl("button");
+    const removed = activity();
+    row.appendChild(removed.element);
+    const other = activity();
     const gate = deferred();
-    h.renderPart.mockImplementationOnce(async (staging) => {
+    h.renderTimeline.mockImplementationOnce(async (staging) => {
       staging.createDiv({ text: "Late history" });
       await gate.promise;
+      return true;
     });
-    h.hydration.deferOverflow(overflow, parts);
-    h.hydration.deferOverflow(other, parts);
-    const pending = h.hydration.hydrate(overflow);
+    h.hydration.deferActivity(removed, parts);
+    h.hydration.deferActivity(other, parts);
+    const pending = h.hydration.hydrate(removed.element);
     h.hydration.forgetWithin(row);
     expect(h.hydration.pendingCount).toBe(0);
-    expect(h.hydration.hydrate(overflow)).toBeNull();
+    expect(h.hydration.hydrate(removed.element)).toBeNull();
     gate.resolve();
     await pending;
-    expect(h.commitOverflow).not.toHaveBeenCalled();
-    await h.hydration.hydrate(other);
-    expect(h.commitOverflow).toHaveBeenCalledTimes(1);
+    expect(removed.body.childElementCount).toBe(0);
+    expect(h.activityHydrated).not.toHaveBeenCalled();
+    await h.hydration.hydrate(other.element);
+    expect(h.activityHydrated).toHaveBeenCalledTimes(1);
+    expect(other.body.textContent).toBe("Saved activity");
     h.hydration.clear();
-    expect(h.hydration.hydrate(other)).toBeNull();
+    expect(h.hydration.hydrate(other.element)).toBeNull();
     expect(h.hydration.pendingCount).toBe(0);
   });
 
