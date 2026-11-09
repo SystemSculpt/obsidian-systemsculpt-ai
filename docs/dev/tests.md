@@ -78,8 +78,9 @@ npm run check:compat
   version exceeds every existing semantic version tag and supersedes them.
 - Obsidian installs the release files of HEAD manifest.json's version, so an
   unpublished version on main breaks every install and update. Only the daily
-  tool bumps the four version files. Trellis setup-health checks daily that
-  HEAD's version has downloadable release files.
+  tool bumps the four version files, and it merges the bump to main only after
+  publishing that version. Trellis setup-health checks daily that HEAD's
+  version has downloadable release files.
 
 - Release validation records the SHA-256 and size of manifest.json, main.js, and styles.css plus the source revision and build environment identity. The published-release workflow rebuilds the tag, requires exact asset bytes, and attests those published bytes before announcing the release through first-party metadata.
 
