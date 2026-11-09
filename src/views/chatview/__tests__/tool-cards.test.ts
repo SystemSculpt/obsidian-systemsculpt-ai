@@ -257,6 +257,21 @@ describe("studio and gated summaries", () => {
     expect(notice.classList.contains("is-shown-in-reply")).toBe(true);
   });
 
+  it("marks a gate line's action as a link that leaves Obsidian", () => {
+    const { app } = setup();
+    const body = document.createElement("div");
+    const gated = { ...hosted("generate_image", { prompt: "Cat astronaut" }, encodeSystemSculptToolResult({
+      ok: false, message: "Image generation comes with a SystemSculpt plan.", link: { label: "See plans", url: "https://systemsculpt.com/pricing" },
+    })), callId: "image-1", id: "image-1" } as AgentToolPart;
+    const openLink = jest.fn();
+    renderTurnMedia(app, body, [gated], { openFile: jest.fn(), openLink });
+    const action = body.querySelector<HTMLAnchorElement>("[data-testid='chat.turn.media.subscribe']")!;
+    expect(action.textContent).toBe("See plans");
+    expect(action.classList.contains("external-link")).toBe(true);
+    action.click();
+    expect(openLink).toHaveBeenCalledWith("https://systemsculpt.com/pricing");
+  });
+
   it("keeps raw Details JSON copyable line by line, each line wrapping under its own indent", () => {
     const card = document.createElement("div");
     const payload = { input: { city: "Portland" } };

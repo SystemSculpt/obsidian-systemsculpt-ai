@@ -163,7 +163,8 @@ function buildTurnMedia(app: App, parent: HTMLElement, presented: ReturnType<typ
   for (const notice of presented.notices) {
     const line = block.createDiv({ cls: "systemsculpt-agent-media-notice", attr: { "data-testid": "chat.turn.media.notice" } });
     if (notice.text) line.appendText(`${notice.text} `);
-    const link = line.createEl("a", { text: notice.label, attr: { href: notice.url, "data-testid": "chat.turn.media.subscribe" } });
+    // It leaves Obsidian, so it carries Obsidian's ↗ mark like every other such link.
+    const link = line.createEl("a", { cls: "external-link", text: notice.label, attr: { href: notice.url, rel: "noopener noreferrer", "data-testid": "chat.turn.media.subscribe" } });
     link.onclick = event => { event.preventDefault(); actions.openLink(notice.url); };
   }
   syncPendingClock(block);
