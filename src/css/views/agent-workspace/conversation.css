@@ -48,7 +48,8 @@
 
 .systemsculpt-agent-turn.is-user {
   align-self: flex-end;
-  max-width: 85%;
+  /* Room beside the bubble for its copy and edit buttons (below). */
+  max-width: min(85%, 100% - 2 * var(--ss-control-height) - 2 * var(--ss-space-1));
 }
 
 .systemsculpt-agent-turn.is-user.is-editing {
@@ -255,11 +256,31 @@
   opacity: 1;
 }
 
+/* An ask's copy and edit show beside its last line on hover, so they hold no empty row under it:
+   the answer starts one turn gap (20 px) under the ask. Touch keeps them on a row below. */
+.systemsculpt-agent-turn.is-user > .systemsculpt-agent-message-actions {
+  position: absolute;
+  inset-inline-end: 100%;
+  bottom: calc(var(--ss-space-3) + (var(--ss-text-base) * var(--ss-leading-relaxed) - var(--ss-control-height)) / 2);
+  margin-top: 0;
+  padding-inline-end: var(--ss-space-1);
+}
+
 /* Touch has no hover: the row stays visible and only its icons dim, so the
  * muted duration text keeps full text contrast (4.5:1) in both themes. */
 @media (pointer: coarse) {
   .systemsculpt-agent-message-actions {
     opacity: 1;
+  }
+
+  .systemsculpt-agent-turn.is-user {
+    max-width: 85%;
+  }
+
+  .systemsculpt-agent-turn.is-user > .systemsculpt-agent-message-actions {
+    position: static;
+    margin-top: var(--ss-space-1);
+    padding-inline-end: 0;
   }
 
   .systemsculpt-agent-message-actions .ss-button {

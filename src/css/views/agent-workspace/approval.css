@@ -15,6 +15,16 @@
   background: var(--ss-surface-1);
   color: var(--ss-ink);
 }
+/* A card that opens the turn stands where a notice or a whole-turn card would: one turn gap
+   under the ask, with no card margin or row centring above it. After a notice it keeps the
+   16 px a framed block keeps under another. */
+.systemsculpt-agent-turn.is-assistant .systemsculpt-agent-turn-body > .systemsculpt-agent-part.is-tool.is-approval-required:first-child,
+.systemsculpt-agent-turn-body > .systemsculpt-agent-part.is-approval-required:first-child > .systemsculpt-agent-approval {
+  margin-top: 0;
+}
+.systemsculpt-agent-notice + .systemsculpt-agent-active-run .systemsculpt-agent-turn.is-assistant .systemsculpt-agent-turn-body > .systemsculpt-agent-part.is-tool.is-approval-required:first-child {
+  margin-top: var(--ss-space-2);
+}
 .systemsculpt-agent-approval:focus-within {
   border-color: var(--ss-line-accent);
   box-shadow: var(--ss-ring);

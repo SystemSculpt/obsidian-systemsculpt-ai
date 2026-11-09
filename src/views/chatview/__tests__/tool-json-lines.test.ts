@@ -18,6 +18,21 @@ describe("renderJsonLines", () => {
     expect(code.querySelectorAll<HTMLElement>(".ss-json-line")[0].querySelector("wbr")).toBeNull();
   });
 
+  it("breaks a command line between its commands, never inside one", () => {
+    const code = document.createElement("code");
+    const text = JSON.stringify({ command: "rm -rf build && npm run build", description: "Clean build" }, null, 2);
+    renderJsonLines(code, text);
+    expect(code.textContent).toBe(text);
+    const line = code.querySelectorAll<HTMLElement>(".ss-json-line")[1];
+    // Each command moves to the next line whole; the closing quote and comma stay on the last.
+    expect(Array.from(line.querySelectorAll(".ss-json-name"), (name) => name.textContent)).toEqual(["rm -rf build &&", "npm run build\","]);
+    expect(Array.from(line.querySelectorAll(".ss-json-whole"), (word) => word.textContent)).toEqual(["-rf"]);
+    // One command alone keeps the ordinary word rule.
+    const single = document.createElement("code");
+    renderJsonLines(single, JSON.stringify({ command: "npm run build" }, null, 2));
+    expect(single.querySelector(".ss-json-name")).toBeNull();
+  });
+
   it("keeps each saved file's name and date whole in a list of paths", () => {
     const code = document.createElement("code");
     const message = "Saved 2 images: SystemSculpt/Images/2026-11-08 093100 lighthouse take 1.png, SystemSculpt/Images/2026-11-08 093100 lighthouse take 2.png";

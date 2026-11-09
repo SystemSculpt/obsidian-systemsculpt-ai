@@ -383,10 +383,41 @@ export function renderJsonLines(code: HTMLElement, text: string): void {
     const block = code.createSpan({ cls: "ss-json-line" });
     // A path breaks after a "/" and an escape ("\n") stays whole, so a wrapped value never splits
     // a name or reads as a new path; only a run with no such place breaks where it must.
-    if (content.length > 32 && /[/\\]/u.test(content)) appendBreakableValue(block, content);
-    else appendJsonWords(block, content);
+    if (!appendCommandLine(block, content)) {
+      if (content.length > 32 && /[/\\]/u.test(content)) appendBreakableValue(block, content);
+      else appendJsonWords(block, content);
+    }
     if (indent) block.setCssProps({ "--ss-json-indent": String(indent) });
   });
+}
+
+/**
+ * A command line ("rm -rf build && npm run build") breaks between its commands, after the
+ * "&&", "||", "|" or ";" that joins them, never inside one that fits on a line. The closing
+ * quote and comma stay on the last command. False when the line holds no joined commands.
+ */
+function appendCommandLine(block: HTMLElement, content: string): boolean {
+  const line = /^(\s*"(?:command|cmd)":\s*")((?:[^"\\\n]|\\.)*)("[^\n]*)(\n?)$/u.exec(content);
+  if (!line) return false;
+  const [, opening, value, closing, end] = line;
+  // Commands and the spaces between them, in turn; each joiner stays on the command before it.
+  const pieces: string[] = [];
+  let start = 0;
+  for (const join of value.matchAll(/(?:\s(?:&&|\|\|?)|;)(\s+)/gu)) {
+    const space = (join.index ?? 0) + join[0].length - join[1].length;
+    pieces.push(value.slice(start, space), join[1]);
+    start = space + join[1].length;
+  }
+  pieces.push(value.slice(start));
+  if (pieces.length < 3) return false;
+  block.appendText(opening);
+  pieces.forEach((piece, index) => {
+    if (index % 2) { block.appendText(piece); return; }
+    const last = index === pieces.length - 1;
+    appendJsonWords(block.createSpan({ cls: "ss-json-name" }), last ? `${piece}${closing}` : piece);
+  });
+  if (end) block.appendText(end);
+  return true;
 }
 
 /** A short hyphenated word ("2026-11-08", "T-5957", "--short") never breaks at its hyphen. */
