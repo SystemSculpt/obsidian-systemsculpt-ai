@@ -70,4 +70,4 @@
   available on this device; an ID in chat history alone is not a saved report.
 - `Copy resource usage report`
 - Advanced tab: `Copy diagnostics snapshot`
-- Advanced tab: `Open diagnostics folder`
+- Advanced tab: `Diagnostics folder` → `Open folder`
