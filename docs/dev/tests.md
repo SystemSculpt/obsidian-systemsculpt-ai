@@ -82,7 +82,7 @@ npm run check:compat
   publishing that version. Trellis setup-health checks daily that HEAD's
   version has downloadable release files.
 
-- Release validation records the SHA-256 and size of manifest.json, main.js, and styles.css plus the source revision and build environment identity. The published-release workflow rebuilds the tag, requires exact asset bytes, and attests those published bytes before announcing the release through first-party metadata.
+- Release validation records the SHA-256 and size of manifest.json, main.js, and styles.css plus the source revision and build environment identity. The published-release workflow rebuilds the tag, requires exact asset bytes, and attests those published bytes before announcing the release through first-party metadata. It announces only once main's manifest.json names that version.
 
 ## Failures
 
