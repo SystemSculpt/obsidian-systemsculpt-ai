@@ -8,11 +8,9 @@ import {
 import {
   createToolCard,
   renderFields,
-  renderMedia,
   renderNotice,
   mediaDisplayName,
   renderPathList,
-  savedMediaField,
   type ToolCardField,
 } from "./ToolCardBlocks";
 
@@ -75,7 +73,6 @@ export function renderSystemSculptToolCard(app: App, host: HTMLElement, part: Ag
   const card = host.classList.contains("ss-tool-card") ? host : createToolCard(host, `systemsculpt:${name}`);
   card.dataset.card = `systemsculpt:${name}`;
 
-  if (result?.media?.length) renderMedia(app, card, result.media);
 
   // The workflow first, then what was asked, then what came of it: one grid, one rhythm.
   const fields: ToolCardField[] = [];
@@ -116,7 +113,6 @@ export function renderSystemSculptToolCard(app: App, host: HTMLElement, part: Ag
     || name === "studio_list_outputs" && !outputs.length) ? personFacingMessage(result) : "";
   // A result beside other fields gets its label, so it never reads as one.
   if (outcome && fields.length) fields.push({ label: "Result", value: outcome });
-  if (result?.media?.length) fields.push(savedMediaField(result.media));
   renderFields(app, card, fields);
   if (outcome && !fields.length) card.createDiv({ cls: "ss-tool-result", text: outcome });
   renderPathList(app, card, workflows);

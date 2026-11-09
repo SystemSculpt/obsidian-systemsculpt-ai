@@ -24,9 +24,8 @@ export type PendingMedia = Readonly<{
   ratio: number;
   state: "working" | "saving" | "failed";
   label: string;
+  /** The prompt, on one line where the file's name lands, so nothing under the tile moves when it does. */
   caption?: string;
-  /** A grid tile's caption keeps to one line, as the file name that replaces it does, so the rows hold still. */
-  captionLine?: true;
   error?: string;
   /** Key of the live progress the call reports here. */
   progressKey: string | null;
@@ -131,11 +130,11 @@ export function presentPendingMedia(parts: readonly AgentToolPart[], live: boole
       if (active) {
         for (let index = 0; index < count; index += 1) {
           // A grid's tiles are the single tile, four times: the same words, each with its prompt on one
-          // line where its file's name will land, so no row moves when the pictures arrive.
+          // line where its file's name will land.
           pending.push({
             ...base, id: `${part.callId}:${index}`, kind, ratio, state: "working",
             label: `${editing(args) ? "Editing" : "Generating"} ${kind}`,
-            ...(prompt ? { caption: prompt, ...(count > 1 ? { captionLine: true as const } : {}) } : {}),
+            ...(prompt ? { caption: prompt } : {}),
           });
         }
         return;
@@ -262,12 +261,10 @@ export function renderPendingMedia(grid: HTMLElement, tile: PendingMedia): HTMLE
     updatePendingTile(figure, tile, Date.now());
   }
   if (tile.kind !== "workflow" && tile.caption) {
-    // The prompt wraps under its frame (up to three lines), so its words are read, not cut at one line;
-    // a grid tile's stays on one line, the height of the file name that replaces it.
-    const caption = figure.createEl("figcaption", { cls: `systemsculpt-agent-media-caption ${tile.captionLine ? "is-single-line is-words" : "is-prompt"}`, attr: { title: tile.caption } });
-    // On one line, each word is one box (its space leading it), so the ellipsis ends on a whole word.
-    if (tile.captionLine) tile.caption.split(/(?=\s)/u).forEach(word => caption.createSpan({ text: word }));
-    else caption.setText(tile.caption);
+    // The prompt keeps to one line, the height of the file name that replaces it; the whole prompt is
+    // its title and the open card's. Each word is one box (its space leading it), so the cut ends on a whole word.
+    const caption = figure.createEl("figcaption", { cls: "systemsculpt-agent-media-caption is-single-line is-words", attr: { title: tile.caption } });
+    tile.caption.split(/(?=\s)/u).forEach(word => caption.createSpan({ text: word }));
   }
   pendingTiles.set(figure, tile);
   return figure;

@@ -317,14 +317,6 @@
 .ss-tool-fields dd code {
   font-size: var(--ss-text-xs);
 }
-/* The "Saved" row names the files only while the reply shows the pictures themselves. */
-.ss-tool-field.is-saved:not(.is-shown) {
-  display: none;
-}
-/* A grid holding only such hidden rows takes no room, not even its gap, in the card. */
-.ss-tool-fields.is-empty {
-  display: none;
-}
 @container ss-surface (max-width: 379px) {
   .ss-tool-fields {
     grid-template-columns: minmax(0, 1fr);
@@ -794,9 +786,10 @@
   padding-inline-start: 0;
 }
 .ss-native-plan-preview li {
+  --ss-plan-gutter: 1.5em;
   position: relative;
   margin-inline-start: 0;
-  padding-inline-start: 1.5em;
+  padding-inline-start: var(--ss-plan-gutter);
   list-style: none;
 }
 .ss-native-plan-preview :is(ol > li, ul > li:not(.task-list-item))::before {
@@ -806,6 +799,17 @@
   font-variant-numeric: tabular-nums;
 }
 .ss-native-plan-preview ol > li::before { content: counter(list-item) "."; }
+.ss-native-plan-preview ol.has-wide-numbers > li,
+.ss-native-plan-preview.has-wide-numbers :is(ul, ol):not(li *) > li { --ss-plan-gutter: 2.1em; }
+/* A task's box hangs on the inset as a bullet does, the size of the text, so its words start where
+   its list's other items' do. */
+.ss-native-plan-preview .task-list-item > .task-list-item-checkbox {
+  --checkbox-size: 1em;
+  margin-block: 0;
+  margin-inline: calc(-1 * var(--ss-plan-gutter)) calc(var(--ss-plan-gutter) - 1em);
+  vertical-align: middle;
+}
+.ss-native-plan-preview li > :is(ul, ol) { margin-block: 0; }
 .ss-native-plan-preview ul > li:not(.task-list-item)::before { content: "•"; }
 .ss-native-plan-preview.is-collapsed {
   max-height: 25.6em;

@@ -19,7 +19,7 @@ import { beginGeneration, generationKey, updateGeneration } from "./GenerationPr
 /** The chat shows generated files under the reply; an embed in the reply would show them twice. */
 /** The chat shows the link as its own line; the reply repeating it would say it twice. */
 const LINK_SHOWN = "The chat already shows the person this line and its link under your reply. Write nothing about it: any sentence about a subscription, credits, the link or nothing being made repeats that line. If the person asked for nothing else, end your turn now with no reply text at all.";
-const SHOWN_IN_CHAT = "The chat already shows generated files right after your reply, so don't embed them or say where they appear.";
+const SHOWN_IN_CHAT = "The chat already shows generated files with your reply, so don't embed them or say where they appear.";
 
 
 type StudioTarget = Pick<StudioService,

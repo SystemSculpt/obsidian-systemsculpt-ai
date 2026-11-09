@@ -5,7 +5,7 @@ import { encodeSystemSculptToolResult, SYSTEMSCULPT_TOOL_SERVER } from "../../..
 import { renderHostedToolPreview } from "../HostedToolPreview";
 import { renderNativeToolPreview } from "../NativeToolPresentation";
 import { presentAgentTool, presentAgentToolFailure, agentToolNoticeTone } from "../AgentToolPresentation";
-import { mediaDisplayName, renderFields, renderMedia, renderRawDetails, savedMediaField } from "../ToolCardBlocks";
+import { mediaDisplayName, renderFields, renderMedia, renderRawDetails } from "../ToolCardBlocks";
 import { renderTurnMedia } from "../TurnMedia";
 import { presentTurnChanges } from "../TurnChangeSummary";
 import { setActivityLabelText, summarizeAgentActivity } from "../AgentActivityPresentation";
@@ -47,20 +47,29 @@ function claude(name: string, input: unknown, data?: unknown, overrides: Partial
 }
 
 describe("one card for every tool result", () => {
-  it("shows generated media as thumbnails that open their vault files, and the prompt in words", () => {
-    const { app, host, openLinkText } = setup();
+  it("shows a generation's prompt in words and leaves its files to the turn, which shows and names them", () => {
+    const { app, host } = setup();
     const data = encodeSystemSculptToolResult({ ok: true, message: "Generated 1 image and 1 video.", media: [
       { kind: "image", path: IMAGE }, { kind: "video", path: VIDEO },
     ] });
     expect(renderHostedToolPreview(app, host, hosted("generate_image", { prompt: "A lighthouse at dusk" }, data))).toBe(true);
-    const tiles = host.querySelectorAll<HTMLButtonElement>('[data-testid="chat.tool.media.open"]');
+    // No thumbnail and no "Saved" row: the open card keeps its height when the files land below it.
+    expect(host.querySelector('[data-testid="chat.tool.media"]')).toBeNull();
+    expect(Array.from(host.querySelectorAll(".ss-tool-field dt"), label => label.textContent)).toEqual(["Prompt"]);
+    expect(host.querySelector(".ss-tool-field dd")?.textContent).toBe("A lighthouse at dusk");
+    expect(host.textContent).not.toContain("systemsculpt_tool");
+  });
+
+  it("draws a card's thumbnails so each opens its vault file", () => {
+    const { app, openLinkText } = setup();
+    const card = document.createElement("div");
+    renderMedia(app, card, [{ kind: "image", path: IMAGE }, { kind: "video", path: VIDEO }]);
+    const tiles = card.querySelectorAll<HTMLButtonElement>('[data-testid="chat.tool.media.open"]');
     expect(tiles).toHaveLength(2);
     expect(tiles[0].querySelector("img")?.getAttribute("src")).toBe(`app://local/vault/${IMAGE}`);
     expect(tiles[1].querySelector("video")?.getAttribute("src")).toBe(`app://local/vault/${VIDEO}#t=0.1`);
     tiles[1].click();
     expect(openLinkText).toHaveBeenCalledWith(VIDEO, "", false);
-    expect(host.querySelector(".ss-tool-field:not(.is-saved) dd")?.textContent).toBe("A lighthouse at dusk");
-    expect(host.textContent).not.toContain("systemsculpt_tool");
   });
 
   it.each(["See plans", "Subscribe"])("says a plan gate (%s) in one calm line with its action, without the agent-only text", async (label) => {
@@ -157,25 +166,19 @@ describe("media shown once per turn", () => {
     expect(mediaDisplayName(IMAGE, "Poster art")).toBe("Poster art");
   });
 
-  it("keeps only the file link in a card when the reply shows the same image", () => {
+  it("hides a card's thumbnail when the reply shows the same image, which names it once", () => {
     const { app } = setup();
     const body = document.createElement("div");
     body.className = "systemsculpt-agent-turn-body";
     const card = body.appendChild(document.createElement("div"));
-    const files = [{ kind: "image", path: IMAGE }] as const;
-    renderMedia(app, card, files);
-    renderFields(app, card, [{ label: "Prompt", value: "Lighthouse" }, savedMediaField(files)]);
+    renderMedia(app, card, [{ kind: "image", path: IMAGE }]);
+    renderFields(app, card, [{ label: "Prompt", value: "Lighthouse" }]);
     const media = card.querySelector(".ss-tool-media")!;
-    const saved = card.querySelector(".ss-tool-field.is-saved")!;
     expect(media.classList.contains("is-shown-in-reply")).toBe(false);
-    expect(saved.classList.contains("is-shown")).toBe(false);
     const generated = hosted("generate_image", { prompt: "Lighthouse" }, encodeSystemSculptToolResult({ ok: true, message: "Saved.", media: [{ kind: "image", path: IMAGE }] }));
     renderTurnMedia(app, body, [generated], { openFile: jest.fn(), openLink: jest.fn() });
     expect(media.classList.contains("is-shown-in-reply")).toBe(true);
-    // The file's name takes the thumbnail's place, in the same grid as the prompt.
-    expect(saved.classList.contains("is-shown")).toBe(true);
-    expect(card.querySelectorAll(".ss-tool-fields")).toHaveLength(1);
-    expect(saved.querySelector("dd a")?.textContent).toBe("Lighthouse");
+    expect(card.textContent).not.toContain("Saved");
     expect(body.querySelector("[data-testid='chat.turn.media.path']")?.textContent).toBe("Lighthouse");
   });
 

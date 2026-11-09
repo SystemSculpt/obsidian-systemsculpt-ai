@@ -20,8 +20,6 @@ export type ToolCardField = Readonly<{
   mono?: boolean;
   /** Several values (files, changes, queries), one per line in the value column. */
   list?: readonly ToolCardPathRow[];
-  /** The saved files' names: shown only while the reply below shows the media itself. */
-  saved?: boolean;
 }>;
 
 /** One row of a list: a vault path that opens (link false: plain text), with an optional muted note. */
@@ -130,10 +128,8 @@ export function externalLink(parent: HTMLElement, url: string, text = url): HTML
 export function renderFields(app: App, card: HTMLElement, fields: readonly ToolCardField[]): void {
   if (!fields.length) return;
   const list = card.createEl("dl", { cls: "ss-tool-fields" });
-  // "Saved" rows start hidden (syncToolMediaWithReply shows them); a grid of only those takes no room until then.
-  list.toggleClass("is-empty", fields.every(field => field.saved));
   for (const field of fields) {
-    const row = list.createDiv({ cls: `ss-tool-field${field.saved ? " is-saved" : ""}` });
+    const row = list.createDiv({ cls: "ss-tool-field" });
     row.createEl("dt", { text: field.label });
     const value = row.createEl("dd");
     if (field.list?.length) renderPathList(app, value, field.list);
@@ -270,8 +266,8 @@ const TURN_MEDIA_ITEM = ":scope > .systemsculpt-agent-turn-media [data-media-pat
 
 /**
  * Media the reply already shows full size is not shown again in its tool card:
- * the card keeps the file link instead of a second picture. Runs when the
- * reply's media renders and when a card renders into its turn.
+ * the reply's own caption names and opens it. Runs when the reply's media
+ * renders and when a card renders into its turn.
  */
 export function syncToolMediaWithReply(turnBody: Element | null): void {
   if (!turnBody) return;
@@ -284,12 +280,6 @@ export function syncToolMediaWithReply(turnBody: Element | null): void {
     const paths = Array.from(media.querySelectorAll("[data-media-path]"), tile => tile.getAttribute("data-media-path"));
     const shown = paths.length > 0 && paths.every(path => below.has(path));
     media.classList.toggle("is-shown-in-reply", shown);
-    // The card's "Saved" row names the files in the thumbnails' place.
-    for (const field of Array.from(media.parentElement?.querySelectorAll(".ss-tool-field.is-saved") ?? [])) {
-      field.classList.toggle("is-shown", shown);
-      const grid = field.parentElement;
-      if (grid) grid.classList.toggle("is-empty", Array.from(grid.children).every(row => row.matches(".is-saved:not(.is-shown)")));
-    }
   }
   // A failed generation's reason is its slim row under the call; the card doesn't say it again.
   const failed = new Set(Array.from(
@@ -301,18 +291,10 @@ export function syncToolMediaWithReply(turnBody: Element | null): void {
   }
 }
 
-/** The saved files' names, one per line: the card shows them while the reply shows the media itself. */
-export function savedMediaField(media: readonly ToolCardMedia[]): ToolCardField {
-  return {
-    label: "Saved", value: "", saved: true,
-    list: media.map(item => ({ path: item.path, text: mediaDisplayName(item.path, item.label) })),
-  };
-}
-
 /** Thumbnails of generated or viewed media; each opens its vault file. */
 export function renderMedia(app: App, card: HTMLElement, media: readonly ToolCardMedia[]): void {
   if (!media.length) return;
-  // When the reply below shows the same files, the strip hides and the card's "Saved" field (savedMediaField) shows.
+  // When the reply below shows the same files, the strip hides (syncToolMediaWithReply): the reply names them.
   const strip = card.createDiv({ cls: "ss-tool-media", attr: { "data-testid": "chat.tool.media" } });
   if (media.length > 1) {
     strip.addClass("is-multiple");

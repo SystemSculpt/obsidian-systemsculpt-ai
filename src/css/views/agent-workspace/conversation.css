@@ -666,16 +666,6 @@ video.systemsculpt-agent-media-frame {
   .systemsculpt-agent-media:not(.is-estimated) .ss-media-pending-fill { visibility: hidden; }
 }
 
-.systemsculpt-agent-media-caption.is-prompt {
-  display: -webkit-box;
-  overflow: hidden;
-  white-space: normal;
-  text-wrap: pretty;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-  line-clamp: 3;
-}
-
 .systemsculpt-agent-media-caption.is-single-line {
   overflow: hidden;
   text-overflow: ellipsis;

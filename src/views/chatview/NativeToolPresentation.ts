@@ -24,7 +24,6 @@ import {
   renderPathList,
   renderTerminal,
   renderText,
-  savedMediaField,
   toolOutputText,
   type ToolCardField,
   type ToolCardLink,
@@ -481,6 +480,11 @@ async function renderPlan(app: App, container: HTMLElement, part: AgentToolPart,
   const body = container.createDiv({ cls: "ss-native-plan-preview" });
   if (component) await MarkdownRenderer.render(app, plan, body, "", component);
   else body.setText(plan);
+  // Steps numbered 10 and up take a wider gutter, so every step's words start at one edge; the plan's
+  // other top-level lists take it too, so its notes start where its steps do.
+  const wide = Array.from(body.querySelectorAll("ol")).filter(list => list.start + list.children.length - 1 >= 10);
+  for (const list of wide) list.addClass("has-wide-numbers");
+  if (wide.some(list => !list.parentElement?.closest("li"))) body.addClass("has-wide-numbers");
   if (plan.split("\n").length > 16) {
     body.addClass("is-collapsed");
     const all = createUiAction(container, { label: "Show all", testId: "chat.approval.show-plan", size: "small", tooltip: false });
@@ -653,10 +657,7 @@ async function renderResolvedNative(app: App, card: HTMLElement, part: AgentTool
       // Codex's own image tools: the saved vault copy, like every generated image.
       const image = codexImageMedia(part);
       if (image) renderMedia(app, card, [image.media]);
-      renderFields(app, card, [
-        ...(toolKind === "imageGeneration" && text(input.revisedPrompt) ? [{ label: "Prompt", value: text(input.revisedPrompt)! }] : []),
-        ...(image ? [savedMediaField([image.media])] : []),
-      ]);
+      renderFields(app, card, toolKind === "imageGeneration" && text(input.revisedPrompt) ? [{ label: "Prompt", value: text(input.revisedPrompt)! }] : []);
       return;
     }
     case "TodoWrite":

@@ -144,7 +144,12 @@ function buildTurnMedia(app: App, parent: HTMLElement, presented: ReturnType<typ
         figure.setCssProps({ "--ss-media-ratio": String(ratio) });
       }
       if (item.kind === "video") {
-        const video = figure.createEl("video", { cls: "systemsculpt-agent-media-frame", attr: { src: source, controls: "", preload: "metadata", playsinline: "", "aria-label": name } });
+        // Play, time, sound and full screen only: with no overflow menu even a narrow vertical player has
+        // room for its length ("0:00 / 0:05"). The file is in the vault, so it needs no download.
+        const video = figure.createEl("video", { cls: "systemsculpt-agent-media-frame", attr: {
+          src: source, controls: "", controlslist: "nodownload noplaybackrate noremoteplayback", disablepictureinpicture: "",
+          disableremoteplayback: "", preload: "metadata", playsinline: "", "aria-label": name,
+        } });
         settleFrame(figure, video, () => [video.videoWidth, video.videoHeight], "loadedmetadata");
       } else {
         const open = figure.createEl("button", { cls: "systemsculpt-agent-media-open", attr: { type: "button", "aria-label": `Open ${name}`, "data-testid": "chat.turn.media.open" } });

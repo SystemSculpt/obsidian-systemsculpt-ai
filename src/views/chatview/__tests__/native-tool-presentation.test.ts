@@ -1,5 +1,5 @@
 /** @jest-environment jsdom */
-import { TFile, type App } from "obsidian";
+import { Component, MarkdownRenderer, TFile, type App } from "obsidian";
 import type { AgentToolPart } from "../../../chat/ChatConversation";
 import { nativeToolPresentation, renderNativeToolPreview } from "../NativeToolPresentation";
 import { nativePathPrefixRewriter, nativeToolPath } from "../../../utils/nativeToolPath";
@@ -584,6 +584,26 @@ describe("native preview rendering", () => {
     host.querySelector<HTMLButtonElement>('[data-testid="chat.approval.show-plan"]')!.click();
     expect(host.querySelector(".ss-native-plan-preview")?.classList.contains("is-collapsed")).toBe(false);
     expect(host.textContent).toBe(plan);
+  });
+
+  it("gives a plan of ten or more steps one text edge, its other top-level lists included", async () => {
+    const { app } = vault();
+    const html = (steps: number) => `<ol>${"<li>Step</li>".repeat(steps)}</ol><ul><li>Note<ol><li>Nested</li></ol></li></ul>`;
+    let steps = 10;
+    const render = jest.spyOn(MarkdownRenderer, "render").mockImplementation(async (_app, _markdown, el) => { el.innerHTML = html(steps); });
+    try {
+      const host = document.createElement("div");
+      await renderNativeToolPreview(app, host, part("ExitPlanMode", { plan: "1. Step" }), new Component());
+      const preview = host.querySelector(".ss-native-plan-preview")!;
+      expect(preview.classList.contains("has-wide-numbers")).toBe(true);
+      expect(preview.querySelector(":scope > ol")?.classList.contains("has-wide-numbers")).toBe(true);
+      // A short nested list keeps the usual gutter under its step's words.
+      expect(preview.querySelector("li ol")?.classList.contains("has-wide-numbers")).toBe(false);
+      steps = 9;
+      const short = document.createElement("div");
+      await renderNativeToolPreview(app, short, part("ExitPlanMode", { plan: "1. Step" }), new Component());
+      expect(short.querySelector(".has-wide-numbers")).toBeNull();
+    } finally { render.mockRestore(); }
   });
 
   it("drops a first heading that only says Plan, which the card's title already says", async () => {

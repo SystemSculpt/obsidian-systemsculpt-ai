@@ -49,7 +49,7 @@ describe("live generation placeholders", () => {
     const part = tool({ name: "generate_image", state: "running", input: { type: "dynamicToolCall", arguments: { prompt: "Owls", count: 3, aspect_ratio: "4:3" } } });
     const tiles = presentPendingMedia([part], true);
     // Each tile is the single tile: its words, and the prompt on one line where its file name lands.
-    expect(tiles.map(tile => [tile.label, tile.caption, tile.captionLine])).toEqual(Array(3).fill(["Generating image", "Owls", true]));
+    expect(tiles.map(tile => [tile.label, tile.caption])).toEqual(Array(3).fill(["Generating image", "Owls"]));
     expect(tiles[0].ratio).toBeCloseTo(4 / 3);
     // A restored chat whose call never finished shows no spinner.
     expect(presentPendingMedia([part], false)).toEqual([]);
@@ -67,7 +67,7 @@ describe("live generation placeholders", () => {
   it("keeps a failure in the card, but not a stop, a gate or one a later call made up for", () => {
     const failed = (message: string, extra: Record<string, unknown> = {}) => tool({ name: "generate_image", state: "failed", input: { prompt: "Owls" },
       output: { data: encodeSystemSculptToolResult({ ok: false, message, ...extra }) } });
-    const [tile] = presentPendingMedia([failed("The image model is busy. The chat already shows generated files right after your reply.")], false);
+    const [tile] = presentPendingMedia([failed("The image model is busy. The chat already shows generated files with your reply.")], false);
     expect(tile).toMatchObject({ state: "failed", error: "The image model is busy." });
     expect(presentPendingMedia([failed("Stopped.")], false)).toEqual([]);
     expect(presentPendingMedia([failed("Not enough credits.", { link: { label: "Buy credits", url: "https://systemsculpt.com/credits" } })], false)).toEqual([]);
@@ -132,6 +132,11 @@ describe("live generation placeholders", () => {
     // The turn's row above names it; the frame keeps its name for a screen reader, not in its words.
     expect(placeholder.getAttribute("aria-label")).toBe("Generating image");
     expect(placeholder.textContent).not.toContain("Generating image");
+    // Its prompt keeps to one line, as the file name that lands there, cut only between whole words.
+    const caption = placeholder.querySelector<HTMLElement>("figcaption")!;
+    expect(caption.className).toBe("systemsculpt-agent-media-caption is-single-line is-words");
+    expect(Array.from(caption.children, word => word.textContent)).toEqual(["A", " lighthouse", " at", " dusk"]);
+    expect(caption.title).toBe("A lighthouse at dusk");
 
     const done = tool({ ...running, state: "succeeded", output: { data: encodeSystemSculptToolResult({ ok: true, message: "Saved", media: [{ kind: "image", path: PATH }] }) } });
     const block = renderTurnMedia(app([PATH]), parent, [done], actions, "", true)!;
