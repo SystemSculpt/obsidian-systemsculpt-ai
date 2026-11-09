@@ -4943,7 +4943,8 @@ describe("AgentConversationRenderer tail status", () => {
 
     expect(parent.querySelector("details[data-agent-turn-fold] > summary .systemsculpt-agent-activity-label")?.textContent)
       .toBe("Edited Launch plan ·\u00a02 denied ·\u00a01 withdrawn");
-    expect(parent.querySelector('[data-testid="chat.turn.changes"]')?.textContent).toBe("Changed 1 note: Launch\u00a0plan");
+    // Each approved edit counts as its row does ("+1 −1"), added up for the one note.
+    expect(parent.querySelector('[data-testid="chat.turn.changes"]')?.textContent).toBe("Changed 1 note: Launch\u00a0plan +2 −2");
     // The fold's rows sit flat inside it: the summary lives on the fold alone.
     expect(parent.querySelector("button[data-agent-activity-overflow]")).toBeNull();
     // Rows keep their order, decisions and approval scope.

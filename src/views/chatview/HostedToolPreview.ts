@@ -322,7 +322,7 @@ export function renderHostedToolPreview(
         if (input.ifExists === "skip") caption(card, "Skip an existing file. A successful request does not confirm that this content was written.");
         if (input.ifExists === "error") caption(card, "Create only if the file does not already exist.");
         renderNotices(card, output);
-        if (typeof input.content === "string") renderFileContent(card, input.content);
+        if (typeof input.content === "string") renderFileContent(card, input.content, undefined, true);
         break;
       case "edit":
       case "multi_edit": renderEdit(app, card, input, output, options, name === "multi_edit"); break;

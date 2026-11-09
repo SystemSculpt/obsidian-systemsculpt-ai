@@ -516,7 +516,7 @@ const COUNTED_CHANGE_STATES: ReadonlySet<AgentToolDisplayState> = new Set<AgentT
  * didn't apply (skipped, or in a note that failed) counts nothing; a regular expression's text isn't
  * the change it makes, so a request with one has no count.
  */
-function hostedChangeSize(canonicalName: string, input: Record<string, unknown>, output: Record<string, unknown>): string | undefined {
+export function hostedChangeSize(canonicalName: string, input: Record<string, unknown>, output: Record<string, unknown>): string | undefined {
   // A write told to keep an existing note ("skip") may have written nothing.
   if (canonicalName === "write") return input.ifExists === "skip" ? undefined : writeChangeSize(input.content);
   if (canonicalName !== "edit" && canonicalName !== "multi_edit") return undefined;

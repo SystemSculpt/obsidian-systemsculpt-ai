@@ -2,7 +2,8 @@ import type { AgentToolPart } from "../../chat/ChatConversation";
 import { splitToolName } from "../../utils/toolPolicy";
 import { parseUnifiedDiff } from "../../utils/diffUtils";
 import { nativeToolPath } from "../../utils/nativeToolPath";
-import { noteDisplayName } from "./NativeToolPresentation";
+import { editChangeSize, noteDisplayName } from "./NativeToolPresentation";
+import { hostedChangeSize } from "./AgentToolPresentation";
 
 export type TurnChange = Readonly<{ path: string; label: string; meta?: string; deleted?: true }>;
 function record(value: unknown): Record<string, unknown> {
@@ -67,7 +68,9 @@ export function presentTurnChanges(parts: readonly AgentToolPart[]): readonly Tu
     if (part.native) {
       if (part.state !== "succeeded" || output.success === false) continue;
       if (["Edit", "MultiEdit", "Write"].includes(part.name)) {
-        for (const path of paths(input.file_path)) add(path, part.name === "Write" ? "written" : undefined);
+        // Each change reads the count its row shows ("+1 −1").
+        const size = part.name === "Write" ? "written" : editChangeSize(part.name === "MultiEdit" ? rows(input.edits) : [input], "old_string", "new_string");
+        for (const path of paths(input.file_path)) add(path, size);
       } else if (part.name === "fileChange" || input.type === "fileChange") {
         for (const change of rows(input.changes)) {
           const path = paths(change.path)[0];
@@ -87,6 +90,10 @@ export function presentTurnChanges(parts: readonly AgentToolPart[]): readonly Tu
     const { canonicalName } = splitToolName(part.name);
     if (part.location !== "vault" || !["write", "edit", "multi_edit", "move", "trash"].includes(canonicalName)) continue;
     const results = rows(output.results);
+    // A batch's note reads the count its own edits and result give, as the row adds them up.
+    const fileChangeSize = (path: string, result: Record<string, unknown>): string | undefined => canonicalName === "multi_edit"
+      ? hostedChangeSize("multi_edit", { files: rows(input.files).filter(file => paths(file.path)[0] === path) }, { results: [result] })
+      : hostedChangeSize(canonicalName, input, result);
     const successful = results.filter(result => result.success === true);
     if (results.length) {
       for (const result of successful) {
@@ -94,7 +101,8 @@ export function presentTurnChanges(parts: readonly AgentToolPart[]): readonly Tu
         const source = paths(result.source)[0], destination = paths(result.destination)[0];
         if (canonicalName === "move" && source && destination) move(source, destination, moved(source, destination));
         // Trash keeps the note: it was moved there, as the row says, not deleted.
-        else if (path) add(path, undefined, canonicalName === "trash" ? `Moved ${name(path)} to trash` : name(path), canonicalName === "trash");
+        else if (canonicalName === "trash") { if (path) add(path, undefined, `Moved ${name(path)} to trash`, true); }
+        else if (path) add(path, fileChangeSize(path, result));
       }
     } else if (part.state !== "succeeded" || output.success === false || Array.isArray(output.results)) {
       continue;
@@ -106,9 +114,9 @@ export function presentTurnChanges(parts: readonly AgentToolPart[]): readonly Tu
     } else if (canonicalName === "trash") {
       for (const path of paths(input.paths)) add(path, undefined, `Moved ${name(path)} to trash`, true);
     } else if (canonicalName === "multi_edit") {
-      for (const file of rows(input.files)) for (const path of paths(file.path)) add(path);
+      for (const file of rows(input.files)) for (const path of paths(file.path)) add(path, hostedChangeSize("multi_edit", { files: [file] }, output));
     } else {
-      for (const path of paths(input.path)) add(path, output.created === true ? "new" : undefined);
+      for (const path of paths(input.path)) add(path, output.created === true ? "new" : hostedChangeSize(canonicalName, input, output));
     }
   }
   return Array.from(changes.values());

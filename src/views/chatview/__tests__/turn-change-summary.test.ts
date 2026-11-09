@@ -110,6 +110,24 @@ describe("turn change receipts", () => {
       .toEqual([{ path: "Notes/Plan.md", label: "Plan" }]);
   });
 
+  it("counts each note as its rows do, a note changed twice added up", () => {
+    expect(presentTurnChanges([
+      part("edit", { path: "Notes/Garden.md", edits: [{ oldText: "Tomatoes go in the south bed.", newText: "Tomatoes and basil go in the south bed." }] },
+        { output: { data: { path: "Notes/Garden.md", success: true, appliedCount: 1, requestedCount: 1, skipped: [] } } }),
+      part("write", { path: "Notes/Basil.md", content: "# Basil\n\nSow after the last frost.\nPinch the tips weekly." }, { output: { data: { path: "Notes/Basil.md", success: true } } }),
+      part("Edit", { file_path: "/vault/Notes/Launch plan.md", old_string: "# Launch", new_string: "# Launch\n\nPlant basil in week 2." }, claude),
+      part("fileChange", { changes: [{ path: "/vault/Notes/Garden.md", kind: { type: "update" }, diff: "@@ -1,3 +1,4 @@\n # Garden plan\n \n Tomatoes and basil go in the south bed.\n+Water every other morning.\n" }] }, codex),
+      part("multi_edit", { files: [{ path: "A.md", edits: [{ oldText: "a", newText: "b" }] }, { path: "B.md", edits: [{ oldText: "c", newText: "c\nd" }] }] },
+        { output: { data: { results: [{ path: "A.md", success: true }, { path: "B.md", success: true }] } } }),
+    ])).toEqual([
+      { path: "Notes/Garden.md", label: "Garden", meta: "+2 −1" },
+      { path: "Notes/Basil.md", label: "Basil", meta: "+4" },
+      { path: "Notes/Launch plan.md", label: "Launch\u00a0plan", meta: "+2" },
+      { path: "A.md", label: "A", meta: "+1 −1" },
+      { path: "B.md", label: "B", meta: "+1" },
+    ]);
+  });
+
   it("resolves native receipts from a nested cwd against the vault root and its alias", () => {
     const native = { agent: "claude" as const, workingDirectory: "/vault/Notes", vaultRoot: "/vault", vaultRootAlias: "/alias/vault" };
     expect(presentTurnChanges([

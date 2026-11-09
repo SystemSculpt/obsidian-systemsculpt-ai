@@ -637,6 +637,8 @@ describe("native preview rendering", () => {
     const host = document.createElement("div");
     await renderNativeToolPreview(app, host, part("Write", { file_path: "Notes/Plan.md", content: "written content" }, { state: "succeeded" }));
     expect(host.querySelector("pre.ss-tool-file-text code")?.textContent).toBe("written content");
+    // What the call wrote reads at full strength, not as a found line.
+    expect(host.querySelector("pre.ss-tool-file-text")?.classList.contains("is-written")).toBe(true);
     expect(host.textContent).toBe("written content");
     expect(host.querySelector(".systemsculpt-diff-viewer")).toBeNull();
     expect(host.textContent).not.toContain("later content");

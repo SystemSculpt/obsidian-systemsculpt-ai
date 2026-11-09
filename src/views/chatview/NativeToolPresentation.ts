@@ -428,7 +428,7 @@ function previewDetails(part: AgentToolPart): Detail[] {
 function renderRequestedWriteEdit(container: HTMLElement, part: AgentToolPart): void {
   const input = record(part.input);
   if (part.name === "Write") {
-    if (typeof input.content === "string") renderFileContent(container, input.content);
+    if (typeof input.content === "string") renderFileContent(container, input.content, undefined, true);
     return;
   }
   const edits = part.name === "MultiEdit" ? records(input.edits) : [input];

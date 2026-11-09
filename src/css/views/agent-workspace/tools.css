@@ -364,7 +364,8 @@
   color: var(--ss-ink-muted);
   font-size: var(--ss-text-xs);
 }
-/* One link style in every card, as replies and row labels set it: accent and underlined. */
+/* One link style in every card, as replies and row labels set it: accent and underlined. A link
+   that leaves Obsidian keeps Obsidian's own ↗ mark, as the reply's Sources draw it. */
 .ss-tool-card a.internal-link,
 .ss-tool-card a.external-link,
 .ss-tool-card a.ss-tool-folder-link,
@@ -374,11 +375,6 @@
   font-weight: inherit;
   text-decoration-line: underline;
   text-underline-offset: 2px;
-}
-.ss-tool-card a.external-link,
-.systemsculpt-agent-tool-support a.ss-tool-notice-action {
-  padding-inline-end: 0;
-  background-image: none;
 }
 .ss-tool-card a.internal-link:hover,
 .ss-tool-card a.external-link:hover,
@@ -435,8 +431,9 @@
   font-size: inherit;
   white-space: inherit;
 }
-/* File text is what was written, so it reads at full strength. */
-.ss-tool-file-text {
+/* Text a call wrote reads at full strength, as a diff's added lines do; text found in a note
+   (a search's matching line) stays muted, as a diff's unchanged lines. */
+.ss-tool-file-text.is-written {
   color: var(--ss-ink);
 }
 .ss-tool-terminal-command {

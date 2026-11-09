@@ -222,14 +222,17 @@ export function renderText(card: HTMLElement, text: string, lineLimit = 8): void
   }
 }
 
-/** A file's content as written, from its first line: the box every card shows file text in. */
-export function renderFileContent(card: HTMLElement, content: string, lineLimit = 20): void {
+/**
+ * A file's content as written, from its first line: the box every card shows file text in. Text
+ * the call wrote reads at full strength, like a diff's added lines; text found in a note stays muted.
+ */
+export function renderFileContent(card: HTMLElement, content: string, lineLimit = 20, written = false): void {
   if (!content) {
     card.createEl("p", { cls: "ss-tool-caption", text: "Empty" });
     return;
   }
   const lines = content.replace(/\n$/u, "").split("\n");
-  const pre = card.createEl("pre", { cls: "ss-tool-file-text", attr: { tabindex: "0" } });
+  const pre = card.createEl("pre", { cls: written ? "ss-tool-file-text is-written" : "ss-tool-file-text", attr: { tabindex: "0" } });
   const code = pre.createEl("code", { text: lines.slice(0, lineLimit).join("\n") });
   if (lines.length > lineLimit) {
     const all = createUiAction(card, { label: `Show all ${lines.length} lines`, testId: "chat.tool.show-output", size: "small", tooltip: false });

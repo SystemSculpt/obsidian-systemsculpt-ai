@@ -40,16 +40,12 @@
   content: " · ";
 }
 /* One link style in every card, as tools.css sets it: the title's note and the plan's links
- * are accent and underlined. */
+ * are accent and underlined, and a link that leaves Obsidian keeps its ↗ mark. */
 .systemsculpt-agent-approval a:is(.internal-link, .external-link) {
   color: var(--ss-ink-accent);
   font-weight: inherit;
   text-decoration-line: underline;
   text-underline-offset: 2px;
-}
-.systemsculpt-agent-approval a.external-link {
-  padding-inline-end: 0;
-  background-image: none;
 }
 .systemsculpt-agent-approval a:is(.internal-link, .external-link):hover {
   color: var(--ss-ink);
