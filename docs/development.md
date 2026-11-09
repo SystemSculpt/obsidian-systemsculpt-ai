@@ -371,7 +371,9 @@ Only then does the version reach main: the tool opens a metadata-only PR from
 the exact published commit and squash-merges it after the required PR check.
 Obsidian installs the release files of HEAD manifest.json's version, so main
 never names an unpublished version. A failure before publication leaves main
-untouched; the next run resumes a failed merge after publication.
+untouched; the next run resumes a failed merge after publication, rerunning a
+failed PR check against current main. systemsculpt.com's release metadata
+workflow waits until main names the version before it announces the release.
 
 Unpublished tags 6.19.6–6.19.8 remain immutable and unpublished. Their source
 fixes go into the next daily release, whose version exceeds all existing
