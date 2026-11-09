@@ -700,9 +700,14 @@ function appendBreakableRun(block: HTMLElement, content: string): void {
     appendChunk(content.slice(start, at), afterSlash);
     if (match[0].startsWith("/")) block.appendText(match[0]);
     else block.createSpan({ cls: "ss-json-whole", text: match[0] });
+    // A path's last two names stay together ("qa/vault"), as a value's last two words do, so a wrapped
+    // path never ends on one name alone.
+    const lastName = /^[^\s"\\,/]+(?=$|["\\,])/u.exec(content.slice(end))?.[0];
+    const parentName = /[^\s"\\/]*$/u.exec(content.slice(start, at))?.[0] ?? "";
+    const lastPair = lastName !== undefined && parentName.length > 0 && parentName.length + match[0].length + lastName.length <= 24;
     // After a slash or a run of line break escapes ("\n\n" whole), a wrapped line may start; never
     // inside either, and never after a tab, which stays with the words it leads ("3\tTomatoes").
-    if (match[0].startsWith("/") || /^(?:\\[nr])+$/u.test(match[0])) block.createEl("wbr");
+    if ((match[0].startsWith("/") && !lastPair) || /^(?:\\[nr])+$/u.test(match[0])) block.createEl("wbr");
     afterSlash = match[0].startsWith("/");
     start = end;
   }

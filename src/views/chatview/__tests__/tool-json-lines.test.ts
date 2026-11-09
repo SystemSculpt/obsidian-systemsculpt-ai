@@ -76,13 +76,30 @@ describe("renderJsonLines", () => {
     // The text stays exactly the JSON, so it copies as it was.
     expect(code.textContent).toBe(text);
     const value = code.querySelectorAll<HTMLElement>(".ss-json-line")[1];
-    // A wrapped line may start after each "/" and after a "\n" escape.
-    expect(value.querySelectorAll("wbr").length).toBe(14);
+    // A wrapped line may start after each "/" and after a "\n" escape, except inside a path's last
+    // two names ("Notes/Garden.md").
+    expect(value.querySelectorAll("wbr").length).toBe(13);
     expect(Array.from(value.querySelectorAll(".ss-json-whole"), (token) => token.textContent)).toEqual(["T-5957", "\\n"]);
     // A name with a space moves to the next line whole.
     expect(Array.from(value.querySelectorAll(".ss-json-name"), (name) => name.textContent)).toEqual(["Launch plan.md\""]);
     // A short line has no break points of its own.
     expect(code.querySelectorAll<HTMLElement>(".ss-json-line")[0].querySelector("wbr")).toBeNull();
+  });
+
+  it("keeps a path's last two names together, as a value's last two words", () => {
+    const code = document.createElement("code");
+    const text = JSON.stringify({ cwd: "/Users/michaelstolarz/.trellis/var/T-5957/qa/vault" }, null, 2);
+    renderJsonLines(code, text);
+    expect(code.textContent).toBe(text);
+    const value = code.querySelectorAll<HTMLElement>(".ss-json-line")[1];
+    const range = document.createRange();
+    const before = Array.from(value.querySelectorAll("wbr"), (wbr) => {
+      range.setStart(value, 0);
+      range.setEndBefore(wbr);
+      return range.toString();
+    });
+    // A line may start after "T-5957/", never between "qa/" and "vault".
+    expect(before[before.length - 1]).toMatch(/T-5957\/$/u);
   });
 
   it("breaks a command line between its commands, never inside one", () => {
@@ -155,9 +172,10 @@ describe("renderJsonLines", () => {
     // The value is one piece: it fits after its key or moves to the next line whole.
     expect(lines[1].querySelector(".ss-json-path")?.textContent).toBe('"2 Studio workflows.",');
     expect(lines[2].querySelector(".ss-json-path")?.textContent).toBe('"Notes/Archive",');
-    // It moves only when it then fits on one line (fitJsonUnits); flowing instead, it breaks only after its "/".
+    // It moves only when it then fits on one line (fitJsonUnits). A path of two names never breaks between
+    // them, so it never ends on one name alone.
     expect(lines[2].querySelector(".ss-json-path")?.classList.contains("ss-json-fit")).toBe(true);
-    expect(lines[2].querySelectorAll("wbr")).toHaveLength(1);
+    expect(lines[2].querySelectorAll("wbr")).toHaveLength(0);
     // A value too long to move whole flows after its key, its last two words together.
     expect(lines[3].querySelector(".ss-json-path")).toBeNull();
     expect(Array.from(lines[3].querySelectorAll(".ss-json-whole"), (word) => word.textContent)).toEqual(['square takes"']);
