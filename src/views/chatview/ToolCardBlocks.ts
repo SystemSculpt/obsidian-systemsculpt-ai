@@ -45,13 +45,13 @@ export function createToolCard(parent: HTMLElement, kind: string): HTMLElement {
   return parent.createDiv({ cls: "ss-tool-card", attr: { "data-card": kind } });
 }
 
-export function openVaultPath(app: App, path: string, event?: MouseEvent): void {
+function openVaultPath(app: App, path: string, event?: MouseEvent): void {
   event?.preventDefault();
   event?.stopPropagation();
   void app.workspace.openLinkText(path, "", false);
 }
 
-export function vaultLink(app: App, parent: HTMLElement, path: string, text = path): HTMLAnchorElement {
+function vaultLink(app: App, parent: HTMLElement, path: string, text = path): HTMLAnchorElement {
   const exists = app.vault.getAbstractFileByPath(path) !== null;
   const link = parent.createEl("a", {
     text,
@@ -83,7 +83,7 @@ export function folderLink(app: App, parent: HTMLElement, path: string, text = p
   return link;
 }
 
-export function externalLink(parent: HTMLElement, url: string, text = url): HTMLAnchorElement {
+function externalLink(parent: HTMLElement, url: string, text = url): HTMLAnchorElement {
   const link = parent.createEl("a", {
     text,
     cls: "external-link",
@@ -148,7 +148,7 @@ export function renderLinks(card: HTMLElement, links: readonly ToolCardLink[]): 
   }
 }
 
-export function hostOf(url: string): string {
+function hostOf(url: string): string {
   try { return new URL(url).host.replace(/^www\./u, ""); } catch { return url; }
 }
 
@@ -317,7 +317,7 @@ const KEY_LABELS: Readonly<Record<string, string>> = {
 };
 
 /** "file_path" → "File", "maxResults" → "Max results". */
-export function humanizeKey(key: string): string {
+function humanizeKey(key: string): string {
   if (KEY_LABELS[key]) return KEY_LABELS[key];
   const words = key.replace(/([a-z\d])([A-Z])/gu, "$1 $2").replace(/[_-]+/gu, " ").trim().toLowerCase();
   return words ? words.charAt(0).toUpperCase() + words.slice(1) : key;
