@@ -14,6 +14,14 @@ function tool(name: string, input: unknown, overrides: Partial<AgentToolPart> = 
 }
 
 describe("AgentActivityPresentation", () => {
+  it("counts a write that replaced a note as replaced, never created", () => {
+    const write = (path: string, created: boolean) => tool("write", { path, content: "# Note" }, { callId: path, output: { data: { path, success: true, created } } });
+    expect(summarizeAgentActivity([write("Basil.md", true), write("Launch plan.md", false)]))
+      .toEqual({ label: "Created Basil, replaced Launch plan", failedCount: 0 });
+    expect(summarizeAgentActivity([write("A.md", false), write("B.md", false)]))
+      .toEqual({ label: "Replaced 2 notes", failedCount: 0 });
+  });
+
   it("joins counted clauses, keeps single edit targets and counts remaining activity", () => {
     const steps = [
       tool("read", { paths: ["One.md", "Two.md"] }),

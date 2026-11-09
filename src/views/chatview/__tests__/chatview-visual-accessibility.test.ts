@@ -267,6 +267,13 @@ describe("ChatView error typography", () => {
   });
 });
 
+describe("ChatView Details wrapping", () => {
+  test("fills each JSON line before wrapping, never pulling a fitting word down", () => {
+    const tools = readCss("views/agent-workspace/tools.css").replace(/\/\*[\s\S]*?\*\//g, "");
+    expect(rule(tools, ".ss-json-line")).toMatch(/text-wrap:\s*wrap;/);
+  });
+});
+
 describe("ChatView activity alignment", () => {
   test("keeps live, restored and tail-status labels on the same columns", () => {
     const activity = readCss("views/agent-workspace/activity.css");

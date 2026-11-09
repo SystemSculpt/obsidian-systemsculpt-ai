@@ -212,6 +212,22 @@ describe("presentAgentTool", () => {
     });
   });
 
+  it("says whether a finished write created, replaced or added to its note", () => {
+    const write = (created: boolean | undefined, ifExists?: string) => presentAgentTool(part({
+      name: "write", state: "succeeded",
+      input: { path: "Notes/Launch plan.md", content: "# Launch plan\n\n- Plant basil in week 2", ...(ifExists ? { ifExists } : {}) },
+      output: { data: { path: "Notes/Launch plan.md", success: true, ...(created === undefined ? {} : { created }) } },
+    }));
+    expect(write(true)).toMatchObject({ label: "Created Launch plan", meta: "+3", actionIcon: "file-plus-2", groupKind: "write" });
+    // A replace counts no added lines: its card shows the note's new text, not a diff.
+    const replaced = write(false);
+    expect(replaced).toMatchObject({ label: "Replaced Launch plan", actionIcon: "file-pen-line", groupKind: "replace" });
+    expect(replaced.meta).toBeUndefined();
+    expect(write(false, "append")).toMatchObject({ label: "Added to Launch plan", meta: "+3", groupKind: "edit" });
+    // A result that doesn't say (an older plugin's) keeps the create wording.
+    expect(write(undefined)).toMatchObject({ label: "Created Launch plan", meta: "+3" });
+  });
+
   it("names context-tool rows by the actual pinning action", () => {
     expect(presentAgentTool(part({
       name: "context",

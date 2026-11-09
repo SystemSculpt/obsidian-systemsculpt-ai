@@ -203,6 +203,8 @@ const TOOL_ACTION_FORMS: Readonly<Record<string, readonly [active: string, compl
   Write: ["Writing", "Wrote"],
   Edit: ["Editing", "Edited"],
   Create: ["Creating", "Created"],
+  Replace: ["Replacing", "Replaced"],
+  Add: ["Adding", "Added"],
   List: ["Listing", "Listed"],
   Move: ["Moving", "Moved"],
   Find: ["Finding", "Found"],
@@ -517,8 +519,11 @@ const COUNTED_CHANGE_STATES: ReadonlySet<AgentToolDisplayState> = new Set<AgentT
  * the change it makes, so a request with one has no count.
  */
 export function hostedChangeSize(canonicalName: string, input: Record<string, unknown>, output: Record<string, unknown>): string | undefined {
-  // A write told to keep an existing note ("skip") may have written nothing.
-  if (canonicalName === "write") return input.ifExists === "skip" ? undefined : writeChangeSize(input.content);
+  // A write told to keep an existing note ("skip") may have written nothing. One that replaced a note added
+  // no counted lines: its card shows the note's new text, not a diff.
+  if (canonicalName === "write") {
+    return input.ifExists === "skip" || (output.created === false && input.ifExists !== "append") ? undefined : writeChangeSize(input.content);
+  }
   if (canonicalName !== "edit" && canonicalName !== "multi_edit") return undefined;
   const list = (value: unknown): Record<string, unknown>[] => Array.isArray(value) ? value.map(record) : [];
   const edits = (canonicalName === "multi_edit" ? list(input.files) : [input]).flatMap((file) => {
@@ -722,9 +727,12 @@ export function presentAgentTool(part: AgentToolPart): AgentToolPresentation {
   const workflow = STUDIO_VERBS[canonicalName] && firstString(input.path) ? studioWorkflowName(firstString(input.path)!) : undefined;
   // A partly finished batch says how many of its notes it reached, never the whole request.
   const noteCount = displayState === "partial" && paths.length > 1 ? `${outcomeCounts.completed} of ${paths.length}` : `${paths.length}`;
+  // A finished write over a note that was there says so: it replaced the note, or added to its end.
+  const existingWrite = canonicalName === "write" && !serverTool && record(part.output?.data).created === false
+    ? input.ifExists === "append" ? "Add to" : "Replace" : undefined;
   const baseLabel = canonicalName === "context" ? contextToolLabel(input)
     : canonicalName === "read" ? (target ? `Read ${target}` : `Read ${paths.length ? noteCount : ""} notes`.replace("  ", " "))
-      : canonicalName === "write" ? `Create ${target ?? "file"}`
+      : canonicalName === "write" ? `${existingWrite ?? "Create"} ${target ?? "file"}`
         : canonicalName === "edit" ? `Edit ${target ?? "file"}`
           : canonicalName === "multi_edit" ? `Edit ${target ?? `${noteCount} notes`}`
             // "Listed the Notes folder": a folder named beside a note count ("read 2 notes") still reads as a folder.
@@ -766,7 +774,7 @@ export function presentAgentTool(part: AgentToolPart): AgentToolPresentation {
   const changeSize = !serverTool && COUNTED_CHANGE_STATES.has(displayState) ? hostedChangeSize(canonicalName, input, output) : undefined;
   return {
     canonicalName: presentedName, label,
-    actionIcon: TOOL_ACTION_ICONS[presentedName] ?? "wrench",
+    actionIcon: existingWrite ? "file-pen-line" : TOOL_ACTION_ICONS[presentedName] ?? "wrench",
     displayState,
     // A gate (subscription, credits) is a lock, a refusal an x: never a check beside "Couldn't".
     icon: gateNeed ? "lock" : refusedSystemSculptCall(part) ? "x" : STATE_ICONS[displayState],
@@ -775,7 +783,7 @@ export function presentAgentTool(part: AgentToolPart): AgentToolPresentation {
     ...(resultCount !== undefined ? { meta: `${resultCount} result${resultCount === 1 ? "" : "s"}` } : changeSize ? { meta: changeSize } : {}),
     // A Studio row names its workflow, and that name opens it as a note's does.
     ...(targetPath ?? (workflow ? firstString(input.path) : undefined) ? { targetPath: targetPath ?? firstString(input.path)! } : {}),
-    groupKind: canonicalName === "multi_edit" ? "edit" : canonicalName === "find" ? "search" : canonicalName === "list_items" ? "list"
+    groupKind: existingWrite ? (existingWrite === "Replace" ? "replace" : "edit") : canonicalName === "multi_edit" ? "edit" : canonicalName === "find" ? "search" : canonicalName === "list_items" ? "list"
       : canonicalName === "web_search" ? "web-search" : presentedName,
     groupCount: serverTool ? 1 : counted?.items.length ?? Math.max(paths.length, 1),
     ...(!serverTool && PATH_GROUP_TOOLS.has(canonicalName) && paths.length ? { groupItems: paths } : {}),

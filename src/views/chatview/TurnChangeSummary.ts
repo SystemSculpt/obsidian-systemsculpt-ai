@@ -31,13 +31,15 @@ function counts(meta: string | undefined): readonly [number, number] | null {
   const match = meta ? COUNTS.exec(meta) : null;
   return match && (match[1] || match[2]) ? [Number(match[1] ?? 0), Number(match[2] ?? 0)] : null;
 }
+/** A write of the whole note: made, written or replaced. It names the note's whole change in the turn. */
+const WHOLE_WRITES: ReadonlySet<string> = new Set(["new", "written", "replaced"]);
 /** A note changed more than once in a turn reads its whole change: counts add up, an uncounted change leaves none. */
 function mergedMeta(earlier: TurnChange | undefined, meta: string | undefined): string | undefined {
   if (!earlier || earlier.deleted) return meta;
-  if (earlier.meta === "new" || earlier.meta === "written") return earlier.meta;
+  if (earlier.meta && WHOLE_WRITES.has(earlier.meta)) return earlier.meta;
   const before = counts(earlier.meta), after = counts(meta);
   if (before && after) return size(before[0] + after[0], before[1] + after[1]);
-  return meta === "new" || meta === "written" ? meta : undefined;
+  return meta && WHOLE_WRITES.has(meta) ? meta : undefined;
 }
 function nativePath(part: AgentToolPart, path: string): ReturnType<typeof nativeToolPath> {
   const { workingDirectory, vaultRoot, vaultRootAlias, homeDirectory } = part.native!;
@@ -116,7 +118,8 @@ export function presentTurnChanges(parts: readonly AgentToolPart[]): readonly Tu
     } else if (canonicalName === "multi_edit") {
       for (const file of rows(input.files)) for (const path of paths(file.path)) add(path, hostedChangeSize("multi_edit", { files: [file] }, output));
     } else {
-      for (const path of paths(input.path)) add(path, output.created === true ? "new" : hostedChangeSize(canonicalName, input, output));
+      const whole = output.created === true ? "new" : output.created === false && input.ifExists !== "append" ? "replaced" : undefined;
+      for (const path of paths(input.path)) add(path, whole ?? hostedChangeSize(canonicalName, input, output));
     }
   }
   return Array.from(changes.values());

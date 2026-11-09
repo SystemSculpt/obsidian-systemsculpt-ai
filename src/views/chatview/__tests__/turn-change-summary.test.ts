@@ -24,6 +24,17 @@ describe("turn change receipts", () => {
     ]);
   });
 
+  it("names a replaced note as replaced, and keeps that through a later edit", () => {
+    expect(presentTurnChanges([
+      part("write", { path: "Notes/Launch plan.md", content: "# Launch plan" }, { output: { data: { created: false } } }),
+      part("edit", { path: "Notes/Launch plan.md", edits: [{ oldText: "# Launch plan", newText: "# Launch" }] }, { callId: "edit" }),
+      part("write", { path: "Log.md", content: "- watered", ifExists: "append" }, { callId: "append", output: { data: { created: false } } }),
+    ])).toEqual([
+      { path: "Notes/Launch plan.md", label: "Launch\u00a0plan", meta: "replaced" },
+      { path: "Log.md", label: "Log", meta: "+1" },
+    ]);
+  });
+
   it("never predicts mutations from pending, denied, cancelled or failed input", () => {
     const states = ["approval-required", "running", "failed", "denied", "cancelled", "outcome-unknown"] as const;
     expect(presentTurnChanges(states.flatMap(state => [

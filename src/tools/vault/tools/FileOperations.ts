@@ -260,6 +260,8 @@ export class FileOperations {
       const result: WriteFileResult = { path: prepared.path, success: true,
         ...(prepared.requestedPath ? { requestedPath: prepared.requestedPath, notice: prepared.notice } : {}) };
       if (prepared.disposition === "skip") return result;
+      // Its row says whether it made the note or replaced (or added to) one that was there.
+      result.created = !prepared.exists;
       if (prepared.file) {
         if (prepared.mode === "append" || isStudioProjectDocumentPath(prepared.path)) {
           await this.commitPreparedEdit(prepared);

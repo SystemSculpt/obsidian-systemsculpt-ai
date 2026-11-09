@@ -2044,7 +2044,8 @@ export class AgentConversationRenderer extends Component {
           void this.options.onOpenArtifact({ id: change.path, kind: "vault_file", title: change.label, path: change.path });
         };
       }
-      if (change.meta) summary.appendText(change.meta.startsWith("+") ? ` ${change.meta}` : ` (${change.meta})`);
+      // A note's change stays on its name's line: "Garden +2 −1", "Herbs (replaced)".
+      if (change.meta) summary.appendText(`\u00a0${/^[+−]\d/u.test(change.meta) ? change.meta.replace(/ /gu, "\u00a0") : `(${change.meta})`}`);
     });
   }
 

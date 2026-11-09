@@ -275,6 +275,7 @@ describe("FileOperations", () => {
       });
 
       expect(result.success).toBe(true);
+      expect(result.created).toBe(true);
       expect(app.vault.create).toHaveBeenCalledWith("new.md", "hello");
     });
 
@@ -318,6 +319,8 @@ describe("FileOperations", () => {
       });
 
       expect(result.success).toBe(true);
+      // The result says the note was there, so its row reads "Replaced", never "Created".
+      expect(result.created).toBe(false);
       expect(app.vault.modify).toHaveBeenCalledWith(mockFile, "new content");
     });
 
@@ -332,6 +335,7 @@ describe("FileOperations", () => {
       } as any);
 
       expect(result.success).toBe(true);
+      expect(result).not.toHaveProperty("created");
       expect(app.vault.modify).not.toHaveBeenCalled();
     });
 
@@ -353,12 +357,13 @@ describe("FileOperations", () => {
       (app.vault.getAbstractFileByPath as jest.Mock).mockReturnValue(mockFile);
       (app.vault.read as jest.Mock).mockResolvedValue("existing");
 
-      await fileOps.writeFile({
+      const result = await fileOps.writeFile({
         path: "existing.md",
         content: " appended",
         ifExists: "append",
       } as any);
 
+      expect(result.created).toBe(false);
       expect(app.vault.modify).toHaveBeenCalledWith(mockFile, "existing appended");
     });
 

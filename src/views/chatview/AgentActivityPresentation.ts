@@ -92,7 +92,7 @@ function clause(kind: string, group: ActivityGroup): string {
   }
   if (count === 1) return group.label;
   const counts: Record<string, string> = {
-    read: `Read ${count} notes`, edit: `Edited ${count} notes`, write: `Created ${count} notes`,
+    read: `Read ${count} notes`, edit: `Edited ${count} notes`, write: `Created ${count} notes`, replace: `Replaced ${count} notes`,
     trash: `Moved ${count} notes to trash`, list: `Listed ${count} folders`,
     search: `Searched for ${count} patterns`, find: `Found files matching ${count} patterns`,
     "web-search": `Searched the web ${count} times`, web: `Read ${count} web pages`,

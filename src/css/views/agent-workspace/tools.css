@@ -844,8 +844,10 @@
   display: block;
   padding-inline-start: calc((var(--ss-json-indent) + 2) * 1ch);
   text-indent: calc((var(--ss-json-indent) + 2) * -1ch);
-  /* A wrapped value never ends on one word alone. */
-  text-wrap: pretty;
+  /* Each line holds every word that fits, as code wraps. A value's last two words already travel
+     together (appendJsonWords), so it never ends on one word alone; rebalancing would pull a fitting
+     word down ("…dusk, its" / "lamp just lit"). */
+  text-wrap: wrap;
 }
 /* An escape ("\n") or a short hyphenated word ("2026-11-08", "T-5957") is one token: a wrapped value never
    splits it. Its spaces are kept as written ("PASS  garden.test.ts"), as everywhere else in the code. */
