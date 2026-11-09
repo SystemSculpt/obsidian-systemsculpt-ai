@@ -5,7 +5,7 @@ import { encodeSystemSculptToolResult, SYSTEMSCULPT_TOOL_SERVER } from "../../..
 import { renderHostedToolPreview } from "../HostedToolPreview";
 import { renderNativeToolPreview } from "../NativeToolPresentation";
 import { presentAgentTool, presentAgentToolFailure, agentToolNoticeTone } from "../AgentToolPresentation";
-import { detailsOutput, mediaDisplayName, renderFields, renderMedia, renderRawDetails } from "../ToolCardBlocks";
+import { detailsInput, detailsOutput, mediaDisplayName, renderFields, renderMedia, renderRawDetails } from "../ToolCardBlocks";
 import { renderTurnMedia } from "../TurnMedia";
 import { presentTurnChanges } from "../TurnChangeSummary";
 import { setActivityLabelText, summarizeAgentActivity } from "../AgentActivityPresentation";
@@ -67,6 +67,17 @@ describe("one card for every tool result", () => {
     expect(renderHostedToolPreview(app, host, hosted("studio_list_outputs", { path: poster }, data))).toBe(true);
     expect(host.querySelector(".ss-tool-fields")).toBeNull();
     expect(Array.from(host.querySelectorAll(".ss-tool-paths > li"), item => item.textContent)).toEqual(["Lighthouse"]);
+  });
+
+  it("shows a Codex request without the item's own id and run status, so it reads the same running and done", () => {
+    const running = { type: "imageGeneration", id: "ig1", status: "inProgress", revisedPrompt: "A lighthouse at night" };
+    expect(detailsInput(running, "codex")).toEqual({ type: "imageGeneration", revisedPrompt: "A lighthouse at night" });
+    expect(detailsInput({ ...running, status: "completed" }, "codex")).toEqual(detailsInput(running, "codex"));
+    // Another agent's request, or one with nothing to leave out, is shown as it is.
+    const claude = { id: "keep", path: "Notes/Garden.md" };
+    expect(detailsInput(claude, "claude")).toBe(claude);
+    const view = { type: "imageView", path: "/vault/a.png" };
+    expect(detailsInput(view, "codex")).toBe(view);
   });
 
   it("leaves the plugin's own result marker out of Details, live or saved", () => {

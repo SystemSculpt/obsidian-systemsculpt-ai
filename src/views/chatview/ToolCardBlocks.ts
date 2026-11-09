@@ -344,6 +344,17 @@ export function detailsOutput(data: unknown): unknown {
   return inner === record.data ? outer : { ...record, data: inner };
 }
 
+/**
+ * A request as Details shows it. A Codex item carries its own id and run status beside what was asked;
+ * Details leave both out, so the request reads the same while the call runs and after it.
+ */
+export function detailsInput(input: unknown, agent?: string): unknown {
+  if (agent !== "codex" || !input || typeof input !== "object" || Array.isArray(input)) return input;
+  const record = input as Record<string, unknown>;
+  if (!("id" in record) && !("status" in record)) return input;
+  return Object.fromEntries(Object.entries(record).filter(([key]) => key !== "id" && key !== "status"));
+}
+
 export function renderRawDetails(
   card: HTMLElement,
   payload: () => unknown,
