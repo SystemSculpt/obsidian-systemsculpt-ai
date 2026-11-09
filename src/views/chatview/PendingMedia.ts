@@ -226,6 +226,19 @@ function nextStep(reason: string): string | null {
   return /\blimit reached\b/iu.test(reason) ? "Try again once it resets." : null;
 }
 
+/**
+ * A one-line caption's word boxes, each led by its space. A word's closing punctuation leads the next
+ * box instead, so a cut ends on the word itself ("warm window light…", never "light,…").
+ */
+export function captionWords(caption: string): string[] {
+  const words = caption.split(/(?=\s)/u);
+  const closing = /[,;:.!?]+$/u;
+  return words.map((word, index) => {
+    const lead = index > 0 ? closing.exec(words[index - 1])?.[0] ?? "" : "";
+    return lead + (index < words.length - 1 ? word.replace(closing, "") : word);
+  });
+}
+
 /** One placeholder or failure tile; its live line and bar update from the block's clock. */
 export function renderPendingMedia(grid: HTMLElement, tile: PendingMedia): HTMLElement {
   const figure = grid.createEl("figure", {
@@ -262,9 +275,9 @@ export function renderPendingMedia(grid: HTMLElement, tile: PendingMedia): HTMLE
   }
   if (tile.kind !== "workflow" && tile.caption) {
     // The prompt keeps to one line, the height of the file name that replaces it; the whole prompt is
-    // its title and the open card's. Each word is one box (its space leading it), so the cut ends on a whole word.
+    // its title and the open card's. Each word is one box, so the cut ends on a whole word.
     const caption = figure.createEl("figcaption", { cls: "systemsculpt-agent-media-caption is-single-line is-words", attr: { title: tile.caption } });
-    tile.caption.split(/(?=\s)/u).forEach(word => caption.createSpan({ text: word }));
+    for (const word of captionWords(tile.caption)) caption.createSpan({ text: word });
   }
   pendingTiles.set(figure, tile);
   return figure;
