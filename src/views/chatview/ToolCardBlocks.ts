@@ -384,20 +384,21 @@ export function renderJsonLines(code: HTMLElement, text: string): void {
     // A path breaks after a "/" and an escape ("\n") stays whole, so a wrapped value never splits
     // a name or reads as a new path; only a run with no such place breaks where it must.
     if (content.length > 32 && /[/\\]/u.test(content)) appendBreakableValue(block, content);
-    else block.setText(content);
+    else appendJsonWords(block, content);
     if (indent) block.setCssProps({ "--ss-json-indent": String(indent) });
   });
 }
 
+/** A short hyphenated word ("2026-11-08", "T-5957", "--short") never breaks at its hyphen. */
+function appendJsonWords(parent: HTMLElement, text: string): void {
+  for (const piece of text.split(/(\s+)/u)) {
+    if (!piece) continue;
+    if (piece.length <= 24 && !/\s/u.test(piece) && piece.includes("-")) parent.createSpan({ cls: "ss-json-whole", text: piece });
+    else parent.appendText(piece);
+  }
+}
+
 function appendBreakableValue(block: HTMLElement, content: string): void {
-  // A short hyphenated word ("2026-11-08", "T-5957") never breaks at its hyphen.
-  const appendWords = (parent: HTMLElement, text: string): void => {
-    for (const piece of text.split(/(\s+)/u)) {
-      if (!piece) continue;
-      if (piece.length <= 24 && !/\s/u.test(piece) && piece.includes("-")) parent.createSpan({ cls: "ss-json-whole", text: piece });
-      else parent.appendText(piece);
-    }
-  };
   // The name after a "/" ("lighthouse take 1.png,") moves to the next line whole when it fits there,
   // rather than leaving its last word behind. Prose (the key, a sentence after a comma) flows as it is.
   const appendChunk = (chunk: string, afterSlash: boolean): void => {
@@ -410,10 +411,10 @@ function appendBreakableValue(block: HTMLElement, content: string): void {
     const whole = !afterSlash ? undefined : name.length <= 48 ? name
       : /^[^\s/][^/\n]{0,46}?\.[\p{L}\d]{1,5}(?=$|[\s"',.;:)\]])/u.exec(name)?.[0];
     if (whole && /\S\s+\S/u.test(whole)) {
-      appendWords(block.createSpan({ cls: "ss-json-name" }), whole);
+      appendJsonWords(block.createSpan({ cls: "ss-json-name" }), whole);
       name = name.slice(whole.length);
     }
-    appendWords(block, name);
+    appendJsonWords(block, name);
     if (trail) block.appendText(trail);
   };
   let start = 0;

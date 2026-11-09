@@ -34,6 +34,14 @@ describe("renderJsonLines", () => {
     expect(value.querySelector(".ss-json-name")?.previousSibling?.nodeName).toBe("WBR");
   });
 
+  it("keeps a command's flags whole on a line with no path", () => {
+    const code = document.createElement("code");
+    const text = JSON.stringify({ command: "git status --short", run: "npm test -- --run garden" }, null, 2);
+    renderJsonLines(code, text);
+    expect(code.textContent).toBe(text);
+    expect(Array.from(code.querySelectorAll(".ss-json-whole"), (word) => word.textContent)).toEqual(["--short\",", "--", "--run"]);
+  });
+
   it("keeps a file name whole when a sentence follows it", () => {
     const code = document.createElement("code");
     const message = "Ran Poster: SystemSculpt/Studio/Outputs/Poster image.png. The chat already shows the picture, so don't repeat it.";
