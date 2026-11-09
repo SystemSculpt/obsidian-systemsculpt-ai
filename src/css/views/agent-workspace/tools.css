@@ -802,40 +802,36 @@
   height: calc(var(--ss-text-xs) * 1.55);
   padding-top: calc((var(--ss-text-xs) * 1.55 - 8px) / 2);
 }
+/* Each bar is its whole line cut to its length, so the sheen crosses every bar in step and shows only
+   on the bars, never as a box over the empty line beside them. */
 .ss-json-pending > span::before,
 .ss-tool-terminal-pending > span::before {
+  --ss-pending-bar: 62%;
   content: "";
   display: block;
-  width: 62%;
   height: 8px;
-  border-radius: var(--ss-radius-full);
-  background: color-mix(in srgb, var(--ss-ink) 7%, transparent);
+  clip-path: inset(0 calc(100% - var(--ss-pending-bar)) 0 0 round var(--ss-radius-full));
+  background-color: color-mix(in srgb, var(--ss-ink) 7%, transparent);
+  background-image: linear-gradient(
+    100deg,
+    transparent 40%,
+    color-mix(in srgb, var(--ss-ink) 5%, transparent) 50%,
+    transparent 60%
+  );
+  background-repeat: no-repeat;
+  /* Three lines wide, so its band starts and ends past both ends of the line. */
+  background-size: 300% 100%;
+  animation: ss-sheen-sweep calc(var(--ss-dur-slow) * 7) var(--ss-ease) infinite;
 }
 .ss-json-pending > span:nth-child(4n + 2)::before,
 .ss-tool-terminal-pending > span:nth-child(2)::before {
-  width: 44%;
+  --ss-pending-bar: 44%;
 }
 .ss-json-pending > span:nth-child(4n + 3)::before {
-  width: 70%;
+  --ss-pending-bar: 70%;
 }
 .ss-json-pending > span:nth-child(4n)::before {
-  width: 36%;
-}
-.ss-json-pending::after,
-.ss-tool-terminal-pending::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: -100%;
-  width: 100%;
-  background: linear-gradient(
-    100deg,
-    transparent 20%,
-    color-mix(in srgb, var(--ss-ink) 5%, transparent) 50%,
-    transparent 80%
-  );
-  animation: ss-shimmer calc(var(--ss-dur-slow) * 7) var(--ss-ease) infinite;
+  --ss-pending-bar: 36%;
 }
 /* One JSON line: a value too long for the pane wraps two characters in from its own start.
    renderJsonLines sets --ss-json-indent on each indented line; this is its default. */

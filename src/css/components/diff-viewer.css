@@ -213,10 +213,15 @@
     min-width: 0;
   }
 
-  /* A wrapped line splits evenly instead of leaving one word alone below it. */
+  /* A wrapped line splits evenly instead of leaving one word alone below it, and its tail hangs two
+   * characters past the line's own start (DiffViewer sets --ss-diff-indent on an indented line), as a
+   * terminal's does, so it never reads as a line of its own. */
   .systemsculpt-diff-line-content {
+    --ss-diff-indent: 0;
+    padding-inline-start: calc((var(--ss-diff-indent) + 2) * 1ch);
     white-space: pre-wrap;
     overflow-wrap: anywhere;
+    text-indent: calc((var(--ss-diff-indent) + 2) * -1ch);
     text-wrap: balance;
   }
 }

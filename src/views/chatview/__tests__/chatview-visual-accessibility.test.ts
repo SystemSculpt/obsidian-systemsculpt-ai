@@ -121,6 +121,26 @@ describe("ChatView text contrast (WCAG AA, default Obsidian themes)", () => {
     expect(readCss("views/agent-workspace/tools.css")).not.toMatch(/systemsculpt-diff-prefix:first-child/);
   });
 
+  test("a wrapped diff line hangs two characters past its own start, so its tail never reads as a line", () => {
+    const css = readCss("components/diff-viewer.css");
+    const narrow = css.slice(css.indexOf("@container ss-surface (max-width: 600px)"));
+    const content = rule(narrow, ".systemsculpt-diff-line-content");
+    expect(content).toMatch(/white-space:\s*pre-wrap/);
+    expect(content).toMatch(/padding-inline-start:\s*calc\(\(var\(--ss-diff-indent\) \+ 2\) \* 1ch\)/);
+    expect(content).toMatch(/text-indent:\s*calc\(\(var\(--ss-diff-indent\) \+ 2\) \* -1ch\)/);
+  });
+
+  test("a pending result's sheen crosses only its bars, never the empty line beside them", () => {
+    const css = readCss("views/agent-workspace/tools.css");
+    for (const selector of [".ss-tool-terminal-pending > span::before", ".ss-json-pending > span::before"]) {
+      const bar = rule(css, selector);
+      expect(bar).toMatch(/clip-path:\s*inset\(0 calc\(100% - var\(--ss-pending-bar\)\) 0 0 round var\(--ss-radius-full\)\)/);
+      expect(bar).toMatch(/animation:\s*ss-sheen-sweep/);
+    }
+    expect(css).not.toMatch(/\.ss-(?:tool-terminal|json)-pending::after/);
+    expect(readCss("foundation/motion.css")).toMatch(/@keyframes ss-sheen-sweep/);
+  });
+
   test("raw tool Details wraps long values instead of clipping paths", () => {
     const css = readCss("views/agent-workspace/tools.css");
     for (const selector of [".systemsculpt-agent-conversation .systemsculpt-agent-tool-raw pre", ".systemsculpt-agent-conversation .systemsculpt-agent-tool-raw code"]) {

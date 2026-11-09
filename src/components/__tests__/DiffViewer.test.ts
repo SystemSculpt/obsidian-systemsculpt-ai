@@ -26,6 +26,18 @@ describe("DiffViewer", () => {
       .toEqual(["−", "+"]);
   });
 
+  it("marks how far each line is indented, so a wrapped line hangs past its own start", () => {
+    const host = document.body.createDiv();
+    new DiffViewer({
+      container: host,
+      diffResult: parseUnifiedDiff("@@ -1,2 +1,2 @@\n-a\n+    indented line\n plain")!,
+      fileName: "Plan.md",
+      hideHeader: true,
+    }).render();
+    const contents = host.querySelectorAll<HTMLElement>('[data-testid="chat.diff.content"]');
+    expect(Array.from(contents, (content) => content.style.getPropertyValue("--ss-diff-indent"))).toEqual(["", "4", ""]);
+  });
+
   it("sizes every number column in a hunk to its longest number", () => {
     const host = document.body.createDiv();
     new DiffViewer({

@@ -22,6 +22,21 @@ describe("AgentActivityPresentation", () => {
       .toEqual({ label: "Replaced 2 notes", failedCount: 0 });
   });
 
+  it("names a note the turn created or replaced once, never again as edited", () => {
+    const write = (path: string, created: boolean) => tool("write", { path, content: "# Note" }, { callId: path, output: { data: { path, success: true, created } } });
+    const claudeEdit = (path: string) => tool("Edit", { file_path: `/vault/${path}`, old_string: "a", new_string: "b" },
+      { callId: `edit ${path}`, native: { agent: "claude", workingDirectory: "/vault" }, output: { data: "The file has been updated." } });
+    const garden = tool("edit", { path: "Notes/Garden.md", edits: [{ oldText: "a", newText: "b" }] });
+    // Three notes changed, each named once, as the receipt under the reply counts them.
+    expect(summarizeAgentActivity([garden, write("Notes/Basil.md", true), write("Notes/Herbs.md", false), claudeEdit("Notes/Basil.md"), claudeEdit("Notes/Herbs.md")]))
+      .toEqual({ label: "Edited Garden, created Basil, replaced Herbs", failedCount: 0 });
+    expect(summarizeAgentActivity([write("Notes/Basil.md", true), claudeEdit("Notes/Basil.md")]))
+      .toEqual({ label: "Created Basil", failedCount: 0 });
+    // An edit before the note was rewritten stays its own step.
+    expect(summarizeAgentActivity([claudeEdit("Notes/Herbs.md"), write("Notes/Herbs.md", false)]))
+      .toEqual({ label: "Edited and replaced Herbs", failedCount: 0 });
+  });
+
   it("joins counted clauses, keeps single edit targets and counts remaining activity", () => {
     const steps = [
       tool("read", { paths: ["One.md", "Two.md"] }),

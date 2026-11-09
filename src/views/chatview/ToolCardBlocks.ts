@@ -368,12 +368,51 @@ function detailsOutput(data: unknown): unknown {
   return inner === record.data ? outer : { ...record, data: inner };
 }
 
-/**
- * A request as Details shows it. A Codex item carries its own id and run status beside what was asked;
- * Details leave both out, so the request reads the same while the call runs and after it.
- */
 /** What Codex reports about a command once it has run: its output, exit code and run time. */
 const CODEX_COMMAND_RESULT = ["aggregatedOutput", "exitCode", "durationMs"];
+
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === "object" && !Array.isArray(value);
+
+/** Two values that print the same: a result Codex keeps on its item is a copy of the result shown. */
+function sameJson(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (!a || !b || typeof a !== "object" || typeof b !== "object") return false;
+  try {
+    return JSON.stringify(a) === JSON.stringify(b);
+  } catch {
+    return false;
+  }
+}
+
+/** A file change's kind as its word ("update"), not a wrapper around it. */
+function codexChange(change: unknown): unknown {
+  if (!isPlainObject(change) || !isPlainObject(change.kind)) return change;
+  const kind = change.kind;
+  return Object.keys(kind).length === 1 && typeof kind.type === "string" ? { ...change, kind: kind.type } : change;
+}
+
+/**
+ * A Codex item's request as Details shows it: without the item's own id, run status and kind (its row
+ * names what it is), with an action's fields as the request's own, and without a search's query when
+ * its queries already hold it, so the request reads the same running and done and says each thing once.
+ */
+function codexRequest(item: Record<string, unknown>, isResult: (key: string, value: unknown) => boolean): Record<string, unknown> {
+  const request: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(item)) {
+    if (key === "id" || key === "status" || key === "type" || isResult(key, value)) continue;
+    if (key === "action" && isPlainObject(value)) {
+      for (const [actionKey, actionValue] of Object.entries(value)) {
+        if (actionKey !== "type" && actionValue != null && !(actionKey in item)) request[actionKey] = actionValue;
+      }
+      continue;
+    }
+    request[key] = key === "changes" && Array.isArray(value) ? value.map(codexChange) : value;
+  }
+  // A search says its query once: in its queries, or not at all beside an opened page.
+  if (request.query === "" || Array.isArray(request.queries) && request.queries.includes(request.query)) delete request.query;
+  return request;
+}
 
 /**
  * A call's request and its result as Details shows them, each once. A Codex item holds both, with
@@ -390,8 +429,8 @@ export function detailsPayload(
   const item = input as Record<string, unknown>;
   const command = item.type === "commandExecution";
   const isResult = (key: string, value: unknown): boolean =>
-    (command && CODEX_COMMAND_RESULT.includes(key)) || (output !== undefined && value !== undefined && value === output.data);
-  const request = Object.fromEntries(Object.entries(item).filter(([key, value]) => key !== "id" && key !== "status" && !isResult(key, value)));
+    (command && CODEX_COMMAND_RESULT.includes(key)) || (output !== undefined && value !== undefined && sameJson(value, output.data));
+  const request = codexRequest(item, isResult);
   if (!output || !command) return { input: request, ...result };
   const ran = Object.fromEntries(Object.entries(item).filter(([key, value]) => CODEX_COMMAND_RESULT.includes(key) && value != null));
   return { input: request, output: Object.keys(ran).length ? ran : result.output };

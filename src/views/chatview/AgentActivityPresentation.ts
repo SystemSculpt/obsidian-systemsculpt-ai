@@ -148,6 +148,12 @@ export function summarizeAgentActivity(parts: readonly AgentPart[]): AgentActivi
       else if (state === "failed" || refusal) add(`failed:${tool.groupKind}`, tool.label, { target: tool.target });
       // A partly done batch says how far it got ("Moved 1 of 2 notes to trash"), never the whole request.
       else if (state === "partial") add("partial", tool.label, { target: tool.target });
+      // An edit to a note this turn already created or replaced is part of that change: the summary
+      // names the note once, as created or replaced, as its receipt does ("Basil (new)").
+      else if (tool.groupKind === "edit" && tool.groupItems?.length
+        && tool.groupItems.every(item => groups.get("write")?.items.has(item) || groups.get("replace")?.items.has(item))) {
+        groups.get(groups.get("write")?.items.has(tool.groupItems[0]) ? "write" : "replace")!.rows += 1;
+      }
       // Any other tool (a server's, an unknown one) counts as a tool: "Used 2 tools", "Used weather forecast twice".
       // A running call's label has no trailing "…"; a long command's own "…" is part of its name.
       else add(/^(?:mcp|unknown):|^server_action$/u.test(tool.groupKind) ? "tool" : tool.groupKind, tool.label,

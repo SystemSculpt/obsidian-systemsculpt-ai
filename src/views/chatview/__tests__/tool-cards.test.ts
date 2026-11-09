@@ -69,20 +69,32 @@ describe("one card for every tool result", () => {
     expect(Array.from(host.querySelectorAll(".ss-tool-paths > li"), item => item.textContent)).toEqual(["Lighthouse"]);
   });
 
-  it("shows a Codex request without the item's own id and run status, so it reads the same running and done", () => {
+  it("shows a Codex request without the item's own id, run status and kind, so it reads the same running and done", () => {
     const running = { type: "imageGeneration", id: "ig1", status: "inProgress", revisedPrompt: "A lighthouse at night" };
-    expect(detailsPayload(running, undefined, "codex")).toEqual({ input: { type: "imageGeneration", revisedPrompt: "A lighthouse at night" } });
+    expect(detailsPayload(running, undefined, "codex")).toEqual({ input: { revisedPrompt: "A lighthouse at night" } });
     expect(detailsPayload({ ...running, status: "completed" }, undefined, "codex")).toEqual(detailsPayload(running, undefined, "codex"));
-    // Another agent's request, or one with nothing to leave out, is shown as it is.
-    const claude = { id: "keep", path: "Notes/Garden.md" };
+    expect(detailsPayload({ type: "imageView", path: "/vault/a.png" }, undefined, "codex").input).toEqual({ path: "/vault/a.png" });
+    // Another agent's request is shown as it is.
+    const claude = { id: "keep", type: "keep", path: "Notes/Garden.md" };
     expect(detailsPayload(claude, undefined, "claude").input).toBe(claude);
-    const view = { type: "imageView", path: "/vault/a.png" };
-    expect(detailsPayload(view, undefined, "codex").input).toEqual(view);
+  });
+
+  it("says each thing a Codex search or file change asked once, without the item's wrappers", () => {
+    const search = { type: "webSearch", id: "ws1", query: "tomato soil temperature", action: { type: "search", query: "tomato soil temperature", queries: ["tomato soil temperature", "tomato night temperature"] } };
+    expect(detailsPayload(search, undefined, "codex").input).toEqual({ queries: ["tomato soil temperature", "tomato night temperature"] });
+    // A search for one query keeps it; an opened page is its address.
+    expect(detailsPayload({ type: "webSearch", id: "ws2", query: "frost dates", action: { type: "search", query: "frost dates" } }, undefined, "codex").input).toEqual({ query: "frost dates" });
+    expect(detailsPayload({ type: "webSearch", id: "ws3", query: "", action: { type: "openPage", url: "https://example.org/a" } }, undefined, "codex").input).toEqual({ url: "https://example.org/a" });
+    const change = { type: "fileChange", id: "f1", status: "completed", changes: [{ path: "/vault/Notes/Garden.md", kind: { type: "update" }, diff: "@@ -1 +1 @@\n-a\n+b\n" }] };
+    expect(detailsPayload(change, undefined, "codex").input).toEqual({ changes: [{ path: "/vault/Notes/Garden.md", kind: "update", diff: "@@ -1 +1 @@\n-a\n+b\n" }] });
+    // A kind that says more than its word (a rename's new path) stays whole.
+    const moved = { path: "/vault/a.md", kind: { type: "update", move_path: "/vault/b.md" } };
+    expect(detailsPayload({ type: "fileChange", changes: [moved] }, undefined, "codex").input).toEqual({ changes: [moved] });
   });
 
   it("shows a Codex command's request, then its output and exit code once, under the names Codex gives them", () => {
     const item = { type: "commandExecution", id: "c1", status: "completed", command: "git status --short", cwd: "/vault", exitCode: 0, aggregatedOutput: " M a.md\n" };
-    const request = { type: "commandExecution", command: "git status --short", cwd: "/vault" };
+    const request = { command: "git status --short", cwd: "/vault" };
     expect(detailsPayload(item, { data: " M a.md\n" }, "codex")).toEqual({ input: request, output: { exitCode: 0, aggregatedOutput: " M a.md\n" } });
     // Still running: the request alone, with no empty result fields in it.
     expect(detailsPayload({ ...item, status: "inProgress", exitCode: null, aggregatedOutput: null }, undefined, "codex")).toEqual({ input: request });
@@ -90,9 +102,13 @@ describe("one card for every tool result", () => {
     const result = { systemsculpt_tool: 1, ok: true };
     const call = { type: "mcpToolCall", id: "m1", status: "completed", server: "systemsculpt", tool: "read", arguments: { path: "a.md" }, result };
     expect(detailsPayload(call, { data: result }, "codex")).toEqual({
-      input: { type: "mcpToolCall", server: "systemsculpt", tool: "read", arguments: { path: "a.md" } },
+      input: { server: "systemsculpt", tool: "read", arguments: { path: "a.md" } },
       output: { ok: true },
     });
+    // A result Codex keeps on its item as a copy of the one shown is left out of the request too.
+    const alerts = { content: [{ type: "text", text: "No weather alerts this week." }] };
+    const copied = { type: "mcpToolCall", server: "weather", tool: "alerts", arguments: { city: "Portland" }, result: JSON.parse(JSON.stringify(alerts)) };
+    expect(detailsPayload(copied, { data: alerts }, "codex").input).toEqual({ server: "weather", tool: "alerts", arguments: { city: "Portland" } });
   });
 
   it("leaves the plugin's own result marker out of Details, live or saved", () => {

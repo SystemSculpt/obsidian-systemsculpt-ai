@@ -89,6 +89,13 @@
   to { transform: translateX(200%); opacity: 0; }
 }
 
+/* A sheen across a loading bar: its band, on a background three bars wide, moves from past the
+   bar's start to past its end. */
+@keyframes ss-sheen-sweep {
+  from { background-position: 100% 0; }
+  to { background-position: 0% 0; }
+}
+
 /* Feedback */
 @keyframes ss-flash {
   0% { background-color: var(--ss-accent-tint-strong); }

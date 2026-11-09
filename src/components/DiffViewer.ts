@@ -331,6 +331,9 @@ export class DiffViewer {
     if (!line.content && line.content !== '') {
       content.textContent = '\u00a0';
     }
+    // A wrapped line hangs past its own indent (diff-viewer.css), so its tail never reads as the next line.
+    const indent = /^ */u.exec(line.content || '')?.[0].length ?? 0;
+    if (indent) content.setCssProps({ '--ss-diff-indent': String(indent) });
   }
 
   /** A standard unified-diff range ("-3,4 +3,5"); the change count has its own badge. */
