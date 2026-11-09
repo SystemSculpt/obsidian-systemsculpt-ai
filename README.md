@@ -20,7 +20,7 @@
 
 1. Install and enable SystemSculpt AI from Obsidian Community Plugins.
 2. For hosted AI, open **Settings → SystemSculpt AI → Account** and choose **Sign up** or **Sign in**. Complete the account connection in your browser; eligible new accounts can claim 500 one-time starter credits, no card needed, while available. For your own desktop Claude Code or Codex, skip the SystemSculpt account step and use your installed, signed-in agent.
-3. Run **Open SystemSculpt Chat** from the command palette, choose your backend from the run line below the message box, and ask about your vault.
+3. Run **SystemSculpt AI: Open chat** from the command palette, choose your backend from the run line below the message box, and ask about your vault.
 
 Already have a plan? Sign in from the same Account settings, or paste and activate your license key there.
 
