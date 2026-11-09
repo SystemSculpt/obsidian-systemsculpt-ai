@@ -370,6 +370,8 @@ No model inference or account sign-in is part of this host smoke.
 Unpublished tags 6.19.6–6.19.8 remain immutable and unpublished. Their source
 fixes go into the next daily release, whose version exceeds all existing
 semantic version tags (initially 6.19.9). Never publish those old tags later.
+Until then main's version files stay at 6.19.5, the latest published release:
+Obsidian reads HEAD manifest.json and downloads that version's release files.
 
 The scheduler launches a durable supervisor because CI can exceed its ordinary
 ten-minute command lifetime. The job holds `release:obsidian-systemsculpt-ai`,
