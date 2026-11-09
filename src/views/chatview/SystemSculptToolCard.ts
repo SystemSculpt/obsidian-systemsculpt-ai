@@ -34,7 +34,7 @@ export function systemSculptToolArguments(part: AgentToolPart): RecordValue {
  * What the person reads from a result message: the agent-only guidance after
  * it ("The chat already shows ...") and a link the card shows as its action stay out.
  */
-export function personFacingMessage(result: SystemSculptToolResult): string {
+function personFacingMessage(result: SystemSculptToolResult): string {
   let message = result.message;
   if (result.link) message = message.split(`${result.link.label}:`)[0];
   return message.split(/\s*The chat already shows\b/u)[0].trim();
