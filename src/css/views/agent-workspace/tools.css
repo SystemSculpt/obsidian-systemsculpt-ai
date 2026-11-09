@@ -88,14 +88,15 @@
 }
 .systemsculpt-agent-conversation .systemsculpt-agent-tool-header .systemsculpt-agent-tool-label {
   /* The verb and target keep their full width; the muted meta beside them
-     yields first. Only a label wider than the row ellipses. */
+     yields first. Only a label wider than the row ellipses. A row reads at its fold's weight,
+     so a step never outranks the fold that holds it, nor the answer under it. */
   flex: 0 0 auto;
   max-width: 100%;
   min-width: 0;
   overflow: hidden;
   color: var(--ss-ink);
   font-size: var(--ss-text-sm);
-  font-weight: var(--ss-weight-medium);
+  font-weight: 400;
   line-height: 20px;
   text-overflow: ellipsis;
   white-space: nowrap;

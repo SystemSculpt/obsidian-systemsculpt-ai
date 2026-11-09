@@ -5,7 +5,7 @@ import { encodeSystemSculptToolResult, SYSTEMSCULPT_TOOL_SERVER } from "../../..
 import { renderHostedToolPreview } from "../HostedToolPreview";
 import { renderNativeToolPreview } from "../NativeToolPresentation";
 import { presentAgentTool, presentAgentToolFailure, agentToolNoticeTone } from "../AgentToolPresentation";
-import { mediaDisplayName, renderFields, renderMedia, renderRawDetails } from "../ToolCardBlocks";
+import { detailsOutput, mediaDisplayName, renderFields, renderMedia, renderRawDetails } from "../ToolCardBlocks";
 import { renderTurnMedia } from "../TurnMedia";
 import { presentTurnChanges } from "../TurnChangeSummary";
 import { setActivityLabelText, summarizeAgentActivity } from "../AgentActivityPresentation";
@@ -58,6 +58,14 @@ describe("one card for every tool result", () => {
     expect(Array.from(host.querySelectorAll(".ss-tool-field dt"), label => label.textContent)).toEqual(["Prompt"]);
     expect(host.querySelector(".ss-tool-field dd")?.textContent).toBe("A lighthouse at dusk");
     expect(host.textContent).not.toContain("systemsculpt_tool");
+  });
+
+  it("leaves the plugin's own result marker out of Details, live or saved", () => {
+    expect(detailsOutput({ systemsculpt_tool: 1, ok: true, media: [{ kind: "image", path: IMAGE }] })).toEqual({ ok: true, media: [{ kind: "image", path: IMAGE }] });
+    expect(detailsOutput({ data: { systemsculpt_tool: 1, ok: true }, status: "completed" })).toEqual({ data: { ok: true }, status: "completed" });
+    const plain = { ok: true };
+    expect(detailsOutput(plain)).toBe(plain);
+    expect(detailsOutput("Saved.")).toBe("Saved.");
   });
 
   it("draws a card's thumbnails so each opens its vault file", () => {

@@ -325,6 +325,25 @@ export function renderMedia(app: App, card: HTMLElement, media: readonly ToolCar
 }
 
 /** Raw request and result for whoever needs them; never the first thing a card shows. */
+/**
+ * A result as Details shows it: the plugin's "systemsculpt_tool" marker, which only lets Chat find
+ * media in a saved result, is left out, so no call reads as one SystemSculpt ran when it didn't.
+ * A saved chat nests the result under "data".
+ */
+export function detailsOutput(data: unknown): unknown {
+  const unmarked = (value: unknown): unknown => {
+    if (!value || typeof value !== "object" || Array.isArray(value) || !("systemsculpt_tool" in value)) return value;
+    const copy: Record<string, unknown> = { ...(value as Record<string, unknown>) };
+    delete copy.systemsculpt_tool;
+    return copy;
+  };
+  const outer = unmarked(data);
+  if (!outer || typeof outer !== "object" || Array.isArray(outer) || !("data" in outer)) return outer;
+  const record = outer as Record<string, unknown>;
+  const inner = unmarked(record.data);
+  return inner === record.data ? outer : { ...record, data: inner };
+}
+
 export function renderRawDetails(card: HTMLElement, payload: () => unknown): void {
   const raw = card.createEl("details", { cls: "systemsculpt-agent-tool-raw" });
   const summary = raw.createEl("summary", { attr: { "data-testid": "chat.tool.raw" } });

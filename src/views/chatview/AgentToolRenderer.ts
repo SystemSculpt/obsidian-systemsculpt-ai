@@ -8,7 +8,7 @@ import { agentToolNoticeTone, gatedSystemSculptTurn, labelTargetClass, presentAg
 import type { AgentApprovalCards } from "./AgentApprovalCards";
 import { renderNativeToolPreview } from "./NativeToolPresentation";
 import { renderHostedToolPreview } from "./HostedToolPreview";
-import { renderNotice, renderRawDetails, syncToolMediaWithReply } from "./ToolCardBlocks";
+import { detailsOutput, renderNotice, renderRawDetails, syncToolMediaWithReply } from "./ToolCardBlocks";
 import { ACTIONABLE_ARTIFACT_TOOLS, toolCallForPart, visibleToolError } from "./ConversationPartPresentation";
 
 type ToolApprovalPreviewHydrationState = {
@@ -130,7 +130,7 @@ export class AgentToolRenderer {
       }
     }
     if (supportNeedsRender && hasReadablePayload && !retainedNativePreview) {
-      renderRawDetails(stagedSupport, () => ({ input: part.input, ...(!isQuestion && part.output ? { output: part.output.data } : {}) }));
+      renderRawDetails(stagedSupport, () => ({ input: part.input, ...(!isQuestion && part.output ? { output: detailsOutput(part.output.data) } : {}) }));
     }
 
     const approvalFingerprint = approvalRequired
