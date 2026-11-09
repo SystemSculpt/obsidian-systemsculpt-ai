@@ -22,6 +22,14 @@ describe("renderRawDetails", () => {
     expect(done.querySelector(".ss-json-pending, .is-pending")).toBeNull();
   });
 
+  it("prints a result as text, never as markup, in every piece it wraps", () => {
+    const output = '<img src=x onerror="alert(1)"> https://example.org/<script>alert(2)</script> {\\"a\\":\\"<b>\\"}';
+    const raw = renderRawDetails(document.createElement("div"), () => ({ input, output }), { open: true });
+    const code = raw.querySelector("code")!;
+    expect(code.querySelector("img, script, b, a")).toBeNull();
+    expect(code.textContent).toBe(JSON.stringify({ input, output }, null, 2));
+  });
+
   it("shows the place opened later while the result is made, and nothing pending once it has one", () => {
     const later = renderRawDetails(document.createElement("div"), () => ({ input }), { awaitingResult: true });
     expect(later.querySelector("code")!.hasChildNodes()).toBe(false);

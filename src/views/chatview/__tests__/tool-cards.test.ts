@@ -134,12 +134,15 @@ describe("one card for every tool result", () => {
 
   it("lists Claude Code web search sources as links and keeps the rest as text", async () => {
     const { app, host } = setup();
-    const output = 'Web search results for query: "canvas"\n\nLinks: [{"title":"Canvas - Obsidian Help","url":"https://help.obsidian.md/canvas"}]\n\nCanvas is a plugin.';
+    const output = 'Web search results for query: "canvas"\n\nLinks: [{"title":"Canvas - Obsidian Help","url":"https://help.obsidian.md/canvas"},{"title":"Run me","url":"javascript:alert(1)"}]\n\nCanvas is a plugin.';
     await renderNativeToolPreview(app, host, claude("WebSearch", { query: "canvas" }, output));
     const link = host.querySelector<HTMLAnchorElement>(".ss-tool-links a.external-link")!;
     expect(link.textContent).toBe("Canvas - Obsidian Help");
     expect(link.getAttribute("href")).toBe("https://help.obsidian.md/canvas");
-    // The title is one block beside its site, so a site that doesn't fit moves under the whole title.
+    // Only a web address becomes a link: a source with any other scheme is left out.
+    expect(host.querySelectorAll("a")).toHaveLength(1);
+    expect(host.textContent).not.toContain("Run me");
+    // The title is its own line with its site under it, the same shape for every source.
     expect(link.parentElement?.className).toBe("ss-tool-link-title");
     expect(link.parentElement?.nextElementSibling?.className).toBe("ss-tool-link-host");
     expect(host.querySelector(".ss-tool-link-host")?.textContent).toBe("help.obsidian.md");
@@ -162,6 +165,14 @@ describe("one card for every tool result", () => {
     // Copied, the output reads exactly as the command printed it, spaces and blank line included.
     expect(lines.map(line => line.textContent)).toEqual(["PASS  garden.test.ts\n", "\n", "  Tests: 2 passed"]);
     expect(lines.map(line => line.style.getPropertyValue("--ss-terminal-indent"))).toEqual(["", "", "2"]);
+  });
+
+  it("prints a command's output as text, never as markup", async () => {
+    const { app, host } = setup();
+    const output = '<img src=x onerror="alert(1)">\n  <script>alert(2)</script>';
+    await renderNativeToolPreview(app, host, claude("Bash", { command: "cat page.html" }, output));
+    expect(host.querySelector("img, script")).toBeNull();
+    expect(host.querySelector(".ss-tool-terminal-output")?.textContent).toBe(output);
   });
 
   it("marks where a running command's output will appear until it prints", async () => {
