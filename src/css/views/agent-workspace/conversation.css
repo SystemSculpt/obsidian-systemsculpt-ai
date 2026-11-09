@@ -439,7 +439,9 @@ video.systemsculpt-agent-media-frame {
 }
 
 .systemsculpt-agent-media-caption {
-  /* Follows the frame's width instead of widening it; a long name ends in an ellipsis on one line. */
+  /* Follows the frame's width instead of widening it; a long name ends in an ellipsis on one line.
+     Its line is never squeezed by a taller frame above it. */
+  flex-shrink: 0;
   width: 0;
   min-width: 100%;
   overflow: hidden;
@@ -506,9 +508,13 @@ video.systemsculpt-agent-media-frame {
   object-fit: cover;
 }
 
+/* The player's border sits inside its shape, as the tile's does, so the file lands in the tile's exact
+   box: its own picture size never makes it taller (min-height), so the name under it stays put. */
 .systemsculpt-agent-media.has-ratio video.systemsculpt-agent-media-frame {
+  box-sizing: border-box;
   height: auto;
-  object-fit: contain;
+  min-height: 0;
+  object-fit: cover;
 }
 
 /* An asked-for shape holds even if the file comes back another one: shown whole, never cropped. */

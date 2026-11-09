@@ -9,7 +9,7 @@ import type { AgentApprovalCards } from "./AgentApprovalCards";
 import { renderNativeToolPreview } from "./NativeToolPresentation";
 import { presentPendingMedia } from "./PendingMedia";
 import { renderHostedToolPreview } from "./HostedToolPreview";
-import { detailsInput, detailsOutput, renderNotice, renderRawDetails, syncToolMediaWithReply } from "./ToolCardBlocks";
+import { detailsPayload, renderNotice, renderRawDetails, syncToolMediaWithReply } from "./ToolCardBlocks";
 import { ACTIONABLE_ARTIFACT_TOOLS, toolCallForPart, visibleToolError } from "./ConversationPartPresentation";
 
 type ToolApprovalPreviewHydrationState = {
@@ -136,7 +136,7 @@ export class AgentToolRenderer {
       const openDetails = node.querySelector<HTMLDetailsElement>(
         ":scope > .systemsculpt-agent-tool > .systemsculpt-agent-tool-support > .systemsculpt-agent-tool-raw",
       )?.open ?? false;
-      renderRawDetails(stagedSupport, () => ({ input: detailsInput(part.input, part.native?.agent), ...(!isQuestion && part.output ? { output: detailsOutput(part.output.data) } : {}) }), {
+      renderRawDetails(stagedSupport, () => detailsPayload(part.input, isQuestion ? undefined : part.output, part.native?.agent), {
         open: openDetails,
         awaitingResult: presentPendingMedia([part], true).some(tile => tile.state !== "failed"),
       });

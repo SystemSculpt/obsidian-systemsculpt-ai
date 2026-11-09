@@ -33,7 +33,6 @@ function embeddedInAnswer(answer: string, path: string): boolean {
  * SystemSculpt tool results. A file the reply already embeds shows once, in
  * the reply.
  */
-/** @internal Exported for tests. */
 export function presentTurnMedia(parts: readonly AgentToolPart[], answer = "", live = false): TurnMedia {
   const media = new Map<string, TurnMediaItem>();
   const notices = new Map<string, { text: string; label: string; url: string }>();

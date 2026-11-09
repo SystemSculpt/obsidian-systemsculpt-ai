@@ -230,7 +230,11 @@ function nextStep(reason: string): string | null {
  * A one-line caption's word boxes, each led by its space. A word's closing punctuation leads the next
  * box instead, so a cut ends on the word itself ("warm window light…", never "light,…"). A clause's
  * first word shares its box with the next, so a cut never shows one word of a new clause: it ends on
- * the clause before ("at dusk…", never "at dusk, four…").
+ * the clause before ("at dusk…", never "at dusk, four…"). A small joining word ("at", "a", "the")
+ * shares its box with the word it leads, so a cut never ends on one ("misty pine forest…", never
+ * "pine forest at…").
+ *
+ * @internal Unit-tested directly.
  */
 export function captionWords(caption: string): string[] {
   const words = caption.split(/(?=\s)/u);
@@ -240,19 +244,30 @@ export function captionWords(caption: string): string[] {
     return lead + (index < words.length - 1 ? word.replace(closing, "") : word);
   });
   const opensClause = (box: string | undefined): boolean => box !== undefined && /^[,;:.!?]/u.test(box);
+  const leadsNext = (box: string): boolean => JOINING_WORDS.has(/[\p{L}']+$/u.exec(box)?.[0].toLowerCase() ?? "");
   const joined: string[] = [];
   for (let index = 0; index < boxes.length; index += 1) {
-    const next = boxes[index + 1];
+    let box = boxes[index];
     // A one-word clause followed by another clause is whole on its own.
-    if (opensClause(boxes[index]) && next !== undefined && !opensClause(next)) {
-      joined.push(boxes[index] + next);
+    if (opensClause(box) && boxes[index + 1] !== undefined && !opensClause(boxes[index + 1])) {
       index += 1;
-    } else {
-      joined.push(boxes[index]);
+      box += boxes[index];
     }
+    while (leadsNext(box) && boxes[index + 1] !== undefined && !opensClause(boxes[index + 1])) {
+      index += 1;
+      box += boxes[index];
+    }
+    joined.push(box);
   }
   return joined;
 }
+
+/** Words that lead the next one: a caption cut after one reads as unfinished ("pine forest at…"). */
+const JOINING_WORDS = new Set([
+  "a", "an", "the", "and", "or", "but", "nor", "of", "at", "in", "on", "to", "for", "with", "by", "from",
+  "into", "onto", "over", "under", "through", "across", "along", "toward", "towards", "between", "behind",
+  "beside", "above", "below", "near", "as", "its", "his", "her", "their", "our", "your", "my", "this", "that",
+]);
 
 /** One placeholder or failure tile; its live line and bar update from the block's clock. */
 export function renderPendingMedia(grid: HTMLElement, tile: PendingMedia): HTMLElement {

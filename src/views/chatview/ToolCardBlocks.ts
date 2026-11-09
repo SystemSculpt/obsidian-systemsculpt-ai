@@ -165,13 +165,14 @@ export function renderPathList(
   }
 }
 
-/** Web sources: the page title as the link, its site beside it. */
+/** Web sources: the page title as the link, its site under it. */
 export function renderLinks(card: HTMLElement, links: readonly ToolCardLink[]): void {
   if (!links.length) return;
   const list = card.createEl("ul", { cls: "ss-tool-links" });
   for (const link of links.slice(0, 20)) {
     const item = list.createEl("li");
-    externalLink(item, link.url, link.title || hostOf(link.url));
+    // The title is its own line, so its last word never moves down to sit beside the site.
+    externalLink(item.createSpan({ cls: "ss-tool-link-title" }), link.url, link.title || hostOf(link.url));
     item.createSpan({ cls: "ss-tool-link-host", text: hostOf(link.url) });
   }
 }
@@ -180,8 +181,11 @@ function hostOf(url: string): string {
   try { return new URL(url).host.replace(/^www\./u, ""); } catch { return url; }
 }
 
-/** A command and the end of its output, the way a terminal shows it. */
-export function renderTerminal(card: HTMLElement, options: Readonly<{ command?: string; output?: string; tailLines?: number }>): void {
+/**
+ * A command and the end of its output, the way a terminal shows it. A running command with no
+ * output yet shows where its output will appear, so the panel never reads as finished and empty.
+ */
+export function renderTerminal(card: HTMLElement, options: Readonly<{ command?: string; output?: string; tailLines?: number; pending?: boolean }>): void {
   const output = options.output?.replace(/\s+$/u, "") ?? "";
   if (!options.command && !output) return;
   const tail = options.tailLines ?? 20;
@@ -194,13 +198,33 @@ export function renderTerminal(card: HTMLElement, options: Readonly<{ command?: 
   }
   if (output) {
     const lines = output.split("\n");
-    const body = pre.createEl("code", { cls: "ss-tool-terminal-output", text: lines.length > tail ? lines.slice(-tail).join("\n") : output });
+    const body = pre.createEl("code", { cls: "ss-tool-terminal-output" });
+    renderTerminalLines(body, lines.length > tail ? lines.slice(-tail) : lines);
     if (lines.length > tail) {
       const all = createUiAction(card, { label: `Show all ${lines.length} lines`, testId: "chat.tool.show-output", size: "small", tooltip: false });
       all.addClass("ss-tool-more");
-      all.onclick = () => { body.textContent = output; all.remove(); };
+      all.onclick = () => { renderTerminalLines(body, lines); all.remove(); };
     }
+  } else if (options.pending) {
+    // Lines that shimmer like a live tile, on the output's own lines, until the first output arrives.
+    const waiting = pre.createSpan({ cls: "ss-tool-terminal-pending", attr: { "aria-hidden": "true" } });
+    waiting.createSpan();
+    waiting.createSpan();
   }
+}
+
+/**
+ * Output one line per block, each keeping its leading spaces. A line too long for the pane wraps two
+ * characters in from its own start, so its tail never reads as the next line. Copying keeps the lines.
+ */
+function renderTerminalLines(body: HTMLElement, lines: readonly string[]): void {
+  body.empty();
+  lines.forEach((text, index) => {
+    const line = body.createSpan({ cls: "ss-tool-terminal-line", text });
+    if (index < lines.length - 1) line.appendText("\n");
+    const indent = /^ */u.exec(text)?.[0].length ?? 0;
+    if (indent) line.setCssProps({ "--ss-terminal-indent": String(indent) });
+  });
 }
 
 /** Prose a tool returned (a subagent's answer, an MCP result), in the reading font. */
@@ -330,7 +354,7 @@ export function renderMedia(app: App, card: HTMLElement, media: readonly ToolCar
  * media in a saved result, is left out, so no call reads as one SystemSculpt ran when it didn't.
  * A saved chat nests the result under "data".
  */
-export function detailsOutput(data: unknown): unknown {
+function detailsOutput(data: unknown): unknown {
   const unmarked = (value: unknown): unknown => {
     if (!value || typeof value !== "object" || Array.isArray(value) || !("systemsculpt_tool" in value)) return value;
     const copy: Record<string, unknown> = { ...(value as Record<string, unknown>) };
@@ -348,11 +372,29 @@ export function detailsOutput(data: unknown): unknown {
  * A request as Details shows it. A Codex item carries its own id and run status beside what was asked;
  * Details leave both out, so the request reads the same while the call runs and after it.
  */
-export function detailsInput(input: unknown, agent?: string): unknown {
-  if (agent !== "codex" || !input || typeof input !== "object" || Array.isArray(input)) return input;
-  const record = input as Record<string, unknown>;
-  if (!("id" in record) && !("status" in record)) return input;
-  return Object.fromEntries(Object.entries(record).filter(([key]) => key !== "id" && key !== "status"));
+/** What Codex reports about a command once it has run: its output, exit code and run time. */
+const CODEX_COMMAND_RESULT = ["aggregatedOutput", "exitCode", "durationMs"];
+
+/**
+ * A call's request and its result as Details shows them, each once. A Codex item holds both, with
+ * its id and run status: the request drops those and every field that is the result, and a command's
+ * result is the item's own output, exit code and run time, under the names Codex gives them.
+ */
+export function detailsPayload(
+  input: unknown,
+  output: Readonly<{ data?: unknown }> | undefined,
+  agent?: string,
+): { input: unknown; output?: unknown } {
+  const result = output ? { output: detailsOutput(output.data) } : {};
+  if (agent !== "codex" || !input || typeof input !== "object" || Array.isArray(input)) return { input, ...result };
+  const item = input as Record<string, unknown>;
+  const command = item.type === "commandExecution";
+  const isResult = (key: string, value: unknown): boolean =>
+    (command && CODEX_COMMAND_RESULT.includes(key)) || (output !== undefined && value !== undefined && value === output.data);
+  const request = Object.fromEntries(Object.entries(item).filter(([key, value]) => key !== "id" && key !== "status" && !isResult(key, value)));
+  if (!output || !command) return { input: request, ...result };
+  const ran = Object.fromEntries(Object.entries(item).filter(([key, value]) => CODEX_COMMAND_RESULT.includes(key) && value != null));
+  return { input: request, output: Object.keys(ran).length ? ran : result.output };
 }
 
 export function renderRawDetails(
@@ -378,12 +420,29 @@ export function renderRawDetails(
     code.toggleClass("is-at-end", !overflowing || code.scrollTop + code.clientHeight >= code.scrollHeight - 1);
   };
   code.addEventListener("scroll", syncOverflow, { passive: true });
+  // Values that move whole are measured once laid out, and again whenever the pane's width changes.
+  let fittedWidth = -1;
+  const fit = (): void => {
+    if (!raw.open || !code.isConnected || code.clientWidth === 0) return;
+    fittedWidth = code.clientWidth;
+    fitJsonUnits(code);
+    syncOverflow();
+  };
   // Measured again once it is laid out: opened inside a closed fold, it has no size yet.
   const view = pre.ownerDocument.defaultView as (Window & { ResizeObserver?: typeof ResizeObserver }) | null;
-  if (view?.ResizeObserver) new view.ResizeObserver(syncOverflow).observe(code);
+  if (view?.ResizeObserver) {
+    new view.ResizeObserver(() => {
+      syncOverflow();
+      // Fitted in the next frame: fitting changes the code's height, which this observer reports again.
+      if (code.clientWidth !== fittedWidth) view.requestAnimationFrame(fit);
+    }).observe(code);
+  }
   raw.addEventListener("toggle", () => {
     if (raw.open && !code.hasChildNodes()) renderDetailsCode(code, payload(), Boolean(options.awaitingResult));
-    if (raw.open) syncOverflow();
+    if (raw.open) {
+      fit();
+      syncOverflow();
+    }
   });
   // Opened before the result landed: it stays open, with the result in it.
   if (options.open) {
@@ -391,6 +450,21 @@ export function renderRawDetails(
     renderDetailsCode(code, payload(), Boolean(options.awaitingResult));
   }
   return raw;
+}
+
+/**
+ * A piece that moves whole to the next line (a short value, the first entry a value lists, a web
+ * address) does so only when it then fits on one line. One that would still wrap flows from where it
+ * is instead, so moving it never costs a line.
+ */
+function fitJsonUnits(code: HTMLElement): void {
+  const units = Array.from(code.querySelectorAll<HTMLElement>(".ss-json-fit"));
+  if (!units.length) return;
+  for (const unit of units) unit.removeClass("is-flowing");
+  const view = code.ownerDocument.defaultView;
+  const line = view ? parseFloat(view.getComputedStyle(code).lineHeight) : Number.NaN;
+  if (!(line > 0)) return;
+  for (const unit of units.filter(item => item.getBoundingClientRect().height > line * 1.5)) unit.addClass("is-flowing");
 }
 
 /** The key a result still being made stands in for; its line becomes the result's opening line. */
@@ -443,18 +517,25 @@ const SHORT_VALUE = 32;
 
 function appendJsonLine(block: HTMLElement, line: string): void {
   if (appendCommandLine(block, line)) return;
-  // A short value ("2 Studio workflows.", "Notes/Archive") moves whole to the next line, never
-  // leaving a word or a name behind on its key's line.
+  // A short value ("2 Studio workflows.", "Notes/Archive") moves whole to the next line when it fits
+  // there on one line, never leaving a word or a name behind on its key's line.
   const keyed = /^(\s*"(?:[^"\\]|\\.)*":\s)("(?:[^"\\]|\\.)*",?)$/u.exec(line);
   if (keyed && keyed[2].length <= SHORT_VALUE) {
     appendJsonWords(block, keyed[1]);
-    appendJsonWords(block.createSpan({ cls: "ss-json-path" }), keyed[2]);
+    appendJsonValue(block.createSpan({ cls: "ss-json-path ss-json-fit" }), keyed[2], true);
+    return;
+  }
+  const entries = jsonLineEntries(line);
+  if (entries.length === 1) {
+    appendJsonValue(block, line, line.length > SHORT_VALUE);
     return;
   }
   // Entries a value lists line by line ("a.md\nb.md", a read's numbered lines) each move to the next
-  // line whole when they fit there, each with the "\n" that ends it; the first stays on its key's line.
-  const entries = jsonLineEntries(line);
-  appendJsonValue(block, entries[0], entries[0].length > SHORT_VALUE);
+  // line whole when they fit there, each with the "\n" that ends it. The first moves off its key's
+  // line too, so every entry starts a line alike.
+  const lead = /^\s*(?:"(?:[^"\\]|\\.)*":\s)?/u.exec(entries[0])?.[0] ?? "";
+  if (lead) appendJsonWords(block, lead);
+  appendJsonValue(block.createSpan({ cls: "ss-json-path ss-json-fit" }), entries[0].slice(lead.length), true);
   for (const entry of entries.slice(1)) appendJsonValue(block.createSpan({ cls: "ss-json-path" }), entry, true);
 }
 
@@ -464,13 +545,16 @@ function appendJsonValue(parent: HTMLElement, text: string, breakable: boolean):
   else appendJsonWords(parent, text);
 }
 
-/** A line cut after each "\n" escape it holds; an escaped backslash before an "n" is no break. */
+/**
+ * A line cut after each run of "\n" escapes it holds ("\n\n" stays whole), never before the quote and
+ * comma that close it. An escaped backslash before an "n" is no break.
+ */
 function jsonLineEntries(line: string): string[] {
   const entries: string[] = [];
   let start = 0;
-  for (const match of line.matchAll(/\\./gu)) {
+  for (const match of line.matchAll(/(?:\\n)+|\\./gu)) {
     const end = (match.index ?? 0) + match[0].length;
-    if (match[0] !== "\\n" || end >= line.length) continue;
+    if (!match[0].startsWith("\\n") || /^["\]},]*$/u.test(line.slice(end))) continue;
     entries.push(line.slice(start, end));
     start = end;
   }
@@ -531,7 +615,41 @@ function appendJsonWords(parent: HTMLElement, text: string): void {
 /** A path listed after a colon or a comma ("…vault: Images/take 1.png, Images/take 2.png"), to its file name. */
 const LISTED_PATH = /(: |, )((?:[^\s"/,:\\][^"/,:\\\n]{0,40}\/)+[^\s"/\\][^"/\\\n]*?\.[\p{L}\d]{1,5})(?=[,.;]?(?:$|[\s"'),\]]))/gu;
 
+/**
+ * A piece of a value that moves to the next line whole when it fits there: one field of JSON the value
+ * quotes, with the brackets that open and close it ("{\"title\":\"Frost dates\","), or a web address with
+ * its quotes ("https://…", "\"https://…\"]"). Line breaks right after it ("\n\n") stay on it.
+ */
+const VALUE_UNIT = /(?:(?:\[?\{)?\\"[\w$-]{1,24}\\":(?:\\"(?:[^"\\]|\\[^"])*\\"|-?\d[\d.]*|true|false|null)[}\]]*,?|"?https?:\/\/[^\s"\\<>]*[^\s"\\<>.,;:!?)\]](?:\\"[}\]]*,?|"[,\]}]*|[.,;:!?)]+)?)(?:\\[nr])*/gu;
+
 function appendBreakableValue(block: HTMLElement, content: string): void {
+  // A quoted field or a web address is one piece: it moves to the next line whole when it fits there
+  // on one line, so a line never pairs one link's tail with the next one's head. Otherwise it flows,
+  // breaking after a "/" or between words.
+  let start = 0;
+  for (const match of content.matchAll(VALUE_UNIT)) {
+    const at = match.index ?? 0;
+    const before = content.slice(start, at);
+    appendListedPaths(block, before);
+    // Between quoted fields ("…\",\"url\"…"), a line may start at the comma before a piece and after the
+    // one that closes it, even when it flows.
+    if (before.endsWith(",")) block.createEl("wbr");
+    // A value that is one piece is already measured as one.
+    const unit = match[0] === content && block.hasClass("ss-json-fit") ? block : block.createSpan({ cls: "ss-json-path ss-json-fit" });
+    // An address's scheme stays with its site ("https://example.org"), so no line ends on "https://".
+    const site = /https?:\/\/[^/\s"\\<>]{1,20}(?=$|[/"\\])/u.exec(match[0]);
+    if (site) {
+      appendBreakableRun(unit, match[0].slice(0, site.index));
+      unit.createSpan({ cls: "ss-json-whole", text: site[0] });
+      appendBreakableRun(unit, match[0].slice(site.index + site[0].length));
+    } else appendBreakableRun(unit, match[0]);
+    if (match[0].endsWith(",")) block.createEl("wbr");
+    start = at + match[0].length;
+  }
+  appendListedPaths(block, content.slice(start));
+}
+
+function appendListedPaths(block: HTMLElement, content: string): void {
   // Each listed path is one piece with its comma or full stop: it moves to the next line whole when it
   // fits there, so a line never pairs one file's name with the next one's folder. Only a path wider
   // than the line breaks inside, after a "/". A value that is one path keeps its key on its line.
@@ -567,18 +685,25 @@ function appendBreakableRun(block: HTMLElement, content: string): void {
   };
   let start = 0;
   let afterSlash = false;
-  for (const match of content.matchAll(/\\[^\n]|\/|,(?= )/gu)) {
+  for (const match of content.matchAll(/(?:\\[nr])+|\\[^\n]|\/+|,(?= |\\"|\{)/gu)) {
     const at = match.index ?? 0;
     const end = at + match[0].length;
-    // A list's comma stays on its name; the space after it is where the next line may start.
-    if (match[0] === ",") { appendChunk(content.slice(start, end), afterSlash); start = end; afterSlash = false; continue; }
+    // A list's comma stays on its name; the space after it is where the next line may start. Between
+    // the fields of quoted JSON ("…\",\"url\"…") the next line may start right after the comma.
+    if (match[0] === ",") {
+      appendChunk(content.slice(start, end), afterSlash);
+      if (content[end] !== " ") block.createEl("wbr");
+      start = end;
+      afterSlash = false;
+      continue;
+    }
     appendChunk(content.slice(start, at), afterSlash);
-    if (match[0] === "/") block.appendText("/");
+    if (match[0].startsWith("/")) block.appendText(match[0]);
     else block.createSpan({ cls: "ss-json-whole", text: match[0] });
-    // After a slash or a line break escape, a wrapped line may start; never inside either, and never
-    // after a tab, which stays with the words it leads ("3\tTomatoes").
-    if (match[0] === "/" || /^\\[nr]$/u.test(match[0])) block.createEl("wbr");
-    afterSlash = match[0] === "/";
+    // After a slash or a run of line break escapes ("\n\n" whole), a wrapped line may start; never
+    // inside either, and never after a tab, which stays with the words it leads ("3\tTomatoes").
+    if (match[0].startsWith("/") || /^(?:\\[nr])+$/u.test(match[0])) block.createEl("wbr");
+    afterSlash = match[0].startsWith("/");
     start = end;
   }
   appendChunk(content.slice(start), afterSlash);

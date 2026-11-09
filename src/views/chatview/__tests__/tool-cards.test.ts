@@ -5,7 +5,7 @@ import { encodeSystemSculptToolResult, SYSTEMSCULPT_TOOL_SERVER } from "../../..
 import { renderHostedToolPreview } from "../HostedToolPreview";
 import { renderNativeToolPreview } from "../NativeToolPresentation";
 import { presentAgentTool, presentAgentToolFailure, agentToolNoticeTone } from "../AgentToolPresentation";
-import { detailsInput, detailsOutput, mediaDisplayName, renderFields, renderMedia, renderRawDetails } from "../ToolCardBlocks";
+import { detailsPayload, mediaDisplayName, renderFields, renderMedia, renderRawDetails } from "../ToolCardBlocks";
 import { renderTurnMedia } from "../TurnMedia";
 import { presentTurnChanges } from "../TurnChangeSummary";
 import { setActivityLabelText, summarizeAgentActivity } from "../AgentActivityPresentation";
@@ -71,21 +71,37 @@ describe("one card for every tool result", () => {
 
   it("shows a Codex request without the item's own id and run status, so it reads the same running and done", () => {
     const running = { type: "imageGeneration", id: "ig1", status: "inProgress", revisedPrompt: "A lighthouse at night" };
-    expect(detailsInput(running, "codex")).toEqual({ type: "imageGeneration", revisedPrompt: "A lighthouse at night" });
-    expect(detailsInput({ ...running, status: "completed" }, "codex")).toEqual(detailsInput(running, "codex"));
+    expect(detailsPayload(running, undefined, "codex")).toEqual({ input: { type: "imageGeneration", revisedPrompt: "A lighthouse at night" } });
+    expect(detailsPayload({ ...running, status: "completed" }, undefined, "codex")).toEqual(detailsPayload(running, undefined, "codex"));
     // Another agent's request, or one with nothing to leave out, is shown as it is.
     const claude = { id: "keep", path: "Notes/Garden.md" };
-    expect(detailsInput(claude, "claude")).toBe(claude);
+    expect(detailsPayload(claude, undefined, "claude").input).toBe(claude);
     const view = { type: "imageView", path: "/vault/a.png" };
-    expect(detailsInput(view, "codex")).toBe(view);
+    expect(detailsPayload(view, undefined, "codex").input).toEqual(view);
+  });
+
+  it("shows a Codex command's request, then its output and exit code once, under the names Codex gives them", () => {
+    const item = { type: "commandExecution", id: "c1", status: "completed", command: "git status --short", cwd: "/vault", exitCode: 0, aggregatedOutput: " M a.md\n" };
+    const request = { type: "commandExecution", command: "git status --short", cwd: "/vault" };
+    expect(detailsPayload(item, { data: " M a.md\n" }, "codex")).toEqual({ input: request, output: { exitCode: 0, aggregatedOutput: " M a.md\n" } });
+    // Still running: the request alone, with no empty result fields in it.
+    expect(detailsPayload({ ...item, status: "inProgress", exitCode: null, aggregatedOutput: null }, undefined, "codex")).toEqual({ input: request });
+    // A tool call's result is shown once, as the result, without the plugin's marker.
+    const result = { systemsculpt_tool: 1, ok: true };
+    const call = { type: "mcpToolCall", id: "m1", status: "completed", server: "systemsculpt", tool: "read", arguments: { path: "a.md" }, result };
+    expect(detailsPayload(call, { data: result }, "codex")).toEqual({
+      input: { type: "mcpToolCall", server: "systemsculpt", tool: "read", arguments: { path: "a.md" } },
+      output: { ok: true },
+    });
   });
 
   it("leaves the plugin's own result marker out of Details, live or saved", () => {
-    expect(detailsOutput({ systemsculpt_tool: 1, ok: true, media: [{ kind: "image", path: IMAGE }] })).toEqual({ ok: true, media: [{ kind: "image", path: IMAGE }] });
-    expect(detailsOutput({ data: { systemsculpt_tool: 1, ok: true }, status: "completed" })).toEqual({ data: { ok: true }, status: "completed" });
+    const output = (data: unknown): unknown => detailsPayload({}, { data }).output;
+    expect(output({ systemsculpt_tool: 1, ok: true, media: [{ kind: "image", path: IMAGE }] })).toEqual({ ok: true, media: [{ kind: "image", path: IMAGE }] });
+    expect(output({ data: { systemsculpt_tool: 1, ok: true }, status: "completed" })).toEqual({ data: { ok: true }, status: "completed" });
     const plain = { ok: true };
-    expect(detailsOutput(plain)).toBe(plain);
-    expect(detailsOutput("Saved.")).toBe("Saved.");
+    expect(output(plain)).toBe(plain);
+    expect(output("Saved.")).toBe("Saved.");
   });
 
   it("draws a card's thumbnails so each opens its vault file", () => {
@@ -123,6 +139,9 @@ describe("one card for every tool result", () => {
     const link = host.querySelector<HTMLAnchorElement>(".ss-tool-links a.external-link")!;
     expect(link.textContent).toBe("Canvas - Obsidian Help");
     expect(link.getAttribute("href")).toBe("https://help.obsidian.md/canvas");
+    // The title is one block beside its site, so a site that doesn't fit moves under the whole title.
+    expect(link.parentElement?.className).toBe("ss-tool-link-title");
+    expect(link.parentElement?.nextElementSibling?.className).toBe("ss-tool-link-host");
     expect(host.querySelector(".ss-tool-link-host")?.textContent).toBe("help.obsidian.md");
     expect(host.querySelector(".ss-tool-text")?.textContent).toBe("Canvas is a plugin.");
     expect(host.textContent).not.toContain("Links: [");
@@ -133,6 +152,32 @@ describe("one card for every tool result", () => {
     await renderNativeToolPreview(app, host, claude("Bash", { command: "ls" }, "a\nb"));
     expect(host.querySelector(".ss-tool-terminal-command")?.textContent).toBe("$ ls");
     expect(host.querySelector(".ss-tool-terminal-output")?.textContent).toBe("a\nb");
+    expect(host.querySelector(".ss-tool-terminal-pending")).toBeNull();
+  });
+
+  it("puts each output line in its own block, so a wrapped line hangs under its own start", async () => {
+    const { app, host } = setup();
+    await renderNativeToolPreview(app, host, claude("Bash", { command: "npm test" }, "PASS  garden.test.ts\n\n  Tests: 2 passed"));
+    const lines = Array.from(host.querySelectorAll<HTMLElement>(".ss-tool-terminal-output > .ss-tool-terminal-line"));
+    // Copied, the output reads exactly as the command printed it, spaces and blank line included.
+    expect(lines.map(line => line.textContent)).toEqual(["PASS  garden.test.ts\n", "\n", "  Tests: 2 passed"]);
+    expect(lines.map(line => line.style.getPropertyValue("--ss-terminal-indent"))).toEqual(["", "", "2"]);
+  });
+
+  it("marks where a running command's output will appear until it prints", async () => {
+    for (const agent of ["claude", "codex"] as const) {
+      const { app, host } = setup();
+      const input = agent === "claude" ? { command: "npm test" } : { type: "commandExecution", command: "npm test", cwd: "/vault", status: "inProgress" };
+      await renderNativeToolPreview(app, host, claude(agent === "claude" ? "Bash" : "commandExecution", input, undefined, { state: "running", native: { agent, workingDirectory: "/vault" } }));
+      const pending = host.querySelector<HTMLElement>(".ss-tool-terminal-pending")!;
+      expect(pending.getAttribute("aria-hidden")).toBe("true");
+      expect(pending.previousElementSibling?.className).toBe("ss-tool-terminal-command");
+      // Its first output replaces the marker.
+      const printing = setup();
+      await renderNativeToolPreview(printing.app, printing.host, claude(agent === "claude" ? "Bash" : "commandExecution", input, "Running 2 tests", { state: "running", native: { agent, workingDirectory: "/vault" } }));
+      expect(printing.host.querySelector(".ss-tool-terminal-pending")).toBeNull();
+      expect(printing.host.querySelector(".ss-tool-terminal-output")?.textContent).toBe("Running 2 tests");
+    }
   });
 
   it("links paths a search found inside the vault", async () => {

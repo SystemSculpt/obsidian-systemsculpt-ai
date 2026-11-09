@@ -135,12 +135,15 @@ describe("live generation placeholders", () => {
     // Its prompt keeps to one line, as the file name that lands there, cut only between whole words.
     const caption = placeholder.querySelector<HTMLElement>("figcaption")!;
     expect(caption.className).toBe("systemsculpt-agent-media-caption is-single-line is-words");
-    expect(Array.from(caption.children, word => word.textContent)).toEqual(["A", " lighthouse", " at", " dusk"]);
+    expect(Array.from(caption.children, word => word.textContent)).toEqual(["A lighthouse", " at dusk"]);
     // A cut never ends on a comma or full stop: each leads the word after it, and the words read as written.
     // A clause's first word shares its box with the next, so a cut never shows one word of a new clause.
     expect(captionWords("Dusk, warm light. Sea.")).toEqual(["Dusk", ", warm light", ". Sea."]);
     expect(captionWords("Dusk, warm light. Sea.").join("")).toBe("Dusk, warm light. Sea.");
-    expect(captionWords("A lighthouse at dusk, four square takes").slice(-3)).toEqual([" dusk", ", four square", " takes"]);
+    expect(captionWords("A lighthouse at dusk, four square takes").slice(-3)).toEqual([" at dusk", ", four square", " takes"]);
+    // A small joining word leads the word after it, so a cut never ends on one ("pine forest at…").
+    expect(captionWords("Slow upward tilt through a misty pine forest at sunrise")).toEqual(["Slow", " upward", " tilt", " through a misty", " pine", " forest", " at sunrise"]);
+    expect(captionWords("Fade to. Black")).toEqual(["Fade", " to", ". Black"]);
     // A one-word clause before another clause is whole on its own.
     expect(captionWords("Dusk, calm, warm light")).toEqual(["Dusk", ", calm", ", warm light"]);
     expect(caption.title).toBe("A lighthouse at dusk");

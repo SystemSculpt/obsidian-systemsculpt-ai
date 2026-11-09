@@ -392,8 +392,19 @@
 .ss-tool-paths > li > .ss-tool-caption {
   margin-top: var(--ss-space-0);
 }
+/* Each source is its whole title with its site under it, the same shape at every width, so no title's
+   last word moves down beside the site. Sources sit 8 px apart, further than a title from its site. */
+.ss-tool-links {
+  gap: var(--ss-space-2);
+}
+.ss-tool-link-title,
 .ss-tool-link-host {
-  margin-inline-start: var(--ss-space-2);
+  display: block;
+}
+.ss-tool-link-title {
+  text-wrap: pretty;
+}
+.ss-tool-link-host {
   color: var(--ss-ink-muted);
   font-size: var(--ss-text-xs);
 }
@@ -433,11 +444,23 @@
 .ss-tool-file-text.is-written {
   color: var(--ss-ink);
 }
-.ss-tool-terminal-command {
+/* A command too long for the pane wraps under its own first character, past the "$ ". */
+.ss-tool-terminal pre code.ss-tool-terminal-command {
+  padding-inline-start: 2ch;
   color: var(--ss-ink);
+  text-indent: -2ch;
 }
-.ss-tool-terminal-command + .ss-tool-terminal-output {
+.ss-tool-terminal-command + .ss-tool-terminal-output,
+.ss-tool-terminal-command + .ss-tool-terminal-pending {
   margin-top: var(--ss-space-1);
+}
+/* One output line: too long for the pane, it wraps two characters in from its own start, so its
+   tail never reads as the next line. renderTerminal sets --ss-terminal-indent on indented lines. */
+.ss-tool-terminal-line {
+  --ss-terminal-indent: 0;
+  display: block;
+  padding-inline-start: calc((var(--ss-terminal-indent) + 2) * 1ch);
+  text-indent: calc((var(--ss-terminal-indent) + 2) * -1ch);
 }
 .ss-tool-terminal-prompt {
   color: var(--ss-ink-muted);
@@ -752,22 +775,35 @@
   flex-direction: column;
   min-height: calc(12 * 18px);
 }
-/* The result still being made: bars at its children's indent, swept by the live tile's sheen. */
-.ss-json-pending {
+/* The result still being made: bars at its children's indent, swept by the live tile's sheen. A
+   running command's output to come reads the same, on the terminal's own lines. */
+.ss-json-pending,
+.ss-tool-terminal-pending {
   position: relative;
+  overflow: hidden;
+}
+.ss-json-pending {
   flex: 1 1 0;
   min-height: 18px;
-  overflow: hidden;
   padding-inline-start: 4ch;
 }
+.ss-tool-terminal-pending {
+  display: block;
+}
 /* Each bar is one 18px line, centered in it; padding, not a margin, so the line keeps its height. */
-.ss-json-pending > span {
+.ss-json-pending > span,
+.ss-tool-terminal-pending > span {
   display: block;
   box-sizing: border-box;
   height: 18px;
   padding-top: 5px;
 }
-.ss-json-pending > span::before {
+.ss-tool-terminal-pending > span {
+  height: calc(var(--ss-text-xs) * 1.55);
+  padding-top: calc((var(--ss-text-xs) * 1.55 - 8px) / 2);
+}
+.ss-json-pending > span::before,
+.ss-tool-terminal-pending > span::before {
   content: "";
   display: block;
   width: 62%;
@@ -775,7 +811,8 @@
   border-radius: var(--ss-radius-full);
   background: color-mix(in srgb, var(--ss-ink) 7%, transparent);
 }
-.ss-json-pending > span:nth-child(4n + 2)::before {
+.ss-json-pending > span:nth-child(4n + 2)::before,
+.ss-tool-terminal-pending > span:nth-child(2)::before {
   width: 44%;
 }
 .ss-json-pending > span:nth-child(4n + 3)::before {
@@ -784,7 +821,8 @@
 .ss-json-pending > span:nth-child(4n)::before {
   width: 36%;
 }
-.ss-json-pending::after {
+.ss-json-pending::after,
+.ss-tool-terminal-pending::after {
   content: "";
   position: absolute;
   top: 0;
@@ -809,9 +847,10 @@
   /* A wrapped value never ends on one word alone. */
   text-wrap: pretty;
 }
-/* An escape ("\n") or a short hyphenated word ("2026-11-08", "T-5957") is one token: a wrapped value never splits it. */
+/* An escape ("\n") or a short hyphenated word ("2026-11-08", "T-5957") is one token: a wrapped value never
+   splits it. Its spaces are kept as written ("PASS  garden.test.ts"), as everywhere else in the code. */
 .ss-json-whole {
-  white-space: nowrap;
+  white-space: pre;
 }
 /* A name with spaces ("lighthouse take 1.png"), or a path listed with others, moves to the next line
    whole when it fits there, and wraps inside itself only when it is wider than the line. */
@@ -820,6 +859,10 @@
   display: inline-block;
   text-indent: 0;
   text-wrap: pretty;
+}
+/* A piece that would still wrap after moving flows from its key instead (fitJsonUnits). */
+.ss-json-fit.is-flowing {
+  display: inline;
 }
 @media (prefers-reduced-motion: reduce) {
   .systemsculpt-agent-tool-raw-chevron { transition: none; }

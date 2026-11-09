@@ -135,7 +135,7 @@ function changeSize(input: Record<string, unknown>): string | undefined {
   return changeCountText(diffs.reduce((sum, diff) => sum + diff.additions, 0), diffs.reduce((sum, diff) => sum + diff.deletions, 0));
 }
 /** A change's lines as an edit row counts them: "+3 −2", "+3" or "−2"; a zero says nothing. */
-export function changeCountText(added: number, removed: number): string | undefined {
+function changeCountText(added: number, removed: number): string | undefined {
   return [added ? `+${added}` : "", removed ? `−${removed}` : ""].filter(Boolean).join(" ") || undefined;
 }
 /**
@@ -589,7 +589,7 @@ async function renderResolvedNative(app: App, card: HTMLElement, part: AgentTool
     case "Bash":
     case "commandExecution":
       if (input.kind === "writeStdin") renderFields(app, card, inputFields(input, { skip: ["kind"] }));
-      else renderTerminal(card, { command: command(input), output: output || text(input.aggregatedOutput) });
+      else renderTerminal(card, { command: command(input), output: output || text(input.aggregatedOutput), pending: ["input-ready", "approved", "running"].includes(part.state) });
       return;
     case "BashOutput":
       renderTerminal(card, { output });
