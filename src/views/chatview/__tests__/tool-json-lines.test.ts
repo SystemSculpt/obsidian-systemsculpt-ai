@@ -26,7 +26,8 @@ describe("renderJsonLines", () => {
     const line = code.querySelectorAll<HTMLElement>(".ss-json-line")[1];
     // Each command moves to the next line whole; the closing quote and comma stay on the last.
     expect(Array.from(line.querySelectorAll(".ss-json-name"), (name) => name.textContent)).toEqual(["rm -rf build &&", "npm run build\","]);
-    expect(Array.from(line.querySelectorAll(".ss-json-whole"), (word) => word.textContent)).toEqual(["-rf"]);
+    // A command that wraps keeps its last two words together ("build &&"), never ending on one.
+    expect(Array.from(line.querySelectorAll(".ss-json-whole"), (word) => word.textContent)).toEqual(["-rf", "build &&", "run build\","]);
     // One command alone keeps the ordinary word rule.
     const single = document.createElement("code");
     renderJsonLines(single, JSON.stringify({ command: "npm run build" }, null, 2));
@@ -44,7 +45,7 @@ describe("renderJsonLines", () => {
       "2026-11-08 093100 lighthouse take 1.png,",
       "2026-11-08 093100 lighthouse take 2.png\"",
     ]);
-    expect(Array.from(value.querySelectorAll(".ss-json-name .ss-json-whole"), (token) => token.textContent)).toEqual(["2026-11-08", "2026-11-08"]);
+    expect(Array.from(value.querySelectorAll(".ss-json-name .ss-json-whole"), (token) => token.textContent)).toEqual(["2026-11-08", "take 1.png,", "2026-11-08", "take 2.png\""]);
     // Each listed path is one piece with its comma: a line breaks between paths, never pairing one
     // file's name with the next file's folder, and inside a path only when it is wider than the line.
     expect(Array.from(value.querySelectorAll(".ss-json-path"), (path) => path.textContent)).toEqual([
@@ -75,7 +76,36 @@ describe("renderJsonLines", () => {
     const text = JSON.stringify({ command: "git status --short", run: "npm test -- --run garden" }, null, 2);
     renderJsonLines(code, text);
     expect(code.textContent).toBe(text);
-    expect(Array.from(code.querySelectorAll(".ss-json-whole"), (word) => word.textContent)).toEqual(["--short\",", "--", "--run"]);
+    expect(Array.from(code.querySelectorAll(".ss-json-whole"), (word) => word.textContent)).toEqual(["status --short\",", "--", "--run garden\""]);
+  });
+
+  it("moves a short value whole after its key, and a long one never ends on one word", () => {
+    const code = document.createElement("code");
+    const text = JSON.stringify({ message: "2 Studio workflows.", path: "Notes/Archive", prompt: "A lighthouse on a rocky coast at dusk, four square takes" }, null, 2);
+    renderJsonLines(code, text);
+    expect(code.textContent).toBe(text);
+    const lines = code.querySelectorAll<HTMLElement>(".ss-json-line");
+    // The value is one piece: it fits after its key or moves to the next line whole.
+    expect(lines[1].querySelector(".ss-json-path")?.textContent).toBe('"2 Studio workflows.",');
+    expect(lines[2].querySelector(".ss-json-path")?.textContent).toBe('"Notes/Archive",');
+    expect(lines[2].querySelector("wbr")).toBeNull();
+    // A value too long to move whole flows after its key, its last two words together.
+    expect(lines[3].querySelector(".ss-json-path")).toBeNull();
+    expect(Array.from(lines[3].querySelectorAll(".ss-json-whole"), (word) => word.textContent)).toEqual(['square takes"']);
+  });
+
+  it("moves each line a value lists to the next line whole, its number with its words", () => {
+    const code = document.createElement("code");
+    const text = JSON.stringify({ output: "     1\t# Garden plan\n     2\t\n     3\tTomatoes go in the south bed.", files: "/vault/Notes/Garden.md\n/vault/Notes/Launch plan.md" }, null, 2);
+    renderJsonLines(code, text);
+    expect(code.textContent).toBe(text);
+    const [, read, files] = code.querySelectorAll<HTMLElement>(".ss-json-line");
+    // Each later entry is one piece ending on its own "\n"; the first stays on its key's line.
+    expect(Array.from(read.querySelectorAll(".ss-json-path"), (entry) => entry.textContent)).toEqual(["     2\\t\\n", '     3\\tTomatoes go in the south bed.",']);
+    expect(Array.from(files.querySelectorAll(".ss-json-path"), (entry) => entry.textContent)).toEqual(['/vault/Notes/Launch plan.md"']);
+    // A line may start after a "\n", never after a tab: the number stays with its words.
+    const third = read.querySelectorAll(".ss-json-path")[1];
+    expect(third.querySelector("wbr")).toBeNull();
   });
 
   it("keeps a file name whole when a sentence follows it", () => {

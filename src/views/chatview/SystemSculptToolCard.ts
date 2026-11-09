@@ -103,7 +103,6 @@ export function renderSystemSculptToolCard(app: App, host: HTMLElement, part: Ag
     ? data.nodes.map(record).flatMap(node => Array.isArray(node.files) ? node.files.map(record) : [])
       .flatMap(file => text(file.path) ? [{ path: text(file.path)!, text: mediaDisplayName(text(file.path)!) }] : [])
     : [];
-  if (outputs.length) fields.push({ label: "Outputs", value: "", list: outputs });
   const workflows = name === "studio_list_workflows" && Array.isArray(data.workflows)
     ? data.workflows.map(record).flatMap(entry => text(entry.path) ? [{ path: text(entry.path)!, text: workflowName(text(entry.path)!) }] : [])
     : [];
@@ -115,7 +114,9 @@ export function renderSystemSculptToolCard(app: App, host: HTMLElement, part: Ag
   if (outcome && fields.length) fields.push({ label: "Result", value: outcome });
   renderFields(app, card, fields);
   if (outcome && !fields.length) card.createDiv({ cls: "ss-tool-result", text: outcome });
+  // A list's results stand bare at the text edge, workflows and outputs alike: the row says what they are.
   renderPathList(app, card, workflows);
+  renderPathList(app, card, outputs);
 
   if (result && !result.ok) {
     const message = personFacingMessage(result) || "SystemSculpt couldn't finish this.";

@@ -15,14 +15,19 @@ function tool(name: string, input: unknown, overrides: Partial<AgentToolPart> = 
 
 describe("AgentActivityPresentation", () => {
   it("joins counted clauses, keeps single edit targets and counts remaining activity", () => {
-    expect(summarizeAgentActivity([
+    const steps = [
       tool("read", { paths: ["One.md", "Two.md"] }),
       tool("Read", { file_path: "/vault/Three.md" }, { native: { agent: "claude", workingDirectory: "/vault" } }),
       tool("search", { patterns: ["launch", "date"] }),
       tool("edit", { path: "Notes/Plan.md" }),
       tool("write", { path: "New.md" }),
       tool("write", { path: "Other.md" }),
-    ])).toEqual({ label: "Read 3 notes, searched for 2 patterns, edited Plan · 2 more", failedCount: 0 });
+    ];
+    // Four clauses are all named: a summary never hides one step behind "1 more".
+    expect(summarizeAgentActivity(steps)).toEqual({ label: "Read 3 notes, searched for 2 patterns, edited Plan, created 2 notes", failedCount: 0 });
+    // Past four, three are named and the rest are counted as steps, inside the sentence.
+    expect(summarizeAgentActivity([...steps, tool("list_items", { paths: ["Notes"] })]))
+      .toEqual({ label: "Read 3 notes, searched for 2 patterns, edited Plan and 3 more steps", failedCount: 0 });
   });
 
   it("names one thing once when several steps act on it", () => {
@@ -126,8 +131,9 @@ describe("AgentActivityPresentation", () => {
       tool("list_items", { paths: ["Notes"] }),
       tool("edit", { path: "Plan.md" }),
       tool("edit", { path: "Plan.md" }, { id: "again", callId: "again" }),
+      tool("write", { path: "New.md" }),
     // "More" counts the rows behind it: two edits of one note are two rows.
-    ])).toEqual({ label: "Searched “launch”, read One, listed the Notes folder · 2 more", failedCount: 0 });
+    ])).toEqual({ label: "Searched “launch”, read One, listed the Notes folder and 3 more steps", failedCount: 0 });
   });
 
   it("matches the resolved approval fixture: repeated approvals, two denials and a withdrawn edit", () => {

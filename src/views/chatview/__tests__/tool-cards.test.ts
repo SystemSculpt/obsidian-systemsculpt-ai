@@ -60,6 +60,15 @@ describe("one card for every tool result", () => {
     expect(host.textContent).not.toContain("systemsculpt_tool");
   });
 
+  it("lists a workflow's outputs bare at the text edge, as it lists workflows", () => {
+    const { app, host } = setup();
+    const poster = "SystemSculpt/Studio/Poster.systemsculpt";
+    const data = encodeSystemSculptToolResult({ ok: true, message: "1 node has saved outputs.", data: { path: poster, nodes: [{ nodeId: "img", files: [{ path: IMAGE }] }] } });
+    expect(renderHostedToolPreview(app, host, hosted("studio_list_outputs", { path: poster }, data))).toBe(true);
+    expect(host.querySelector(".ss-tool-fields")).toBeNull();
+    expect(Array.from(host.querySelectorAll(".ss-tool-paths > li"), item => item.textContent)).toEqual(["Lighthouse"]);
+  });
+
   it("leaves the plugin's own result marker out of Details, live or saved", () => {
     expect(detailsOutput({ systemsculpt_tool: 1, ok: true, media: [{ kind: "image", path: IMAGE }] })).toEqual({ ok: true, media: [{ kind: "image", path: IMAGE }] });
     expect(detailsOutput({ data: { systemsculpt_tool: 1, ok: true }, status: "completed" })).toEqual({ data: { ok: true }, status: "completed" });
@@ -310,9 +319,9 @@ describe("studio and gated summaries", () => {
 describe("activity label wrapping", () => {
   it("keeps each count with its word without changing the text", () => {
     const label = document.createElement("strong");
-    setActivityLabelText(label, "Couldn't complete 2 actions · 5 more · 1 blocked");
-    expect(label.textContent).toBe("Couldn't complete 2 actions · 5 more · 1 blocked");
-    expect(Array.from(label.querySelectorAll(".ss-activity-count"), span => span.textContent)).toEqual(["2 actions", "5 more", "1 blocked"]);
+    setActivityLabelText(label, "Couldn't complete 2 actions and 5 more steps · 1 blocked");
+    expect(label.textContent).toBe("Couldn't complete 2 actions and 5 more steps · 1 blocked");
+    expect(Array.from(label.querySelectorAll(".ss-activity-count"), span => span.textContent)).toEqual(["2 actions", "5 more steps", "1 blocked"]);
     // "1 of 2 notes" is one count.
     setActivityLabelText(label, "Moved 1 of 2 notes to trash");
     expect(Array.from(label.querySelectorAll(".ss-activity-count"), span => span.textContent)).toEqual(["1 of 2 notes"]);

@@ -50,7 +50,7 @@ export function setActivityLabelText(element: HTMLElement, label: string): void 
   element.dataset.activityLabel = label;
   const appendCounts = (text: string): void => {
     let last = 0;
-    for (const match of text.matchAll(/\d+(?: of \d+)? \p{L}+/gu)) {
+    for (const match of text.matchAll(/\d+(?: of \d+)? \p{L}+(?: steps?\b)?/gu)) {
       const at = match.index ?? 0;
       if (at > last) element.appendText(text.slice(last, at));
       element.createSpan({ cls: "ss-activity-count", text: match[0] });
@@ -179,7 +179,9 @@ export function summarizeAgentActivity(parts: readonly AgentPart[]): AgentActivi
   }
   const labels = kinds.map(kind => merged.get(kind) ?? clause(kind, groups.get(kind)!));
   // Two groups that read the same are one clause.
-  const shown = labels.filter((label, index) => labels.indexOf(label) === index).slice(0, 3);
+  const unique = labels.filter((label, index) => labels.indexOf(label) === index);
+  // Never "1 more": a fourth clause is named; past four, three are, and the rest count as steps.
+  const shown = unique.slice(0, unique.length <= 4 ? 4 : 3);
   const visible = kinds.filter((_, index) => shown.includes(labels[index]));
   const hidden = kinds.filter(kind => !visible.includes(kind));
   // A failure its own clause names ("Couldn't read Missing") isn't counted again; one folded into "N more" is.
@@ -202,7 +204,9 @@ export function summarizeAgentActivity(parts: readonly AgentPart[]): AgentActivi
       : words.length > 1 ? [actions, ...tallies].join(" · ")
         : words[0] === "denied" ? `Denied ${actions}` : words[0] === "stopped" ? `Stopped ${actions}` : `${actions} ${words[0]}`;
   } else {
-    label = [shown.map((text, index) => index ? lowerFirst(text) : text).join(", "), ...(more ? [`${more} more`] : []), ...tallies].join(" · ");
+    // The steps not named are part of the sentence ("and 2 more steps"), not a tally after a "·".
+    const clauses = shown.map((text, index) => index ? lowerFirst(text) : text).join(", ");
+    label = [more ? `${clauses} and ${more} more ${more === 1 ? "step" : "steps"}` : clauses, ...tallies].join(" · ");
     targets = visible.flatMap(kind => {
       const group = groups.get(kind)!;
       return group.target && clause(kind, group) === group.label ? [group.target] : [];

@@ -393,16 +393,52 @@ export function renderJsonLines(code: HTMLElement, text: string): void {
   const lines = text.split("\n");
   lines.forEach((line, index) => {
     const indent = /^ */u.exec(line)?.[0].length ?? 0;
-    const content = index < lines.length - 1 ? `${line}\n` : line;
     const block = code.createSpan({ cls: "ss-json-line" });
-    // A path breaks after a "/" and an escape ("\n") stays whole, so a wrapped value never splits
-    // a name or reads as a new path; only a run with no such place breaks where it must.
-    if (!appendCommandLine(block, content)) {
-      if (content.length > 32 && /[/\\]/u.test(content)) appendBreakableValue(block, content);
-      else appendJsonWords(block, content);
-    }
+    appendJsonLine(block, line);
+    // The line's own end stays outside every piece, so a copy keeps the lines as they were.
+    if (index < lines.length - 1) block.appendText("\n");
     if (indent) block.setCssProps({ "--ss-json-indent": String(indent) });
   });
+}
+
+/** A value this short moves whole after its key when the line can't hold both. */
+const SHORT_VALUE = 32;
+
+function appendJsonLine(block: HTMLElement, line: string): void {
+  if (appendCommandLine(block, line)) return;
+  // A short value ("2 Studio workflows.", "Notes/Archive") moves whole to the next line, never
+  // leaving a word or a name behind on its key's line.
+  const keyed = /^(\s*"(?:[^"\\]|\\.)*":\s)("(?:[^"\\]|\\.)*",?)$/u.exec(line);
+  if (keyed && keyed[2].length <= SHORT_VALUE) {
+    appendJsonWords(block, keyed[1]);
+    appendJsonWords(block.createSpan({ cls: "ss-json-path" }), keyed[2]);
+    return;
+  }
+  // Entries a value lists line by line ("a.md\nb.md", a read's numbered lines) each move to the next
+  // line whole when they fit there, each with the "\n" that ends it; the first stays on its key's line.
+  const entries = jsonLineEntries(line);
+  appendJsonValue(block, entries[0], entries[0].length > SHORT_VALUE);
+  for (const entry of entries.slice(1)) appendJsonValue(block.createSpan({ cls: "ss-json-path" }), entry, true);
+}
+
+/** A path breaks after a "/" and an escape ("\n") stays whole, so a wrapped value never splits a name. */
+function appendJsonValue(parent: HTMLElement, text: string, breakable: boolean): void {
+  if (breakable && /[/\\]/u.test(text)) appendBreakableValue(parent, text);
+  else appendJsonWords(parent, text);
+}
+
+/** A line cut after each "\n" escape it holds; an escaped backslash before an "n" is no break. */
+function jsonLineEntries(line: string): string[] {
+  const entries: string[] = [];
+  let start = 0;
+  for (const match of line.matchAll(/\\./gu)) {
+    const end = (match.index ?? 0) + match[0].length;
+    if (match[0] !== "\\n" || end >= line.length) continue;
+    entries.push(line.slice(start, end));
+    start = end;
+  }
+  entries.push(line.slice(start));
+  return entries;
 }
 
 /**
@@ -434,13 +470,25 @@ function appendCommandLine(block: HTMLElement, content: string): boolean {
   return true;
 }
 
-/** A short hyphenated word ("2026-11-08", "T-5957", "--short") never breaks at its hyphen. */
+/**
+ * A short hyphenated word ("2026-11-08", "T-5957", "--short") never breaks at its hyphen, and the
+ * last two words of a run of three or more wrap together, so a wrapped run never ends on one word.
+ */
 function appendJsonWords(parent: HTMLElement, text: string): void {
-  for (const piece of text.split(/(\s+)/u)) {
-    if (!piece) continue;
+  const pieces = text.split(/(\s+)/u).filter(Boolean);
+  const words = pieces.flatMap((piece, index) => /\s/u.test(piece) ? [] : [index]);
+  const from = words.length >= 3 ? words[words.length - 2] : -1;
+  const to = words[words.length - 1] ?? -1;
+  const pair = from >= 0 ? pieces.slice(from, to + 1).join("") : "";
+  const paired = pair.length > 0 && pair.length <= 24;
+  pieces.forEach((piece, index) => {
+    if (paired && index >= from && index <= to) {
+      if (index === from) parent.createSpan({ cls: "ss-json-whole", text: pair });
+      return;
+    }
     if (piece.length <= 24 && !/\s/u.test(piece) && piece.includes("-")) parent.createSpan({ cls: "ss-json-whole", text: piece });
     else parent.appendText(piece);
-  }
+  });
 }
 
 /** A path listed after a colon or a comma ("…vault: Images/take 1.png, Images/take 2.png"), to its file name. */
@@ -490,8 +538,9 @@ function appendBreakableRun(block: HTMLElement, content: string): void {
     appendChunk(content.slice(start, at), afterSlash);
     if (match[0] === "/") block.appendText("/");
     else block.createSpan({ cls: "ss-json-whole", text: match[0] });
-    // After a slash or a line break escape, a wrapped line may start; never inside either.
-    if (match[0] === "/" || /^\\[nrt]$/u.test(match[0])) block.createEl("wbr");
+    // After a slash or a line break escape, a wrapped line may start; never inside either, and never
+    // after a tab, which stays with the words it leads ("3\tTomatoes").
+    if (match[0] === "/" || /^\\[nr]$/u.test(match[0])) block.createEl("wbr");
     afterSlash = match[0] === "/";
     start = end;
   }

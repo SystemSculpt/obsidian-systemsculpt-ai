@@ -286,13 +286,13 @@
 }
 /* A card's first and last lines of text sit as far from its border as a boxed block does: the space
    a line keeps above its capitals and below its baseline is taken back. */
-.systemsculpt-agent-tool-support .ss-tool-card > :is(.ss-tool-fields, .ss-tool-paths, .ss-tool-result):first-child,
-.systemsculpt-agent-tool-support .ss-tool-card > .ss-tool-media.is-shown-in-reply:first-child + :is(.ss-tool-fields, .ss-tool-paths, .ss-tool-result),
+.systemsculpt-agent-tool-support .ss-tool-card > :is(.ss-tool-fields, .ss-tool-paths, .ss-tool-result, .ss-tool-caption):first-child,
+.systemsculpt-agent-tool-support .ss-tool-card > .ss-tool-media.is-shown-in-reply:first-child + :is(.ss-tool-fields, .ss-tool-paths, .ss-tool-result, .ss-tool-caption),
 .systemsculpt-agent-tool-support .ss-tool-card > .ss-tool-section:first-child > :is(.ss-tool-fields, .ss-tool-paths, .ss-tool-section-title):first-child {
   margin-top: -4px;
 }
-.systemsculpt-agent-tool-support > .ss-tool-card:last-child > :is(.ss-tool-fields, .ss-tool-paths, .ss-tool-result):last-child,
-.systemsculpt-agent-tool-support > .systemsculpt-agent-tool-preview:last-child > :only-child > .ss-tool-card > :is(.ss-tool-fields, .ss-tool-paths, .ss-tool-result):last-child {
+.systemsculpt-agent-tool-support > .ss-tool-card:last-child > :is(.ss-tool-fields, .ss-tool-paths, .ss-tool-result, .ss-tool-caption):last-child,
+.systemsculpt-agent-tool-support > .systemsculpt-agent-tool-preview:last-child > :only-child > .ss-tool-card > :is(.ss-tool-fields, .ss-tool-paths, .ss-tool-result, .ss-tool-caption):last-child {
   margin-bottom: -4px;
 }
 
