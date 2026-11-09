@@ -1,5 +1,38 @@
 /** @jest-environment jsdom */
-import { renderJsonLines } from "../ToolCardBlocks";
+import { renderJsonLines, renderRawDetails } from "../ToolCardBlocks";
+
+describe("renderRawDetails", () => {
+  const input = { prompt: "A lighthouse at dusk", aspect_ratio: "3:2" };
+  const lineTexts = (code: HTMLElement): string[] => Array.from(code.querySelectorAll<HTMLElement>(".ss-json-line"), (line) => line.textContent ?? "");
+
+  it("holds a result's place while it is made, on the lines the result lands on", () => {
+    const running = renderRawDetails(document.createElement("div"), () => ({ input }), { open: true, awaitingResult: true });
+    const code = running.querySelector("code")!;
+    // The request, then the result's key and its close, with shimmering lines between them.
+    expect(lineTexts(code)).toEqual(["{\n", '  "input": {\n', '    "prompt": "A lighthouse at dusk",\n', '    "aspect_ratio": "3:2"\n', "  },\n", '  "output": {\n', "  }\n", "}"]);
+    expect(Array.from(code.querySelectorAll(".ss-json-line.is-pending"), (line) => line.textContent)).toEqual(['  "output": {\n', "  }\n"]);
+    const pending = code.querySelector<HTMLElement>(".ss-json-pending")!;
+    expect(pending.getAttribute("aria-hidden")).toBe("true");
+    expect(pending.children).toHaveLength(12);
+    expect(pending.previousElementSibling?.textContent).toBe('  "output": {\n');
+    expect(pending.nextElementSibling?.textContent).toBe("  }\n");
+    // The result starts on the line its place held.
+    const done = renderRawDetails(document.createElement("div"), () => ({ input, output: { ok: true } }), { open: true }).querySelector("code")!;
+    expect(lineTexts(done).indexOf('  "output": {\n')).toBe(lineTexts(code).indexOf('  "output": {\n'));
+    expect(done.querySelector(".ss-json-pending, .is-pending")).toBeNull();
+  });
+
+  it("shows the place opened later while the result is made, and nothing pending once it has one", () => {
+    const later = renderRawDetails(document.createElement("div"), () => ({ input }), { awaitingResult: true });
+    expect(later.querySelector("code")!.hasChildNodes()).toBe(false);
+    later.open = true;
+    later.dispatchEvent(new Event("toggle"));
+    expect(later.querySelectorAll(".ss-json-pending")).toHaveLength(1);
+    const idle = renderRawDetails(document.createElement("div"), () => ({ input }), { open: true });
+    expect(idle.querySelector(".ss-json-pending")).toBeNull();
+    expect(idle.querySelector("code")!.textContent).toBe(JSON.stringify({ input }, null, 2));
+  });
+});
 
 describe("renderJsonLines", () => {
   it("lets a long path wrap after a slash, never inside an escape or a short hyphenated name", () => {

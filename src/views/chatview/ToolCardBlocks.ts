@@ -371,15 +371,41 @@ export function renderRawDetails(
   const view = pre.ownerDocument.defaultView as (Window & { ResizeObserver?: typeof ResizeObserver }) | null;
   if (view?.ResizeObserver) new view.ResizeObserver(syncOverflow).observe(code);
   raw.addEventListener("toggle", () => {
-    if (raw.open && !code.hasChildNodes()) renderJsonLines(code, JSON.stringify(payload(), null, 2));
+    if (raw.open && !code.hasChildNodes()) renderDetailsCode(code, payload(), Boolean(options.awaitingResult));
     if (raw.open) syncOverflow();
   });
   // Opened before the result landed: it stays open, with the result in it.
   if (options.open) {
     raw.open = true;
-    renderJsonLines(code, JSON.stringify(payload(), null, 2));
+    renderDetailsCode(code, payload(), Boolean(options.awaitingResult));
   }
   return raw;
+}
+
+/** The key a result still being made stands in for; its line becomes the result's opening line. */
+const PENDING_RESULT = "\u2026";
+
+/**
+ * A call's request and result as Details shows them. While its picture, video or Studio run is made,
+ * the result's place reads as pending: its key, then lines that shimmer like the live tile, filling
+ * the frame's twelve lines, so the result lands in the lines that held it.
+ */
+function renderDetailsCode(code: HTMLElement, payload: unknown, awaitingResult: boolean): void {
+  const record = payload && typeof payload === "object" && !Array.isArray(payload) ? payload as Record<string, unknown> : null;
+  const pending = awaitingResult && record !== null && record.output === undefined;
+  renderJsonLines(code, JSON.stringify(pending ? { ...record, output: PENDING_RESULT } : payload, null, 2));
+  if (!pending) return;
+  const marker = Array.from(code.querySelectorAll<HTMLElement>(".ss-json-line"))
+    .find((line) => line.textContent === `  "output": "${PENDING_RESULT}"\n`);
+  if (!marker) return;
+  marker.setText('  "output": {\n');
+  marker.addClass("is-pending");
+  const lines = code.createSpan({ cls: "ss-json-pending", attr: { "aria-hidden": "true" } });
+  // As many bars as the frame has lines; those past its end are clipped with the box that holds them.
+  for (let index = 0; index < 12; index += 1) lines.createSpan();
+  const close = code.createSpan({ cls: "ss-json-line is-pending", text: "  }\n" });
+  close.setCssProps({ "--ss-json-indent": "2" });
+  marker.after(lines, close);
 }
 
 /**

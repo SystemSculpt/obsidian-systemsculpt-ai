@@ -228,15 +228,30 @@ function nextStep(reason: string): string | null {
 
 /**
  * A one-line caption's word boxes, each led by its space. A word's closing punctuation leads the next
- * box instead, so a cut ends on the word itself ("warm window light…", never "light,…").
+ * box instead, so a cut ends on the word itself ("warm window light…", never "light,…"). A clause's
+ * first word shares its box with the next, so a cut never shows one word of a new clause: it ends on
+ * the clause before ("at dusk…", never "at dusk, four…").
  */
 export function captionWords(caption: string): string[] {
   const words = caption.split(/(?=\s)/u);
   const closing = /[,;:.!?]+$/u;
-  return words.map((word, index) => {
+  const boxes = words.map((word, index) => {
     const lead = index > 0 ? closing.exec(words[index - 1])?.[0] ?? "" : "";
     return lead + (index < words.length - 1 ? word.replace(closing, "") : word);
   });
+  const opensClause = (box: string | undefined): boolean => box !== undefined && /^[,;:.!?]/u.test(box);
+  const joined: string[] = [];
+  for (let index = 0; index < boxes.length; index += 1) {
+    const next = boxes[index + 1];
+    // A one-word clause followed by another clause is whole on its own.
+    if (opensClause(boxes[index]) && next !== undefined && !opensClause(next)) {
+      joined.push(boxes[index] + next);
+      index += 1;
+    } else {
+      joined.push(boxes[index]);
+    }
+  }
+  return joined;
 }
 
 /** One placeholder or failure tile; its live line and bar update from the block's clock. */

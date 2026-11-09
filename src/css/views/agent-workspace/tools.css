@@ -746,9 +746,59 @@
   line-height: inherit;
 }
 /* While a picture, video or Studio run is made, the open frame already has the twelve lines its
-   result fills, so the files land where their tiles were. */
+   result fills, so the files land where their tiles were; the result's own place fills the rest. */
 .systemsculpt-agent-tool-raw.is-awaiting-result > pre > code {
+  display: flex;
+  flex-direction: column;
   min-height: calc(12 * 18px);
+}
+.ss-json-line.is-pending {
+  color: var(--ss-ink-faint);
+}
+/* The result still being made: bars at its children's indent, swept by the live tile's sheen. */
+.ss-json-pending {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 18px;
+  overflow: hidden;
+  padding-inline-start: 4ch;
+}
+.ss-json-pending > span {
+  display: block;
+  height: 18px;
+}
+.ss-json-pending > span::before {
+  content: "";
+  display: block;
+  width: 62%;
+  height: 8px;
+  margin-top: 5px;
+  border-radius: var(--ss-radius-full);
+  background: color-mix(in srgb, var(--ss-ink) 7%, transparent);
+}
+.ss-json-pending > span:nth-child(4n + 2)::before {
+  width: 44%;
+}
+.ss-json-pending > span:nth-child(4n + 3)::before {
+  width: 70%;
+}
+.ss-json-pending > span:nth-child(4n)::before {
+  width: 36%;
+}
+.ss-json-pending::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -100%;
+  width: 100%;
+  background: linear-gradient(
+    100deg,
+    transparent 20%,
+    color-mix(in srgb, var(--ss-ink) 5%, transparent) 50%,
+    transparent 80%
+  );
+  animation: ss-shimmer calc(var(--ss-dur-slow) * 7) var(--ss-ease) infinite;
 }
 /* One JSON line: a value too long for the pane wraps two characters in from its own start.
    renderJsonLines sets --ss-json-indent on each indented line; this is its default. */

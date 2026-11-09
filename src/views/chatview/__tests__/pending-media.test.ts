@@ -137,8 +137,12 @@ describe("live generation placeholders", () => {
     expect(caption.className).toBe("systemsculpt-agent-media-caption is-single-line is-words");
     expect(Array.from(caption.children, word => word.textContent)).toEqual(["A", " lighthouse", " at", " dusk"]);
     // A cut never ends on a comma or full stop: each leads the word after it, and the words read as written.
-    expect(captionWords("Dusk, warm light. Sea.")).toEqual(["Dusk", ", warm", " light", ". Sea."]);
+    // A clause's first word shares its box with the next, so a cut never shows one word of a new clause.
+    expect(captionWords("Dusk, warm light. Sea.")).toEqual(["Dusk", ", warm light", ". Sea."]);
     expect(captionWords("Dusk, warm light. Sea.").join("")).toBe("Dusk, warm light. Sea.");
+    expect(captionWords("A lighthouse at dusk, four square takes").slice(-3)).toEqual([" dusk", ", four square", " takes"]);
+    // A one-word clause before another clause is whole on its own.
+    expect(captionWords("Dusk, calm, warm light")).toEqual(["Dusk", ", calm", ", warm light"]);
     expect(caption.title).toBe("A lighthouse at dusk");
 
     const done = tool({ ...running, state: "succeeded", output: { data: encodeSystemSculptToolResult({ ok: true, message: "Saved", media: [{ kind: "image", path: PATH }] }) } });
