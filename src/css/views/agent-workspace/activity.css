@@ -266,15 +266,16 @@ details.systemsculpt-agent-activity:not([open]) > .systemsculpt-agent-activity-b
   margin-bottom: 0;
 }
 
+/* An open fold's last card ends 16px above whatever follows the fold: 8px here plus the turn's 8px gap. */
 details.systemsculpt-agent-activity:not([data-single-tool]) > .systemsculpt-agent-activity-body.is-card-last {
-  margin-bottom: calc(var(--ss-space-1) + var(--ss-space-2));
+  margin-bottom: var(--ss-space-2);
 }
 
-/* A framed block under that card (a picture, a live tile, a whole-turn card) keeps one 16 px gap
-   from it, not the fold's 12 px plus the turn's 8 px plus its own 8 px. Code sets is-card-last on the fold. */
+/* A framed block under that card (a picture, a live tile, a whole-turn card) keeps the same 16px,
+   not 16px plus its own 8px. Code sets is-card-last on the fold. */
 .systemsculpt-agent-turn-body > details.systemsculpt-agent-activity[open].is-card-last + .systemsculpt-agent-turn-media,
 .systemsculpt-agent-turn-body > details.systemsculpt-agent-activity[open].is-card-last + .systemsculpt-agent-part.is-error {
-  margin-top: calc(var(--ss-space-4) - var(--ss-space-3) - var(--ss-space-2));
+  margin-top: 0;
 }
 
 /* A fold that holds one call is that call's row: open, it shows the card under its label,
@@ -291,13 +292,14 @@ details.systemsculpt-agent-activity[data-single-tool]
   display: none;
 }
 
-/* Its card ends as far above what follows as a longer fold's last card does (12px in all). */
+/* Its card ends as far above what follows as a longer fold's last card does: 4px here, the body's
+   4px and the turn's 8px gap, 16px in all. */
 details.systemsculpt-agent-activity[data-single-tool]
   > .systemsculpt-agent-activity-body
   > .systemsculpt-agent-part.is-tool
   > details.systemsculpt-agent-tool
   > .systemsculpt-agent-tool-support {
-  margin: var(--ss-space-0) 0 var(--ss-space-2);
+  margin: var(--ss-space-0) 0 var(--ss-space-1);
 }
 
 /* Under the words said before the call, the card is a frame: 16px under their line. */

@@ -33,4 +33,14 @@ describe("renderJsonLines", () => {
     // The key that opens the line flows as it is: it is no name of its own.
     expect(value.querySelector(".ss-json-name")?.previousSibling?.nodeName).toBe("WBR");
   });
+
+  it("keeps a file name whole when a sentence follows it", () => {
+    const code = document.createElement("code");
+    const message = "Ran Poster: SystemSculpt/Studio/Outputs/Poster image.png. The chat already shows the picture, so don't repeat it.";
+    const text = JSON.stringify({ message }, null, 2);
+    renderJsonLines(code, text);
+    expect(code.textContent).toBe(text);
+    const value = code.querySelectorAll<HTMLElement>(".ss-json-line")[1];
+    expect(value.querySelector(".ss-json-name")?.textContent).toBe("Poster image.png");
+  });
 });

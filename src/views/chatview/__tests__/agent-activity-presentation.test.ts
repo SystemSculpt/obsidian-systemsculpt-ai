@@ -25,6 +25,21 @@ describe("AgentActivityPresentation", () => {
     ])).toEqual({ label: "Read 3 notes, searched for 2 patterns, edited Plan · 2 more", failedCount: 0 });
   });
 
+  it("names one thing once when several steps act on it", () => {
+    const poster = { path: "SystemSculpt/Studio/Poster.systemsculpt" };
+    expect(summarizeAgentActivity([
+      tool("studio_list_workflows", {}),
+      tool("studio_edit_workflow", { ...poster, edits: [] }),
+      tool("studio_run_workflow", poster),
+      tool("studio_list_outputs", poster),
+    ]).label).toBe("Listed Studio workflows, edited, ran and listed outputs of Poster workflow");
+    // A failure keeps its own clause: "Couldn't" never joins a verb list.
+    expect(summarizeAgentActivity([
+      tool("read", { paths: ["Plan.md"] }),
+      tool("edit", { path: "Plan.md" }, { id: "edit-plan", callId: "edit-plan", state: "failed", error: { code: "x", message: "No match" } }),
+    ]).label).toBe("Read Plan, couldn't edit Plan");
+  });
+
   it("counts each web query as one search, a Codex call's several included", () => {
     const claude = { agent: "claude" as const, workingDirectory: "/vault" };
     const codex = { agent: "codex" as const, workingDirectory: "/vault" };

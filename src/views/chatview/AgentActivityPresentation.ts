@@ -155,15 +155,36 @@ export function summarizeAgentActivity(parts: readonly AgentPart[]): AgentActivi
       if (part.approvalDecision !== "withdrawn" && (refusal || ["failed", "partial", "outcome-unknown"].includes(state))) failedCount += 1;
     }
   }
-  const kinds = Array.from(groups.keys());
-  const labels = kinds.map(kind => clause(kind, groups.get(kind)!));
+  // Clauses about one named thing are one clause: "Edited Poster workflow, ran Poster workflow" reads
+  // "Edited and ran Poster workflow". Only plain single-row clauses merge, never a failure or a gate.
+  const named = new Map<string, { kind: string; verbs: string[] }>();
+  const kinds: string[] = [];
+  const merged = new Map<string, string>();
+  const mergedRows = new Map<string, number>();
+  for (const kind of groups.keys()) {
+    const group = groups.get(kind)!;
+    const label = clause(kind, group);
+    const at = group.target && label === group.label && !/^(?:gated|failed):|^(?:partial|reasoning|command|tool)$/u.test(kind)
+      ? label.indexOf(group.target.text, label.indexOf(" ") + 1) : -1;
+    const rest = at > 0 ? label.slice(at) : "";
+    const earlier = rest ? named.get(rest) : undefined;
+    if (earlier) {
+      earlier.verbs.push(lowerFirst(label.slice(0, at).trimEnd()));
+      merged.set(earlier.kind, `${earlier.verbs.slice(0, -1).join(", ")} and ${earlier.verbs[earlier.verbs.length - 1]} ${rest}`);
+      mergedRows.set(earlier.kind, (mergedRows.get(earlier.kind) ?? 0) + group.rows);
+      continue;
+    }
+    if (rest) named.set(rest, { kind, verbs: [label.slice(0, at).trimEnd()] });
+    kinds.push(kind);
+  }
+  const labels = kinds.map(kind => merged.get(kind) ?? clause(kind, groups.get(kind)!));
   // Two groups that read the same are one clause.
   const shown = labels.filter((label, index) => labels.indexOf(label) === index).slice(0, 3);
   const visible = kinds.filter((_, index) => shown.includes(labels[index]));
   const hidden = kinds.filter(kind => !visible.includes(kind));
   // A failure its own clause names ("Couldn't read Missing") isn't counted again; one folded into "N more" is.
   for (const kind of hidden) if (kind.startsWith("failed:") || kind === "partial") outcomes.push(...Array<OutcomeWord>(groups.get(kind)!.rows).fill("failed"));
-  const more = hidden.reduce((count, kind) => count + groups.get(kind)!.rows, 0);
+  const more = hidden.reduce((count, kind) => count + groups.get(kind)!.rows + (mergedRows.get(kind) ?? 0), 0);
   const tallies = OUTCOME_WORDS.map(word => [outcomes.filter(outcome => outcome === word).length, word] as const)
     .filter(([count]) => count).map(([count, word]) => `${count} ${word}`);
   let label: string;

@@ -773,7 +773,8 @@ export function presentAgentTool(part: AgentToolPart): AgentToolPresentation {
     summary,
     ...(partialSummary && summary === partialSummary ? { summaryCountsOutcomes: true as const } : {}),
     ...(resultCount !== undefined ? { meta: `${resultCount} result${resultCount === 1 ? "" : "s"}` } : changeSize ? { meta: changeSize } : {}),
-    ...(targetPath ? { targetPath } : {}),
+    // A Studio row names its workflow, and that name opens it as a note's does.
+    ...(targetPath ?? (workflow ? firstString(input.path) : undefined) ? { targetPath: targetPath ?? firstString(input.path)! } : {}),
     groupKind: canonicalName === "multi_edit" ? "edit" : canonicalName === "find" ? "search" : canonicalName === "list_items" ? "list"
       : canonicalName === "web_search" ? "web-search" : presentedName,
     groupCount: serverTool ? 1 : counted?.items.length ?? Math.max(paths.length, 1),

@@ -254,10 +254,9 @@ export function renderPendingMedia(grid: HTMLElement, tile: PendingMedia): HTMLE
     const next = nextStep(reason);
     if (next) status.createSpan({ cls: "ss-media-pending-meta", text: next });
   } else {
-    // A picture or video in the making is named on the turn's row above it; its frame keeps only its
-    // clock and bar, so the two never say the same words. A Studio run's slim tile is its own row.
-    if (tile.kind === "workflow") status.createSpan({ cls: "ss-media-pending-label", text: tile.label });
-    else figure.setAttribute("aria-label", tile.label);
+    // A picture, video or Studio run in the making is named on the turn's row above it; its tile keeps
+    // only its clock and bar, so the two never say the same words.
+    figure.setAttribute("aria-label", tile.label);
     status.createSpan({ cls: "ss-media-pending-meta", attr: { "data-testid": "chat.turn.media.pending.meta" } });
     frame.createSpan({ cls: "ss-media-pending-bar", attr: { "aria-hidden": "true" } }).createSpan({ cls: "ss-media-pending-fill" });
     updatePendingTile(figure, tile, Date.now());

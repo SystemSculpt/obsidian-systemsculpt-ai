@@ -56,6 +56,10 @@ function resultData(output: unknown): RecordValue {
   return {};
 }
 
+const ROW_NAMES_WORKFLOW: ReadonlySet<string> = new Set([
+  "studio_create_workflow", "studio_open_workflow", "studio_edit_workflow", "studio_run_workflow", "studio_list_outputs",
+]);
+
 /**
  * One card for generate_image, generate_video and the Studio tools, whichever
  * agent called them: thumbnails that open the vault file, the prompt or
@@ -76,7 +80,10 @@ export function renderSystemSculptToolCard(app: App, host: HTMLElement, part: Ag
   // The workflow first, then what was asked, then what came of it: one grid, one rhythm.
   const fields: ToolCardField[] = [];
   const workflow = text(args.path) ?? text(data.path);
-  if (workflow && name.startsWith("studio_")) fields.push({ label: "Workflow", value: workflowName(workflow), path: workflow });
+  // A row that names its workflow ("Ran Poster workflow") links it there; its card doesn't say it again.
+  if (workflow && name.startsWith("studio_") && !(ROW_NAMES_WORKFLOW.has(name) && text(args.path))) {
+    fields.push({ label: "Workflow", value: workflowName(workflow), path: workflow });
+  }
   if (name === "studio_create_workflow" && !workflow && text(args.name)) fields.push({ label: "Name", value: text(args.name)! });
   const prompt = text(args.prompt);
   if (prompt) fields.push({ label: "Prompt", value: prompt });

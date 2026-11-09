@@ -237,7 +237,8 @@ describe("studio and gated summaries", () => {
     // Results in words, one per line: no field paths, node ids or node kinds.
     const field = Array.from(host.querySelectorAll(".ss-tool-field")).find(row => row.querySelector("dt")?.textContent === "Changes")!;
     expect(Array.from(field.querySelectorAll("dd li"), item => item.textContent)).toEqual(["Prompt set to “A lighthouse”", "Added Poster image"]);
-    expect(Array.from(host.querySelectorAll(".ss-tool-fields dt"), label => label.textContent)).toEqual(["Workflow", "Changes"]);
+    // Its row names and links the workflow ("Edited Poster workflow"), so the card starts at what changed.
+    expect(Array.from(host.querySelectorAll(".ss-tool-fields dt"), label => label.textContent)).toEqual(["Changes"]);
     expect(host.textContent).not.toMatch(/config\.value|node:|image_generation/u);
   });
 
