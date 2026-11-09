@@ -215,14 +215,16 @@ function hostedDetail(state: AgentChromeState): RunLineSegment {
       : { ...base, label: "Credits", ariaLabel: "Open credits", action: "credits" };
   }
   if (credits.totalRemaining <= 0) {
+    // An empty balance is a gate with a way through, amber like the gate's lock; red stays for the
+    // failed payment the turn's card or the line above the composer names.
     // A failed renewal fixes its card in the billing portal (T-5348).
     if (needsPaymentFix(credits)) {
-      return { ...base, label: "Out of credits", ariaLabel: "Out of credits. Payment failed: update your card", tone: "danger", action: "update-card" };
+      return { ...base, label: "Out of credits", ariaLabel: "Out of credits. Payment failed: update your card", tone: "warning", action: "update-card" };
     }
     // A spent starter account goes straight to the $9 Monthly checkout (T-5302).
     return isStarterBalance(credits)
-      ? { ...base, label: "Out of credits", ariaLabel: "Out of credits. Get Monthly for $9", tone: "danger", action: "monthly" }
-      : { ...base, label: "Out of credits", ariaLabel: "Out of credits. Open credits", tone: "danger", action: "credits" };
+      ? { ...base, label: "Out of credits", ariaLabel: "Out of credits. Get Monthly for $9", tone: "warning", action: "monthly" }
+      : { ...base, label: "Out of credits", ariaLabel: "Out of credits. Open credits", tone: "warning", action: "credits" };
   }
   const available = credits.availableUnreserved ?? credits.totalRemaining;
   const label = `${formatCredits(Math.max(0, available))} credits`;

@@ -142,7 +142,7 @@ describe("run line (spec 4.1)", () => {
     expect(codex.ariaLabel).toContain("Update Codex to use Auto.");
   });
 
-  it("shows hosted credits, low and empty tones, and Sign in when signed out", () => {
+  it("shows hosted credits, low and empty (amber, a gate) tones, and Sign in when signed out", () => {
     const hosted = { backend: "systemsculpt" as const };
     const [backend] = segments(state({ ...hosted, account: "signed-in", credits: credits() }));
     expect(backend).toMatchObject({ icon: "cloud", label: "SystemSculpt", ariaLabel: "Backend: SystemSculpt. Change backend" });
@@ -151,13 +151,13 @@ describe("run line (spec 4.1)", () => {
     expect(segments(state({ ...hosted, account: "signed-in", credits: credits({ availableUnreserved: 1_000 }) }))[2])
       .toMatchObject({ label: "1,000 credits", tone: "warning" });
     expect(segments(state({ ...hosted, account: "no-plan", credits: credits({ totalRemaining: 0, availableUnreserved: 0 }) }))[2])
-      .toMatchObject({ label: "Out of credits", tone: "danger", action: "credits" });
+      .toMatchObject({ label: "Out of credits", tone: "warning", action: "credits" });
     // A spent starter account goes straight to Monthly checkout (T-5302).
     expect(segments(state({ ...hosted, account: "no-plan", credits: credits({ includedCreditsEntitled: false, totalRemaining: 0, availableUnreserved: 0 }) }))[2])
-      .toMatchObject({ label: "Out of credits", tone: "danger", action: "monthly" });
+      .toMatchObject({ label: "Out of credits", tone: "warning", action: "monthly" });
     // A spent past-due subscriber fixes their card, never a second checkout (T-5348).
     expect(segments(state({ ...hosted, account: "no-plan", credits: credits({ includedCreditsEntitled: false, subscriptionStatus: "past_due", totalRemaining: 0, availableUnreserved: 0 }) }))[2])
-      .toMatchObject({ label: "Out of credits", tone: "danger", action: "update-card" });
+      .toMatchObject({ label: "Out of credits", tone: "warning", action: "update-card" });
     expect(segments(state({ ...hosted, account: "signed-out" }))[2])
       .toMatchObject({ label: "Sign in", action: "sign-in" });
     expect(segments(state({ ...hosted, account: "signed-in", credits: credits({ usageClass: "master_auth" }) }))[2].label)

@@ -321,7 +321,8 @@
   }
 
   .systemsculpt-agent-composer,
-  .systemsculpt-agent-queue {
+  .systemsculpt-agent-queue,
+  .systemsculpt-agent-credits-offer {
     padding-right: var(--ss-space-3);
     padding-left: var(--ss-space-3);
   }

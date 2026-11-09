@@ -1689,6 +1689,9 @@ export class AgentConversationRenderer extends Component {
           node.addClass("is-gate");
           setIcon(errorIcon, "lock");
         }
+        // The line above the composer stays hidden while this card offers the same fix.
+        if (presented.action === "see-plans" || presented.action === "monthly" || presented.action === "add-credits"
+          || presented.action === "update-card") node.dataset.offer = presented.action;
         copy.createEl("strong", {
           cls: "systemsculpt-agent-error-heading",
           text: presented.heading,

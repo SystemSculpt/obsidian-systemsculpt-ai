@@ -187,8 +187,8 @@
   overflow-wrap: anywhere;
   font-family: var(--ss-font-mono);
 }
-/* Details JSON: the block every tool card ends with. It keeps its indentation and
- * scrolls sideways, stops between lines, and fades out at the bottom until it is
+/* Details JSON: the block every tool card ends with. A long value wraps under its own
+ * indent (.ss-json-line); the block stops between lines and fades out at the bottom until it is
  * scrolled to its end. A scroller shows overflow in its bottom padding, so the
  * height is the top inset and twelve whole lines: the thirteenth starts at the edge. */
 .systemsculpt-agent-approval-details > pre {
@@ -204,8 +204,6 @@
   font-family: var(--ss-font-mono);
   font-size: var(--ss-text-xs);
   line-height: 18px;
-  white-space: pre;
-  overflow-wrap: normal;
 }
 .systemsculpt-agent-approval-details > pre.is-overflowing:not(.is-at-end) {
   mask-image: linear-gradient(to bottom, #000 calc(100% - 40px), transparent);
@@ -335,6 +333,11 @@
 }
 .systemsculpt-agent-approval-preview .systemsculpt-inline-ops__body {
   padding: var(--ss-space-2) var(--ss-space-3);
+}
+/* The preview is the diff's frame: the viewer inside drops its own, so the box has one 1 px border. */
+.systemsculpt-agent-approval-preview .systemsculpt-diff-viewer {
+  border: 0;
+  border-radius: 0;
 }
 .systemsculpt-agent-approval-preview .systemsculpt-inline-diff__body + .systemsculpt-inline-diff__body {
   border-top: 1px solid var(--ss-warning-line);

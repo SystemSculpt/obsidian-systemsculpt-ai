@@ -4,6 +4,7 @@ import type { AgentToolPart } from "../../chat/ChatConversation";
 import { presentAgentTool } from "./AgentToolPresentation";
 import { nativeToolPresentation } from "./NativeToolPresentation";
 import { getHostOperatingSystem } from "../../platform/hostCapabilities";
+import { renderJsonLines } from "./ToolCardBlocks";
 
 export type ApprovalAnswer = (
   approvalId: string,
@@ -262,10 +263,9 @@ export class AgentApprovalCards extends Component {
     const raw = JSON.stringify(part.native?.permissionSuggestions?.length
       ? { input: part.input, permissionSuggestions: part.native.permissionSuggestions }
       : part.input ?? {}, null, 2);
-    const pre = details.createEl("pre", {
-      text: raw.length > RAW_DISPLAY_CHARACTERS ? `${raw.slice(0, RAW_DISPLAY_CHARACTERS)}\n… Preview shortened; the full request is sent unchanged.` : raw,
-      attr: { tabindex: "0" },
-    });
+    const pre = details.createEl("pre", { attr: { tabindex: "0" } });
+    // Line by line, as in tool cards: a long value wraps under its own indent, never back to the edge.
+    renderJsonLines(pre, raw.length > RAW_DISPLAY_CHARACTERS ? `${raw.slice(0, RAW_DISPLAY_CHARACTERS)}\n… Preview shortened; the full request is sent unchanged.` : raw);
     // JSON keeps its indentation and scrolls; a block taller than its frame fades out at the
     // bottom until it is scrolled to its end, so a cut line reads as more below.
     const syncOverflow = (): void => {
