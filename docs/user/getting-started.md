@@ -58,8 +58,8 @@ For hosted chat, mobile chat, or other hosted features:
 
 ## Start chatting
 
-- Command palette: `Open SystemSculpt Chat`
-- Ribbon icon: `Open SystemSculpt Chat`
+- Command palette: `SystemSculpt AI: Open chat`
+- Ribbon icon: `Open chat`
 - The run line under the composer shows the backend, mode and model or credits;
   each part is a menu. **Auto** is the default for new chats. Saved chats keep their
   backend, and saved hosted modes are preserved (missing or unknown modes use **Ask**).
@@ -116,7 +116,7 @@ Enter approves, Escape denies, and Alt+Up focuses a pending request. See
   results anywhere on the chat. Paste images or files into the message box.
 - Each attachment is a chip above the message. Select a chip to open it, pin it
   for every message, or remove it. Pinned files show a pin and stay after you send.
-- Use `Chat with File` from the command palette.
+- Use `Chat with file` from the command palette.
 
 ## Message box keys
 
@@ -141,7 +141,7 @@ Enter approves, Escape denies, and Alt+Up focuses a pending request. See
 1. Open `Settings -> SystemSculpt AI -> Knowledge`.
 2. Enable embeddings.
 3. Review indexing scope and exclusions for your vault.
-4. Open `Open Similar Notes Panel`.
+4. Run `Open similar notes panel` from the command palette.
 
 ## Next docs
 

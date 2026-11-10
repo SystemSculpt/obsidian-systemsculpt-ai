@@ -352,13 +352,13 @@ node tools/plugin-daily-release.mjs --dry-run
 node tools/plugin-daily-release.mjs
 ~~~
 
-The script skips when main equals the latest published release revision, or
+The script skips when main's tree equals the latest published release's, or
 when a stable release already went out that Pacific day. Its persistent private
 clone, state and logs belong to the script, not to individual fix tasks. It
-bumps all four version files in a metadata-only PR, merges after the required
-PR check, pins an immutable tag on that main commit, and requires the full CI
-and all four compatibility lanes green on that exact revision. Tag-dispatched
-CI avoids cancellation when unrelated source fixes merge during the release.
+bumps all four version files in one commit on the current main, pins an
+immutable tag on that commit, and requires the full CI and all four
+compatibility lanes green on that exact revision. Tag-dispatched CI avoids
+cancellation when unrelated source fixes merge during the release.
 
 It then installs the locked dependencies and builds with Node 22, matching the
 release-metadata verifier. It runs the exact production bytes in isolated
@@ -366,6 +366,14 @@ real Obsidian: plugin load/reload, Chat, Studio and settings. It stages a draft
 with exactly manifest.json, main.js and styles.css, compares SHA-256 before
 publication, publishes once, downloads again and compares all three hashes.
 No model inference or account sign-in is part of this host smoke.
+
+Only then does the version reach main: the tool opens a metadata-only PR from
+the exact published commit and squash-merges it after the required PR check.
+Obsidian installs the release files of HEAD manifest.json's version, so main
+never names an unpublished version. A failure before publication leaves main
+untouched; the next run resumes a failed merge after publication, rerunning a
+failed PR check against current main. systemsculpt.com's release metadata
+workflow waits until main names the version before it announces the release.
 
 Unpublished tags 6.19.6–6.19.8 remain immutable and unpublished. Their source
 fixes go into the next daily release, whose version exceeds all existing
