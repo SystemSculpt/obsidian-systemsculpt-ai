@@ -49,6 +49,23 @@ describe("reply links and embeds", () => {
     const after = Array.from(root.querySelectorAll(".internal-embed")).map((embed) => embed.classList.contains("is-after-text"));
     expect(after).toEqual([true, false, true]);
   });
+
+  it("names every embedded file beneath it and gives its player no overflow menu", async () => {
+    const root = html(`
+      <p><span class="internal-embed image-embed" src="Images/2026-11-08 093012 lighthouse at dusk.png"><img></span></p>
+      <p><span class="internal-embed pdf-embed" src="Planting guide.pdf"></span></p>
+      <p><span class="internal-embed media-embed audio-embed" src="Voice memo.m4a"><audio controls></audio></span></p>
+      <p><span class="internal-embed media-embed video-embed" src="forest.mp4"></span></p>`);
+    enhanceMarkdownEmbeds(root);
+    const names = Array.from(root.querySelectorAll("a.ss-embed-source")).map((link) => [link.getAttribute("data-embed-kind"), link.textContent]);
+    expect(names).toEqual([["image", "lighthouse at dusk"], ["pdf", "Planting guide"], ["audio", "Voice memo"], ["video", "forest"]]);
+    expect(root.querySelector("audio")?.getAttribute("controlslist")).toBe("nodownload noplaybackrate noremoteplayback");
+    // A player Obsidian builds once its file loads gets the same controls.
+    const video = document.createElement("video");
+    root.querySelector(".video-embed")!.appendChild(video);
+    await Promise.resolve();
+    expect(video.getAttribute("controlslist")).toBe("nodownload noplaybackrate noremoteplayback");
+  });
 });
 
 describe("request bubbles", () => {

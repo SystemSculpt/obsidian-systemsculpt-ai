@@ -2,15 +2,33 @@ import { setIcon } from "obsidian";
 import { mediaDisplayName } from "./ToolCardBlocks";
 
 /**
- * Embedded PDFs, audio and video in an answer play in place; their controls
- * take every click, so each gets its file name as a vault link beneath it.
- * Images open their file on click instead (see AgentConversationRenderer).
+ * Every file an answer embeds carries its name beneath it as a vault link: PDFs, audio and
+ * video play in place, so their controls take every click; a picture also opens on click
+ * (see AgentConversationRenderer), and its name says what it is, as every other embed's does.
  */
 const SOURCE_EMBEDS: ReadonlyArray<readonly [kind: string, icon: string, extensions: ReadonlySet<string>]> = [
+  ["image", "image", new Set(["png", "jpg", "jpeg", "gif", "webp", "avif", "bmp", "svg"])],
   ["pdf", "file-text", new Set(["pdf"])],
   ["audio", "audio-lines", new Set(["mp3", "wav", "m4a", "ogg", "flac", "3gp", "opus", "aac"])],
   ["video", "video", new Set(["mp4", "webm", "ogv", "mov", "mkv", "m4v"])],
 ];
+
+/** A reply's player shows play, time, sound and full screen, the same as a generated video's (TurnMedia). */
+const PLAYER_CONTROLS = "nodownload noplaybackrate noremoteplayback";
+
+function quietPlayer(embed: HTMLElement): void {
+  const apply = (): boolean => {
+    const player = embed.querySelector<HTMLMediaElement>("video, audio");
+    if (!player) return false;
+    player.setAttribute("controlslist", PLAYER_CONTROLS);
+    if (player.tagName === "VIDEO") (player as HTMLVideoElement).disablePictureInPicture = true;
+    return true;
+  };
+  if (apply()) return;
+  // Obsidian may build the player once the file loads, after the reply's text renders.
+  const observer = new MutationObserver(() => { if (apply()) observer.disconnect(); });
+  observer.observe(embed, { childList: true, subtree: true });
+}
 
 export function embedTarget(embed: Element): string | null {
   const src = embed.getAttribute("src")?.trim();
@@ -31,6 +49,7 @@ export function enhanceMarkdownEmbeds(parent: HTMLElement): void {
     const extension = target?.split(".").pop()?.toLowerCase() ?? "";
     const match = SOURCE_EMBEDS.find(([, , extensions]) => extensions.has(extension));
     if (!target || !match) continue;
+    if (match[0] === "audio" || match[0] === "video") quietPlayer(embed);
     const next = embed.nextElementSibling;
     if (next?.classList.contains("ss-embed-source") && next.getAttribute("data-href") === target) continue;
     const name = target.split("/").pop() ?? target;

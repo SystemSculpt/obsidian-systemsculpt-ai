@@ -71,7 +71,7 @@ export function setActivityLabelText(element: HTMLElement, label: string): void 
 
 const lowerFirst = (text: string): string => text.charAt(0).toLowerCase() + text.slice(1);
 
-/** One clause per group: its one row's label, or a count ("Ran 3 commands", "Used 3 tools"). */
+/** One clause per group: its one row's label, or a count ("Ran 3 commands", "Used weather forecast twice"). */
 function clause(kind: string, group: ActivityGroup): string {
   const count = groupSize(group);
   if (kind.startsWith("gated:")) {
@@ -85,11 +85,8 @@ function clause(kind: string, group: ActivityGroup): string {
   if (kind === "partial") return count === 1 ? group.label : `${count} actions partly done`;
   if (kind === "command") return count === 1 ? group.label : `Ran ${count} commands`;
   if (kind === "reasoning") return "Thought";
-  // The same tool twice is one tool used twice; different tools count as tools.
-  if (kind === "tool") {
-    if (group.rows === 1) return group.label;
-    return group.names.size === 1 ? `${group.label} ${group.rows === 2 ? "twice" : `${group.rows} times`}` : `Used ${group.names.size} tools`;
-  }
+  // The same tool twice is one tool used twice; each other tool is its own clause.
+  if (kind.startsWith("tool:")) return group.rows === 1 ? group.label : `${group.label} ${group.rows === 2 ? "twice" : `${group.rows} times`}`;
   if (count === 1) return group.label;
   const counts: Record<string, string> = {
     read: `Read ${count} notes`, edit: `Edited ${count} notes`, write: `Created ${count} notes`, replace: `Replaced ${count} notes`,
@@ -154,9 +151,9 @@ export function summarizeAgentActivity(parts: readonly AgentPart[]): AgentActivi
         && tool.groupItems.every(item => groups.get("write")?.items.has(item) || groups.get("replace")?.items.has(item))) {
         groups.get(groups.get("write")?.items.has(tool.groupItems[0]) ? "write" : "replace")!.rows += 1;
       }
-      // Any other tool (a server's, an unknown one) counts as a tool: "Used 2 tools", "Used weather forecast twice".
+      // Any other tool (a server's, an unknown one) is named by its row: "Used weather forecast twice".
       // A running call's label has no trailing "…"; a long command's own "…" is part of its name.
-      else add(/^(?:mcp|unknown):|^server_action$/u.test(tool.groupKind) ? "tool" : tool.groupKind, tool.label,
+      else add(/^(?:mcp|unknown):|^server_action$/u.test(tool.groupKind) ? `tool:${tool.label}` : tool.groupKind, tool.label,
         { items: tool.groupItems, count: tool.groupCount, target: tool.target });
       if (part.approvalDecision !== "withdrawn" && (refusal || ["failed", "partial", "outcome-unknown"].includes(state))) failedCount += 1;
     }
@@ -167,10 +164,21 @@ export function summarizeAgentActivity(parts: readonly AgentPart[]): AgentActivi
   const kinds: string[] = [];
   const merged = new Map<string, string>();
   const mergedRows = new Map<string, number>();
+  // Tools used one after another share their verb: "Used weather forecast and weather alerts".
+  let used: { kind: string; names: string[] } | undefined;
   for (const kind of groups.keys()) {
     const group = groups.get(kind)!;
     const label = clause(kind, group);
-    const at = group.target && label === group.label && !/^(?:gated|failed):|^(?:partial|reasoning|command|tool)$/u.test(kind)
+    if (kind.startsWith("tool:") && label.startsWith("Used ")) {
+      if (used) {
+        used.names.push(label.slice("Used ".length));
+        merged.set(used.kind, `Used ${used.names.slice(0, -1).join(", ")} and ${used.names[used.names.length - 1]}`);
+        mergedRows.set(used.kind, (mergedRows.get(used.kind) ?? 0) + group.rows);
+        continue;
+      }
+      used = { kind, names: [label.slice("Used ".length)] };
+    }
+    const at = group.target && label === group.label && !/^(?:gated|failed|tool):|^(?:partial|reasoning|command)$/u.test(kind)
       ? label.indexOf(group.target.text, label.indexOf(" ") + 1) : -1;
     const rest = at > 0 ? label.slice(at) : "";
     const earlier = rest ? named.get(rest) : undefined;

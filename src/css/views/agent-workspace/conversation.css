@@ -871,12 +871,20 @@ video.systemsculpt-agent-media-frame {
 .systemsculpt-agent-conversation .pdf-embed :is(.pdf-container, .pdf-content-container) {
   min-width: 0;
 }
-/* Obsidian sizes an embedded PDF to its whole first page, taller than the window at desktop
-   width. The frame stops at a screenful; the page scrolls inside it, as in a note. */
+/* Obsidian sizes an embedded PDF to its whole first page. A reply's PDF is as wide as a
+   picture beside it, so that first page shows whole, edges included, at every width; later
+   pages scroll inside it, as in a note. */
 .systemsculpt-agent-conversation .internal-embed.pdf-embed {
-  max-height: min(34rem, 70vh);
+  max-width: 28rem;
 }
 .systemsculpt-agent-conversation .pdf-embed .pdf-toolbar {
   /* The viewer's column would otherwise squeeze the toolbar and cut its icons. */
   flex-shrink: 0;
+}
+/* A page sidebar has no room in a picture-wide frame, and its two buttons would push the
+   toolbar's own menu out of it on a phone. The name beneath opens the PDF in the vault. */
+.systemsculpt-agent-conversation .pdf-toolbar-left > .clickable-icon:has(> .lucide-layout-list),
+.systemsculpt-agent-conversation .pdf-toolbar-left > .clickable-icon:has(> .lucide-layout-list) + .clickable-icon,
+.systemsculpt-agent-conversation .pdf-toolbar-left > .clickable-icon:has(> .lucide-layout-list) + .clickable-icon + .pdf-toolbar-spacer {
+  display: none;
 }

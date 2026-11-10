@@ -94,6 +94,10 @@ describe("AgentActivityPresentation", () => {
       { id, callId: id, location: "server", native: { agent, workingDirectory: "/vault" } } as Partial<AgentToolPart>);
     // The same server's tool from Claude Code and Codex is one tool, used twice.
     expect(summarizeAgentActivity([forecast("claude", "a"), forecast("codex", "b")]).label).toBe("Used weather forecast twice");
+    // Different tools are each named, sharing their verb, never "Used 2 tools".
+    const alerts = tool(["mcp", "weather", "alerts"].join("__"), { city: "Portland" },
+      { id: "c", callId: "c", location: "server", native: { agent: "claude", workingDirectory: "/vault" } } as Partial<AgentToolPart>);
+    expect(summarizeAgentActivity([forecast("claude", "a"), alerts]).label).toBe("Used weather forecast and weather alerts");
   });
 
   it.each(["claude", "codex"] as const)("labels a denied %s edit without counting a failure", agent => {
