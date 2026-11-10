@@ -44,11 +44,11 @@ function renderPath(app: App, host: HTMLElement, value: unknown, options: Hosted
   const root = !value.trim() || value === "." || value === "/";
   const display = root ? "Vault root" : value;
   const path = link && !root ? safeVaultPath(display) : null;
-  // Notes go by their name, as Obsidian shows them ("Notes/Garden").
+  // Files go by their name, as Obsidian shows them ("Garden"); the full path is the tooltip.
   const shown = label ?? (root ? display : notePathText(display));
   // A file that isn't there stays plain text: opening it would create the very note that was denied or not found.
   if (!path || app.vault.getAbstractFileByPath(path) === null) {
-    host.createSpan({ cls: "ss-tool-path", text: shown });
+    host.createSpan({ cls: "ss-tool-path", text: shown, attr: { title: display } });
     return;
   }
   const anchor = host.createEl("a", { text: shown, cls: "internal-link ss-tool-path", attr: { href: path, "data-href": path, title: path } });
@@ -79,6 +79,16 @@ function renderList<T>(host: HTMLElement, items: readonly T[], render: (row: HTM
 /** Muted supporting line: what the preview can and cannot show. */
 function caption(host: HTMLElement, value: string): HTMLElement {
   return host.createEl("p", { cls: "ss-tool-caption", text: value });
+}
+
+/**
+ * A file's error as the person reads it: a missing note is "Not in your vault", the words the reply
+ * uses, never a "File" the row calls by its name. Other reasons keep their words, without a stop.
+ */
+function fileError(error: string): string {
+  const reason = error.trim().replace(/[.:]\s*$/u, "");
+  if (/^(?:error:\s*)?(?:(?:file|note|path)\s+)?(?:not found|does not exist|doesn't exist)\b|ENOENT/iu.test(reason)) return "Not in your vault";
+  return reason.charAt(0).toUpperCase() + reason.slice(1);
 }
 
 /** A secondary fact beside a path: " · Folder", " · Moved". */
@@ -138,7 +148,8 @@ function renderRead(app: App, host: HTMLElement, input: RecordValue, output: Rec
   const requested = [...strings(input.paths), ...(text(input.path) ? [input.path as string] : [])];
   if (requested.length === 1 && files.length <= 1) {
     const amount = files[0] ? readAmount(files[0]) : undefined;
-    if (files[0] && text(files[0].error)) renderNotice(host, { tone: "warning", text: files[0].error as string });
+    // The whole call failed: its reason is the failure's red, a sentence like every other card notice.
+    if (files[0] && text(files[0].error)) renderNotice(host, { tone: "danger", text: `${fileError(files[0].error as string)}.` });
     else if (amount) caption(host, amount);
     return;
   }
@@ -147,7 +158,7 @@ function renderRead(app: App, host: HTMLElement, input: RecordValue, output: Rec
       renderPath(app, row, file.path, options, !text(file.error));
       // Each note with its reason, or how much was read.
       const amount = readAmount(file);
-      if (text(file.error)) note(row, file.error as string, "warning");
+      if (text(file.error)) note(row, fileError(file.error as string), "warning");
       else if (amount) note(row, amount);
     });
   } else {
@@ -282,7 +293,7 @@ function renderMutationList(app: App, host: HTMLElement, input: RecordValue, out
     const failed = hasResults && item.success === false;
     // A failure gives its own reason after the dot ("File not found"), as a read does.
     const status = success ? name === "trash" ? "In trash" : name === "move" ? "Moved" : "Folder ready"
-      : failed ? text(item.error) ?? "Failed" : "Requested";
+      : failed ? fileError(text(item.error) ?? "Failed") : "Requested";
     note(row, status, failed ? "warning" : undefined);
     if (text(item.notice)) row.createDiv({ cls: "ss-tool-caption", text: item.notice as string });
   });

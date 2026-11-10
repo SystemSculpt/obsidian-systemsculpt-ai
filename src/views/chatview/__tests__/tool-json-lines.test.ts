@@ -41,7 +41,7 @@ describe("renderRawDetails", () => {
     expect(idle.querySelector("code")!.textContent).toBe(JSON.stringify({ input }, null, 2));
   });
 
-  it("lets a short value flow from its key when moving it would still take two lines", () => {
+  it("lets a short value flow from its key when moving it would still take two lines, and its siblings with it", () => {
     const host = document.body.createDiv();
     const raw = renderRawDetails(host, () => ({ input: { oldText: "Tomatoes go in the south bed.", path: "Notes/Garden.md" } }));
     const code = raw.querySelector("code")!;
@@ -55,9 +55,10 @@ describe("renderRawDetails", () => {
       raw.open = true;
       raw.dispatchEvent(new Event("toggle"));
       const units = Array.from(code.querySelectorAll<HTMLElement>(".ss-json-fit"));
+      // The second fits on one line, but sibling values wrap alike: it flows from its key too.
       expect(units.map((unit) => [unit.textContent, unit.classList.contains("is-flowing")])).toEqual([
         ['"Tomatoes go in the south bed.",', true],
-        ['"Notes/Garden.md"', false],
+        ['"Notes/Garden.md"', true],
       ]);
     } finally {
       width.mockRestore();
@@ -181,20 +182,23 @@ describe("renderJsonLines", () => {
     expect(Array.from(lines[3].querySelectorAll(".ss-json-whole"), (word) => word.textContent)).toEqual(['square takes"']);
   });
 
-  it("moves each line a value lists to the next line whole, its number with its words", () => {
+  it("starts each line a value lists on a line of its own, its number with its words", () => {
     const code = document.createElement("code");
     const text = JSON.stringify({ output: "     1\t# Garden plan\n     2\t\n     3\tTomatoes go in the south bed.", files: "/vault/Notes/Garden.md\n/vault/Notes/Launch plan.md" }, null, 2);
     renderJsonLines(code, text);
     expect(code.textContent).toBe(text);
     const [, read, files] = code.querySelectorAll<HTMLElement>(".ss-json-line");
-    // Each entry is one piece ending on its own "\n", the first too, so every entry starts a line alike.
-    expect(Array.from(read.querySelectorAll(".ss-json-path"), (entry) => entry.textContent)).toEqual(['"     1\\t# Garden plan\\n', "     2\\t\\n", '     3\\tTomatoes go in the south bed.",']);
-    expect(Array.from(files.querySelectorAll(".ss-json-path"), (entry) => entry.textContent)).toEqual(['"/vault/Notes/Garden.md\\n', '/vault/Notes/Launch plan.md"']);
-    // The first moves off its key's line only when it then fits on one line; the key stays.
-    expect(read.querySelector(".ss-json-path")?.classList.contains("ss-json-fit")).toBe(true);
-    expect(read.querySelector(".ss-json-path")?.textContent).not.toContain('"output"');
+    // Each entry is a line of its own ending on its "\n", the first too, off its key's line; the JSON
+    // line's own end closes the last entry, so no empty line follows it.
+    expect(Array.from(read.querySelectorAll(".ss-json-entry"), (entry) => entry.textContent)).toEqual(['"     1\\t# Garden plan\\n', "     2\\t\\n", '     3\\tTomatoes go in the south bed.",\n']);
+    expect(Array.from(files.querySelectorAll(".ss-json-entry"), (entry) => entry.textContent)).toEqual(['"/vault/Notes/Garden.md\\n', '/vault/Notes/Launch plan.md"\n']);
+    expect(read.querySelector(".ss-json-entry")?.classList.contains("is-first")).toBe(true);
+    expect(read.querySelector(".ss-json-entry")?.textContent).not.toContain('"output"');
+    // An entry's own leading spaces count toward its start, so a wrapped tail hangs past its text.
+    expect(Array.from(read.querySelectorAll<HTMLElement>(".ss-json-entry"), (entry) => entry.style.getPropertyValue("--ss-json-entry-lead"))).toEqual(["5", "5", "5"]);
+    expect(files.querySelector<HTMLElement>(".ss-json-entry")?.style.getPropertyValue("--ss-json-entry-lead")).toBe("0");
     // A line may start after a "\n", never after a tab: the number stays with its words.
-    const third = read.querySelectorAll(".ss-json-path")[2];
+    const third = read.querySelectorAll(".ss-json-entry")[2];
     expect(third.querySelector("wbr")).toBeNull();
   });
 
@@ -205,10 +209,10 @@ describe("renderJsonLines", () => {
     expect(code.textContent).toBe(text);
     const [, output, list] = code.querySelectorAll<HTMLElement>(".ss-json-line");
     // "\n\n" is one piece, so no line starts between its two breaks.
-    expect(Array.from(output.querySelectorAll(".ss-json-path"), (entry) => entry.textContent)).toEqual(['"PASS  garden.test.ts\\n\\n', 'Tests: 2 passed",']);
+    expect(Array.from(output.querySelectorAll(".ss-json-entry"), (entry) => entry.textContent)).toEqual(['"PASS  garden.test.ts\\n\\n', 'Tests: 2 passed",\n']);
     expect(Array.from(output.querySelectorAll(".ss-json-whole"), (piece) => piece.textContent)).toContain("\\n\\n");
     // A value's closing quote and comma never become an entry of their own.
-    expect(Array.from(list.querySelectorAll(":scope > .ss-json-path"), (entry) => entry.textContent)).toEqual(['"Notes/Garden plan.md\\n', 'Notes/Basil.md\\n"']);
+    expect(Array.from(list.querySelectorAll(":scope > .ss-json-entry"), (entry) => entry.textContent)).toEqual(['"Notes/Garden plan.md\\n', 'Notes/Basil.md\\n"\n']);
   });
 
   it("moves each field of quoted JSON and each web address whole, breaking only between them", () => {
@@ -221,7 +225,6 @@ describe("renderJsonLines", () => {
     // Each source's title and its address are one piece each, so a line never pairs one's tail with the next one's head.
     const units = Array.from(output.querySelectorAll<HTMLElement>(".ss-json-fit"));
     expect(units.map((unit) => unit.textContent)).toEqual([
-      '"Results\\n\\n',
       '[{\\"title\\":\\"Frost dates · Extension Service\\",',
       '\\"url\\":\\"https://example.org/extension/frost-dates\\"},',
       '{\\"title\\":\\"Portland planting calendar\\",',
@@ -229,7 +232,7 @@ describe("renderJsonLines", () => {
     ]);
     // A line may start after each piece that ends on a comma, even when the piece flows; the last keeps
     // the line breaks after it, so they never sit on a line of their own.
-    expect(units.slice(1).map((unit) => unit.nextSibling?.nodeName)).toEqual(["WBR", "WBR", "WBR", undefined]);
+    expect(units.map((unit) => unit.nextSibling?.nodeName)).toEqual(["WBR", "WBR", "WBR", undefined]);
     // An address's scheme stays with its site, so no line ends on "https://".
     expect(Array.from(output.querySelectorAll(".ss-json-fit > .ss-json-whole"), (piece) => piece.textContent)).toContain("https://example.org");
     // A plain address value moves whole with its quotes.
@@ -245,5 +248,26 @@ describe("renderJsonLines", () => {
     const value = code.querySelectorAll<HTMLElement>(".ss-json-line")[1];
     expect(value.querySelector(".ss-json-path")?.textContent).toBe("SystemSculpt/Studio/Outputs/Poster image.png.");
     expect(value.querySelector(".ss-json-name")?.textContent).toBe("Poster image.png.");
+  });
+
+  it("pairs only a value's own last words: words a path follows flow, so a fitting word never drops", () => {
+    const code = document.createElement("code");
+    renderJsonLines(code, JSON.stringify({ message: "Run completed. Generated: SystemSculpt/Images/Poster image.png." }, null, 2));
+    const value = code.querySelectorAll<HTMLElement>(".ss-json-line")[1];
+    expect(Array.from(value.querySelectorAll(":scope > .ss-json-whole"), (piece) => piece.textContent)).toEqual([]);
+    expect(value.textContent).toBe('  "message": "Run completed. Generated: SystemSculpt/Images/Poster image.png."\n');
+    // The closing quote stays on the path's last line.
+    expect(value.querySelector(".ss-json-path")?.textContent).toBe('SystemSculpt/Images/Poster image.png."');
+  });
+});
+
+describe("renderRawDetails while a command runs", () => {
+  it("holds its text result's place under its key, two lines, no braces", () => {
+    const running = renderRawDetails(document.createElement("div"), () => ({ input: { command: "npm test" } }), { open: true, awaitingResult: "lines" });
+    expect(running.hasClass("is-awaiting-result")).toBe(false);
+    const pending = running.querySelector<HTMLElement>(".ss-json-pending")!;
+    expect(pending.children).toHaveLength(2);
+    expect(pending.previousElementSibling?.textContent).toBe('  "output":\n');
+    expect(pending.nextElementSibling?.textContent).toBe("}");
   });
 });

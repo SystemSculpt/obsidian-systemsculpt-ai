@@ -95,6 +95,8 @@ describe("SystemSculpt chat tools", () => {
     (fake.images.generate as jest.Mock).mockRejectedValueOnce(error);
     const result = await new SystemSculptToolService(fake).call("generate_image", { prompt: "x" }, signal());
     expect(result.link).toEqual({ label: "Add credits", url: CREDITS });
+    // The line names what it stopped, as a plan gate does.
+    expect(result.message).toMatch(/^Not enough credits for this picture\. /u);
   });
 
   it("rejects bad input with a readable message", async () => {

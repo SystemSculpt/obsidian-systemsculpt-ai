@@ -813,13 +813,13 @@ describe("AgentChatView composer admission", () => {
       name: "an empty balance",
       totalRemaining: 0,
       heldInFlight: 0,
-      expected: "Out of credits. Add more to keep chatting.",
+      expected: "Out of credits.",
     },
     {
       name: "a fully held balance",
       totalRemaining: 5,
       heldInFlight: 5,
-      expected: "Not enough credits. Add more to keep chatting.",
+      expected: "Not enough credits.",
     },
   ])("rejects $name before attachment or vault-note preparation", async ({
     totalRemaining,
@@ -1342,7 +1342,7 @@ describe("AgentChatView composer admission", () => {
     expect(refreshCreditsBalance).toHaveBeenCalledTimes(1);
     expect(refreshCreditsBalance).toHaveBeenCalledWith({ reason: "billing_failure" });
     expect(setBanner).toHaveBeenCalledWith(
-      "Not enough credits. Add more to keep chatting.",
+      "Not enough credits.",
       "info",
       expect.objectContaining({ label: "Add credits", testId: "chat.banner.add-credits" }),
     );

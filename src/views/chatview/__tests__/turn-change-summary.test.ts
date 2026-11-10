@@ -20,7 +20,7 @@ describe("turn change receipts", () => {
       { path: "Notes/Plan.md", label: "Plan" },
       { path: "New.md", label: "New", meta: "new" },
       { path: "Archive/Old.md", label: "Moved Old to Archive" },
-      { path: "Discard.md", label: "Moved Discard to trash", deleted: true },
+      { path: "Discard.md", label: "Discard", meta: "in trash", deleted: true },
     ]);
   });
 
@@ -70,7 +70,7 @@ describe("turn change receipts", () => {
       ] } },
     });
     expect(presentTurnChanges([trashed, part("write", { path: "Restored.md" }, { output: { data: { created: true } } })])).toEqual([
-      { path: "Gone.md", label: "Moved Gone to trash", deleted: true },
+      { path: "Gone.md", label: "Gone", meta: "in trash", deleted: true },
       { path: "Restored.md", label: "Restored", meta: "new" },
     ]);
   });
@@ -96,7 +96,7 @@ describe("turn change receipts", () => {
     ] }, codex)])).toEqual([
       { path: "Notes/Plan.md", label: "Plan", meta: "+1 −1" },
       { path: "New.md", label: "New", meta: "new" },
-      { path: "Gone.md", label: "Deleted Gone", deleted: true },
+      { path: "Gone.md", label: "Gone", meta: "deleted", deleted: true },
       { path: "Archive/Old.md", label: "Moved Old to Archive" },
     ]);
   });

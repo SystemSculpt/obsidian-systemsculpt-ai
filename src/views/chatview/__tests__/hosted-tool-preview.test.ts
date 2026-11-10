@@ -28,7 +28,7 @@ it("renders recorded read paths and partial/error states, not note contents", ()
     { path: "Missing.md", content: "", error: "File not found" },
   ] }))).toBe(true);
   // Notes read by their name; a partial read and a missing note say so after the dot, and a missing note is no link.
-  expect(Array.from(host.querySelectorAll("li"), row => row.textContent)).toEqual(["Notes/Read ·\u00a0Partly read", "Missing ·\u00a0File not found"]);
+  expect(Array.from(host.querySelectorAll("li"), row => row.textContent)).toEqual(["Read ·\u00a0Partly read", "Missing ·\u00a0Not in your vault"]);
   expect(host.querySelectorAll("a")).toHaveLength(1);
   expect(host.textContent).not.toContain("PRIVATE NOTE CONTENT");
   expect(host.textContent).not.toContain("Requested.md");
@@ -47,7 +47,7 @@ it("says only how much one note's read got, never the note again", () => {
   render(read({ content: "# Launch", metadata: { hasMore: true } }));
   expect(host.textContent).toBe("Partly read");
   render(read({ content: "", error: "File not found" }));
-  expect(host.querySelector(".ss-tool-notice-text")?.textContent).toBe("File not found");
+  expect(host.querySelector(".ss-tool-notice-text")?.textContent).toBe("Not in your vault.");
   expect(host.textContent).not.toContain("Garden");
   // Nothing read yet: the row names the note, and the card has nothing to add.
   expect(render(part("read", { paths: ["Notes/Garden.md"] }, undefined, { state: "running" }))).toBe(false);
@@ -114,7 +114,8 @@ it("shows folder entries and safe notices without exposing unknown result metada
 it("uses actual find results and search snippets, leaving scoring and pagination tokens private", () => {
   const { host, render } = setup();
   render(part("find", { patterns: ["plan"] }, { results: [{ path: "Notes/Plan.md", score: 99, reasoning: "PRIVATE SCORE" }], totalFound: 1 }));
-  expect(host.textContent).toContain("Notes/Plan");
+  expect(host.textContent).toContain("Plan");
+  expect(host.querySelector("a.ss-tool-path")?.getAttribute("title")).toBe("Notes/Plan.md");
   expect(host.textContent).not.toContain("returned"); // A complete list needs no count.
   expect(host.textContent).not.toContain("PRIVATE SCORE");
   render(part("search", {}, {

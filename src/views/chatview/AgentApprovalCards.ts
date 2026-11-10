@@ -293,7 +293,8 @@ export class AgentApprovalCards extends Component {
     const action = (label: string, hint: string, identity: { testId: string }, focusKey: string, keys: string, approved: boolean, remember = false) => {
       const button = createUiAction(actions, { label, ...identity, size: "small", ...(approved && !remember ? { tone: "primary" as const } : {}), tooltip: remember, ...(remember ? { title: sessionScope(part) } : {}) });
       button.setAttrs({ "data-focus-key": focusKey, "aria-keyshortcuts": keys });
-      button.createEl("kbd", { text: hint, attr: { "aria-hidden": "true" } });
+      // In the label's own line, so the smaller hint sits on its words' baseline, not centred beside them.
+      (button.querySelector<HTMLElement>(".ss-button__label") ?? button).createEl("kbd", { text: hint, attr: { "aria-hidden": "true" } });
       button.onclick = () => {
         if (button.getAttribute("aria-disabled") === "true") return;
         void this.answer(card, approved, remember, questionList.length ? approved ? answers : {} : undefined);

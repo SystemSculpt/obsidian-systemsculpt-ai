@@ -84,7 +84,8 @@ export function presentTurnChanges(parts: readonly AgentToolPart[]): readonly Tu
           const meta = operation === "add" ? "new" : operation === "delete" ? undefined
             : diff ? size(diff.stats.additions, diff.stats.deletions) : undefined;
           if (destination) move(path, destination, moved(path, nativePath(part, destination).displayPath));
-          else add(path, meta, operation === "delete" ? `Deleted ${name(path)}` : name(path), operation === "delete");
+          // The receipt's own pattern: a note and its change, "Draft (deleted)".
+          else add(path, operation === "delete" ? "deleted" : meta, name(path), operation === "delete");
         }
       }
       continue;
@@ -102,8 +103,8 @@ export function presentTurnChanges(parts: readonly AgentToolPart[]): readonly Tu
         const path = paths(result.path)[0];
         const source = paths(result.source)[0], destination = paths(result.destination)[0];
         if (canonicalName === "move" && source && destination) move(source, destination, moved(source, destination));
-        // Trash keeps the note: it was moved there, as the row says, not deleted.
-        else if (canonicalName === "trash") { if (path) add(path, undefined, `Moved ${name(path)} to trash`, true); }
+        // Trash keeps the note: it was moved there, as the row says, not deleted; "Draft (in trash)".
+        else if (canonicalName === "trash") { if (path) add(path, "in trash", name(path), true); }
         else if (path) add(path, fileChangeSize(path, result));
       }
     } else if (part.state !== "succeeded" || output.success === false || Array.isArray(output.results)) {
@@ -114,7 +115,7 @@ export function presentTurnChanges(parts: readonly AgentToolPart[]): readonly Tu
         if (source && destination) move(source, destination, moved(source, destination));
       }
     } else if (canonicalName === "trash") {
-      for (const path of paths(input.paths)) add(path, undefined, `Moved ${name(path)} to trash`, true);
+      for (const path of paths(input.paths)) add(path, "in trash", name(path), true);
     } else if (canonicalName === "multi_edit") {
       for (const file of rows(input.files)) for (const path of paths(file.path)) add(path, hostedChangeSize("multi_edit", { files: [file] }, output));
     } else {

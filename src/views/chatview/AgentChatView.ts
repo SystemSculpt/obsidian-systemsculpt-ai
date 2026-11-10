@@ -1525,8 +1525,8 @@ export class AgentChatView extends ItemView {
         onSelect: () => void this.openMonthlyCheckout(),
       });
     } else if (presented.action === "add-credits") {
-      // "Add more to keep chatting" needs the way to add them beside it.
-      this.workspace?.setBanner(presented.message, "info", {
+      // The state in its own words ("Out of credits."), the way through beside it: the button says the fix once.
+      this.workspace?.setBanner(`${presented.heading}.`, "info", {
         label: "Add credits",
         testId: "chat.banner.add-credits",
         onSelect: () => void this.openCreditsBalanceModal(),

@@ -344,7 +344,13 @@
    space below that text, as media in a paragraph of its own does (see MarkdownEmbeds). */
 .systemsculpt-agent-part.is-text p > .internal-embed.is-after-text {
   display: block;
-  margin-top: 1em;
+  margin-top: var(--ss-space-4);
+}
+
+/* A picture, PDF or player sits 16px under the line above it, the gap a fold's card and a failure
+   row keep under their text, wherever the reply writes it. */
+.systemsculpt-agent-part.is-text p.ss-media-paragraph:not(:first-child) {
+  margin-top: var(--ss-space-4);
 }
 
 /* The Sources a web answer appends are its footnote: a small muted label right over its links,
@@ -704,8 +710,11 @@ video.systemsculpt-agent-media-frame {
   padding: var(--ss-space-2) var(--ss-space-4) var(--ss-space-3);
 }
 
+/* The reason is read, not shouted: regular and muted, so the answer under it stays the loudest line. */
 .systemsculpt-agent-media.is-failed .ss-media-pending-label {
   max-width: 100%;
+  color: var(--ss-ink-muted);
+  font-weight: 400;
   white-space: normal;
   text-wrap: balance;
 }
@@ -868,15 +877,17 @@ video.systemsculpt-agent-media-frame {
    pages scroll inside it, as in a note. */
 .systemsculpt-agent-conversation .internal-embed.pdf-embed {
   max-width: 28rem;
+  /* The same corners as the picture, video and audio around it. */
+  border-radius: var(--ss-radius-md);
+  overflow: hidden;
 }
 .systemsculpt-agent-conversation .pdf-embed .pdf-toolbar {
   /* The viewer's column would otherwise squeeze the toolbar and cut its icons. */
   flex-shrink: 0;
 }
 /* A page sidebar has no room in a picture-wide frame, and its two buttons would push the
-   toolbar's own menu out of it on a phone. The name beneath opens the PDF in the vault. */
-.systemsculpt-agent-conversation .pdf-toolbar-left > .clickable-icon:has(> .lucide-layout-list),
-.systemsculpt-agent-conversation .pdf-toolbar-left > .clickable-icon:has(> .lucide-layout-list) + .clickable-icon,
-.systemsculpt-agent-conversation .pdf-toolbar-left > .clickable-icon:has(> .lucide-layout-list) + .clickable-icon + .pdf-toolbar-spacer {
+   toolbar's own menu out of it on a phone. The name beneath opens the PDF in the vault
+   (MarkdownEmbeds marks them). */
+.systemsculpt-agent-conversation .pdf-toolbar-left > .ss-pdf-sidebar-control {
   display: none;
 }

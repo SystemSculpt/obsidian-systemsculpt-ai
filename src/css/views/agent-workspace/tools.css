@@ -186,6 +186,10 @@
 .systemsculpt-agent-part.is-error {
   color: var(--ss-danger);
 }
+/* Blocked before it ran: drawn as its card's notice is, with Denied and Stopped, never red. */
+.systemsculpt-agent-part.is-tool.is-failed.is-blocked {
+  color: inherit;
+}
 .systemsculpt-agent-conversation .systemsculpt-agent-tool-support {
   display: flex;
   flex-direction: column;
@@ -226,12 +230,17 @@
 .systemsculpt-agent-conversation .systemsculpt-agent-part.is-tool.is-failed .systemsculpt-agent-tool-icon {
   color: var(--ss-danger);
 }
+.systemsculpt-agent-conversation .systemsculpt-agent-part.is-tool.is-failed.is-blocked .systemsculpt-agent-tool-icon {
+  color: var(--ss-ink-muted);
+}
 /* A row's or summary's target: a command reads as code ("ls", never "Is"); a short name or
    command never breaks across lines, not even at its hyphen. */
 .ss-tool-target.is-command {
   font-family: var(--ss-font-mono);
   /* One step down from the sm label and summary, so mono's wide glyphs sit level with the words. */
   font-size: var(--ss-text-xs);
+  /* Mono's taller ascent never grows its line: a label with code is as tall as one without. */
+  line-height: 1;
 }
 .ss-tool-target.is-whole {
   white-space: nowrap;
@@ -279,6 +288,10 @@
   font-size: var(--ss-text-xs);
   line-height: var(--ss-leading-base);
   text-wrap: pretty;
+}
+/* A card's own caption keeps the card's line height, so a caption-only card is as tall as a one-line card. */
+.ss-tool-card > .ss-tool-caption {
+  line-height: calc(var(--ss-text-sm) * var(--ss-leading-base));
 }
 .ss-tool-result {
   color: var(--ss-ink);
@@ -385,10 +398,6 @@
   color: var(--ss-ink);
   overflow-wrap: anywhere;
 }
-.ss-tool-paths .ss-tool-path-note.is-warning {
-  color: var(--ss-ink);
-  font-weight: var(--ss-weight-medium);
-}
 .ss-tool-paths > li > .ss-tool-caption {
   margin-top: var(--ss-space-0);
 }
@@ -479,9 +488,10 @@
   overflow-wrap: normal;
 }
 
-/* Prose a tool returned. */
+/* Prose a tool returned: found text, muted as a command's output and a diff's unchanged lines are,
+   so the reply's answer stays the loudest line. */
 .ss-tool-text {
-  color: var(--ss-ink);
+  color: var(--ss-ink-muted);
   line-height: var(--ss-leading-relaxed);
   white-space: pre-wrap;
   /* No one-word last line, as in replies. */
@@ -783,6 +793,7 @@
   overflow: hidden;
 }
 .ss-json-pending {
+  display: block;
   flex: 1 1 0;
   min-height: 18px;
   padding-inline-start: 4ch;
@@ -860,12 +871,25 @@
   white-space: pre;
 }
 /* A name with spaces ("lighthouse take 1.png"), or a path listed with others, moves to the next line
-   whole when it fits there, and wraps inside itself only when it is wider than the line. */
+   whole when it fits there, and wraps inside itself only when it is wider than the line, filling each
+   line as code does. */
 .ss-json-name,
 .ss-json-path {
   display: inline-block;
   text-indent: 0;
-  text-wrap: pretty;
+  text-wrap: wrap;
+}
+/* Each line a value lists ("1\t# Garden plan\n") starts a line of its own at the value's indent, its text
+   level with the first's, after that one's opening quote. A line too long for the pane wraps two
+   characters past its own text, so its tail never reads as the next line. */
+.ss-json-entry {
+  --ss-json-entry-lead: 0;
+  display: block;
+  padding-inline-start: calc((var(--ss-json-entry-lead) + 3) * 1ch);
+  text-indent: calc((var(--ss-json-entry-lead) + 2) * -1ch);
+}
+.ss-json-entry.is-first {
+  text-indent: calc((var(--ss-json-entry-lead) + 3) * -1ch);
 }
 /* A piece that would still wrap after moving flows from its key instead (fitJsonUnits). */
 .ss-json-fit.is-flowing {

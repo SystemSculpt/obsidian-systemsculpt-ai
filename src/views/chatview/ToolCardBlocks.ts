@@ -48,9 +48,15 @@ export function changeCounts(stats: Readonly<{ additions: number; deletions: num
   return [stats.additions ? `+${stats.additions}` : "", stats.deletions ? `−${stats.deletions}` : ""].filter(Boolean).join(" ") || "No changes";
 }
 
-/** A note as Obsidian names it, without ".md" ("Notes/Garden"); other files keep their extension. */
+/**
+ * A file as Obsidian names it in a tab or a link, so one note has one name in every row, card and
+ * reply: a note by its name ("Garden"), any other file with its extension ("Planting guide.pdf").
+ * A folder keeps its path. The full path is the link's tooltip.
+ */
 export function notePathText(path: string): string {
-  return /.\.md$/iu.test(path) ? path.slice(0, -3) : path;
+  const name = path.split("/").filter(Boolean).pop() ?? path;
+  if (/.\.md$/iu.test(name)) return name.slice(0, -3);
+  return /.\.[\p{L}\d]{1,5}$/u.test(name) ? name : path;
 }
 
 function record(value: unknown): RecordValue {
@@ -73,7 +79,7 @@ function openVaultPath(app: App, path: string, event?: MouseEvent): void {
  * written, since deleted) is plain text: opening it would create an empty note.
  */
 function vaultLink(app: App, parent: HTMLElement, path: string, text = notePathText(path)): HTMLElement {
-  if (app.vault.getAbstractFileByPath(path) === null) return parent.createSpan({ cls: "ss-tool-missing-path", text });
+  if (app.vault.getAbstractFileByPath(path) === null) return parent.createSpan({ cls: "ss-tool-missing-path", text, attr: { title: path } });
   const link = parent.createEl("a", {
     text,
     cls: "internal-link",
@@ -354,14 +360,31 @@ export function renderMedia(app: App, card: HTMLElement, media: readonly ToolCar
  * media in a saved result, is left out, so no call reads as one SystemSculpt ran when it didn't.
  * A saved chat nests the result under "data".
  */
+/**
+ * What the person reads from a SystemSculpt result message: the guidance written for the agent after
+ * it ("The chat already shows ...") and the link the result also carries ("See plans: https://…")
+ * stay out, so Details shows each fact once.
+ */
+export function systemSculptPersonMessage(message: string, link?: Readonly<{ label?: unknown }> | null): string {
+  let shown = message;
+  if (typeof link?.label === "string" && link.label) shown = shown.split(`${link.label}:`)[0];
+  return shown.split(/\s*The chat already shows\b/u)[0].trim();
+}
+
 function detailsOutput(data: unknown): unknown {
   const unmarked = (value: unknown): unknown => {
     if (!value || typeof value !== "object" || Array.isArray(value) || !("systemsculpt_tool" in value)) return value;
     const copy: Record<string, unknown> = { ...(value as Record<string, unknown>) };
     delete copy.systemsculpt_tool;
+    if (typeof copy.message === "string") {
+      const link = copy.link && typeof copy.link === "object" ? copy.link as { label?: unknown } : null;
+      copy.message = systemSculptPersonMessage(copy.message, link);
+    }
     return copy;
   };
-  const outer = unmarked(data);
+  // A result saved as its JSON text reads as the same object.
+  const parsed = typeof data === "string" && data.includes("systemsculpt_tool") ? (() => { try { return JSON.parse(data) as unknown; } catch { return data; } })() : data;
+  const outer = unmarked(parsed);
   if (!outer || typeof outer !== "object" || Array.isArray(outer) || !("data" in outer)) return outer;
   const record = outer as Record<string, unknown>;
   const inner = unmarked(record.data);
@@ -439,12 +462,13 @@ export function detailsPayload(
 export function renderRawDetails(
   card: HTMLElement,
   payload: () => unknown,
-  options: Readonly<{ open?: boolean; awaitingResult?: boolean }> = {},
+  options: Readonly<{ open?: boolean; awaitingResult?: boolean | "lines" }> = {},
 ): HTMLDetailsElement {
   const raw = card.createEl("details", { cls: "systemsculpt-agent-tool-raw" });
   // While a picture, video or Studio run is made, an open frame already has the height its result
-  // fills, so nothing under it moves when the files land.
-  raw.toggleClass("is-awaiting-result", Boolean(options.awaitingResult));
+  // fills, so nothing under it moves when the files land. Any other running call ("lines") shows
+  // its result's place as two pending lines, as its terminal does, at no fixed height.
+  raw.toggleClass("is-awaiting-result", options.awaitingResult === true);
   const summary = raw.createEl("summary", { attr: { "data-testid": "chat.tool.raw" } });
   const chevron = summary.createSpan({ cls: "systemsculpt-agent-tool-raw-chevron", attr: { "aria-hidden": "true" } });
   setIcon(chevron, "chevron-right");
@@ -477,7 +501,7 @@ export function renderRawDetails(
     }).observe(code);
   }
   raw.addEventListener("toggle", () => {
-    if (raw.open && !code.hasChildNodes()) renderDetailsCode(code, payload(), Boolean(options.awaitingResult));
+    if (raw.open && !code.hasChildNodes()) renderDetailsCode(code, payload(), options.awaitingResult ?? false);
     if (raw.open) {
       fit();
       syncOverflow();
@@ -486,7 +510,7 @@ export function renderRawDetails(
   // Opened before the result landed: it stays open, with the result in it.
   if (options.open) {
     raw.open = true;
-    renderDetailsCode(code, payload(), Boolean(options.awaitingResult));
+    renderDetailsCode(code, payload(), options.awaitingResult ?? false);
   }
   return raw;
 }
@@ -504,6 +528,19 @@ function fitJsonUnits(code: HTMLElement): void {
   const line = view ? parseFloat(view.getComputedStyle(code).lineHeight) : Number.NaN;
   if (!(line > 0)) return;
   for (const unit of units.filter(item => item.getBoundingClientRect().height > line * 1.5)) unit.addClass("is-flowing");
+  // Sibling values wrap alike: when one value of an object has to flow from its key, its siblings
+  // flow too, rather than one moving whole beside another that breaks after its key.
+  const lines = Array.from(code.querySelectorAll<HTMLElement>(".ss-json-line"));
+  const indentOf = (line: HTMLElement): number => Number(line.style.getPropertyValue("--ss-json-indent")) || 0;
+  lines.forEach((line, at) => {
+    if (!line.querySelector(":scope > .ss-json-keyed.is-flowing")) return;
+    const indent = indentOf(line);
+    for (const step of [-1, 1]) {
+      for (let index = at + step; index >= 0 && index < lines.length && indentOf(lines[index]) >= indent; index += step) {
+        if (indentOf(lines[index]) === indent) lines[index].querySelector(":scope > .ss-json-keyed")?.addClass("is-flowing");
+      }
+    }
+  });
 }
 
 /** The key a result still being made stands in for; its line becomes the result's opening line. */
@@ -514,19 +551,26 @@ const PENDING_RESULT = "\u2026";
  * the result's place reads as pending: its key, then lines that shimmer like the live tile, filling
  * the frame's twelve lines, so the result lands in the lines that held it.
  */
-function renderDetailsCode(code: HTMLElement, payload: unknown, awaitingResult: boolean): void {
+function renderDetailsCode(code: HTMLElement, payload: unknown, awaitingResult: boolean | "lines"): void {
   const record = payload && typeof payload === "object" && !Array.isArray(payload) ? payload as Record<string, unknown> : null;
-  const pending = awaitingResult && record !== null && record.output === undefined;
+  const pending = awaitingResult !== false && record !== null && record.output === undefined;
   renderJsonLines(code, JSON.stringify(pending ? { ...record, output: PENDING_RESULT } : payload, null, 2));
   if (!pending) return;
   const marker = Array.from(code.querySelectorAll<HTMLElement>(".ss-json-line"))
     .find((line) => line.textContent === `  "output": "${PENDING_RESULT}"\n`);
   if (!marker) return;
-  marker.setText('  "output": {\n');
+  // A generation's result is an object, its braces held open; a command's or a search's is its text,
+  // a value still to come under its key.
+  const text = awaitingResult === "lines";
+  marker.setText(text ? '  "output":\n' : '  "output": {\n');
   marker.addClass("is-pending");
   const lines = code.createSpan({ cls: "ss-json-pending", attr: { "aria-hidden": "true" } });
   // As many bars as the frame has lines; those past its end are clipped with the box that holds them.
-  for (let index = 0; index < 12; index += 1) lines.createSpan();
+  for (let index = 0; index < (text ? 2 : 12); index += 1) lines.createSpan();
+  if (text) {
+    marker.after(lines);
+    return;
+  }
   const close = code.createSpan({ cls: "ss-json-line is-pending", text: "  }\n" });
   close.setCssProps({ "--ss-json-indent": "2" });
   marker.after(lines, close);
@@ -545,8 +589,10 @@ export function renderJsonLines(code: HTMLElement, text: string): void {
     const indent = /^ */u.exec(line)?.[0].length ?? 0;
     const block = code.createSpan({ cls: "ss-json-line" });
     appendJsonLine(block, line);
-    // The line's own end stays outside every piece, so a copy keeps the lines as they were.
-    if (index < lines.length - 1) block.appendText("\n");
+    // The line's own end stays outside every piece, so a copy keeps the lines as they were; after a
+    // listed entry, which is a line of its own, it ends that entry instead of opening an empty line.
+    const entry = block.lastElementChild?.classList.contains("ss-json-entry") ? block.lastElementChild as HTMLElement : block;
+    if (index < lines.length - 1) entry.appendText("\n");
     if (indent) block.setCssProps({ "--ss-json-indent": String(indent) });
   });
 }
@@ -561,7 +607,7 @@ function appendJsonLine(block: HTMLElement, line: string): void {
   const keyed = /^(\s*"(?:[^"\\]|\\.)*":\s)("(?:[^"\\]|\\.)*",?)$/u.exec(line);
   if (keyed && keyed[2].length <= SHORT_VALUE) {
     appendJsonWords(block, keyed[1]);
-    appendJsonValue(block.createSpan({ cls: "ss-json-path ss-json-fit" }), keyed[2], true);
+    appendJsonValue(block.createSpan({ cls: "ss-json-path ss-json-fit ss-json-keyed" }), keyed[2], true);
     return;
   }
   const entries = jsonLineEntries(line);
@@ -569,13 +615,20 @@ function appendJsonLine(block: HTMLElement, line: string): void {
     appendJsonValue(block, line, line.length > SHORT_VALUE);
     return;
   }
-  // Entries a value lists line by line ("a.md\nb.md", a read's numbered lines) each move to the next
-  // line whole when they fit there, each with the "\n" that ends it. The first moves off its key's
-  // line too, so every entry starts a line alike.
+  // Entries a value lists line by line ("a.md\nb.md", a read's numbered lines, a plan's steps) each
+  // start a line of their own, with the "\n" that ends it, the first too, off its key's line: the value
+  // reads as the lines it holds. An entry too long for the pane wraps two characters past its own start.
   const lead = /^\s*(?:"(?:[^"\\]|\\.)*":\s)?/u.exec(entries[0])?.[0] ?? "";
   if (lead) appendJsonWords(block, lead);
-  appendJsonValue(block.createSpan({ cls: "ss-json-path ss-json-fit" }), entries[0].slice(lead.length), true);
-  for (const entry of entries.slice(1)) appendJsonValue(block.createSpan({ cls: "ss-json-path" }), entry, true);
+  // An entry's own leading spaces ("     3\tTomatoes…", a read's line numbers) count toward its start,
+  // so its wrapped tail hangs past its text, never left of it.
+  const entry = (text: string, first: boolean): void => {
+    const span = block.createSpan({ cls: first ? "ss-json-entry is-first" : "ss-json-entry" });
+    span.setCssProps({ "--ss-json-entry-lead": String(/^"? */u.exec(text)![0].replace(/"/u, "").length) });
+    appendJsonValue(span, text, true);
+  };
+  entry(entries[0].slice(lead.length), true);
+  for (const text of entries.slice(1)) entry(text, false);
 }
 
 /** A path breaks after a "/" and an escape ("\n") stays whole, so a wrapped value never splits a name. */
@@ -634,10 +687,12 @@ function appendCommandLine(block: HTMLElement, content: string): boolean {
  * A short hyphenated word ("2026-11-08", "T-5957", "--short") never breaks at its hyphen, and the
  * last two words of a run of three or more wrap together, so a wrapped run never ends on one word.
  */
-function appendJsonWords(parent: HTMLElement, text: string): void {
+function appendJsonWords(parent: HTMLElement, text: string, endsValue = true): void {
   const pieces = text.split(/(\s+)/u).filter(Boolean);
   const words = pieces.flatMap((piece, index) => /\s/u.test(piece) ? [] : [index]);
-  const from = words.length >= 3 ? words[words.length - 2] : -1;
+  // Only the value's own last words pair: words a path or a link follows ("Run completed. Generated:")
+  // flow on, or a fitting word would drop to the next line for nothing.
+  const from = endsValue && words.length >= 3 ? words[words.length - 2] : -1;
   const to = words[words.length - 1] ?? -1;
   const pair = from >= 0 ? pieces.slice(from, to + 1).join("") : "";
   const paired = pair.length > 0 && pair.length <= 24;
@@ -669,7 +724,7 @@ function appendBreakableValue(block: HTMLElement, content: string): void {
   for (const match of content.matchAll(VALUE_UNIT)) {
     const at = match.index ?? 0;
     const before = content.slice(start, at);
-    appendListedPaths(block, before);
+    appendListedPaths(block, before, false);
     // Between quoted fields ("…\",\"url\"…"), a line may start at the comma before a piece and after the
     // one that closes it, even when it flows.
     if (before.endsWith(",")) block.createEl("wbr");
@@ -688,25 +743,26 @@ function appendBreakableValue(block: HTMLElement, content: string): void {
   appendListedPaths(block, content.slice(start));
 }
 
-function appendListedPaths(block: HTMLElement, content: string): void {
+function appendListedPaths(block: HTMLElement, content: string, endsValue = true): void {
   // Each listed path is one piece with its comma or full stop: it moves to the next line whole when it
   // fits there, so a line never pairs one file's name with the next one's folder. Only a path wider
   // than the line breaks inside, after a "/". A value that is one path keeps its key on its line.
   let start = 0;
   for (const match of content.matchAll(LISTED_PATH)) {
     const at = (match.index ?? 0) + match[1].length;
-    const end = at + match[2].length + (/^(?:[,.;]|"[,.;]?)/u.exec(content.slice(at + match[2].length))?.[0].length ?? 0);
-    appendBreakableRun(block, content.slice(start, at));
+    // Its full stop or comma, and the value's closing quote after it, stay on its last line.
+    const end = at + match[2].length + (/^[,.;]?(?:"[,.;]?)?/u.exec(content.slice(at + match[2].length))?.[0].length ?? 0);
+    appendBreakableRun(block, content.slice(start, at), false);
     appendBreakableRun(block.createSpan({ cls: "ss-json-path" }), content.slice(at, end));
     start = end;
   }
-  appendBreakableRun(block, content.slice(start));
+  appendBreakableRun(block, content.slice(start), endsValue);
 }
 
-function appendBreakableRun(block: HTMLElement, content: string): void {
+function appendBreakableRun(block: HTMLElement, content: string, endsValue = true): void {
   // The name after a "/" ("lighthouse take 1.png,") moves to the next line whole when it fits there,
   // rather than leaving its last word behind. Prose (the key, a sentence after a comma) flows as it is.
-  const appendChunk = (chunk: string, afterSlash: boolean): void => {
+  const appendChunk = (chunk: string, afterSlash: boolean, last = false): void => {
     if (!chunk) return;
     // The line's own end stays outside the name.
     const trail = /\s*$/u.exec(chunk)![0];
@@ -719,7 +775,7 @@ function appendBreakableRun(block: HTMLElement, content: string): void {
       appendJsonWords(block.createSpan({ cls: "ss-json-name" }), whole);
       name = name.slice(whole.length);
     }
-    appendJsonWords(block, name);
+    appendJsonWords(block, name, endsValue && last);
     if (trail) block.appendText(trail);
   };
   let start = 0;
@@ -736,7 +792,8 @@ function appendBreakableRun(block: HTMLElement, content: string): void {
       afterSlash = false;
       continue;
     }
-    appendChunk(content.slice(start, at), afterSlash);
+    // Words that only line breaks and the closing quote follow end the value (or its entry).
+    appendChunk(content.slice(start, at), afterSlash, /^(?:\\[nr]|["\]},.;\s])*$/u.test(content.slice(at)));
     if (match[0].startsWith("/")) block.appendText(match[0]);
     else block.createSpan({ cls: "ss-json-whole", text: match[0] });
     // A path's last two names stay together ("qa/vault"), as a value's last two words do, so a wrapped
@@ -750,7 +807,7 @@ function appendBreakableRun(block: HTMLElement, content: string): void {
     afterSlash = match[0].startsWith("/");
     start = end;
   }
-  appendChunk(content.slice(start), afterSlash);
+  appendChunk(content.slice(start), afterSlash, true);
 }
 
 /** The text inside a tool result as each agent saves it: a string, content blocks or content items. */

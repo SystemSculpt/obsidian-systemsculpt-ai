@@ -11,6 +11,7 @@ import {
   renderNotice,
   mediaDisplayName,
   renderPathList,
+  systemSculptPersonMessage,
   type ToolCardField,
 } from "./ToolCardBlocks";
 
@@ -29,14 +30,18 @@ export function systemSculptToolArguments(part: AgentToolPart): RecordValue {
   return input.type === "dynamicToolCall" ? { ...input, ...record(input.arguments) } : input;
 }
 
-/**
- * What the person reads from a result message: the agent-only guidance after
- * it ("The chat already shows ...") and a link the card shows as its action stay out.
- */
+/** What the person reads from a result message, without the agent's guidance or the card's own link. */
 function personFacingMessage(result: SystemSculptToolResult): string {
-  let message = result.message;
-  if (result.link) message = message.split(`${result.link.label}:`)[0];
-  return message.split(/\s*The chat already shows\b/u)[0].trim();
+  return systemSculptPersonMessage(result.message, result.link);
+}
+
+/** "Vertical · 9:16", "Wide · 16:9", "Square · 1:1": a frame as the person asked for it. */
+function frameShape(ratio: string | undefined): string | null {
+  const match = ratio?.match(/^(\d+(?:\.\d+)?)\s*[:x]\s*(\d+(?:\.\d+)?)$/u);
+  if (!match) return null;
+  const width = Number(match[1]), height = Number(match[2]);
+  if (!width || !height) return null;
+  return `${width > height ? "Wide" : width < height ? "Vertical" : "Square"} · ${match[1]}:${match[2]}`;
 }
 
 function workflowName(path: string): string {
@@ -84,6 +89,13 @@ export function renderSystemSculptToolCard(app: App, host: HTMLElement, part: Ag
   if (name === "studio_create_workflow" && !workflow && text(args.name)) fields.push({ label: "Name", value: text(args.name)! });
   const prompt = text(args.prompt);
   if (prompt) fields.push({ label: "Prompt", value: prompt });
+  // A picture or video that wasn't made keeps its frame and length in words: no tile shows them.
+  if ((name === "generate_image" || name === "generate_video") && (part.state === "failed" || result?.ok === false)) {
+    const shape = frameShape(text(args.aspect_ratio));
+    if (shape) fields.push({ label: "Shape", value: shape });
+    const seconds = typeof args.duration_seconds === "number" && args.duration_seconds > 0 ? Math.round(args.duration_seconds) : 0;
+    if (name === "generate_video" && seconds) fields.push({ label: "Length", value: `${seconds} ${seconds === 1 ? "second" : "seconds"}` });
+  }
   if (name === "studio_edit_workflow" && Array.isArray(args.edits)) {
     // Each change as a result, in words, one per line.
     const changes = args.edits.flatMap((edit: unknown) => studioChange(edit) ?? []);

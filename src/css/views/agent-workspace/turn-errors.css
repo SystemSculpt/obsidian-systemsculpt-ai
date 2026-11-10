@@ -35,8 +35,10 @@
 .systemsculpt-agent-part.is-error.is-gate .systemsculpt-agent-error-heading {
   color: var(--ss-ink);
 }
+/* The copy spans the card's text column at every width, so Details is as wide as the card, not its longest sentence. */
 .systemsculpt-agent-error-copy {
   display: flex;
+  flex: 1 1 0;
   flex-direction: column;
   gap: var(--ss-space-1);
   min-width: 0;

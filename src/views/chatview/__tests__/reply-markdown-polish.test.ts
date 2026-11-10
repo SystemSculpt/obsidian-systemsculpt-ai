@@ -66,6 +66,17 @@ describe("reply links and embeds", () => {
     await Promise.resolve();
     expect(video.getAttribute("controlslist")).toBe("nodownload noplaybackrate noremoteplayback");
   });
+
+  it("marks a reply PDF's page-sidebar controls once its viewer is built, and nothing else", async () => {
+    const root = html(`<p><span class="internal-embed pdf-embed" src="Planting guide.pdf"></span></p>`);
+    enhanceMarkdownEmbeds(root);
+    const left = document.createElement("div");
+    left.className = "pdf-toolbar-left";
+    left.innerHTML = `<div class="clickable-icon"><svg class="lucide-layout-list"></svg></div><div class="clickable-icon"><svg class="lucide-chevron-down"></svg></div><div class="pdf-toolbar-spacer"></div><div class="clickable-icon"><svg class="lucide-zoom-out"></svg></div><div class="pdf-toolbar-spacer"></div>`;
+    root.querySelector(".pdf-embed")!.appendChild(left);
+    await Promise.resolve();
+    expect(Array.from(left.children, (child) => child.classList.contains("ss-pdf-sidebar-control"))).toEqual([true, true, true, false, false]);
+  });
 });
 
 describe("request bubbles", () => {

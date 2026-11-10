@@ -114,7 +114,7 @@ describe("AgentChatView shared credits reads", () => {
         "$9 a month for 10,000 credits.", "info", expect.objectContaining({ label: "Subscribe", testId: "chat.banner.subscribe" }),
       );
     } else {
-      expect(workspace.setBanner).toHaveBeenCalledWith("Out of credits. Add more to keep chatting.", "info", expect.objectContaining({ label: "Add credits", testId: "chat.banner.add-credits" }));
+      expect(workspace.setBanner).toHaveBeenCalledWith("Out of credits.", "info", expect.objectContaining({ label: "Add credits", testId: "chat.banner.add-credits" }));
     }
   });
 

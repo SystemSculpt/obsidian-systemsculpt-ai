@@ -69,6 +69,19 @@ describe("one card for every tool result", () => {
     expect(Array.from(host.querySelectorAll(".ss-tool-paths > li"), item => item.textContent)).toEqual(["Lighthouse"]);
   });
 
+  it("shows a SystemSculpt result in Details without the agent's guidance or a second copy of its link", () => {
+    const link = { label: "Add credits", url: "https://systemsculpt.com/credits" };
+    const data = encodeSystemSculptToolResult({ ok: false, message: `Not enough credits for this video. Add credits: ${link.url} The chat already shows the person this line. Write nothing about it.`, link });
+    expect(detailsPayload({ prompt: "x" }, { data }).output).toEqual({ ok: false, message: "Not enough credits for this video.", link });
+  });
+
+  it("says what a picture or video that wasn't made asked for: its shape and length", () => {
+    const { app, host } = setup();
+    const data = encodeSystemSculptToolResult({ ok: false, message: "The video service is busy right now." });
+    renderHostedToolPreview(app, host, hosted("generate_video", { prompt: "Pines", aspect_ratio: "9:16", duration_seconds: 5 }, data, { state: "failed" }));
+    expect(Array.from(host.querySelectorAll(".ss-tool-field"), field => field.textContent)).toEqual(["PromptPines", "ShapeVertical · 9:16", "Length5 seconds"]);
+  });
+
   it("shows a Codex request without the item's own id, run status and kind, so it reads the same running and done", () => {
     const running = { type: "imageGeneration", id: "ig1", status: "inProgress", revisedPrompt: "A lighthouse at night" };
     expect(detailsPayload(running, undefined, "codex")).toEqual({ input: { revisedPrompt: "A lighthouse at night" } });
@@ -249,10 +262,10 @@ describe("one card for every tool result", () => {
       results: [{ path: "Notes/Garden.md", success: true }], summary: "Pinned 1 file.",
     }));
     // Notes go by their name, as Obsidian shows them; the link keeps the file's path.
-    expect(host.querySelector(".ss-tool-paths li")?.textContent).toBe("Notes/Garden ·\u00a0Pinned");
+    expect(host.querySelector(".ss-tool-paths li")?.textContent).toBe("Garden ·\u00a0Pinned");
     const opened = setup();
     renderHostedToolPreview(opened.app, opened.host, hosted("open", { files: [{ path: "Notes/Garden.md" }] }, { opened: ["Notes/Garden.md"], errors: ["Failed to open file: Missing.md"] }));
-    expect(opened.host.querySelector("a.internal-link")?.textContent).toBe("Notes/Garden");
+    expect(opened.host.querySelector("a.internal-link")?.textContent).toBe("Garden");
     expect(opened.host.querySelector("a.internal-link")?.getAttribute("data-href")).toBe("Notes/Garden.md");
     expect(opened.host.querySelector(".ss-tool-notice")?.textContent).toBe("Failed to open file: Missing.md");
   });

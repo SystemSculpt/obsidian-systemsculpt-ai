@@ -120,7 +120,9 @@
 .systemsculpt-agent-notice > .ss-button--icon {
   flex: none;
   margin-block: calc((var(--ss-text-base) * var(--ss-leading-relaxed) - 32px) / 2);
-  margin-inline-end: -8px;
+  /* The X's ink (6/24 in from its 16px box, which sits 8px in from the button) ends 12px + the border
+     from the edge, as the text starts on the left and as the content edge of a card below it. */
+  margin-inline-end: calc(-8px - 16px * 6 / 24);
 }
 
 /* Details sits nearer its own output (8px) than the buttons above it (12px). */

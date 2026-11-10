@@ -138,7 +138,8 @@ export class AgentToolRenderer {
       )?.open ?? false;
       renderRawDetails(stagedSupport, () => detailsPayload(part.input, isQuestion ? undefined : part.output, part.native?.agent), {
         open: openDetails,
-        awaitingResult: presentPendingMedia([part], true).some(tile => tile.state !== "failed"),
+        awaitingResult: presentPendingMedia([part], true).some(tile => tile.state !== "failed")
+          || (part.state === "running" && part.output === undefined ? "lines" : false),
       });
     }
 
@@ -163,6 +164,8 @@ export class AgentToolRenderer {
     node.className = `systemsculpt-agent-part is-tool is-${presentation.displayState}`;
     if (gatedSystemSculptTurn(part)) node.classList.add("is-gated");
     else if (refusedSystemSculptCall(part)) node.classList.add("is-refused");
+    // A call the agent's own review stopped before it ran is an outcome, as Denied and Stopped are, not a failure.
+    else if (presentation.icon === "shield-x") node.classList.add("is-blocked");
     node.dataset.testid = "chat.part";
     node.dataset.kind = "tool";
     node.dataset.state = presentation.displayState;

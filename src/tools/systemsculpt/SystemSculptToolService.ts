@@ -19,6 +19,12 @@ import { beginGeneration, generationKey, updateGeneration } from "./GenerationPr
 /** The chat shows generated files under the reply; an embed in the reply would show them twice. */
 /** The chat shows the link as its own line; the reply repeating it would say it twice. */
 const LINK_SHOWN = "The chat already shows the person this line and its link under your reply. Write nothing about it: any sentence about a subscription, credits, the link or nothing being made repeats that line. If the person asked for nothing else, end your turn now with no reply text at all.";
+/** What a credits stop names: "Not enough credits for this video." */
+const CREDIT_SUBJECTS: Readonly<Record<string, string>> = {
+  generate_image: "this picture",
+  generate_video: "this video",
+  studio_run_workflow: "this Studio run",
+};
 const SHOWN_IN_CHAT = "The chat already shows generated files with your reply, so don't embed them or say where they appear.";
 
 
@@ -113,7 +119,7 @@ export class SystemSculptToolService {
       }
     } catch (error) {
       if (signal.aborted) return { ok: false, message: "Stopped." };
-      return this.failure(error);
+      return this.failure(error, CREDIT_SUBJECTS[name]);
     } finally {
       endProgress();
     }
@@ -128,11 +134,12 @@ export class SystemSculptToolService {
     };
   }
 
-  private failure(error: unknown): SystemSculptToolResult {
+  private failure(error: unknown, subject = "this"): SystemSculptToolResult {
     const code = errorCode(error), message = errorText(error);
     if (code === "payment_required" || /insufficient_credits|not enough credits/i.test(message)) {
-      // The same words as the chat's credits banner and card: "credits" and "Add credits".
-      return { ok: false, message: `Not enough credits for this. Add credits: ${this.host.links.credits} ${LINK_SHOWN}`, link: { label: "Add credits", url: this.host.links.credits } };
+      // The same words as the chat's credits banner and card: "credits" and "Add credits". The line
+      // names what it stopped, as a plan gate does ("Image generation comes with…").
+      return { ok: false, message: `Not enough credits for ${subject}. Add credits: ${this.host.links.credits} ${LINK_SHOWN}`, link: { label: "Add credits", url: this.host.links.credits } };
     }
     if (/Operation already exists/.test(message)) {
       return { ok: false, message: "This request already generated, or is generating, its result; it is not run twice. Look in SystemSculpt/Images or SystemSculpt/Videos." };
@@ -380,7 +387,7 @@ export class SystemSculptToolService {
     // Only nodes that ran now show inline; cached outputs are earlier work.
     const { media } = await this.nodeOutputs(path, executed);
     if (summary.error) {
-      const failure = this.failure(new Error(summary.error));
+      const failure = this.failure(new Error(summary.error), CREDIT_SUBJECTS.studio_run_workflow);
       return { ...failure, message: failure.link ? failure.message : `The run ${summary.status}: ${summary.error.slice(0, 1_500)}`, ...(media.length ? { media } : {}), data: { runId: summary.runId, status: summary.status, nodes } };
     }
     return {
