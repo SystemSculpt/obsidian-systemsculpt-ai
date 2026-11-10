@@ -1,16 +1,16 @@
-import { setIcon } from "obsidian";
 import { mediaDisplayName } from "./ToolCardBlocks";
 
 /**
  * Every file an answer embeds carries its name beneath it as a vault link: PDFs, audio and
  * video play in place, so their controls take every click; a picture also opens on click
  * (see AgentConversationRenderer), and its name says what it is, as every other embed's does.
+ * The line reads as a generated picture's or video's caption does: the name alone.
  */
-const SOURCE_EMBEDS: ReadonlyArray<readonly [kind: string, icon: string, extensions: ReadonlySet<string>]> = [
-  ["image", "image", new Set(["png", "jpg", "jpeg", "gif", "webp", "avif", "bmp", "svg"])],
-  ["pdf", "file-text", new Set(["pdf"])],
-  ["audio", "audio-lines", new Set(["mp3", "wav", "m4a", "ogg", "flac", "3gp", "opus", "aac"])],
-  ["video", "video", new Set(["mp4", "webm", "ogv", "mov", "mkv", "m4v"])],
+const SOURCE_EMBEDS: ReadonlyArray<readonly [kind: string, extensions: ReadonlySet<string>]> = [
+  ["image", new Set(["png", "jpg", "jpeg", "gif", "webp", "avif", "bmp", "svg"])],
+  ["pdf", new Set(["pdf"])],
+  ["audio", new Set(["mp3", "wav", "m4a", "ogg", "flac", "3gp", "opus", "aac"])],
+  ["video", new Set(["mp4", "webm", "ogv", "mov", "mkv", "m4v"])],
 ];
 
 /** A reply's player shows play, time, sound and full screen, the same as a generated video's (TurnMedia). */
@@ -47,7 +47,7 @@ export function enhanceMarkdownEmbeds(parent: HTMLElement): void {
     if (embed.closest(".internal-embed") !== embed || embed.parentElement?.closest(".markdown-embed")) continue;
     const target = embedTarget(embed);
     const extension = target?.split(".").pop()?.toLowerCase() ?? "";
-    const match = SOURCE_EMBEDS.find(([, , extensions]) => extensions.has(extension));
+    const match = SOURCE_EMBEDS.find(([, extensions]) => extensions.has(extension));
     if (!target || !match) continue;
     if (match[0] === "audio" || match[0] === "video") quietPlayer(embed);
     const next = embed.nextElementSibling;
@@ -57,10 +57,8 @@ export function enhanceMarkdownEmbeds(parent: HTMLElement): void {
       cls: "internal-link ss-embed-source",
       attr: { href: target, "data-href": target, "aria-label": `Open ${name} in the vault`, "data-embed-kind": match[0] },
     });
-    const icon = link.createSpan({ cls: "ss-embed-source-icon", attr: { "aria-hidden": "true" } });
-    setIcon(icon, match[1]);
-    // The same name the chat gives the file everywhere else; the icon says what kind it is.
-    link.appendText(mediaDisplayName(target));
+    // The same name the chat gives the file everywhere else; its frame above says what kind it is.
+    link.setText(mediaDisplayName(target));
     embed.after(link);
   }
 }
