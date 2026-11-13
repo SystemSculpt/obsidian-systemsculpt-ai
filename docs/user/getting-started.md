@@ -145,6 +145,7 @@ Enter approves, Escape denies, and Alt+Up focuses a pending request. See
 
 ## Next docs
 
+- [Weekly review: clarify daily notes, extract tasks and plan next week](weekly-review.md)
 - [Settings](settings.md)
 - [Commands](commands.md)
 - [Troubleshooting](troubleshooting.md)
