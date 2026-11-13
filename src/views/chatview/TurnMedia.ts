@@ -2,7 +2,7 @@ import { TFile, type App } from "obsidian";
 import type { AgentToolPart } from "../../chat/ChatConversation";
 import { decodeSystemSculptToolOutput, systemSculptToolName, type SystemSculptMedia } from "../../tools/systemsculpt/SystemSculptTools";
 import { codexImageMedia, rememberCodexImage } from "../../services/codex/CodexImages";
-import { fitPendingText, generationArguments, presentPendingMedia, renderPendingMedia, requestedMediaRatio, syncPendingClock, type PendingMedia } from "./PendingMedia";
+import { generationArguments, presentPendingMedia, renderPendingMedia, requestedMediaRatio, syncPendingClock, type PendingMedia } from "./PendingMedia";
 import { mediaDisplayName, syncToolMediaWithReply } from "./ToolCardBlocks";
 
 /** A file to show, with where its call sits in the turn and the frame its call asked for. */
@@ -33,7 +33,6 @@ function embeddedInAnswer(answer: string, path: string): boolean {
  * SystemSculpt tool results. A file the reply already embeds shows once, in
  * the reply.
  */
-/** @internal Exported for tests. */
 export function presentTurnMedia(parts: readonly AgentToolPart[], answer = "", live = false): TurnMedia {
   const media = new Map<string, TurnMediaItem>();
   const notices = new Map<string, { text: string; label: string; url: string }>();
@@ -112,6 +111,8 @@ function buildTurnMedia(app: App, parent: HTMLElement, presented: ReturnType<typ
     ...presented.media.map(item => ({ order: item.order ?? -1, item, pending: null })),
     ...presented.pending.map(tile => ({ order: tile.order, item: null, pending: tile })),
   ].sort((left, right) => left.order - right.order);
+  // Gate lines alone are text, so they sit a text line's gap under the row.
+  if (!tiles.length) block.addClass("is-text-only");
   if (tiles.length) {
     const grid = block.createDiv({ cls: "systemsculpt-agent-media-grid" });
     if (tiles.length > 1) grid.addClass("is-multiple");
@@ -142,7 +143,12 @@ function buildTurnMedia(app: App, parent: HTMLElement, presented: ReturnType<typ
         figure.setCssProps({ "--ss-media-ratio": String(ratio) });
       }
       if (item.kind === "video") {
-        const video = figure.createEl("video", { cls: "systemsculpt-agent-media-frame", attr: { src: source, controls: "", preload: "metadata", playsinline: "", "aria-label": name } });
+        // Play, time, sound and full screen only: with no overflow menu even a narrow vertical player has
+        // room for its length ("0:00 / 0:05"). The file is in the vault, so it needs no download.
+        const video = figure.createEl("video", { cls: "systemsculpt-agent-media-frame", attr: {
+          src: source, controls: "", controlslist: "nodownload noplaybackrate noremoteplayback", disablepictureinpicture: "",
+          disableremoteplayback: "", preload: "metadata", playsinline: "", "aria-label": name,
+        } });
         settleFrame(figure, video, () => [video.videoWidth, video.videoHeight], "loadedmetadata");
       } else {
         const open = figure.createEl("button", { cls: "systemsculpt-agent-media-open", attr: { type: "button", "aria-label": `Open ${name}`, "data-testid": "chat.turn.media.open" } });
@@ -161,11 +167,11 @@ function buildTurnMedia(app: App, parent: HTMLElement, presented: ReturnType<typ
   for (const notice of presented.notices) {
     const line = block.createDiv({ cls: "systemsculpt-agent-media-notice", attr: { "data-testid": "chat.turn.media.notice" } });
     if (notice.text) line.appendText(`${notice.text} `);
-    const link = line.createEl("a", { text: notice.label, attr: { href: notice.url, "data-testid": "chat.turn.media.subscribe" } });
+    // It leaves Obsidian, so it carries Obsidian's ↗ mark like every other such link.
+    const link = line.createEl("a", { cls: "external-link", text: notice.label, attr: { href: notice.url, rel: "noopener noreferrer", "data-testid": "chat.turn.media.subscribe" } });
     link.onclick = event => { event.preventDefault(); actions.openLink(notice.url); };
   }
   syncPendingClock(block);
-  fitPendingText(block);
   return block;
 }
 

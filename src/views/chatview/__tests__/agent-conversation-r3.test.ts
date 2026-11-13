@@ -125,12 +125,14 @@ describe("R3 conversation semantics", () => {
     renderer.unload();
   });
 
-  it("keeps retry before detection in signed-out errors", async () => {
+  it("finishes a signed-out error with Retry alone, as its words say", async () => {
     const { renderer, parent } = setup();
     await render(renderer, snapshot([{ kind: "error", id: "signed-out", order: 0, retryable: true,
       error: { code: "local_codex_failed", message: "Not signed in" } }], "failed"));
     expect([...parent.querySelectorAll('.systemsculpt-agent-error-actions button')].map(button => button.textContent))
-      .toEqual(["Retry", "Detect again"]);
+      .toEqual(["Retry"]);
+    expect(parent.querySelector(".systemsculpt-agent-error-message")?.textContent)
+      .toBe("In a terminal, run codex login. Then retry.");
     renderer.unload();
   });
 
@@ -192,6 +194,21 @@ describe("R3 conversation semantics", () => {
     expect(status.textContent).toBe("Waiting for your approval");
     expect(status.querySelector('.is-animated')).toBeNull();
     expect(status.hasAttribute('data-agent-working-timer')).toBe(false);
+    renderer.unload();
+  });
+
+  it("keeps Details opened while a picture is made open, at the height its result fills, when the file lands", async () => {
+    const { renderer, parent } = setup();
+    const running = tool({ name: "generate_image", input: { prompt: "A lighthouse at dusk" } });
+    await render(renderer, snapshot([running]));
+    const raw = () => parent.querySelector<HTMLDetailsElement>(".systemsculpt-agent-tool-raw")!;
+    expect(raw().classList.contains("is-awaiting-result")).toBe(true);
+    raw().open = true; raw().dispatchEvent(new Event("toggle"));
+    const output = { data: { ok: true, message: "Saved 1 image", media: [{ kind: "image", path: "SystemSculpt/Images/Lighthouse.png" }] } };
+    await render(renderer, snapshot([{ ...running, state: "succeeded", output }]));
+    expect(raw().open).toBe(true);
+    expect(raw().classList.contains("is-awaiting-result")).toBe(false);
+    expect(JSON.parse(raw().querySelector("code")!.textContent!)).toEqual({ input: running.input, output: output.data });
     renderer.unload();
   });
 

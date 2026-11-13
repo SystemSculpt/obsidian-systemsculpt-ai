@@ -141,13 +141,14 @@ describe("presentAgentTool", () => {
   it("concentrates labels, state, and compact target summaries", () => {
     expect(presentAgentTool(part())).toMatchObject({
       canonicalName: "read",
-      label: "Reading Plan.md…",
+      label: "Reading Plan",
       actionIcon: "file-text",
       icon: "loader-circle",
       targetPath: "Projects/Plan.md",
       groupKind: "read",
       groupCount: 1,
-      summary: "Projects/Plan.md",
+      // The label names the note and the card shows its path: the row never repeats it as meta.
+      summary: null,
     });
   });
 
@@ -170,8 +171,8 @@ describe("presentAgentTool", () => {
     ["approval-required", "shield-question"],
     ["failed", "x"],
     ["denied", "ban"],
-    ["cancelled", "minus"],
-    ["outcome-unknown", "x"],
+    ["cancelled", "circle-stop"],
+    ["outcome-unknown", "circle-help"],
   ] as const)(
     "uses a static mark without visible state text for %s",
     (state, icon) => {
@@ -201,14 +202,30 @@ describe("presentAgentTool", () => {
     expect(presentAgentTool(part({ name: "write", input: { path: "Note.md" } })))
       .toMatchObject({
         canonicalName: "write",
-        label: "Creating Note.md…",
+        label: "Creating Note",
         actionIcon: "file-plus-2",
-        summary: "Note.md",
+        summary: null,
       });
     expect(presentAgentTool(part({ name: "future_tool" }))).toMatchObject({
       canonicalName: "future_tool",
       actionIcon: "wrench",
     });
+  });
+
+  it("says whether a finished write created, replaced or added to its note", () => {
+    const write = (created: boolean | undefined, ifExists?: string) => presentAgentTool(part({
+      name: "write", state: "succeeded",
+      input: { path: "Notes/Launch plan.md", content: "# Launch plan\n\n- Plant basil in week 2", ...(ifExists ? { ifExists } : {}) },
+      output: { data: { path: "Notes/Launch plan.md", success: true, ...(created === undefined ? {} : { created }) } },
+    }));
+    expect(write(true)).toMatchObject({ label: "Created Launch plan", meta: "+3", actionIcon: "file-plus-2", groupKind: "write" });
+    // A replace counts no added lines: its card shows the note's new text, not a diff.
+    const replaced = write(false);
+    expect(replaced).toMatchObject({ label: "Replaced Launch plan", actionIcon: "file-pen-line", groupKind: "replace" });
+    expect(replaced.meta).toBeUndefined();
+    expect(write(false, "append")).toMatchObject({ label: "Added to Launch plan", meta: "+3", groupKind: "edit" });
+    // A result that doesn't say (an older plugin's) keeps the create wording.
+    expect(write(undefined)).toMatchObject({ label: "Created Launch plan", meta: "+3" });
   });
 
   it("names context-tool rows by the actual pinning action", () => {
@@ -217,7 +234,7 @@ describe("presentAgentTool", () => {
       input: { action: "add", paths: ["Project.md"] },
     }))).toMatchObject({
       canonicalName: "context",
-      label: "Pinning files…",
+      label: "Pinning files",
       summary: "Project.md",
     });
     expect(presentAgentTool(part({
@@ -225,14 +242,14 @@ describe("presentAgentTool", () => {
       input: { action: "remove", paths: ["Project.md"] },
     }))).toMatchObject({
       canonicalName: "context",
-      label: "Unpinning files…",
+      label: "Unpinning files",
     });
     expect(presentAgentTool(part({
       name: "context",
       input: { paths: ["Project.md"] },
     }))).toMatchObject({
       canonicalName: "context",
-      label: "Managing pinned files…",
+      label: "Managing pinned files",
     });
   });
 
@@ -251,15 +268,41 @@ describe("presentAgentTool", () => {
     }))).toEqual([{ label: "Query", value: "Completed public query" }]);
   });
 
-  it("uses only the public result count for hosted web search", () => {
+  it("never counts a hosted web search's results, which its card cannot list", () => {
     const search = part({ name: "web_search", location: "server", state: "succeeded", input: {},
       output: { data: { query: "Public query", result_count: 3, matches: ["private"] } } });
-    expect(presentAgentToolDetails(search)).toEqual([{ label: "Query", value: "Public query" }, { label: "Results", value: "3" }]);
-    expect(presentAgentTool(search).meta).toBe("3 results");
-    for (const count of [-1, 1.5, "3", NaN, Infinity]) {
-      expect(presentAgentTool({ ...search, output: { data: { result_count: count, matches: ["private"] } } }).meta).toBeUndefined();
-    }
+    // Its sources reach the answer's Sources list, not the call: a row counts only results its card lists.
+    expect(presentAgentToolDetails(search)).toEqual([{ label: "Query", value: "Public query" }]);
+    expect(presentAgentTool(search).meta).toBeUndefined();
     expect(presentAgentTool({ ...search, name: "private_server_tool" }).meta).toBeUndefined();
+  });
+
+  it("counts a vault edit's or write's lines from the diff its card draws", () => {
+    const edit = part({ name: "edit", state: "succeeded",
+      input: { path: "Notes/Garden.md", edits: [{ oldText: "Tomatoes go in the south bed.", newText: "Tomatoes and basil go in the south bed." }] },
+      output: { data: { path: "Notes/Garden.md", success: true, appliedCount: 1, requestedCount: 1, skipped: [] } } });
+    expect(presentAgentTool(edit).meta).toBe("+1 \u22121");
+    const write = part({ name: "write", state: "succeeded",
+      input: { path: "Notes/Basil.md", content: "# Basil\n\nSow after the last frost.\nPinch the tips weekly." },
+      output: { data: { path: "Notes/Basil.md", success: true } } });
+    expect(presentAgentTool(write).meta).toBe("+4");
+    const multi = part({ name: "multi_edit", state: "succeeded",
+      input: { files: [
+        { path: "A.md", edits: [{ oldText: "a", newText: "b" }, { oldText: "c", newText: "c\nd" }] },
+        { path: "B.md", edits: [{ oldText: "x", newText: "y" }] },
+      ] },
+      output: { data: { results: [
+        { path: "A.md", success: true, appliedCount: 1, requestedCount: 2, skipped: [{ index: 0, reason: "Not found" }] },
+        { path: "B.md", success: false, error: "File not found" },
+      ] } } });
+    // Only what applied counts: A.md's second edit; the skipped edit and the failed note count nothing.
+    expect(presentAgentTool(multi).meta).toBe("+1");
+    // A regular expression isn't the text it changes; a write that may have kept the old note claims nothing.
+    expect(presentAgentTool({ ...edit, input: { path: "Notes/Garden.md", edits: [{ oldText: "a+", newText: "b", isRegex: true }] } }).meta).toBeUndefined();
+    expect(presentAgentTool({ ...write, input: { ...(write.input as object), ifExists: "skip" } }).meta).toBeUndefined();
+    for (const state of ["approval-required", "failed", "denied", "cancelled", "outcome-unknown"] as const) {
+      expect(presentAgentTool({ ...edit, state }).meta).toBeUndefined();
+    }
   });
 
   it("presents capped, known vault details without exposing file or edit content", () => {
@@ -354,7 +397,7 @@ describe("presentAgentTool", () => {
 
     expect(presentation).toMatchObject({
       canonicalName: "server_action",
-      label: "Running SystemSculpt action…",
+      label: "Running SystemSculpt action",
       actionIcon: "wand-sparkles",
       summary: null,
     });
@@ -366,7 +409,7 @@ describe("presentAgentTool", () => {
       location: "server",
       input: { paths: ["Private provider path"] },
     }))).toMatchObject({
-      label: "Running SystemSculpt action…",
+      label: "Running SystemSculpt action",
       summary: null,
     });
   });
@@ -379,25 +422,26 @@ describe("presentAgentTool", () => {
       approvalId: "server-approval",
     }))).toMatchObject({
       canonicalName: "server_action",
-      label: "Running SystemSculpt action…",
+      label: "Running SystemSculpt action",
       icon: "loader-circle",
     });
   });
 
-  it("summarizes canonical find, search, and open inputs", () => {
+  it("names find, search and open inputs in the label, never again as meta", () => {
     expect(presentAgentTool(part({ name: "find", input: { patterns: ["meeting", "notes"] } })).summary)
-      .toBe("meeting");
-    expect(presentAgentTool(part({ name: "search", input: { patterns: ["TODO"] } })).summary)
-      .toBe("TODO");
+      .toBeNull();
+    expect(presentAgentTool(part({ name: "search", input: { patterns: ["TODO"] } }))).toMatchObject({
+      label: "Searching “TODO”", summary: null, target: { text: "“TODO”" },
+    });
     expect(presentAgentTool(part({
       name: "open",
       input: { files: [{ path: "Research/Plan.md" }] },
-    })).summary).toBe("Research/Plan.md");
+    }))).toMatchObject({ summary: null, targetPath: "Research/Plan.md", target: { text: "Plan" } });
   });
 
   it("uses accurate singular and plural labels for safely countable tools", () => {
     expect(presentAgentTool(part({ state: "succeeded", input: { paths: ["One.md"] } })).label)
-      .toBe("Read One.md");
+      .toBe("Read One");
     expect(presentAgentTool(part({ state: "succeeded", input: { paths: ["One.md", "Two.md"] } })).label)
       .toBe("Read 2 notes");
     expect(presentAgentTool(part({
@@ -414,7 +458,7 @@ describe("presentAgentTool", () => {
       state: "succeeded",
       name: "find",
       input: { patterns: ["project", "meeting"] },
-    })).label).toBe("Searched 2 patterns");
+    })).label).toBe("Searched for 2 patterns");
     expect(presentAgentTool(part({
       state: "succeeded",
       name: "search",
@@ -424,15 +468,15 @@ describe("presentAgentTool", () => {
 
   it("uses explicit action failures, meaningful result metadata and from/to moves", () => {
     expect(presentAgentTool(part({ name: "edit", input: { path: "Notes/Plan.md" }, state: "failed" })))
-      .toMatchObject({ label: "Couldn't edit Plan.md", targetPath: "Notes/Plan.md" });
+      .toMatchObject({ label: "Couldn't edit Plan", targetPath: "Notes/Plan.md" });
     expect(presentAgentTool(part({ name: "search", input: { patterns: ["launch"] }, state: "succeeded", output: { data: { totalMatches: 7 } } })))
       .toMatchObject({ label: "Searched “launch”", meta: "7 results" });
     expect(presentAgentTool(part({ name: "move", input: { items: [{ source: "Notes/Plan.md", destination: "Archive/Plan.md" }] }, state: "succeeded" })).label)
-      .toBe("Moved Plan.md to Archive");
+      .toBe("Moved Plan to Archive");
     expect(presentAgentTool(part({ name: "move", input: { items: [{ source: "Notes/Plan.md", destination: "Plan.md" }] }, state: "succeeded" })).label)
-      .toBe("Moved Plan.md to the vault root");
+      .toBe("Moved Plan to the vault root");
     expect(presentAgentTool(part({ name: "move", input: { items: [{ source: "Notes/Plan.md", destination: "Archive/Old plan.md" }] }, state: "succeeded" })).label)
-      .toBe("Moved Plan.md → Archive/Old plan.md");
+      .toBe("Moved Plan → Archive/Old plan");
   });
 
   it("presents an item-level partial failure independently", () => {
@@ -490,10 +534,10 @@ describe("presentAgentTool", () => {
       expect(mixedPresentation).toMatchObject({
         displayState: "partial",
         summary: "1 completed, 1 failed",
-        icon: "x",
+        icon: "triangle-alert",
       });
-      expect(mixedFailure)
-        .toBe("Some requested items failed; successful items were kept.");
+      // The card lists each item with its own outcome, so no notice repeats it.
+      expect(mixedFailure).toBe("");
       expect(JSON.stringify({ mixedPresentation, mixedFailure }))
         .not.toContain(PRIVATE_FAILURE_SENTINEL);
 
@@ -515,7 +559,7 @@ describe("presentAgentTool", () => {
         summary: "0 completed, 2 failed",
         icon: "x",
       });
-      expect(failedCopy).toBe("This vault action could not be completed.");
+      expect(failedCopy).toBe("");
       expect(JSON.stringify({ failedPresentation, failedCopy }))
         .not.toContain(PRIVATE_FAILURE_SENTINEL);
     },
@@ -539,7 +583,7 @@ describe("presentAgentTool", () => {
 
     expect(presentation).toMatchObject({
       displayState: "partial",
-      icon: "x",
+      icon: "triangle-alert",
       summary: "1 completed, 1 failed",
     });
     expect(JSON.stringify(presentation)).not.toContain(PRIVATE_FAILURE_SENTINEL);
@@ -554,6 +598,7 @@ describe("tool line meta", () => {
     const meta = (name: string, input: unknown) => presentToolLineMeta(presentAgentTool(hosted(name, input)));
     expect(meta("search", { patterns: ["milestone"], paths: ["Notes"] })).toBeUndefined();
     expect(meta("read", { paths: ["Notes/A.md", "B.md"] })).toBeUndefined();
-    expect(meta("read", { paths: ["Research/One.md"] })).toBe("Research/One.md");
+    // The card shows the note's path; the row's label already names it.
+    expect(meta("read", { paths: ["Research/One.md"] })).toBeUndefined();
   });
 });

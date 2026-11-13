@@ -48,7 +48,8 @@
 
 .systemsculpt-agent-turn.is-user {
   align-self: flex-end;
-  max-width: 85%;
+  /* Room beside the bubble for its copy and edit buttons (below). */
+  max-width: min(85%, 100% - 2 * var(--ss-control-height) - 2 * var(--ss-space-1));
 }
 
 .systemsculpt-agent-turn.is-user.is-editing {
@@ -191,6 +192,17 @@
   margin-bottom: 0;
 }
 
+/* A live turn's first row stands on the line its finished fold will take (activity.css, is-settled),
+   so the row does not move when the turn ends. */
+.systemsculpt-agent-turn.is-assistant .systemsculpt-agent-turn-body > :is(
+  .systemsculpt-agent-part.is-tool,
+  .systemsculpt-agent-part.is-reasoning,
+  button.systemsculpt-agent-activity-overflow,
+  .systemsculpt-agent-tail-status
+):first-child {
+  margin-top: calc((var(--ss-text-base) * var(--ss-leading-relaxed) - var(--ss-control-height-sm)) / 2);
+}
+
 /* No one-word last lines in finished replies, or in text a later step already
  * follows; only the text still growing keeps plain wrap so read lines never reflow. */
 .systemsculpt-agent-part.is-text:not(.is-streaming) :is(p, li),
@@ -244,11 +256,31 @@
   opacity: 1;
 }
 
+/* An ask's copy and edit show beside its last line on hover, so they hold no empty row under it:
+   the answer starts one turn gap (20 px) under the ask. Touch keeps them on a row below. */
+.systemsculpt-agent-turn.is-user > .systemsculpt-agent-message-actions {
+  position: absolute;
+  inset-inline-end: 100%;
+  bottom: calc(var(--ss-space-3) + (var(--ss-text-base) * var(--ss-leading-relaxed) - var(--ss-control-height)) / 2);
+  margin-top: 0;
+  padding-inline-end: var(--ss-space-1);
+}
+
 /* Touch has no hover: the row stays visible and only its icons dim, so the
  * muted duration text keeps full text contrast (4.5:1) in both themes. */
 @media (pointer: coarse) {
   .systemsculpt-agent-message-actions {
     opacity: 1;
+  }
+
+  .systemsculpt-agent-turn.is-user {
+    max-width: 85%;
+  }
+
+  .systemsculpt-agent-turn.is-user > .systemsculpt-agent-message-actions {
+    position: static;
+    margin-top: var(--ss-space-1);
+    padding-inline-end: 0;
   }
 
   .systemsculpt-agent-message-actions .ss-button {
@@ -279,7 +311,8 @@
   font-size: var(--ss-text-base);
 }
 
-.systemsculpt-agent-turn-changes a { color: var(--ss-ink-muted); }
+/* Links keep the one link colour everywhere in the chat; the caption around them stays muted. */
+.systemsculpt-agent-turn-changes a { color: var(--ss-ink-accent); }
 
 /* Images and videos a SystemSculpt tool saved this turn. */
 /* An image the reply embeds itself sits at the same size as generated media. */
@@ -291,6 +324,62 @@
   max-height: 28rem;
   border: 1px solid var(--ss-line);
   border-radius: var(--ss-radius-md);
+}
+
+/* A video the reply embeds wears the same frame as an embedded or generated picture. Players
+   sit as blocks, so no text descender gap opens under them and every name sits as close. */
+.systemsculpt-agent-part.is-text .internal-embed :is(video, audio) {
+  display: block;
+  max-width: 100%;
+}
+
+.systemsculpt-agent-part.is-text .internal-embed.video-embed video {
+  max-height: 28rem;
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-md);
+  background: var(--ss-surface-sunken);
+}
+
+/* Media written after text in its paragraph ("A picture: ![[x.png]]") starts a paragraph's
+   space below that text, as media in a paragraph of its own does (see MarkdownEmbeds). */
+.systemsculpt-agent-part.is-text p > .internal-embed.is-after-text {
+  display: block;
+  margin-top: var(--ss-space-4);
+}
+
+/* A picture, PDF or player sits 16px under the line above it, the gap a fold's card and a failure
+   row keep under their text, wherever the reply writes it. */
+.systemsculpt-agent-part.is-text p.ss-media-paragraph:not(:first-child) {
+  margin-top: var(--ss-space-4);
+}
+
+/* The Sources a web answer appends are its footnote: a small muted label right over its links,
+   a little apart from the answer, never louder than it. */
+.systemsculpt-agent-part.is-text.is-sources {
+  margin-top: var(--ss-space-2);
+  font-size: var(--ss-text-sm);
+}
+
+.systemsculpt-agent-part.is-text.is-sources > :is(h1, h2, h3, h4, h5, h6):first-child {
+  margin: 0 0 var(--ss-space-1);
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-sm);
+  font-weight: var(--ss-weight-semibold);
+  line-height: 20px;
+}
+
+.systemsculpt-agent-part.is-text.is-sources > ul {
+  margin-top: 0;
+}
+
+/* A wikilink to a note that doesn't exist yet is dimmed, as Obsidian draws it: a click creates it. */
+.systemsculpt-agent-part.is-text a.internal-link.is-unresolved {
+  color: var(--ss-ink-muted);
+  text-decoration-color: color-mix(in srgb, var(--ss-ink-muted) 50%, transparent);
+}
+
+.systemsculpt-agent-part.is-text a.internal-link.is-unresolved:hover {
+  color: var(--ss-ink);
 }
 
 .systemsculpt-agent-turn-media {
@@ -356,7 +445,9 @@ video.systemsculpt-agent-media-frame {
 }
 
 .systemsculpt-agent-media-caption {
-  /* Follows the frame's width instead of widening it; a long name ends in an ellipsis on one line. */
+  /* Follows the frame's width instead of widening it; a long name ends in an ellipsis on one line.
+     Its line is never squeezed by a taller frame above it. */
+  flex-shrink: 0;
   width: 0;
   min-width: 100%;
   overflow: hidden;
@@ -395,6 +486,11 @@ video.systemsculpt-agent-media-frame {
   font-size: var(--ss-text-base);
 }
 
+/* Gate lines with no picture are text: they sit a text line's gap under the row, not a picture's. */
+.systemsculpt-agent-turn-media.is-text-only {
+  margin-top: 0;
+}
+
 /* A generation and its result share one frame at the requested shape, so the
    image or video lands in place (T-5955). TS writes --ss-media-ratio (width
    over height) and --ss-media-progress (0-1, only with a server estimate). */
@@ -418,9 +514,13 @@ video.systemsculpt-agent-media-frame {
   object-fit: cover;
 }
 
+/* The player's border sits inside its shape, as the tile's does, so the file lands in the tile's exact
+   box: its own picture size never makes it taller (min-height), so the name under it stays put. */
 .systemsculpt-agent-media.has-ratio video.systemsculpt-agent-media-frame {
+  box-sizing: border-box;
   height: auto;
-  object-fit: contain;
+  min-height: 0;
+  object-fit: cover;
 }
 
 /* An asked-for shape holds even if the file comes back another one: shown whole, never cropped. */
@@ -473,7 +573,7 @@ video.systemsculpt-agent-media-frame {
   background: linear-gradient(
     100deg,
     transparent 20%,
-    color-mix(in srgb, var(--ss-accent) 10%, transparent) 50%,
+    color-mix(in srgb, var(--ss-ink) 5%, transparent) 50%,
     transparent 80%
   );
   animation: ss-shimmer calc(var(--ss-dur-slow) * 7) var(--ss-ease) infinite;
@@ -514,9 +614,11 @@ video.systemsculpt-agent-media-frame {
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: var(--ss-space-0);
+  gap: 0;
   min-width: 0;
-  padding: var(--ss-space-3) var(--ss-space-3) calc(var(--ss-space-3) + var(--ss-space-1));
+  /* The label block sits as far from the frame's bottom edge as from its left: the
+     bottom inset is short by the text's own space under its baseline. */
+  padding: var(--ss-space-3) var(--ss-space-3) var(--ss-space-2);
   font-family: var(--font-interface);
 }
 
@@ -531,12 +633,14 @@ video.systemsculpt-agent-media-frame {
   color: var(--ss-ink);
   font-size: var(--ss-text-sm);
   font-weight: var(--ss-weight-medium);
+  line-height: 18px;
 }
 
 .ss-media-pending-meta {
   color: var(--ss-ink-muted);
   font-size: var(--ss-text-xs);
   font-variant-numeric: tabular-nums;
+  line-height: 16px;
 }
 
 /* Thin progress line on the frame's bottom edge: the server's usual time
@@ -580,6 +684,12 @@ video.systemsculpt-agent-media-frame {
   white-space: nowrap;
 }
 
+/* A one-line prompt ends on a whole word: each word is one box, hidden whole when it doesn't fit. */
+.systemsculpt-agent-media-caption.is-words > span {
+  display: inline-block;
+  white-space: pre;
+}
+
 /* The failure keeps the frame; the reason is the headline. */
 .systemsculpt-agent-media.is-failed .ss-media-pending-frame {
   justify-content: center;
@@ -600,14 +710,52 @@ video.systemsculpt-agent-media-frame {
   padding: var(--ss-space-2) var(--ss-space-4) var(--ss-space-3);
 }
 
+/* The reason is read, not shouted: regular and muted, so the answer under it stays the loudest line. */
 .systemsculpt-agent-media.is-failed .ss-media-pending-label {
   max-width: 100%;
+  color: var(--ss-ink-muted);
+  font-weight: 400;
+  white-space: normal;
+  text-wrap: balance;
 }
 
 .systemsculpt-agent-media.is-failed[data-kind="workflow"] .ss-media-pending-label {
   text-align: start;
   white-space: normal;
   overflow-wrap: anywhere;
+}
+
+/* A lone failure holds no place for a file that will not come: one slim row, as a
+   failed Studio run. A failure beside other tiles keeps its frame, so the grid lines up. */
+.systemsculpt-agent-media.is-failed:only-child {
+  grid-column: 1 / -1;
+  width: 100%;
+}
+
+.systemsculpt-agent-media.is-failed:only-child .ss-media-pending-frame {
+  flex-direction: row;
+  justify-content: flex-start;
+  align-items: center;
+  gap: var(--ss-space-3);
+  padding-left: var(--ss-space-3);
+  aspect-ratio: auto;
+  text-align: start;
+}
+
+.systemsculpt-agent-media.is-failed:only-child .ss-media-pending-icon svg {
+  width: var(--ss-space-5);
+  height: var(--ss-space-5);
+}
+
+.systemsculpt-agent-media.is-failed:only-child .ss-media-pending-status {
+  flex: 1;
+  align-items: flex-start;
+  padding: var(--ss-space-3) var(--ss-space-3) var(--ss-space-3) 0;
+}
+
+.systemsculpt-agent-media.is-failed:only-child .ss-media-pending-label {
+  text-align: start;
+  text-wrap: pretty;
 }
 
 /* A Studio run has no known shape: one slim row across the grid. */
@@ -697,13 +845,13 @@ video.systemsculpt-agent-media-frame {
   cursor: zoom-in;
 }
 .systemsculpt-agent-conversation a.ss-embed-source {
-  display: flex;
-  align-items: center;
-  gap: var(--ss-space-1);
+  /* Reads as a generated picture's caption: the name alone, in the interface font. */
+  display: block;
   width: fit-content;
   max-width: 100%;
   margin: var(--ss-space-1) 0 var(--ss-space-2);
   color: var(--ss-ink-muted);
+  font-family: var(--font-interface);
   font-size: var(--ss-text-xs);
   text-decoration: none;
   overflow-wrap: anywhere;
@@ -718,21 +866,28 @@ video.systemsculpt-agent-media-frame {
   outline-offset: 2px;
   border-radius: var(--ss-radius-xs);
 }
-.ss-embed-source-icon {
-  display: inline-flex;
-  flex: none;
-}
-.ss-embed-source-icon svg {
-  width: 12px;
-  height: 12px;
-}
 
 /* Obsidian's PDF viewer keeps a 350px minimum; in a phone-width answer that
    clips the page's right edge. The page fits the answer instead. */
 .systemsculpt-agent-conversation .pdf-embed :is(.pdf-container, .pdf-content-container) {
   min-width: 0;
 }
+/* Obsidian sizes an embedded PDF to its whole first page. A reply's PDF is as wide as a
+   picture beside it, so that first page shows whole, edges included, at every width; later
+   pages scroll inside it, as in a note. */
+.systemsculpt-agent-conversation .internal-embed.pdf-embed {
+  max-width: 28rem;
+  /* The same corners as the picture, video and audio around it. */
+  border-radius: var(--ss-radius-md);
+  overflow: hidden;
+}
 .systemsculpt-agent-conversation .pdf-embed .pdf-toolbar {
   /* The viewer's column would otherwise squeeze the toolbar and cut its icons. */
   flex-shrink: 0;
+}
+/* A page sidebar has no room in a picture-wide frame, and its two buttons would push the
+   toolbar's own menu out of it on a phone. The name beneath opens the PDF in the vault
+   (MarkdownEmbeds marks them). */
+.systemsculpt-agent-conversation .pdf-toolbar-left > .ss-pdf-sidebar-control {
+  display: none;
 }

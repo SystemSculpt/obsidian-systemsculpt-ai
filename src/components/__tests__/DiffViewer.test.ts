@@ -26,6 +26,18 @@ describe("DiffViewer", () => {
       .toEqual(["−", "+"]);
   });
 
+  it("marks how far each line is indented, so a wrapped line hangs past its own start", () => {
+    const host = document.body.createDiv();
+    new DiffViewer({
+      container: host,
+      diffResult: parseUnifiedDiff("@@ -1,2 +1,2 @@\n-a\n+    indented line\n plain")!,
+      fileName: "Plan.md",
+      hideHeader: true,
+    }).render();
+    const contents = host.querySelectorAll<HTMLElement>('[data-testid="chat.diff.content"]');
+    expect(Array.from(contents, (content) => content.style.getPropertyValue("--ss-diff-indent"))).toEqual(["", "4", ""]);
+  });
+
   it("sizes every number column in a hunk to its longest number", () => {
     const host = document.body.createDiv();
     new DiffViewer({
@@ -58,7 +70,7 @@ describe("DiffViewer", () => {
     new DiffViewer({ container: host, diffResult: diff, fileName: "Plan.md", maxVisibleLines: 12 }).render();
     expect(host.querySelectorAll(".systemsculpt-diff-line")).toHaveLength(12);
     const showAll = host.querySelector<HTMLButtonElement>('[data-testid="chat.diff.show-all"]')!;
-    expect(showAll.textContent).toBe("Show full diff (31 lines)");
+    expect(showAll.textContent).toBe("Show all 31 lines");
     expect(showAll.getAttribute("aria-expanded")).toBe("false");
     expect(document.getElementById(showAll.getAttribute("aria-controls")!)).not.toBeNull();
     showAll.focus();
@@ -82,7 +94,10 @@ describe("DiffViewer", () => {
     expect(host.querySelectorAll(".systemsculpt-diff-hunk")).toHaveLength(1);
     host.querySelector<HTMLButtonElement>("button")!.click();
     expect(host.querySelectorAll(".systemsculpt-diff-hunk")).toHaveLength(2);
-    expect(host.textContent).toContain("-100 +100");
+    expect(Array.from(host.querySelectorAll(".systemsculpt-diff-line-content"), line => line.textContent)).toEqual(["a", "b", "c", "d"]);
+    // Separate hunks stay apart; the patch range shows only with line numbers.
+    expect(host.querySelectorAll(".systemsculpt-diff-hunk-separated")).toHaveLength(1);
+    expect(host.querySelector(".systemsculpt-diff-hunk-header")).toBeNull();
   });
 
   it("keeps a short preview completely visible without a redundant disclosure", () => {

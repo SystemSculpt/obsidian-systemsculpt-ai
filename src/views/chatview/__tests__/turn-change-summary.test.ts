@@ -17,10 +17,21 @@ describe("turn change receipts", () => {
       part("trash", { paths: ["Discard.md"] }),
       part("read", { paths: ["Reference.md"] }),
     ])).toEqual([
-      { path: "Notes/Plan.md", label: "Plan.md" },
-      { path: "New.md", label: "New.md", meta: "new" },
-      { path: "Archive/Old.md", label: "Moved Old.md → Archive/Old.md" },
-      { path: "Discard.md", label: "Deleted Discard.md", meta: "in trash", deleted: true },
+      { path: "Notes/Plan.md", label: "Plan" },
+      { path: "New.md", label: "New", meta: "new" },
+      { path: "Archive/Old.md", label: "Moved Old to Archive" },
+      { path: "Discard.md", label: "Discard", meta: "in trash", deleted: true },
+    ]);
+  });
+
+  it("names a replaced note as replaced, and keeps that through a later edit", () => {
+    expect(presentTurnChanges([
+      part("write", { path: "Notes/Launch plan.md", content: "# Launch plan" }, { output: { data: { created: false } } }),
+      part("edit", { path: "Notes/Launch plan.md", edits: [{ oldText: "# Launch plan", newText: "# Launch" }] }, { callId: "edit" }),
+      part("write", { path: "Log.md", content: "- watered", ifExists: "append" }, { callId: "append", output: { data: { created: false } } }),
+    ])).toEqual([
+      { path: "Notes/Launch plan.md", label: "Launch\u00a0plan", meta: "replaced" },
+      { path: "Log.md", label: "Log", meta: "+1" },
     ]);
   });
 
@@ -45,8 +56,8 @@ describe("turn change receipts", () => {
         output: { data: { results: [{ source: "Other.md", destination: "Archive/Other.md", success: true }] } },
       }),
     ])).toEqual([
-      { path: "Good.md", label: "Good.md" },
-      { path: "Archive/Other.md", label: "Moved Other.md → Archive/Other.md" },
+      { path: "Good.md", label: "Good" },
+      { path: "Archive/Other.md", label: "Moved Other to Archive" },
     ]);
   });
 
@@ -59,8 +70,8 @@ describe("turn change receipts", () => {
       ] } },
     });
     expect(presentTurnChanges([trashed, part("write", { path: "Restored.md" }, { output: { data: { created: true } } })])).toEqual([
-      { path: "Gone.md", label: "Deleted Gone.md", meta: "in trash", deleted: true },
-      { path: "Restored.md", label: "Restored.md", meta: "new" },
+      { path: "Gone.md", label: "Gone", meta: "in trash", deleted: true },
+      { path: "Restored.md", label: "Restored", meta: "new" },
     ]);
   });
 
@@ -73,7 +84,7 @@ describe("turn change receipts", () => {
       part("write", { path: "/provider/private.md" }, { location: "server" }),
     ])).toEqual([]);
     expect(presentTurnChanges([part("Edit", { file_path: "/vault/Notes/Plan.md" }, claude)]))
-      .toEqual([{ path: "Notes/Plan.md", label: "Plan.md" }]);
+      .toEqual([{ path: "Notes/Plan.md", label: "Plan" }]);
   });
 
   it("uses native add/delete/move semantics and parsed diff counts", () => {
@@ -83,10 +94,48 @@ describe("turn change receipts", () => {
       { path: "Gone.md", kind: "delete" },
       { path: "Old.md", kind: { type: "update", move_path: "/vault/Archive/Old.md" } },
     ] }, codex)])).toEqual([
-      { path: "Notes/Plan.md", label: "Plan.md", meta: "+1 −1" },
-      { path: "New.md", label: "New.md", meta: "new" },
-      { path: "Gone.md", label: "Deleted Gone.md", deleted: true },
-      { path: "Archive/Old.md", label: "Moved Old.md → Archive/Old.md" },
+      { path: "Notes/Plan.md", label: "Plan", meta: "+1 −1" },
+      { path: "New.md", label: "New", meta: "new" },
+      { path: "Gone.md", label: "Gone", meta: "deleted", deleted: true },
+      { path: "Archive/Old.md", label: "Moved Old to Archive" },
+    ]);
+  });
+
+  it("names notes as Obsidian does, keeps a short name whole and drops a zero count", () => {
+    expect(presentTurnChanges([
+      part("edit", { path: "Notes/Launch plan.md" }),
+      part("fileChange", { changes: [{ path: "Notes/Basil.md", kind: "update", diff: "@@ -1 +1,2 @@\n basil\n+water\n" }] }, codex),
+      part("move", { items: [{ source: "Notes/Old.md", destination: "Archive/Older.md" }] }),
+    ])).toEqual([
+      { path: "Notes/Launch plan.md", label: "Launch\u00a0plan" },
+      { path: "Notes/Basil.md", label: "Basil", meta: "+1" },
+      { path: "Archive/Older.md", label: "Moved Old → Archive/Older" },
+    ]);
+  });
+
+  it("adds up the counts of a note changed twice and drops a count it cannot know", () => {
+    const change = (diff: string) => part("fileChange", { changes: [{ path: "Notes/Plan.md", kind: "update", diff }] }, codex);
+    expect(presentTurnChanges([change("@@ -1 +1 @@\n-old\n+new\n"), change("@@ -1 +1,2 @@\n new\n+more\n")]))
+      .toEqual([{ path: "Notes/Plan.md", label: "Plan", meta: "+2 −1" }]);
+    expect(presentTurnChanges([part("edit", { path: "Notes/Plan.md" }), change("@@ -1 +1,2 @@\n new\n+more\n")]))
+      .toEqual([{ path: "Notes/Plan.md", label: "Plan" }]);
+  });
+
+  it("counts each note as its rows do, a note changed twice added up", () => {
+    expect(presentTurnChanges([
+      part("edit", { path: "Notes/Garden.md", edits: [{ oldText: "Tomatoes go in the south bed.", newText: "Tomatoes and basil go in the south bed." }] },
+        { output: { data: { path: "Notes/Garden.md", success: true, appliedCount: 1, requestedCount: 1, skipped: [] } } }),
+      part("write", { path: "Notes/Basil.md", content: "# Basil\n\nSow after the last frost.\nPinch the tips weekly." }, { output: { data: { path: "Notes/Basil.md", success: true } } }),
+      part("Edit", { file_path: "/vault/Notes/Launch plan.md", old_string: "# Launch", new_string: "# Launch\n\nPlant basil in week 2." }, claude),
+      part("fileChange", { changes: [{ path: "/vault/Notes/Garden.md", kind: { type: "update" }, diff: "@@ -1,3 +1,4 @@\n # Garden plan\n \n Tomatoes and basil go in the south bed.\n+Water every other morning.\n" }] }, codex),
+      part("multi_edit", { files: [{ path: "A.md", edits: [{ oldText: "a", newText: "b" }] }, { path: "B.md", edits: [{ oldText: "c", newText: "c\nd" }] }] },
+        { output: { data: { results: [{ path: "A.md", success: true }, { path: "B.md", success: true }] } } }),
+    ])).toEqual([
+      { path: "Notes/Garden.md", label: "Garden", meta: "+2 −1" },
+      { path: "Notes/Basil.md", label: "Basil", meta: "+4" },
+      { path: "Notes/Launch plan.md", label: "Launch\u00a0plan", meta: "+2" },
+      { path: "A.md", label: "A", meta: "+1 −1" },
+      { path: "B.md", label: "B", meta: "+1" },
     ]);
   });
 
@@ -98,9 +147,9 @@ describe("turn change receipts", () => {
       part("fileChange", { changes: [{ path: "Old.md", kind: { type: "update", move_path: "../Archive/Old.md" } }] },
         { native: { ...native, agent: "codex" } }),
     ])).toEqual([
-      { path: "Notes/Plan.md", label: "Plan.md" },
-      { path: "Ideas.md", label: "Ideas.md", meta: "written" },
-      { path: "Archive/Old.md", label: "Moved Old.md → Archive/Old.md" },
+      { path: "Notes/Plan.md", label: "Plan" },
+      { path: "Ideas.md", label: "Ideas", meta: "written" },
+      { path: "Archive/Old.md", label: "Moved Old to Archive" },
     ]);
   });
 });

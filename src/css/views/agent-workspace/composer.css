@@ -19,8 +19,9 @@
   );
 }
 
-/* "Approval needed · Review": shown above the card while the person types
- * and a card waits (the approval cards own when). */
+/* "Approval needed · Review" ("Answer needed" for questions): shown above the
+ * composer while a waiting card is out of view and the person types or is
+ * elsewhere (the approval cards own when). */
 .ss-surface .ss-button.systemsculpt-agent-approval-review {
   align-self: flex-start;
   gap: var(--ss-space-1);
@@ -37,16 +38,7 @@
   color: var(--ss-warning);
 }
 
-.systemsculpt-agent-approval-review-key {
-  color: var(--ss-ink-muted);
-  font-size: var(--ss-text-xs);
-}
-
-@media (pointer: coarse) {
-  .systemsculpt-agent-approval-review-key {
-    display: none;
-  }
-}
+/* Its key hint shares the cards' one hint style and narrow/touch rule (approval.css). */
 
 /* The composer card: chips, the message box, and its toolbar. */
 .systemsculpt-agent-prompt {
@@ -329,7 +321,8 @@
   }
 
   .systemsculpt-agent-composer,
-  .systemsculpt-agent-queue {
+  .systemsculpt-agent-queue,
+  .systemsculpt-agent-credits-offer {
     padding-right: var(--ss-space-3);
     padding-left: var(--ss-space-3);
   }

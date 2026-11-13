@@ -83,11 +83,13 @@ const textPairs = [
 ];
 
 describe("ChatView text contrast (WCAG AA, default Obsidian themes)", () => {
-  test("open tool and reasoning disclosures rotate their right chevrons downward", () => {
+  test("open tool and reasoning disclosures rotate their right chevrons downward, ink still on the edge", () => {
+    // Pointing down, the ink is 3/24 of the box wider each side; the shift keeps its right end in place.
+    const downOnEdge = /transform:\s*translateX\(calc\(var\(--ss-icon-size-sm\) \* -3 \/ 24\)\) rotate\(90deg\)/;
     expect(rule(readCss("views/agent-workspace/tools.css"), ".systemsculpt-agent-conversation .systemsculpt-agent-tool.is-disclosure[open] > .systemsculpt-agent-tool-header .systemsculpt-agent-tool-disclosure"))
-      .toMatch(/transform:\s*rotate\(90deg\)/);
+      .toMatch(downOnEdge);
     expect(rule(readCss("views/agent-workspace/reasoning.css"), ".systemsculpt-agent-reasoning-details[open] .systemsculpt-agent-reasoning-disclosure"))
-      .toMatch(/transform:\s*rotate\(90deg\)/);
+      .toMatch(downOnEdge);
   });
 
   test("lone activity rows share the turn-summary gutter", () => {
@@ -96,8 +98,10 @@ describe("ChatView text contrast (WCAG AA, default Obsidian themes)", () => {
       ["tools", ".systemsculpt-agent-conversation .systemsculpt-agent-tool-header"],
       ["reasoning", ".systemsculpt-agent-reasoning-header"],
     ]) {
+      // The hover pill bleeds 4px past the column, so every icon sits on the column edge.
       const header = rule(readCss(`views/agent-workspace/${sheet}.css`), selector);
-      expect(header).toMatch(/gap:\s*var\(--ss-space-1\)/);
+      expect(header).toMatch(/gap:\s*var\(--ss-space-2\)/);
+      expect(header).toMatch(/margin-inline:\s*calc\(-1 \* var\(--ss-space-1\)\)/);
       expect(header).toMatch(/padding:\s*0 var\(--ss-space-1\)/);
     }
   });
@@ -105,16 +109,36 @@ describe("ChatView text contrast (WCAG AA, default Obsidian themes)", () => {
   test("grouped activity does not override the shared icon gutters", () => {
     const override = readCss("views/agent-workspace/activity.css")
       .match(/button\.systemsculpt-agent-activity-overflow-header\s*\{[^}]+\}/g)?.pop();
-    expect(override).toMatch(/gap:\s*var\(--ss-space-1\)/);
+    expect(override).not.toMatch(/(?:^|[\s;])gap:/);
+    expect(override).not.toMatch(/margin/);
     expect(override).toMatch(/padding:\s*0 var\(--ss-space-1\)/);
   });
 
-  test("replayed edit diff prefixes have an inset when no number gutter precedes them", () => {
+  test("diff markers start on the 12 px inset every card code box uses, without a number gutter", () => {
+    const css = readCss("components/diff-viewer.css");
+    expect(rule(css, ".systemsculpt-diff-viewer")).toMatch(/--ss-diff-inset:\s*var\(--ss-space-3\)/);
+    expect(rule(css, ".systemsculpt-diff-line")).toMatch(/padding-inline:\s*var\(--ss-diff-inset\)/);
+    expect(readCss("views/agent-workspace/tools.css")).not.toMatch(/systemsculpt-diff-prefix:first-child/);
+  });
+
+  test("a wrapped diff line hangs two characters past its own start, so its tail never reads as a line", () => {
+    const css = readCss("components/diff-viewer.css");
+    const narrow = css.slice(css.indexOf("@container ss-surface (max-width: 600px)"));
+    const content = rule(narrow, ".systemsculpt-diff-line-content");
+    expect(content).toMatch(/white-space:\s*pre-wrap/);
+    expect(content).toMatch(/padding-inline-start:\s*calc\(\(var\(--ss-diff-indent\) \+ 2\) \* 1ch\)/);
+    expect(content).toMatch(/text-indent:\s*calc\(\(var\(--ss-diff-indent\) \+ 2\) \* -1ch\)/);
+  });
+
+  test("a pending result's sheen crosses only its bars, never the empty line beside them", () => {
     const css = readCss("views/agent-workspace/tools.css");
-    for (const preview of ["native", "hosted"]) {
-      expect(rule(css, `.ss-${preview}-tool-preview .systemsculpt-diff-prefix:first-child`))
-        .toMatch(/margin-inline-start:\s*var\(--ss-space-2\)/);
+    for (const pending of [".ss-tool-terminal-pending", ".ss-json-pending"]) {
+      expect(rule(css, `${pending} > span`)).toMatch(/clip-path:\s*inset\(var\(--ss-pending-pad\) calc\(100% - var\(--ss-pending-bar\)\) var\(--ss-pending-pad\) 0 round var\(--ss-radius-full\)\)/);
+      const sheen = rule(css, `${pending} > span::after`);
+      expect(sheen).toMatch(/position:\s*absolute/);
+      expect(sheen).toMatch(/animation:\s*ss-shimmer/);
     }
+    expect(css).not.toMatch(/\.ss-(?:tool-terminal|json)-pending::after/);
   });
 
   test("raw tool Details wraps long values instead of clipping paths", () => {
@@ -258,8 +282,15 @@ describe("ChatView narrow run-line readability", () => {
 
 describe("ChatView error typography", () => {
   test("rebalances narrow error text without single-word ending lines", () => {
-    expect(rule(readCss("views/agent-workspace/tools.css"), ".systemsculpt-agent-error-message"))
+    expect(rule(readCss("views/agent-workspace/turn-errors.css"), ".systemsculpt-agent-error-message"))
       .toMatch(/text-wrap:\s*pretty/);
+  });
+});
+
+describe("ChatView Details wrapping", () => {
+  test("fills each JSON line before wrapping, never pulling a fitting word down", () => {
+    const tools = readCss("views/agent-workspace/tools.css").replace(/\/\*[\s\S]*?\*\//g, "");
+    expect(rule(tools, ".ss-json-line")).toMatch(/text-wrap:\s*wrap;/);
   });
 });
 
@@ -267,20 +298,35 @@ describe("ChatView activity alignment", () => {
   test("keeps live, restored and tail-status labels on the same columns", () => {
     const activity = readCss("views/agent-workspace/activity.css");
     const tools = readCss("views/agent-workspace/tools.css");
+    const reasoning = readCss("views/agent-workspace/reasoning.css");
+    // Hoverable rows bleed their pill 4px past the column; the tail status has no pill.
     for (const [css, selector] of [
       [activity, "summary.systemsculpt-agent-activity-header"],
-      [activity, ".systemsculpt-agent-tail-status"],
       [tools, ".systemsculpt-agent-conversation .systemsculpt-agent-tool-header"],
+      [reasoning, ".systemsculpt-agent-reasoning-header"],
     ]) {
       const header = rule(css, selector);
-      expect(header).toMatch(/gap:\s*var\(--ss-space-1\)/);
+      expect(header).toMatch(/gap:\s*var\(--ss-space-2\)/);
+      expect(header).toMatch(/margin-inline:\s*calc\(-1 \* var\(--ss-space-1\)\)/);
       expect(header).toMatch(/padding:\s*0 var\(--ss-space-1\)/);
     }
-    expect(rule(activity, ".systemsculpt-agent-tail-status-icon")).toMatch(/width:\s*20px/);
-    expect(rule(tools, ".systemsculpt-agent-conversation .systemsculpt-agent-tool-icon"))
-      .toMatch(/width:\s*20px/);
-    expect(rule(activity, ".systemsculpt-agent-activity-body"))
-      .toMatch(/padding:\s*var\(--ss-space-0\) 0 var\(--ss-space-1\)/);
+    const tail = rule(activity, ".systemsculpt-agent-tail-status");
+    expect(tail).toMatch(/gap:\s*var\(--ss-space-2\)/);
+    expect(tail).toMatch(/padding:\s*0;/);
+    // Same icon box everywhere, so every label starts on one column (14px icon + 8px gap).
+    for (const [css, selector] of [
+      [activity, ".systemsculpt-agent-tail-status-icon"],
+      [activity, ".systemsculpt-agent-activity-overflow-icon"],
+      [tools, ".systemsculpt-agent-conversation .systemsculpt-agent-tool-icon"],
+      [reasoning, ".systemsculpt-agent-reasoning-icon"],
+    ]) {
+      expect(rule(css, selector)).toMatch(/width:\s*var\(--ss-icon-size-sm\)/);
+    }
+    // A fold's rows hang from its label column, under a hairline at its icon's centre.
+    const body = rule(activity, ".systemsculpt-agent-activity-body");
+    expect(body).toMatch(/margin:\s*var\(--ss-space-0\) 0 var\(--ss-space-1\) calc\(var\(--ss-icon-size-sm\) \/ 2 - 0\.5px\)/);
+    expect(body).toMatch(/padding:\s*0 0 0 calc\(var\(--ss-icon-size-sm\) \/ 2 \+ var\(--ss-space-2\) - 0\.5px\)/);
+    expect(body).toMatch(/border-left:\s*1px solid/);
   });
 
   test("start-aligns Provider values and keeps detection in the provider grid", () => {
@@ -314,7 +360,7 @@ describe("ChatView activity alignment", () => {
 describe("ChatView touch input and disclosure targets", () => {
   test.each([
     ["views/agent-workspace/composer.css", ".systemsculpt-agent-prompt > .systemsculpt-agent-prompt-input"],
-    ["views/agent-workspace/tools.css", ".systemsculpt-agent-approval-details > summary"],
+    ["views/agent-workspace/approval.css", ".systemsculpt-agent-approval-details > summary"],
   ])("%s gives %s a full touch target without changing fine-pointer sizing", (path, selector) => {
     const css = readCss(path);
     const coarse = [...css.matchAll(/@media \(pointer: coarse\)\s*\{((?:[^{}]|\{[^{}]*\})*)\}/g)]

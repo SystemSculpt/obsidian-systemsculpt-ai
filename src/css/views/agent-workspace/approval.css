@@ -1,0 +1,393 @@
+/**
+ * Approval cards: a file write, a command, a question or a plan waiting for the person,
+ * and the shortcut hints they share with the composer's Review pill.
+ */
+/* The whole outline carries the waiting state, as the Review pill's does: no stripe to
+ * bend at the rounded corners, and the same inset on both sides. */
+.systemsculpt-agent-approval {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ss-space-2);
+  margin-block: var(--ss-space-2);
+  padding: var(--ss-space-3);
+  border: 1px solid var(--ss-warning-line);
+  border-radius: var(--ss-radius-md);
+  background: var(--ss-surface-1);
+  color: var(--ss-ink);
+}
+/* A card that opens the turn stands where a notice or a whole-turn card would: one turn gap
+   under the ask, with no card margin or row centring above it. After a notice it keeps the
+   16 px a framed block keeps under another. */
+.systemsculpt-agent-turn.is-assistant .systemsculpt-agent-turn-body > .systemsculpt-agent-part.is-tool.is-approval-required:first-child,
+.systemsculpt-agent-turn-body > .systemsculpt-agent-part.is-approval-required:first-child > .systemsculpt-agent-approval {
+  margin-top: 0;
+}
+.systemsculpt-agent-notice + .systemsculpt-agent-active-run .systemsculpt-agent-turn.is-assistant .systemsculpt-agent-turn-body > .systemsculpt-agent-part.is-tool.is-approval-required:first-child {
+  margin-top: var(--ss-space-2);
+}
+.systemsculpt-agent-approval:focus-within {
+  border-color: var(--ss-line-accent);
+  box-shadow: var(--ss-ring);
+}
+.systemsculpt-agent-approval button:focus-visible,
+.systemsculpt-agent-approval input:focus-visible,
+.systemsculpt-agent-approval a:focus-visible,
+.systemsculpt-agent-approval summary:focus-visible {
+  outline: none;
+  box-shadow: var(--ss-ring);
+}
+/* The subtitle belongs to its title: close under it. The panel follows it as it follows a
+ * lone title, so every card has one gap from its header to its panel: the smaller line has
+ * less room under its baseline, and half the size difference makes that up. */
+.systemsculpt-agent-approval-meta {
+  margin-block: calc(var(--ss-space-0) - var(--ss-space-2)) calc((var(--ss-text-base) - var(--ss-text-xs)) / 2);
+  margin-inline-start: 22px;
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
+  overflow-wrap: anywhere;
+}
+.systemsculpt-agent-approval-meta > span + span::before {
+  content: " · ";
+}
+/* One link style in every card, as tools.css sets it: the title's note and the plan's links
+ * are accent and underlined, and a link that leaves Obsidian keeps its ↗ mark. */
+.systemsculpt-agent-approval a:is(.internal-link, .external-link) {
+  color: var(--ss-ink-accent);
+  font-weight: inherit;
+  text-decoration-line: underline;
+  text-underline-offset: 2px;
+}
+.systemsculpt-agent-approval a:is(.internal-link, .external-link):hover {
+  color: var(--ss-ink);
+}
+/* A short note name stays whole; the title wraps before it instead. */
+.systemsculpt-agent-approval-target.is-whole {
+  white-space: nowrap;
+}
+/* Every shortcut hint (Approve, Deny, Approve all, Send, option numbers, the Review pill)
+ * reads one way: quieter than its control's words, in the interface font, never boxed. On
+ * a plain control it is the muted ink of the meta line; on a filled one, its own white a step
+ * down, still over 4.5:1 on the fill in both default themes. */
+.systemsculpt-agent-approval kbd,
+.systemsculpt-agent-approval-review-key {
+  margin: 0 0 0 var(--ss-space-1);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  color: var(--ss-ink-muted);
+  font-family: var(--ss-font);
+  font-size: var(--ss-text-xs);
+  font-weight: 400;
+  line-height: inherit;
+  white-space: nowrap;
+}
+.systemsculpt-agent-approval .ss-button--primary kbd {
+  color: inherit;
+  opacity: 0.85;
+}
+.systemsculpt-agent-approval-header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--ss-space-2);
+  min-width: 0;
+  font-size: var(--ss-text-base);
+  line-height: var(--ss-leading-relaxed);
+}
+/* One line box tall, so the icon centres on the title's first line when it wraps. */
+.systemsculpt-agent-approval-icon {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  height: calc(var(--ss-text-base) * var(--ss-leading-relaxed));
+  color: var(--ss-ink-muted);
+}
+.systemsculpt-agent-approval-icon svg {
+  width: var(--ss-icon-size-sm);
+  height: var(--ss-icon-size-sm);
+}
+.systemsculpt-agent-approval-copy {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  /* No word alone on a wrapped title's last line. */
+  text-wrap: pretty;
+  font-weight: var(--ss-weight-semibold);
+}
+.systemsculpt-agent-approval-counter {
+  flex: none;
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
+}
+.systemsculpt-agent-approval-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ss-space-2);
+  order: 1;
+}
+.systemsculpt-agent-approval-actions > .ss-button,
+.systemsculpt-agent-approval-answer > .ss-button {
+  padding-inline: var(--ss-space-2);
+  white-space: normal;
+  height: auto;
+}
+/* Send waits for a chosen option or typed words: it stays focusable, faded like a disabled button. */
+.ss-surface .systemsculpt-agent-approval .ss-button[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.ss-surface .systemsculpt-agent-approval .ss-button--primary[aria-disabled="true"]:is(:hover, :active) {
+  background-color: var(--ss-accent-fill);
+  border-color: var(--ss-accent-fill);
+  transform: none;
+}
+.systemsculpt-agent-approval-preview {
+  min-width: 0;
+  overflow: auto;
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-sm);
+  background: var(--ss-surface-0);
+}
+/* The plan sits inside the native preview wrapper, so match it at any depth. */
+.systemsculpt-agent-approval-preview .ss-native-plan-preview {
+  padding: var(--ss-space-2) var(--ss-space-3);
+}
+.systemsculpt-agent-approval-preview dl {
+  margin: 0;
+  padding: var(--ss-space-2) var(--ss-space-3);
+}
+.systemsculpt-agent-approval-preview dt {
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
+}
+.systemsculpt-agent-approval-preview dd {
+  margin: 0 0 var(--ss-space-2);
+  overflow-wrap: anywhere;
+}
+.systemsculpt-agent-approval-preview dd:last-child {
+  margin-bottom: 0;
+}
+/* A command is the panel's own text, not a field inside it: one frame, full ink,
+ * the plan's inset. */
+.systemsculpt-agent-approval-preview dd > pre {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--ss-ink);
+}
+.systemsculpt-agent-approval-details {
+  order: 2;
+  /* With the card's 8px gap: 12px under the buttons, nearer its own output (8px) than them. */
+  margin-top: var(--ss-space-1);
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
+}
+.systemsculpt-agent-approval-details > summary {
+  text-align: end;
+}
+@container ss-surface (max-width: 379px) {
+  /* Each action takes its own full-width row, so the broadest permission is never
+   * the biggest target and Approve stays the loudest. */
+  .systemsculpt-agent-approval-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  /* One rule for every hint at this width, the Review pill's included: the
+   * controls' words carry it, as on touch. */
+  .systemsculpt-agent-approval kbd,
+  .systemsculpt-agent-approval-review-key {
+    display: none;
+  }
+}
+.systemsculpt-agent-approval-details summary {
+  cursor: pointer;
+}
+.systemsculpt-agent-approval-preview pre {
+  margin: 0;
+  padding: var(--ss-space-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: var(--ss-font-mono);
+}
+/* Details JSON is the box every tool card ends with (.systemsculpt-agent-tool-raw in tools.css):
+ * the code scrolls and fades inside the frame, which keeps its border and inset at both ends. */
+/* The question's options and answer field sit in the page-colour panel every card's
+ * body uses (diff, command, plan). */
+.systemsculpt-agent-approval-question {
+  min-width: 0;
+  margin: 0;
+  padding: var(--ss-space-3);
+  border: 1px solid var(--ss-line);
+  border-radius: var(--ss-radius-sm);
+  background: var(--ss-surface-0);
+}
+/* Several questions show each question above its own options, not on the frame. */
+.systemsculpt-agent-approval-question > legend:not(.systemsculpt-agent-approval-question-legend) {
+  float: left;
+  width: 100%;
+  margin-bottom: var(--ss-space-2);
+  padding: 0;
+  font-weight: var(--ss-weight-medium);
+  overflow-wrap: anywhere;
+}
+/* Everything after it clears it, the answer row too when a question has no options. */
+.systemsculpt-agent-approval-question > legend ~ * {
+  clear: both;
+}
+.systemsculpt-agent-approval-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ss-space-2);
+  margin-bottom: var(--ss-space-2);
+}
+.systemsculpt-agent-approval-options:empty {
+  display: none;
+}
+/* An option reads as one line, its shortcut number then its label, with the description under the label. */
+.systemsculpt-agent-approval .systemsculpt-agent-approval-options button.ss-button {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  /* The gap rides on the number, so a hidden number (touch, narrow) leaves no indent. */
+  column-gap: 0;
+  row-gap: 2px;
+  align-items: baseline;
+  justify-items: start;
+  height: auto;
+  padding-block: var(--ss-space-1);
+  white-space: normal;
+  text-align: start;
+}
+.systemsculpt-agent-approval-options button > .ss-button__label {
+  grid-column: 2;
+  grid-row: 1;
+}
+.systemsculpt-agent-approval-options button > kbd {
+  grid-column: 1;
+  grid-row: 1;
+  margin-inline: 0 var(--ss-space-2);
+}
+.systemsculpt-agent-approval-options button > .systemsculpt-agent-approval-option-description {
+  grid-column: 2;
+  grid-row: 2;
+}
+/* A chosen option (several may be chosen) uses the button system's selected look. */
+.ss-surface .systemsculpt-agent-approval-options .ss-button[aria-pressed="true"] {
+  background-color: var(--ss-accent-tint-strong);
+  border-color: var(--ss-line-accent);
+  color: var(--ss-ink-accent);
+}
+.systemsculpt-agent-approval-option-description {
+  display: block;
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-xs);
+}
+/* The typed answer, with Send beside it when a click on an option already answers. */
+.systemsculpt-agent-approval-answer {
+  display: flex;
+  align-items: stretch;
+  gap: var(--ss-space-2);
+  min-width: 0;
+}
+.systemsculpt-agent-approval-answer > input {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+  height: auto;
+  min-height: max(var(--input-height, 30px), var(--ss-control-height-sm));
+}
+.systemsculpt-agent-approval-answer > .ss-button {
+  flex: none;
+  min-height: max(var(--input-height, 30px), var(--ss-control-height-sm));
+}
+@media (pointer: coarse) {
+  .systemsculpt-agent-approval-details > summary {
+    min-height: var(--ss-touch-target);
+    align-content: center;
+  }
+
+  .systemsculpt-agent-approval kbd,
+  .systemsculpt-agent-approval-review-key {
+    display: none;
+  }
+}
+.systemsculpt-agent-approval-review[hidden],
+.systemsculpt-agent-tool[hidden],
+.systemsculpt-agent-approval-preview[hidden] {
+  display: none;
+}
+.systemsculpt-agent-approval-announcement,
+.systemsculpt-agent-approval-question-legend {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+.systemsculpt-agent-approval-notice-surface {
+  /* Notices size to their content; inline-size containment collapses them. */
+  container-type: normal;
+}
+.systemsculpt-agent-approval-notice {
+  width: 100%;
+  white-space: normal;
+  height: auto;
+}
+.systemsculpt-agent-approval-preview .systemsculpt-inline-ops__body {
+  padding: var(--ss-space-2) var(--ss-space-3);
+}
+/* The preview is the diff's frame: the viewer inside drops its own, so the box has one 1 px border. */
+.systemsculpt-agent-approval-preview .systemsculpt-diff-viewer {
+  border: 0;
+  border-radius: 0;
+}
+.systemsculpt-agent-approval-preview .systemsculpt-inline-diff__body + .systemsculpt-inline-diff__body {
+  border-top: 1px solid var(--ss-warning-line);
+}
+.systemsculpt-inline-diff__summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ss-space-2);
+  padding: var(--ss-space-2) var(--ss-space-3);
+  border-bottom: 1px solid var(--ss-warning-line);
+  font-size: var(--ss-text-sm);
+}
+.systemsculpt-inline-diff__summary-count {
+  font-weight: var(--ss-weight-medium);
+}
+.systemsculpt-inline-diff__summary-blocked {
+  color: var(--ss-warning);
+}
+.systemsculpt-agent-approval-preview .systemsculpt-inline-ops ul {
+  margin: 0;
+  padding-left: var(--ss-space-4);
+}
+.systemsculpt-inline-ops ul.is-moves {
+  display: grid;
+  gap: var(--ss-space-2);
+  padding-left: 0;
+  list-style: none;
+}
+/* Both paths sit in a flex row, so their chips get the same height. */
+.systemsculpt-inline-ops__move-from,
+.systemsculpt-inline-ops__move-to {
+  display: flex;
+  align-items: baseline;
+  gap: var(--ss-space-1);
+}
+.systemsculpt-inline-ops__move-to {
+  margin-top: var(--ss-space-0);
+}
+.systemsculpt-inline-ops__arrow {
+  flex: none;
+  color: var(--ss-ink-muted);
+}
+.systemsculpt-agent-approval-preview code {
+  overflow-wrap: anywhere;
+}

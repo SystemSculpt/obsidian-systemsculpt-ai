@@ -14,15 +14,90 @@ function tool(name: string, input: unknown, overrides: Partial<AgentToolPart> = 
 }
 
 describe("AgentActivityPresentation", () => {
+  it("counts a write that replaced a note as replaced, never created", () => {
+    const write = (path: string, created: boolean) => tool("write", { path, content: "# Note" }, { callId: path, output: { data: { path, success: true, created } } });
+    expect(summarizeAgentActivity([write("Basil.md", true), write("Launch plan.md", false)]))
+      .toEqual({ label: "Created Basil, replaced Launch plan", failedCount: 0 });
+    expect(summarizeAgentActivity([write("A.md", false), write("B.md", false)]))
+      .toEqual({ label: "Replaced 2 notes", failedCount: 0 });
+  });
+
+  it("names a note the turn created or replaced once, never again as edited", () => {
+    const write = (path: string, created: boolean) => tool("write", { path, content: "# Note" }, { callId: path, output: { data: { path, success: true, created } } });
+    const claudeEdit = (path: string) => tool("Edit", { file_path: `/vault/${path}`, old_string: "a", new_string: "b" },
+      { callId: `edit ${path}`, native: { agent: "claude", workingDirectory: "/vault" }, output: { data: "The file has been updated." } });
+    const garden = tool("edit", { path: "Notes/Garden.md", edits: [{ oldText: "a", newText: "b" }] });
+    // Three notes changed, each named once, as the receipt under the reply counts them.
+    expect(summarizeAgentActivity([garden, write("Notes/Basil.md", true), write("Notes/Herbs.md", false), claudeEdit("Notes/Basil.md"), claudeEdit("Notes/Herbs.md")]))
+      .toEqual({ label: "Edited Garden, created Basil, replaced Herbs", failedCount: 0 });
+    expect(summarizeAgentActivity([write("Notes/Basil.md", true), claudeEdit("Notes/Basil.md")]))
+      .toEqual({ label: "Created Basil", failedCount: 0 });
+    // An edit before the note was rewritten stays its own step.
+    expect(summarizeAgentActivity([claudeEdit("Notes/Herbs.md"), write("Notes/Herbs.md", false)]))
+      .toEqual({ label: "Edited and replaced Herbs", failedCount: 0 });
+  });
+
   it("joins counted clauses, keeps single edit targets and counts remaining activity", () => {
-    expect(summarizeAgentActivity([
+    const steps = [
       tool("read", { paths: ["One.md", "Two.md"] }),
       tool("Read", { file_path: "/vault/Three.md" }, { native: { agent: "claude", workingDirectory: "/vault" } }),
       tool("search", { patterns: ["launch", "date"] }),
       tool("edit", { path: "Notes/Plan.md" }),
       tool("write", { path: "New.md" }),
       tool("write", { path: "Other.md" }),
-    ])).toEqual({ label: "Read 3 notes, searched 2 patterns, edited Plan.md · 2 more", failedCount: 0 });
+    ];
+    // Four clauses are all named: a summary never hides one step behind "1 more".
+    expect(summarizeAgentActivity(steps)).toEqual({ label: "Read 3 notes, searched for 2 patterns, edited Plan, created 2 notes", failedCount: 0 });
+    // Past four, three are named and the rest are counted as steps, inside the sentence.
+    expect(summarizeAgentActivity([...steps, tool("list_items", { paths: ["Notes"] })]))
+      .toEqual({ label: "Read 3 notes, searched for 2 patterns, edited Plan and 3 more steps", failedCount: 0 });
+  });
+
+  it("names one thing once when several steps act on it", () => {
+    const poster = { path: "SystemSculpt/Studio/Poster.systemsculpt" };
+    expect(summarizeAgentActivity([
+      tool("studio_list_workflows", {}),
+      tool("studio_edit_workflow", { ...poster, edits: [] }),
+      tool("studio_run_workflow", poster),
+      tool("studio_list_outputs", poster),
+    ]).label).toBe("Listed Studio workflows, edited, ran and listed outputs of Poster workflow");
+    // A failure keeps its own clause: "Couldn't" never joins a verb list.
+    expect(summarizeAgentActivity([
+      tool("read", { paths: ["Plan.md"] }),
+      tool("edit", { path: "Plan.md" }, { id: "edit-plan", callId: "edit-plan", state: "failed", error: { code: "x", message: "No match" } }),
+    ]).label).toBe("Read Plan, couldn't edit Plan");
+  });
+
+  it("counts each web query as one search, a Codex call's several included", () => {
+    const claude = { agent: "claude" as const, workingDirectory: "/vault" };
+    const codex = { agent: "codex" as const, workingDirectory: "/vault" };
+    expect(summarizeAgentActivity([
+      tool("web_search", { query: "when to plant tomatoes outside" }, { location: "server", output: { data: { query: "when to plant tomatoes outside", result_count: 6 } } }),
+      tool("WebSearch", { query: "last frost date portland" }, { id: "claude-search", callId: "claude-search", native: claude }),
+      tool("webSearch", { type: "webSearch", query: "tomato soil temperature", action: { type: "search", query: "tomato soil temperature", queries: ["tomato soil temperature", "tomato night temperature"] } },
+        { id: "codex-search", callId: "codex-search", native: codex }),
+      tool("WebFetch", { url: "https://example.org/grow/hardening-off", prompt: "How long to harden off?" }, { id: "claude-fetch", callId: "claude-fetch", native: claude }),
+    ]).label).toBe("Searched the web 4 times, read example.org");
+  });
+
+  it("says how far a partly done batch got and counts one tool used twice", () => {
+    const partial = tool("trash", { paths: ["Notes/Old.md", "Notes/Draft.md"] }, {
+      state: "failed",
+      output: { data: { results: [{ path: "Notes/Old.md", success: true }, { path: "Notes/Draft.md", success: false, error: "File not found" }] } },
+      error: { code: "TOOL_PARTIAL_FAILURE", message: "partial" },
+    } as Partial<AgentToolPart>);
+    const summary = summarizeAgentActivity([partial]);
+    expect(summary.label).toMatch(/^Moved 1 of 2 notes to trash$/u);
+    expect(summary.failedCount).toBe(1);
+    const forecast = (agent: "claude" | "codex", id: string) => tool(agent === "claude" ? ["mcp", "weather", "forecast"].join("__") : "forecast",
+      agent === "claude" ? { city: "Portland" } : { type: "mcpToolCall", server: "weather", tool: "forecast", arguments: { city: "Portland" } },
+      { id, callId: id, location: "server", native: { agent, workingDirectory: "/vault" } } as Partial<AgentToolPart>);
+    // The same server's tool from Claude Code and Codex is one tool, used twice.
+    expect(summarizeAgentActivity([forecast("claude", "a"), forecast("codex", "b")]).label).toBe("Used weather forecast twice");
+    // Different tools are each named, sharing their verb, never "Used 2 tools".
+    const alerts = tool(["mcp", "weather", "alerts"].join("__"), { city: "Portland" },
+      { id: "c", callId: "c", location: "server", native: { agent: "claude", workingDirectory: "/vault" } } as Partial<AgentToolPart>);
+    expect(summarizeAgentActivity([forecast("claude", "a"), alerts]).label).toBe("Used weather forecast and weather alerts");
   });
 
   it.each(["claude", "codex"] as const)("labels a denied %s edit without counting a failure", agent => {
@@ -31,11 +106,12 @@ describe("AgentActivityPresentation", () => {
       : { changes: [{ path: "/vault/Notes/Launch plan.md", kind: { type: "update" } }] }, {
       location: "server", native: { agent, workingDirectory: "/vault" }, state: "denied", approvalDecision: "denied",
     });
-    expect(summarizeAgentActivity([denied])).toEqual({ label: "Edit Launch plan.md · Denied", failedCount: 0, denied: true });
+    expect(summarizeAgentActivity([denied])).toEqual({ label: "Edit Launch plan · Denied", failedCount: 0, denied: true });
     expect(summarizeAgentActivity([denied, { ...denied, callId: "another", id: "another" }]))
       .toEqual({ label: "Denied 2 actions", failedCount: 0, denied: true });
+    // What didn't go ahead is counted after the work, never listed as a bare instruction ("edit X").
     expect(summarizeAgentActivity([{ ...denied, state: "succeeded", approvalDecision: "approved" }, denied]))
-      .toEqual({ label: "Edited Launch plan.md, edit Launch plan.md · Denied", failedCount: 0, denied: true });
+      .toEqual({ label: "Edited Launch plan · 1 denied", failedCount: 0, denied: true });
   });
 
   it.each(["claude", "codex"] as const)("does not claim a denied %s command ran or failed", agent => {
@@ -57,7 +133,7 @@ describe("AgentActivityPresentation", () => {
     expect(summarizeAgentActivity([
       edit("first", "Notes/Launch plan.md", { approvalDecision: "approved" }),
       edit("second", "Notes/Launch plan.md", { approvalDecision: "approved", approvalScope: "session" }),
-    ])).toEqual({ label: "Edited Launch plan.md", failedCount: 0 });
+    ])).toEqual({ label: "Edited Launch plan", failedCount: 0 });
     expect(summarizeAgentActivity([
       edit("first", "Notes/Launch plan.md"),
       edit("second", "Notes/Research.md"),
@@ -82,8 +158,9 @@ describe("AgentActivityPresentation", () => {
       tool("list_items", { paths: ["Notes"] }),
       tool("edit", { path: "Plan.md" }),
       tool("edit", { path: "Plan.md" }, { id: "again", callId: "again" }),
+      tool("write", { path: "New.md" }),
     // "More" counts the rows behind it: two edits of one note are two rows.
-    ])).toEqual({ label: "Searched 1 pattern, read One.md, listed Notes · 2 more", failedCount: 0 });
+    ])).toEqual({ label: "Searched “launch”, read One, listed the Notes folder and 3 more steps", failedCount: 0 });
   });
 
   it("matches the resolved approval fixture: repeated approvals, two denials and a withdrawn edit", () => {
@@ -99,7 +176,7 @@ describe("AgentActivityPresentation", () => {
       tool("ExitPlanMode", { plan: "Review the checklist before editing." }, {
         id: "kept-planning", callId: "kept-planning", approvalId: "kept-planning", location: "server", native, state: "denied", approvalDecision: "denied",
       }),
-    ])).toEqual({ label: "Edited Launch plan.md, denied 2 actions, edit Launch plan.md · Withdrawn", failedCount: 0, denied: true });
+    ])).toEqual({ label: "Edited Launch plan · 2 denied · 1 withdrawn", failedCount: 0, denied: true });
   });
 
   it.each(["claude", "codex", "hosted"] as const)("never counts a cancelled or withdrawn %s action as a change or failure", backend => {
@@ -111,15 +188,17 @@ describe("AgentActivityPresentation", () => {
         id, callId: id, approvalId: id, location: "server", native: { agent: backend, workingDirectory: "/vault" }, ...overrides,
       });
     const withdrawn = edit("withdrawn", { state: "cancelled", ...(backend === "hosted" ? {} : { approvalDecision: "withdrawn" as const }) });
-    expect(summarizeAgentActivity([withdrawn])).toEqual({ label: "Edit Launch plan.md · Withdrawn", failedCount: 0 });
+    // A hosted call has no approval to withdraw: cancelled means it was stopped while running.
+    const word = backend === "hosted" ? "Stopped" : "Withdrawn";
+    expect(summarizeAgentActivity([withdrawn])).toEqual({ label: `Edit Launch plan · ${word}`, failedCount: 0 });
     expect(summarizeAgentActivity([withdrawn, edit("stopped", { state: "cancelled" })]))
-      .toEqual({ label: "2 actions withdrawn", failedCount: 0 });
+      .toEqual({ label: backend === "hosted" ? "Stopped 2 actions" : "2 actions withdrawn", failedCount: 0 });
     expect(summarizeAgentActivity([edit("done", { state: "succeeded" }), withdrawn]))
-      .toEqual({ label: "Edited Launch plan.md, edit Launch plan.md · Withdrawn", failedCount: 0 });
+      .toEqual({ label: `Edited Launch plan · 1 ${word.toLowerCase()}`, failedCount: 0 });
     if (backend === "hosted") return;
     // A card still pending when the run finished is withdrawn, not an uncertain edit.
     expect(summarizeAgentActivity([edit("unanswered", { state: "outcome-unknown", approvalDecision: "withdrawn" })]))
-      .toEqual({ label: "Edit Launch plan.md · Withdrawn", failedCount: 0 });
+      .toEqual({ label: "Edit Launch plan · Withdrawn", failedCount: 0 });
   });
 
   it("keeps mixed completed, failed and denied work in separate truthful clauses", () => {
@@ -127,40 +206,41 @@ describe("AgentActivityPresentation", () => {
       tool("edit", { path: "Notes/A.md" }),
       tool("edit", { path: "Notes/B.md" }, { id: "failed", callId: "failed", state: "failed" }),
       tool("edit", { path: "Notes/C.md" }, { id: "denied", callId: "denied", state: "denied" }),
-    ])).toEqual({ label: "Edited A.md, couldn't edit B.md, edit C.md · Denied · 1 failed", failedCount: 1, denied: true });
+    ])).toEqual({ label: "Edited A, couldn't edit B · 1 denied", failedCount: 1, denied: true });
     expect(summarizeAgentActivity([
       tool("edit", { path: "Notes/A.md" }, { state: "failed" }),
       tool("edit", { path: "Notes/A.md" }, { id: "retry", callId: "retry" }),
-    ])).toEqual({ label: "Couldn't edit A.md, edited A.md · 1 failed", failedCount: 1 });
+    ])).toEqual({ label: "Couldn't edit A, edited A", failedCount: 1 });
     expect(summarizeAgentActivity([
       tool("edit", { path: "Notes/A.md" }, { state: "failed" }),
       tool("write", { path: "Notes/B.md" }, { id: "uncertain", callId: "uncertain", state: "outcome-unknown" }),
-    ])).toEqual({ label: "Couldn't edit A.md, create B.md · Uncertain · 1 failed", failedCount: 2 });
+    ])).toEqual({ label: "Couldn't edit A · 1 uncertain", failedCount: 2 });
     expect(summarizeAgentActivity([
       tool("Bash", { command: "rm -rf build" }, {
         location: "server", state: "failed", native: { agent: "claude", workingDirectory: "/vault" },
         error: { code: "CLAUDE_AUTO_BLOCKED", message: "Blocked" },
       } as Partial<AgentToolPart>),
-    ]).label).toMatch(/ · 1 blocked$/u);
+    ]).label).toMatch(/· Blocked by Claude Code$/u);
     expect(summarizeAgentActivity([
       tool("edit", { path: "Notes/A.md" }, { id: "denied", callId: "denied", state: "denied" }),
       tool("read", { paths: ["One.md"] }, { id: "r", callId: "r" }),
       tool("search", { patterns: ["x"] }, { id: "s", callId: "s" }),
       tool("write", { path: "Notes/B.md" }, { id: "u", callId: "u", state: "outcome-unknown" }),
-    ]).label).toMatch(/ · 1 more · 1 uncertain$/u);
+    ]).label).toBe("Read One, searched “x” · 1 uncertain · 1 denied");
     const native = { location: "server" as const, native: { agent: "claude" as const, workingDirectory: "/vault" } };
     expect(summarizeAgentActivity([
       tool("Edit", { file_path: "/vault/A.md" }, { ...native, approvalDecision: "approved" }),
       tool("Bash", { command: "npm test" }, { ...native, id: "bash", callId: "bash", state: "failed", output: { data: { exitCode: 1 } } }),
       tool("Edit", { file_path: "/vault/B.md" }, { ...native, id: "denied", callId: "denied", state: "denied", approvalDecision: "denied" }),
-    ])).toEqual({ label: "Edited A.md, couldn't run npm test, edit B.md · Denied · 1 failed", failedCount: 1, denied: true });
+    // A command that exited non-zero ran: it is named, and its failure counted.
+    ])).toEqual({ label: "Edited A, ran npm test · 1 failed · 1 denied", failedCount: 1, denied: true });
   });
 
   it("distinguishes failed and denied work without exposing hosted server inputs", () => {
     expect(summarizeAgentActivity([
       tool("edit", { path: "Notes/Plan.md" }, { state: "failed" }),
       tool("edit", { path: "Notes/Other.md" }, { state: "denied" }),
-    ])).toEqual({ label: "Couldn't edit Plan.md, edit Other.md · Denied · 1 failed", failedCount: 1, denied: true });
+    ])).toEqual({ label: "Couldn't edit Plan · 1 denied", failedCount: 1, denied: true });
     const summary = summarizeAgentActivity([tool("private_provider_action", { paths: ["Secret.md"] }, { location: "server" })]);
     expect(summary.label).toBe("Ran SystemSculpt action");
     expect(JSON.stringify(summary)).not.toMatch(/private|Secret/u);

@@ -87,7 +87,8 @@ it.each(cases.flatMap(native => [false, true].map(partial => ({ ...native, parti
       const snapshot = session.getSnapshot();
       await renderer.renderActive(snapshot, presentAgentConversation(snapshot, false));
       expect(parent.querySelector('.systemsculpt-agent-error-heading')?.textContent).toBe(`${name} usage limit reached`);
-      expect(parent.querySelector('.systemsculpt-agent-error-message')?.textContent).toBe(NOTICE);
+      // The title says the limit was reached; the body adds only when it resets.
+      expect(parent.querySelector('.systemsculpt-agent-error-message')?.textContent).toBe('It resets Oct 25 at 2pm.');
       expect(parent.querySelector('[data-testid="chat.turn.error-details"]')).toBeNull();
       expect(parent.querySelector('[data-testid="chat.turn.retry-failed"]')).toBeNull();
       const hosted = parent.querySelector<HTMLButtonElement>('[data-testid="chat.turn.use-hosted"]');

@@ -4,11 +4,12 @@ import { createSurfaceElement } from "../../core/ui/surface";
 import type { ToolCall } from "../../types/toolCalls";
 import type { AgentArtifact, AgentToolPart } from "../../chat/ChatConversation";
 import { renderOperationsInlinePreview, renderWriteEditInlineDiff } from "./ToolCallPreview";
-import { agentToolNoticeTone, gatedSystemSculptTurn, presentAgentTool, presentAgentToolDetails, presentToolLineMeta, refusedSystemSculptCall } from "./AgentToolPresentation";
+import { agentToolNoticeTone, gatedSystemSculptTurn, labelTargetClass, presentAgentTool, presentAgentToolDetails, presentToolLineMeta, presentToolRowLabel, refusedSystemSculptCall } from "./AgentToolPresentation";
 import type { AgentApprovalCards } from "./AgentApprovalCards";
 import { renderNativeToolPreview } from "./NativeToolPresentation";
+import { presentPendingMedia } from "./PendingMedia";
 import { renderHostedToolPreview } from "./HostedToolPreview";
-import { renderNotice, renderRawDetails, syncToolMediaWithReply } from "./ToolCardBlocks";
+import { detailsPayload, renderNotice, renderRawDetails, syncToolMediaWithReply } from "./ToolCardBlocks";
 import { ACTIONABLE_ARTIFACT_TOOLS, toolCallForPart, visibleToolError } from "./ConversationPartPresentation";
 
 type ToolApprovalPreviewHydrationState = {
@@ -119,7 +120,10 @@ export class AgentToolRenderer {
       stagedSupport.createDiv({ cls: "systemsculpt-agent-tool-preview" });
     }
     if (supportNeedsRender && toolError) {
-      renderNotice(stagedSupport, { tone: agentToolNoticeTone(part, presentation.displayState), text: toolError }).addClass("systemsculpt-agent-tool-error");
+      const notice = renderNotice(stagedSupport, { tone: agentToolNoticeTone(part, presentation.displayState), text: toolError });
+      notice.addClass("systemsculpt-agent-tool-error");
+      // A failed picture or video says why on its own tile in the reply; the card then doesn't repeat it.
+      notice.setAttribute("data-media-failure", part.callId);
     }
     if (supportNeedsRender) {
       for (const artifact of actionableArtifacts) {
@@ -127,7 +131,16 @@ export class AgentToolRenderer {
       }
     }
     if (supportNeedsRender && hasReadablePayload && !retainedNativePreview) {
-      renderRawDetails(stagedSupport, () => ({ input: part.input, ...(!isQuestion && part.output ? { output: part.output.data } : {}) }));
+      // Details opened while the call ran stay open when its result lands; while it makes a picture,
+      // video or Studio run, the open frame already holds the height its result will fill.
+      const openDetails = node.querySelector<HTMLDetailsElement>(
+        ":scope > .systemsculpt-agent-tool > .systemsculpt-agent-tool-support > .systemsculpt-agent-tool-raw",
+      )?.open ?? false;
+      renderRawDetails(stagedSupport, () => detailsPayload(part.input, isQuestion ? undefined : part.output, part.native?.agent), {
+        open: openDetails,
+        awaitingResult: presentPendingMedia([part], true).some(tile => tile.state !== "failed")
+          || (part.state === "running" && part.output === undefined ? "lines" : false),
+      });
     }
 
     const approvalFingerprint = approvalRequired
@@ -151,6 +164,8 @@ export class AgentToolRenderer {
     node.className = `systemsculpt-agent-part is-tool is-${presentation.displayState}`;
     if (gatedSystemSculptTurn(part)) node.classList.add("is-gated");
     else if (refusedSystemSculptCall(part)) node.classList.add("is-refused");
+    // A call the agent's own review stopped before it ran is an outcome, as Denied and Stopped are, not a failure.
+    else if (presentation.icon === "shield-x") node.classList.add("is-blocked");
     node.dataset.testid = "chat.part";
     node.dataset.kind = "tool";
     node.dataset.state = presentation.displayState;
@@ -244,7 +259,8 @@ export class AgentToolRenderer {
       });
       createdShell.addEventListener("toggle", () => {
         createdShell.querySelector("summary")?.setAttribute("aria-expanded", String(createdShell.open));
-        if (createdShell.open) this.toolDetailHydrators.get(node)?.();
+        // The toggle lands a task later (a settled fold opens its one card): a card gone from the page by then has nothing to fill.
+        if (createdShell.open && node.isConnected) this.toolDetailHydrators.get(node)?.();
         this.options.updateDisclosure(
           createdShell,
           createdShell.classList.contains("is-disclosure"),
@@ -291,33 +307,32 @@ export class AgentToolRenderer {
       setIcon(stateIcon, presentation.icon);
       stateIcon.dataset.iconState = presentation.icon;
     }
-    const decision = part.approvalDecision ?? (part.approvalId && !approvalRequired
-      ? part.state === "denied" ? "denied"
-        : part.state === "cancelled" || part.state === "outcome-unknown" ? "withdrawn"
-          : part.state === "approved" || part.state === "running" || part.state === "succeeded" ? "approved" : undefined
-      : undefined);
-    const decisionLabel = decision === "withdrawn" ? "Withdrawn" : decision === "denied" ? "Denied"
-      : part.approvalScope === "session" ? "Approved for this chat" : "Approved";
-    const planDecision = part.name === "ExitPlanMode" && decision;
-    const displayLabel = planDecision
-      ? decision === "denied" ? "Kept planning" : decision === "withdrawn" ? "Plan withdrawn" : "Plan started"
-      : isQuestion && decision ? decision === "denied" ? "Skipped" : "Answered question"
-        : decision ? `${presentation.label} · ${decisionLabel}` : presentation.label;
-    if (label.textContent !== displayLabel) {
+    // The label's outcome ("· Denied", "· Uncertain") is worded once, where the summary reads it too.
+    const displayLabel = presentToolRowLabel(part, presentation, Boolean(approvalRequired));
+    // Its target is set apart: a note is its link, a command reads as code, a short name stays on one line.
+    const targetPath = presentation.targetPath;
+    const target = presentation.target ?? (targetPath ? { text: targetPath.split("/").pop()! } : undefined);
+    // Only a note that exists is a link: opening a missing one would create it, even one the person denied.
+    const linkPath = targetPath && this.options.app.vault.getAbstractFileByPath(targetPath) ? targetPath : "";
+    const targetKey = target ? JSON.stringify([target.text, target.command ?? false, linkPath]) : "";
+    if (label.textContent !== displayLabel || (label.dataset.target ?? "") !== targetKey) {
       label.setText(displayLabel);
-      const target = presentation.targetPath;
-      const basename = target?.split("/").pop();
-      const index = basename ? displayLabel.indexOf(basename) : -1;
-      if (target && basename && index >= 0) {
+      if (targetKey) label.dataset.target = targetKey;
+      else delete label.dataset.target;
+      const index = target ? displayLabel.indexOf(target.text, displayLabel.indexOf(" ") + 1) : -1;
+      if (target && index >= 0) {
         label.setText(displayLabel.slice(0, index));
-        const link = label.createEl("a", {
-          text: basename, attr: { href: target, "data-href": target, "data-testid": "chat.tool.open-path" },
-        });
-        link.onclick = (event) => {
-          event.preventDefault(); event.stopPropagation();
-          void this.options.onOpenArtifact({ id: target, path: target, title: basename, kind: "vault_file" });
-        };
-        label.appendText(displayLabel.slice(index + basename.length));
+        const cls = labelTargetClass(target);
+        if (linkPath) {
+          const link = label.createEl("a", {
+            cls, text: target.text, attr: { href: linkPath, "data-href": linkPath, "data-testid": "chat.tool.open-path" },
+          });
+          link.onclick = (event) => {
+            event.preventDefault(); event.stopPropagation();
+            void this.options.onOpenArtifact({ id: linkPath, path: linkPath, title: target.text, kind: "vault_file" });
+          };
+        } else label.createSpan({ cls, text: target.text });
+        label.appendText(displayLabel.slice(index + target.text.length));
       }
     }
     shell.toggleAttribute("hidden", Boolean(approvalRequired));
@@ -335,6 +350,7 @@ export class AgentToolRenderer {
     if (supportNeedsRender || rebuiltShell) {
       support.replaceChildren(...Array.from(stagedSupport.childNodes));
       node.dataset.toolSupportFingerprint = supportFingerprint;
+      syncToolMediaWithReply(support.closest(".systemsculpt-agent-turn-body"));
     }
     if (retainedNativePreview && retainedNativePreview.parentElement !== support) {
       support.appendChild(retainedNativePreview);
