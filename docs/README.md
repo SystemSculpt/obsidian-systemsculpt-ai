@@ -6,6 +6,7 @@ Current user and engineering references for the Obsidian plugin.
 
 - [Getting started](user/getting-started.md)
 - [Agent tools and approvals](user/agent-mode.md)
+- [Weekly review: clarify notes, extract tasks and plan next week](user/weekly-review.md)
 - [Settings](user/settings.md)
 - [Commands and hotkeys](user/commands.md)
 - [Ribbon icons](user/ribbon-icons.md)

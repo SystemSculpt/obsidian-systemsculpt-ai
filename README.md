@@ -80,6 +80,7 @@ SystemSculpt checks its first-party release endpoint in the background. On deskt
 - [Agent skill for Claude Code, Codex and other file-capable agents](https://github.com/SystemSculpt/obsidian-systemsculpt-ai/blob/main/SKILL.md)
 - [Getting started](https://github.com/SystemSculpt/obsidian-systemsculpt-ai/blob/main/docs/user/getting-started.md)
 - [Agent tools and approvals](https://github.com/SystemSculpt/obsidian-systemsculpt-ai/blob/main/docs/user/agent-mode.md)
+- [Weekly review: clarify daily notes, extract tasks and plan next week](https://github.com/SystemSculpt/obsidian-systemsculpt-ai/blob/main/docs/user/weekly-review.md)
 - [Settings](https://github.com/SystemSculpt/obsidian-systemsculpt-ai/blob/main/docs/user/settings.md)
 - [Commands](https://github.com/SystemSculpt/obsidian-systemsculpt-ai/blob/main/docs/user/commands.md)
 - [Studio workspaces, on-machine Codex and Claude Code](https://github.com/SystemSculpt/obsidian-systemsculpt-ai/blob/main/docs/studio-workspaces.md)
