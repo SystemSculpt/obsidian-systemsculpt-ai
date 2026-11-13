@@ -373,7 +373,6 @@ export class StudioGraphConnectionEngine {
     const anchorX = Math.round(viewport.scrollLeft + (clientX - viewportRect.left));
     const anchorY = Math.round(viewport.scrollTop + (clientY - viewportRect.top));
     this.edgeContextMenu.mount(viewport);
-    this.edgeContextMenu.setGraphZoom(this.host.getGraphZoom());
     this.edgeContextMenu.open({
       anchorX,
       anchorY,

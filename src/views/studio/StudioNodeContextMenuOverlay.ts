@@ -1,10 +1,7 @@
 import type { StudioNodeDefinition } from "../../studio/types";
 import { applyPluginSurface, SurfaceCombobox } from "../../core/ui/surface";
 import { rankStudioFuzzyItems } from "./StudioFuzzySearch";
-import {
-  normalizeStudioMenuScale,
-  resolveStudioAnchoredMenuPosition,
-} from "./StudioFloatingMenuUtils";
+import { resolveStudioAnchoredMenuPosition } from "./StudioFloatingMenuUtils";
 import { StudioMenuLifecycle } from "./StudioMenuLifecycle";
 import { isMobileLayout } from "../../platform/mobileLayout";
 import { readMobileHostLayout } from "../../platform/mobileHostLayout";
@@ -41,7 +38,6 @@ export class StudioNodeContextMenuOverlay {
   private listEl: HTMLElement | null = null;
   private combobox: SurfaceCombobox<StudioNodeContextMenuItem> | null = null;
   private actionsEl: HTMLElement | null = null;
-  private graphZoom = 1;
   private anchorX = 0;
   private anchorY = 0;
   private onSelectDefinition: ((definition: StudioNodeDefinition) => void) | null = null;
@@ -72,15 +68,6 @@ export class StudioNodeContextMenuOverlay {
     this.searchInputEl = null;
     this.listEl = null;
     this.actionsEl = null;
-  }
-
-  setGraphZoom(zoom: number): void {
-    const nextZoom = normalizeStudioMenuScale(zoom);
-    if (Math.abs(this.graphZoom - nextZoom) < 0.0001) {
-      return;
-    }
-    this.graphZoom = nextZoom;
-    this.applyLayout();
   }
 
   open(options: {
@@ -295,27 +282,25 @@ export class StudioNodeContextMenuOverlay {
       return;
     }
 
-    const scale = normalizeStudioMenuScale(this.graphZoom);
+    // The root lives outside the zoomed world; anchors and menu dimensions are
+    // already viewport scroll-box pixels. Graph zoom must not scale application UI.
     const compact = isMobileLayout(this.rootEl) || this.viewportEl.clientWidth <= CONTEXT_MENU_COMPACT_WIDTH;
     const width = compact
-      ? Math.min(CONTEXT_MENU_WIDTH, Math.max(0, this.viewportEl.clientWidth - CONTEXT_MENU_MOBILE_EDGE_GAP * 2) / scale)
+      ? Math.min(CONTEXT_MENU_WIDTH, Math.max(0, this.viewportEl.clientWidth - CONTEXT_MENU_MOBILE_EDGE_GAP * 2))
       : CONTEXT_MENU_WIDTH;
     this.rootEl.style.width = `${width}px`;
     this.rootEl.classList.toggle("is-compact-width", compact);
-    this.rootEl.style.setProperty("--ss-studio-node-context-menu-scale", String(scale));
 
     const height = Math.max(
       CONTEXT_MENU_MIN_HEIGHT,
       this.rootEl.offsetHeight || CONTEXT_MENU_FALLBACK_HEIGHT
     );
-    const visualWidth = width * scale;
-    const visualHeight = height * scale;
     const position = resolveStudioAnchoredMenuPosition({
       viewportEl: this.viewportEl,
       anchorX: this.anchorX,
       anchorY: this.anchorY,
-      visualWidth,
-      visualHeight,
+      visualWidth: width,
+      visualHeight: height,
     });
     let resolvedY = position.y;
 
@@ -342,7 +327,7 @@ export class StudioNodeContextMenuOverlay {
         0,
         contentBottom - resolvedY - CONTEXT_MENU_MOBILE_EDGE_GAP,
       );
-      this.rootEl.style.maxHeight = `${availableVisualHeight / scale}px`;
+      this.rootEl.style.maxHeight = `${availableVisualHeight}px`;
     } else {
       this.rootEl.style.removeProperty("max-height");
     }
