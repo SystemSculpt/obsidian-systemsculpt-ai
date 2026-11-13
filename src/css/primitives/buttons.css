@@ -131,10 +131,12 @@
 /* ------------------------------------------------------------------ *
  * States
  * ------------------------------------------------------------------ */
+/* Accent ink alone sat near 4.5:1 on the dark tint; mixed toward ink the
+ * label reads clearly in both themes while fill and border mark the choice. */
 .ss-surface .ss-button.is-selected {
   background-color: var(--ss-accent-tint-strong);
   border-color: var(--ss-line-accent);
-  color: var(--ss-ink-accent);
+  color: color-mix(in srgb, var(--ss-ink-accent) 55%, var(--ss-ink));
 }
 
 .ss-surface .ss-button.is-busy {
