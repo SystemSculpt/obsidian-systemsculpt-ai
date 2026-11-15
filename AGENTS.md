@@ -1,5 +1,7 @@
 # SystemSculpt AI Obsidian Plugin
 
+Rust by default; existing components may keep their language (new files included); new non-Rust components need Michael's yes. See [Trellis rules](https://github.com/SystemSculpt/trellis/blob/main/company/RULES.md#rust-by-default).
+
 Canonical repository guidance for every coding agent working on the SystemSculpt Obsidian client. Edit `AGENTS.md` directly.
 
 ## Product boundary
