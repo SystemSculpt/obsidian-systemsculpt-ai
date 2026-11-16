@@ -163,7 +163,7 @@ describe("UpgradePlanModal", () => {
   });
 
   it.each([{}, { userEmail: "user@example.test" }, { userEmail: "user@example.test", licenseKey: "lapsed-key" }])(
-    "keeps Patreon support external, attributed and separate from plan activation: %j",
+    "sends patrons to Patreon activation on the account page without changing plugin state: %j",
     (settings) => {
       const plugin = createPlugin(settings);
       const before = { ...plugin.settings };
@@ -172,10 +172,10 @@ describe("UpgradePlanModal", () => {
       const { hrefs, spy } = spyOnAnchorClicks();
       try {
         const link = modal.modalEl.querySelector<HTMLButtonElement>('[data-testid="upgrade-plan.patreon"]')!;
-        expect(link.textContent).toBe("Support us on Patreon");
+        expect(link.textContent).toBe("Patron? Activate Pro");
         link.click();
         expect(hrefs).toEqual([
-          "https://www.patreon.com/SystemSculpt?utm_source=plugin_upgrade_modal&utm_campaign=patreon_everywhere",
+          "https://systemsculpt.com/dashboard?utm_source=obsidian-plugin&utm_medium=plugin&utm_campaign=patreon_pro&utm_content=upgrade_modal",
         ]);
         expect(plugin.settings).toEqual(before);
         expect(plugin.begin).not.toHaveBeenCalled();

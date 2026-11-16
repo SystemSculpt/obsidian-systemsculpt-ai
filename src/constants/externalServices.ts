@@ -28,7 +28,9 @@ function pluginPageLink(href: string, place: string): string {
 export const SYSTEMSCULPT_WEBSITE = {
   BASE_URL: "https://systemsculpt.com",
   PATREON_SETTINGS: "https://www.patreon.com/SystemSculpt?utm_source=plugin_settings&utm_campaign=patreon_everywhere",
-  PATREON_UPGRADE: "https://www.patreon.com/SystemSculpt?utm_source=plugin_upgrade_modal&utm_campaign=patreon_everywhere",
+  /** Paid patrons connect Patreon on the account page; Pro then syncs to the plugin. */
+  PATREON_ACTIVATE_SETTINGS: "https://systemsculpt.com/dashboard?utm_source=obsidian-plugin&utm_medium=plugin&utm_campaign=patreon_pro&utm_content=settings",
+  PATREON_ACTIVATE_UPGRADE: "https://systemsculpt.com/dashboard?utm_source=obsidian-plugin&utm_medium=plugin&utm_campaign=patreon_pro&utm_content=upgrade_modal",
   /** Upgrade modal plan buttons; each `ref` is in the website's checkout-view catalog. */
   YEARLY: "https://systemsculpt.com/checkout?resourceId=2b96b063-3ed9-4e5a-972c-6910fb611ab8&ref=plugin_modal_annual",
   /** Monthly checkout from the low-credits offer; `ref` is in the website's checkout-view catalog. */
