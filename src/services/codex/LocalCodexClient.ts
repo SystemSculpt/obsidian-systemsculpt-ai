@@ -143,7 +143,8 @@ export async function runLocalCodex(input: CodexRequest, signal: AbortSignal, ca
     const profile = native && isRecord(native.activePermissionProfile) ? native.activePermissionProfile.id : undefined;
     const thread = await connection.request(input.threadId ? 'thread/resume' : 'thread/start', {
       ...(!input.threadId && input.dynamicTools?.length ? { dynamicTools: input.dynamicTools } : {}),
-      ...parameters, ...approvalParameters.thread, ...(input.threadId ? { threadId: input.threadId } : {}),
+      // Chat never reads resumed history, and it can repeat every earlier image inline.
+      ...parameters, ...approvalParameters.thread, ...(input.threadId ? { threadId: input.threadId, excludeTurns: true } : {}),
       ...(native ? { approvalPolicy: native.approvalPolicy,
         approvalsReviewer: native.approvalsReviewer, ...(typeof profile === 'string' ? { permissions: profile } : {}) } : {}),
     });

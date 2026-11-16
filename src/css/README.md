@@ -89,6 +89,9 @@ states in `states.css`, and every narrow-surface adjustment in `composer.css`.
   styled only in `views/studio/activity.css`
 - `--ss-studio-link-*` / `--ss-studio-edge-stroke` — read by
   StudioEdgeRenderer for the inline base SVG stroke
+- `--ss-media-ratio` / `--ss-media-progress` — a chat media tile's frame
+  shape (width over height) and live generation progress (0-1), written by
+  `src/views/chatview/PendingMedia.ts` and `TurnMedia.ts`
 - `.systemsculpt-agent-workspace.is-font-{small|medium|large}` — the agent
   workspace font-scale contract, toggled by the agent workspace view and
   implemented in `views/agent-workspace/shell.css`.

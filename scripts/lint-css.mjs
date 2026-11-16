@@ -111,10 +111,14 @@ const LEGACY_STATE_CLASS_PATTERN = /\.(active|completed|error|primary|danger|dis
 const RUNTIME_CUSTOM_PROPERTIES = new Set([
   "--ss-activity-progress",
   "--ss-agent-composer-host-clearance",
+  "--ss-media-progress",
+  "--ss-media-ratio",
   "--ss-recorder-mobile-stack-offset",
   "--ss-studio-chip-color",
   "--ss-studio-swatch-color",
   "--ss-studio-text-node-font-size",
+  "--ss-tool-media-columns",
+  "--ss-tool-text-lines",
 ]);
 
 /**

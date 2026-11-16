@@ -36,6 +36,8 @@ describe("DiffViewer", () => {
     }).render();
     const lines = host.querySelector<HTMLElement>(".systemsculpt-diff-lines");
     expect(lines?.style.getPropertyValue("--ss-diff-number-digits")).toBe("3");
+    // A real unified-diff range, not a change count dressed as one.
+    expect(host.querySelector(".systemsculpt-diff-hunk-header")?.textContent).toBe("@@ -98,2 +98,3 @@");
   });
 
   it("hides duplicate file headers without hiding an unmatched-edit warning", () => {

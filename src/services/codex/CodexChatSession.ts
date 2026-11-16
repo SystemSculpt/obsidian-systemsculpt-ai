@@ -3,6 +3,7 @@ import type { App } from 'obsidian';
 import { CodexChatTransport } from './LocalCodexClient';
 import { isRecord } from '../../utils/jsonRecord';
 import { codexToolActivity } from './CodexActivity';
+import { CodexImageImporter, isCodexImageItem } from './CodexImages';
 import { codexClientRequestKind, codexClientResponse } from './CodexClientRequests';
 import type { CodexExecutionOptions } from './CodexExecutionSettings';
 import { LocalAgentChatSession } from './LocalAgentChatSession';
@@ -20,11 +21,20 @@ function codexDynamicTools(toolset: SystemSculptToolset | undefined): Record<str
 export class CodexChatSession extends LocalAgentChatSession {
   constructor(app: App, localOptions: { persistAssistant: (message: ChatMessage) => Promise<void>; notice?: (text: string) => void }, forkHistory: () => readonly ChatMessage[] = () => [], executionOptions: () => CodexExecutionOptions & { approvalMode?: string } = () => ({}), tools?: () => SystemSculptToolset | undefined) {
     const transport = new CodexChatTransport(localOptions.notice);
-    super(app, 'codex', localOptions, forkHistory, (turn, signal, events) => { const toolset = tools?.(); const dynamicTools = codexDynamicTools(toolset); return transport.run({ approvalMode: 'auto', ...executionOptions(), ...turn, ...(dynamicTools ? { dynamicTools } : {}) }, signal, {
+    const images = new CodexImageImporter(app);
+    super(app, 'codex', localOptions, forkHistory, async (turn, signal, events) => { const toolset = tools?.(); const dynamicTools = codexDynamicTools(toolset);
+    // Images are saved into the vault before the turn is saved, so the reply keeps them.
+    const saving: Promise<void>[] = [];
+    try { return await transport.run({ approvalMode: 'auto', ...executionOptions(), ...turn, ...(dynamicTools ? { dynamicTools } : {}) }, signal, {
       thread: events.thread,
       log: text => events.status(text.startsWith('Command ') ? text : 'Codex is working'),
       text: events.text,
-      activity: (activity, item) => { const update = codexToolActivity(activity, item, turn.workingDirectory); if (update) events.tool(update); },
+      activity: (activity, item) => {
+        const update = codexToolActivity(activity, item, turn.workingDirectory);
+        if (!update) return;
+        events.tool(update);
+        if (item && isCodexImageItem(item) && update.state === 'succeeded') saving.push(images.present(update, item, turn.workingDirectory).then(saved => { if (saved !== update) events.tool(saved); }));
+      },
       request: async (method, params, requestSignal, requestId) => {
         if (method === 'item/tool/call' && toolset) {
           const tool = String(params.tool ?? ''), callId = typeof params.callId === 'string' ? params.callId : undefined;
@@ -54,6 +64,7 @@ export class CodexChatSession extends LocalAgentChatSession {
           answers: decision.answers,
         });
       },
-    }); }, () => transport.close());
+    });
+    } finally { await Promise.allSettled(saving); } }, () => transport.close());
   }
 }

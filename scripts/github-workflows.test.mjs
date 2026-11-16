@@ -35,9 +35,24 @@ test("only a published stable release can update first-party release metadata", 
   assert.deepEqual(releaseMetadataWorkflow.permissions, { contents: "read" });
   assert.equal(releaseMetadataWorkflow.concurrency.group, "publish-release-metadata");
   assert.equal(releaseMetadataWorkflow.concurrency["cancel-in-progress"], false);
-  assert.deepEqual(Object.keys(releaseMetadataWorkflow.jobs), ["verify", "publish"]);
+  assert.deepEqual(Object.keys(releaseMetadataWorkflow.jobs), ["main-names-release", "verify", "publish"]);
+
+  // Obsidian installs HEAD manifest.json's version and the daily tool merges a version to main only after
+  // publishing it, so the release is announced once main names it, with no secret or write permission.
+  const mainNamesRelease = releaseMetadataWorkflow.jobs["main-names-release"];
+  assert.equal(
+    mainNamesRelease.if,
+    "${{ github.event.release.draft == false && github.event.release.prerelease == false }}",
+  );
+  assert.equal(mainNamesRelease.permissions, undefined);
+  assert.deepEqual(mainNamesRelease.steps.map((step) => step.uses).filter(Boolean), []);
+  assert.equal(mainNamesRelease.steps[0].env.GH_TOKEN, "${{ github.token }}");
+  assert.equal(mainNamesRelease.steps[0].env.TAG, "${{ github.event.release.tag_name }}");
+  assert.match(mainNamesRelease.steps[0].run, /contents\/manifest\.json\?ref=main/);
+  assert.match(mainNamesRelease.steps[0].run, /"\$version" = "\$TAG"/);
 
   const releaseVerification = releaseMetadataWorkflow.jobs.verify;
+  assert.equal(releaseVerification.needs, "main-names-release");
   assert.equal(
     releaseVerification.if,
     "${{ github.event.release.draft == false && github.event.release.prerelease == false }}",

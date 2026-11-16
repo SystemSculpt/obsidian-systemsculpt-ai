@@ -20,7 +20,7 @@
 
 1. Install and enable SystemSculpt AI from Obsidian Community Plugins.
 2. For hosted AI, open **Settings → SystemSculpt AI → Account** and choose **Sign up** or **Sign in**. Complete the account connection in your browser; eligible new accounts can claim 500 one-time starter credits, no card needed, while available. For your own desktop Claude Code or Codex, skip the SystemSculpt account step and use your installed, signed-in agent.
-3. Run **Open SystemSculpt Chat** from the command palette, choose your backend from the run line below the message box, and ask about your vault.
+3. Run **SystemSculpt AI: Open chat** from the command palette, choose your backend from the run line below the message box, and ask about your vault.
 
 Already have a plan? Sign in from the same Account settings, or paste and activate your license key there.
 
@@ -80,6 +80,7 @@ SystemSculpt checks its first-party release endpoint in the background. On deskt
 - [Agent skill for Claude Code, Codex and other file-capable agents](https://github.com/SystemSculpt/obsidian-systemsculpt-ai/blob/main/SKILL.md)
 - [Getting started](https://github.com/SystemSculpt/obsidian-systemsculpt-ai/blob/main/docs/user/getting-started.md)
 - [Agent tools and approvals](https://github.com/SystemSculpt/obsidian-systemsculpt-ai/blob/main/docs/user/agent-mode.md)
+- [Weekly review: clarify daily notes, extract tasks and plan next week](https://github.com/SystemSculpt/obsidian-systemsculpt-ai/blob/main/docs/user/weekly-review.md)
 - [Settings](https://github.com/SystemSculpt/obsidian-systemsculpt-ai/blob/main/docs/user/settings.md)
 - [Commands](https://github.com/SystemSculpt/obsidian-systemsculpt-ai/blob/main/docs/user/commands.md)
 - [Studio workspaces, on-machine Codex and Claude Code](https://github.com/SystemSculpt/obsidian-systemsculpt-ai/blob/main/docs/studio-workspaces.md)

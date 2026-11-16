@@ -172,7 +172,7 @@ describe("native presentation metadata", () => {
     expect(nativeToolPresentation(part("Read", { file_path: "/vault/Plan.md" }, { native: nested }))?.targetPath).toBe("Plan.md");
     const host = document.createElement("div");
     await renderNativeToolPreview(vault().app, host, part("Read", { file_path: "Daily/Today.md" }, { native: nested, state: "running" }));
-    const link = host.querySelector<HTMLAnchorElement>(".ss-agent-tool-details a.internal-link");
+    const link = host.querySelector<HTMLAnchorElement>(".ss-tool-paths a.internal-link");
     expect(link?.textContent).toBe("Notes/Daily/Today.md");
     expect(link?.dataset.href).toBe("Notes/Daily/Today.md");
   });
@@ -517,7 +517,7 @@ describe("native preview rendering", () => {
     const host = document.createElement("div");
     const output = Array.from({ length: 25 }, (_, index) => `output ${index}`).join("\n");
     await renderNativeToolPreview(app, host, part("Bash", { command: "npm test" }, { state: "succeeded", output: { data: output } }));
-    const code = host.querySelector(".ss-native-tool-output code")!;
+    const code = host.querySelector(".ss-tool-terminal-output")!;
     expect(code.textContent?.split("\n")).toHaveLength(20);
     expect(code.textContent).toMatch(/^output 5\n/u);
     host.querySelector<HTMLButtonElement>('[data-testid="chat.tool.show-output"]')!.click();
@@ -577,7 +577,7 @@ describe("native preview rendering", () => {
     const host = document.createElement("div");
     await renderNativeToolPreview(app, host, part("Write", { file_path: "Notes/Plan.md", content: "written content" }, { state: "succeeded" }));
     expect(host.querySelector("pre code")?.textContent).toBe("written content");
-    expect(host.textContent).toContain("this is not a before-and-after diff");
+    expect(host.textContent).toContain("not a before-and-after diff");
     expect(host.querySelector(".systemsculpt-diff-viewer")).toBeNull();
     expect(host.textContent).not.toContain("later content");
     expect(read).not.toHaveBeenCalled();

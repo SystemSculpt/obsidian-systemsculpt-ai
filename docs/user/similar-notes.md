@@ -10,22 +10,20 @@ Similar Notes settings now live inside the `Knowledge` tab.
 
 Core controls:
 
-- `Enable embeddings`
-- `Embeddings execution` (`SystemSculpt`)
-- `Processing status` (refresh + remaining-files modal)
-- `Clear embeddings data`
-- Exclusions: chat history, Obsidian exclusions, excluded folders, excluded patterns
+- `Similar notes` (turns the index on)
+- `Index status` (progress; **View remaining files** lists notes still waiting)
+- `Rebuild index`
+- Exclusions: `Exclude chat history`, `Respect Obsidian exclusions`, `Excluded folders`, `Excluded patterns`
 
 ## Open Similar Notes
 
-- Command: `Open Similar Notes Panel`
+- Command: `Open similar notes panel`
 - Ribbon: `Open Similar Notes Panel`
 
 ## Related commands
 
-- `Find Similar Notes (Current Note)`
 - `Rebuild SystemSculpt embeddings`
-- `Show Embeddings Database Statistics (Debug)`
+- `Show embeddings database statistics (debug)`
 
 ## Notes
 

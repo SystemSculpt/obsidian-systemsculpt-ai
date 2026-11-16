@@ -26,7 +26,7 @@ type ActiveConversationRendererOptions = Readonly<{
   renderPart: (node: HTMLElement, part: AgentPart, previous?: AgentPart, suppressToolError?: boolean, progressActive?: boolean) => Promise<boolean>;
   forgetMarkdown: (target: HTMLElement) => void;
   renderMessageAttachments: (parent: HTMLElement, attachments: readonly PresentedMessageAttachment[]) => void;
-  renderTurnMediaBlock: (parent: HTMLElement, parts: readonly AgentToolPart[], answer: string) => HTMLElement | null;
+  renderTurnMediaBlock: (parent: HTMLElement, parts: readonly AgentToolPart[], answer: string, live?: boolean) => HTMLElement | null;
   renderTurnChanges: (parent: HTMLElement, parts: readonly AgentToolPart[]) => void;
   addTurnHeading: (row: HTMLElement, user: boolean) => void;
   createCompletedActivity: (parent: HTMLElement, elapsedMs?: number, cancelled?: boolean) => Activity;
@@ -339,14 +339,45 @@ export class ActiveConversationRenderer {
     // An unchanged receipt survives reconciliation, so a focused link keeps focus.
     const receipt = presentation.busy ? null
       : body.querySelector<HTMLElement>(":scope > .systemsculpt-agent-turn-changes");
-    // Generated media shows as soon as a tool saves it, above the working status.
+    // Generated media shows as soon as a tool saves it, above the working status;
+    // while the turn runs, each generation holds its place as a live placeholder.
+    const toolParts = orderedParts.filter((part): part is AgentToolPart => part.kind === "tool");
     const media = this.options.renderTurnMediaBlock(
       body,
-      orderedParts.filter((part): part is AgentToolPart => part.kind === "tool"),
+      toolParts,
       orderedParts.flatMap((part) => part.kind === "text" ? [part.markdown] : []).join("\n"),
+      presentation.busy,
     );
+    if (tailStatus) {
+      // A generation's live card already shows its label and time; the tail would say it twice.
+      const latest = [...presentation.visibleParts].reverse().find((part) =>
+        part.kind === "tool" ? isActiveAgentToolState(part.state)
+          : (part.kind === "text" || part.kind === "reasoning") && part.state === "streaming");
+      const placeholders = Array.from(media?.querySelectorAll<HTMLElement>("[data-pending-id][aria-busy]") ?? [])
+        .map((tile) => (tile.dataset.pendingId ?? "").replace(/:[^:]*$/u, ""));
+      tailStatus.hidden = presentation.phase === "acting" && latest?.kind === "tool" && placeholders.includes(latest.callId);
+    }
     const laneNodes = visibleLanes.map((lane) => lane.node);
-    if (media) laneNodes.splice(tailStatus ? laneNodes.length - 1 : laneNodes.length, 0, media);
+    if (media) {
+      // While the turn runs, media sits right after whatever came before the call that makes it, so the
+      // steps that follow (even once they fold into an activity group) land below it, never above.
+      const source = presentation.busy && media.dataset.firstTool !== undefined ? toolParts[Number(media.dataset.firstTool)] : undefined;
+      const sourceIndex = source ? orderedParts.indexOf(source) : -1;
+      const partIndex = new Map(orderedParts.map((part, index) => [part.kind === "tool" ? toolPartKey(part.callId) : part.id, index]));
+      let anchor = -1;
+      if (sourceIndex >= 0) {
+        anchor = 0;
+        for (const lane of visibleLanes) {
+          const index = partIndex.get(lane.key.replace(/^overflow:/u, ""));
+          if (index === undefined || index >= sourceIndex) break;
+          anchor += 1;
+        }
+      }
+      // A settled turn keeps that place too: its work folds into one row and the reply follows the media.
+      const fold = visibleLanes.findIndex((lane) => lane.key === "turn-fold");
+      if (!presentation.busy && fold >= 0) anchor = fold + 1;
+      laneNodes.splice(anchor >= 0 ? anchor : tailStatus ? laneNodes.length - 1 : laneNodes.length, 0, media);
+    }
     reconcileConversationChildren(body, [...laneNodes, ...(receipt ? [receipt] : [])]);
     for (const [key, node] of this.activeNodes) {
       if (!wantedParts.has(key)) {

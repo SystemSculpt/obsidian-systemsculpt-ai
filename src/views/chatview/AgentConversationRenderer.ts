@@ -22,11 +22,15 @@ import {
   groupAdjacentAgentActivity,
   splitPreviousAgentActivity,
   summarizeAgentActivity,
+  setActivityLabelText,
+  unbreakableActivityLabel,
 } from "./AgentActivityPresentation";
 import { presentTurnChanges } from "./TurnChangeSummary";
 import { renderTurnMedia } from "./TurnMedia";
+import { codexImageVaultPath } from "../../services/codex/CodexImages";
 import { openExternalUrl } from "../../utils/externalUrl";
 import { enhanceMarkdownCodeBlocks } from "./MarkdownCodeBlocks";
+import { embedTarget, enhanceMarkdownEmbeds } from "./MarkdownEmbeds";
 import {
   presentAgentError,
   type AgentConversationPresentation,
@@ -277,11 +281,16 @@ export class AgentConversationRenderer extends Component {
     // Delegate from the stable root: streamed Markdown reconciliation clones links.
     const openSourceLink = (event: MouseEvent): void => {
       if (event.defaultPrevented || (event.type === "click" ? event.button !== 0 : event.button !== 1)) return;
-      const link = (event.target as Element | null)?.closest?.("a.internal-link");
-      const href = link?.getAttribute("data-href") ?? link?.getAttribute("href");
-      if (!href) return;
+      const target = event.target as Element | null;
+      const link = target?.closest?.("a.internal-link");
+      // An embedded image in an answer opens its vault file, like a link to it.
+      const image = !link && target?.tagName === "IMG" ? target.closest?.(".internal-embed.image-embed") : null;
+      const linked = link?.getAttribute("data-href") ?? link?.getAttribute("href") ?? (image ? embedTarget(image) : null);
+      if (!linked) return;
       event.preventDefault();
       event.stopPropagation();
+      // A reply linking an image Codex saved outside the vault opens the vault copy.
+      const href = codexImageVaultPath(linked) ?? linked;
       void this.options.app.workspace.openLinkText(href, this.options.sourcePath(), Keymap.isModEvent(event));
     };
     this.registerDomEvent(this.element, "click", openSourceLink);
@@ -303,6 +312,7 @@ export class AgentConversationRenderer extends Component {
           component,
         );
         this.enhanceCodeBlocks(staging);
+        enhanceMarkdownEmbeds(staging);
       },
     });
     this.addChild(this.liveMarkdown);
@@ -358,7 +368,7 @@ export class AgentConversationRenderer extends Component {
       renderPart: (node, part, previous, suppressError, progress) => this.renderPart(node, part, previous, suppressError, progress),
       forgetMarkdown: (target) => this.forgetMarkdown(target),
       renderMessageAttachments: (parent, attachments) => this.renderMessageAttachments(parent, attachments),
-      renderTurnMediaBlock: (parent, parts, answer) => this.renderTurnMediaBlock(parent, parts, answer),
+      renderTurnMediaBlock: (parent, parts, answer, live) => this.renderTurnMediaBlock(parent, parts, answer, live),
       renderTurnChanges: (parent, parts) => this.renderTurnChanges(parent, parts),
       addTurnHeading: (row, user) => this.addTurnHeading(row, user),
       createCompletedActivity: (parent, elapsed, cancelled) => this.createCompletedActivity(parent, elapsed, cancelled),
@@ -743,8 +753,11 @@ export class AgentConversationRenderer extends Component {
         }
         const historicalTools = turnParts.flatMap((part) => part.type === "tool_call"
           ? [historicalToolPart(part.data)] : []);
-        this.renderTurnMediaBlock(body, historicalTools,
+        const media = this.renderTurnMediaBlock(body, historicalTools,
           turnParts.flatMap((part) => part.type === "content" && typeof part.data === "string" ? [part.data] : []).join("\n"));
+        // Same place as the live turn settled it: under the folded work, above the reply.
+        const fold = body.querySelector<HTMLElement>(":scope > details[data-agent-turn-fold]");
+        if (media && fold && fold.nextElementSibling !== media) fold.after(media);
         this.renderTurnChanges(body, historicalTools);
       } else {
         const { content } = presented[0];
@@ -1104,7 +1117,7 @@ export class AgentConversationRenderer extends Component {
     const label = cancelled ? this.workedLabel(elapsedMs, true) : summary.label;
     // Keep the action summary while closed; once open, name the whole-turn
     // container instead of repeating the activity labels below it.
-    header.dataset.closedLabel = label.replace(/ · /gu, " ·\u00a0");
+    header.dataset.closedLabel = unbreakableActivityLabel(label);
     header.dataset.openLabel = cancelled ? header.dataset.closedLabel : "Activity";
     this.syncCompletedActivityLabel(element);
     let icon = header.querySelector<HTMLElement>(".systemsculpt-agent-activity-state");
@@ -1121,7 +1134,8 @@ export class AgentConversationRenderer extends Component {
   private syncCompletedActivityLabel(element: HTMLDetailsElement): void {
     const header = element.querySelector<HTMLElement>(":scope > summary");
     const label = element.open ? header?.dataset.openLabel : header?.dataset.closedLabel;
-    if (label) header?.querySelector(".systemsculpt-agent-activity-label")?.setText(label);
+    const target = header?.querySelector<HTMLElement>(".systemsculpt-agent-activity-label");
+    if (label && target) setActivityLabelText(target, label);
   }
 
   private createActivityOverflow(
@@ -1226,11 +1240,11 @@ export class AgentConversationRenderer extends Component {
     const count = Number(element.dataset.hiddenCount);
     const expanded = this.activityOverflowExpanded(element);
     // Same as the turn summary: "· 2 failed" never strands its dot at a line end.
-    const label = (element.dataset.activitySummary ?? this.activityOverflowLabel(
+    const label = unbreakableActivityLabel((element.dataset.activitySummary ?? this.activityOverflowLabel(
       Number.isFinite(count) ? count : 0,
       state.latestNode,
-    )).replace(/ · /gu, " ·\u00a0");
-    if (state.label.textContent !== label) state.label.setText(label);
+    )));
+    setActivityLabelText(state.label, label);
     if (Number(element.dataset.failedCount) > 0) {
       setIcon(state.icon, "circle-alert");
       state.icon.dataset.iconName = "circle-alert";
@@ -1963,11 +1977,11 @@ export class AgentConversationRenderer extends Component {
     if (!details.open || state.revision !== revision) state.dirty = true;
   }
 
-  private renderTurnMediaBlock(parent: HTMLElement, parts: readonly AgentToolPart[], answer: string): HTMLElement | null {
+  private renderTurnMediaBlock(parent: HTMLElement, parts: readonly AgentToolPart[], answer: string, live = false): HTMLElement | null {
     return renderTurnMedia(this.options.app, parent, parts, {
       openFile: (path) => void this.options.onOpenArtifact({ id: path, kind: "generated_file", title: path.split("/").pop() ?? path, path }),
       openLink: (url) => void openExternalUrl(url, parent.ownerDocument.defaultView ?? undefined),
-    }, answer);
+    }, answer, live);
   }
 
   private renderTurnChanges(parent: HTMLElement, parts: readonly AgentToolPart[]): void {

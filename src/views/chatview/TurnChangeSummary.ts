@@ -28,6 +28,13 @@ export function presentTurnChanges(parts: readonly AgentToolPart[]): readonly Tu
       if (!target.vaultPath) return;
       changes.set(target.vaultPath, { path: target.vaultPath, label, ...(meta ? { meta } : {}), ...(deleted ? { deleted: true } : {}) });
     };
+    // A note made or changed earlier in the turn and then moved is one note: it is listed once, where it ended up.
+    const move = (source: string, destination: string, label: string) => {
+      const from = part.native ? nativePath(part, source).vaultPath : source;
+      const earlier = from ? changes.get(from) : undefined;
+      if (from && from !== destination) changes.delete(from);
+      add(destination, earlier?.meta, label);
+    };
     if (part.native) {
       if (part.state !== "succeeded" || output.success === false) continue;
       if (["Edit", "MultiEdit", "Write"].includes(part.name)) {
@@ -42,7 +49,7 @@ export function presentTurnChanges(parts: readonly AgentToolPart[]): readonly Tu
           const diff = typeof change.diff === "string" ? parseUnifiedDiff(change.diff) : null;
           const meta = operation === "add" ? "new" : operation === "delete" ? undefined
             : diff ? `+${diff.stats.additions} −${diff.stats.deletions}` : undefined;
-          if (destination) add(destination, undefined, `Moved ${name(path)} → ${nativePath(part, destination).displayPath}`);
+          if (destination) move(path, destination, `Moved ${name(path)} → ${nativePath(part, destination).displayPath}`);
           else add(path, meta, operation === "delete" ? `Deleted ${name(path)}` : name(path), operation === "delete");
         }
       }
@@ -56,7 +63,7 @@ export function presentTurnChanges(parts: readonly AgentToolPart[]): readonly Tu
       for (const result of successful) {
         const path = paths(result.path)[0];
         const source = paths(result.source)[0], destination = paths(result.destination)[0];
-        if (canonicalName === "move" && source && destination) add(destination, undefined, `Moved ${name(source)} → ${destination}`);
+        if (canonicalName === "move" && source && destination) move(source, destination, `Moved ${name(source)} → ${destination}`);
         else if (path) add(path, canonicalName === "trash" ? "in trash" : undefined, canonicalName === "trash" ? `Deleted ${name(path)}` : name(path), canonicalName === "trash");
       }
     } else if (part.state !== "succeeded" || output.success === false || Array.isArray(output.results)) {
@@ -64,7 +71,7 @@ export function presentTurnChanges(parts: readonly AgentToolPart[]): readonly Tu
     } else if (canonicalName === "move") {
       for (const item of rows(input.items)) {
         const source = paths(item.source)[0], destination = paths(item.destination)[0];
-        if (source && destination) add(destination, undefined, `Moved ${name(source)} → ${destination}`);
+        if (source && destination) move(source, destination, `Moved ${name(source)} → ${destination}`);
       }
     } else if (canonicalName === "trash") {
       for (const path of paths(input.paths)) add(path, "in trash", `Deleted ${name(path)}`, true);

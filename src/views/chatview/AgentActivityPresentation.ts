@@ -5,17 +5,42 @@ import { gatedSystemSculptTurn, presentAgentTool, refusedSystemSculptCall } from
 /** denied: the person declined an action, so the turn is not marked done with a check. */
 export type AgentActivitySummary = Readonly<{ label: string; failedCount: number; refused?: true; gated?: true; denied?: true }>;
 
-type ActivityGroup = { label: string; items: Set<string>; uncounted: number };
+/** rows: how many activity rows the group stands for; "N more" counts rows, as the person sees them. */
+type ActivityGroup = { label: string; items: Set<string>; uncounted: number; rows: number };
 
 const groupSize = (group: ActivityGroup): number => group.items.size + group.uncounted;
+
+/** "· 2 failed" never strands its dot at a line end. */
+export function unbreakableActivityLabel(label: string): string {
+  return label.replace(/ · /gu, " ·\u00a0");
+}
+
+/**
+ * Writes a summary so that a count and its word ("5 more", "1 blocked") wrap
+ * as one unit; the text itself is unchanged.
+ */
+export function setActivityLabelText(element: HTMLElement, label: string): void {
+  if (element.textContent === label && element.dataset.activityLabel === label) return;
+  element.replaceChildren();
+  element.dataset.activityLabel = label;
+  let last = 0;
+  for (const match of label.matchAll(/\d+ \p{L}+/gu)) {
+    const at = match.index ?? 0;
+    if (at > last) element.appendText(label.slice(last, at));
+    element.createSpan({ cls: "ss-activity-count", text: match[0] });
+    last = at + match[0].length;
+  }
+  if (last < label.length) element.appendText(label.slice(last));
+}
 
 /** Count adjacent activity by action without repeating payloads or full paths. */
 export function summarizeAgentActivity(parts: readonly AgentPart[]): AgentActivitySummary {
   const groups = new Map<string, ActivityGroup>();
-  let failedCount = 0, refused = false, gated = false, denied = false;
+  let failedCount = 0, blockedCount = 0, uncertainCount = 0, refused = false, gated = false, denied = false;
   const add = (kind: string, label: string, items: readonly string[] = [], count = 1): void => {
-    const group = groups.get(kind) ?? { label, items: new Set<string>(), uncounted: 0 };
+    const group = groups.get(kind) ?? { label, items: new Set<string>(), uncounted: 0, rows: 0 };
     group.label = label;
+    group.rows += 1;
     if (items.length) for (const item of items) group.items.add(item);
     else group.uncounted += count;
     groups.set(kind, group);
@@ -33,32 +58,52 @@ export function summarizeAgentActivity(parts: readonly AgentPart[]): AgentActivi
       // own clause, and a withdrawn request is not a failure.
       if (tool.displayState === "denied") { denied = true; add("denied", `${tool.label} · Denied`); }
       else if (tool.displayState === "cancelled" || part.approvalDecision === "withdrawn") add("withdrawn", `${tool.label} · Withdrawn`);
-      else if (tool.displayState === "failed" || tool.displayState === "outcome-unknown") add("failed", tool.label);
+      // An uncertain result may have happened: it is never folded into "couldn't".
+      else if (tool.displayState === "outcome-unknown") add("uncertain", `${tool.label} · Uncertain`);
+      else if (tool.displayState === "failed") add("failed", tool.label);
+      // A gate (subscription, credits) and a refusal did nothing: neither joins the work that was done.
+      else if (gatedSystemSculptTurn(part)) add("gated", tool.label);
+      else if (refusedSystemSculptCall(part)) add("failed", tool.label);
       else add(tool.groupKind, tool.label.replace(/…$/u, ""), tool.groupItems, tool.groupCount);
-      if (part.approvalDecision !== "withdrawn" && ["failed", "partial", "outcome-unknown"].includes(tool.displayState)) failedCount += 1;
+      const refusal = refusedSystemSculptCall(part) && !gatedSystemSculptTurn(part);
+      if (part.approvalDecision !== "withdrawn" && (refusal || ["failed", "partial", "outcome-unknown"].includes(tool.displayState))) {
+        failedCount += 1;
+        // A guard's block and an uncertain result are not known failures: each keeps its own word.
+        if (tool.icon === "shield-x") blockedCount += 1;
+        else if (tool.displayState === "outcome-unknown") uncertainCount += 1;
+      }
     }
   }
   const labels = Array.from(groups, ([kind, group]) => {
     const count = groupSize(group);
     if (kind === "denied") return count === 1 ? group.label : `Denied ${count} actions`;
     if (kind === "withdrawn") return count === 1 ? group.label : `${count} actions withdrawn`;
+    if (kind === "gated") return count === 1 ? group.label : `${count} actions need a subscription or credits`;
+    if (kind === "uncertain") return count === 1 ? group.label : `${count} actions uncertain`;
     if (kind === "failed") return count === 1 ? group.label : `Couldn't complete ${count} actions`;
     // One read names its note (spec 3.2: "Read Plan.md, searched 2 patterns").
     if (kind === "read") return count === 1 ? group.label : `Read ${count} notes`;
     if (kind === "search") return `Searched ${count} pattern${count === 1 ? "" : "s"}`;
     if (kind === "command") return `Ran ${count} command${count === 1 ? "" : "s"}`;
     if (kind === "reasoning") return "Thought";
-    if (count > 1 && ["edit", "write", "trash", "list", "web-search"].includes(kind)) {
+    if (count > 1 && ["edit", "write", "trash", "list", "web-search", "web"].includes(kind)) {
       const [verb, noun] = kind === "edit" ? ["Edited", "notes"] : kind === "write" ? ["Created", "notes"]
-        : kind === "trash" ? ["Trashed", "notes"] : kind === "list" ? ["Listed", "folders"] : ["Searched", "web queries"];
+        : kind === "trash" ? ["Trashed", "notes"] : kind === "list" ? ["Listed", "folders"]
+          : kind === "web" ? ["Read", "web pages"] : ["Searched", "web queries"];
       return `${verb} ${count} ${noun}`;
     }
     return group.label;
   });
   const visible = labels.slice(0, 3).map((label, index) => index ? label.charAt(0).toLowerCase() + label.slice(1) : label).join(", ");
-  const more = Array.from(groups.values()).slice(3).reduce((count, group) => count + groupSize(group), 0);
+  const more = Array.from(groups.values()).slice(3).reduce((count, group) => count + group.rows, 0);
+  const failed = failedCount - blockedCount - uncertainCount;
+  // Uncertain work says so in its own clause; when that clause is past the
+  // three shown, its tally keeps the uncertainty visible.
+  const uncertainHidden = Array.from(groups.keys()).indexOf("uncertain") >= 3;
+  const outcomes = [[failed, "failed"], [blockedCount, "blocked"], [uncertainHidden ? uncertainCount : 0, "uncertain"]]
+    .filter(([count]) => count).map(([count, word]) => ` · ${count} ${word}`).join("");
   return {
-    label: `${visible || "Activity"}${more ? ` · ${more} more` : ""}${failedCount ? ` · ${failedCount} failed` : ""}`,
+    label: `${visible || "Activity"}${more ? ` · ${more} more` : ""}${outcomes}`,
     failedCount,
     ...(refused ? { refused: true as const } : {}),
     ...(gated ? { gated: true as const } : {}),

@@ -7,6 +7,15 @@
     "x-systemsculpt-platform": "macos | windows | linux | ios | android"
   },
   "local_interactions": {
+    "chat-tool-cards": {
+      "events": [],
+      "not_measured": "Chat tool result cards (fields, vault path links, web sources, command output, media thumbnails, notices) and opening embedded images, PDFs, audio and video from an answer stay local; Obsidian's policies ban client telemetry. Generation itself is measured where it reaches the API, as image and video generation jobs.",
+      "where": [
+        "src/views/chatview/ToolCardBlocks.ts",
+        "src/views/chatview/SystemSculptToolCard.ts",
+        "src/views/chatview/MarkdownEmbeds.ts"
+      ]
+    },
     "studio-incident-arrow-geometry": {
       "events": [],
       "not_measured": "Studio batches local diagram-arrow geometry for touched nodes and shapes per frame. Movement, resize and peer reconciliation send no client telemetry or server calls.",
@@ -41,6 +50,11 @@
       "events": [],
       "not_measured": "Local run teardown and unload-safe resume admission send no telemetry. Existing audio_processing API events measure only requests that are actually sent.",
       "where": ["src/features/audio-processor/AudioProcessorModal.ts", "src/features/audio-processor/AudioProcessorResume.ts"]
+    },
+    "chat-live-media-generation": {
+      "events": [],
+      "not_measured": "Chat's live image, video and Studio run placeholders and their failure state draw from the tool call and the job status the plugin already polls. No client telemetry or extra server call is sent; the hosted image and video job events measure generation server-side.",
+      "where": ["src/views/chatview/PendingMedia.ts", "src/views/chatview/TurnMedia.ts", "src/tools/systemsculpt/GenerationProgress.ts"]
     },
     "chat-source-citation-open": {
       "events": [],

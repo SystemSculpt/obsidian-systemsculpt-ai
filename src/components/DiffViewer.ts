@@ -346,26 +346,19 @@ export class DiffViewer {
     }
   }
 
+  /** A standard unified-diff range ("-3,4 +3,5"); the change count has its own badge. */
   private computeHunkSummary(hunk: DiffLine[]): string | null {
     const firstOld = hunk.find((line) => typeof line.oldLineNumber === 'number');
     const firstNew = hunk.find((line) => typeof line.newLineNumber === 'number');
-    const changeCount = hunk.filter((line) => line.type !== 'unchanged').length;
-
     if (!firstOld && !firstNew) {
       return null;
     }
-
-    const summaryParts: string[] = [];
-    if (firstOld?.oldLineNumber) {
-      summaryParts.push(`-${firstOld.oldLineNumber}`);
-    }
-    if (firstNew?.newLineNumber) {
-      summaryParts.push(`+${firstNew.newLineNumber}`);
-    }
-    if (changeCount > 0) {
-      summaryParts.push(`${changeCount} ${changeCount === 1 ? 'line' : 'lines'}`);
-    }
-
-    return summaryParts.join(' ');
+    const oldCount = hunk.filter((line) => typeof line.oldLineNumber === 'number').length;
+    const newCount = hunk.filter((line) => typeof line.newLineNumber === 'number').length;
+    // An empty side starts at the line before the change, as in unified diff.
+    const oldStart = firstOld?.oldLineNumber ?? Math.max(0, (firstNew?.newLineNumber ?? 1) - 1);
+    const newStart = firstNew?.newLineNumber ?? Math.max(0, (firstOld?.oldLineNumber ?? 1) - 1);
+    const range = (start: number, count: number) => count === 1 ? `${start}` : `${start},${count}`;
+    return `-${range(oldStart, oldCount)} +${range(newStart, newCount)}`;
   }
 }

@@ -53,7 +53,7 @@ Bulk arrivals still ask for confirmation. **Not now** leaves them waiting withou
 
 ## Commands
 
-- `Toggle Audio Recorder`
+- `Toggle audio recorder`
 - `Transcribe an audio file`
 - `Open audio processor`
 - `Process YouTube video`

@@ -27,6 +27,8 @@ let pluginLifetime = new AbortController();
 export function startCodexSession(): void { if (pluginLifetime.signal.aborted) pluginLifetime = new AbortController(); }
 
 type CodexLaunch = Awaited<ReturnType<typeof resolveCodexLaunchOptions>>;
+/** Largest single app-server line Chat reads before treating the connection as broken. */
+const CODEX_MAX_MESSAGE_CHARS = 64 * 1024 * 1024;
 const launchKey = (launch: CodexLaunch) => JSON.stringify([launch.binary, launch.home, launch.codexHome, launch.environment]);
 function abortable<T>(operation: Promise<T>, signals: readonly AbortSignal[], error: () => Error = () => new Error('Codex run canceled.')): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -287,10 +289,12 @@ async function startCodex(launch: CodexLaunch, signal: AbortSignal, callbacks: C
     }
   };
   child.stdout.on('data', (chunk: string) => {
+    // A long line (a generated image arrives inline as base64) is scanned once, not on every chunk.
+    const scanned = buffer.length;
     buffer += chunk;
-    if (buffer.length > 4 * 1024 * 1024) { stop(new Error('Codex protocol message exceeded 4 MiB.')); return; }
-    let newline: number;
-    while ((newline = buffer.indexOf('\n')) >= 0) {
+    if (buffer.length > CODEX_MAX_MESSAGE_CHARS) { stop(new Error('Codex protocol message exceeded 64 MiB.')); return; }
+    let newline = buffer.indexOf('\n', scanned);
+    for (; newline >= 0; newline = buffer.indexOf('\n')) {
       const line = buffer.slice(0, newline); buffer = buffer.slice(newline + 1);
       if (!line.trim()) continue;
       try { const message: unknown = JSON.parse(line); if (!isRecord(message)) throw new Error('Invalid message'); receive(message); }

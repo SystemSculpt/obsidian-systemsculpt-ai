@@ -254,6 +254,26 @@ describe("AgentComposer", () => {
     composer.unload();
   });
 
+  it("re-measures its status bar clearance when the floating bar grows", () => {
+    const observed: Element[] = [];
+    let notify: () => void = () => {};
+    const original = (window as any).ResizeObserver;
+    (window as any).ResizeObserver = class { constructor(callback: () => void) { notify = callback; } observe(target: Element) { observed.push(target); } disconnect() {} };
+    const bar = document.body.createDiv({ cls: "status-bar" });
+    bar.style.position = "fixed";
+    let barTop = 819;
+    bar.getBoundingClientRect = () => ({ top: barTop, bottom: 844, left: 0, right: 390, width: 390, height: 844 - barTop } as DOMRect);
+    try {
+      const { parent } = mount();
+      const composer = parent.querySelector<HTMLElement>(".systemsculpt-agent-composer")!;
+      composer.getBoundingClientRect = () => ({ top: 694, bottom: 844, left: 0, right: 390, width: 390, height: 150 } as DOMRect);
+      expect(observed).toContain(bar);
+      barTop = 804;
+      notify();
+      expect(composer.style.getPropertyValue("--ss-agent-composer-host-clearance")).toBe("40px");
+    } finally { (window as any).ResizeObserver = original; }
+  });
+
   it("exposes a footer slot under the card for the run line", () => {
     const { composer, query } = mount();
     const card = query<HTMLElement>(".systemsculpt-agent-prompt")!;

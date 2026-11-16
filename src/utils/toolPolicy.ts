@@ -17,6 +17,15 @@ export function splitToolName(fullName: string): ToolNameParts {
   };
 }
 
+/**
+ * A tool an agent reached through another tool server (Claude Code names it
+ * `mcp__<server>__<tool>`), as people read it: the tool, with its server beside it.
+ */
+export function bridgedToolName(name: string): { server: string; tool: string } | null {
+  const match = /^mcp__(.+?)__(.+)$/u.exec(name);
+  return match ? { server: match[1].replace(/[_-]+/gu, " "), tool: match[2].replace(/[_-]+/gu, " ") } : null;
+}
+
 export type ToolApprovalPolicy = {
   trustedToolNames?: Set<string>;
   requireDestructiveApproval?: boolean;

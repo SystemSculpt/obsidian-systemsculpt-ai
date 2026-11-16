@@ -2,7 +2,8 @@
  * @jest-environment jsdom
  */
 
-import { App, MarkdownRenderer } from "obsidian";
+import { App, MarkdownRenderer, TFile } from "obsidian";
+import { encodeSystemSculptToolResult } from "../../../tools/systemsculpt/SystemSculptTools";
 import type { AgentConversationSnapshot } from "../../../chat/ChatConversation";
 import type { ChatMessage } from "../../../types";
 import type { ToolCall } from "../../../types/toolCalls";
@@ -238,6 +239,58 @@ it("does not lend settlement adoption to an overlapping ordinary history refresh
   } finally {
     release();
     markdown.mockRestore();
+    renderer.unload();
+    parent.remove();
+  }
+});
+
+it.each(["restored", "adopted"])("keeps generated media under the folded work and above the reply in %s history", async (origin) => {
+  const path = "SystemSculpt/Images/Lighthouse.png";
+  const app = new App();
+  (app.vault as unknown as { getAbstractFileByPath: (p: string) => unknown }).getAbstractFileByPath = (p: string) => p === path ? Object.assign(new TFile(), { path, name: "Lighthouse.png", extension: "png" }) : null;
+  (app.vault as unknown as { getResourcePath: () => string }).getResourcePath = () => "app://vault/Lighthouse.png";
+  const parent = document.body.createDiv();
+  const renderer = new AgentConversationRenderer(parent, {
+    app, sourcePath: () => "", onApprove: jest.fn(),
+    onOpenArtifact: jest.fn(), onCopyArtifactPath: jest.fn(),
+  });
+  renderer.load();
+  try {
+    const data = encodeSystemSculptToolResult({ ok: true, message: "Saved", media: [{ kind: "image", path }] });
+    const tool: ToolCall = {
+      id: "media-call", messageId: "media-assistant", timestamp: 2,
+      request: { id: "media-call", type: "function", function: { name: "generate_image", arguments: JSON.stringify({ prompt: "A lighthouse" }) } },
+      state: "completed", result: { success: true, data },
+    };
+    const messages: ChatMessage[] = [
+      { role: "user", message_id: "media-user", content: "Draw a lighthouse." },
+      { role: "assistant", message_id: "media-assistant", content: "Here it is.", responseDurationMs: 12000, messageParts: [
+        { id: "media-reasoning", type: "reasoning", timestamp: 1, data: "Planning the image." },
+        { id: "media-tool", type: "tool_call", timestamp: 2, data: tool },
+        { id: "media-answer", type: "content", timestamp: 3, data: "Here it is." },
+      ] },
+    ];
+    if (origin === "adopted") {
+      await renderer.renderHistory(messages.slice(0, 1));
+      const snapshot: AgentConversationSnapshot = {
+        runId: "media-run", turnId: "media-user", status: "completed", phase: "complete", elapsedMs: 12000,
+        messages: [{ id: "media-assistant", role: "assistant", partIds: ["media-reasoning", "media-tool", "media-answer"] }],
+        parts: [
+          { id: "media-reasoning", kind: "reasoning", messageId: "media-assistant", order: 1, state: "complete", summary: "Planning the image." },
+          { id: "media-tool", kind: "tool", messageId: "media-assistant", order: 2, state: "succeeded", callId: tool.id, name: "generate_image", location: "server", input: { prompt: "A lighthouse" }, output: { data } },
+          { id: "media-answer", kind: "text", messageId: "media-assistant", order: 3, state: "complete", markdown: "Here it is." },
+        ],
+      };
+      await renderer.renderActive(snapshot, presentAgentConversation(snapshot, false));
+      await renderer.settleHistory(messages, "media-user");
+    } else {
+      await renderer.renderHistory(messages);
+    }
+    const media = parent.querySelector<HTMLElement>(".systemsculpt-agent-turn-media")!;
+    expect(media).not.toBeNull();
+    expect(media.previousElementSibling?.matches("details[data-agent-turn-fold]")).toBe(true);
+    expect(media.nextElementSibling?.textContent).toContain("Here it is.");
+  } finally {
     renderer.unload();
     parent.remove();
   }

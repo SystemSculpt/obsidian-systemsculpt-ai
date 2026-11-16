@@ -12,7 +12,27 @@ permissions:
   contents: read
 
 jobs:
+  # Obsidian installs the release files of HEAD manifest.json's version, and the daily release tool merges a
+  # version to main only after publishing it (Trellis T-6109). Announce a release on systemsculpt.com once
+  # main names it, so the plugin's update notice never offers an update Obsidian cannot install yet.
+  main-names-release:
+    if: ${{ github.event.release.draft == false && github.event.release.prerelease == false }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait until main's manifest.json names this release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          while :; do
+            version="$(gh api -H 'Accept: application/vnd.github.raw+json' "repos/${GITHUB_REPOSITORY}/contents/manifest.json?ref=main" | jq -r .version || true)"
+            [ "$version" = "$TAG" ] && break
+            echo "main names ${version:-unknown}; waiting for $TAG"
+            sleep 20
+          done
+
   verify:
+    needs: main-names-release
     if: ${{ github.event.release.draft == false && github.event.release.prerelease == false }}
     permissions:
       contents: read

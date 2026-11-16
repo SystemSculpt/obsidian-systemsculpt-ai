@@ -866,6 +866,9 @@ export class AgentComposer extends Component {
     if (Observer) {
       const observer = new Observer(() => measure());
       observer.observe(this.element);
+      // The bar grows when a narrow window wraps its items, without any layout change.
+      const bar = this.element.ownerDocument.querySelector<HTMLElement>(".status-bar");
+      if (bar) observer.observe(bar);
       this.register(() => observer.disconnect());
     }
     this.registerDomEvent(view, "resize", measure);

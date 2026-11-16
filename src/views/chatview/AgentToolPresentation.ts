@@ -5,7 +5,7 @@ import {
 } from "../../tools/LocalToolOutcome";
 import type { AgentToolPart } from "../../chat/ChatConversation";
 import { isActiveAgentToolState } from "./AgentConversationPresentation";
-import { nativeToolPresentation } from "./NativeToolPresentation";
+import { imageCountTarget, nativeToolPresentation } from "./NativeToolPresentation";
 import { decodeSystemSculptToolOutput, systemSculptToolName } from "../../tools/systemsculpt/SystemSculptTools";
 
 type AgentToolDisplayState = AgentToolPart["state"] | "partial";
@@ -97,6 +97,7 @@ const STATE_ICONS: Readonly<Record<AgentToolDisplayState, string>> = {
   failed: "x",
   denied: "ban",
   cancelled: "minus",
+  // Spec 3.4: uncertain stays `x`; its colour (warning, not danger) says it may have worked.
   "outcome-unknown": "x",
 };
 
@@ -278,11 +279,24 @@ function hasPartialOutcome(part: AgentToolPart, counts: ToolOutcomeCounts): bool
  * provider and vault details private while making it clear that later agent
  * work may still continue and that successful partial results were retained.
  */
+/** How loud a tool's notice is: a choice or a guard is calm, uncertainty a warning, breakage an error. */
+export function agentToolNoticeTone(part: AgentToolPart, displayState: AgentToolDisplayState): "danger" | "warning" | "info" {
+  if (part.state === "denied" || part.state === "cancelled") return "info";
+  if (/(?:^|_)(?:AUTO_BLOCKED|REVIEW_BLOCKED|BLOCKED_BY_REVIEW)(?:_|$)/u.test(part.error?.code ?? "")) return "info";
+  return displayState === "partial" || part.state === "outcome-unknown" ? "warning" : "danger";
+}
+
 export function presentAgentToolFailure(part: AgentToolPart): string {
   // SystemSculpt tools write their own plain reason; show it, without the link the chat shows already.
   const own = systemSculptToolName(part.name) ? decodeSystemSculptToolOutput(part.output?.data) : null;
   if (own && !own.ok && own.message) return (own.link ? own.message.split(`${own.link.label}:`)[0] : own.message).trim().slice(0, 300);
+  // Declined, stopped and blocked are outcomes the person chose or a guard made, not breakage.
+  if (part.state === "denied") return "Declined, so it didn't run.";
+  if (part.state === "cancelled") return "Stopped before it finished.";
   const native = nativeToolPresentation(part);
+  if (native && /(?:^|_)(?:AUTO_BLOCKED|REVIEW_BLOCKED|BLOCKED_BY_REVIEW)(?:_|$)/u.test(part.error?.code ?? "")) {
+    return `${native.agentName} blocked this before it ran.`;
+  }
   if (native) return part.state === "outcome-unknown"
     ? `The result from ${native.agentName} is uncertain. Check the requested action before retrying.`
     : `This ${native.agentName} action could not be completed.`;
@@ -557,7 +571,7 @@ export function presentAgentTool(part: AgentToolPart): AgentToolPresentation {
       canonicalName: part.name, label,
       actionIcon: native.icon,
       displayState: part.state,
-      icon: blocked ? "shield-x" : STATE_ICONS[part.state],
+      icon: blocked ? "shield-x" : gatedSystemSculptCall(part) ? "lock" : refusedSystemSculptCall(part) ? "x" : STATE_ICONS[part.state],
       summary: native.description ?? null,
       meta, targetPath: native.targetPath,
       groupKind: native.groupKind, groupCount: native.groupCount,
@@ -594,14 +608,16 @@ export function presentAgentTool(part: AgentToolPart): AgentToolPresentation {
     : [...strings(input.paths), ...strings(input.path)];
   const targetPath = !serverTool && VAULT_TOOLS_WITH_SAFE_DETAILS.has(canonicalName) && paths.length === 1 ? paths[0] : undefined;
   const target = targetPath?.split(/[\\/]/u).filter(Boolean).pop();
+  // A partly finished batch says how many of its notes it reached, never the whole request.
+  const noteCount = displayState === "partial" && paths.length > 1 ? `${outcomeCounts.completed} of ${paths.length}` : `${paths.length}`;
   const baseLabel = canonicalName === "context" ? contextToolLabel(input)
-    : canonicalName === "read" ? (target ? `Read ${target}` : `Read ${paths.length || ""} notes`.replace("  ", " "))
+    : canonicalName === "read" ? (target ? `Read ${target}` : `Read ${paths.length ? noteCount : ""} notes`.replace("  ", " "))
       : canonicalName === "write" ? `Create ${target ?? "file"}`
         : canonicalName === "edit" ? `Edit ${target ?? "file"}`
-          : canonicalName === "multi_edit" ? `Edit ${target ?? `${paths.length} notes`}`
+          : canonicalName === "multi_edit" ? `Edit ${target ?? `${noteCount} notes`}`
             : canonicalName === "list_items" ? `List ${targetPath ?? (counted ? `${counted.items.length} folders` : "vault")}`
-              : canonicalName === "create_folders" ? `Create ${targetPath ?? `${paths.length} folders`}`
-                : canonicalName === "trash" ? `Move ${target ?? `${paths.length} notes`} to trash`
+              : canonicalName === "create_folders" ? `Create ${targetPath ?? `${noteCount} folders`}`
+                : canonicalName === "trash" ? `Move ${target ?? `${noteCount} notes`} to trash`
                   : canonicalName === "move" ? (() => {
                     const sources = objectStrings(input.items, "source"), destinations = objectStrings(input.items, "destination");
                     if (sources.length !== 1 || destinations.length !== 1) return `Move ${sources.length || ""} notes`.replace("  ", " ");
@@ -612,6 +628,7 @@ export function presentAgentTool(part: AgentToolPart): AgentToolPresentation {
                   })()
                   : canonicalName === "find" || canonicalName === "search"
                     ? counted && counted.items.length > 1 ? countedLabel(counted, "base") : `Search “${firstString(input.patterns) ?? firstString(input.query) ?? firstString(input.pattern) ?? "your vault"}”`
+                    : canonicalName === "generate_image" ? `Generate ${imageCountTarget(part, input)}`
                     : counted ? countedLabel(counted, "base") : TOOL_LABELS[canonicalName] ?? `Use ${canonicalName || "tool"}`;
   const query = webSearchQuery(part);
   const label = serverTool ? actionLabel(query ? `Search the web for “${query}”` : serverLabel ?? UNKNOWN_SERVER_TOOL_LABEL, labelState)
@@ -625,7 +642,8 @@ export function presentAgentTool(part: AgentToolPart): AgentToolPresentation {
     canonicalName: presentedName, label,
     actionIcon: TOOL_ACTION_ICONS[presentedName] ?? "wrench",
     displayState,
-    icon: STATE_ICONS[displayState],
+    // A gate (subscription, credits) is a lock, a refusal an x: never a check beside "Couldn't".
+    icon: gatedSystemSculptCall(part) ? "lock" : refusedSystemSculptCall(part) ? "x" : STATE_ICONS[displayState],
     summary,
     ...(partialSummary && summary === partialSummary ? { summaryCountsOutcomes: true as const } : {}),
     ...(resultCount !== undefined ? { meta: `${resultCount} result${resultCount === 1 ? "" : "s"}` } : {}),
