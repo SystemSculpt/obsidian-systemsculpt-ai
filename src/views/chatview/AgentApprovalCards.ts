@@ -1,9 +1,10 @@
 import { Component, setIcon } from "obsidian";
-import { createSurfaceElement, createUiAction } from "../../core/ui/surface";
+import { createSurfaceElement, createUiAction, updateUiAction } from "../../core/ui/surface";
 import type { AgentToolPart } from "../../chat/ChatConversation";
 import { presentAgentTool } from "./AgentToolPresentation";
-import { nativeToolPresentation } from "./NativeToolPresentation";
+import { nativeToolPresentation, noteDisplayName } from "./NativeToolPresentation";
 import { getHostOperatingSystem } from "../../platform/hostCapabilities";
+import { renderJsonLines } from "./ToolCardBlocks";
 
 export type ApprovalAnswer = (
   approvalId: string,
@@ -20,6 +21,8 @@ type ApprovalOptions = {
   onHiddenApproval?: (part: AgentToolPart) => void;
   onAnnounce?: (text: string) => void;
   onOpenPath?: (path: string) => void | Promise<void>;
+  /** Whether a vault path already holds a file, so a write over it reads as replacing it. */
+  exists?: (path: string) => boolean;
 };
 
 type Question = { id: string; header: string; question: string; isSecret: boolean; multiSelect: boolean; options: { label: string; description: string }[] };
@@ -51,6 +54,35 @@ function questions(part: AgentToolPart): Question[] {
 
 function editable(element: Element | null): boolean {
   return Boolean(element?.closest('input, textarea, select, [contenteditable="true"]'));
+}
+
+/** A shortcut written the way Obsidian lists hotkeys: "⌘ ⇧ Enter" on macOS, "Ctrl + Shift + Enter" elsewhere. */
+function shortcut(key: string, ...modifiers: readonly ("Mod" | "Alt" | "Shift")[]): string {
+  const mac = getHostOperatingSystem() === "macOS";
+  const names = mac ? { Mod: "⌘", Alt: "⌥", Shift: "⇧" } : { Mod: "Ctrl", Alt: "Alt", Shift: "Shift" };
+  return [...modifiers.map(modifier => names[modifier]), key].join(mac ? " " : " + ");
+}
+
+/** A name this short never breaks across lines, as in rows. */
+const WHOLE_NAME_LENGTH = 32;
+
+/** The file a title names, as Obsidian and its row name a note ("Garden", not "Garden.md"); Details keeps the path. */
+function namedTarget(title: string, targetPath: string | undefined): { before: string; name: string; after: string } | undefined {
+  const file = targetPath?.split(/[\\/]/u).pop();
+  const offset = file ? title.lastIndexOf(file) : -1;
+  return file && offset >= 0
+    ? { before: title.slice(0, offset), name: noteDisplayName(file), after: title.slice(offset + file.length) }
+    : undefined;
+}
+
+function folderOf(path: string | undefined): string | undefined {
+  return path?.includes("/") ? path.slice(0, path.lastIndexOf("/")) : undefined;
+}
+
+/** The meta line names a place one way, capitalised: "In Notes", "In vault". */
+function placeMeta(meta: string | undefined, folder: string | undefined): string | undefined {
+  if (meta?.startsWith("in ")) return `In ${meta.slice(3)}`;
+  return meta && folder && (meta === folder || meta.startsWith(`${folder} · `)) ? `In ${meta}` : meta;
 }
 
 function sessionScope(part: AgentToolPart): string {
@@ -85,9 +117,13 @@ export class AgentApprovalCards extends Component {
   private readonly answering = new Set<string>();
   private readonly announced = new Set<string>();
   private review: HTMLButtonElement | null = null;
+  private reviewKind: "question" | "approval" = "approval";
   private announcement: HTMLElement | null;
   private composing = false;
   private composerEventTarget: HTMLElement | undefined;
+  private cardObserver: IntersectionObserver | null = null;
+  /** Whether each pending card is in the chat's scroller; a card not yet measured counts as on screen. */
+  private readonly onScreen = new Map<Element, boolean>();
 
   constructor(private readonly root: HTMLElement, private readonly options: ApprovalOptions) {
     super();
@@ -98,7 +134,18 @@ export class AgentApprovalCards extends Component {
     this.registerDomEvent(root, "keydown", event => this.handleKey(event));
     this.registerDomEvent(root, "focusin", () => this.syncReviewVisibility());
     this.registerDomEvent(root, "focusout", () => this.syncReviewVisibilityAfterFocusMoves());
-    this.register(() => { this.review?.remove(); this.announcement?.remove(); });
+    // A chat moved into a pop-out measures its cards with that window's observer.
+    const detachMigration = root.onWindowMigrated?.(() => {
+      this.disconnectCards();
+      this.observeCards();
+      this.syncReviewVisibility();
+    });
+    this.register(() => {
+      detachMigration?.();
+      this.disconnectCards();
+      this.review?.remove();
+      this.announcement?.remove();
+    });
   }
 
   onload(): void { this.bindComposerEvents(); }
@@ -139,43 +186,61 @@ export class AgentApprovalCards extends Component {
     const tool = presentAgentTool(part);
     const plan = part.native?.agent === "claude" && part.name === "ExitPlanMode";
     const questionList = questions(part);
-    const actionTitle = native?.approvalTitle ?? tool.label.charAt(0).toLowerCase() + tool.label.slice(1);
+    const targetPath = native?.targetPath ?? tool.targetPath;
+    // A write over an existing note replaces it; the title and its icon both say so.
+    const writes = native ? part.native?.agent === "claude" && part.name === "Write" : canonicalName === "write";
+    const replaces = writes && Boolean(targetPath && this.options.exists?.(targetPath));
+    const label = replaces && !native ? tool.label.replace(/^Create /u, "Replace ") : tool.label;
+    const nativeTitle = replaces && native ? native.approvalTitle.replace(/^create /u, "replace ") : native?.approvalTitle;
+    const actionTitle = nativeTitle ?? label.charAt(0).toLowerCase() + label.slice(1);
     const agent = native?.agentName ?? "SystemSculpt";
     const title = plan ? `${agent} has a plan` : questionList.length ? `${agent} asks: ${questionList.length === 1 ? questionList[0].question : "A few questions"}`
       : `${agent} wants to ${actionTitle}`;
+    // One glyph per verb: creating adds a file; replacing or editing one changes it.
+    const icon = replaces || (canonicalName === "multi_edit" && tool.targetPath) ? "file-pen-line" : native?.icon ?? tool.actionIcon;
     const header = card.createDiv({ cls: "systemsculpt-agent-approval-header" });
-    setIcon(header.createSpan({ cls: "systemsculpt-agent-approval-icon", attr: { "aria-hidden": "true" } }), native?.icon ?? tool.actionIcon);
+    setIcon(header.createSpan({ cls: "systemsculpt-agent-approval-icon", attr: { "aria-hidden": "true" } }), icon);
     const heading = header.createEl("strong", { cls: "systemsculpt-agent-approval-copy", text: title, attr: { id: titleId } });
-    const targetPath = native?.targetPath ?? tool.targetPath;
-    if (targetPath && this.options.onOpenPath) {
-      const target = targetPath.split(/[\\/]/u).pop()!;
-      const offset = title.lastIndexOf(target);
-      if (offset >= 0) {
-        heading.empty(); heading.appendText(title.slice(0, offset));
-        const link = heading.createEl("a", { text: target, cls: "internal-link", attr: { href: targetPath, "data-href": targetPath } });
+    const target = namedTarget(title, targetPath);
+    if (target && targetPath) {
+      heading.empty(); heading.appendText(target.before);
+      const cls = `systemsculpt-agent-approval-target${target.name.length <= WHOLE_NAME_LENGTH ? " is-whole" : ""}`;
+      // A note that isn't there yet is plain text: opening it would create it.
+      if (this.options.onOpenPath && this.options.exists?.(targetPath) !== false) {
+        const link = heading.createEl("a", { text: target.name, cls: `internal-link ${cls}`, attr: { href: targetPath, "data-href": targetPath } });
         link.onclick = event => { event.preventDefault(); void this.options.onOpenPath?.(targetPath); };
-        heading.appendText(title.slice(offset + target.length));
-      }
+      } else heading.createSpan({ cls, text: target.name });
+      heading.appendText(target.after);
     }
     header.createSpan({ cls: "systemsculpt-agent-approval-counter" });
-    const meta = native?.meta ?? (targetPath?.includes("/") ? targetPath.slice(0, targetPath.lastIndexOf("/")) : undefined);
+    const meta = placeMeta(native?.meta ?? folderOf(targetPath), native?.meta ? folderOf(native.path) : folderOf(targetPath));
     const metaId = `${titleId}-meta`;
     card.createDiv({ cls: "systemsculpt-agent-approval-meta", text: meta ?? "", attr: { id: metaId, ...(!meta ? { hidden: "" } : {}) } });
     card.setAttribute("aria-describedby", metaId);
     card.createDiv({ cls: "systemsculpt-agent-approval-preview", attr: { hidden: "", "data-testid": "chat.approval.preview" } });
     card.dataset.questionCount = String(questionList.length);
     const answers: Record<string, string[]> = {};
+    // Send waits for a chosen option or typed words. It stays in the tab order, announced as unavailable.
+    let send: HTMLButtonElement | undefined;
+    const syncSend = (): void => {
+      send?.setAttribute("aria-disabled", String(!Object.values(answers).some(values => values.length > 0)));
+    };
+    // One question with one choice: a click on an option answers it at once, so Send sits
+    // beside the typed answer, the only thing it sends.
+    const optionAnswers = questionList.length === 1 && !questionList[0].multiSelect;
+    let answerField: HTMLElement | undefined;
     for (const question of questionList) {
       const group = card.createEl("fieldset", { cls: "systemsculpt-agent-approval-question" });
       group.createEl("legend", { text: question.question, ...(questionList.length === 1 ? { cls: "systemsculpt-agent-approval-question-legend" } : {}) });
       const choices = group.createDiv({ cls: "systemsculpt-agent-approval-options" });
-      const inputId = `${titleId}-${questionList.indexOf(question)}`;
-      const label = group.createEl("label", { text: "Your answer", attr: { for: inputId } });
-      const input = group.createEl("input", { attr: { id: inputId, type: question.isSecret ? "password" : "text", autocomplete: "off", placeholder: "Type an answer…", "data-testid": "chat.approval.answer" } });
-      label.addClass("systemsculpt-agent-approval-answer-label");
+      // One prompt, worded as the alternative to the options.
+      const prompt = question.options.length ? "Or type an answer" : "Type an answer";
+      answerField = group.createDiv({ cls: "systemsculpt-agent-approval-answer" });
+      const input = answerField.createEl("input", { attr: { type: question.isSecret ? "password" : "text", autocomplete: "off", placeholder: `${prompt}…`, "aria-label": prompt, "data-testid": "chat.approval.answer" } });
       input.addEventListener("input", () => {
         answers[question.id] = input.value ? [input.value] : [];
         choices.querySelectorAll("button").forEach(button => button.setAttribute("aria-pressed", "false"));
+        syncSend();
       });
       for (const option of question.options) {
         const choice = createUiAction(choices, { label: option.label, testId: "chat.approval.option", size: "small", tooltip: false });
@@ -196,36 +261,60 @@ export class AgentApprovalCards extends Component {
           choices.querySelectorAll("button").forEach((button, index) => {
             button.setAttribute("aria-pressed", String(answers[question.id].includes(question.options[index].label)));
           });
-          if (questionList.length === 1 && !question.multiSelect) void this.answer(card, true, false, answers);
+          syncSend();
+          if (optionAnswers) void this.answer(card, true, false, answers);
         };
       }
     }
 
-    const details = card.createEl("details", { cls: "systemsculpt-agent-approval-details" });
-    details.createEl("summary", { text: "Details" });
+    // The same quiet "› Details" disclosure every tool card ends with.
+    const details = card.createEl("details", { cls: "systemsculpt-agent-approval-details systemsculpt-agent-tool-raw" });
+    const summary = details.createEl("summary");
+    setIcon(summary.createSpan({ cls: "systemsculpt-agent-tool-raw-chevron", attr: { "aria-hidden": "true" } }), "chevron-right");
+    summary.appendText("Details");
     // Secret answers are never copied into this disclosure or the conversation.
     const raw = JSON.stringify(part.native?.permissionSuggestions?.length
       ? { input: part.input, permissionSuggestions: part.native.permissionSuggestions }
       : part.input ?? {}, null, 2);
-    details.createEl("pre", { text: raw.length > RAW_DISPLAY_CHARACTERS ? `${raw.slice(0, RAW_DISPLAY_CHARACTERS)}\n… Preview shortened; the full request is sent unchanged.` : raw });
+    // The tool cards' Details box: the code scrolls inside the frame's padding, so the frame keeps
+    // its border and inset at both ends while the code fades out above its bottom edge.
+    const code = details.createEl("pre").createEl("code", { attr: { tabindex: "0" } });
+    // Line by line, as in tool cards: a long value wraps under its own indent, never back to the edge.
+    renderJsonLines(code, raw.length > RAW_DISPLAY_CHARACTERS ? `${raw.slice(0, RAW_DISPLAY_CHARACTERS)}\n… Preview shortened; the full request is sent unchanged.` : raw);
+    // A block taller than its frame fades out at the bottom until it is scrolled to its end, so a cut line reads as more below.
+    const syncOverflow = (): void => {
+      const overflowing = code.scrollHeight > code.clientHeight + 1;
+      code.classList.toggle("is-overflowing", overflowing);
+      code.classList.toggle("is-at-end", !overflowing || code.scrollTop + code.clientHeight >= code.scrollHeight - 1);
+    };
+    code.addEventListener("scroll", syncOverflow, { passive: true });
+    details.addEventListener("toggle", () => { if (details.open) syncOverflow(); });
     const actions = card.createDiv({ cls: "systemsculpt-agent-approval-actions" });
-    const action = (label: string, hint: string, identity: { testId: string }, focusKey: string, shortcut: string, approved: boolean, remember = false) => {
+    const action = (label: string, hint: string, identity: { testId: string }, focusKey: string, keys: string, approved: boolean, remember = false) => {
       const button = createUiAction(actions, { label, ...identity, size: "small", ...(approved && !remember ? { tone: "primary" as const } : {}), tooltip: remember, ...(remember ? { title: sessionScope(part) } : {}) });
-      button.setAttrs({ "data-focus-key": focusKey, "aria-keyshortcuts": shortcut });
-      button.createEl("kbd", { text: hint, attr: { "aria-hidden": "true" } });
-      button.onclick = () => void this.answer(card, approved, remember, questionList.length ? approved ? answers : {} : undefined);
+      button.setAttrs({ "data-focus-key": focusKey, "aria-keyshortcuts": keys });
+      // In the label's own line, so the smaller hint sits on its words' baseline, not centred beside them.
+      (button.querySelector<HTMLElement>(".ss-button__label") ?? button).createEl("kbd", { text: hint, attr: { "aria-hidden": "true" } });
+      button.onclick = () => {
+        if (button.getAttribute("aria-disabled") === "true") return;
+        void this.answer(card, approved, remember, questionList.length ? approved ? answers : {} : undefined);
+      };
       return button;
     };
-    action(plan ? "Start" : questionList.length ? "Send" : "Approve", "⏎", { testId: "chat.approval.allow-once" }, "tool-allow-once", "Enter Meta+Enter Control+Enter", true);
-    action(plan ? "Keep planning" : questionList.length ? "Skip" : "Deny", "esc", { testId: "chat.approval.deny" }, "tool-deny", "Escape", false);
+    const allowOnce = action(plan ? "Start" : questionList.length ? "Send" : "Approve", shortcut("Enter"), { testId: "chat.approval.allow-once" }, "tool-allow-once", "Enter Meta+Enter Control+Enter", true);
+    if (questionList.length) {
+      send = allowOnce;
+      syncSend();
+      if (optionAnswers) answerField?.appendChild(allowOnce);
+    }
+    action(plan ? "Keep planning" : questionList.length ? "Skip" : "Deny", shortcut("Esc"), { testId: "chat.approval.deny" }, "tool-deny", "Escape", false);
     // Neither deleting files nor approving a plan grants ongoing permission.
     const deletesFiles = canonicalName === "trash" || (Array.isArray(record(part.input).changes) && (record(part.input).changes as unknown[]).some(change => {
       const operation = record(change).kind;
       return operation === "delete" || record(operation).type === "delete";
     }));
     if (!questionList.length && !plan && !deletesFiles) {
-      const shortcut = getHostOperatingSystem() === "macOS" ? "⇧⌘↵" : "Ctrl+Shift+Enter";
-      action("Approve all in this chat", shortcut, { testId: "chat.approval.allow-for-chat" }, "tool-allow-chat", "Shift+Meta+Enter Shift+Control+Enter", true, true);
+      action("Approve all in this chat", shortcut("Enter", "Mod", "Shift"), { testId: "chat.approval.allow-for-chat" }, "tool-allow-chat", "Shift+Meta+Enter Shift+Control+Enter", true, true);
     }
     return card;
   }
@@ -263,10 +352,12 @@ export class AgentApprovalCards extends Component {
     const native = nativeToolPresentation(first);
     const tool = presentAgentTool(first);
     const title = native?.approvalTitle ?? tool.label.charAt(0).toLowerCase() + tool.label.slice(1);
+    // The note is named as on its card.
+    const target = namedTarget(title, native?.targetPath ?? tool.targetPath);
     const questionList = questions(first);
     const announcement = first.name === "ExitPlanMode" ? `${native?.agentName ?? "Claude Code"} has a plan. Enter to start, Escape to keep planning.`
       : questionList.length ? `${native?.agentName ?? "Codex"} asks: ${questionList[0].question}`
-        : `${native?.agentName ?? "SystemSculpt"} wants to ${title}. Enter to approve, Escape to deny.`;
+        : `${native?.agentName ?? "SystemSculpt"} wants to ${target ? `${target.before}${target.name}${target.after}` : title}. Enter to approve, Escape to deny.`;
     this.announce(announcement);
     if (this.options.isVisible?.() === false) {
       this.options.onHiddenApproval?.(first);
@@ -330,6 +421,8 @@ export class AgentApprovalCards extends Component {
   private updateReview(): void {
     this.bindComposerEvents();
     const composer = this.options.composer?.();
+    // A question is not an approval: the pill names what is waiting, as the card and status row do.
+    const kind = this.pending.size > 0 && [...this.pending.values()].every(part => questions(part).length > 0) ? "question" : "approval";
     if (!this.review && composer) {
       this.review = createUiAction(composer, { label: "Approval needed · Review", icon: "shield-question", size: "small", testId: "chat.approval.review", tooltip: false });
       composer.prepend(this.review);
@@ -337,12 +430,49 @@ export class AgentApprovalCards extends Component {
       this.review.setAttribute("aria-keyshortcuts", "Alt+ArrowUp Alt+ArrowDown");
       this.review.createEl("kbd", {
         cls: "systemsculpt-agent-approval-review-key",
-        text: getHostOperatingSystem() === "macOS" ? "⌥↑" : "Alt+↑",
+        text: shortcut("↑", "Alt"),
         attr: { "aria-hidden": "true" },
       });
       this.review.onclick = () => this.reviewFirst();
+      this.reviewKind = "approval";
     }
+    if (this.review && kind !== this.reviewKind) {
+      this.reviewKind = kind;
+      updateUiAction(this.review, kind === "question"
+        ? { label: "Answer needed · Review", icon: "message-circle-question" }
+        : { label: "Approval needed · Review", icon: "shield-question" });
+    }
+    this.observeCards();
     this.syncReviewVisibility();
+  }
+
+  /** Watches each pending card, so the pill shows only while one is scrolled out of view. */
+  private observeCards(): void {
+    const Observer = this.root.ownerDocument.defaultView?.IntersectionObserver;
+    if (typeof Observer !== "function") return;
+    if (!this.cardObserver) {
+      this.cardObserver = new Observer(entries => {
+        for (const entry of entries) this.onScreen.set(entry.target, entry.isIntersecting);
+        this.syncReviewVisibility();
+      });
+    }
+    const cards = new Set<Element>(this.cards());
+    for (const card of [...this.onScreen.keys()]) {
+      if (cards.has(card)) continue;
+      this.cardObserver.unobserve(card);
+      this.onScreen.delete(card);
+    }
+    for (const card of cards) {
+      if (this.onScreen.has(card)) continue;
+      this.onScreen.set(card, true);
+      this.cardObserver.observe(card);
+    }
+  }
+
+  private disconnectCards(): void {
+    this.cardObserver?.disconnect();
+    this.cardObserver = null;
+    this.onScreen.clear();
   }
 
   /**
@@ -363,6 +493,9 @@ export class AgentApprovalCards extends Component {
 
   private reviewWanted(): boolean {
     if (this.pending.size === 0) return false;
+    // A card the person can see is its own prompt; a second pill would say it twice.
+    const cards = this.cards();
+    if (this.cardObserver && cards.length > 0 && cards.every(card => this.onScreen.get(card) !== false)) return false;
     const ownerDocument = this.root.ownerDocument;
     const active = ownerDocument.activeElement;
     const composer = this.options.composer?.();

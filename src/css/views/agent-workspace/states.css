@@ -92,11 +92,14 @@
   display: none;
 }
 
+/* A notice opens the run below it: it sits where that run's first item would (the run's own
+ * 20 px), and the run follows it as a framed block follows the item above (16 px, a card's
+ * own 8 px included). */
 .systemsculpt-agent-notice {
   display: flex;
   align-items: flex-start;
   gap: var(--ss-space-2);
-  margin-block: var(--ss-space-3);
+  margin-block: var(--ss-space-5) 0;
   padding: var(--ss-space-3);
   border: 1px solid var(--ss-line);
   border-radius: var(--ss-radius-md);
@@ -105,8 +108,27 @@
   font-size: var(--ss-text-base);
 }
 
-.systemsculpt-agent-notice > span { flex: 1; }
+.systemsculpt-agent-notice + .systemsculpt-agent-notice,
+.systemsculpt-agent-notice + .systemsculpt-agent-active-run:not(:empty) {
+  margin-top: var(--ss-space-2);
+}
 
+/* No word alone on the last line. */
+.systemsculpt-agent-notice > span { flex: 1; text-wrap: pretty; }
+
+/* The X sits on the first line's centre, its glyph inset like the text on the other side. */
+.systemsculpt-agent-notice > .ss-button--icon {
+  flex: none;
+  margin-block: calc((var(--ss-text-base) * var(--ss-leading-relaxed) - 32px) / 2);
+  /* The X's ink (6/24 in from its 16px box, which sits 8px in from the button) ends 12px + the border
+     from the edge, as the text starts on the left and as the content edge of a card below it. */
+  margin-inline-end: calc(-8px - 16px * 6 / 24);
+}
+
+/* Details sits nearer its own output (8px) than the buttons above it (12px). */
+.systemsculpt-agent-error-details {
+  margin-top: var(--ss-space-2);
+}
 .systemsculpt-agent-error-details pre {
   max-width: 100%;
   overflow: auto;

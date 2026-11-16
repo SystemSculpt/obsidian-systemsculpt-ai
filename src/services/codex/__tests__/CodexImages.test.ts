@@ -85,7 +85,8 @@ describe("Codex images in chat", () => {
     const view = { type: "imageView", id: "exec-3", path: "/vault/Photos/old.png" };
     const viewed = part(await new CodexImageImporter(app).present(update(view), view, "/vault"));
     expect(createBinary).not.toHaveBeenCalled();
-    expect(nativeToolPresentation(viewed)?.completedTitle).toBe("Viewed old.png");
+    // Named as the card and the reply name it: no extension, no date stamp.
+    expect(nativeToolPresentation(viewed)?.completedTitle).toBe("Viewed old");
     const host = document.createElement("div");
     await renderNativeToolPreview(app, host, viewed);
     expect(host.querySelector("img")?.getAttribute("src")).toBe("app://vault/Photos/old.png");

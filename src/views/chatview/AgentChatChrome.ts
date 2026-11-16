@@ -89,8 +89,9 @@ export const MODE_CHOICES: Readonly<Record<TextExecutionBackend, readonly Chrome
   ],
 };
 
+// A no-break space keeps the product's name on one line.
 const CLAUDE_AUTO_UNAVAILABLE =
-  "Update Claude Code to use Auto. Until then, edits run and other actions ask.";
+  "Update Claude\u00a0Code to use Auto. Until then, edits apply without asking.";
 const CODEX_AUTO_UNAVAILABLE =
   "Update Codex to use Auto. Until then, Codex asks.";
 const MODE_APPLIES_NEXT = "Applies from your next message.";
@@ -209,19 +210,23 @@ function hostedDetail(state: AgentChromeState): RunLineSegment {
     return { ...base, label: "Internal QA", ariaLabel: "Internal testing mode. Open credits", action: "credits" };
   }
   if (!credits) {
+    // The account's state, amber like "Out of credits": the turn's card or the banner offers See plans,
+    // so the footer never says the same action twice. It still opens the plans.
     return state.account === "no-plan"
-      ? { ...base, label: "See plans", ariaLabel: "See SystemSculpt plans", action: "see-plans" }
+      ? { ...base, label: "No plan", ariaLabel: "No SystemSculpt plan. See plans", tone: "warning", action: "see-plans" }
       : { ...base, label: "Credits", ariaLabel: "Open credits", action: "credits" };
   }
   if (credits.totalRemaining <= 0) {
+    // An empty balance is a gate with a way through, amber like the gate's lock; red stays for the
+    // failed payment the turn's card or the line above the composer names.
     // A failed renewal fixes its card in the billing portal (T-5348).
     if (needsPaymentFix(credits)) {
-      return { ...base, label: "Out of credits", ariaLabel: "Out of credits. Payment failed: update your card", tone: "danger", action: "update-card" };
+      return { ...base, label: "Out of credits", ariaLabel: "Out of credits. Payment failed: update your card", tone: "warning", action: "update-card" };
     }
     // A spent starter account goes straight to the $9 Monthly checkout (T-5302).
     return isStarterBalance(credits)
-      ? { ...base, label: "Out of credits", ariaLabel: "Out of credits. Get Monthly for $9", tone: "danger", action: "monthly" }
-      : { ...base, label: "Out of credits", ariaLabel: "Out of credits. Open credits", tone: "danger", action: "credits" };
+      ? { ...base, label: "Out of credits", ariaLabel: "Out of credits. Get Monthly for $9", tone: "warning", action: "monthly" }
+      : { ...base, label: "Out of credits", ariaLabel: "Out of credits. Open credits", tone: "warning", action: "credits" };
   }
   const available = credits.availableUnreserved ?? credits.totalRemaining;
   const label = `${formatCredits(Math.max(0, available))} credits`;

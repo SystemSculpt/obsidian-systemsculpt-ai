@@ -47,7 +47,7 @@ function setup() {
 
 function expectToolIdentity(tool: HTMLElement, state: string) {
   expect(tool.dataset).toMatchObject({ testid: "chat.part", kind: "tool", state, toolGrouped: "false", partKey: "tool:read-plan" });
-  expect(tool.querySelector('[data-testid="chat.tool.label"]')?.textContent).toContain("Plan.md");
+  expect(tool.querySelector('[data-testid="chat.tool.label"]')?.textContent).toContain("Plan");
   expect(tool.querySelector('[data-testid="chat.tool.summary"]')).not.toBeNull();
   expect(tool.querySelector<HTMLElement>('[data-testid="chat.tool.state"]')?.dataset.iconState)
     .toBe(state === "running" ? "loader-circle" : "check");
@@ -109,9 +109,6 @@ it("stamps restored historical parts after deferred activity hydration", async (
     const turn = host.querySelector<HTMLElement>('[data-testid="chat.turn"][data-role="assistant"]')!;
     const activity = turn.querySelector<HTMLDetailsElement>('details[data-agent-turn-fold]')!;
     await historyHydrationFor(renderer).hydrate(activity);
-    const overflow = turn.querySelector<HTMLButtonElement>('[data-testid="chat.activity.previous-tools"]')!;
-    overflow.click();
-    await historyHydrationFor(renderer).hydrate(overflow);
     const restored = [...turn.querySelectorAll<HTMLElement>('[data-testid="chat.part"]')];
     expect(restored.map((part) => part.dataset.kind).sort()).toEqual(["reasoning", "text", "tool"]);
     expectToolIdentity(turn.querySelector<HTMLElement>('[data-kind="tool"]')!, "succeeded");

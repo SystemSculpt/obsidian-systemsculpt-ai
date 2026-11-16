@@ -18,12 +18,18 @@ export type ToolCardField = Readonly<{
   /** http(s) address: the value opens in the browser. */
   url?: string;
   mono?: boolean;
+  /** Several values (files, changes, queries), one per line in the value column. */
+  list?: readonly ToolCardPathRow[];
 }>;
+
+/** One row of a list: a vault path that opens (link false: plain text), with an optional muted note. */
+export type ToolCardPathRow = Readonly<{ path: string; text?: string; note?: string; link?: boolean }>;
 
 export type ToolCardMedia = Readonly<{ kind: "image" | "video"; path: string; label?: string }>;
 
 export type ToolCardNotice = Readonly<{
-  tone: "danger" | "warning" | "info";
+  /** gate: a plan or credits stop, the calm lock the whole-turn gate uses. */
+  tone: "danger" | "warning" | "info" | "gate";
   text: string;
   action?: Readonly<{ label: string; url: string }>;
 }>;
@@ -34,7 +40,24 @@ const NOTICE_ICONS: Readonly<Record<ToolCardNotice["tone"], string>> = {
   danger: "circle-alert",
   warning: "circle-alert",
   info: "info",
+  gate: "lock",
 };
+
+/** "+3 −1", "+1", "−2": a change's added and removed lines, without a count of zero. */
+export function changeCounts(stats: Readonly<{ additions: number; deletions: number }>): string {
+  return [stats.additions ? `+${stats.additions}` : "", stats.deletions ? `−${stats.deletions}` : ""].filter(Boolean).join(" ") || "No changes";
+}
+
+/**
+ * A file as Obsidian names it in a tab or a link, so one note has one name in every row, card and
+ * reply: a note by its name ("Garden"), any other file with its extension ("Planting guide.pdf").
+ * A folder keeps its path. The full path is the link's tooltip.
+ */
+export function notePathText(path: string): string {
+  const name = path.split("/").filter(Boolean).pop() ?? path;
+  if (/.\.md$/iu.test(name)) return name.slice(0, -3);
+  return /.\.[\p{L}\d]{1,5}$/u.test(name) ? name : path;
+}
 
 function record(value: unknown): RecordValue {
   return value && typeof value === "object" && !Array.isArray(value) ? value as RecordValue : {};
@@ -51,11 +74,15 @@ function openVaultPath(app: App, path: string, event?: MouseEvent): void {
   void app.workspace.openLinkText(path, "", false);
 }
 
-function vaultLink(app: App, parent: HTMLElement, path: string, text = path): HTMLAnchorElement {
-  const exists = app.vault.getAbstractFileByPath(path) !== null;
+/**
+ * A vault file that opens on click. A file that isn't there (not found, never
+ * written, since deleted) is plain text: opening it would create an empty note.
+ */
+function vaultLink(app: App, parent: HTMLElement, path: string, text = notePathText(path)): HTMLElement {
+  if (app.vault.getAbstractFileByPath(path) === null) return parent.createSpan({ cls: "ss-tool-missing-path", text, attr: { title: path } });
   const link = parent.createEl("a", {
     text,
-    cls: `internal-link${exists ? "" : " is-unresolved"}`,
+    cls: "internal-link",
     attr: { href: path, "data-href": path, title: path },
   });
   link.onclick = event => openVaultPath(app, path, event);
@@ -74,13 +101,19 @@ export function folderLink(app: App, parent: HTMLElement, path: string, text = p
   link.onclick = event => {
     event.preventDefault();
     event.stopPropagation();
-    const leaf = app.workspace.getLeavesOfType("file-explorer")[0];
-    const explorer = leaf?.view as { revealInFolder?: (file: TFolder) => void } | undefined;
-    if (!leaf || typeof explorer?.revealInFolder !== "function") return;
-    void app.workspace.revealLeaf(leaf);
-    explorer.revealInFolder(folder);
+    void revealFolder(app, folder);
   };
   return link;
+}
+
+/** Shows a folder in the file explorer, loading the explorer first when its sidebar has not drawn it yet. */
+export async function revealFolder(app: App, folder: TFolder): Promise<void> {
+  const leaf = app.workspace.getLeavesOfType("file-explorer")[0];
+  if (!leaf) return;
+  await app.workspace.revealLeaf(leaf);
+  await (leaf as { loadIfDeferred?: () => Promise<void> }).loadIfDeferred?.();
+  const explorer = leaf.view as { revealInFolder?: (file: TFolder) => void };
+  if (typeof explorer.revealInFolder === "function") explorer.revealInFolder(folder);
 }
 
 function externalLink(parent: HTMLElement, url: string, text = url): HTMLAnchorElement {
@@ -105,7 +138,8 @@ export function renderFields(app: App, card: HTMLElement, fields: readonly ToolC
     const row = list.createDiv({ cls: "ss-tool-field" });
     row.createEl("dt", { text: field.label });
     const value = row.createEl("dd");
-    if (field.path) vaultLink(app, value, field.path, field.value);
+    if (field.list?.length) renderPathList(app, value, field.list);
+    else if (field.path) vaultLink(app, value, field.path, field.value);
     else if (field.url) externalLink(value, field.url, field.value);
     else if (field.mono) value.createEl("code", { text: field.value });
     else value.setText(field.value);
@@ -116,7 +150,7 @@ export function renderFields(app: App, card: HTMLElement, fields: readonly ToolC
 export function renderPathList(
   app: App,
   card: HTMLElement,
-  rows: readonly Readonly<{ path: string; text?: string; note?: string; link?: boolean }>[],
+  rows: readonly ToolCardPathRow[],
   limit = 50,
 ): void {
   if (!rows.length) return;
@@ -125,7 +159,7 @@ export function renderPathList(
     for (const row of entries) {
       const item = list.createEl("li");
       if (row.link === false) item.createSpan({ cls: "ss-tool-path", text: row.text ?? row.path });
-      else vaultLink(app, item, row.path, row.text ?? row.path).addClass("ss-tool-path");
+      else vaultLink(app, item, row.path, row.text ?? notePathText(row.path)).addClass("ss-tool-path");
       if (row.note) item.createSpan({ cls: "ss-tool-path-note", text: ` ·\u00a0${row.note}` });
     }
   };
@@ -137,13 +171,14 @@ export function renderPathList(
   }
 }
 
-/** Web sources: the page title as the link, its site beside it. */
+/** Web sources: the page title as the link, its site under it. */
 export function renderLinks(card: HTMLElement, links: readonly ToolCardLink[]): void {
   if (!links.length) return;
   const list = card.createEl("ul", { cls: "ss-tool-links" });
   for (const link of links.slice(0, 20)) {
     const item = list.createEl("li");
-    externalLink(item, link.url, link.title || hostOf(link.url));
+    // The title is its own line, so its last word never moves down to sit beside the site.
+    externalLink(item.createSpan({ cls: "ss-tool-link-title" }), link.url, link.title || hostOf(link.url));
     item.createSpan({ cls: "ss-tool-link-host", text: hostOf(link.url) });
   }
 }
@@ -152,8 +187,11 @@ function hostOf(url: string): string {
   try { return new URL(url).host.replace(/^www\./u, ""); } catch { return url; }
 }
 
-/** A command and the end of its output, the way a terminal shows it. */
-export function renderTerminal(card: HTMLElement, options: Readonly<{ command?: string; output?: string; tailLines?: number }>): void {
+/**
+ * A command and the end of its output, the way a terminal shows it. A running command with no
+ * output yet shows where its output will appear, so the panel never reads as finished and empty.
+ */
+export function renderTerminal(card: HTMLElement, options: Readonly<{ command?: string; output?: string; tailLines?: number; pending?: boolean }>): void {
   const output = options.output?.replace(/\s+$/u, "") ?? "";
   if (!options.command && !output) return;
   const tail = options.tailLines ?? 20;
@@ -166,13 +204,33 @@ export function renderTerminal(card: HTMLElement, options: Readonly<{ command?: 
   }
   if (output) {
     const lines = output.split("\n");
-    const body = pre.createEl("code", { cls: "ss-tool-terminal-output", text: lines.length > tail ? lines.slice(-tail).join("\n") : output });
+    const body = pre.createEl("code", { cls: "ss-tool-terminal-output" });
+    renderTerminalLines(body, lines.length > tail ? lines.slice(-tail) : lines);
     if (lines.length > tail) {
       const all = createUiAction(card, { label: `Show all ${lines.length} lines`, testId: "chat.tool.show-output", size: "small", tooltip: false });
       all.addClass("ss-tool-more");
-      all.onclick = () => { body.textContent = output; all.remove(); };
+      all.onclick = () => { renderTerminalLines(body, lines); all.remove(); };
     }
+  } else if (options.pending) {
+    // Lines that shimmer like a live tile, on the output's own lines, until the first output arrives.
+    const waiting = pre.createSpan({ cls: "ss-tool-terminal-pending", attr: { "aria-hidden": "true" } });
+    waiting.createSpan();
+    waiting.createSpan();
   }
+}
+
+/**
+ * Output one line per block, each keeping its leading spaces. A line too long for the pane wraps two
+ * characters in from its own start, so its tail never reads as the next line. Copying keeps the lines.
+ */
+function renderTerminalLines(body: HTMLElement, lines: readonly string[]): void {
+  body.empty();
+  lines.forEach((text, index) => {
+    const line = body.createSpan({ cls: "ss-tool-terminal-line", text });
+    if (index < lines.length - 1) line.appendText("\n");
+    const indent = /^ */u.exec(text)?.[0].length ?? 0;
+    if (indent) line.setCssProps({ "--ss-terminal-indent": String(indent) });
+  });
 }
 
 /** Prose a tool returned (a subagent's answer, an MCP result), in the reading font. */
@@ -187,6 +245,25 @@ export function renderText(card: HTMLElement, text: string, lineLimit = 8): void
     const all = createUiAction(card, { label: "Show all", testId: "chat.tool.show-text", size: "small", tooltip: false });
     all.addClass("ss-tool-more");
     all.onclick = () => { block.removeClass("is-clamped"); all.remove(); };
+  }
+}
+
+/**
+ * A file's content as written, from its first line: the box every card shows file text in. Text
+ * the call wrote reads at full strength, like a diff's added lines; text found in a note stays muted.
+ */
+export function renderFileContent(card: HTMLElement, content: string, lineLimit = 20, written = false): void {
+  if (!content) {
+    card.createEl("p", { cls: "ss-tool-caption", text: "Empty" });
+    return;
+  }
+  const lines = content.replace(/\n$/u, "").split("\n");
+  const pre = card.createEl("pre", { cls: written ? "ss-tool-file-text is-written" : "ss-tool-file-text", attr: { tabindex: "0" } });
+  const code = pre.createEl("code", { text: lines.slice(0, lineLimit).join("\n") });
+  if (lines.length > lineLimit) {
+    const all = createUiAction(card, { label: `Show all ${lines.length} lines`, testId: "chat.tool.show-output", size: "small", tooltip: false });
+    all.addClass("ss-tool-more");
+    all.onclick = () => { code.textContent = content; all.remove(); };
   }
 }
 
@@ -219,8 +296,8 @@ const TURN_MEDIA_ITEM = ":scope > .systemsculpt-agent-turn-media [data-media-pat
 
 /**
  * Media the reply already shows full size is not shown again in its tool card:
- * the card keeps the file link instead of a second picture. Runs when the
- * reply's media renders and when a card renders into its turn.
+ * the reply's own caption names and opens it. Runs when the reply's media
+ * renders and when a card renders into its turn.
  */
 export function syncToolMediaWithReply(turnBody: Element | null): void {
   if (!turnBody) return;
@@ -231,19 +308,24 @@ export function syncToolMediaWithReply(turnBody: Element | null): void {
   } catch { /* An unreadable list hides nothing. */ }
   for (const media of Array.from(turnBody.querySelectorAll<HTMLElement>(".ss-tool-media"))) {
     const paths = Array.from(media.querySelectorAll("[data-media-path]"), tile => tile.getAttribute("data-media-path"));
-    media.classList.toggle("is-shown-in-reply", paths.length > 0 && paths.every(path => below.has(path)));
+    const shown = paths.length > 0 && paths.every(path => below.has(path));
+    media.classList.toggle("is-shown-in-reply", shown);
+  }
+  // A failed generation's reason is its slim row under the call; the card doesn't say it again.
+  const failed = new Set(Array.from(
+    turnBody.querySelectorAll(":scope > .systemsculpt-agent-turn-media [data-pending-id$=':failed']"),
+    tile => (tile.getAttribute("data-pending-id") ?? "").slice(0, -":failed".length),
+  ));
+  for (const notice of Array.from(turnBody.querySelectorAll<HTMLElement>(".ss-tool-notice[data-media-failure]"))) {
+    notice.classList.toggle("is-shown-in-reply", failed.has(notice.getAttribute("data-media-failure") ?? ""));
   }
 }
 
 /** Thumbnails of generated or viewed media; each opens its vault file. */
 export function renderMedia(app: App, card: HTMLElement, media: readonly ToolCardMedia[]): void {
   if (!media.length) return;
+  // When the reply below shows the same files, the strip hides (syncToolMediaWithReply): the reply names them.
   const strip = card.createDiv({ cls: "ss-tool-media", attr: { "data-testid": "chat.tool.media" } });
-  // Shown instead of the thumbnails when the reply below already shows the same files.
-  const files = card.createEl("dl", { cls: "ss-tool-fields ss-tool-media-files" }).createDiv({ cls: "ss-tool-field" });
-  files.createEl("dt", { text: "Saved" });
-  const links = files.createEl("dd");
-  for (const item of media) vaultLink(app, links, item.path, mediaDisplayName(item.path, item.label));
   if (media.length > 1) {
     strip.addClass("is-multiple");
     strip.setCssProps({ "--ss-tool-media-columns": String(Math.min(media.length, 4)) });
@@ -273,16 +355,459 @@ export function renderMedia(app: App, card: HTMLElement, media: readonly ToolCar
 }
 
 /** Raw request and result for whoever needs them; never the first thing a card shows. */
-export function renderRawDetails(card: HTMLElement, payload: () => unknown): void {
+/**
+ * A result as Details shows it: the plugin's "systemsculpt_tool" marker, which only lets Chat find
+ * media in a saved result, is left out, so no call reads as one SystemSculpt ran when it didn't.
+ * A saved chat nests the result under "data".
+ */
+/**
+ * What the person reads from a SystemSculpt result message: the guidance written for the agent after
+ * it ("The chat already shows ...") and the link the result also carries ("See plans: https://…")
+ * stay out, so Details shows each fact once.
+ */
+export function systemSculptPersonMessage(message: string, link?: Readonly<{ label?: unknown }> | null): string {
+  let shown = message;
+  if (typeof link?.label === "string" && link.label) shown = shown.split(`${link.label}:`)[0];
+  return shown.split(/\s*The chat already shows\b/u)[0].trim();
+}
+
+function detailsOutput(data: unknown): unknown {
+  const unmarked = (value: unknown): unknown => {
+    if (!value || typeof value !== "object" || Array.isArray(value) || !("systemsculpt_tool" in value)) return value;
+    const copy: Record<string, unknown> = { ...(value as Record<string, unknown>) };
+    delete copy.systemsculpt_tool;
+    if (typeof copy.message === "string") {
+      const link = copy.link && typeof copy.link === "object" ? copy.link as { label?: unknown } : null;
+      copy.message = systemSculptPersonMessage(copy.message, link);
+    }
+    return copy;
+  };
+  // A result saved as its JSON text reads as the same object.
+  const parsed = typeof data === "string" && data.includes("systemsculpt_tool") ? (() => { try { return JSON.parse(data) as unknown; } catch { return data; } })() : data;
+  const outer = unmarked(parsed);
+  if (!outer || typeof outer !== "object" || Array.isArray(outer) || !("data" in outer)) return outer;
+  const record = outer as Record<string, unknown>;
+  const inner = unmarked(record.data);
+  return inner === record.data ? outer : { ...record, data: inner };
+}
+
+/** What Codex reports about a command once it has run: its output, exit code and run time. */
+const CODEX_COMMAND_RESULT = ["aggregatedOutput", "exitCode", "durationMs"];
+
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === "object" && !Array.isArray(value);
+
+/** Two values that print the same: a result Codex keeps on its item is a copy of the result shown. */
+function sameJson(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (!a || !b || typeof a !== "object" || typeof b !== "object") return false;
+  try {
+    return JSON.stringify(a) === JSON.stringify(b);
+  } catch {
+    return false;
+  }
+}
+
+/** A file change's kind as its word ("update"), not a wrapper around it. */
+function codexChange(change: unknown): unknown {
+  if (!isPlainObject(change) || !isPlainObject(change.kind)) return change;
+  const kind = change.kind;
+  return Object.keys(kind).length === 1 && typeof kind.type === "string" ? { ...change, kind: kind.type } : change;
+}
+
+/**
+ * A Codex item's request as Details shows it: without the item's own id, run status and kind (its row
+ * names what it is), with an action's fields as the request's own, and without a search's query when
+ * its queries already hold it, so the request reads the same running and done and says each thing once.
+ */
+function codexRequest(item: Record<string, unknown>, isResult: (key: string, value: unknown) => boolean): Record<string, unknown> {
+  const request: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(item)) {
+    if (key === "id" || key === "status" || key === "type" || isResult(key, value)) continue;
+    if (key === "action" && isPlainObject(value)) {
+      for (const [actionKey, actionValue] of Object.entries(value)) {
+        if (actionKey !== "type" && actionValue != null && !(actionKey in item)) request[actionKey] = actionValue;
+      }
+      continue;
+    }
+    request[key] = key === "changes" && Array.isArray(value) ? value.map(codexChange) : value;
+  }
+  // A search says its query once: in its queries, or not at all beside an opened page.
+  if (request.query === "" || Array.isArray(request.queries) && request.queries.includes(request.query)) delete request.query;
+  return request;
+}
+
+/**
+ * A call's request and its result as Details shows them, each once. A Codex item holds both, with
+ * its id and run status: the request drops those and every field that is the result, and a command's
+ * result is the item's own output, exit code and run time, under the names Codex gives them.
+ */
+export function detailsPayload(
+  input: unknown,
+  output: Readonly<{ data?: unknown }> | undefined,
+  agent?: string,
+): { input: unknown; output?: unknown } {
+  const result = output ? { output: detailsOutput(output.data) } : {};
+  if (agent !== "codex" || !input || typeof input !== "object" || Array.isArray(input)) return { input, ...result };
+  const item = input as Record<string, unknown>;
+  const command = item.type === "commandExecution";
+  const isResult = (key: string, value: unknown): boolean =>
+    (command && CODEX_COMMAND_RESULT.includes(key)) || (output !== undefined && value !== undefined && sameJson(value, output.data));
+  const request = codexRequest(item, isResult);
+  if (!output || !command) return { input: request, ...result };
+  const ran = Object.fromEntries(Object.entries(item).filter(([key, value]) => CODEX_COMMAND_RESULT.includes(key) && value != null));
+  return { input: request, output: Object.keys(ran).length ? ran : result.output };
+}
+
+export function renderRawDetails(
+  card: HTMLElement,
+  payload: () => unknown,
+  options: Readonly<{ open?: boolean; awaitingResult?: boolean | "lines" }> = {},
+): HTMLDetailsElement {
   const raw = card.createEl("details", { cls: "systemsculpt-agent-tool-raw" });
+  // While a picture, video or Studio run is made, an open frame already has the height its result
+  // fills, so nothing under it moves when the files land. Any other running call ("lines") shows
+  // its result's place as two pending lines, as its terminal does, at no fixed height.
+  raw.toggleClass("is-awaiting-result", options.awaitingResult === true);
   const summary = raw.createEl("summary", { attr: { "data-testid": "chat.tool.raw" } });
   const chevron = summary.createSpan({ cls: "systemsculpt-agent-tool-raw-chevron", attr: { "aria-hidden": "true" } });
   setIcon(chevron, "chevron-right");
   summary.appendText("Details");
-  const code = raw.createEl("pre", { attr: { tabindex: "0" } }).createEl("code");
+  const pre = raw.createEl("pre");
+  // The code scrolls inside the frame's padding, so the frame never cuts a line and keeps its inset at both ends.
+  const code = pre.createEl("code", { attr: { tabindex: "0" } });
+  // A block taller than its frame fades at the bottom until scrolled to its end, so a cut line reads as "more below".
+  const syncOverflow = (): void => {
+    const overflowing = code.scrollHeight > code.clientHeight + 1;
+    code.toggleClass("is-overflowing", overflowing);
+    code.toggleClass("is-at-end", !overflowing || code.scrollTop + code.clientHeight >= code.scrollHeight - 1);
+  };
+  code.addEventListener("scroll", syncOverflow, { passive: true });
+  // Values that move whole are measured once laid out, and again whenever the pane's width changes.
+  let fittedWidth = -1;
+  const fit = (): void => {
+    if (!raw.open || !code.isConnected || code.clientWidth === 0) return;
+    fittedWidth = code.clientWidth;
+    fitJsonUnits(code);
+    syncOverflow();
+  };
+  // Measured again once it is laid out: opened inside a closed fold, it has no size yet.
+  const view = pre.ownerDocument.defaultView as (Window & { ResizeObserver?: typeof ResizeObserver }) | null;
+  if (view?.ResizeObserver) {
+    new view.ResizeObserver(() => {
+      syncOverflow();
+      // Fitted in the next frame: fitting changes the code's height, which this observer reports again.
+      if (code.clientWidth !== fittedWidth) view.requestAnimationFrame(fit);
+    }).observe(code);
+  }
   raw.addEventListener("toggle", () => {
-    if (raw.open && !code.hasChildNodes()) code.setText(JSON.stringify(payload(), null, 2));
+    if (raw.open && !code.hasChildNodes()) renderDetailsCode(code, payload(), options.awaitingResult ?? false);
+    if (raw.open) {
+      fit();
+      syncOverflow();
+    }
   });
+  // Opened before the result landed: it stays open, with the result in it.
+  if (options.open) {
+    raw.open = true;
+    renderDetailsCode(code, payload(), options.awaitingResult ?? false);
+  }
+  return raw;
+}
+
+/**
+ * A piece that moves whole to the next line (a short value, the first entry a value lists, a web
+ * address) does so only when it then fits on one line. One that would still wrap flows from where it
+ * is instead, so moving it never costs a line.
+ */
+function fitJsonUnits(code: HTMLElement): void {
+  const units = Array.from(code.querySelectorAll<HTMLElement>(".ss-json-fit"));
+  if (!units.length) return;
+  for (const unit of units) unit.removeClass("is-flowing");
+  const view = code.ownerDocument.defaultView;
+  const line = view ? parseFloat(view.getComputedStyle(code).lineHeight) : Number.NaN;
+  if (!(line > 0)) return;
+  for (const unit of units.filter(item => item.getBoundingClientRect().height > line * 1.5)) unit.addClass("is-flowing");
+  // Sibling values wrap alike: when one value of an object has to flow from its key, its siblings
+  // flow too, rather than one moving whole beside another that breaks after its key.
+  const lines = Array.from(code.querySelectorAll<HTMLElement>(".ss-json-line"));
+  const indentOf = (line: HTMLElement): number => Number(line.style.getPropertyValue("--ss-json-indent")) || 0;
+  lines.forEach((line, at) => {
+    if (!line.querySelector(":scope > .ss-json-keyed.is-flowing")) return;
+    const indent = indentOf(line);
+    for (const step of [-1, 1]) {
+      for (let index = at + step; index >= 0 && index < lines.length && indentOf(lines[index]) >= indent; index += step) {
+        if (indentOf(lines[index]) === indent) lines[index].querySelector(":scope > .ss-json-keyed")?.addClass("is-flowing");
+      }
+    }
+  });
+}
+
+/** The key a result still being made stands in for; its line becomes the result's opening line. */
+const PENDING_RESULT = "\u2026";
+
+/**
+ * A call's request and result as Details shows them. While its picture, video or Studio run is made,
+ * the result's place reads as pending: its key, then lines that shimmer like the live tile, filling
+ * the frame's twelve lines, so the result lands in the lines that held it.
+ */
+function renderDetailsCode(code: HTMLElement, payload: unknown, awaitingResult: boolean | "lines"): void {
+  const record = payload && typeof payload === "object" && !Array.isArray(payload) ? payload as Record<string, unknown> : null;
+  const pending = awaitingResult !== false && record !== null && record.output === undefined;
+  renderJsonLines(code, JSON.stringify(pending ? { ...record, output: PENDING_RESULT } : payload, null, 2));
+  if (!pending) return;
+  const marker = Array.from(code.querySelectorAll<HTMLElement>(".ss-json-line"))
+    .find((line) => line.textContent === `  "output": "${PENDING_RESULT}"\n`);
+  if (!marker) return;
+  // A generation's result is an object, its braces held open; a command's or a search's is its text,
+  // a value still to come under its key.
+  const text = awaitingResult === "lines";
+  marker.setText(text ? '  "output":\n' : '  "output": {\n');
+  marker.addClass("is-pending");
+  const lines = code.createSpan({ cls: "ss-json-pending", attr: { "aria-hidden": "true" } });
+  // As many bars as the frame has lines; those past its end are clipped with the box that holds them.
+  for (let index = 0; index < (text ? 2 : 12); index += 1) lines.createSpan();
+  if (text) {
+    marker.after(lines);
+    return;
+  }
+  const close = code.createSpan({ cls: "ss-json-line is-pending", text: "  }\n" });
+  close.setCssProps({ "--ss-json-indent": "2" });
+  marker.after(lines, close);
+}
+
+/**
+ * Indented text (JSON) one line per block, each keeping its leading spaces. A
+ * long line wraps under its own start, two characters in, instead of falling
+ * back to the left edge and breaking the tree. Copying keeps lines and spaces.
+ */
+export function renderJsonLines(code: HTMLElement, text: string): void {
+  code.empty();
+  code.addClass("ss-json-lines");
+  const lines = text.split("\n");
+  lines.forEach((line, index) => {
+    const indent = /^ */u.exec(line)?.[0].length ?? 0;
+    const block = code.createSpan({ cls: "ss-json-line" });
+    appendJsonLine(block, line);
+    // The line's own end stays outside every piece, so a copy keeps the lines as they were; after a
+    // listed entry, which is a line of its own, it ends that entry instead of opening an empty line.
+    const entry = block.lastElementChild?.classList.contains("ss-json-entry") ? block.lastElementChild as HTMLElement : block;
+    if (index < lines.length - 1) entry.appendText("\n");
+    if (indent) block.setCssProps({ "--ss-json-indent": String(indent) });
+  });
+}
+
+/** A value this short moves whole after its key when the line can't hold both. */
+const SHORT_VALUE = 32;
+
+function appendJsonLine(block: HTMLElement, line: string): void {
+  if (appendCommandLine(block, line)) return;
+  // A short value ("2 Studio workflows.", "Notes/Archive") moves whole to the next line when it fits
+  // there on one line, never leaving a word or a name behind on its key's line.
+  const keyed = /^(\s*"(?:[^"\\]|\\.)*":\s)("(?:[^"\\]|\\.)*",?)$/u.exec(line);
+  if (keyed && keyed[2].length <= SHORT_VALUE) {
+    appendJsonWords(block, keyed[1]);
+    appendJsonValue(block.createSpan({ cls: "ss-json-path ss-json-fit ss-json-keyed" }), keyed[2], true);
+    return;
+  }
+  const entries = jsonLineEntries(line);
+  if (entries.length === 1) {
+    appendJsonValue(block, line, line.length > SHORT_VALUE);
+    return;
+  }
+  // Entries a value lists line by line ("a.md\nb.md", a read's numbered lines, a plan's steps) each
+  // start a line of their own, with the "\n" that ends it, the first too, off its key's line: the value
+  // reads as the lines it holds. An entry too long for the pane wraps two characters past its own start.
+  const lead = /^\s*(?:"(?:[^"\\]|\\.)*":\s)?/u.exec(entries[0])?.[0] ?? "";
+  if (lead) appendJsonWords(block, lead);
+  // An entry's own leading spaces ("     3\tTomatoes…", a read's line numbers) count toward its start,
+  // so its wrapped tail hangs past its text, never left of it.
+  const entry = (text: string, first: boolean): void => {
+    const span = block.createSpan({ cls: first ? "ss-json-entry is-first" : "ss-json-entry" });
+    span.setCssProps({ "--ss-json-entry-lead": String(/^"? */u.exec(text)![0].replace(/"/u, "").length) });
+    appendJsonValue(span, text, true);
+  };
+  entry(entries[0].slice(lead.length), true);
+  for (const text of entries.slice(1)) entry(text, false);
+}
+
+/** A path breaks after a "/" and an escape ("\n") stays whole, so a wrapped value never splits a name. */
+function appendJsonValue(parent: HTMLElement, text: string, breakable: boolean): void {
+  if (breakable && /[/\\]/u.test(text)) appendBreakableValue(parent, text);
+  else appendJsonWords(parent, text);
+}
+
+/**
+ * A line cut after each run of "\n" escapes it holds ("\n\n" stays whole), never before the quote and
+ * comma that close it. An escaped backslash before an "n" is no break.
+ */
+function jsonLineEntries(line: string): string[] {
+  const entries: string[] = [];
+  let start = 0;
+  for (const match of line.matchAll(/(?:\\n)+|\\./gu)) {
+    const end = (match.index ?? 0) + match[0].length;
+    if (!match[0].startsWith("\\n") || /^["\]},]*$/u.test(line.slice(end))) continue;
+    entries.push(line.slice(start, end));
+    start = end;
+  }
+  entries.push(line.slice(start));
+  return entries;
+}
+
+/**
+ * A command line ("rm -rf build && npm run build") breaks between its commands, after the
+ * "&&", "||", "|" or ";" that joins them, never inside one that fits on a line. The closing
+ * quote and comma stay on the last command. False when the line holds no joined commands.
+ */
+function appendCommandLine(block: HTMLElement, content: string): boolean {
+  const line = /^(\s*"(?:command|cmd)":\s*")((?:[^"\\\n]|\\.)*)("[^\n]*)(\n?)$/u.exec(content);
+  if (!line) return false;
+  const [, opening, value, closing, end] = line;
+  // Commands and the spaces between them, in turn; each joiner stays on the command before it.
+  const pieces: string[] = [];
+  let start = 0;
+  for (const join of value.matchAll(/(?:\s(?:&&|\|\|?)|;)(\s+)/gu)) {
+    const space = (join.index ?? 0) + join[0].length - join[1].length;
+    pieces.push(value.slice(start, space), join[1]);
+    start = space + join[1].length;
+  }
+  pieces.push(value.slice(start));
+  if (pieces.length < 3) return false;
+  block.appendText(opening);
+  pieces.forEach((piece, index) => {
+    if (index % 2) { block.appendText(piece); return; }
+    const last = index === pieces.length - 1;
+    appendJsonWords(block.createSpan({ cls: "ss-json-name" }), last ? `${piece}${closing}` : piece);
+  });
+  if (end) block.appendText(end);
+  return true;
+}
+
+/**
+ * A short hyphenated word ("2026-11-08", "T-5957", "--short") never breaks at its hyphen, and the
+ * last two words of a run of three or more wrap together, so a wrapped run never ends on one word.
+ */
+function appendJsonWords(parent: HTMLElement, text: string, endsValue = true): void {
+  const pieces = text.split(/(\s+)/u).filter(Boolean);
+  const words = pieces.flatMap((piece, index) => /\s/u.test(piece) ? [] : [index]);
+  // Only the value's own last words pair: words a path or a link follows ("Run completed. Generated:")
+  // flow on, or a fitting word would drop to the next line for nothing.
+  const from = endsValue && words.length >= 3 ? words[words.length - 2] : -1;
+  const to = words[words.length - 1] ?? -1;
+  const pair = from >= 0 ? pieces.slice(from, to + 1).join("") : "";
+  const paired = pair.length > 0 && pair.length <= 24;
+  pieces.forEach((piece, index) => {
+    if (paired && index >= from && index <= to) {
+      if (index === from) parent.createSpan({ cls: "ss-json-whole", text: pair });
+      return;
+    }
+    if (piece.length <= 24 && !/\s/u.test(piece) && piece.includes("-")) parent.createSpan({ cls: "ss-json-whole", text: piece });
+    else parent.appendText(piece);
+  });
+}
+
+/** A path listed after a colon or a comma ("…vault: Images/take 1.png, Images/take 2.png"), to its file name. */
+const LISTED_PATH = /(: |, )((?:[^\s"/,:\\][^"/,:\\\n]{0,40}\/)+[^\s"/\\][^"/\\\n]*?\.[\p{L}\d]{1,5})(?=[,.;]?(?:$|[\s"'),\]]))/gu;
+
+/**
+ * A piece of a value that moves to the next line whole when it fits there: one field of JSON the value
+ * quotes, with the brackets that open and close it ("{\"title\":\"Frost dates\","), or a web address with
+ * its quotes ("https://…", "\"https://…\"]"). Line breaks right after it ("\n\n") stay on it.
+ */
+const VALUE_UNIT = /(?:(?:\[?\{)?\\"[\w$-]{1,24}\\":(?:\\"(?:[^"\\]|\\[^"])*\\"|-?\d[\d.]*|true|false|null)[}\]]*,?|"?https?:\/\/[^\s"\\<>]*[^\s"\\<>.,;:!?)\]](?:\\"[}\]]*,?|"[,\]}]*|[.,;:!?)]+)?)(?:\\[nr])*/gu;
+
+function appendBreakableValue(block: HTMLElement, content: string): void {
+  // A quoted field or a web address is one piece: it moves to the next line whole when it fits there
+  // on one line, so a line never pairs one link's tail with the next one's head. Otherwise it flows,
+  // breaking after a "/" or between words.
+  let start = 0;
+  for (const match of content.matchAll(VALUE_UNIT)) {
+    const at = match.index ?? 0;
+    const before = content.slice(start, at);
+    appendListedPaths(block, before, false);
+    // Between quoted fields ("…\",\"url\"…"), a line may start at the comma before a piece and after the
+    // one that closes it, even when it flows.
+    if (before.endsWith(",")) block.createEl("wbr");
+    // A value that is one piece is already measured as one.
+    const unit = match[0] === content && block.hasClass("ss-json-fit") ? block : block.createSpan({ cls: "ss-json-path ss-json-fit" });
+    // An address's scheme stays with its site ("https://example.org"), so no line ends on "https://".
+    const site = /https?:\/\/[^/\s"\\<>]{1,20}(?=$|[/"\\])/u.exec(match[0]);
+    if (site) {
+      appendBreakableRun(unit, match[0].slice(0, site.index));
+      unit.createSpan({ cls: "ss-json-whole", text: site[0] });
+      appendBreakableRun(unit, match[0].slice(site.index + site[0].length));
+    } else appendBreakableRun(unit, match[0]);
+    if (match[0].endsWith(",")) block.createEl("wbr");
+    start = at + match[0].length;
+  }
+  appendListedPaths(block, content.slice(start));
+}
+
+function appendListedPaths(block: HTMLElement, content: string, endsValue = true): void {
+  // Each listed path is one piece with its comma or full stop: it moves to the next line whole when it
+  // fits there, so a line never pairs one file's name with the next one's folder. Only a path wider
+  // than the line breaks inside, after a "/". A value that is one path keeps its key on its line.
+  let start = 0;
+  for (const match of content.matchAll(LISTED_PATH)) {
+    const at = (match.index ?? 0) + match[1].length;
+    // Its full stop or comma, and the value's closing quote after it, stay on its last line.
+    const end = at + match[2].length + (/^[,.;]?(?:"[,.;]?)?/u.exec(content.slice(at + match[2].length))?.[0].length ?? 0);
+    appendBreakableRun(block, content.slice(start, at), false);
+    appendBreakableRun(block.createSpan({ cls: "ss-json-path" }), content.slice(at, end));
+    start = end;
+  }
+  appendBreakableRun(block, content.slice(start), endsValue);
+}
+
+function appendBreakableRun(block: HTMLElement, content: string, endsValue = true): void {
+  // The name after a "/" ("lighthouse take 1.png,") moves to the next line whole when it fits there,
+  // rather than leaving its last word behind. Prose (the key, a sentence after a comma) flows as it is.
+  const appendChunk = (chunk: string, afterSlash: boolean, last = false): void => {
+    if (!chunk) return;
+    // The line's own end stays outside the name.
+    const trail = /\s*$/u.exec(chunk)![0];
+    let name = chunk.slice(0, chunk.length - trail.length);
+    // The whole piece when it fits on a line, or else the file name that starts it ("Poster image.png"
+    // in "Poster image.png. The chat already…").
+    const whole = !afterSlash ? undefined : name.length <= 48 ? name
+      : /^[^\s/][^/\n]{0,46}?\.[\p{L}\d]{1,5}(?=$|[\s"',.;:)\]])/u.exec(name)?.[0];
+    if (whole && /\S\s+\S/u.test(whole)) {
+      appendJsonWords(block.createSpan({ cls: "ss-json-name" }), whole);
+      name = name.slice(whole.length);
+    }
+    appendJsonWords(block, name, endsValue && last);
+    if (trail) block.appendText(trail);
+  };
+  let start = 0;
+  let afterSlash = false;
+  for (const match of content.matchAll(/(?:\\[nr])+|\\[^\n]|\/+|,(?= |\\"|\{)/gu)) {
+    const at = match.index ?? 0;
+    const end = at + match[0].length;
+    // A list's comma stays on its name; the space after it is where the next line may start. Between
+    // the fields of quoted JSON ("…\",\"url\"…") the next line may start right after the comma.
+    if (match[0] === ",") {
+      appendChunk(content.slice(start, end), afterSlash);
+      if (content[end] !== " ") block.createEl("wbr");
+      start = end;
+      afterSlash = false;
+      continue;
+    }
+    // Words that only line breaks and the closing quote follow end the value (or its entry).
+    appendChunk(content.slice(start, at), afterSlash, /^(?:\\[nr]|["\]},.;\s])*$/u.test(content.slice(at)));
+    if (match[0].startsWith("/")) block.appendText(match[0]);
+    else block.createSpan({ cls: "ss-json-whole", text: match[0] });
+    // A path's last two names stay together ("qa/vault"), as a value's last two words do, so a wrapped
+    // path never ends on one name alone.
+    const lastName = /^[^\s"\\,/]+(?=$|["\\,])/u.exec(content.slice(end))?.[0];
+    const parentName = /[^\s"\\/]*$/u.exec(content.slice(start, at))?.[0] ?? "";
+    const lastPair = lastName !== undefined && parentName.length > 0 && parentName.length + match[0].length + lastName.length <= 24;
+    // After a slash or a run of line break escapes ("\n\n" whole), a wrapped line may start; never
+    // inside either, and never after a tab, which stays with the words it leads ("3\tTomatoes").
+    if ((match[0].startsWith("/") && !lastPair) || /^(?:\\[nr])+$/u.test(match[0])) block.createEl("wbr");
+    afterSlash = match[0].startsWith("/");
+    start = end;
+  }
+  appendChunk(content.slice(start), afterSlash, true);
 }
 
 /** The text inside a tool result as each agent saves it: a string, content blocks or content items. */

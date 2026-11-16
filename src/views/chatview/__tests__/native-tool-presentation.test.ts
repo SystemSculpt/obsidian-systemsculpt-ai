@@ -1,5 +1,5 @@
 /** @jest-environment jsdom */
-import { TFile, type App } from "obsidian";
+import { Component, MarkdownRenderer, TFile, type App } from "obsidian";
 import type { AgentToolPart } from "../../../chat/ChatConversation";
 import { nativeToolPresentation, renderNativeToolPreview } from "../NativeToolPresentation";
 import { nativePathPrefixRewriter, nativeToolPath } from "../../../utils/nativeToolPath";
@@ -126,7 +126,7 @@ describe("portable saved native activity", () => {
     const saved = part("Edit", { file_path: "Plan.md", old_string: "before", new_string: "after" }, {
       native: { agent: "claude", workingDirectory: "Notes", vaultRoot: "." }, state: "succeeded",
     });
-    expect(nativeToolPresentation(saved)).toMatchObject({ title: "Edit Plan.md", meta: "Notes", targetPath: "Notes/Plan.md" });
+    expect(nativeToolPresentation(saved)).toMatchObject({ title: "Edit Plan", meta: "Notes", targetPath: "Notes/Plan.md" });
     const { app, read } = vault({ "Notes/Plan.md": "before" });
     const preview = await prepareNativeWriteEditPreview(app, saved);
     expect(preview?.status).toBe("unavailable");
@@ -146,6 +146,33 @@ describe("native presentation metadata", () => {
     ["WebSearch", { query: "gardening advice" }, "Search the web for “gardening advice”", "Searched the web for “gardening advice”", "globe-2"],
   ])("presents %s using a readable verb and target", (name, input, title, completedTitle, icon) => {
     expect(nativeToolPresentation(part(name, input))).toMatchObject({ title, completedTitle, icon, agentName: "Claude Code" });
+  });
+
+  it("counts the results a web search lists, as a SystemSculpt search counts its own", () => {
+    const output = { data: 'Web search results for query: "frost"\n\nLinks: [{"title":"Frost dates","url":"https://example.org/a"},{"title":"Calendar","url":"https://example.org/b"}]\n\nEarly April.' };
+    expect(presentAgentTool(part("WebSearch", { query: "frost" }, { state: "succeeded", output })).meta).toBe("2 results");
+    expect(presentAgentTool(part("WebSearch", { query: "frost" }, { state: "succeeded", output: { data: "No links." } })).meta).toBeUndefined();
+  });
+
+  it("counts every edit and write row from the change its card draws", () => {
+    const done = { state: "succeeded" as const };
+    expect(presentAgentTool(part("Edit", { file_path: "/vault/Notes/Launch plan.md", old_string: "# Launch", new_string: "# Launch\n\nPlant basil in week 2." }, done)).meta).toBe("+2");
+    expect(presentAgentTool(part("MultiEdit", { file_path: "/vault/Plan.md", edits: [{ old_string: "a", new_string: "b" }, { old_string: "c\nd", new_string: "c" }] }, done)).meta).toBe("+1 \u22122");
+    // A new note of four lines reads "+4", as its card draws four added lines.
+    expect(presentAgentTool(part("Write", { file_path: "/vault/Basil.md", content: "# Basil\n\nSow after the last frost.\nPinch the tips weekly.\n" }, done)).meta).toBe("+4");
+    expect(presentAgentTool({ ...edit(), state: "running", approvalDecision: "approved" }).meta).toBe("+1 \u22121");
+    // A pending approval shows its own count; a change that didn't go ahead counts nothing.
+    expect(presentAgentTool(edit()).meta).toBeUndefined();
+    expect(presentAgentTool({ ...edit(), state: "failed" }).meta).toBeUndefined();
+    expect(presentAgentTool({ ...edit(), state: "denied", approvalDecision: "denied" }).meta).toBeUndefined();
+  });
+
+  it("names a Codex search's first query and counts each query as one search", () => {
+    const search = { ...codex("webSearch", { type: "webSearch", query: "tomato soil temperature", action: { type: "search", query: "tomato soil temperature", queries: ["tomato soil temperature", "tomato night temperature"] } }), state: "succeeded" as const };
+    expect(presentAgentTool(search)).toMatchObject({ label: "Searched the web for \u201ctomato soil temperature\u201d and 1\u00a0more", groupCount: 2, target: { text: "\u201ctomato soil temperature\u201d" } });
+    expect(presentAgentTool(search).meta).toBeUndefined();
+    const one = { ...codex("webSearch", { type: "webSearch", query: "frost", action: { type: "search", query: "frost" } }), state: "succeeded" as const };
+    expect(presentAgentTool(one)).toMatchObject({ label: "Searched the web for \u201cfrost\u201d", groupCount: 1 });
   });
 
   it("names unknown native tools without applying the hosted provider privacy rule", () => {
@@ -170,16 +197,35 @@ describe("native presentation metadata", () => {
     });
     expect(nativeToolPresentation(part("Edit", { file_path: "/alias/vault/Notes/Plan.md" }, { native: nested }))?.targetPath).toBe("Notes/Plan.md");
     expect(nativeToolPresentation(part("Read", { file_path: "/vault/Plan.md" }, { native: nested }))?.targetPath).toBe("Plan.md");
+    // The row names and links the note by its vault path; its card says only how much was read, never the note again.
+    const read = part("Read", { file_path: "Daily/Today.md" }, { native: nested, state: "succeeded", output: { data: "today" } });
+    expect(nativeToolPresentation(read)?.targetPath).toBe("Notes/Daily/Today.md");
+    const { app } = vault({ "Notes/Daily/Today.md": "today" });
     const host = document.createElement("div");
-    await renderNativeToolPreview(vault().app, host, part("Read", { file_path: "Daily/Today.md" }, { native: nested, state: "running" }));
-    const link = host.querySelector<HTMLAnchorElement>(".ss-tool-paths a.internal-link");
-    expect(link?.textContent).toBe("Notes/Daily/Today.md");
-    expect(link?.dataset.href).toBe("Notes/Daily/Today.md");
+    await renderNativeToolPreview(app, host, read);
+    expect(host.querySelector("a")).toBeNull();
+    expect(host.querySelector(".ss-tool-caption")?.textContent).toBe("1 line");
+    // A failed read's output is its error, shown by the row's error line: never counted as lines.
+    const failed = document.createElement("div");
+    await renderNativeToolPreview(app, failed, { ...read, state: "failed", output: { data: "File does not exist." } });
+    expect(failed.querySelector(".ss-tool-caption")).toBeNull();
   });
 
   it("uses progressive verbs and only reports explicit native auto blocks", () => {
     const request = part("Bash", { command: "npm test", exitCode: 0 });
-    expect(presentAgentTool({ ...request, state: "succeeded" })).toMatchObject({ label: "Ran npm test", meta: "exit 0" });
+    // A clean exit says nothing a check doesn't; a failed one shows its status, never "Couldn't run".
+    expect(presentAgentTool({ ...request, state: "succeeded" }).meta).toBeUndefined();
+    expect(presentAgentTool({ ...request, state: "succeeded" }).label).toBe("Ran npm test");
+    const missing = part("Bash", { command: "ls missing-folder", description: "List the folder" }, {
+      state: "failed", output: { data: "Exit code 1\nls: missing-folder: No such file or directory" }, error: { code: "NATIVE_TOOL_FAILED", message: "failed" },
+    });
+    expect(presentAgentTool(missing)).toMatchObject({ label: "Ran ls missing-folder", meta: "exit 1", exitCode: 1, summary: null, target: { text: "ls missing-folder", command: true } });
+    expect(presentAgentToolFailure(missing)).toBe("");
+    // The status may come last; a successful command's own text is never read as one.
+    expect(presentAgentTool({ ...missing, output: { data: "ls: missing-folder: No such file or directory\nExit code 2" } }).meta)
+      .toBe("exit 2");
+    expect(presentAgentTool({ ...missing, state: "succeeded", error: undefined, output: { data: "Exit code 3" } }).meta)
+      .toBeUndefined();
     expect(presentAgentTool({ ...request, state: "failed", error: { code: "AUTO_BLOCKED", message: "blocked" } }))
       .toMatchObject({ icon: "shield-x", label: "Run npm test · Blocked by Claude Code" });
     expect(presentAgentTool({ ...request, state: "failed", error: { code: "FAILED", message: "blocked" } }).label).toBe("Couldn't run npm test");
@@ -205,10 +251,11 @@ describe("native presentation metadata", () => {
     const pending = edit();
     expect(presentAgentTool(pending)).toMatchObject({ label: "Edit Plan.md", displayState: "approval-required", actionIcon: "file-pen-line" });
     expect(presentAgentTool({ ...pending, state: "denied", approvalDecision: "denied" }))
-      .toMatchObject({ label: "Edit Plan.md", displayState: "denied", icon: "ban" });
-    expect(presentAgentTool({ ...pending, state: "running", approvalDecision: "approved" }).label).toBe("Editing Plan.md…");
-    expect(presentAgentTool({ ...pending, state: "succeeded", approvalDecision: "approved" }).label).toBe("Edited Plan.md");
-    expect(presentAgentTool({ ...pending, state: "cancelled", approvalDecision: "withdrawn" }).label).toBe("Edit Plan.md");
+      .toMatchObject({ label: "Edit Plan", displayState: "denied", icon: "ban" });
+    // An approval names the file it asks about; once decided, the row names the note as Obsidian does.
+    expect(presentAgentTool({ ...pending, state: "running", approvalDecision: "approved" }).label).toBe("Editing Plan");
+    expect(presentAgentTool({ ...pending, state: "succeeded", approvalDecision: "approved" }).label).toBe("Edited Plan");
+    expect(presentAgentTool({ ...pending, state: "cancelled", approvalDecision: "withdrawn" }).label).toBe("Edit Plan");
     expect(presentAgentToolDetails(pending)).toEqual([]);
     expect(presentAgentToolFailure({ ...pending, state: "failed" })).toBe("This Claude Code action could not be completed.");
   });
@@ -222,9 +269,9 @@ describe("native presentation metadata", () => {
     expect(await prepareNativeWriteEditPreview(app, hosted)).toBeNull();
     expect(read).not.toHaveBeenCalled();
     expect(host.childElementCount).toBe(0);
-    expect(presentAgentTool(hosted)).toMatchObject({ label: "Creating Note.md…", summary: "Note.md" });
+    expect(presentAgentTool(hosted)).toMatchObject({ label: "Creating Note", summary: null });
     const server = { ...hosted, location: "server" as const, name: "future_action", state: "approval-required" as const };
-    expect(presentAgentTool(server)).toMatchObject({ label: "Running SystemSculpt action…", displayState: "running" });
+    expect(presentAgentTool(server)).toMatchObject({ label: "Running SystemSculpt action", displayState: "running" });
   });
 });
 
@@ -346,7 +393,8 @@ describe("real native edit previews", () => {
   it("distinguishes missing files, new writes, existing writes, and genuine no-ops", async () => {
     const { app } = vault({ "Notes/Plan.md": "before" });
     expect(await prepareNativeWriteEditPreview(app, edit({ file_path: "Missing.md" }))).toMatchObject({ status: "missing", appliedCount: 0 });
-    expect(await prepareNativeWriteEditPreview(app, part("Write", { file_path: "New.md", content: "new" }))).toMatchObject({ status: "changed", oldContent: "", newContent: "new", notice: "Create a new file." });
+    // A new note's lines are its diff; only an empty new note needs words.
+    expect(await prepareNativeWriteEditPreview(app, part("Write", { file_path: "New.md", content: "new" }))).toMatchObject({ status: "changed", oldContent: "", newContent: "new", isNewFile: true, notice: undefined });
     expect(await prepareNativeWriteEditPreview(app, part("Write", { file_path: "Notes/Plan.md", content: "after" }))).toMatchObject({ status: "changed", oldContent: "before", newContent: "after" });
     expect(await prepareNativeWriteEditPreview(app, edit({ new_string: "before" }))).toMatchObject({ status: "identical", newContent: "before" });
   });
@@ -395,7 +443,7 @@ describe("native preview rendering", () => {
     expect(host.textContent).toContain("Create a new file.");
     expect(host.textContent).not.toContain("No changes");
     await renderNativeToolPreview(app, host, part("Write", { file_path: "New.md", content: "New note\n" }));
-    expect(host.textContent).toContain("Create a new file.");
+    expect(host.textContent).not.toContain("Create a new file.");
     expect(host.querySelector(".systemsculpt-diff-line-added")?.textContent).toContain("New note");
     await renderNativeToolPreview(app, host, part("Write", { file_path: "Existing.md", content: "text\n" }));
     expect(host.textContent).toContain("Change the final line break.");
@@ -430,10 +478,12 @@ describe("native preview rendering", () => {
       { path: "/vault/One.md", kind: { type: "update" }, diff: "--- a/One.md\n+++ b/One.md\n@@ -1 +1 @@\n-old\n+new\n@@ -100 +100 @@\n-last\n+final\n" },
       { path: "Two.md", kind: { type: "add" }, diff: "@@ -0,0 +1 @@\n+hello\n" },
     ] }));
-    expect(Array.from(host.querySelectorAll(".systemsculpt-diff-filename"), el => el.textContent)).toEqual(["One.md", "Two.md"]);
+    // Each file is named once, by its summary; the diff box under it has no second header or gutter.
+    expect(Array.from(host.querySelectorAll("details.systemsculpt-inline-diff__file > summary"), el => el.textContent)).toEqual(["Edit One.md · +2 −2", "Create Two.md · +1"]);
+    expect(host.querySelector(".systemsculpt-diff-filename")).toBeNull();
     expect(host.querySelectorAll(".systemsculpt-diff-hunk")).toHaveLength(3);
-    expect(Array.from(host.querySelectorAll(".systemsculpt-diff-line-number-new"), el => el.textContent)).toContain("100");
-    expect(host.querySelectorAll("details.systemsculpt-inline-diff__file")).toHaveLength(2);
+    expect(host.querySelectorAll(".systemsculpt-diff-hunk-separated")).toHaveLength(1);
+    expect(host.querySelector(".systemsculpt-diff-line-number")).toBeNull();
     expect(host.textContent).not.toContain("Update the notes");
     expect(read).not.toHaveBeenCalled();
     expect(getAbstractFileByPath).not.toHaveBeenCalled();
@@ -505,7 +555,8 @@ describe("native preview rendering", () => {
     const { app } = vault();
     const host = document.createElement("div");
     await renderNativeToolPreview(app, host, part("Write", { file_path: "New.md", content: Array.from({ length: 30 }, (_, index) => `line ${index}`).join("\n") }));
-    expect(host.querySelector(".systemsculpt-inline-diff__new-file")?.textContent).toBe("New file");
+    // The title says "create" and every line is "+": no "New file" chip says it again.
+    expect(host.querySelector(".systemsculpt-inline-diff__new-file")).toBeNull();
     expect(host.querySelector(".systemsculpt-diff-header")).toBeNull();
     expect(host.querySelectorAll(".systemsculpt-diff-line-added")).toHaveLength(12);
     host.querySelector<HTMLButtonElement>('[data-testid="chat.diff.show-all"]')!.click();
@@ -535,6 +586,35 @@ describe("native preview rendering", () => {
     expect(host.textContent).toBe(plan);
   });
 
+  it("gives a plan of ten or more steps one text edge, its other top-level lists included", async () => {
+    const { app } = vault();
+    const html = (steps: number) => `<ol>${"<li>Step</li>".repeat(steps)}</ol><ul><li>Note<ol><li>Nested</li></ol></li></ul>`;
+    let steps = 10;
+    const render = jest.spyOn(MarkdownRenderer, "render").mockImplementation(async (_app, _markdown, el) => { el.innerHTML = html(steps); });
+    try {
+      const host = document.createElement("div");
+      await renderNativeToolPreview(app, host, part("ExitPlanMode", { plan: "1. Step" }), new Component());
+      const preview = host.querySelector(".ss-native-plan-preview")!;
+      expect(preview.classList.contains("has-wide-numbers")).toBe(true);
+      expect(preview.querySelector(":scope > ol")?.classList.contains("has-wide-numbers")).toBe(true);
+      // A short nested list keeps the usual gutter under its step's words.
+      expect(preview.querySelector("li ol")?.classList.contains("has-wide-numbers")).toBe(false);
+      steps = 9;
+      const short = document.createElement("div");
+      await renderNativeToolPreview(app, short, part("ExitPlanMode", { plan: "1. Step" }), new Component());
+      expect(short.querySelector(".has-wide-numbers")).toBeNull();
+    } finally { render.mockRestore(); }
+  });
+
+  it("drops a first heading that only says Plan, which the card's title already says", async () => {
+    const { app } = vault();
+    const host = document.createElement("div");
+    await renderNativeToolPreview(app, host, part("ExitPlanMode", { plan: "## Plan\n\n1. Read Garden\n2. Add basil" }));
+    expect(host.querySelector(".ss-native-plan-preview")?.textContent).toBe("1. Read Garden\n2. Add basil");
+    await renderNativeToolPreview(app, host, part("ExitPlanMode", { plan: "# Basil plan\n\n1. Read Garden" }));
+    expect(host.querySelector(".ss-native-plan-preview")?.textContent).toBe("# Basil plan\n\n1. Read Garden");
+  });
+
   it("does not mislabel a vault write grant as outside the vault", async () => {
     const { app } = vault();
     const host = document.createElement("div");
@@ -547,7 +627,8 @@ describe("native preview rendering", () => {
     const { app, read, getAbstractFileByPath } = vault({ "Notes/Plan.md": "later content" });
     const host = document.createElement("div");
     await renderNativeToolPreview(app, host, { ...edit(), state });
-    expect(host.textContent).toContain("Original file line numbers are unavailable");
+    // Only the change itself: no caveat about how it is drawn.
+    expect(host.textContent).toBe("−before+after");
     expect(host.querySelector(".systemsculpt-diff-line-removed .systemsculpt-diff-line-content")?.textContent).toBe("before");
     expect(host.querySelector(".systemsculpt-diff-line-added .systemsculpt-diff-line-content")?.textContent).toBe("after");
     expect(host.querySelector(".systemsculpt-diff-line-number")).toBeNull();
@@ -566,8 +647,7 @@ describe("native preview rendering", () => {
       { old_string: "middle", new_string: "" },
     ] }, { state: "succeeded" }));
     expect(Array.from(host.querySelectorAll(".systemsculpt-diff-line-removed .systemsculpt-diff-line-content"), node => node.textContent)).toEqual(["before", "middle"]);
-    expect(host.textContent).toContain("Requested edit 1");
-    expect(host.textContent).toContain("Requested edit 2");
+    expect(Array.from(host.querySelectorAll(".ss-tool-edit > .ss-tool-caption"), node => node.textContent)).toEqual(["Edit 1", "Edit 2"]);
     expect(host.querySelector(".systemsculpt-diff-hunk-header")).toBeNull();
     expect(read).not.toHaveBeenCalled();
   });
@@ -576,8 +656,10 @@ describe("native preview rendering", () => {
     const { app, read, getAbstractFileByPath } = vault({ "Notes/Plan.md": "later content" });
     const host = document.createElement("div");
     await renderNativeToolPreview(app, host, part("Write", { file_path: "Notes/Plan.md", content: "written content" }, { state: "succeeded" }));
-    expect(host.querySelector("pre code")?.textContent).toBe("written content");
-    expect(host.textContent).toContain("not a before-and-after diff");
+    expect(host.querySelector("pre.ss-tool-file-text code")?.textContent).toBe("written content");
+    // What the call wrote reads at full strength, not as a found line.
+    expect(host.querySelector("pre.ss-tool-file-text")?.classList.contains("is-written")).toBe(true);
+    expect(host.textContent).toBe("written content");
     expect(host.querySelector(".systemsculpt-diff-viewer")).toBeNull();
     expect(host.textContent).not.toContain("later content");
     expect(read).not.toHaveBeenCalled();
@@ -609,6 +691,6 @@ describe("native preview rendering", () => {
   it("names the workflow of a completed Codex dynamic call from its own arguments", () => {
     const item = { type: "dynamicToolCall", id: "call", tool: "studio_list_outputs", arguments: { path: "SystemSculpt/Studio/Garden cards.systemsculpt" }, status: "completed" };
     const presented = nativeToolPresentation(codex("studio_list_outputs", item, undefined));
-    expect(presented?.completedTitle).toBe("Listed outputs of Garden cards");
+    expect(presented?.completedTitle).toBe("Listed outputs of Garden cards workflow");
   });
 });

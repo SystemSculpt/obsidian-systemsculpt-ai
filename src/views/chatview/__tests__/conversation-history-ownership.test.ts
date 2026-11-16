@@ -50,18 +50,22 @@ it.each(["restored", "adopted"])("does not duplicate the action summary in opene
     }
     const activity = parent.querySelector<HTMLDetailsElement>("details[data-agent-turn-fold]")!;
     const label = activity.querySelector<HTMLElement>(":scope > summary .systemsculpt-agent-activity-label")!;
-    expect(label.textContent).toBe("Thought, read Plan.md");
+    expect(label.textContent).toBe("Thought, read Plan");
     activity.open = true;
     activity.dispatchEvent(new Event("toggle"));
     await historyHydrationFor(renderer).hydrate(activity);
-    expect(label.textContent).toBe("Activity");
-    expect(activity.querySelector(".systemsculpt-agent-activity-overflow-label")?.textContent).toBe("Thought, read Plan.md");
+    // The clicked line keeps its summary when it opens.
+    expect(label.textContent).toBe("Thought, read Plan");
+    // The open fold's rows sit flat inside it: no nested header repeats the summary.
+    expect(activity.querySelector("[data-agent-activity-overflow]")).toBeNull();
+    expect(activity.querySelector(":scope > .systemsculpt-agent-activity-body")?.textContent).not.toContain("Thought, read Plan");
+    expect(activity.querySelector(".systemsculpt-agent-tool-label")?.textContent).toBe("Read Plan");
     expect(activity.querySelector(".systemsculpt-agent-activity-duration")?.textContent).toBe("12s");
     await renderer.renderHistory(messages);
-    expect(label.textContent).toBe("Activity");
+    expect(label.textContent).toBe("Thought, read Plan");
     activity.open = false;
     activity.dispatchEvent(new Event("toggle"));
-    expect(label.textContent).toBe("Thought, read Plan.md");
+    expect(label.textContent).toBe("Thought, read Plan");
   } finally {
     renderer.unload();
     parent.remove();
@@ -131,9 +135,17 @@ it.each(["live", "restored", "adopted"].flatMap(origin =>
     const label = scope.querySelector<HTMLElement>(activity ? ":scope > summary .systemsculpt-agent-activity-label" : ".systemsculpt-agent-tail-status-label")!;
     const row = scope.querySelector(".systemsculpt-agent-tool")!;
     expect(parent.querySelectorAll(".systemsculpt-agent-tool")).toHaveLength(1);
-    expect(row.querySelector(".systemsculpt-agent-tool-label")?.textContent).toBe("Read Plan.md");
-    expect(label.textContent).not.toMatch(/read|plan\.md/i);
-    if (cancelled) expect(label.textContent).toMatch(/stopped/i);
+    expect(row.querySelector(".systemsculpt-agent-tool-label")?.textContent).toBe("Read Plan");
+    if (cancelled) {
+      expect(label.textContent).not.toMatch(/read|plan\.md/i);
+      expect(label.textContent).toMatch(/stopped/i);
+    } else {
+      // A lone call's fold is that call's row: it keeps the call's name and opens straight
+      // to its card, whose own header the stylesheet hides so nothing names the call twice.
+      expect(label.textContent).toBe("Read Plan");
+      expect(activity?.hasAttribute("data-single-tool")).toBe(true);
+      expect((row as HTMLDetailsElement).open).toBe(true);
+    }
     if (liveTool) expect(row).toBe(liveTool);
     if (origin === "live") await renderer.renderActive(snapshot, presentAgentConversation(snapshot, false));
     else await renderer.renderHistory(messages);
@@ -144,7 +156,7 @@ it.each(["live", "restored", "adopted"].flatMap(origin =>
       activity.open = false;
       activity.dispatchEvent(new Event("toggle"));
       if (cancelled) expect(label.textContent).toMatch(/stopped/i);
-      else expect(label.textContent).toBe("Read Plan.md");
+      else expect(label.textContent).toBe("Read Plan");
     }
   } finally {
     renderer.unload();

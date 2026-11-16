@@ -15,7 +15,7 @@ const input = { conversationId: 'conversation', turnId: 'user-turn', message: { 
 const PARTIAL = 'I checked the first note.';
 const cases = (['claude', 'codex'] as LocalAgentId[]).flatMap(agent => [
   { agent, scenario: 'mid-answer failure', partial: true, error: new Error('Native process exited: "unexpected"\nDetails: résumé — <!-- SYSTEMSCULPT-MESSAGE-END -->'), retry: true, detect: false, hosted: false },
-  { agent, scenario: 'no-output sign-in failure', partial: false, error: new Error('Not signed in. Please log in.'), retry: true, detect: true, hosted: false },
+  { agent, scenario: 'no-output sign-in failure', partial: false, error: new Error('Not signed in. Please log in.'), retry: true, detect: false, hosted: false },
   { agent, scenario: 'not installed', partial: false, error: new Error('Executable not found: ENOENT'), retry: false, detect: true, hosted: true },
   { agent, scenario: 'usage limit', partial: true, error: new LocalAgentUsageLimitError('Usage limit reached. Resets tomorrow.'), retry: false, detect: false, hosted: true },
   { agent, scenario: 'no-output usage limit', partial: false, error: new LocalAgentUsageLimitError('Usage limit reached. Resets tomorrow.'), retry: false, detect: false, hosted: true },

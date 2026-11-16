@@ -19,7 +19,7 @@ export interface DiffViewerOptions {
   diffResult: DiffResult;
   fileName: string;
   maxContextLines?: number; // Context lines around changes (default 2)
-  showLineNumbers?: boolean; // Show line numbers (default false for compactness)
+  showLineNumbers?: boolean; // Line numbers and each hunk's patch range (default false: patch syntax is opt-in)
   emptyReason?: DiffEmptyReason; // Why there is nothing to show (default 'identical')
   emptyDetail?: string; // Extra context for the empty state, e.g. unmatched edit count
   hideHeader?: boolean; // A single-file card already names the file and change size
@@ -92,7 +92,7 @@ export class DiffViewer {
         this.container.addClass('is-blocked');
       }
     } else {
-      // Create separate spans for additions and deletions to style them independently
+      // "+3 −1": the counts say it all; a zero says nothing.
       if (this.diffResult.stats.additions > 0) {
         stats.createSpan({
           cls: 'systemsculpt-diff-additions',
@@ -100,27 +100,14 @@ export class DiffViewer {
         });
       }
       if (this.diffResult.stats.deletions > 0) {
-        // Add space between additions and deletions if both exist
         if (this.diffResult.stats.additions > 0) {
           stats.createSpan({ text: ' ' });
         }
         stats.createSpan({
           cls: 'systemsculpt-diff-deletions',
-          text: `-${this.diffResult.stats.deletions}`
+          text: `−${this.diffResult.stats.deletions}`
         });
       }
-      
-      if (this.diffResult.stats.additions > 0) {
-        stats.addClass('systemsculpt-diff-has-additions');
-      }
-      if (this.diffResult.stats.deletions > 0) {
-        stats.addClass('systemsculpt-diff-has-deletions');
-      }
-
-      stats.createSpan({
-        cls: 'systemsculpt-diff-total',
-        text: ` · ${totalChanges} ${totalChanges === 1 ? 'line' : 'lines'} changed`,
-      });
     }
   }
 
@@ -196,7 +183,7 @@ export class DiffViewer {
     if (totalLines > visibleLines) {
       content.id = `ss-diff-content-${++diffContentSequence}`;
       const showAll = createUiAction(this.container, {
-        label: `Show full diff (${totalLines} lines)`,
+        label: `Show all ${totalLines} lines`,
         testId: 'chat.diff.show-all',
         size: 'small',
       });
@@ -207,7 +194,7 @@ export class DiffViewer {
         renderHunks(expanded);
         showAll.setAttribute('aria-expanded', String(expanded));
         const label = showAll.querySelector('.ss-button__label');
-        if (label) label.textContent = expanded ? 'Show less' : `Show full diff (${totalLines} lines)`;
+        if (label) label.textContent = expanded ? 'Show less' : `Show all ${totalLines} lines`;
       });
     }
   }
@@ -269,8 +256,8 @@ export class DiffViewer {
       hunkEl.addClass('systemsculpt-diff-hunk-separated');
     }
 
-    // Hunk header with location summary
-    const hunkSummary = this.computeHunkSummary(hunk);
+    // The patch range ("@@ -1,3 +1,4 @@") is patch syntax: shown only with the line numbers it belongs to.
+    const hunkSummary = this.showLineNumbers ? this.computeHunkSummary(hunk) : null;
     if (hunkSummary) {
       hunkEl.createDiv({
         cls: 'systemsculpt-diff-hunk-header',
@@ -344,6 +331,9 @@ export class DiffViewer {
     if (!line.content && line.content !== '') {
       content.textContent = '\u00a0';
     }
+    // A wrapped line hangs past its own indent (diff-viewer.css), so its tail never reads as the next line.
+    const indent = /^ */u.exec(line.content || '')?.[0].length ?? 0;
+    if (indent) content.setCssProps({ '--ss-diff-indent': String(indent) });
   }
 
   /** A standard unified-diff range ("-3,4 +3,5"); the change count has its own badge. */

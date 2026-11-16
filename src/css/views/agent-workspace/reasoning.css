@@ -17,9 +17,11 @@
   box-sizing: border-box;
   display: flex;
   align-items: center;
-  gap: var(--ss-space-1);
-  width: 100%;
+  gap: var(--ss-space-2);
+  width: calc(100% + 2 * var(--ss-space-1));
   min-height: var(--ss-control-height-sm);
+  /* Same columns as every activity row: icon on the column edge, label 22px in. */
+  margin-inline: calc(-1 * var(--ss-space-1));
   padding: 0 var(--ss-space-1);
   border-radius: var(--ss-radius-sm);
   color: var(--ss-ink-muted);
@@ -50,10 +52,10 @@
 .systemsculpt-agent-reasoning-disclosure,
 .systemsculpt-agent-reasoning-icon {
   display: inline-flex;
-  flex: 0 0 20px;
+  flex: 0 0 var(--ss-icon-size-sm);
   align-items: center;
   justify-content: center;
-  width: 20px;
+  width: var(--ss-icon-size-sm);
   height: 20px;
   color: var(--ss-ink-muted);
 }
@@ -78,14 +80,17 @@
 .systemsculpt-agent-reasoning-disclosure {
   order: 2;
   margin-left: auto;
+  /* The chevron's ink, not its box, ends on the column's right edge. */
+  margin-inline-end: calc(-1 * var(--ss-space-1));
   opacity: 0.72;
   transition:
     opacity var(--ss-dur-fast) var(--ss-ease),
     transform var(--ss-dur-fast) var(--ss-ease);
 }
 
+/* Pointing down, the ink is 3/24 of the box wider each side; the shift keeps its right end on the edge. */
 .systemsculpt-agent-reasoning-details[open] .systemsculpt-agent-reasoning-disclosure {
-  transform: rotate(90deg);
+  transform: translateX(calc(var(--ss-icon-size-sm) * -3 / 24)) rotate(90deg);
 }
 
 .systemsculpt-agent-reasoning-header:hover .systemsculpt-agent-reasoning-disclosure {

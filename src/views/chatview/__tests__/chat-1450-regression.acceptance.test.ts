@@ -48,14 +48,6 @@ async function hydrateRestoredWorked(
   worked.dispatchEvent(new Event("toggle"));
 }
 
-async function expandHistoricalOverflow(
-  renderer: AgentConversationRenderer,
-  overflow: HTMLButtonElement,
-): Promise<void> {
-  overflow.click();
-  await historyHydrationFor(renderer).hydrate(overflow);
-}
-
 function legacyReadPart(
   id: string,
   order: number,
@@ -152,17 +144,18 @@ describe("sanitized 14:50 ChatView regression acceptance", () => {
         const failedTool = tools.find((tool) =>
           tool.dataset.partKey === `tool:${failed.callId}`);
         expect(mixedTool?.classList).toContain("is-partial");
+        // Partly done is a warning, never the failure X.
         expect(mixedTool?.querySelector<HTMLElement>(
           ".systemsculpt-agent-tool-state-icon",
-        )?.dataset.iconState).toBe("x");
-        expect(mixedTool?.querySelector(".systemsculpt-agent-tool-summary")?.textContent)
-          .toBe("2 completed, 1 failed");
+        )?.dataset.iconState).toBe("triangle-alert");
+        expect(mixedTool?.querySelector(".systemsculpt-agent-tool-summary")?.textContent ?? "").toBe("");
+        expect(mixedTool?.querySelector(".systemsculpt-agent-tool-label")?.textContent).toMatch(/\b2 of 3\b/u);
         expect(failedTool?.classList).toContain("is-failed");
         expect(failedTool?.querySelector<HTMLElement>(
           ".systemsculpt-agent-tool-state-icon",
         )?.dataset.iconState).toBe("x");
-        expect(failedTool?.querySelector(".systemsculpt-agent-tool-summary")?.textContent)
-          .toBe("0 completed, 2 failed");
+        expect(failedTool?.querySelector(".systemsculpt-agent-tool-summary")?.textContent ?? "").toBe("");
+        expect(failedTool?.querySelector(".systemsculpt-agent-tool-label")?.textContent).toMatch(/^Couldn't /u);
         return tools;
       };
 
@@ -171,18 +164,13 @@ describe("sanitized 14:50 ChatView regression acceptance", () => {
           view.renderer,
           parent.querySelector<HTMLDetailsElement>("details[data-agent-turn-fold]"),
         );
+        // A settled fold lists every call flat, in order: no nested previous-calls header.
         const visibleTools = [...parent.querySelectorAll<HTMLElement>(
           ".systemsculpt-agent-part.is-tool",
         )];
-        expect(visibleTools).toHaveLength(1);
-        expect(visibleTools[0]?.dataset.partKey).toBe(`tool:${failed.callId}`);
-        const overflow = parent.querySelector<HTMLButtonElement>(
-          "button[data-agent-activity-overflow]",
-        );
-        expect(overflow).not.toBeNull();
-        expect(overflow?.getAttribute("aria-expanded")).toBe("false");
-        if (overflow) await expandHistoricalOverflow(view.renderer, overflow);
-        expect(overflow?.getAttribute("aria-expanded")).toBe("true");
+        expect(visibleTools.map((tool) => tool.dataset.partKey))
+          .toEqual([`tool:${mixed.callId}`, `tool:${failed.callId}`]);
+        expect(parent.querySelector("button[data-agent-activity-overflow]")).toBeNull();
       };
 
       await view.setAgentSnapshot(snapshot);

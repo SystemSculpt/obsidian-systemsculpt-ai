@@ -13,10 +13,13 @@ import {
 } from "./ToolCallPreview";
 import { renderSystemSculptToolCard, systemSculptToolArguments as systemSculptArguments } from "./SystemSculptToolCard";
 import {
+  changeCounts,
   createToolCard,
   inputFields,
   renderFields,
+  renderFileContent,
   renderLinks,
+  mediaDisplayName,
   renderMedia,
   renderPathList,
   renderTerminal,
@@ -34,6 +37,8 @@ export type NativeToolPresentation = Readonly<{
   description?: string;
   meta?: string;
   changeSize?: string;
+  /** "2 results": how many results a web search lists. */
+  resultCount?: string;
   path?: string;
   targetPath?: string;
   icon: string;
@@ -42,7 +47,33 @@ export type NativeToolPresentation = Readonly<{
   groupCount: number;
   /** Distinct notes or folders the group counts, so a repeated path counts once. */
   groupItems?: readonly string[];
+  /** The words in the title that name what the call acted on: a note, a query, a command. */
+  target?: LabelTarget;
+  /** A call stopped at the plan or credits gate: what it would have made, and what it needs. */
+  gate?: Readonly<{ subject: string; need: string }>;
 }>;
+
+/** The words a tool label sets apart; a shell command reads in the code font. */
+export type LabelTarget = Readonly<{ text: string; command?: true }>;
+
+/** A Markdown note is named as Obsidian names it, without ".md"; other files keep their extension. */
+export function noteDisplayName(name: string): string {
+  return /.\.md$/iu.test(name) ? name.slice(0, -3) : name;
+}
+
+/** A tool server's tool as people read it ("weather forecast"); a tool already named for its server isn't repeated. */
+/** What a gated SystemSculpt call needs, from its link's words; saved chats keep the older words. */
+export function systemSculptGateNeed(label: string | undefined): string | null {
+  return label === "See plans" || label === "Subscribe" ? "Needs a plan"
+    : label === "Add credits" || label === "Buy credits" ? "Needs credits" : null;
+}
+
+function serverToolName(server: string | undefined, tool: string): string {
+  const name = tool.replace(/[_-]+/gu, " ").trim();
+  // Claude names its connectors "claude_ai_<Service>"; the service is the server people know.
+  const owner = server?.replace(/[_-]+/gu, " ").replace(/^claude ai /iu, "").trim();
+  return owner && !name.toLowerCase().startsWith(owner.toLowerCase()) ? `${owner} ${name}` : name;
+}
 
 type Detail = { label: string; value: string; code?: boolean; path?: string };
 
@@ -101,8 +132,30 @@ function changeSize(input: Record<string, unknown>): string | undefined {
     const parsed = patch ? parseUnifiedDiff(patch) : null;
     return parsed ? [parsed.stats] : [];
   });
-  if (!diffs.length) return undefined;
-  return `+${diffs.reduce((sum, diff) => sum + diff.additions, 0)} −${diffs.reduce((sum, diff) => sum + diff.deletions, 0)}`;
+  return changeCountText(diffs.reduce((sum, diff) => sum + diff.additions, 0), diffs.reduce((sum, diff) => sum + diff.deletions, 0));
+}
+/** A change's lines as an edit row counts them: "+3 −2", "+3" or "−2"; a zero says nothing. */
+function changeCountText(added: number, removed: number): string | undefined {
+  return [added ? `+${added}` : "", removed ? `−${removed}` : ""].filter(Boolean).join(" ") || undefined;
+}
+/**
+ * What requested edits add and remove, counted from the same diff their card draws. `before` and
+ * `after` name each edit's text fields (Claude Code's old_string/new_string, a vault edit's oldText/newText).
+ */
+export function editChangeSize(edits: readonly Record<string, unknown>[], before: string, after: string): string | undefined {
+  let added = 0, removed = 0;
+  for (const edit of edits) {
+    const old = edit[before], next = edit[after];
+    if (typeof old !== "string" || typeof next !== "string") continue;
+    const { stats } = generateDiff(old, next, 0);
+    added += stats.additions;
+    removed += stats.deletions;
+  }
+  return changeCountText(added, removed);
+}
+/** "+4": a write adds every line its card draws. */
+export function writeChangeSize(content: unknown): string | undefined {
+  return typeof content === "string" ? changeCountText(content ? content.split("\n").length - (content.endsWith("\n") ? 1 : 0) : 0, 0) : undefined;
 }
 function realReason(part: AgentToolPart, target: string, title: string): string | undefined {
   const input = record(part.input);
@@ -121,15 +174,21 @@ export function nativeToolPresentation(part: AgentToolPart): NativeToolPresentat
   if (!part.native) return null;
   const input = record(part.input);
   const agentName = part.native.agent === "claude" ? "Claude Code" : "Codex";
-  const presentation = (verb: string, completed: string, running: string, target: string, icon: string, groupKind: string, options: { path?: string; approval?: string; count?: number; items?: readonly string[]; meta?: string } = {}): NativeToolPresentation => {
+  // shown: the target as the row names it (a note without ".md"); an approval keeps the file name its card links.
+  // mark: the words in the title that name the target, set apart when the row is drawn.
+  const presentation = (verb: string, completed: string, running: string, target: string, icon: string, groupKind: string, options: { path?: string; approval?: string; count?: number; items?: readonly string[]; meta?: string; shown?: string; mark?: LabelTarget } = {}): NativeToolPresentation => {
     const path = options.path ? resolvedPath(part, options.path) : undefined;
-    const title = `${verb} ${target}`;
+    const approving = part.state === "approval-required" && options.shown !== undefined;
+    const shown = approving ? target : options.shown ?? target;
+    const title = `${verb} ${shown}`;
     const description = realReason(part, path?.displayPath ?? target, title);
     const folder = path?.displayPath.includes("/") ? path.displayPath.slice(0, path.displayPath.lastIndexOf("/")) : undefined;
     const items = options.items ?? (path ? [path.vaultPath ?? path.displayPath] : []);
     return {
-      title, completedTitle: `${completed} ${target}`, runningTitle: `${running} ${target}…`,
+      // The spinner says it is running; a trailing "…" would read as a cut target.
+      title, completedTitle: `${completed} ${shown}`, runningTitle: `${running} ${shown}`,
       approvalTitle: options.approval ?? `${verb.toLowerCase()} ${target}`,
+      ...(options.mark && !approving ? { target: options.mark } : {}),
       ...(description ? { description } : {}),
       ...(path ? { path: path.displayPath, ...(path.vaultPath ? { targetPath: path.vaultPath } : {}) } : {}),
       meta: [options.meta ?? folder, description].filter(Boolean).join(" · ") || undefined,
@@ -140,9 +199,10 @@ export function nativeToolPresentation(part: AgentToolPart): NativeToolPresentat
   const systemsculpt = systemSculptToolName(part.name);
   if (systemsculpt) {
     const input = systemSculptArguments(part);
-    const workflow = text(input.path) ? basename(text(input.path)!).replace(/\.systemsculpt$/iu, "") : text(input.name) ?? "workflow";
+    const named = text(input.path) ? studioWorkflowName(text(input.path)!) : text(input.name);
+    const workflow = named ? `${named} workflow` : "workflow";
     const [verb, completed, running, target, icon] = ({
-      generate_image: ["Generate", "Generated", "Generating", imageCountTarget(part, input), "image"],
+      generate_image: [...(editsImages(input) ? ["Edit", "Edited", "Editing"] : ["Generate", "Generated", "Generating"]), imageCountTarget(part, input), "image"],
       generate_video: ["Generate", "Generated", "Generating", "video", "film"],
       studio_list_workflows: ["List", "Listed", "Listing", "Studio workflows", "layout-dashboard"],
       studio_create_workflow: ["Create", "Created", "Creating", workflow, "layout-dashboard"],
@@ -154,46 +214,68 @@ export function nativeToolPresentation(part: AgentToolPart): NativeToolPresentat
     // A refused call (no subscription, no credits) finished normally but did nothing.
     const result = part.state === "succeeded" ? decodeSystemSculptToolOutput(part.output?.data) : null;
     const refused = result?.ok === false;
-    // Needing a subscription or credits is an expected gate, not a failure.
-    const gate = refused && result?.link?.label === "Subscribe" ? "Needs a subscription" : refused && result?.link?.label === "Buy credits" ? "Needs credits" : null;
-    if (gate) return presentation(verb, verb, running, `${target} · ${gate}`, icon, `systemsculpt:${systemsculpt}`);
+    // Needing a plan or credits is an expected gate, not a failure.
+    const gate = refused ? systemSculptGateNeed(result?.link?.label) : null;
+    if (gate) return { ...presentation(verb, verb, running, `${target} · ${gate}`, icon, `systemsculpt:${systemsculpt}`), gate: { subject: target, need: gate.replace(/^Needs /u, "") } };
     return presentation(verb, refused ? `Couldn't ${verb.toLowerCase()}` : completed, running, target, icon, `systemsculpt:${systemsculpt}`);
   }
   const rawPath = text(input.file_path) ?? text(input.path);
   const path = rawPath ? displayPath(part, rawPath) : undefined;
   const target = path ? basename(path) : "file";
+  const note = path ? { shown: noteDisplayName(target), mark: { text: noteDisplayName(target) } } : {};
   switch (kind(part)) {
+    // Counted from the change the card draws: "+1 −1", or "+4" for a write of four lines.
     case "Edit":
-    case "MultiEdit": return presentation("Edit", "Edited", "Editing", target, "file-pen-line", "edit", { path: rawPath });
-    case "Write": return presentation("Create", "Created", "Creating", target, "file-plus-2", "write", { path: rawPath });
-    case "Read": return presentation("Read", "Read", "Reading", target, "file-text", "read", { path: rawPath });
-    case "LS": return presentation("List", "Listed", "Listing", path ?? "vault", "list-tree", "list", { path: rawPath });
+    case "MultiEdit": return {
+      ...presentation("Edit", "Edited", "Editing", target, "file-pen-line", "edit", { path: rawPath, ...note }),
+      changeSize: editChangeSize(part.name === "MultiEdit" ? records(input.edits) : [input], "old_string", "new_string"),
+    };
+    case "Write": return { ...presentation("Create", "Created", "Creating", target, "file-plus-2", "write", { path: rawPath, ...note }), changeSize: writeChangeSize(input.content) };
+    case "Read": return presentation("Read", "Read", "Reading", target, "file-text", "read", { path: rawPath, ...note });
+    // "Listed the Notes folder": a folder named like a note count ("read 2 notes") still reads as a folder.
+    case "LS": return path && path !== "Vault root"
+      ? presentation("List", "Listed", "Listing", `the ${path} folder`, "list-tree", "list", { path: rawPath, mark: { text: path } })
+      : presentation("List", "Listed", "Listing", "the vault", "list-tree", "list", { path: rawPath });
     case "Bash":
     case "commandExecution": {
       if (input.kind === "writeStdin") return presentation("Send input to", "Sent input to", "Sending input to", "a running command", "terminal", "command");
       const cmd = command(input)?.replace(/\s+/gu, " ").trim() ?? "command";
-      return presentation("Run", "Ran", "Running", cmd.length > 40 ? `${cmd.slice(0, 39)}…` : cmd, "terminal", "command", {
-        approval: "run a command", meta: cwdMeta(part, text(input.cwd)),
+      const shown = cmd.length > 40 ? `${cmd.slice(0, 39)}…` : cmd;
+      return presentation("Run", "Ran", "Running", shown, "terminal", "command", {
+        approval: "run a command", meta: cwdMeta(part, text(input.cwd)), ...(command(input) ? { mark: { text: shown, command: true } } : {}),
       });
     }
-    case "WebFetch": return presentation("Read", "Read", "Opening", host(text(input.url)), "globe-2", "web", { approval: `fetch ${host(text(input.url))}` });
+    case "WebFetch": return presentation("Read", "Read", "Opening", host(text(input.url)), "globe-2", "web", { approval: `fetch ${host(text(input.url))}`, mark: { text: host(text(input.url)) } });
     case "WebSearch":
     case "webSearch": {
       // Codex reports opening a page and finding in it as web searches; title them as what happened.
       const action = record(input.action);
       const url = text(action.url);
-      if (url && action.type === "openPage") return presentation("Open", "Opened", "Opening", host(url), "globe-2", "web", { approval: "open a web page" });
-      if (url && action.type === "findInPage") return presentation("Find in", "Found in", "Finding in", host(url), "globe-2", "web", { approval: "search a web page" });
-      const query = text(input.query) ?? text(action.query) ?? strings(action.queries)[0];
-      return presentation("Search the web for", "Searched the web for", "Searching the web for", query ? `“${query}”` : "information", "globe-2", "web-search", { approval: "search the web" });
+      if (url && action.type === "openPage") return presentation("Open", "Opened", "Opening", host(url), "globe-2", "web", { approval: "open a web page", mark: { text: host(url) } });
+      if (url && action.type === "findInPage") return presentation("Find in", "Found in", "Finding in", host(url), "globe-2", "web", { approval: "search a web page", mark: { text: host(url) } });
+      // Codex can run several queries in one call: the row names the first and counts the rest, and each
+      // query counts as one search in the turn's summary ("Searched the web 4 times").
+      const queries = webSearchQueries(input);
+      const query = queries[0];
+      const more = queries.length > 1 ? ` and ${queries.length - 1}\u00a0more` : "";
+      // A count only for results the card lists (20 at most): Claude Code's links. Codex lists none.
+      const results = part.state === "succeeded" ? Math.min(webSearchLinks(toolOutputText(part.output?.data)).links.length, 20) : 0;
+      return {
+        ...presentation("Search the web for", "Searched the web for", "Searching the web for", query ? `“${query}”${more}` : "information", "globe-2", "web-search", {
+          approval: "search the web", count: Math.max(queries.length, 1), ...(query ? { mark: { text: `“${query}”` } } : {}),
+        }),
+        ...(results ? { resultCount: `${results} result${results === 1 ? "" : "s"}` } : {}),
+      };
     }
-    case "Grep": return presentation("Search", "Searched", "Searching", `“${text(input.pattern) ?? "text"}”`, "search", "search");
-    case "Glob": return presentation("List", "Listed", "Listing", text(input.pattern) ?? "files", "file-search", "list");
+    case "Grep": return presentation("Search", "Searched", "Searching", `“${text(input.pattern) ?? "text"}”`, "search", "search", text(input.pattern) ? { mark: { text: `“${text(input.pattern)}”` } } : {});
+    // A name pattern finds files: a search of names, not of text ("Searched for 2 patterns") nor a folder listing.
+    // Its pattern is code ("**/*.md"), set as code like a command, never read as Markdown.
+    case "Glob": return presentation("Find", "Found", "Finding", `files matching ${text(input.pattern) ?? "a pattern"}`, "file-search", "find", text(input.pattern) ? { mark: { text: text(input.pattern)!, command: true } } : {});
     case "TodoWrite":
     case "plan": {
       const todos = records(input.todos ?? input.plan);
       const done = todos.filter(todo => todo.status === "completed").length;
-      return { ...presentation("Update", "Updated", "Updating", "plan", "list-checks", "plan"), runningTitle: "Planning…", meta: todos.length ? `${done} of ${todos.length} done` : undefined };
+      return { ...presentation("Update", "Updated", "Updating", "plan", "list-checks", "plan"), runningTitle: "Planning", meta: todos.length ? `${done} of ${todos.length} done` : undefined };
     }
     case "ExitPlanMode": return { ...presentation("Approve", "Approved", "Preparing", "plan", "list-checks", "plan"), approvalTitle: "has a plan", completedTitle: "Plan approved" };
     case "fileChange": {
@@ -212,16 +294,19 @@ export function nativeToolPresentation(part: AgentToolPart): NativeToolPresentat
       const size = changeSize(input);
       const sourcePath = source ? displayPath(part, source) : "";
       const folder = sourcePath.includes("/") ? sourcePath.slice(0, sourcePath.lastIndexOf("/")) : undefined;
+      const shown = source ? noteDisplayName(name) : name;
       return { ...presentation(verb, completed, running, destination ? `${name} → ${displayPath(part, destination)}` : name, icon, verb === "Create" ? "write" : verb === "Delete" ? "trash" : "edit", {
         path: source, meta: [folder, size].filter(Boolean).join(" · ") || undefined,
+        shown: destination ? `${shown} → ${noteDisplayName(displayPath(part, destination))}` : shown,
+        ...(source ? { mark: { text: shown } } : {}),
       }), changeSize: size };
     }
     case "imageGeneration": return presentation("Generate", "Generated", "Generating", "image", "image", "image");
     case "imageView": {
       const image = codexImageLocalPath(input.path);
       // Codex names its generated files by internal id, so those read as "image".
-      const name = image && !isCodexGeneratedImagePath(image) ? basename(image) : "image";
-      return presentation("View", "Viewed", "Viewing", name, "image", "image-view", image ? { path: image } : {});
+      const name = image && !isCodexGeneratedImagePath(image) ? mediaDisplayName(image) : "image";
+      return presentation("View", "Viewed", "Viewing", name, "image", "image-view", image ? { path: image, mark: { text: name } } : {});
     }
     case "permissions": return presentation("Allow", "Allowed", "Requesting", "additional access", "shield-check", "permission", {
       meta: cwdMeta(part, text(input.cwd)),
@@ -233,16 +318,16 @@ export function nativeToolPresentation(part: AgentToolPart): NativeToolPresentat
     case "Agent": return presentation("Run", "Ran", "Running", "an agent", "bot", "agent");
     case "NotebookEdit": {
       const notebook = text(input.notebook_path);
-      return presentation("Edit", "Edited", "Editing", notebook ? basename(displayPath(part, notebook)) : "notebook", "file-pen-line", "edit", { path: notebook });
+      return presentation("Edit", "Edited", "Editing", notebook ? basename(displayPath(part, notebook)) : "notebook", "file-pen-line", "edit", notebook ? { path: notebook, mark: { text: basename(displayPath(part, notebook)) } } : {});
     }
     case "BashOutput": return presentation("Check", "Checked", "Checking", "a running command", "terminal", "command");
     case "KillShell":
     case "KillBash": return presentation("Stop", "Stopped", "Stopping", "a running command", "terminal", "command");
     case "Skill": return presentation("Use", "Used", "Using", `the ${text(input.skill) ?? text(input.command) ?? ""} skill`.replace(/\s+/gu, " "), "sparkles", "skill");
-    case "SlashCommand": return presentation("Run", "Ran", "Running", text(input.command) ?? "a command", "terminal", "command");
-    case "ToolSearch": return presentation("Find", "Found", "Finding", "tools", "search", "search");
+    case "SlashCommand": return presentation("Run", "Ran", "Running", text(input.command) ?? "a command", "terminal", "command", text(input.command) ? { mark: { text: text(input.command)!, command: true } } : {});
+    case "ToolSearch": return presentation("Find", "Found", "Finding", "tools", "search", "tools");
     case "ListMcpResourcesTool": return presentation("List", "Listed", "Listing", "resources", "list-tree", "list");
-    case "ReadMcpResourceTool": return presentation("Read", "Read", "Reading", text(input.uri) ?? "a resource", "file-text", "read");
+    case "ReadMcpResourceTool": return presentation("Read", "Read", "Reading", text(input.uri) ?? "a resource", "file-text", "read", text(input.uri) ? { mark: { text: text(input.uri)! } } : {});
     case "collabAgentToolCall": {
       const tool = text(input.tool);
       return tool === "spawnAgent" ? presentation("Start", "Started", "Starting", "an agent", "bot", "agent")
@@ -251,11 +336,17 @@ export function nativeToolPresentation(part: AgentToolPart): NativeToolPresentat
             : presentation("Message", "Messaged", "Messaging", "an agent", "bot", "agent");
     }
     case "sleep": return presentation("Wait", "Waited", "Waiting", duration(input.durationMs), "timer", "wait");
-    case "mcpToolCall": return presentation("Use", "Used", "Using", (text(input.tool) ?? part.name).replace(/[_-]+/gu, " "), "plug", `mcp:${part.name}`, { meta: text(input.server) });
+    // A server's tool is named with its server ("Used weather forecast"), and the same tool from Claude
+    // Code or Codex is one group, so the summary can count its calls.
+    case "mcpToolCall": {
+      const name = serverToolName(text(input.server), text(input.tool) ?? part.name);
+      return presentation("Use", "Used", "Using", name, "plug", `mcp:${name}`, { meta: text(input.server), mark: { text: name } });
+    }
     default: {
       const mcp = bridgedToolName(part.name);
-      if (mcp) return presentation("Use", "Used", "Using", mcp.tool, "plug", `mcp:${part.name}`, { meta: mcp.server });
-      return presentation("Use", "Used", "Using", part.name, "wrench", `unknown:${part.name}`);
+      const name = mcp ? serverToolName(mcp.server, mcp.tool) : part.name;
+      if (mcp) return presentation("Use", "Used", "Using", name, "plug", `mcp:${name}`, { meta: mcp.server, mark: { text: name } });
+      return presentation("Use", "Used", "Using", part.name, "wrench", `unknown:${part.name}`, { mark: { text: part.name } });
     }
   }
 }
@@ -332,36 +423,18 @@ function previewDetails(part: AgentToolPart): Detail[] {
   }
   return details;
 }
-function renderOutput(container: HTMLElement, output: unknown): void {
-  const content = toolOutputText(output);
-  if (!content) return;
-  const lines = content.split("\n");
-  const pre = container.createEl("pre", { cls: "ss-native-tool-output", attr: { tabindex: "0" } });
-  pre.createEl("code", { text: lines.length > 20 ? lines.slice(-20).join("\n") : content });
-  if (lines.length > 20) {
-    const all = createUiAction(container, { label: `Show all ${lines.length} lines`, testId: "chat.tool.show-output", size: "small", tooltip: false });
-    all.onclick = () => { pre.firstChild!.textContent = content; all.remove(); };
-  }
-}
-
+/** What the agent wrote or changed, in the one box every edit card uses; the row already names the note. */
 function renderRequestedWriteEdit(container: HTMLElement, part: AgentToolPart): void {
   const input = record(part.input);
   if (part.name === "Write") {
-    container.createEl("p", { cls: "ss-tool-caption", text: "Requested content, not a before-and-after diff." });
-    if (typeof input.content === "string") {
-      if (input.content) renderOutput(container, input.content);
-      else container.createEl("p", { cls: "ss-tool-caption", text: "The requested content is empty." });
-    }
+    if (typeof input.content === "string") renderFileContent(container, input.content, undefined, true);
     return;
   }
   const edits = part.name === "MultiEdit" ? records(input.edits) : [input];
-  if (edits.some(edit => typeof edit.old_string === "string" && typeof edit.new_string === "string")) {
-    container.createEl("p", { cls: "ss-tool-caption", text: "Requested text changes only. Original file line numbers are unavailable." });
-  }
   for (const [index, edit] of edits.entries()) {
     if (typeof edit.old_string !== "string" || typeof edit.new_string !== "string") continue;
-    const body = container.createDiv({ cls: "systemsculpt-inline-diff__body" });
-    if (edits.length > 1) body.createEl("p", { cls: "ss-tool-caption", text: `Requested edit ${index + 1}` });
+    const body = container.createDiv({ cls: "systemsculpt-inline-diff__body ss-tool-edit" });
+    if (edits.length > 1) body.createEl("p", { cls: "ss-tool-caption", text: `Edit ${index + 1}` });
     const context = Math.max(edit.old_string.split("\n").length, edit.new_string.split("\n").length);
     const diff = generateDiff(edit.old_string, edit.new_string, context);
     if (!diff.stats.additions && !diff.stats.deletions) {
@@ -387,11 +460,11 @@ function renderFileChanges(container: HTMLElement, part: AgentToolPart, approval
     const patch = text(change.diff);
     const diff = patch ? parseUnifiedDiff(patch) : null;
     const section = changes.length > 1 ? diffContainer.createEl("details", { cls: "systemsculpt-inline-diff__file" }) : diffContainer;
-    if (changes.length > 1) section.createEl("summary", { text: `${verb} ${fileName}${destination ? ` → ${displayPath(part, destination)}` : ""}${diff ? ` · +${diff.stats.additions} −${diff.stats.deletions}` : ""}` });
+    // Each file is named once: by its row, or by its summary when one change holds several files.
+    if (changes.length > 1) section.createEl("summary", { text: `${verb} ${fileName}${destination ? ` → ${displayPath(part, destination)}` : ""}${diff ? ` · ${changeCounts(diff.stats)}` : ""}` });
     const body = section.createDiv({ cls: "systemsculpt-inline-diff__body" });
-    if (verb === "Create") body.createDiv({ cls: "systemsculpt-inline-diff__new-file", text: "New file" });
     if (diff && (diff.stats.additions || diff.stats.deletions)) {
-      new DiffViewer({ container: body, diffResult: diff, fileName, maxContextLines: 3, showLineNumbers: true, hideHeader: approval && changes.length === 1, ...(approval ? { maxVisibleLines: 12 } : {}) }).render();
+      new DiffViewer({ container: body, diffResult: diff, fileName, maxContextLines: 3, hideHeader: true, ...(approval ? { maxVisibleLines: 12 } : {}) }).render();
     } else {
       body.createDiv({ cls: "systemsculpt-diff-no-changes-notice", text: "A line-by-line preview is not available. Review Details for the requested file change." });
       if (patch) body.createEl("pre").createEl("code", { text: patch });
@@ -401,11 +474,17 @@ function renderFileChanges(container: HTMLElement, part: AgentToolPart, approval
 }
 
 async function renderPlan(app: App, container: HTMLElement, part: AgentToolPart, component?: Component): Promise<void> {
-  const plan = text(record(part.input).plan);
+  // The card's title already says "plan": a first heading that only says "Plan" would say it twice.
+  const plan = text(record(part.input).plan)?.replace(/^\s*#{1,6}[ \t]+plan[ \t]*\r?\n(?:[ \t]*\r?\n)*/iu, "");
   if (!plan) return;
   const body = container.createDiv({ cls: "ss-native-plan-preview" });
   if (component) await MarkdownRenderer.render(app, plan, body, "", component);
   else body.setText(plan);
+  // Steps numbered 10 and up take a wider gutter, so every step's words start at one edge; the plan's
+  // other top-level lists take it too, so its notes start where its steps do.
+  const wide = Array.from(body.querySelectorAll("ol")).filter(list => list.start + list.children.length - 1 >= 10);
+  for (const list of wide) list.addClass("has-wide-numbers");
+  if (wide.some(list => !list.parentElement?.closest("li"))) body.addClass("has-wide-numbers");
   if (plan.split("\n").length > 16) {
     body.addClass("is-collapsed");
     const all = createUiAction(container, { label: "Show all", testId: "chat.approval.show-plan", size: "small", tooltip: false });
@@ -442,6 +521,14 @@ function renderQuestions(container: HTMLElement, part: AgentToolPart): void {
     if (options.length) item.createDiv({ cls: "ss-tool-question-options", text: options.join(" · ") });
   }
   if (!list.childElementCount) list.remove();
+}
+
+/** A web search's queries, as its card lists them: Codex can run several in one call. */
+function webSearchQueries(input: Record<string, unknown>): string[] {
+  const action = record(input.action);
+  const queries = strings(action.queries).filter(query => query.trim());
+  const query = text(input.query) ?? text(action.query);
+  return queries.length ? queries : query ? [query] : [];
 }
 
 /** `Links: [{"title","url"}]` inside Claude Code's WebSearch result. */
@@ -502,7 +589,7 @@ async function renderResolvedNative(app: App, card: HTMLElement, part: AgentTool
     case "Bash":
     case "commandExecution":
       if (input.kind === "writeStdin") renderFields(app, card, inputFields(input, { skip: ["kind"] }));
-      else renderTerminal(card, { command: command(input), output: output || text(input.aggregatedOutput) });
+      else renderTerminal(card, { command: command(input), output: output || text(input.aggregatedOutput), pending: ["input-ready", "approved", "running"].includes(part.state) });
       return;
     case "BashOutput":
       renderTerminal(card, { output });
@@ -512,34 +599,39 @@ async function renderResolvedNative(app: App, card: HTMLElement, part: AgentTool
     case "Glob":
     case "Grep": {
       const path = text(input.file_path) ?? text(input.path);
-      // The title already names the pattern; the card adds where it looked.
-      const fields: ToolCardField[] = [];
-      if (path && toolKind !== "Read") {
-        const resolved = resolvedPath(part, path);
-        fields.push({ label: "In", value: resolved.displayPath, ...(resolved.vaultPath ? { path: resolved.vaultPath } : {}) });
-      }
-      renderFields(app, card, fields);
+      // The title names the pattern or folder; the card adds where a search looked only when that narrows it.
+      const scope = path && (toolKind === "Glob" || toolKind === "Grep") ? resolvedPath(part, path) : null;
+      const fields: ToolCardField[] = scope && scope.displayPath !== "Vault root"
+        ? [{ label: "In", value: scope.displayPath, ...(scope.vaultPath ? { path: scope.vaultPath } : {}) }]
+        : [];
       if (toolKind === "Read" && path) {
-        const resolved = resolvedPath(part, path);
-        const lines = output ? output.replace(/\n+$/u, "").split("\n").length : 0;
-        renderPathList(app, card, [{ path: resolved.vaultPath ?? resolved.displayPath, link: Boolean(resolved.vaultPath), ...(lines ? { note: `${lines} ${lines === 1 ? "line" : "lines"}` } : {}) }]);
+        // The row names and links the note; its card says how much was read, never the note again, in
+        // the same muted line a SystemSculpt read uses. A failed read's output is its error, not lines.
+        const lines = output && part.state === "succeeded" ? output.replace(/\n+$/u, "").split("\n").length : 0;
+        if (lines) card.createEl("p", { cls: "ss-tool-caption", text: `${lines} ${lines === 1 ? "line" : "lines"}` });
       } else if (toolKind === "LS") {
         renderTerminal(card, { output });
       } else if (output) {
         // Grep and Glob list one path per line; content matches keep their own lines.
         const lines = output.trim().split("\n");
         const looksLikePaths = lines.every(line => !line.includes(":") || /^[A-Za-z]:[\\/]/u.test(line) || line.startsWith("Found "));
-        if (looksLikePaths) renderPathList(app, card, pathRows(part, lines));
-        else renderTerminal(card, { output });
-      }
+        const rows = looksLikePaths ? pathRows(part, lines) : [];
+        // Found files sit in the value column beside their scope, never under it where they'd read as labels.
+        if (rows.length && fields.length) fields.push({ label: "Found", value: "", list: rows });
+        renderFields(app, card, fields);
+        if (!looksLikePaths) renderTerminal(card, { output });
+        else if (rows.length && fields.length === 0) renderPathList(app, card, rows);
+      } else renderFields(app, card, fields);
       return;
     }
     case "WebSearch":
     case "webSearch": {
       const action = record(input.action);
-      const queries = strings(action.queries).length ? strings(action.queries) : [text(input.query) ?? text(action.query)].filter((value): value is string => Boolean(value));
-      // One query is already the title; several are listed.
-      const fields: ToolCardField[] = queries.length > 1 ? [{ label: "Searches", value: queries.join("\n") }] : [];
+      const queries = webSearchQueries(input);
+      // "Query", as every web search card says it; several are listed one per line.
+      const fields: ToolCardField[] = queries.length > 1
+        ? [{ label: "Queries", value: "", list: queries.map(query => ({ path: query, link: false })) }]
+        : queries.length ? [{ label: "Query", value: queries[0] }] : [];
       const url = text(action.url);
       if (url) fields.push({ label: "Page", value: url, url });
       if (text(action.pattern)) fields.push({ label: "Find", value: text(action.pattern)! });
@@ -565,7 +657,7 @@ async function renderResolvedNative(app: App, card: HTMLElement, part: AgentTool
       // Codex's own image tools: the saved vault copy, like every generated image.
       const image = codexImageMedia(part);
       if (image) renderMedia(app, card, [image.media]);
-      if (toolKind === "imageGeneration" && text(input.revisedPrompt)) renderFields(app, card, [{ label: "Prompt", value: text(input.revisedPrompt)! }]);
+      renderFields(app, card, toolKind === "imageGeneration" && text(input.revisedPrompt) ? [{ label: "Prompt", value: text(input.revisedPrompt)! }] : []);
       return;
     }
     case "TodoWrite":
@@ -608,6 +700,8 @@ export async function renderNativeToolPreview(app: App, host: HTMLElement, part:
     await renderResolvedNative(app, card, part, component);
     if (!card.childElementCount) card.remove();
   } else {
+    // A pending question's card asks it, with its options; a preview would say it all again.
+    if (["AskUserQuestion", "requestUserInput", "questions"].includes(kind(part))) return false;
     const details = previewDetails(part);
     if (details.length) {
       const list = container.createEl("dl", { cls: "ss-agent-tool-details" });
@@ -626,13 +720,12 @@ export async function renderNativeToolPreview(app: App, host: HTMLElement, part:
     if (preview) {
       renderPreparedWriteEditPreviews(container, [preview], { approval: true });
       if (preview.diff.stats.additions || preview.diff.stats.deletions) {
-        host.dataset.changeSize = `+${preview.diff.stats.additions} −${preview.diff.stats.deletions}`;
+        host.dataset.changeSize = changeCounts(preview.diff.stats);
       }
     }
     if (kind(part) === "fileChange") renderFileChanges(container, part, true);
     if (kind(part) === "ExitPlanMode") await renderPlan(app, container, part, component);
     if (["TodoWrite", "plan"].includes(kind(part))) renderTodos(container, part);
-    if (["AskUserQuestion", "requestUserInput", "questions"].includes(kind(part))) renderQuestions(container, part);
     if (!container.childElementCount) {
       const card = createToolCard(container, `native:${kind(part)}`);
       renderGeneric(app, card, part);
@@ -642,6 +735,16 @@ export async function renderNativeToolPreview(app: App, host: HTMLElement, part:
   host.querySelector(":scope > .ss-native-tool-preview")?.remove();
   host.appendChild(container);
   return true;
+}
+
+/** A Studio workflow's name from its vault path ("Poster" from "…/Poster.systemsculpt"). */
+export function studioWorkflowName(path: string): string {
+  return (path.split(/[\\/]/u).pop() ?? path).replace(/\.systemsculpt$/iu, "");
+}
+
+/** An image call with reference images edits them; the chat says so. */
+export function editsImages(input: Record<string, unknown>): boolean {
+  return Array.isArray(input.reference_images) && input.reference_images.some(path => typeof path === "string" && path.trim() !== "");
 }
 
 /** "image", or "3 images": what a batch saved once it finished, else what it asked for. */

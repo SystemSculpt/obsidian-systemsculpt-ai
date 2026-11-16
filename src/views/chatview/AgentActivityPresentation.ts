@@ -1,14 +1,39 @@
-import type { AgentPart } from "../../chat/ChatConversation";
-import { gatedSystemSculptTurn, presentAgentTool, refusedSystemSculptCall } from "./AgentToolPresentation";
+import type { AgentPart, AgentToolPart } from "../../chat/ChatConversation";
+import {
+  gatedSystemSculptTurn,
+  labelTargetClass,
+  presentAgentTool,
+  presentToolRowLabel,
+  refusedSystemSculptCall,
+  type LabelTarget,
+} from "./AgentToolPresentation";
 
-/** refused: a SystemSculpt tool did nothing; not a failure, but not done either. gated: it needs a subscription or credits. */
+/** refused: a SystemSculpt tool did nothing; not a failure, but not done either. gated: it needs a plan or credits. */
 /** denied: the person declined an action, so the turn is not marked done with a check. */
 export type AgentActivitySummary = Readonly<{ label: string; failedCount: number; refused?: true; gated?: true; denied?: true }>;
 
 /** rows: how many activity rows the group stands for; "N more" counts rows, as the person sees them. */
-type ActivityGroup = { label: string; items: Set<string>; uncounted: number; rows: number };
+/** names: the distinct row labels in the group; target: the words its one row's label sets apart. */
+type ActivityGroup = { label: string; items: Set<string>; uncounted: number; rows: number; names: Set<string>; target?: LabelTarget };
 
 const groupSize = (group: ActivityGroup): number => group.items.size + group.uncounted;
+
+/** What didn't happen as asked, counted after the clauses ("· 1 denied"), in this order. */
+const OUTCOME_WORDS = ["failed", "blocked", "uncertain", "denied", "stopped", "withdrawn"] as const;
+type OutcomeWord = typeof OUTCOME_WORDS[number];
+
+/**
+ * The words of each summary that name a target (a note, a command, a query), so the label is
+ * drawn with them set apart while staying plain text everywhere else. Only summaries on screen
+ * matter; the oldest are forgotten first.
+ */
+const summaryTargets = new Map<string, readonly LabelTarget[]>();
+function rememberTargets(label: string, targets: readonly LabelTarget[]): void {
+  summaryTargets.delete(label);
+  if (!targets.length) return;
+  summaryTargets.set(label, targets);
+  if (summaryTargets.size > 200) summaryTargets.delete(summaryTargets.keys().next().value!);
+}
 
 /** "· 2 failed" never strands its dot at a line end. */
 export function unbreakableActivityLabel(label: string): string {
@@ -16,94 +41,194 @@ export function unbreakableActivityLabel(label: string): string {
 }
 
 /**
- * Writes a summary so that a count and its word ("5 more", "1 blocked") wrap
- * as one unit; the text itself is unchanged.
+ * Writes a summary so that a count and its word ("5 more", "1 blocked") wrap as one unit, a
+ * command reads in the code font and a short name never breaks; the text itself is unchanged.
  */
 export function setActivityLabelText(element: HTMLElement, label: string): void {
   if (element.textContent === label && element.dataset.activityLabel === label) return;
   element.replaceChildren();
   element.dataset.activityLabel = label;
-  let last = 0;
-  for (const match of label.matchAll(/\d+ \p{L}+/gu)) {
-    const at = match.index ?? 0;
-    if (at > last) element.appendText(label.slice(last, at));
-    element.createSpan({ cls: "ss-activity-count", text: match[0] });
-    last = at + match[0].length;
+  const appendCounts = (text: string): void => {
+    let last = 0;
+    for (const match of text.matchAll(/\d+(?: of \d+)? \p{L}+(?: steps?\b)?/gu)) {
+      const at = match.index ?? 0;
+      if (at > last) element.appendText(text.slice(last, at));
+      element.createSpan({ cls: "ss-activity-count", text: match[0] });
+      last = at + match[0].length;
+    }
+    if (last < text.length) element.appendText(text.slice(last));
+  };
+  let cursor = 0;
+  for (const target of summaryTargets.get(label.replace(/ ·\u00a0/gu, " · ")) ?? []) {
+    const at = label.indexOf(target.text, cursor);
+    if (at < 0) continue;
+    appendCounts(label.slice(cursor, at));
+    element.createSpan({ cls: labelTargetClass(target), text: target.text });
+    cursor = at + target.text.length;
   }
-  if (last < label.length) element.appendText(label.slice(last));
+  appendCounts(label.slice(cursor));
+}
+
+const lowerFirst = (text: string): string => text.charAt(0).toLowerCase() + text.slice(1);
+
+/** One clause per group: its one row's label, or a count ("Ran 3 commands", "Used weather forecast twice"). */
+function clause(kind: string, group: ActivityGroup): string {
+  const count = groupSize(group);
+  if (kind.startsWith("gated:")) {
+    if (count === 1) return group.label;
+    // "2 images need credits" when every one is the same kind of thing, else "2 actions need credits".
+    const need = kind.slice("gated:".length), only = group.names.size === 1 ? [...group.names][0] : "";
+    const subject = only.endsWith(` needs ${need}`) ? only.slice(0, -` needs ${need}`.length) : "";
+    return `${count} ${/^\p{L}+$/u.test(subject) ? `${subject.toLowerCase()}s` : "actions"} need ${need}`;
+  }
+  if (kind.startsWith("failed:")) return count === 1 ? group.label : `Couldn't complete ${count} actions`;
+  if (kind === "partial") return count === 1 ? group.label : `${count} actions partly done`;
+  if (kind === "command") return count === 1 ? group.label : `Ran ${count} commands`;
+  if (kind === "reasoning") return "Thought";
+  // The same tool twice is one tool used twice; each other tool is its own clause.
+  if (kind.startsWith("tool:")) return group.rows === 1 ? group.label : `${group.label} ${group.rows === 2 ? "twice" : `${group.rows} times`}`;
+  if (count === 1) return group.label;
+  const counts: Record<string, string> = {
+    read: `Read ${count} notes`, edit: `Edited ${count} notes`, write: `Created ${count} notes`, replace: `Replaced ${count} notes`,
+    trash: `Moved ${count} notes to trash`, list: `Listed ${count} folders`,
+    search: `Searched for ${count} patterns`, find: `Found files matching ${count} patterns`,
+    "web-search": `Searched the web ${count} times`, web: `Read ${count} web pages`,
+  };
+  return counts[kind] ?? group.label;
 }
 
 /** Count adjacent activity by action without repeating payloads or full paths. */
 export function summarizeAgentActivity(parts: readonly AgentPart[]): AgentActivitySummary {
   const groups = new Map<string, ActivityGroup>();
-  let failedCount = 0, blockedCount = 0, uncertainCount = 0, refused = false, gated = false, denied = false;
-  const add = (kind: string, label: string, items: readonly string[] = [], count = 1): void => {
-    const group = groups.get(kind) ?? { label, items: new Set<string>(), uncounted: 0, rows: 0 };
+  let failedCount = 0, refused = false, gated = false, denied = false, thought = false;
+  const outcomes: OutcomeWord[] = [];
+  const tools: AgentToolPart[] = [];
+  const add = (kind: string, label: string, options: { items?: readonly string[]; count?: number; target?: LabelTarget } = {}): void => {
+    const group = groups.get(kind) ?? { label, items: new Set<string>(), uncounted: 0, rows: 0, names: new Set<string>() };
     group.label = label;
     group.rows += 1;
-    if (items.length) for (const item of items) group.items.add(item);
-    else group.uncounted += count;
+    group.names.add(label);
+    group.target = options.target;
+    if (options.items?.length) for (const item of options.items) group.items.add(item);
+    else group.uncounted += options.count ?? 1;
     groups.set(kind, group);
   };
   for (const part of parts) {
     if (part.kind === "reasoning") {
+      thought = true;
       add("reasoning", "Thought");
     } else if (part.kind === "tool") {
+      tools.push(part);
       const tool = presentAgentTool(part);
+      const state = tool.displayState;
+      const refusal = refusedSystemSculptCall(part) && !gatedSystemSculptTurn(part);
       if (refusedSystemSculptCall(part)) refused = true;
       if (gatedSystemSculptTurn(part)) gated = true;
-      // Only completed or in-progress work counts toward "Edited 2 notes", and
-      // each note once. Denials are decisions, withdrawn requests never ran and
-      // failed or uncertain actions aren't completed changes: each keeps its
-      // own clause, and a withdrawn request is not a failure.
-      if (tool.displayState === "denied") { denied = true; add("denied", `${tool.label} · Denied`); }
-      else if (tool.displayState === "cancelled" || part.approvalDecision === "withdrawn") add("withdrawn", `${tool.label} · Withdrawn`);
-      // An uncertain result may have happened: it is never folded into "couldn't".
-      else if (tool.displayState === "outcome-unknown") add("uncertain", `${tool.label} · Uncertain`);
-      else if (tool.displayState === "failed") add("failed", tool.label);
-      // A gate (subscription, credits) and a refusal did nothing: neither joins the work that was done.
-      else if (gatedSystemSculptTurn(part)) add("gated", tool.label);
-      else if (refusedSystemSculptCall(part)) add("failed", tool.label);
-      else add(tool.groupKind, tool.label.replace(/…$/u, ""), tool.groupItems, tool.groupCount);
-      const refusal = refusedSystemSculptCall(part) && !gatedSystemSculptTurn(part);
-      if (part.approvalDecision !== "withdrawn" && (refusal || ["failed", "partial", "outcome-unknown"].includes(tool.displayState))) {
-        failedCount += 1;
-        // A guard's block and an uncertain result are not known failures: each keeps its own word.
-        if (tool.icon === "shield-x") blockedCount += 1;
-        else if (tool.displayState === "outcome-unknown") uncertainCount += 1;
+      // Only completed or in-progress work counts toward "Edited 2 notes", and each note once.
+      // What didn't happen as asked (a denial, a withdrawn request that never ran, a stop, a
+      // guard's block, an unknown result) is counted after the clauses in its own word.
+      if (state === "denied") { denied = true; outcomes.push("denied"); }
+      else if (part.approvalDecision === "withdrawn" || state === "cancelled" && part.approvalId && !part.approvalDecision) outcomes.push("withdrawn");
+      else if (state === "cancelled") outcomes.push("stopped");
+      else if (tool.icon === "shield-x") outcomes.push("blocked");
+      else if (state === "outcome-unknown") outcomes.push("uncertain");
+      // A gate names what it stopped and what that needs: "Image needs a subscription".
+      else if (tool.gate) {
+        const { subject, need } = tool.gate;
+        add(`gated:${need}`, `${subject.charAt(0).toUpperCase()}${subject.slice(1)} ${/^(?!1 )\d+ /u.test(subject) ? "need" : "needs"} ${need}`);
       }
+      // A command that exited non-zero ran; it counts with the others ("Ran 3 commands · 1 failed").
+      else if (state === "failed" && tool.exitCode !== undefined) {
+        add(tool.groupKind, tool.label, { count: tool.groupCount, target: tool.target });
+        outcomes.push("failed");
+      }
+      else if (state === "failed" || refusal) add(`failed:${tool.groupKind}`, tool.label, { target: tool.target });
+      // A partly done batch says how far it got ("Moved 1 of 2 notes to trash"), never the whole request.
+      else if (state === "partial") add("partial", tool.label, { target: tool.target });
+      // An edit to a note this turn already created or replaced is part of that change: the summary
+      // names the note once, as created or replaced, as its receipt does ("Basil (new)").
+      else if (tool.groupKind === "edit" && tool.groupItems?.length
+        && tool.groupItems.every(item => groups.get("write")?.items.has(item) || groups.get("replace")?.items.has(item))) {
+        groups.get(groups.get("write")?.items.has(tool.groupItems[0]) ? "write" : "replace")!.rows += 1;
+      }
+      // Any other tool (a server's, an unknown one) is named by its row: "Used weather forecast twice".
+      // A running call's label has no trailing "…"; a long command's own "…" is part of its name.
+      else add(/^(?:mcp|unknown):|^server_action$/u.test(tool.groupKind) ? `tool:${tool.label}` : tool.groupKind, tool.label,
+        { items: tool.groupItems, count: tool.groupCount, target: tool.target });
+      if (part.approvalDecision !== "withdrawn" && (refusal || ["failed", "partial", "outcome-unknown"].includes(state))) failedCount += 1;
     }
   }
-  const labels = Array.from(groups, ([kind, group]) => {
-    const count = groupSize(group);
-    if (kind === "denied") return count === 1 ? group.label : `Denied ${count} actions`;
-    if (kind === "withdrawn") return count === 1 ? group.label : `${count} actions withdrawn`;
-    if (kind === "gated") return count === 1 ? group.label : `${count} actions need a subscription or credits`;
-    if (kind === "uncertain") return count === 1 ? group.label : `${count} actions uncertain`;
-    if (kind === "failed") return count === 1 ? group.label : `Couldn't complete ${count} actions`;
-    // One read names its note (spec 3.2: "Read Plan.md, searched 2 patterns").
-    if (kind === "read") return count === 1 ? group.label : `Read ${count} notes`;
-    if (kind === "search") return `Searched ${count} pattern${count === 1 ? "" : "s"}`;
-    if (kind === "command") return `Ran ${count} command${count === 1 ? "" : "s"}`;
-    if (kind === "reasoning") return "Thought";
-    if (count > 1 && ["edit", "write", "trash", "list", "web-search", "web"].includes(kind)) {
-      const [verb, noun] = kind === "edit" ? ["Edited", "notes"] : kind === "write" ? ["Created", "notes"]
-        : kind === "trash" ? ["Trashed", "notes"] : kind === "list" ? ["Listed", "folders"]
-          : kind === "web" ? ["Read", "web pages"] : ["Searched", "web queries"];
-      return `${verb} ${count} ${noun}`;
+  // Clauses about one named thing are one clause: "Edited Poster workflow, ran Poster workflow" reads
+  // "Edited and ran Poster workflow". Only plain single-row clauses merge, never a failure or a gate.
+  const named = new Map<string, { kind: string; verbs: string[] }>();
+  const kinds: string[] = [];
+  const merged = new Map<string, string>();
+  const mergedRows = new Map<string, number>();
+  // Tools used one after another share their verb: "Used weather forecast and weather alerts".
+  let used: { kind: string; names: string[] } | undefined;
+  for (const kind of groups.keys()) {
+    const group = groups.get(kind)!;
+    const label = clause(kind, group);
+    if (kind.startsWith("tool:") && label.startsWith("Used ")) {
+      if (used) {
+        used.names.push(label.slice("Used ".length));
+        merged.set(used.kind, `Used ${used.names.slice(0, -1).join(", ")} and ${used.names[used.names.length - 1]}`);
+        mergedRows.set(used.kind, (mergedRows.get(used.kind) ?? 0) + group.rows);
+        continue;
+      }
+      used = { kind, names: [label.slice("Used ".length)] };
     }
-    return group.label;
-  });
-  const visible = labels.slice(0, 3).map((label, index) => index ? label.charAt(0).toLowerCase() + label.slice(1) : label).join(", ");
-  const more = Array.from(groups.values()).slice(3).reduce((count, group) => count + group.rows, 0);
-  const failed = failedCount - blockedCount - uncertainCount;
-  // Uncertain work says so in its own clause; when that clause is past the
-  // three shown, its tally keeps the uncertainty visible.
-  const uncertainHidden = Array.from(groups.keys()).indexOf("uncertain") >= 3;
-  const outcomes = [[failed, "failed"], [blockedCount, "blocked"], [uncertainHidden ? uncertainCount : 0, "uncertain"]]
-    .filter(([count]) => count).map(([count, word]) => ` · ${count} ${word}`).join("");
+    const at = group.target && label === group.label && !/^(?:gated|failed|tool):|^(?:partial|reasoning|command)$/u.test(kind)
+      ? label.indexOf(group.target.text, label.indexOf(" ") + 1) : -1;
+    const rest = at > 0 ? label.slice(at) : "";
+    const earlier = rest ? named.get(rest) : undefined;
+    if (earlier) {
+      earlier.verbs.push(lowerFirst(label.slice(0, at).trimEnd()));
+      merged.set(earlier.kind, `${earlier.verbs.slice(0, -1).join(", ")} and ${earlier.verbs[earlier.verbs.length - 1]} ${rest}`);
+      mergedRows.set(earlier.kind, (mergedRows.get(earlier.kind) ?? 0) + group.rows);
+      continue;
+    }
+    if (rest) named.set(rest, { kind, verbs: [label.slice(0, at).trimEnd()] });
+    kinds.push(kind);
+  }
+  const labels = kinds.map(kind => merged.get(kind) ?? clause(kind, groups.get(kind)!));
+  // Two groups that read the same are one clause.
+  const unique = labels.filter((label, index) => labels.indexOf(label) === index);
+  // Never "1 more": a fourth clause is named; past four, three are, and the rest count as steps.
+  const shown = unique.slice(0, unique.length <= 4 ? 4 : 3);
+  const visible = kinds.filter((_, index) => shown.includes(labels[index]));
+  const hidden = kinds.filter(kind => !visible.includes(kind));
+  // A failure its own clause names ("Couldn't read Missing") isn't counted again; one folded into "N more" is.
+  for (const kind of hidden) if (kind.startsWith("failed:") || kind === "partial") outcomes.push(...Array<OutcomeWord>(groups.get(kind)!.rows).fill("failed"));
+  const more = hidden.reduce((count, kind) => count + groups.get(kind)!.rows + (mergedRows.get(kind) ?? 0), 0);
+  const tallies = OUTCOME_WORDS.map(word => [outcomes.filter(outcome => outcome === word).length, word] as const)
+    .filter(([count]) => count).map(([count, word]) => `${count} ${word}`);
+  let label: string;
+  let targets: LabelTarget[] = [];
+  if (tools.length === 1 && !thought) {
+    // A fold of one call is that call's row: the same words, outcome included.
+    const tool = presentAgentTool(tools[0]);
+    label = presentToolRowLabel(tools[0], tool);
+    if (tool.target) targets = [tool.target];
+  } else if (!shown.length) {
+    // Nothing went ahead: one kind of outcome is the sentence ("Denied 2 actions"), several are counted.
+    const words = OUTCOME_WORDS.filter(word => outcomes.includes(word));
+    const actions = `${outcomes.length} action${outcomes.length === 1 ? "" : "s"}`;
+    label = !words.length ? "Activity"
+      : words.length > 1 ? [actions, ...tallies].join(" · ")
+        : words[0] === "denied" ? `Denied ${actions}` : words[0] === "stopped" ? `Stopped ${actions}` : `${actions} ${words[0]}`;
+  } else {
+    // The steps not named are part of the sentence ("and 2 more steps"), not a tally after a "·".
+    const clauses = shown.map((text, index) => index ? lowerFirst(text) : text).join(", ");
+    label = [more ? `${clauses} and ${more} more ${more === 1 ? "step" : "steps"}` : clauses, ...tallies].join(" · ");
+    targets = visible.flatMap(kind => {
+      const group = groups.get(kind)!;
+      return group.target && clause(kind, group) === group.label ? [group.target] : [];
+    });
+  }
+  rememberTargets(label, targets);
   return {
-    label: `${visible || "Activity"}${more ? ` · ${more} more` : ""}${outcomes}`,
+    label,
     failedCount,
     ...(refused ? { refused: true as const } : {}),
     ...(gated ? { gated: true as const } : {}),

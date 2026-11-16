@@ -126,6 +126,40 @@ describe("AgentWorkspace chrome", () => {
     workspace.unload();
   });
 
+  it("says a credits fix once: a banner or the latest turn's card hides the line above the composer", async () => {
+    jest.useFakeTimers();
+    const { parent, workspace } = mount({ onCreditsOffer: jest.fn() });
+    try {
+      workspace.setChrome(chrome({
+        account: "signed-in",
+        credits: {
+          usageClass: "customer", totalRemaining: 0, availableUnreserved: 0,
+          includedRemaining: 0, addOnRemaining: 0, includedPerMonth: 0,
+          includedCreditsEntitled: false, subscriptionStatus: null,
+          cycleEndsAt: "2026-12-01T00:00:00Z", cycleStartedAt: "2026-11-01T00:00:00Z", cycleAnchorAt: "2026-11-01T00:00:00Z",
+          turnInFlightUntil: null, purchaseUrl: null,
+        },
+      }));
+      const offer = parent.querySelector<HTMLElement>('[data-testid="chat.credits-offer"]')!;
+      expect(offer.hasAttribute("hidden")).toBe(false);
+
+      workspace.setBanner("Not enough credits. Add more to keep chatting.", "info", { label: "Add credits", testId: "chat.banner.add-credits", onSelect: jest.fn() });
+      expect(offer.hasAttribute("hidden")).toBe(true);
+      workspace.setBanner("Something went wrong.", "error");
+      expect(offer.hasAttribute("hidden")).toBe(false);
+      workspace.setBanner(null);
+
+      const rendered = workspace.setAgentSnapshot({ runId: "run", turnId: "turn", status: "failed", messages: [], parts: [
+        { kind: "error", id: "spent", order: 0, retryable: false,
+          error: { code: "out_of_credits", message: "Out of credits", retryable: false } },
+      ] });
+      await jest.advanceTimersByTimeAsync(20);
+      await rendered;
+      expect(parent.querySelector(".systemsculpt-agent-part.is-error")?.getAttribute("data-offer")).toBeTruthy();
+      expect(offer.hasAttribute("hidden")).toBe(true);
+    } finally { workspace.unload(); jest.useRealTimers(); }
+  });
+
   it("marks its title row as the fallback for a hidden Obsidian view header", () => {
     const { workspace } = mount();
     try {
@@ -347,7 +381,7 @@ describe("AgentWorkspace chrome", () => {
       await rendered;
       await jest.advanceTimersByTimeAsync(50);
       const region = parent.querySelector('[data-testid="chat.announcer"]')!;
-      expect(region.textContent).toContain("Claude Code wants to edit Plan.md. Enter to approve, Escape to deny.");
+      expect(region.textContent).toContain("Claude Code wants to edit Plan. Enter to approve, Escape to deny.");
       parent.querySelector<HTMLButtonElement>(`[data-testid="chat.approval.${approved ? "allow-once" : "deny"}"]`)!.click();
       await jest.advanceTimersByTimeAsync(50);
       expect(region.textContent).toBe(approved ? "Approved" : "Denied");

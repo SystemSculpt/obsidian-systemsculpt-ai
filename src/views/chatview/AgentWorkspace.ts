@@ -213,6 +213,8 @@ export class AgentWorkspace extends Component {
   private readonly banner: HTMLElement;
   private readonly queueElement: HTMLElement;
   private readonly creditsOffer: HTMLElement;
+  /** The line above the composer has an offer, and whether a banner or the latest turn's card already says it. */
+  private readonly creditsOfferState = { offered: false, inBanner: false, inTurn: false };
   private readonly jumpButton: HTMLButtonElement;
   private readonly scroller: AnchoredScroller;
   private readonly registeredRows = new Map<string, HTMLElement>();
@@ -473,7 +475,8 @@ export class AgentWorkspace extends Component {
   private renderCreditsOffer(state: AgentChromeState): void {
     const offer = this.options.onCreditsOffer ? presentCreditsOffer(state) : null;
     this.creditsOffer.empty();
-    this.creditsOffer.toggleAttribute("hidden", !offer);
+    this.creditsOfferState.offered = Boolean(offer);
+    this.syncCreditsOfferVisibility();
     if (!offer) return;
     if (offer.lead) this.creditsOffer.createSpan({ text: `${offer.lead} ` });
     const link = this.creditsOffer.createEl("a", {
@@ -485,6 +488,12 @@ export class AgentWorkspace extends Component {
       event.preventDefault();
       void this.options.onCreditsOffer?.();
     });
+  }
+
+  /** The screen says a credits, plan or payment fix once: a banner or the latest turn's card wins over the line. */
+  private syncCreditsOfferVisibility(): void {
+    const { offered, inBanner, inTurn } = this.creditsOfferState;
+    this.creditsOffer.toggleAttribute("hidden", !offered || inBanner || inTurn);
   }
 
   /** False while Obsidian's own view header shows the title and actions. */
@@ -682,6 +691,9 @@ export class AgentWorkspace extends Component {
     else this.banner.removeAttribute("role");
     this.banner.setText(message ?? "");
     if (message && message !== previousMessage && kind !== "error") this.announce(message);
+    // A banner with a way through (plans, credits, card) says what the line above the composer would.
+    this.creditsOfferState.inBanner = Boolean(message && action);
+    this.syncCreditsOfferVisibility();
     if (!message) return;
     if (action === true && this.options.onViewPlans) {
       const plans = createUiAction(this.banner, {
@@ -1130,6 +1142,10 @@ export class AgentWorkspace extends Component {
     this.registeredActiveResponse = activeResponse && activeTurnId
       ? { turnId: activeTurnId, row: activeResponse }
       : null;
+    // A turn that ended on a credits, plan or payment card already says what the line would.
+    const latest = rows.length ? rows[rows.length - 1] : null;
+    this.creditsOfferState.inTurn = Boolean(latest?.querySelector(".systemsculpt-agent-part.is-error[data-offer]"));
+    this.syncCreditsOfferVisibility();
   }
 
   private syncActiveResponseRow(): void {

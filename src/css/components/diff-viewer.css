@@ -1,13 +1,23 @@
 /**
  * Diff viewer — tool-call file diff display.
- * Color contract: additions = success, deletions = danger, mixed = warning.
+ * Added and removed lines are tinted; counts and markers stay muted.
  */
 
 .systemsculpt-diff-viewer {
+  /* Every code box in a card starts its first glyph 12 px in: diff markers, file text, terminal.
+   * Its first and last lines keep the 8 px above and below that file text keeps. */
+  --ss-diff-inset: var(--ss-space-3);
+  --ss-diff-inset-block: var(--ss-space-2);
   border: 1px solid var(--ss-line);
   border-radius: var(--ss-radius-sm);
   overflow: hidden;
   font-size: var(--ss-text-xs);
+}
+
+/* A diff fenced in a reply sits inside the code block's own inset. */
+.systemsculpt-diff-viewer.systemsculpt-agent-fenced-diff {
+  --ss-diff-inset: 0px;
+  --ss-diff-inset-block: 0px;
 }
 
 .systemsculpt-diff-header {
@@ -20,7 +30,7 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--ss-space-2);
-  padding: var(--ss-space-1) var(--ss-space-2);
+  padding: var(--ss-space-1) var(--ss-diff-inset);
 }
 
 .systemsculpt-diff-filename {
@@ -31,44 +41,31 @@
   text-overflow: ellipsis;
 }
 
+/* "+3 −1" in muted text, like a row's meta: the counts need no colour of their own. */
 .systemsculpt-diff-stats {
   display: inline-flex;
   align-items: center;
-  gap: var(--ss-space-1);
   flex-shrink: 0;
-  padding: 0 var(--ss-space-2);
-  border-radius: var(--ss-radius-full);
-  background-color: var(--ss-surface-2);
+  color: var(--ss-ink-muted);
   font-variant-numeric: tabular-nums;
+  white-space: pre;
 }
 
-.systemsculpt-diff-stats.systemsculpt-diff-has-additions {
-  background-color: var(--ss-success-tint);
-}
-
-.systemsculpt-diff-stats.systemsculpt-diff-has-deletions {
-  background-color: var(--ss-danger-tint);
-}
-
-.systemsculpt-diff-stats.systemsculpt-diff-no-changes {
-  color: var(--ss-ink-muted);
-}
-
-.systemsculpt-diff-additions {
-  color: var(--ss-success);
-}
-
+.systemsculpt-diff-additions,
 .systemsculpt-diff-deletions {
-  color: var(--ss-danger);
-}
-
-.systemsculpt-diff-total {
   color: var(--ss-ink-muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .systemsculpt-diff-content {
   max-height: clamp(120px, 30vh, 200px);
+  padding-block: var(--ss-diff-inset-block);
   overflow: auto;
+}
+
+/* A notice in place of the lines takes that inset as its own. */
+.systemsculpt-diff-content > .systemsculpt-diff-no-changes-notice {
+  padding-block: 0;
 }
 
 .systemsculpt-diff-content.is-disclosed {
@@ -95,13 +92,13 @@
 .systemsculpt-diff-hunk-separated::before {
   content: "⋯";
   display: block;
-  padding: var(--ss-space-0) var(--ss-space-2);
+  padding: var(--ss-space-0) var(--ss-diff-inset);
   color: var(--ss-ink-muted);
   text-align: center;
 }
 
 .systemsculpt-diff-hunk-header {
-  padding: var(--ss-space-0) var(--ss-space-2);
+  padding: var(--ss-space-0) var(--ss-diff-inset);
   background-color: var(--ss-surface-1);
   color: var(--ss-ink-muted);
   font-family: var(--ss-font-mono);
@@ -117,9 +114,13 @@
   display: flex;
   align-items: baseline;
   min-width: max-content;
+  padding-inline: var(--ss-diff-inset);
   color: var(--ss-ink);
   font-family: var(--ss-font-mono);
-  line-height: var(--ss-leading-base);
+  /* The same line pitch as a card's file text and terminal boxes. */
+  line-height: 1.55;
+  /* A blank line keeps its height without a gutter to hold it open. */
+  min-height: 1.55em;
   transition: background-color var(--ss-dur-fast) var(--ss-ease);
 }
 
@@ -144,7 +145,7 @@
   flex-shrink: 0;
   box-sizing: content-box;
   width: calc(var(--ss-diff-number-digits) * 1ch);
-  padding: 0 var(--ss-space-1);
+  padding: 0 var(--ss-space-2) 0 0;
   color: var(--ss-ink-muted);
   text-align: right;
   user-select: none;
@@ -163,7 +164,6 @@
   min-width: 0;
   white-space: pre;
   overflow-wrap: normal;
-  padding-right: var(--ss-space-2);
 }
 
 .systemsculpt-diff-no-changes-notice {
@@ -185,7 +185,7 @@
 }
 
 .systemsculpt-diff-truncated {
-  padding: var(--ss-space-1) var(--ss-space-2);
+  padding: var(--ss-space-1) var(--ss-diff-inset);
   color: var(--ss-ink-muted);
   font-style: italic;
 }
@@ -213,10 +213,15 @@
     min-width: 0;
   }
 
-  /* A wrapped line splits evenly instead of leaving one word alone below it. */
+  /* A wrapped line splits evenly instead of leaving one word alone below it, and its tail hangs two
+   * characters past the line's own start (DiffViewer sets --ss-diff-indent on an indented line), as a
+   * terminal's does, so it never reads as a line of its own. */
   .systemsculpt-diff-line-content {
+    --ss-diff-indent: 0;
+    padding-inline-start: calc((var(--ss-diff-indent) + 2) * 1ch);
     white-space: pre-wrap;
     overflow-wrap: anywhere;
+    text-indent: calc((var(--ss-diff-indent) + 2) * -1ch);
     text-wrap: balance;
   }
 }

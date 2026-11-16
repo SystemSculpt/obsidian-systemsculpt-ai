@@ -3,7 +3,7 @@ import { TFile, type App } from "obsidian";
 import type { AgentToolPart } from "../../../chat/ChatConversation";
 import { beginGeneration, generationKey, updateGeneration } from "../../../tools/systemsculpt/GenerationProgress";
 import { encodeSystemSculptToolResult } from "../../../tools/systemsculpt/SystemSculptTools";
-import { presentPendingMedia, renderPendingMedia, requestedMediaRatio, type PendingMedia } from "../PendingMedia";
+import { captionWords, presentPendingMedia, renderPendingMedia, requestedMediaRatio, type PendingMedia } from "../PendingMedia";
 import { renderTurnMedia } from "../TurnMedia";
 
 function tool(overrides: Partial<AgentToolPart> & Pick<AgentToolPart, "name" | "state">): AgentToolPart {
@@ -48,7 +48,8 @@ describe("live generation placeholders", () => {
     // Codex keeps a dynamic call's arguments inside the item.
     const part = tool({ name: "generate_image", state: "running", input: { type: "dynamicToolCall", arguments: { prompt: "Owls", count: 3, aspect_ratio: "4:3" } } });
     const tiles = presentPendingMedia([part], true);
-    expect(tiles.map(tile => tile.label)).toEqual(["Image 1 of 3", "Image 2 of 3", "Image 3 of 3"]);
+    // Each tile is the single tile: its words, and the prompt on one line where its file name lands.
+    expect(tiles.map(tile => [tile.label, tile.caption])).toEqual(Array(3).fill(["Generating image", "Owls"]));
     expect(tiles[0].ratio).toBeCloseTo(4 / 3);
     // A restored chat whose call never finished shows no spinner.
     expect(presentPendingMedia([part], false)).toEqual([]);
@@ -66,7 +67,7 @@ describe("live generation placeholders", () => {
   it("keeps a failure in the card, but not a stop, a gate or one a later call made up for", () => {
     const failed = (message: string, extra: Record<string, unknown> = {}) => tool({ name: "generate_image", state: "failed", input: { prompt: "Owls" },
       output: { data: encodeSystemSculptToolResult({ ok: false, message, ...extra }) } });
-    const [tile] = presentPendingMedia([failed("The image model is busy. The chat already shows generated files right after your reply.")], false);
+    const [tile] = presentPendingMedia([failed("The image model is busy. The chat already shows generated files with your reply.")], false);
     expect(tile).toMatchObject({ state: "failed", error: "The image model is busy." });
     expect(presentPendingMedia([failed("Stopped.")], false)).toEqual([]);
     expect(presentPendingMedia([failed("Not enough credits.", { link: { label: "Buy credits", url: "https://systemsculpt.com/credits" } })], false)).toEqual([]);
@@ -128,7 +129,24 @@ describe("live generation placeholders", () => {
     const placeholder = pending.querySelector<HTMLElement>("[data-testid='chat.turn.media.pending']")!;
     expect(placeholder.getAttribute("aria-busy")).toBe("true");
     expect(placeholder.style.getPropertyValue("--ss-media-ratio")).toBe(String(3 / 2));
-    expect(placeholder.textContent).toContain("Generating image");
+    // The turn's row above names it; the frame keeps its name for a screen reader, not in its words.
+    expect(placeholder.getAttribute("aria-label")).toBe("Generating image");
+    expect(placeholder.textContent).not.toContain("Generating image");
+    // Its prompt keeps to one line, as the file name that lands there, cut only between whole words.
+    const caption = placeholder.querySelector<HTMLElement>("figcaption")!;
+    expect(caption.className).toBe("systemsculpt-agent-media-caption is-single-line is-words");
+    expect(Array.from(caption.children, word => word.textContent)).toEqual(["A lighthouse", " at dusk"]);
+    // A cut never ends on a comma or full stop: each leads the word after it, and the words read as written.
+    // A clause's first word shares its box with the next, so a cut never shows one word of a new clause.
+    expect(captionWords("Dusk, warm light. Sea.")).toEqual(["Dusk", ", warm light", ". Sea."]);
+    expect(captionWords("Dusk, warm light. Sea.").join("")).toBe("Dusk, warm light. Sea.");
+    expect(captionWords("A lighthouse at dusk, four square takes").slice(-3)).toEqual([" at dusk", ", four square", " takes"]);
+    // A small joining word leads the word after it, so a cut never ends on one ("pine forest at…").
+    expect(captionWords("Slow upward tilt through a misty pine forest at sunrise")).toEqual(["Slow", " upward", " tilt", " through a misty", " pine", " forest", " at sunrise"]);
+    expect(captionWords("Fade to. Black")).toEqual(["Fade", " to", ". Black"]);
+    // A one-word clause before another clause is whole on its own.
+    expect(captionWords("Dusk, calm, warm light")).toEqual(["Dusk", ", calm", ", warm light"]);
+    expect(caption.title).toBe("A lighthouse at dusk");
 
     const done = tool({ ...running, state: "succeeded", output: { data: encodeSystemSculptToolResult({ ok: true, message: "Saved", media: [{ kind: "image", path: PATH }] }) } });
     const block = renderTurnMedia(app([PATH]), parent, [done], actions, "", true)!;
@@ -148,15 +166,18 @@ describe("live generation placeholders", () => {
     expect(rebuilt.querySelector("figure[data-media-path]")).toBe(figure);
   });
 
-  it("shows a failed generation's reason with the retry hint", () => {
+  it("shows a failed generation's reason, with a next step only where the reason lacks one", () => {
     const parent = document.createElement("div");
     const failed = tool({ name: "generate_video", state: "failed", input: { prompt: "Waves" }, output: { data: encodeSystemSculptToolResult({ ok: false, message: "The video model timed out." }) } });
     const block = renderTurnMedia(app([]), parent, [failed], actions, "", false)!;
     const tile = block.querySelector<HTMLElement>(".is-failed")!;
     expect(tile.textContent).toContain("The video model timed out.");
-    expect(tile.textContent).toContain("Ask again to retry.");
+    // "Ask again to retry" said nothing the reply doesn't: a plain failure is its reason alone.
+    expect(tile.querySelector(".ss-media-pending-status")!.textContent).toBe("The video model timed out.");
     expect(tile.hasAttribute("aria-busy")).toBe(false);
     const refused = tool({ name: "generate_image", state: "failed", input: { prompt: "Owls" }, output: { data: encodeSystemSculptToolResult({ ok: false, message: "The prompt was flagged by the provider's safety system." }) } });
     expect(renderTurnMedia(app([]), document.createElement("div"), [refused], actions, "", false)!.textContent).toContain("Change the prompt and ask again.");
+    const advised = tool({ name: "generate_image", state: "failed", input: { prompt: "Owls" }, output: { data: encodeSystemSculptToolResult({ ok: false, message: "The image model refused this prompt. Try different words." }) } });
+    expect(renderTurnMedia(app([]), document.createElement("div"), [advised], actions, "", false)!.querySelector(".ss-media-pending-status")!.textContent).toBe("The image model refused this prompt. Try different words.");
   });
 });

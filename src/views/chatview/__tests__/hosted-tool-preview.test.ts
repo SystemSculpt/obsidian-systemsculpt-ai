@@ -27,13 +27,30 @@ it("renders recorded read paths and partial/error states, not note contents", ()
     { path: "Notes/Read.md", content: "PRIVATE NOTE CONTENT", metadata: { hasMore: true } },
     { path: "Missing.md", content: "", error: "File not found" },
   ] }))).toBe(true);
-  expect(host.textContent).toContain("Notes/Read.md");
-  expect(host.textContent).toContain("Partial file read");
-  expect(host.textContent).toContain("File not found");
+  // Notes read by their name; a partial read and a missing note say so after the dot, and a missing note is no link.
+  expect(Array.from(host.querySelectorAll("li"), row => row.textContent)).toEqual(["Read ·\u00a0Partly read", "Missing ·\u00a0Not in your vault"]);
+  expect(host.querySelectorAll("a")).toHaveLength(1);
   expect(host.textContent).not.toContain("PRIVATE NOTE CONTENT");
   expect(host.textContent).not.toContain("Requested.md");
   host.querySelector<HTMLAnchorElement>("a")!.click();
   expect(onOpenPath).toHaveBeenCalledWith("Notes/Read.md");
+});
+
+it("says only how much one note's read got, never the note again", () => {
+  const { host, render } = setup();
+  const read = (file: Record<string, unknown>) => part("read", { paths: ["Notes/Garden.md"] }, { files: [{ path: "Notes/Garden.md", ...file }] });
+  expect(render(read({ content: "# Garden plan\n\nTomatoes go in the south bed.", metadata: {} }))).toBe(true);
+  // The same muted line a native read's card shows.
+  expect(host.querySelector(".ss-tool-caption")?.textContent).toBe("3 lines");
+  expect(host.textContent).toBe("3 lines");
+  expect(host.querySelector("a")).toBeNull();
+  render(read({ content: "# Launch", metadata: { hasMore: true } }));
+  expect(host.textContent).toBe("Partly read");
+  render(read({ content: "", error: "File not found" }));
+  expect(host.querySelector(".ss-tool-notice-text")?.textContent).toBe("Not in your vault.");
+  expect(host.textContent).not.toContain("Garden");
+  // Nothing read yet: the row names the note, and the card has nothing to add.
+  expect(render(part("read", { paths: ["Notes/Garden.md"] }, undefined, { state: "running" }))).toBe(false);
 });
 
 it.each([
@@ -41,14 +58,16 @@ it.each([
   "file:///private/Note.md", "https://example.com", "~/Note.md", "Note.md\u0000",
 ])("keeps ambiguous path %s as literal non-clickable text", path => {
   const { host, render, onOpenPath } = setup();
-  render(part("read", { paths: [path] }));
-  expect(host.querySelector("a")).toBeNull();
-  expect(onOpenPath).not.toHaveBeenCalled();
+  // Several notes keep their list: only the vault note beside the ambiguous path is a link.
+  render(part("read", { paths: [path, "Notes/Other.md"] }));
+  expect(host.querySelectorAll("a")).toHaveLength(1);
+  host.querySelector<HTMLAnchorElement>("a")!.click();
+  expect(onOpenPath.mock.calls).toEqual([["Notes/Other.md"]]);
 });
 
 it.each(["Notes/#Ideas.md", "Notes/100%.md", "Notes/[Draft].md", "~Ideas.md", "%2e%2e/Note.md"])("preserves literal vault filename %s", path => {
   const { host, render, onOpenPath } = setup();
-  render(part("read", { paths: [path] }));
+  render(part("read", { paths: [path, "Notes/Other.md"] }));
   host.querySelector<HTMLAnchorElement>("a")!.click();
   expect(onOpenPath).toHaveBeenCalledWith(path);
 });
@@ -57,7 +76,7 @@ it("normalizes relative separators and opens an exact file without parsing link 
   const { app, host, openFile, getAbstractFileByPath } = setup();
   const file = Object.assign(Object.create(TFile.prototype), { path: "Notes/#Read.md" });
   getAbstractFileByPath.mockReturnValue(file);
-  renderHostedToolPreview(app, host, part("read", { paths: ["Notes\\#Read.md"] }));
+  renderHostedToolPreview(app, host, part("read", { paths: ["Notes\\#Read.md", "Notes/Other.md"] }));
   host.querySelector<HTMLAnchorElement>("a")!.click();
   expect(getAbstractFileByPath).toHaveBeenCalledWith("Notes/#Read.md");
   expect(openFile).toHaveBeenCalledWith(file);
@@ -75,7 +94,8 @@ it("discloses the first 50 returned directory entries without claiming to fetch 
   expect(all.textContent).toBe("Show all 55 items");
   all.click();
   expect(host.querySelectorAll("li")).toHaveLength(55);
-  expect(host.textContent).toContain("Notes/54.md");
+  // Entries read by their name inside the listed folder.
+  expect(host.querySelectorAll("li")[54].textContent).toBe("54");
   expect(host.querySelector('[data-testid="chat.tool.show-items"]')).toBeNull();
 });
 
@@ -94,7 +114,8 @@ it("shows folder entries and safe notices without exposing unknown result metada
 it("uses actual find results and search snippets, leaving scoring and pagination tokens private", () => {
   const { host, render } = setup();
   render(part("find", { patterns: ["plan"] }, { results: [{ path: "Notes/Plan.md", score: 99, reasoning: "PRIVATE SCORE" }], totalFound: 1 }));
-  expect(host.textContent).toContain("Notes/Plan.md");
+  expect(host.textContent).toContain("Plan");
+  expect(host.querySelector("a.ss-tool-path")?.getAttribute("title")).toBe("Notes/Plan.md");
   expect(host.textContent).not.toContain("returned"); // A complete list needs no count.
   expect(host.textContent).not.toContain("PRIVATE SCORE");
   render(part("search", {}, {
@@ -114,8 +135,10 @@ it("shows all requested write content as literal text, not a fabricated original
   const { host, render, read, getAbstractFileByPath } = setup();
   const content = Array.from({ length: 25 }, (_, i) => `line ${i}`).join("\n") + "\n<img src=x onerror=alert(1)>";
   render(part("write", { path: "Requested.md", content, ifExists: "skip" }, { path: "Actual.md", success: true, notice: "Used a portable name." }));
-  expect(host.textContent).toContain("Actual.md");
-  expect(host.textContent).toContain("not a before-and-after diff");
+  // The row names the note; the card adds it only because it was saved under another name.
+  expect(host.querySelector(".ss-tool-field")?.textContent).toBe("Saved asActual");
+  expect(host.textContent).not.toContain("Requested.md");
+  expect(host.textContent).not.toContain("before-and-after");
   expect(host.textContent).toContain("does not confirm that this content was written");
   expect(host.textContent).toContain("Used a portable name.");
   expect(host.querySelector("code")!.textContent!.split("\n")).toHaveLength(20);
@@ -124,7 +147,8 @@ it("shows all requested write content as literal text, not a fabricated original
   expect(host.querySelector("img")).toBeNull();
   expect(host.querySelector(".systemsculpt-diff-viewer")).toBeNull();
   expect(read).not.toHaveBeenCalled();
-  expect(getAbstractFileByPath).not.toHaveBeenCalled();
+  // Only the saved note's link checks that it exists; nothing reads or diffs today's file.
+  expect(getAbstractFileByPath.mock.calls).toEqual([["Actual.md"]]);
 });
 
 it.each(["succeeded", "failed", "denied", "cancelled", "outcome-unknown"] as const)("renders requested edit snippets after %s without reading today's file or inventing positions", state => {
@@ -133,9 +157,9 @@ it.each(["succeeded", "failed", "denied", "cancelled", "outcome-unknown"] as con
     path: "Notes/Plan.md", success: false, appliedCount: 0, requestedCount: 1,
     skipped: [{ index: 0, reason: "Original text not found" }], diff: "--- file\n+++ file\n- private original receipt",
   }, { state }));
-  expect(host.textContent).toContain("Requested text changes only");
-  expect(host.textContent).toContain("Original file line numbers are unavailable");
-  expect(host.textContent).toContain("0 of 1 requested edits applied");
+  // A count only because an edit didn't apply; no caveat about how the change is drawn.
+  expect(host.textContent).not.toMatch(/Requested text changes|line numbers are unavailable/u);
+  expect(host.textContent).toContain("0 of 1 edits applied.");
   expect(host.textContent).toContain("Skipped edit 1: Original text not found");
   expect(host.querySelector(".systemsculpt-diff-line-removed")!.textContent).toContain("before");
   expect(host.querySelector(".systemsculpt-diff-line-added")!.textContent).toContain("after");
@@ -155,10 +179,10 @@ it("renders multi-edit deletions and regex/loose semantics honestly", () => {
     { path: "A.md", success: true, appliedCount: 1, requestedCount: 1, skipped: [] },
     { path: "B.md", success: false, appliedCount: 0, requestedCount: 1, error: "No match", skipped: [] },
   ] }));
-  expect(host.textContent).toContain("A.md");
-  expect(host.textContent).toContain("B.md");
-  expect(host.textContent).toContain("1 of 1 requested edits applied");
-  expect(host.textContent).toContain("0 of 1 requested edits applied");
+  expect(Array.from(host.querySelectorAll(".ss-tool-section-title"), title => title.textContent)).toEqual(["A", "B"]);
+  // Only the note whose edit didn't apply gives a count.
+  expect(host.textContent).not.toContain("1 of 1");
+  expect(host.textContent).toContain("0 of 1 edits applied.");
   expect(host.textContent).toContain("Regular expression and replacement");
   expect(host.textContent).toContain("Loose matching");
   expect(host.textContent).toContain("Requested occurrence: all");
@@ -171,15 +195,16 @@ it("keeps successful move destinations usable and trashed entries non-clickable"
     { source: "Old.md", destination: "New.md", success: true },
     { source: "Stay.md", destination: "Missing.md", success: false, error: "Move failed" },
   ] }));
-  expect(host.textContent).toContain("Old.md → New.md ·\u00a0Moved");
-  expect(host.textContent).toContain("Stay.md → Missing.md ·\u00a0Failed");
+  expect(host.textContent).toContain("Old → New ·\u00a0Moved");
+  // A failure gives its own reason after the dot, as a read does.
+  expect(host.textContent).toContain("Stay → Missing ·\u00a0Move failed");
   expect(host.querySelector('a[data-href="Old.md"]')).toBeNull();
   expect(host.querySelector('a[data-href="New.md"]')).not.toBeNull();
   expect(host.querySelector('a[data-href="Stay.md"]')).not.toBeNull();
   expect(host.querySelector('a[data-href="Missing.md"]')).toBeNull();
   render(part("trash", {}, { results: [{ path: "Gone.md", success: true }, { path: "Stay.md", success: false }] }));
-  expect(host.textContent).toContain("Gone.md ·\u00a0In trash");
-  expect(host.textContent).toContain("Stay.md ·\u00a0Failed");
+  expect(host.textContent).toContain("Gone ·\u00a0In trash");
+  expect(host.textContent).toContain("Stay ·\u00a0Failed");
   expect(host.querySelector("a")).toBeNull();
 });
 
@@ -219,11 +244,11 @@ it("replaces only its own preview and uses the host owner document", () => {
   const host = ownerDocument.createElement("div");
   const details = host.appendChild(ownerDocument.createElement("details"));
   details.textContent = "Raw Details";
-  renderHostedToolPreview(app, host, part("read", { paths: ["First.md"] }));
-  renderHostedToolPreview(app, host, part("read", { paths: ["Second.md"] }));
+  renderHostedToolPreview(app, host, part("read", { paths: ["First.md", "First other.md"] }));
+  renderHostedToolPreview(app, host, part("read", { paths: ["Second.md", "Second other.md"] }));
   expect(host.querySelectorAll(".ss-hosted-tool-preview")).toHaveLength(1);
-  expect(host.textContent).not.toContain("First.md");
-  expect(host.textContent).toContain("Second.md");
+  expect(host.textContent).not.toContain("First");
+  expect(host.textContent).toContain("Second");
   expect(host.contains(details)).toBe(true);
   expect(host.querySelector("a")!.ownerDocument).toBe(ownerDocument);
 });

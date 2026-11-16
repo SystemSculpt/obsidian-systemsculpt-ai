@@ -92,6 +92,8 @@ export interface WriteFileResult {
   success: boolean;
   requestedPath?: string;
   notice?: string;
+  /** True when this write made the file, false when the file was already there. Absent when skipped. */
+  created?: boolean;
 }
 
 export interface FileEditRange {

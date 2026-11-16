@@ -73,28 +73,30 @@ describe("SystemSculpt chat tools", () => {
     expect(images.completeLocalCommit).toHaveBeenCalledWith("chat-image-abc-123");
   });
 
-  it("answers a person without a license with one Subscribe line and generates nothing", async () => {
+  it("answers a person without a license with one See plans line and generates nothing", async () => {
     const { host: fake, images } = host({ hasLicenseKey: () => false });
     const result = await new SystemSculptToolService(fake).call("generate_image", { prompt: "x" }, signal());
-    expect(result).toEqual({ ok: false, message: expect.stringMatching(/^Image generation comes with a SystemSculpt subscription\. Subscribe: \S+ The chat already shows the person this line/u), link: { label: "Subscribe", url: SUBSCRIBE } });
+    expect(result).toEqual({ ok: false, message: expect.stringMatching(/^Image generation comes with a SystemSculpt plan\. See plans: \S+ The chat already shows the person this line/u), link: { label: "See plans", url: SUBSCRIBE } });
     expect(presentTurnMedia([{ id: "a", order: 0, kind: "tool", messageId: "m", callId: "a", name: "generate_image", state: "succeeded", input: {}, location: "server", output: { data: { systemsculpt_tool: 1, ...result } } } as unknown as AgentToolPart]).notices)
-      .toEqual([{ text: "Image generation comes with a SystemSculpt subscription.", label: "Subscribe", url: SUBSCRIBE }]);
+      .toEqual([{ text: "Image generation comes with a SystemSculpt plan.", label: "See plans", url: SUBSCRIBE }]);
     expect(images.generate).not.toHaveBeenCalled();
   });
 
   it("answers a rejected license the same way", async () => {
     const { host: fake } = host({ checkLicense: async () => ({ outcome: "license_required" }) });
     const result = await new SystemSculptToolService(fake).call("generate_video", { prompt: "x" }, signal());
-    expect(result.link).toEqual({ label: "Subscribe", url: SUBSCRIBE });
-    expect(result.message).toMatch(/^Video generation comes with a SystemSculpt subscription\. Subscribe: /u);
+    expect(result.link).toEqual({ label: "See plans", url: SUBSCRIBE });
+    expect(result.message).toMatch(/^Video generation comes with a SystemSculpt plan\. See plans: /u);
   });
 
-  it("turns a credits shortfall into a Buy credits line, not an error dump", async () => {
+  it("turns a credits shortfall into an Add credits line, not an error dump", async () => {
     const error = Object.assign(new Error("Not enough credits are available for this generation."), { code: "payment_required" });
     const { host: fake } = host();
     (fake.images.generate as jest.Mock).mockRejectedValueOnce(error);
     const result = await new SystemSculptToolService(fake).call("generate_image", { prompt: "x" }, signal());
-    expect(result.link).toEqual({ label: "Buy credits", url: CREDITS });
+    expect(result.link).toEqual({ label: "Add credits", url: CREDITS });
+    // The line names what it stopped, as a plan gate does.
+    expect(result.message).toMatch(/^Not enough credits for this picture\. /u);
   });
 
   it("rejects bad input with a readable message", async () => {
@@ -143,11 +145,11 @@ describe("billing and approval", () => {
     expect(allowed("plan")).toEqual([]);
   });
 
-  it("gates Studio tools behind the subscription too", async () => {
+  it("gates Studio tools behind the plan too", async () => {
     const studio = { listProjects: jest.fn() };
     const { host: fake } = host({ hasLicenseKey: () => false, studio: () => studio as never });
     const result = await new SystemSculptToolService(fake).call("studio_list_workflows", {}, signal());
-    expect(result).toMatchObject({ ok: false, link: { label: "Subscribe" }, message: expect.stringMatching(/^SystemSculpt Studio comes with a SystemSculpt subscription\./u) });
+    expect(result).toMatchObject({ ok: false, link: { label: "See plans" }, message: expect.stringMatching(/^SystemSculpt Studio comes with a SystemSculpt plan\./u) });
   });
 
   it("opens a workflow beside the chat, never in front of it", async () => {

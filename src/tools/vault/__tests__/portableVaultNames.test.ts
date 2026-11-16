@@ -73,7 +73,7 @@ describe("agent file tools create names that work on every device", () => {
     const ops = new FileOperations(app, ["/"]);
 
     const overwrite = await ops.writeFile({ path: "Old: Folder/Note?.md", content: "after" });
-    expect(overwrite).toEqual({ path: "Old: Folder/Note?.md", success: true });
+    expect(overwrite).toEqual({ path: "Old: Folder/Note?.md", success: true, created: false });
     expect(app.vault.modify).toHaveBeenCalledWith(expect.objectContaining({ path: "Old: Folder/Note?.md" }), "after");
 
     const sibling = await ops.writeFile({ path: "Old: Folder/New: note.md", content: "new" });
@@ -101,7 +101,7 @@ describe("agent file tools create names that work on every device", () => {
     const adapter = app.vault.adapter as unknown as Record<string, jest.Mock>;
     adapter.exists.mockResolvedValue(false);
     const result = await new FileOperations(app, ["/"]).writeFile({ path: ".systemsculpt/scratch.md", content: "x" });
-    expect(result).toEqual({ path: ".systemsculpt/scratch.md", success: true });
+    expect(result).toEqual({ path: ".systemsculpt/scratch.md", success: true, created: true });
   });
 
   it("refuses a portable path that would leave the allowed folder", async () => {

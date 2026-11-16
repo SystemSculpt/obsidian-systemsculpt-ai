@@ -5,7 +5,7 @@ import { encodeSystemSculptToolResult, SYSTEMSCULPT_TOOL_SERVER } from "../../..
 import { renderHostedToolPreview } from "../HostedToolPreview";
 import { renderNativeToolPreview } from "../NativeToolPresentation";
 import { presentAgentTool, presentAgentToolFailure, agentToolNoticeTone } from "../AgentToolPresentation";
-import { mediaDisplayName, renderMedia } from "../ToolCardBlocks";
+import { detailsPayload, mediaDisplayName, renderFields, renderMedia, renderRawDetails } from "../ToolCardBlocks";
 import { renderTurnMedia } from "../TurnMedia";
 import { presentTurnChanges } from "../TurnChangeSummary";
 import { setActivityLabelText, summarizeAgentActivity } from "../AgentActivityPresentation";
@@ -47,30 +47,115 @@ function claude(name: string, input: unknown, data?: unknown, overrides: Partial
 }
 
 describe("one card for every tool result", () => {
-  it("shows generated media as thumbnails that open their vault files, and the prompt in words", () => {
-    const { app, host, openLinkText } = setup();
+  it("shows a generation's prompt in words and leaves its files to the turn, which shows and names them", () => {
+    const { app, host } = setup();
     const data = encodeSystemSculptToolResult({ ok: true, message: "Generated 1 image and 1 video.", media: [
       { kind: "image", path: IMAGE }, { kind: "video", path: VIDEO },
     ] });
     expect(renderHostedToolPreview(app, host, hosted("generate_image", { prompt: "A lighthouse at dusk" }, data))).toBe(true);
-    const tiles = host.querySelectorAll<HTMLButtonElement>('[data-testid="chat.tool.media.open"]');
+    // No thumbnail and no "Saved" row: the open card keeps its height when the files land below it.
+    expect(host.querySelector('[data-testid="chat.tool.media"]')).toBeNull();
+    expect(Array.from(host.querySelectorAll(".ss-tool-field dt"), label => label.textContent)).toEqual(["Prompt"]);
+    expect(host.querySelector(".ss-tool-field dd")?.textContent).toBe("A lighthouse at dusk");
+    expect(host.textContent).not.toContain("systemsculpt_tool");
+  });
+
+  it("lists a workflow's outputs bare at the text edge, as it lists workflows", () => {
+    const { app, host } = setup();
+    const poster = "SystemSculpt/Studio/Poster.systemsculpt";
+    const data = encodeSystemSculptToolResult({ ok: true, message: "1 node has saved outputs.", data: { path: poster, nodes: [{ nodeId: "img", files: [{ path: IMAGE }] }] } });
+    expect(renderHostedToolPreview(app, host, hosted("studio_list_outputs", { path: poster }, data))).toBe(true);
+    expect(host.querySelector(".ss-tool-fields")).toBeNull();
+    expect(Array.from(host.querySelectorAll(".ss-tool-paths > li"), item => item.textContent)).toEqual(["Lighthouse"]);
+  });
+
+  it("shows a SystemSculpt result in Details without the agent's guidance or a second copy of its link", () => {
+    const link = { label: "Add credits", url: "https://systemsculpt.com/credits" };
+    const data = encodeSystemSculptToolResult({ ok: false, message: `Not enough credits for this video. Add credits: ${link.url} The chat already shows the person this line. Write nothing about it.`, link });
+    expect(detailsPayload({ prompt: "x" }, { data }).output).toEqual({ ok: false, message: "Not enough credits for this video.", link });
+  });
+
+  it("says what a picture or video that wasn't made asked for: its shape and length", () => {
+    const { app, host } = setup();
+    const data = encodeSystemSculptToolResult({ ok: false, message: "The video service is busy right now." });
+    renderHostedToolPreview(app, host, hosted("generate_video", { prompt: "Pines", aspect_ratio: "9:16", duration_seconds: 5 }, data, { state: "failed" }));
+    expect(Array.from(host.querySelectorAll(".ss-tool-field"), field => field.textContent)).toEqual(["PromptPines", "ShapeVertical · 9:16", "Length5 seconds"]);
+  });
+
+  it("shows a Codex request without the item's own id, run status and kind, so it reads the same running and done", () => {
+    const running = { type: "imageGeneration", id: "ig1", status: "inProgress", revisedPrompt: "A lighthouse at night" };
+    expect(detailsPayload(running, undefined, "codex")).toEqual({ input: { revisedPrompt: "A lighthouse at night" } });
+    expect(detailsPayload({ ...running, status: "completed" }, undefined, "codex")).toEqual(detailsPayload(running, undefined, "codex"));
+    expect(detailsPayload({ type: "imageView", path: "/vault/a.png" }, undefined, "codex").input).toEqual({ path: "/vault/a.png" });
+    // Another agent's request is shown as it is.
+    const claude = { id: "keep", type: "keep", path: "Notes/Garden.md" };
+    expect(detailsPayload(claude, undefined, "claude").input).toBe(claude);
+  });
+
+  it("says each thing a Codex search or file change asked once, without the item's wrappers", () => {
+    const search = { type: "webSearch", id: "ws1", query: "tomato soil temperature", action: { type: "search", query: "tomato soil temperature", queries: ["tomato soil temperature", "tomato night temperature"] } };
+    expect(detailsPayload(search, undefined, "codex").input).toEqual({ queries: ["tomato soil temperature", "tomato night temperature"] });
+    // A search for one query keeps it; an opened page is its address.
+    expect(detailsPayload({ type: "webSearch", id: "ws2", query: "frost dates", action: { type: "search", query: "frost dates" } }, undefined, "codex").input).toEqual({ query: "frost dates" });
+    expect(detailsPayload({ type: "webSearch", id: "ws3", query: "", action: { type: "openPage", url: "https://example.org/a" } }, undefined, "codex").input).toEqual({ url: "https://example.org/a" });
+    const change = { type: "fileChange", id: "f1", status: "completed", changes: [{ path: "/vault/Notes/Garden.md", kind: { type: "update" }, diff: "@@ -1 +1 @@\n-a\n+b\n" }] };
+    expect(detailsPayload(change, undefined, "codex").input).toEqual({ changes: [{ path: "/vault/Notes/Garden.md", kind: "update", diff: "@@ -1 +1 @@\n-a\n+b\n" }] });
+    // A kind that says more than its word (a rename's new path) stays whole.
+    const moved = { path: "/vault/a.md", kind: { type: "update", move_path: "/vault/b.md" } };
+    expect(detailsPayload({ type: "fileChange", changes: [moved] }, undefined, "codex").input).toEqual({ changes: [moved] });
+  });
+
+  it("shows a Codex command's request, then its output and exit code once, under the names Codex gives them", () => {
+    const item = { type: "commandExecution", id: "c1", status: "completed", command: "git status --short", cwd: "/vault", exitCode: 0, aggregatedOutput: " M a.md\n" };
+    const request = { command: "git status --short", cwd: "/vault" };
+    expect(detailsPayload(item, { data: " M a.md\n" }, "codex")).toEqual({ input: request, output: { exitCode: 0, aggregatedOutput: " M a.md\n" } });
+    // Still running: the request alone, with no empty result fields in it.
+    expect(detailsPayload({ ...item, status: "inProgress", exitCode: null, aggregatedOutput: null }, undefined, "codex")).toEqual({ input: request });
+    // A tool call's result is shown once, as the result, without the plugin's marker.
+    const result = { systemsculpt_tool: 1, ok: true };
+    const call = { type: "mcpToolCall", id: "m1", status: "completed", server: "systemsculpt", tool: "read", arguments: { path: "a.md" }, result };
+    expect(detailsPayload(call, { data: result }, "codex")).toEqual({
+      input: { server: "systemsculpt", tool: "read", arguments: { path: "a.md" } },
+      output: { ok: true },
+    });
+    // A result Codex keeps on its item as a copy of the one shown is left out of the request too.
+    const alerts = { content: [{ type: "text", text: "No weather alerts this week." }] };
+    const copied = { type: "mcpToolCall", server: "weather", tool: "alerts", arguments: { city: "Portland" }, result: JSON.parse(JSON.stringify(alerts)) };
+    expect(detailsPayload(copied, { data: alerts }, "codex").input).toEqual({ server: "weather", tool: "alerts", arguments: { city: "Portland" } });
+  });
+
+  it("leaves the plugin's own result marker out of Details, live or saved", () => {
+    const output = (data: unknown): unknown => detailsPayload({}, { data }).output;
+    expect(output({ systemsculpt_tool: 1, ok: true, media: [{ kind: "image", path: IMAGE }] })).toEqual({ ok: true, media: [{ kind: "image", path: IMAGE }] });
+    expect(output({ data: { systemsculpt_tool: 1, ok: true }, status: "completed" })).toEqual({ data: { ok: true }, status: "completed" });
+    const plain = { ok: true };
+    expect(output(plain)).toBe(plain);
+    expect(output("Saved.")).toBe("Saved.");
+  });
+
+  it("draws a card's thumbnails so each opens its vault file", () => {
+    const { app, openLinkText } = setup();
+    const card = document.createElement("div");
+    renderMedia(app, card, [{ kind: "image", path: IMAGE }, { kind: "video", path: VIDEO }]);
+    const tiles = card.querySelectorAll<HTMLButtonElement>('[data-testid="chat.tool.media.open"]');
     expect(tiles).toHaveLength(2);
     expect(tiles[0].querySelector("img")?.getAttribute("src")).toBe(`app://local/vault/${IMAGE}`);
     expect(tiles[1].querySelector("video")?.getAttribute("src")).toBe(`app://local/vault/${VIDEO}#t=0.1`);
     tiles[1].click();
     expect(openLinkText).toHaveBeenCalledWith(VIDEO, "", false);
-    expect(host.querySelector(".ss-tool-fields:not(.ss-tool-media-files) dd")?.textContent).toBe("A lighthouse at dusk");
-    expect(host.textContent).not.toContain("systemsculpt_tool");
   });
 
-  it("says a subscription or credits gate in one calm line with its action, without the agent-only text", async () => {
+  it.each(["See plans", "Subscribe"])("says a plan gate (%s) in one calm line with its action, without the agent-only text", async (label) => {
     const { app, host } = setup();
-    const link = { label: "Subscribe", url: "https://systemsculpt.com/pricing?utm_source=plugin" };
+    const link = { label, url: "https://systemsculpt.com/pricing?utm_source=plugin" };
     const data = encodeSystemSculptToolResult({ ok: false, message: `Image generation comes with a SystemSculpt subscription. ${link.label}: ${link.url}`, link });
     const part = claude(["mcp", SYSTEMSCULPT_TOOL_SERVER, "generate_image"].join("__"), { prompt: "A cat" }, data);
     await renderNativeToolPreview(app, host, part);
-    const notice = host.querySelector(".ss-tool-notice.is-warning")!;
-    expect(notice.textContent).toBe("Image generation comes with a SystemSculpt subscription. Subscribe");
+    // The calm lock of the turn's own gate, never the warning box a partial failure uses.
+    const notice = host.querySelector(".ss-tool-notice.is-gate")!;
+    expect(host.querySelector(".ss-tool-notice.is-warning")).toBeNull();
+    expect(agentToolNoticeTone(part, "succeeded")).toBe("gate");
+    expect(notice.textContent).toBe(`Image generation comes with a SystemSculpt subscription. ${label}`);
     notice.querySelector<HTMLAnchorElement>("a")!.click();
     expect(openExternalUrl).toHaveBeenCalledWith(link.url, expect.anything());
     expect(presentAgentTool(part).icon).toBe("lock");
@@ -78,11 +163,17 @@ describe("one card for every tool result", () => {
 
   it("lists Claude Code web search sources as links and keeps the rest as text", async () => {
     const { app, host } = setup();
-    const output = 'Web search results for query: "canvas"\n\nLinks: [{"title":"Canvas - Obsidian Help","url":"https://help.obsidian.md/canvas"}]\n\nCanvas is a plugin.';
+    const output = 'Web search results for query: "canvas"\n\nLinks: [{"title":"Canvas - Obsidian Help","url":"https://help.obsidian.md/canvas"},{"title":"Run me","url":"javascript:alert(1)"}]\n\nCanvas is a plugin.';
     await renderNativeToolPreview(app, host, claude("WebSearch", { query: "canvas" }, output));
     const link = host.querySelector<HTMLAnchorElement>(".ss-tool-links a.external-link")!;
     expect(link.textContent).toBe("Canvas - Obsidian Help");
     expect(link.getAttribute("href")).toBe("https://help.obsidian.md/canvas");
+    // Only a web address becomes a link: a source with any other scheme is left out.
+    expect(host.querySelectorAll("a")).toHaveLength(1);
+    expect(host.textContent).not.toContain("Run me");
+    // The title is its own line with its site under it, the same shape for every source.
+    expect(link.parentElement?.className).toBe("ss-tool-link-title");
+    expect(link.parentElement?.nextElementSibling?.className).toBe("ss-tool-link-host");
     expect(host.querySelector(".ss-tool-link-host")?.textContent).toBe("help.obsidian.md");
     expect(host.querySelector(".ss-tool-text")?.textContent).toBe("Canvas is a plugin.");
     expect(host.textContent).not.toContain("Links: [");
@@ -93,6 +184,40 @@ describe("one card for every tool result", () => {
     await renderNativeToolPreview(app, host, claude("Bash", { command: "ls" }, "a\nb"));
     expect(host.querySelector(".ss-tool-terminal-command")?.textContent).toBe("$ ls");
     expect(host.querySelector(".ss-tool-terminal-output")?.textContent).toBe("a\nb");
+    expect(host.querySelector(".ss-tool-terminal-pending")).toBeNull();
+  });
+
+  it("puts each output line in its own block, so a wrapped line hangs under its own start", async () => {
+    const { app, host } = setup();
+    await renderNativeToolPreview(app, host, claude("Bash", { command: "npm test" }, "PASS  garden.test.ts\n\n  Tests: 2 passed"));
+    const lines = Array.from(host.querySelectorAll<HTMLElement>(".ss-tool-terminal-output > .ss-tool-terminal-line"));
+    // Copied, the output reads exactly as the command printed it, spaces and blank line included.
+    expect(lines.map(line => line.textContent)).toEqual(["PASS  garden.test.ts\n", "\n", "  Tests: 2 passed"]);
+    expect(lines.map(line => line.style.getPropertyValue("--ss-terminal-indent"))).toEqual(["", "", "2"]);
+  });
+
+  it("prints a command's output as text, never as markup", async () => {
+    const { app, host } = setup();
+    const output = '<img src=x onerror="alert(1)">\n  <script>alert(2)</script>';
+    await renderNativeToolPreview(app, host, claude("Bash", { command: "cat page.html" }, output));
+    expect(host.querySelector("img, script")).toBeNull();
+    expect(host.querySelector(".ss-tool-terminal-output")?.textContent).toBe(output);
+  });
+
+  it("marks where a running command's output will appear until it prints", async () => {
+    for (const agent of ["claude", "codex"] as const) {
+      const { app, host } = setup();
+      const input = agent === "claude" ? { command: "npm test" } : { type: "commandExecution", command: "npm test", cwd: "/vault", status: "inProgress" };
+      await renderNativeToolPreview(app, host, claude(agent === "claude" ? "Bash" : "commandExecution", input, undefined, { state: "running", native: { agent, workingDirectory: "/vault" } }));
+      const pending = host.querySelector<HTMLElement>(".ss-tool-terminal-pending")!;
+      expect(pending.getAttribute("aria-hidden")).toBe("true");
+      expect(pending.previousElementSibling?.className).toBe("ss-tool-terminal-command");
+      // Its first output replaces the marker.
+      const printing = setup();
+      await renderNativeToolPreview(printing.app, printing.host, claude(agent === "claude" ? "Bash" : "commandExecution", input, "Running 2 tests", { state: "running", native: { agent, workingDirectory: "/vault" } }));
+      expect(printing.host.querySelector(".ss-tool-terminal-pending")).toBeNull();
+      expect(printing.host.querySelector(".ss-tool-terminal-output")?.textContent).toBe("Running 2 tests");
+    }
   });
 
   it("links paths a search found inside the vault", async () => {
@@ -117,14 +242,15 @@ describe("one card for every tool result", () => {
     expect(host.textContent?.trim()).not.toBe("");
   });
 
-  it("titles an MCP tool by its tool name with its server as meta", () => {
+  it("names an MCP tool with its server, so two servers' tools never read alike", () => {
     const presentation = presentAgentTool(claude(BRIDGED_FORECAST, { city: "Portland" }));
-    expect(presentation.label).toBe("Used forecast");
+    expect(presentation.label).toBe("Used weather forecast");
+    expect(presentation.target).toEqual({ text: "weather forecast" });
   });
 
   it("calls a declined or stopped action calmly", () => {
     const denied = hosted("write", { path: "A.md" }, undefined, { state: "denied", error: { code: "DENIED", message: "x" } });
-    expect(presentAgentToolFailure(denied)).toBe("Declined, so it didn't run.");
+    expect(presentAgentToolFailure(denied)).toBe("Denied, so it didn't run.");
     expect(agentToolNoticeTone(denied, "denied")).toBe("info");
     const failed = hosted("write", { path: "A.md" }, undefined, { state: "failed", error: { code: "X", message: "x" } });
     expect(agentToolNoticeTone(failed, "failed")).toBe("danger");
@@ -135,10 +261,12 @@ describe("one card for every tool result", () => {
     renderHostedToolPreview(app, host, hosted("context", { action: "add", paths: ["Notes/Garden.md"] }, {
       results: [{ path: "Notes/Garden.md", success: true }], summary: "Pinned 1 file.",
     }));
-    expect(host.querySelector(".ss-tool-paths li")?.textContent).toBe("Notes/Garden.md ·\u00a0Pinned");
+    // Notes go by their name, as Obsidian shows them; the link keeps the file's path.
+    expect(host.querySelector(".ss-tool-paths li")?.textContent).toBe("Garden ·\u00a0Pinned");
     const opened = setup();
     renderHostedToolPreview(opened.app, opened.host, hosted("open", { files: [{ path: "Notes/Garden.md" }] }, { opened: ["Notes/Garden.md"], errors: ["Failed to open file: Missing.md"] }));
-    expect(opened.host.querySelector("a.internal-link")?.textContent).toBe("Notes/Garden.md");
+    expect(opened.host.querySelector("a.internal-link")?.textContent).toBe("Garden");
+    expect(opened.host.querySelector("a.internal-link")?.getAttribute("data-href")).toBe("Notes/Garden.md");
     expect(opened.host.querySelector(".ss-tool-notice")?.textContent).toBe("Failed to open file: Missing.md");
   });
 });
@@ -151,18 +279,19 @@ describe("media shown once per turn", () => {
     expect(mediaDisplayName(IMAGE, "Poster art")).toBe("Poster art");
   });
 
-  it("keeps only the file link in a card when the reply shows the same image", () => {
+  it("hides a card's thumbnail when the reply shows the same image, which names it once", () => {
     const { app } = setup();
     const body = document.createElement("div");
     body.className = "systemsculpt-agent-turn-body";
     const card = body.appendChild(document.createElement("div"));
     renderMedia(app, card, [{ kind: "image", path: IMAGE }]);
+    renderFields(app, card, [{ label: "Prompt", value: "Lighthouse" }]);
     const media = card.querySelector(".ss-tool-media")!;
     expect(media.classList.contains("is-shown-in-reply")).toBe(false);
     const generated = hosted("generate_image", { prompt: "Lighthouse" }, encodeSystemSculptToolResult({ ok: true, message: "Saved.", media: [{ kind: "image", path: IMAGE }] }));
     renderTurnMedia(app, body, [generated], { openFile: jest.fn(), openLink: jest.fn() });
     expect(media.classList.contains("is-shown-in-reply")).toBe(true);
-    expect(card.querySelector(".ss-tool-media-files dd a")?.textContent).toBe("Lighthouse");
+    expect(card.textContent).not.toContain("Saved");
     expect(body.querySelector("[data-testid='chat.turn.media.path']")?.textContent).toBe("Lighthouse");
   });
 
@@ -221,8 +350,54 @@ describe("studio and gated summaries", () => {
       path: "SystemSculpt/Studio/Poster.systemsculpt", revision: "abc",
       edits: [{ kind: "set", entityId: "node:prompt", path: ["config", "value"], value: "A lighthouse" }, { kind: "create", entityId: "node:img", value: { kind: "image_generation", title: "Poster image" } }],
     }, encodeSystemSculptToolResult({ ok: true, message: "Applied 2 edits." })));
-    expect(host.textContent).toContain("Set prompt · config.value: “A lighthouse”");
-    expect(host.textContent).toContain("Add img: Poster image (image generation)");
+    // Results in words, one per line: no field paths, node ids or node kinds.
+    const field = Array.from(host.querySelectorAll(".ss-tool-field")).find(row => row.querySelector("dt")?.textContent === "Changes")!;
+    expect(Array.from(field.querySelectorAll("dd li"), item => item.textContent)).toEqual(["Prompt set to “A lighthouse”", "Added Poster image"]);
+    // Its row names and links the workflow ("Edited Poster workflow"), so the card starts at what changed.
+    expect(Array.from(host.querySelectorAll(".ss-tool-fields dt"), label => label.textContent)).toEqual(["Changes"]);
+    expect(host.textContent).not.toMatch(/config\.value|node:|image_generation/u);
+  });
+
+  it("leaves a failed generation's reason to its tile in the reply instead of saying it twice", () => {
+    const { app } = setup();
+    const body = document.createElement("div");
+    body.className = "systemsculpt-agent-turn-body";
+    const card = body.appendChild(document.createElement("div"));
+    const failed = { ...hosted("generate_video", { prompt: "Waves" }, encodeSystemSculptToolResult({ ok: false, message: "The video service is busy right now." })), callId: "video-1", id: "video-1" } as AgentToolPart;
+    renderHostedToolPreview(app, card, failed);
+    const notice = card.querySelector<HTMLElement>(".ss-tool-notice[data-media-failure='video-1']")!;
+    expect(notice.textContent).toBe("The video service is busy right now.");
+    expect(notice.classList.contains("is-shown-in-reply")).toBe(false);
+    renderTurnMedia(app, body, [failed], { openFile: jest.fn(), openLink: jest.fn() });
+    expect(body.querySelector("[data-pending-id='video-1:failed']")).not.toBeNull();
+    expect(notice.classList.contains("is-shown-in-reply")).toBe(true);
+  });
+
+  it("marks a gate line's action as a link that leaves Obsidian", () => {
+    const { app } = setup();
+    const body = document.createElement("div");
+    const gated = { ...hosted("generate_image", { prompt: "Cat astronaut" }, encodeSystemSculptToolResult({
+      ok: false, message: "Image generation comes with a SystemSculpt plan.", link: { label: "See plans", url: "https://systemsculpt.com/pricing" },
+    })), callId: "image-1", id: "image-1" } as AgentToolPart;
+    const openLink = jest.fn();
+    renderTurnMedia(app, body, [gated], { openFile: jest.fn(), openLink });
+    const action = body.querySelector<HTMLAnchorElement>("[data-testid='chat.turn.media.subscribe']")!;
+    expect(action.textContent).toBe("See plans");
+    expect(action.classList.contains("external-link")).toBe(true);
+    action.click();
+    expect(openLink).toHaveBeenCalledWith("https://systemsculpt.com/pricing");
+  });
+
+  it("keeps raw Details JSON copyable line by line, each line wrapping under its own indent", () => {
+    const card = document.createElement("div");
+    const payload = { input: { city: "Portland" } };
+    renderRawDetails(card, () => payload);
+    const raw = card.querySelector<HTMLDetailsElement>(".systemsculpt-agent-tool-raw")!;
+    raw.open = true;
+    raw.dispatchEvent(new Event("toggle"));
+    const code = raw.querySelector<HTMLElement>("pre > code")!;
+    expect(code.textContent).toBe(JSON.stringify(payload, null, 2));
+    expect(Array.from(code.querySelectorAll<HTMLElement>(".ss-json-line"), line => line.style.getPropertyValue("--ss-json-indent"))).toEqual(["", "2", "4", "2", ""]);
   });
 
   it("keeps a credits gate and a refusal apart from a finished generation", () => {
@@ -230,7 +405,8 @@ describe("studio and gated summaries", () => {
     const gate = { ...hosted("generate_image", { prompt: "B" }, encodeSystemSculptToolResult({ ok: false, message: "Out of credits.", link: { label: "Buy credits", url: "https://systemsculpt.com/pricing" } })), callId: "gate", id: "gate" } as AgentToolPart;
     const refused = { ...hosted("generate_image", { prompt: "C" }, encodeSystemSculptToolResult({ ok: false, message: "Nope." })), callId: "refused", id: "refused" } as AgentToolPart;
     const summary = summarizeAgentActivity([done, gate, refused]);
-    expect(summary.label).toBe("Generated image, generate image · Needs credits, couldn't generate image · 1 failed");
+    // The gate says what it stopped and what that needs.
+    expect(summary.label).toBe("Generated image, image needs credits, couldn't generate image");
     expect(summary.failedCount).toBe(1);
     expect(summary.gated).toBe(true);
   });
@@ -239,8 +415,11 @@ describe("studio and gated summaries", () => {
 describe("activity label wrapping", () => {
   it("keeps each count with its word without changing the text", () => {
     const label = document.createElement("strong");
-    setActivityLabelText(label, "Couldn't complete 2 actions · 5 more · 1 blocked");
-    expect(label.textContent).toBe("Couldn't complete 2 actions · 5 more · 1 blocked");
-    expect(Array.from(label.querySelectorAll(".ss-activity-count"), span => span.textContent)).toEqual(["2 actions", "5 more", "1 blocked"]);
+    setActivityLabelText(label, "Couldn't complete 2 actions and 5 more steps · 1 blocked");
+    expect(label.textContent).toBe("Couldn't complete 2 actions and 5 more steps · 1 blocked");
+    expect(Array.from(label.querySelectorAll(".ss-activity-count"), span => span.textContent)).toEqual(["2 actions", "5 more steps", "1 blocked"]);
+    // "1 of 2 notes" is one count.
+    setActivityLabelText(label, "Moved 1 of 2 notes to trash");
+    expect(Array.from(label.querySelectorAll(".ss-activity-count"), span => span.textContent)).toEqual(["1 of 2 notes"]);
   });
 });
