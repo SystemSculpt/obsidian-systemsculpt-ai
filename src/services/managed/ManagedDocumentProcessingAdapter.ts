@@ -1,7 +1,7 @@
 import { managedAbortError, throwIfManagedAborted } from "./ManagedAbort";
 import { ManagedJobDispatch } from "./ManagedJobDispatch";
-import { uploadManagedRecoveryParts } from "./ManagedMultipartUpload";
-import type { ManagedFileSource } from "./ManagedFileSource";
+import { completeManagedRecoveryUpload, MANAGED_UPLOAD_PHASES } from "./ManagedMultipartUpload";
+import type { ManagedFileContent, ManagedFileSource } from "./ManagedFileSource";
 import { sha256HexFromBytesPortable } from "../../utils/sha256";
 import type { ManagedAdmission } from "./ManagedAdmission";
 import { ManagedJobClient, ManagedJobError } from "./ManagedJobClient";
@@ -121,22 +121,6 @@ function waitForTurn(previous: Promise<void>, signal: AbortSignal): Promise<void
 function furthestFirst(a: ManagedJobRecoveryRecord, b: ManagedJobRecoveryRecord): number {
   return (PHASE_PROGRESS[b.phase] ?? -1) - (PHASE_PROGRESS[a.phase] ?? -1)
     || (b.completedParts?.length ?? 0) - (a.completedParts?.length ?? 0);
-}
-
-function readDocumentId(value: unknown): string {
-  const documentId = (value as { document?: { id?: unknown } })?.document?.id;
-  if (typeof documentId !== "string" || !documentId) throw new Error("Managed document create response did not include a document ID.");
-  return documentId;
-}
-
-function readUpload(value: unknown): { partSize: number; totalParts: number } {
-  const upload = (value as { upload?: { part_size_bytes?: unknown; total_parts?: unknown } })?.upload;
-  const partSize = upload?.part_size_bytes;
-  const totalParts = upload?.total_parts;
-  if (!Number.isInteger(partSize) || (partSize as number) < 1 || !Number.isInteger(totalParts) || (totalParts as number) < 1 || (totalParts as number) > 3) {
-    throw new Error("Managed document create response included invalid multipart metadata.");
-  }
-  return { partSize: partSize as number, totalParts: totalParts as number };
 }
 
 export class ManagedDocumentProcessingAdapter {
@@ -372,7 +356,9 @@ export class ManagedDocumentProcessingAdapter {
     signal: AbortSignal,
   ): Promise<ManagedDocumentProcessingResult> {
     const operationId = record.operationId;
-    if (["admitted", "content_ready", "create_dispatching", "created", "part_dispatching", "uploading"].includes(record.phase)) {
+    const recordedRequest = record.pendingDispatch?.createRequest ?? record.multipartUpload?.createRequest;
+    let loading: Promise<ManagedFileContent> | undefined;
+    const loadSource = (): Promise<ManagedFileContent> => loading ??= (async () => {
       if (!source) throw new Error("Managed document dispatch is ambiguous without the original source bytes. Retry with the original document.");
       const loaded = await source.load();
       throwIfAborted(signal);
@@ -382,89 +368,47 @@ export class ManagedDocumentProcessingAdapter {
       if (!loaded.filename || loaded.filename.length > 512 || !loaded.contentType) {
         throw new Error("Document filename or content type is invalid.");
       }
-      if (record.phase === "admitted") {
-        record = await this.dependencies.recovery.markContentReady(CAPABILITY, operationId, record.revision);
-        throwIfAborted(signal);
-      }
-      const createRequest = record.pendingDispatch?.createRequest ?? record.multipartUpload?.createRequest ?? {
-        filename: loaded.filename,
-        contentType: loaded.contentType,
-        contentLengthBytes: loaded.sizeBytes,
-      };
       // A recorded request is replayed as sent. The selected bytes match the
       // record's fingerprint, so a copy under another name, such as a renamed
       // chat attachment, continues with the filename it was created with.
-      if (createRequest.contentType !== loaded.contentType || createRequest.contentLengthBytes !== loaded.sizeBytes) {
+      if (recordedRequest && recordedRequest.contentType !== loaded.contentType) {
         throw new Error("The original document upload metadata does not match the retained source.");
       }
-      if (record.phase === "content_ready" || record.phase === "create_dispatching") {
-        context.onProgress?.(5, "Preparing document upload…");
-        if (record.phase === "content_ready") {
-          record = await this.dispatch.begin(record, "create", undefined, createRequest);
-          throwIfAborted(signal);
-        }
-        // Replay the recorded request with the original supported create key.
-        const created = await dispatchManagedJob({
-          send: () => this.dependencies.jobs.create(createRequest, operationId, signal),
-          signal,
-          wait: this.wait,
-        });
-        throwIfAborted(signal);
-        const documentId = readDocumentId(created);
-        const upload = readUpload(created);
-        if (upload.totalParts !== Math.ceil(loaded.sizeBytes / upload.partSize)) {
-          throw new Error("Managed document multipart layout does not match the document size.");
-        }
-        record = await this.dependencies.recovery.acknowledgeCreated(CAPABILITY, operationId, record.revision, documentId, {
-          createRequest, partSizeBytes: upload.partSize, totalParts: upload.totalParts,
-        });
-        throwIfAborted(signal);
-      }
-      const upload = record.multipartUpload;
-      const documentId = record.jobId;
-      if (!upload || !documentId) {
-        throw new Error("Managed document cannot resume this upload without its acknowledged multipart metadata.");
-      }
-      if (upload.totalParts !== Math.ceil(loaded.sizeBytes / upload.partSizeBytes)) {
-        throw new Error("Managed document multipart layout does not match the document size.");
-      }
-      record = await uploadManagedRecoveryParts({
+      return loaded;
+    })();
+    if (record.phase === "admitted") {
+      await loadSource();
+      record = await this.dependencies.recovery.markContentReady(CAPABILITY, operationId, record.revision);
+      throwIfAborted(signal);
+    }
+    if (MANAGED_UPLOAD_PHASES.includes(record.phase)) {
+      record = await completeManagedRecoveryUpload({
         record,
-        source: loaded,
+        loadSource,
+        createRequest: (loaded) => ({
+          filename: loaded.filename,
+          contentType: loaded.contentType,
+          contentLengthBytes: loaded.sizeBytes,
+        }),
+        jobs: this.dependencies.jobs,
         dispatch: this.dispatch,
         recovery: this.dependencies.recovery,
-        sendPart: (partNumber, bytes) => this.dependencies.jobs.uploadPart(documentId, partNumber, bytes, signal),
         signal,
         wait: this.wait,
         sourceChangedMessage: "The selected document changed while it was being read.",
-        onProgress: (partNumber, state) => {
-          if (state === "uploaded") context.onProgress?.(
-            10 + Math.floor((partNumber / upload.totalParts) * 55),
-            `Uploading document (${partNumber}/${upload.totalParts})…`,
+        onProgress: (progress) => {
+          if (progress.stage === "create") context.onProgress?.(5, "Preparing document upload…");
+          else if (progress.stage === "part") context.onProgress?.(
+            10 + Math.floor((progress.partNumber / progress.totalParts) * 55),
+            `Uploading document (${progress.partNumber}/${progress.totalParts})…`,
           );
         },
       });
-      record = await this.dispatch.begin(record, "complete");
-      throwIfAborted(signal);
     }
-    if (!record.jobId || !["complete_dispatching", "upload_completed", "start_dispatching", "processing", "result_ready", "local_commit_pending"].includes(record.phase)) {
+    if (!record.jobId || !["upload_completed", "start_dispatching", "processing", "result_ready", "local_commit_pending"].includes(record.phase)) {
       throw new Error(`Managed document cannot resume from ${record.phase}; acknowledged processing is required.`);
     }
     const documentId = record.jobId;
-    if (record.phase === "complete_dispatching") {
-      const completedParts = record.completedParts;
-      if (!completedParts?.length) {
-        throw new Error("Managed document upload completion cannot resume without acknowledged parts.");
-      }
-      await dispatchManagedJob({
-        send: () => this.dependencies.jobs.complete(documentId, completedParts, operationId, signal),
-        signal,
-        wait: this.wait,
-      });
-      throwIfAborted(signal);
-      record = await this.dependencies.recovery.acknowledgeComplete(CAPABILITY, operationId, record.revision);
-      throwIfAborted(signal);
-    }
     if (record.phase === "upload_completed") {
       context.onProgress?.(70, "Starting document processing…");
       record = await this.dispatch.begin(record, "start");

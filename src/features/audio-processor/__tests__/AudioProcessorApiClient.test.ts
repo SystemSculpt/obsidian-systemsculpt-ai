@@ -224,7 +224,7 @@ describe("AudioProcessorApiClient", () => {
     requestClient.responses.push(new Response("<html>Gateway unavailable</html>", { status, headers: { "Retry-After": "5" } }));
     await expect(client.getPartUrl("audio_job_123", 1)).rejects.toMatchObject({ status, code: "request_failed", retryAfterMs: 5_000 });
     requestClient.responses.push(new Response("<html>Gateway unavailable</html>", { status, headers: { "Retry-After": "5" } }));
-    await expect(client.completeUpload("audio_job_123", [{ part_number: 1, etag: "etag" }], "operation-1"))
+    await expect(client.completeUpload("audio_job_123", [{ partNumber: 1, etag: "etag" }], "operation-1"))
       .rejects.toMatchObject({ status, code: "request_failed", retryAfterMs: 5_000 });
   });
 
@@ -249,7 +249,7 @@ describe("AudioProcessorApiClient", () => {
       url: "https://objects.example.com/upload?signature=exact",
       headers: { "x-amz-checksum-sha256": "checksum" },
       expiresInSeconds: 900,
-    }, bytes)).resolves.toEqual({ part_number: 2, etag: "\"part-etag\"" });
+    }, bytes)).resolves.toEqual({ partNumber: 2, etag: "\"part-etag\"" });
 
     expect(requestClient.inputs[0]).toEqual(expect.objectContaining({
       method: "PUT",
@@ -411,15 +411,31 @@ describe("AudioProcessorApiClient", () => {
       partSizeBytes: 8_388_608,
       totalParts: 3,
       parts: [
-        { part_number: 1, etag: "\"etag-1\"", size_bytes: 8_388_608 },
-        { part_number: 2, etag: "\"etag-2\"", size_bytes: 8_388_608 },
-        { part_number: 3, etag: "\"etag-3\"", size_bytes: 1_024 },
+        { partNumber: 1, etag: "\"etag-1\"" },
+        { partNumber: 2, etag: "\"etag-2\"" },
+        { partNumber: 3, etag: "\"etag-3\"" },
       ],
     });
 
     expect(requestClient.inputs[0]).toEqual(expect.objectContaining({
       url: "https://systemsculpt.test/api/plugin/audio-processor/jobs/audio_job_123/upload/parts",
       method: "GET",
+    }));
+  });
+
+  it("sends completed parts in the wire format", async () => {
+    const { client, requestClient } = setup();
+    requestClient.responses.push(json({ job: pendingJob }));
+
+    await client.completeUpload("audio_job_123", [
+      { partNumber: 1, etag: "\"etag-1\"" },
+      { partNumber: 2, etag: "\"etag-2\"" },
+    ], "operation-1");
+
+    expect(requestClient.inputs[0]).toEqual(expect.objectContaining({
+      url: "https://systemsculpt.test/api/plugin/audio-processor/jobs/audio_job_123/upload/complete",
+      method: "POST",
+      body: { parts: [{ part_number: 1, etag: "\"etag-1\"" }, { part_number: 2, etag: "\"etag-2\"" }] },
     }));
   });
 

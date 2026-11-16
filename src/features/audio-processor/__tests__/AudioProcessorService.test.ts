@@ -171,7 +171,7 @@ function createApi() {
     createYouTubeJob: jest.fn(),
     getPartUrl: jest.fn(async (_jobId: string, partNumber: number) => signedPart(partNumber)),
     uploadPart: jest.fn(async (part: AudioProcessorSignedPart, _bytes: ArrayBuffer, _signal?: AbortSignal) => ({
-      part_number: part.partNumber,
+      partNumber: part.partNumber,
       etag: `etag-${part.partNumber}`,
     })),
     getUploadParts: jest.fn().mockResolvedValue({
@@ -556,9 +556,9 @@ describe("AudioProcessorService", () => {
     expect(api.completeUpload).toHaveBeenCalledWith(
       "audio_job_123",
       [
-        { part_number: 1, etag: "etag-1" },
-        { part_number: 2, etag: "etag-2" },
-        { part_number: 3, etag: "etag-3" },
+        { partNumber: 1, etag: "etag-1" },
+        { partNumber: 2, etag: "etag-2" },
+        { partNumber: 3, etag: "etag-3" },
       ],
       expect.stringMatching(/^audio-.+:complete$/),
       expect.any(AbortSignal),
@@ -798,8 +798,8 @@ describe("AudioProcessorService", () => {
       partSizeBytes: 4,
       totalParts: 3,
       parts: [
-        { part_number: 1, etag: "etag-1", size_bytes: 4 },
-        { part_number: 2, etag: "etag-2", size_bytes: 4 },
+        { partNumber: 1, etag: "etag-1" },
+        { partNumber: 2, etag: "etag-2" },
       ],
     });
     api.getJob.mockReset()
@@ -823,9 +823,9 @@ describe("AudioProcessorService", () => {
     expect(api.completeUpload).toHaveBeenCalledWith(
       "audio_job_123",
       [
-        { part_number: 1, etag: "etag-1" },
-        { part_number: 2, etag: "etag-2" },
-        { part_number: 3, etag: "etag-3" },
+        { partNumber: 1, etag: "etag-1" },
+        { partNumber: 2, etag: "etag-2" },
+        { partNumber: 3, etag: "etag-3" },
       ],
       expect.stringMatching(/^audio-.+:complete$/),
       expect.any(AbortSignal),
@@ -872,9 +872,9 @@ describe("AudioProcessorService", () => {
     expect(api.completeUpload).toHaveBeenCalledWith(
       "audio_job_123",
       [
-        { part_number: 1, etag: "etag-1" },
-        { part_number: 2, etag: "etag-2" },
-        { part_number: 3, etag: "etag-3" },
+        { partNumber: 1, etag: "etag-1" },
+        { partNumber: 2, etag: "etag-2" },
+        { partNumber: 3, etag: "etag-3" },
       ],
       expect.stringMatching(/^audio-.+:complete$/),
       expect.any(AbortSignal),
@@ -889,9 +889,9 @@ describe("AudioProcessorService", () => {
       partSizeBytes: 4,
       totalParts: 3,
       parts: [
-        { part_number: 1, etag: "etag-1", size_bytes: 4 },
-        { part_number: 2, etag: "etag-2", size_bytes: 4 },
-        { part_number: 3, etag: "etag-3", size_bytes: 2 },
+        { partNumber: 1, etag: "etag-1" },
+        { partNumber: 2, etag: "etag-2" },
+        { partNumber: 3, etag: "etag-3" },
       ],
     });
     api.getJob.mockReset()
@@ -914,9 +914,9 @@ describe("AudioProcessorService", () => {
     expect(api.completeUpload).toHaveBeenCalledWith(
       "audio_job_123",
       [
-        { part_number: 1, etag: "etag-1" },
-        { part_number: 2, etag: "etag-2" },
-        { part_number: 3, etag: "etag-3" },
+        { partNumber: 1, etag: "etag-1" },
+        { partNumber: 2, etag: "etag-2" },
+        { partNumber: 3, etag: "etag-3" },
       ],
       expect.stringMatching(/^audio-.+:complete$/),
       expect.any(AbortSignal),

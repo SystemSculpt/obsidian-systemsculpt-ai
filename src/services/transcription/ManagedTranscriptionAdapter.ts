@@ -1,6 +1,6 @@
 import { throwIfManagedAborted } from "../managed/ManagedAbort";
 import { ManagedJobDispatch } from "../managed/ManagedJobDispatch";
-import { uploadManagedRecoveryParts } from "../managed/ManagedMultipartUpload";
+import { completeManagedRecoveryUpload, MANAGED_UPLOAD_PHASES } from "../managed/ManagedMultipartUpload";
 import type { ManagedFileContent, ManagedFileSource } from "../managed/ManagedFileSource";
 import type { ManagedAdmission } from "../managed/ManagedAdmission";
 import { ManagedJobClient, ManagedJobError } from "../managed/ManagedJobClient";
@@ -10,7 +10,6 @@ import type {
   ManagedJobStatus,
   ManagedLocalCommitReceipt,
   ManagedMultipartCreateRequest,
-  ManagedMultipartUploadDescriptor,
 } from "../managed/ManagedTypes";
 import {
   dispatchManagedJob,
@@ -136,22 +135,6 @@ export class TranscriptionResumeRequiredError extends Error {
       ? originalError.message
       : String(originalError));
   }
-}
-
-function readJobId(value: unknown): string {
-  const jobId = (value as { job?: { id?: unknown } })?.job?.id;
-  if (typeof jobId !== "string" || !jobId) throw new Error("Managed transcription create response did not include a job ID.");
-  return jobId;
-}
-
-function readUpload(value: unknown): { partSize: number; totalParts: number } {
-  const upload = (value as { upload?: { part_size_bytes?: unknown; total_parts?: unknown } })?.upload;
-  const partSize = upload?.part_size_bytes;
-  const totalParts = upload?.total_parts;
-  if (!Number.isInteger(partSize) || (partSize as number) < 1 || !Number.isInteger(totalParts) || (totalParts as number) < 1 || (totalParts as number) > 50) {
-    throw new Error("Managed transcription create response included invalid multipart metadata.");
-  }
-  return { partSize: partSize as number, totalParts: totalParts as number };
 }
 
 export class ManagedTranscriptionAdapter {
@@ -692,7 +675,7 @@ export class ManagedTranscriptionAdapter {
     }
 
     if (
-      ["content_ready", "create_dispatching", "created", "part_dispatching", "uploading", "complete_dispatching"].includes(record.phase)
+      MANAGED_UPLOAD_PHASES.includes(record.phase)
     ) {
       record = await this.ensureUploadCompleted(record, source, context, signal, releaseSource);
       throwIfAborted(signal);
@@ -744,96 +727,37 @@ export class ManagedTranscriptionAdapter {
   }
 
   private async ensureUploadCompleted(
-    initialRecord: ManagedJobRecoveryRecord,
+    record: ManagedJobRecoveryRecord,
     source: ManagedTranscriptionSource,
     context: ManagedTranscriptionContext,
     signal: AbortSignal,
     releaseSource: () => void,
   ): Promise<ManagedJobRecoveryRecord> {
-    let record = initialRecord;
-    if (record.phase === "upload_completed") return record;
-    const loaded = await this.loadSource(source, context, signal);
-    throwIfAborted(signal);
-
-    if (record.phase === "content_ready" || record.phase === "create_dispatching") {
-      const createRequest = record.pendingDispatch?.createRequest
-        ?? this.buildCreateRequest(source.identity, loaded, context);
-      if (record.phase === "content_ready") {
-        context.onProgress?.(2, "Preparing upload…");
-        record = await this.dispatch.begin(record, "create", undefined, createRequest);
-        throwIfAborted(signal);
-      } else {
-        context.onProgress?.(2, "Resuming preserved upload…");
-      }
-
-      const created = await dispatchManagedJob({
-        send: () => this.dependencies.jobs.create(createRequest, record.operationId, signal),
-        signal,
-        wait: this.wait,
-      });
-      throwIfAborted(signal);
-      const jobId = readJobId(created);
-      const multipartUpload = this.buildMultipartUploadDescriptor(createRequest, readUpload(created));
-      this.assertLoadedBytesMatchUpload(loaded.sizeBytes, multipartUpload);
-      record = await this.dependencies.recovery.acknowledgeCreated(
-        CAPABILITY,
-        record.operationId,
-        record.revision,
-        jobId,
-        multipartUpload,
-      );
-      throwIfAborted(signal);
-    }
-
-    if (["created", "part_dispatching", "uploading"].includes(record.phase)) {
-      const multipartUpload = await this.requireMultipartUpload(record, loaded.sizeBytes);
-      const jobId = record.jobId;
-      if (!jobId) throw new Error("Managed transcription recovery record has no acknowledged job ID.");
-      record = await uploadManagedRecoveryParts({
-        record,
-        source: loaded,
-        dispatch: this.dispatch,
-        recovery: this.dependencies.recovery,
-        sendPart: (partNumber, bytes) => this.dependencies.jobs.uploadPart(jobId, partNumber, bytes, signal),
-        signal,
-        wait: this.wait,
-        sourceChangedMessage: "The selected audio changed while it was being read.",
-        onProgress: (partNumber, state) => {
-          if (state === "uploaded") context.onProgress?.(
-            5 + Math.floor((partNumber / multipartUpload.totalParts) * 60),
-            `Uploading audio (${partNumber}/${multipartUpload.totalParts})…`,
+    const uploaded = await completeManagedRecoveryUpload({
+      record,
+      loadSource: () => this.loadSource(source, context, signal),
+      createRequest: (loaded) => this.buildCreateRequest(source.identity, loaded, context),
+      jobs: this.dependencies.jobs,
+      dispatch: this.dispatch,
+      recovery: this.dependencies.recovery,
+      signal,
+      wait: this.wait,
+      sourceChangedMessage: "The selected audio changed while it was being read.",
+      onProgress: (progress) => {
+        if (progress.stage === "create") {
+          context.onProgress?.(2, progress.resumed ? "Resuming preserved upload…" : "Preparing upload…");
+        } else if (progress.stage === "part") {
+          context.onProgress?.(
+            5 + Math.floor((progress.partNumber / progress.totalParts) * 60),
+            `Uploading audio (${progress.partNumber}/${progress.totalParts})…`,
           );
-        },
-      });
-    }
-
-    if (["complete_dispatching", "created", "part_dispatching", "uploading"].includes(record.phase)) {
-      const jobId = record.jobId;
-      const completedParts = record.completedParts;
-      if (!completedParts?.length || !jobId) {
-        throw new Error("Managed transcription upload completion cannot resume without acknowledged parts.");
-      }
-      if (record.phase === "complete_dispatching") {
-        context.onProgress?.(68, "Finalizing preserved upload…");
-      } else {
-        throwIfAborted(signal);
-        record = await this.dispatch.begin(record, "complete");
-        throwIfAborted(signal);
-      }
-      await dispatchManagedJob({
-        send: () => this.dependencies.jobs.complete(jobId, completedParts, record.operationId, signal),
-        signal,
-        wait: this.wait,
-      });
-      throwIfAborted(signal);
-      record = await this.dependencies.recovery.acknowledgeComplete(CAPABILITY, record.operationId, record.revision);
-      throwIfAborted(signal);
-    }
-
-    if (record.phase === "upload_completed") {
-      releaseSource();
-    }
-    return record;
+        } else {
+          context.onProgress?.(68, "Finalizing preserved upload…");
+        }
+      },
+    });
+    if (uploaded.phase === "upload_completed") releaseSource();
+    return uploaded;
   }
 
   private loadSource(
@@ -872,40 +796,6 @@ export class ManagedTranscriptionAdapter {
       ...(context.timestamped === undefined ? {} : { timestamped: context.timestamped }),
       ...(context.language === undefined ? {} : { language: context.language }),
     };
-  }
-
-  private buildMultipartUploadDescriptor(
-    createRequest: ManagedMultipartCreateRequest,
-    upload: Readonly<{ partSize: number; totalParts: number }>,
-  ): ManagedMultipartUploadDescriptor {
-    return {
-      createRequest,
-      partSizeBytes: upload.partSize,
-      totalParts: upload.totalParts,
-    };
-  }
-
-  private assertLoadedBytesMatchUpload(
-    byteLength: number,
-    multipartUpload: ManagedMultipartUploadDescriptor,
-  ): void {
-    if (multipartUpload.createRequest.contentLengthBytes !== byteLength) {
-      throw new Error("Managed transcription upload metadata no longer matches the audio size.");
-    }
-    if (multipartUpload.totalParts !== Math.ceil(byteLength / multipartUpload.partSizeBytes)) {
-      throw new Error("Managed transcription multipart layout does not match the audio size.");
-    }
-  }
-
-  private async requireMultipartUpload(
-    record: ManagedJobRecoveryRecord,
-    byteLength: number,
-  ): Promise<ManagedMultipartUploadDescriptor> {
-    if (!record.multipartUpload) {
-      throw new Error("Managed transcription cannot safely resume this acknowledged upload because its persisted upload metadata is missing.");
-    }
-    this.assertLoadedBytesMatchUpload(byteLength, record.multipartUpload);
-    return record.multipartUpload;
   }
 
   private buildOpaqueUploadFilename(
