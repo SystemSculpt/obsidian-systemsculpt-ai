@@ -1,8 +1,3 @@
-import {
-  STUDIO_GRAPH_MAX_ZOOM,
-  STUDIO_GRAPH_MIN_ZOOM,
-} from "./StudioGraphInteractionTypes";
-
 const STUDIO_MENU_EDGE_PADDING_PX = 8;
 const STUDIO_MENU_ANCHOR_OFFSET_PX = 8;
 
@@ -23,13 +18,6 @@ type ResolveStudioAnchoredMenuPositionOptions = {
 
 function asFiniteNumber(value: number, fallback: number): number {
   return Number.isFinite(value) ? value : fallback;
-}
-
-export function normalizeStudioMenuScale(value: number): number {
-  if (!Number.isFinite(value)) {
-    return 1;
-  }
-  return Math.min(STUDIO_GRAPH_MAX_ZOOM, Math.max(STUDIO_GRAPH_MIN_ZOOM, value));
 }
 
 export function resolveStudioAnchoredMenuPosition(

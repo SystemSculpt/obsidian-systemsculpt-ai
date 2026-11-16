@@ -386,7 +386,10 @@ export class StudioGraphInteractionEngine {
       return;
     }
 
-    if (target.closest(".ss-studio-port-pin") || target.closest(".ss-studio-node-card")) {
+    // Diagram picks and drags end in clicks too; they are not background hits.
+    if (target.closest(
+      ".ss-studio-port-pin, .ss-studio-node-card, .ss-studio-shape, .ss-studio-shape-arrow, .ss-studio-shape-arrow-label"
+    )) {
       return;
     }
 

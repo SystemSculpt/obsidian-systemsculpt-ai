@@ -142,8 +142,26 @@ export function renderStudioGraphAlignmentGuidesLayer(
   if (!result || (result.guides.length === 0 && result.gaps.length === 0)) return;
 
   const scale = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
+  type Annotation = StudioAlignmentGuideLine | StudioDistanceBadge;
+  const strokeWidth = 2 / scale;
+  const strokeRect = (axis: "x" | "y", position: number, start: number, end: number): StudioGuideRect => axis === "x"
+    ? { left: position, right: position + strokeWidth, top: start, bottom: end }
+    : { left: start, right: end, top: position, bottom: position + strokeWidth };
+  // Reserve all annotations before placing any badge, including later spans.
+  const strokes: Array<{ owner: Annotation; rects: StudioGuideRect[] }> = result.guides.map(guide => ({
+    owner: guide, rects: [strokeRect(guide.axis, guide.position, guide.start, guide.end)],
+  }));
+  for (const gap of result.gaps) {
+    const rects = [strokeRect(gap.axis === "x" ? "y" : "x", gap.cross, gap.start, gap.end)];
+    for (const start of [gap.start, gap.end - strokeWidth]) {
+      rects.push(gap.axis === "x"
+        ? { left: start, right: start + strokeWidth, top: gap.cross - 3 / scale, bottom: gap.cross + 5 / scale }
+        : { left: gap.cross - 3 / scale, right: gap.cross + 5 / scale, top: start, bottom: start + strokeWidth });
+    }
+    strokes.push({ owner: gap, rects });
+  }
   const placed: StudioGuideRect[] = [];
-  const placeBadge = (badge: HTMLElement, anchor: { x: number; y: number }, kind: "x" | "y" | "offset"): void => {
+  const placeBadge = (badge: HTMLElement, anchor: { x: number; y: number }, kind: "x" | "y" | "offset", owner: Annotation): void => {
     layer.appendChild(badge);
     // offsetWidth/Height can round down fractional text boxes and clip an edge.
     const measured = badge.getBoundingClientRect();
@@ -153,7 +171,9 @@ export function renderStudioGraphAlignmentGuidesLayer(
     const left = anchor.x - (kind === "y" ? width + gap : width / 2);
     const top = kind === "offset" ? anchor.y + gap : anchor.y - (kind === "x" ? height + gap : height / 2);
     const desired = { left, top, right: left + width, bottom: top + height };
-    const resolved = nearestBadgeRect(desired, occlusions, placed, gap, viewport);
+    // A label may interrupt its own annotation, never a different measurement.
+    const otherStrokes = strokes.flatMap(stroke => stroke.owner === owner ? [] : stroke.rects);
+    const resolved = nearestBadgeRect(desired, [...occlusions, otherStrokes], placed, gap, viewport);
     // Keep the guide/span when no clear bounded candidate is found for its label.
     if (!resolved) { badge.remove(); return; }
     placed.push(resolved);
@@ -189,7 +209,7 @@ export function renderStudioGraphAlignmentGuidesLayer(
       const anchor = { x: guide.axis === "x" ? guide.position : cross, y: guide.axis === "x" ? cross : guide.position };
       badge.style.left = `${(anchor.x + origin.x) * scale}px`;
       badge.style.top = `${(anchor.y + origin.y) * scale}px`;
-      placeBadge(badge, anchor, "offset");
+      placeBadge(badge, anchor, "offset", guide);
     }
   }
 
@@ -218,6 +238,6 @@ export function renderStudioGraphAlignmentGuidesLayer(
     const anchor = { x: gap.axis === "x" ? mid : gap.cross, y: gap.axis === "x" ? gap.cross : mid };
     badge.style.left = `${(anchor.x + origin.x) * scale}px`;
     badge.style.top = `${(anchor.y + origin.y) * scale}px`;
-    placeBadge(badge, anchor, gap.axis);
+    placeBadge(badge, anchor, gap.axis, gap);
   }
 }

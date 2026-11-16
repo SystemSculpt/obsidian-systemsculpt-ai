@@ -1,8 +1,5 @@
 import { applyPluginSurface } from "../../core/ui/surface";
-import {
-  normalizeStudioMenuScale,
-  resolveStudioAnchoredMenuPosition,
-} from "./StudioFloatingMenuUtils";
+import { resolveStudioAnchoredMenuPosition } from "./StudioFloatingMenuUtils";
 import { StudioMenuLifecycle } from "./StudioMenuLifecycle";
 
 const CONTEXT_MENU_DEFAULT_WIDTH = 220;
@@ -21,7 +18,6 @@ export class StudioSimpleContextMenuOverlay {
   private titleEl: HTMLElement | null = null;
   private subtitleEl: HTMLElement | null = null;
   private listEl: HTMLElement | null = null;
-  private graphZoom = 1;
   private anchorX = 0;
   private anchorY = 0;
   private menuWidth = CONTEXT_MENU_DEFAULT_WIDTH;
@@ -52,15 +48,6 @@ export class StudioSimpleContextMenuOverlay {
     this.subtitleEl = null;
     this.listEl = null;
     this.itemButtons = [];
-  }
-
-  setGraphZoom(zoom: number): void {
-    const nextZoom = normalizeStudioMenuScale(zoom);
-    if (Math.abs(this.graphZoom - nextZoom) < 0.0001) {
-      return;
-    }
-    this.graphZoom = nextZoom;
-    this.applyLayout();
   }
 
   open(options: {
@@ -232,19 +219,16 @@ export class StudioSimpleContextMenuOverlay {
       return;
     }
 
-    const scale = normalizeStudioMenuScale(this.graphZoom);
+    // Like the node picker, this application menu lives outside the zoomed world.
     this.rootEl.style.width = `${this.menuWidth}px`;
-    this.rootEl.style.setProperty("--ss-studio-simple-context-menu-scale", String(scale));
 
     const height = Math.max(40, this.rootEl.offsetHeight || 80);
-    const visualWidth = this.menuWidth * scale;
-    const visualHeight = height * scale;
     const position = resolveStudioAnchoredMenuPosition({
       viewportEl: this.viewportEl,
       anchorX: this.anchorX,
       anchorY: this.anchorY,
-      visualWidth,
-      visualHeight,
+      visualWidth: this.menuWidth,
+      visualHeight: height,
     });
     this.rootEl.style.left = `${position.x}px`;
     this.rootEl.style.top = `${position.y}px`;

@@ -173,6 +173,29 @@ it.each([0.8, 1, 2])("keeps badges separate when their anchors clamp to the same
   expect(layer.children).toHaveLength(4);
 });
 
+it.each([0.8, 1, 2])("keeps each badge clear of other annotation stems at zoom %s", zoom => {
+  jest.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+    if (!this.classList.contains("ss-studio-distance-badge")) throw new Error("Measured a peer instead of the badge");
+    return new DOMRect(0, 0, this.classList.contains("ss-studio-alignment-offset-badge") ? 84 : 46, 20);
+  });
+  const layer = document.createElement("div");
+  renderStudioGraphAlignmentGuidesLayer(layer, {
+    guides: [{ axis: "x", position: 143 / zoom, start: 530 / zoom, end: 710 / zoom, offset: 0.5, labelCross: 530 / zoom }],
+    gaps: [{ axis: "y", cross: 181 / zoom, start: 530 / zoom, end: 710 / zoom, label: "180 px" }],
+  }, zoom, { x: 0, y: 0 }, [], { left: 0, top: 0, right: 400 / zoom, bottom: 800 / zoom });
+  const badges = Array.from(layer.querySelectorAll<HTMLElement>(".ss-studio-distance-badge"));
+  expect(badges).toHaveLength(2);
+  const rect = (badge: HTMLElement): StudioGuideRect => {
+    const left = Number.parseFloat(badge.style.left), top = Number.parseFloat(badge.style.top);
+    return { left, top, right: left + (badge.classList.contains("ss-studio-alignment-offset-badge") ? 84 : 46), bottom: top + 20 };
+  };
+  const offset = badges.find(badge => badge.classList.contains("ss-studio-alignment-offset-badge"))!;
+  const distance = badges.find(badge => badge !== offset)!;
+  expect(intersects(rect(offset), { left: 181, right: 183, top: 530, bottom: 710 })).toBe(false);
+  expect(intersects(rect(distance), { left: 143, right: 145, top: 530, bottom: 710 })).toBe(false);
+  expect(rect(offset).right).toBeLessThanOrEqual(173);
+});
+
 it.each([0.8, 1, 2])("keeps fractional badge borders inside camera edges at zoom %s", zoom => {
   const width = 46.484375, height = 19.3984375;
   jest.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
