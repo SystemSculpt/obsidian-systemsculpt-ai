@@ -71,16 +71,16 @@ npm run check:compat
 ## Release rules
 
 - Fixes merge source only: no per-fix version bumps, tags or publication.
-  Trellis `tools/plugin-daily-release.mjs` owns one combined release per Pacific
-  day when main changed. It requires full CI on the exact release revision, a
+  The Trellis timer `systemsculpt-daily-release` owns one combined release per
+  Pacific day when main changed. It requires full CI on the exact release revision, a
   real isolated Obsidian smoke and three-asset SHA-256 comparison.
-- Unpublished tags 6.19.6–6.19.8 stay immutable and unpublished. The next daily
-  version exceeds every existing semantic version tag and supersedes them.
+- Unpublished tags 6.19.6–6.19.8 stay immutable and unpublished. Daily
+  versions exceed every existing semantic version tag and supersede them.
 - Obsidian installs the release files of HEAD manifest.json's version, so an
   unpublished version on main breaks every install and update. Only the daily
   tool bumps the four version files, and it merges the bump to main only after
-  publishing that version. Trellis setup-health checks daily that HEAD's
-  version has downloadable release files.
+  publishing that version. Each daily run checks that HEAD's version has
+  downloadable release files and fails loudly when it does not.
 
 - Release validation records the SHA-256 and size of manifest.json, main.js, and styles.css plus the source revision and build environment identity. The published-release workflow rebuilds the tag, requires exact asset bytes, and attests those published bytes before announcing the release through first-party metadata. It announces only once main's manifest.json names that version.
 

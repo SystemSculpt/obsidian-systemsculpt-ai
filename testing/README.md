@@ -105,9 +105,9 @@ policy tests prevent local and hosted gate definitions from silently drifting.
 The merge queue event runs the same workflow. Repository branch protection
 must require the stable `required` job before merge.
 
-The release:plugin command also requires check:ci before it rebuilds and
-validates release artifacts, so the local release path cannot bypass the
-exhaustive gate. It only succeeds from a clean worktree when the version tag
+The release:plugin command does not rerun check:ci: the daily release timer
+requires full CI green on the exact tagged commit before it builds. It only
+succeeds from a clean worktree when the version tag
 resolves to the same full revision recorded in provenance, and the CLI cannot
 reuse pre-existing artifacts without rebuilding them.
 
