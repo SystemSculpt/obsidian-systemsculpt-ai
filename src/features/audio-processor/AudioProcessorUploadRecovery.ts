@@ -1,7 +1,7 @@
 import type SystemSculptPlugin from "../../main";
 import type { PendingAudioProcessorUpload } from "../../types";
 import type { AudioProcessorAudioSource } from "./types";
-import type { AudioProcessorUploadedPart } from "./AudioProcessorApiClient";
+import type { ManagedMultipartPart } from "../../services/managed/ManagedTypes";
 
 const MAX_PENDING_UPLOADS = 10;
 const persistenceByPlugin = new WeakMap<SystemSculptPlugin, Promise<void>>();
@@ -38,7 +38,7 @@ export class AudioProcessorUploadRecovery {
     ]);
   }
 
-  async rememberPart(jobId: string, part: AudioProcessorUploadedPart): Promise<void> {
+  async rememberPart(jobId: string, part: ManagedMultipartPart): Promise<void> {
     const normalizedJobId = normalizeJobId(jobId);
     await this.mutate((current) => current.map((entry) => {
       if (entry.jobId !== normalizedJobId) return entry;
@@ -46,10 +46,7 @@ export class AudioProcessorUploadRecovery {
         candidate.partNumber,
         candidate,
       ]));
-      uploadedPartMap.set(part.part_number, {
-        partNumber: part.part_number,
-        etag: part.etag,
-      });
+      uploadedPartMap.set(part.partNumber, { partNumber: part.partNumber, etag: part.etag });
       return {
         ...entry,
         uploadedParts: [...uploadedPartMap.values()].sort(
@@ -65,7 +62,7 @@ export class AudioProcessorUploadRecovery {
     upload: Readonly<{
       partSizeBytes: number;
       totalParts: number;
-      parts: readonly AudioProcessorUploadedPart[];
+      parts: readonly ManagedMultipartPart[];
     }>,
   ): Promise<void> {
     const normalizedJobId = normalizeJobId(jobId);
@@ -76,7 +73,7 @@ export class AudioProcessorUploadRecovery {
         partSizeBytes: upload.partSizeBytes,
         totalParts: upload.totalParts,
         uploadedParts: [...upload.parts]
-          .map((part) => ({ partNumber: part.part_number, etag: part.etag.trim() }))
+          .map((part) => ({ partNumber: part.partNumber, etag: part.etag.trim() }))
           .sort((left, right) => left.partNumber - right.partNumber),
         updatedAt: Date.now(),
       };

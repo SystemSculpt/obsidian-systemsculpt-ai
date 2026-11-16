@@ -21,6 +21,7 @@ import {
   AUDIO_PROCESSOR_PRESET_ARTIFACT_MANIFEST_VERSION,
 } from "./types";
 import { parseRetryAfterMs } from "../../utils/retryAfter";
+import type { ManagedMultipartPart } from "../../services/managed/ManagedTypes";
 import { CREDITS_REQUIRED_MESSAGE } from "../../utils/errors";
 
 type JsonRecord = Record<string, unknown>;
@@ -45,22 +46,11 @@ export interface AudioProcessorSignedPart {
   expiresInSeconds: number;
 }
 
-export interface AudioProcessorUploadedPart {
-  part_number: number;
-  etag: string;
-}
-
-interface AudioProcessorRemoteUploadPart {
-  part_number: number;
-  etag: string;
-  size_bytes: number;
-}
-
 export interface AudioProcessorRemoteUploadState {
   objectCompleted: boolean;
   partSizeBytes: number;
   totalParts: number;
-  parts: AudioProcessorRemoteUploadPart[];
+  parts: ManagedMultipartPart[];
 }
 
 const STATUSES: readonly AudioProcessorStatus[] = [
@@ -160,7 +150,7 @@ export class AudioProcessorApiClient {
     part: AudioProcessorSignedPart,
     bytes: ArrayBuffer,
     signal?: AbortSignal,
-  ): Promise<AudioProcessorUploadedPart> {
+  ): Promise<ManagedMultipartPart> {
     const response = await this.requestClient.request({
       url: part.url,
       method: "PUT",
@@ -182,19 +172,19 @@ export class AudioProcessorApiClient {
     }
     const etag = response.headers.get("etag")?.trim();
     if (!etag || etag.length > 512) malformed("The audio upload response did not include a valid ETag.");
-    return { part_number: part.partNumber, etag };
+    return { partNumber: part.partNumber, etag };
   }
 
   async completeUpload(
     jobId: string,
-    parts: readonly AudioProcessorUploadedPart[],
+    parts: readonly ManagedMultipartPart[],
     operationId: string,
     signal?: AbortSignal,
   ): Promise<AudioProcessorJob> {
     const payload = await this.apiJson(
       `/audio-processor/jobs/${encodeURIComponent(jobId)}/upload/complete`,
       "POST",
-      { parts },
+      { parts: parts.map((part) => ({ part_number: part.partNumber, etag: part.etag })) },
       operationId,
       signal,
     );
@@ -486,7 +476,7 @@ function parseUploadParts(value: unknown): AudioProcessorRemoteUploadState {
   if (!Array.isArray(upload.parts) || upload.parts.length > totalParts || totalParts > 10_000) {
     malformed("Audio upload parts exceeded client limits.");
   }
-  const deduped = new Map<number, AudioProcessorRemoteUploadPart>();
+  const deduped = new Map<number, ManagedMultipartPart>();
   for (const entry of upload.parts) {
     const part = record(entry, "Audio upload part");
     const partNumber = positiveInteger(part.part_number, "part_number");
@@ -495,13 +485,13 @@ function parseUploadParts(value: unknown): AudioProcessorRemoteUploadState {
     if (partNumber > totalParts || sizeBytes > partSizeBytes) {
       malformed("Audio upload part was out of bounds.");
     }
-    deduped.set(partNumber, { part_number: partNumber, etag, size_bytes: sizeBytes });
+    deduped.set(partNumber, { partNumber, etag });
   }
   return {
     objectCompleted: upload.object_completed,
     partSizeBytes,
     totalParts,
-    parts: [...deduped.values()].sort((left, right) => left.part_number - right.part_number),
+    parts: [...deduped.values()].sort((left, right) => left.partNumber - right.partNumber),
   };
 }
 
