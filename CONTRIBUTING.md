@@ -24,7 +24,8 @@ npm run test:related -- <changed src files>
 Run the loop once for the changed area, using the focused test command instead
 of the full suite. Add compiled integration only for bundle/composition
 changes. Fixes merge source only: no per-fix version bumps, tags or publication.
-The no-model Trellis daily script owns the combined release. Its
+The no-model Trellis timer `systemsculpt-daily-release` owns the combined daily
+release. Its
 `release:plugin` step builds and validates artifacts without rerunning
 `check:ci`; full CI must already be green on the exact tagged commit.
 

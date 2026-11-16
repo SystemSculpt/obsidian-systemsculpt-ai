@@ -341,15 +341,18 @@ Do not run either two-phase journey concurrently.
 
 Fixes merge source only. Do not bump a version, create a release tag, or publish
 for an individual fix. Michael approved one combined release per Pacific day
-on November 7, 2026 (T-5751); the first daily release is November 8.
+on November 7, 2026 (T-5751); the first daily release was 6.19.9 on November 9.
+Whatever is on main at release time ships, so merge a change that spans several
+PRs only once every part is ready.
 
-Trellis owns the no-model daily schedule at 00:05 America/Los_Angeles:
+The Trellis timer `systemsculpt-daily-release` (no model, no agent) runs at
+00:05 America/Los_Angeles on Michael's Mac:
 
 ~~~bash
 # From the Trellis repository; read-only plan, including the next unused version:
-node tools/plugin-daily-release.mjs --dry-run
-# The scheduled command launches its owned, logged release job:
-node tools/plugin-daily-release.mjs
+/opt/homebrew/opt/node@22/bin/node extensions/timers/jobs/systemsculpt-daily-release/daily-release.mjs --dry-run
+# What the timer runs (or use Run now on the timer's line in Trellis):
+/opt/homebrew/opt/node@22/bin/node extensions/timers/jobs/systemsculpt-daily-release/daily-release.mjs
 ~~~
 
 The script skips when main's tree equals the latest published release's, or
@@ -375,21 +378,23 @@ untouched; the next run resumes a failed merge after publication, rerunning a
 failed PR check against current main. systemsculpt.com's release metadata
 workflow waits until main names the version before it announces the release.
 
-Unpublished tags 6.19.6–6.19.8 remain immutable and unpublished. Their source
-fixes go into the next daily release, whose version exceeds all existing
-semantic version tags (initially 6.19.9). Never publish those old tags later.
-Until then main's version files stay at 6.19.5, the latest published release:
-Obsidian reads HEAD manifest.json and downloads that version's release files.
+Unpublished tags 6.19.6–6.19.8 (cut per fix on November 7–8, before the daily
+release existed) remain immutable and unpublished; they are kept, not deleted,
+because they record what was tagged. Their source fixes shipped in the daily
+releases, whose versions exceed every existing semantic version tag, so they
+are superseded. Never publish those old tags later.
 
-The scheduler launches a durable supervisor because CI can exceed its ordinary
-ten-minute command lifetime. The job holds `release:obsidian-systemsculpt-ai`,
-logs each stage and has a one-hour wall-clock timeout. On failure it files or
-updates one rolling repair task; healthy and no-change runs never wake an agent.
-Runtime state and logs are under `~/.trellis/var/plugin-daily-release/`; the
-owned checkout is `~/.trellis/checkouts/plugin-daily-release/`. An interrupted
-publication resumes the same candidate and verifies remote bytes instead of
-creating another release. Repair failed source on main, then rerun the daily
-tool; never move an existing tag or publish by hand.
+Each run holds a lock, logs each stage to the timer's log, and has a 90-minute
+timeout. It exits 0 when it released or had nothing to do, 75 when another run
+holds the lock or the Pacific day ended mid-release (the next run resumes), and
+1 on failure; a failure tells Trellis's general orchestrator through the
+timers' own alerts. Healthy and no-change runs never wake an agent. State,
+per-version evidence and the owned clone are under
+`~/.trellis-next/systemsculpt-daily-release/`; the run log is in
+`~/.trellis-next/timers/logs/`. An interrupted publication resumes the same
+candidate and verifies remote bytes instead of creating another release.
+Repair failed source on main, then rerun the timer; never move an existing tag
+or publish by hand.
 
 `npm run release:plugin` remains the daily tool's build/validation step, not a
 publication command for fix tasks. It does not rerun check:ci: the exact tagged
