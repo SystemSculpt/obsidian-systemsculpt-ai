@@ -220,6 +220,40 @@ describe("R3 conversation semantics", () => {
     renderer.unload();
   });
 
+  it("moves the timer onto a running step inside an activity group and leaves no trace in history", async () => {
+    jest.useFakeTimers();
+    const { renderer, parent } = setup();
+    const thought = { kind: "reasoning" as const, id: "thought", messageId: "answer", order: 0, state: "complete" as const, summary: "Looking for notes" };
+    const reading = tool({ order: 1, input: { paths: ["Notes/A.md", "Notes/B.md"] } });
+    await render(renderer, snapshot([thought, reading]));
+    const row = parent.querySelector<HTMLElement>(".systemsculpt-agent-part.is-tool")!;
+    const tail = parent.querySelector<HTMLElement>(".systemsculpt-agent-tail-status")!;
+    // The step sits in the group's body, on screen; it carries the timer and the tail steps aside.
+    expect(row.parentElement?.matches('[data-testid="chat.activity.body"]')).toBe(true);
+    expect(row.closest("[hidden]")).toBeNull();
+    expect(row.querySelector('[data-testid="chat.tool.elapsed"]')?.textContent).toBe("· 2s");
+    expect(tail.hidden).toBe(true);
+
+    await render(renderer, { ...snapshot([thought, { ...reading, state: "succeeded" },
+      { kind: "text", id: "reply", messageId: "answer", order: 2, state: "complete", markdown: "Your starter" }], "completed"), elapsedMs: 3_000 });
+    expect(parent.querySelector("[data-agent-live-step], [data-testid=\"chat.tool.elapsed\"]")).toBeNull();
+    expect(parent.querySelector(".systemsculpt-agent-tool-ellipsis")).toBeNull();
+    renderer.unload();
+  });
+
+  it("keeps an approved native step's decision and drops only its ellipsis for the timer", async () => {
+    const { renderer, parent } = setup();
+    await render(renderer, snapshot([tool({ name: "Bash", location: "server", input: { command: "pwd" }, state: "running", approvalId: "approval",
+      native: { agent: "claude", workingDirectory: "/synthetic" } })]));
+    const row = parent.querySelector<HTMLElement>(".systemsculpt-agent-part.is-tool")!;
+    const ellipsis = row.querySelector(".systemsculpt-agent-tool-ellipsis")!;
+    expect(ellipsis.nextSibling?.textContent).toBe(" · Approved");
+    expect(row.getAttribute("data-agent-live-step")).toBe("timed");
+    expect(row.querySelector('[data-testid="chat.tool.elapsed"]')?.textContent).toBe("· 2s");
+    expect(parent.querySelector<HTMLElement>(".systemsculpt-agent-tail-status")!.hidden).toBe(true);
+    renderer.unload();
+  });
+
   it("keeps native approval waits spinner-free and timer-free", async () => {
     const { renderer, parent } = setup();
     const pending = tool({ name: "Bash", location: "server", input: { command: "pwd" }, state: "approval-required", approvalId: "approval",

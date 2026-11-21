@@ -746,11 +746,11 @@ export class ActiveConversationRenderer {
 
   /** The running tool's row when the tail would only repeat it; never a row folded out of sight. */
   private liveStepRow(lanes: readonly Readonly<{ key: string; node: HTMLElement }>[]): HTMLElement | null {
-    const key = this.activeTailToolKey;
-    if (!key) return null;
-    const node = lanes.find((lane) => lane.key === key)?.node;
+    const node = this.activeTailToolKey ? this.activeNodes.get(this.activeTailToolKey) : undefined;
     const shell = node?.querySelector<HTMLElement>(":scope > .systemsculpt-agent-tool");
-    return node && shell && !shell.hidden ? node : null;
+    if (!node || !shell || shell.hidden) return null;
+    // A lane itself, or shown inside an open activity group (the newest step of a group lives in its body).
+    return lanes.some((lane) => lane.node === node || (lane.node === node.parentElement && !lane.node.hidden)) ? node : null;
   }
 
   private setLiveStep(row: HTMLElement | null): void {

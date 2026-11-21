@@ -298,7 +298,9 @@ approvals cross-check it against `chat.diff.file` and its `data-path`, even
 when the preview header is hidden. Tool labels,
 summaries and status icons use `chat.tool.label`, `chat.tool.summary`, and
 `chat.tool.state`; `chat.tail-status` retains `data-status` and exposes
-`data-phase`. Settings use `settings.surface`, `settings.tab-bar`, and
+`data-phase`. While a running tool's own row is visible, that row carries the
+turn timer in `chat.tool.elapsed` and the tail status is hidden but keeps its
+`data-status`. Settings use `settings.surface`, `settings.tab-bar`, and
 `settings.panel.<id>` with the tabs’ existing ARIA selection/visibility state.
 Supported actions read these identities, not cosmetic classes. Snapshot part
 kinds retain their existing `is-<kind>` values for script compatibility.

@@ -38,6 +38,29 @@ type AgentToolRendererOptions = Readonly<{
   untrackDisclosures: (target: HTMLElement) => void;
 }>;
 
+/** Wraps the "…" at a text offset of the label in its own span, keeping the label's text unchanged. */
+function isolateEllipsis(label: HTMLElement, at: number): void {
+  let offset = 0;
+  for (const node of Array.from(label.childNodes)) {
+    const length = node.textContent?.length ?? 0;
+    if (at >= offset + length) {
+      offset += length;
+      continue;
+    }
+    if (node.nodeType !== Node.TEXT_NODE || (node as Text).data[at - offset] !== "…") return;
+    const before = node as Text;
+    const ellipsis = before.splitText(at - offset);
+    const after = ellipsis.splitText(1);
+    const span = createSurfaceElement(label.ownerDocument, "span");
+    span.className = "systemsculpt-agent-tool-ellipsis";
+    span.textContent = "…";
+    ellipsis.replaceWith(span);
+    if (!after.data) after.remove();
+    if (!before.data) before.remove();
+    return;
+  }
+}
+
 /** Owns tool DOM reuse, approval previews, and lazy tool-detail hydration. */
 export class AgentToolRenderer {
   private readonly toolApprovalPreviewHydrationStates = new WeakMap<HTMLElement, ToolApprovalPreviewHydrationState>();
@@ -320,11 +343,8 @@ export class AgentToolRenderer {
         label.appendText(displayLabel.slice(index + basename.length));
       }
       // A running step's "…" is its own node so a live timer can stand in for it.
-      const last = label.lastChild;
-      if (last?.nodeType === Node.TEXT_NODE && last.nodeValue?.endsWith("…")) {
-        last.nodeValue = last.nodeValue.slice(0, -1);
-        if (!last.nodeValue) last.remove();
-        label.createSpan({ cls: "systemsculpt-agent-tool-ellipsis", text: "…" });
+      if (presentation.label.endsWith("…") && displayLabel.startsWith(presentation.label)) {
+        isolateEllipsis(label, presentation.label.length - 1);
       }
     }
     shell.toggleAttribute("hidden", Boolean(approvalRequired));
