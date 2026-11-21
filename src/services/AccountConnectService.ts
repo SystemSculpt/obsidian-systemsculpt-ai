@@ -7,6 +7,7 @@ import { sha256HexFromBytes } from "../utils/sha256";
 import { isStarterBalance } from "../utils/licenseUtils";
 import { requireApiVersion } from "obsidian";
 import { withExperimentArm, type CopyExperimentArm } from "./CopyExperiments";
+import { deriveConnectUserCode, formatConnectUserCode } from "./connectUserCode";
 
 export type AccountConnectMode = "sign-in" | "sign-up";
 
@@ -263,14 +264,29 @@ export class AccountConnectService {
     return this.openUrl(await this.connectUrl(pending), ownerWindow);
   }
 
-  private async connectUrl(pending: PendingConnectRequest): Promise<string> {
-    const hash = await sha256HexFromBytes(new TextEncoder().encode(pending.verifier));
+  /**
+   * The code the sign-in page asks for (connectUserCode.ts), as shown to the
+   * person: null when no sign-in is pending.
+   */
+  public async pendingUserCode(): Promise<string | null> {
+    const pending = this.activePending();
+    if (!pending) return null;
+    return formatConnectUserCode(await deriveConnectUserCode(await this.challengeFor(pending.verifier)));
+  }
+
+  private async challengeFor(verifier: string): Promise<string> {
+    const hash = await sha256HexFromBytes(new TextEncoder().encode(verifier));
     const digest = Uint8Array.from({ length: hash.length / 2 }, (_, index) =>
       Number.parseInt(hash.slice(index * 2, index * 2 + 2), 16));
-    const challenge = base64UrlEncode(digest);
+    return base64UrlEncode(digest);
+  }
+
+  private async connectUrl(pending: PendingConnectRequest): Promise<string> {
+    const challenge = await this.challengeFor(pending.verifier);
     const origin = new URL(API_BASE_URL).origin;
     const path = pending.mode === "sign-up" ? "/sign-up" : "/sign-in";
-    const redirect = `/plugin/connect?state=${pending.state}&challenge=${challenge}`;
+    // uc=1: this plugin shows the code the page asks for (connectUserCode.ts).
+    const redirect = `/plugin/connect?state=${pending.state}&challenge=${challenge}&uc=1`;
     const url = `${origin}${path}?redirect_url=${encodeURIComponent(redirect)}`;
     if (!pending.arm) return url;
     return withExperimentArm(`${url}&utm_source=obsidian-plugin&utm_medium=modal`, pending.arm);

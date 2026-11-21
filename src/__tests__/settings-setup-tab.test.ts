@@ -38,6 +38,7 @@ const createPluginStub = () => {
 
   const accountConnectService = {
     hasPendingRequest: jest.fn(() => false),
+    pendingUserCode: jest.fn(async () => "G1JP-JTC9"),
     cancelPending: jest.fn(),
     reopen: jest.fn().mockResolvedValue(true),
     begin: jest.fn().mockResolvedValue(undefined),
@@ -136,6 +137,17 @@ describe("Setup tab SystemSculpt-only layout", () => {
     renderAccountSection(container, tab, true);
     container.querySelector<HTMLElement>('[aria-label="Manage account"]')!.click();
     expect(new URL(anchorHrefs[1]).pathname).toBe("/dashboard/billing");
+  });
+
+  it("shows the code the sign-in page asks for while a sign-in is pending", async () => {
+    const plugin = createPluginStub();
+    plugin.accountConnectService.hasPendingRequest.mockReturnValue(true);
+    const tab = new SystemSculptSettingTab(app, plugin);
+    const container = document.createElement("div");
+    renderAccountSection(container, tab, false);
+    await flushSetupSectionRender();
+    expect(container.querySelector("[data-testid='account.user-code']")?.textContent)
+      .toBe("Enter this code on the sign-in page: G1JP-JTC9");
   });
 
   it("reopens the pending browser request from the manual-code fallback", async () => {
