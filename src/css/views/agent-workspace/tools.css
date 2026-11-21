@@ -156,6 +156,21 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* A running step carries the turn timer on its own row: "Reading 2 notes · 4s". */
+.systemsculpt-agent-conversation .systemsculpt-agent-tool-elapsed {
+  flex: 0 0 auto;
+  color: var(--ss-ink-muted);
+  font-size: var(--ss-text-sm);
+  line-height: 20px;
+  white-space: nowrap;
+}
+.systemsculpt-agent-conversation [data-agent-live-step="timed"] .systemsculpt-agent-tool-ellipsis {
+  display: none;
+}
+/* A long label gives way so the timer stays in view. */
+.systemsculpt-agent-conversation [data-agent-live-step="timed"] .systemsculpt-agent-tool-header .systemsculpt-agent-tool-label {
+  flex-shrink: 1;
+}
 .systemsculpt-agent-conversation .systemsculpt-agent-tool-summary.is-compact {
   /* Short meta still yields to the label on a narrow row, with an ellipsis. */
   flex: 0 1 auto;

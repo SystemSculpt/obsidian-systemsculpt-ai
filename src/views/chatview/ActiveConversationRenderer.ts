@@ -54,6 +54,10 @@ export class ActiveConversationRenderer {
   private activeCompletedFoldBody: HTMLElement | null = null;
   private activeWorkingTimer: number | null = null;
   private activeWorkingWindow: Window | null = null;
+  /** The running tool the tail would name; its own row carries the live label instead. */
+  private activeTailToolKey: string | null = null;
+  private activeWorkingDuration: string | null = null;
+  private activeLiveStep: HTMLElement | null = null;
   private visible = true;
   private activeElapsedBaseline: Readonly<{ elapsedMs: number; observedAt: number }> | null = null;
   private activeTurn: HTMLElement | null = null;
@@ -125,6 +129,7 @@ export class ActiveConversationRenderer {
       && parent === this.activeBody
       && isHistoryCurrent();
     if (!isCurrent()) return null;
+    this.setLiveStep(null);
     const { workParts, finalAnswers, hasActivity } = partitionHistoricalParts(
       parts,
       finalAnswerPartIds,
@@ -193,6 +198,8 @@ export class ActiveConversationRenderer {
   }
 
   private releaseAdoptedActiveTurn(): void {
+    this.setLiveStep(null);
+    this.activeTailToolKey = null;
     this.activeTailStatus?.remove();
     this.stopWorkingTimer();
     this.activeTurn = null;
@@ -273,6 +280,7 @@ export class ActiveConversationRenderer {
     if (!tailStatus && this.activeTailStatus) {
       this.activeTailStatus.remove();
       this.activeTailStatus = null;
+      this.activeTailToolKey = null;
       this.stopWorkingTimer();
     }
     if (orderedParts.length === 0 && !tailStatus) {
@@ -355,7 +363,14 @@ export class ActiveConversationRenderer {
           : (part.kind === "text" || part.kind === "reasoning") && part.state === "streaming");
       const placeholders = Array.from(media?.querySelectorAll<HTMLElement>("[data-pending-id][aria-busy]") ?? [])
         .map((tile) => (tile.dataset.pendingId ?? "").replace(/:[^:]*$/u, ""));
-      tailStatus.hidden = presentation.phase === "acting" && latest?.kind === "tool" && placeholders.includes(latest.callId);
+      const mediaOwnsStatus = presentation.phase === "acting" && latest?.kind === "tool" && placeholders.includes(latest.callId);
+      // A running step's own row already names it, so that row carries the live
+      // timer and the tail steps aside: one line per step (SS-131).
+      const liveStep = mediaOwnsStatus ? null : this.liveStepRow(visibleLanes);
+      tailStatus.hidden = mediaOwnsStatus || liveStep !== null;
+      this.setLiveStep(liveStep);
+    } else {
+      this.setLiveStep(null);
     }
     const laneNodes = visibleLanes.map((lane) => lane.node);
     if (media) {
@@ -630,9 +645,13 @@ export class ActiveConversationRenderer {
       part.kind === "tool" ? isActiveAgentToolState(part.state)
         : (part.kind === "text" || part.kind === "reasoning") && part.state === "streaming",
     );
+    const namesLatest = presentation.phase !== "submitting"
+      && latestActivity !== undefined
+      && ["acting", "reasoning", "responding"].includes(presentation.phase);
+    this.activeTailToolKey = namesLatest && latestActivity.kind === "tool" ? toolPartKey(latestActivity.callId) : null;
     const activity = presentation.phase === "submitting"
       ? backend === "SystemSculpt" ? "Connecting…" : `Starting ${backend}…`
-      : latestActivity && ["acting", "reasoning", "responding"].includes(presentation.phase)
+      : namesLatest
         // The row adds its own elapsed time (spec 3.3: "Editing Plan.md · 12s").
         ? latestActivity.kind === "tool" ? presentAgentTool(latestActivity).label.replace(/…$/u, "")
           : latestActivity.kind === "text" ? "Writing" : "Thinking"
@@ -640,6 +659,7 @@ export class ActiveConversationRenderer {
     status.dataset.activityLabel = activity;
     const workingElapsedMs = timed ? this.startWorkingTimer(status, elapsedMs) : undefined;
     const workingDuration = formatAgentWorkingDuration(workingElapsedMs);
+    this.activeWorkingDuration = timed ? workingDuration ?? null : null;
     const displayStatus = timed && workingDuration ? `${activity} · ${workingDuration}` : activity;
     const statusChanged = status.dataset.status !== displayStatus;
     if (statusChanged) {
@@ -710,15 +730,62 @@ export class ActiveConversationRenderer {
       }
       const current = this.activeElapsedBaseline.elapsedMs
         + Math.max(0, this.monotonicNow(status) - this.activeElapsedBaseline.observedAt);
-      const text = `${status.dataset.activityLabel ?? "Working"} · ${formatAgentWorkingDuration(current) ?? "0s"}`;
+      const duration = formatAgentWorkingDuration(current) ?? "0s";
+      const text = `${status.dataset.activityLabel ?? "Working"} · ${duration}`;
       if (status.dataset.status === text) return;
       status.dataset.status = text;
       this.setTextNode(
         status.querySelector<HTMLElement>(".systemsculpt-agent-tail-status-label"),
         text,
       );
+      this.activeWorkingDuration = duration;
+      this.paintLiveStep();
     }, 1_000);
     return rebasedElapsedMs;
+  }
+
+  /** The running tool's row when the tail would only repeat it; never a row folded out of sight. */
+  private liveStepRow(lanes: readonly Readonly<{ key: string; node: HTMLElement }>[]): HTMLElement | null {
+    const node = this.activeTailToolKey ? this.activeNodes.get(this.activeTailToolKey) : undefined;
+    const shell = node?.querySelector<HTMLElement>(":scope > .systemsculpt-agent-tool");
+    if (!node || !shell || shell.hidden) return null;
+    // A lane itself, or shown inside an open activity group (the newest step of a group lives in its body).
+    return lanes.some((lane) => lane.node === node || (lane.node === node.parentElement && !lane.node.hidden)) ? node : null;
+  }
+
+  private setLiveStep(row: HTMLElement | null): void {
+    const previous = this.activeLiveStep;
+    if (previous && previous !== row) {
+      previous.removeAttribute("data-agent-live-step");
+      previous.querySelector(".systemsculpt-agent-tool-elapsed")?.remove();
+    }
+    this.activeLiveStep = row;
+    this.paintLiveStep();
+  }
+
+  /** "Reading 2 notes · 4s" on the step's own row, ticking with the turn timer. */
+  private paintLiveStep(): void {
+    const row = this.activeLiveStep;
+    if (!row) return;
+    const duration = this.activeWorkingDuration;
+    row.setAttribute("data-agent-live-step", duration ? "timed" : "");
+    const label = row.querySelector<HTMLElement>(
+      ":scope > .systemsculpt-agent-tool > .systemsculpt-agent-tool-header > .systemsculpt-agent-tool-copy > .systemsculpt-agent-tool-label",
+    );
+    let elapsed = row.querySelector<HTMLElement>(".systemsculpt-agent-tool-elapsed");
+    if (!duration || !label) {
+      elapsed?.remove();
+      return;
+    }
+    if (!elapsed || elapsed.previousElementSibling !== label) {
+      elapsed?.remove();
+      elapsed = createSurfaceElement(row.ownerDocument, "span");
+      elapsed.className = "systemsculpt-agent-tool-elapsed";
+      elapsed.dataset.testid = "chat.tool.elapsed";
+      elapsed.setAttribute("data-agent-working-duration", "");
+      label.after(elapsed);
+    }
+    this.setTextNode(elapsed, `· ${duration}`);
   }
 
   private monotonicNow(element: HTMLElement): number {
@@ -787,6 +854,8 @@ export class ActiveConversationRenderer {
     this.activeBody = null;
     this.activeTurnId = null;
     this.activeTailStatus = null;
+    this.activeTailToolKey = null;
+    this.activeLiveStep = null;
     this.activeCompletedFold = null;
     this.activeCompletedFoldBody = null;
     this.stopWorkingTimer();
