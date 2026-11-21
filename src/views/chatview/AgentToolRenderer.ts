@@ -319,6 +319,13 @@ export class AgentToolRenderer {
         };
         label.appendText(displayLabel.slice(index + basename.length));
       }
+      // A running step's "…" is its own node so a live timer can stand in for it.
+      const last = label.lastChild;
+      if (last?.nodeType === Node.TEXT_NODE && last.nodeValue?.endsWith("…")) {
+        last.nodeValue = last.nodeValue.slice(0, -1);
+        if (!last.nodeValue) last.remove();
+        label.createSpan({ cls: "systemsculpt-agent-tool-ellipsis", text: "…" });
+      }
     }
     shell.toggleAttribute("hidden", Boolean(approvalRequired));
     if (existingApproval && !approvalRequired) (shell as HTMLDetailsElement).open = false;
