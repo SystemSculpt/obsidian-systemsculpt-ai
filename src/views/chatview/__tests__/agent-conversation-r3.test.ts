@@ -183,11 +183,15 @@ describe("R3 conversation semantics", () => {
     renderer.unload();
   });
 
-  it("gives a running step one line that carries the timer, then settles in place", async () => {
+  it.each([
+    ["Reading 2 notes", "Read 2 notes", { input: { paths: ["Notes/A.md", "Notes/B.md"] } }],
+    ["Reading Plan.md", "Read Plan.md", {}],
+    ["Searching “sourdough”", "Searched “sourdough”", { name: "search", input: { patterns: ["sourdough"] } }],
+  ] as const)("gives a running step one line that carries the timer: %s", async (running, done, overrides) => {
     jest.useFakeTimers();
     const { renderer, parent } = setup();
-    const reading = tool({ input: { paths: ["Notes/A.md", "Notes/B.md"] } });
-    await render(renderer, snapshot([reading]));
+    const step = tool(overrides);
+    await render(renderer, snapshot([step]));
     const lines = () => [...parent.querySelectorAll<HTMLElement>(".systemsculpt-agent-turn-body > *")]
       .filter((line) => !line.hidden);
     const row = parent.querySelector<HTMLElement>(".systemsculpt-agent-part.is-tool")!;
@@ -195,7 +199,7 @@ describe("R3 conversation semantics", () => {
     // One line for the step: its own row, with the timer standing in for the "…".
     expect(lines()).toEqual([row]);
     expect(tail.hidden).toBe(true);
-    expect(row.querySelector('[data-testid="chat.tool.label"]')!.textContent).toBe("Reading 2 notes…");
+    expect(row.querySelector('[data-testid="chat.tool.label"]')!.textContent).toBe(`${running}…`);
     expect(row.querySelector(".systemsculpt-agent-tool-ellipsis")?.textContent).toBe("…");
     expect(row.getAttribute("data-agent-live-step")).toBe("timed");
     const elapsed = row.querySelector('[data-testid="chat.tool.elapsed"]')!;
@@ -203,16 +207,16 @@ describe("R3 conversation semantics", () => {
     jest.advanceTimersByTime(1_000);
     expect(elapsed.textContent).toBe("· 3s");
 
-    // Done: the same row reads "Read 2 notes" and the timer moves on to the next activity.
-    await render(renderer, { ...snapshot([{ ...reading, state: "succeeded" },
+    // Done: the same row settles and the timer moves on to the next activity.
+    await render(renderer, { ...snapshot([{ ...step, state: "succeeded" },
       { kind: "text", id: "reply", messageId: "answer", order: 1, state: "streaming", markdown: "Your starter" }]), elapsedMs: 3_000 });
     expect(parent.querySelector(".systemsculpt-agent-part.is-tool")).toBe(row);
-    expect(row.querySelector('[data-testid="chat.tool.label"]')!.textContent).toBe("Read 2 notes");
+    expect(row.querySelector('[data-testid="chat.tool.label"]')!.textContent).toBe(done);
+    expect(row.querySelector(".systemsculpt-agent-tool-ellipsis")).toBeNull();
     expect(row.hasAttribute("data-agent-live-step")).toBe(false);
     expect(row.querySelector('[data-testid="chat.tool.elapsed"]')).toBeNull();
     expect(tail.hidden).toBe(false);
     expect(tail.textContent).toBe("Writing · 3s");
-    expect(lines().filter((line) => line.textContent?.includes("Read"))).toEqual([row]);
     renderer.unload();
   });
 
