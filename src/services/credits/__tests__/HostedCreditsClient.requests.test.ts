@@ -233,4 +233,75 @@ describe("HostedCreditsClient requests", () => {
     expect(request.mock.calls[2][0].headers).toMatchObject({ "x-license-key": "other_account" });
     expect(listener).toHaveBeenCalledTimes(2);
   });
+
+  it.each([
+    [401, "license_invalid"],
+    [403, "access_denied"],
+  ])("tells listeners when the server refuses the license with %s %s", async (status, code) => {
+    const { credits } = createClient();
+    const refused = jest.fn();
+    const stopListening = credits.onAuthorizationRejected(refused);
+    request.mockImplementation(async () => jsonResponse({ error: "Refused", code }, { status }));
+
+    await expect(credits.readBalance()).rejects.toBeDefined();
+    await expect(credits.readUsage()).rejects.toBeDefined();
+    expect(refused).toHaveBeenCalledTimes(2);
+
+    stopListening();
+    await expect(credits.readBalance({ fresh: true })).rejects.toBeDefined();
+    expect(refused).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    [429, { error: "Too many requests", code: "auth_rate_limited" }],
+    [500, { error: "Internal error" }],
+    [503, { error: "Authentication unavailable", code: "auth_unavailable" }],
+  ])("does not report a license refusal for HTTP %s", async (status, payload) => {
+    const { credits } = createClient();
+    const refused = jest.fn();
+    credits.onAuthorizationRejected(refused);
+    request.mockImplementation(async () => jsonResponse(payload, { status }));
+
+    await expect(credits.readBalance()).rejects.toBeDefined();
+    await expect(credits.readUsage()).rejects.toBeDefined();
+    expect(refused).not.toHaveBeenCalled();
+  });
+
+  it("does not report a refusal of a key that is no longer saved", async () => {
+    const { credits, plugin } = createClient();
+    const refused = jest.fn();
+    credits.onAuthorizationRejected(refused);
+    let finish!: (response: Response) => void;
+    request.mockReturnValueOnce(new Promise<Response>((resolve) => { finish = resolve; }));
+
+    const read = credits.readBalance();
+    plugin.settings = { licenseKey: "license_after_sign_in" };
+    finish(jsonResponse({ error: "Refused", code: "license_invalid" }, { status: 401 }));
+
+    await expect(read).rejects.toBeDefined();
+    expect(refused).not.toHaveBeenCalled();
+  });
+
+  it("does not report a license refusal for a network failure or a missing key", async () => {
+    const { credits, plugin } = createClient();
+    const refused = jest.fn();
+    credits.onAuthorizationRejected(refused);
+    request.mockRejectedValue(new Error("offline"));
+
+    await expect(credits.readBalance()).rejects.toThrow("offline");
+    plugin.settings = { licenseKey: "" };
+    await expect(credits.readBalance()).rejects.toMatchObject({ code: ERROR_CODES.INVALID_LICENSE });
+    expect(refused).not.toHaveBeenCalled();
+  });
+
+  it("keeps reading when a listener throws", async () => {
+    const { credits } = createClient();
+    const refused = jest.fn();
+    credits.onAuthorizationRejected(() => { throw new Error("listener failed"); });
+    credits.onAuthorizationRejected(refused);
+    request.mockImplementation(async () => jsonResponse({ error: "Refused", code: "license_invalid" }, { status: 401 }));
+
+    await expect(credits.readBalance()).rejects.toMatchObject({ code: ERROR_CODES.INVALID_LICENSE });
+    expect(refused).toHaveBeenCalledTimes(1);
+  });
 });

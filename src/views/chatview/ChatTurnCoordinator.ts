@@ -4,7 +4,7 @@ import type { ChatSession } from "../../chat/ChatSession";
 import type { ChatMessage } from "../../types";
 import type { AgentConversationSnapshot, ManagedAgentError } from "../../chat/ChatConversation";
 import type { AgentRunResult, AgentLifecycleCode, AgentLifecyclePhase } from "../../chat/managed/ChatSession";
-import { isAgentBillingFailure } from "../../chat/managed/AgentFailurePolicy";
+import { isAgentAuthorizationRejection, isAgentBillingFailure } from "../../chat/managed/AgentFailurePolicy";
 import { toThinAgentUserMessage } from "../../chat/managed/MessageAdapter";
 import type { CreditsRefreshReason } from "../../chat/managed/Lifecycle";
 import { LocalAgentChatSession } from "../../services/codex/LocalAgentChatSession";
@@ -474,7 +474,13 @@ export class ChatTurnCoordinator {
     );
   }
 
+  /**
+   * After a failed turn, re-read what the failure may have changed: the
+   * balance after a billing failure, and the license after a refused one,
+   * where a key replaced from the dashboard signs the plugin out.
+   */
   public refreshCreditsAfterBillingFailure(error: unknown): void {
+    if (isAgentAuthorizationRejection(error)) this.host.plugin.recheckLicenseAfterRejection();
     if (!isAgentBillingFailure(error)) return;
     void this.host.refreshCreditsBalance({ reason: "billing_failure" });
   }

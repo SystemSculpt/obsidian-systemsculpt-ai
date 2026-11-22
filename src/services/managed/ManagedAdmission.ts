@@ -8,6 +8,8 @@ type Options = {
   transport: Pick<HostedTransportAdapter, "getCatalog" | "getAdmission"> & Partial<Pick<HostedTransportAdapter, "onAuthorizationRejected">>;
   licenseKey: () => string;
   now?: () => number;
+  /** A license check for managed work answered license_rejected for the current key. */
+  onLicenseRejected?: () => void;
 };
 type Cache = { catalog: ManagedCapabilityCatalogContract; licenseKey: string; fetchedAt: number };
 type AdmissionCache = { admission: HostedLicenseAdmission; licenseKey: string; checkedAt: number };
@@ -94,8 +96,14 @@ export class ManagedAdmission {
       this.admissionCache = admission.outcome === "allowed"
         ? { admission, licenseKey, checkedAt: (this.options.now ?? Date.now)() }
         : null;
+      // An explicit (fresh) validation applies its own answer.
+      if (admission.outcome === "license_rejected" && !options.fresh) this.reportLicenseRejected();
     }
     return admission;
+  }
+
+  private reportLicenseRejected(): void {
+    try { this.options.onLicenseRejected?.(); } catch { /* A listener must not change the admission. */ }
   }
 
   async acquireLease(operation: ManagedOperation, signal?: AbortSignal): Promise<ManagedLease> {

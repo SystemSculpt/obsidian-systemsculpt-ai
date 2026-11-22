@@ -307,5 +307,63 @@ describe("ManagedAdmission", () => {
     await admission.checkLicense();
     expect(getAdmission).toHaveBeenCalledTimes(2);
   });
+
+  describe("license rejection reports", () => {
+    const rejectedKey = { outcome: "license_rejected", reason: "invalid", diagnostics: { status: 403 } };
+    const createReporting = (onLicenseRejected: () => void) => new ManagedAdmission({
+      transport: { getCatalog, getAdmission } as any, licenseKey, now: () => now, onLicenseRejected,
+    });
+
+    it("reports a key refused while managed work checks it", async () => {
+      const reported = jest.fn();
+      getAdmission.mockResolvedValue(rejectedKey);
+      const admission = createReporting(reported);
+
+      await expect(admission.acquireLease({ alias: "systemsculpt/chat" })).resolves.toMatchObject({ outcome: "license_rejected" });
+      await expect(admission.checkLicense()).resolves.toMatchObject({ outcome: "license_rejected" });
+
+      expect(reported).toHaveBeenCalledTimes(2);
+    });
+
+    it("leaves an explicit check to apply its own answer", async () => {
+      const reported = jest.fn();
+      getAdmission.mockResolvedValue(rejectedKey);
+
+      await createReporting(reported).checkLicense(undefined, { fresh: true });
+
+      expect(reported).not.toHaveBeenCalled();
+    });
+
+    it.each(["allowed", "license_required", "rate_limited", "temporarily_unavailable"] as const)(
+      "does not report %s", async (outcome) => {
+        const reported = jest.fn();
+        getAdmission.mockResolvedValue({ outcome, diagnostics: { status: 200 } });
+
+        await createReporting(reported).checkLicense();
+
+        expect(reported).not.toHaveBeenCalled();
+      },
+    );
+
+    it("ignores an answer for a key replaced during the check", async () => {
+      const reported = jest.fn();
+      let finish!: (value: unknown) => void;
+      getAdmission.mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+      const pending = createReporting(reported).checkLicense();
+
+      licenseKey.mockReturnValue("license_after_sign_in");
+      finish(rejectedKey);
+
+      await expect(pending).resolves.toMatchObject({ outcome: "license_rejected" });
+      expect(reported).not.toHaveBeenCalled();
+    });
+
+    it("returns the answer when the report throws", async () => {
+      getAdmission.mockResolvedValue(rejectedKey);
+
+      await expect(createReporting(() => { throw new Error("listener failed"); }).checkLicense())
+        .resolves.toMatchObject({ outcome: "license_rejected", reason: "invalid" });
+    });
+  });
 });
 
