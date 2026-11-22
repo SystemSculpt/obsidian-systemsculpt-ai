@@ -1,4 +1,5 @@
 import { createHash } from "crypto";
+import { deriveConnectUserCode, formatConnectUserCode } from "../connectUserCode";
 import { requestUrl, requireApiVersion } from "obsidian";
 import { API_BASE_URL } from "../../constants/api";
 import { AccountConnectService, type ConnectOutcome } from "../AccountConnectService";
@@ -122,6 +123,17 @@ describe("AccountConnectService browser sign-in", () => {
 
     await service.begin("sign-in");
     expect([...new URL(openedUrls[2]).searchParams.keys()]).toEqual(["redirect_url"]);
+  });
+
+  it("asks the page for the device code and shows the code it derives from the challenge", async () => {
+    const { service, openedUrls } = createService();
+    expect(await service.pendingUserCode()).toBeNull();
+
+    await service.begin("sign-in");
+    const redirect = new URL(new URL(openedUrls[0]).searchParams.get("redirect_url") as string, "https://example.test");
+    expect(redirect.searchParams.get("uc")).toBe("1");
+    const challenge = redirect.searchParams.get("challenge") as string;
+    expect(await service.pendingUserCode()).toBe(formatConnectUserCode(await deriveConnectUserCode(challenge)));
   });
 
   it("begins sign-in with fresh base64url state and challenge and opens the website", async () => {

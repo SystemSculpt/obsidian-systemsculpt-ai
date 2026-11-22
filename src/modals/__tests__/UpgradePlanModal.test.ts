@@ -125,11 +125,12 @@ function createPlugin(settings: Record<string, unknown> = {}) {
   const submitManualCode = jest.fn().mockResolvedValue({ kind: "error", reason: "expired" });
   const pollInBackground = jest.fn();
   const hasPendingRequest = jest.fn(() => true);
+  const pendingUserCode = jest.fn(async () => "G1JP-JTC9");
   const updateSettings = jest.fn().mockResolvedValue(undefined);
   return {
     app: {},
     settings: { licenseKey: "", licenseValid: false, userEmail: "", ...settings },
-    getAccountConnectService: () => ({ begin, reopen, submitManualCode, pollInBackground, hasPendingRequest }),
+    getAccountConnectService: () => ({ begin, reopen, submitManualCode, pollInBackground, hasPendingRequest, pendingUserCode }),
     getSettingsManager: () => ({ updateSettings }),
     openNewChat: jest.fn(),
     startHostedChat: jest.fn().mockResolvedValue(undefined),
