@@ -240,7 +240,8 @@ it.each([
   ['claude', '/home/test/.claude/projects/vault/main.jsonl'],
   ['codex', '/home/test/.codex/sessions/2026/10/23/main.jsonl'],
 ] as const)('uses recent sessions for hung %s status, but not old or missing sessions', async (agent, session) => {
-  jest.useFakeTimers();
+  // Fake timers replace Date: start their clock at `now` so session ages don't drift with the real date.
+  jest.useFakeTimers({ now });
   const host = machine({ installed: [agent], hang: agent });
   for (const age of [null, 40 * day, day]) {
     if (age !== null) host.file(session, now - age);

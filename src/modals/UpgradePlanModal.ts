@@ -321,6 +321,14 @@ export class UpgradePlanModal extends StandardModal {
     const status = this.contentEl.createDiv({ cls: "ss-upgrade-plan__status" });
     status.createDiv({ cls: "ss-upgrade-plan__spinner", attr: { "aria-hidden": "true" } });
     status.createDiv({ cls: "ss-upgrade-plan__status-text", text: "Waiting for you to finish in the browser…" });
+    // The browser asks for this code, so a sign-in link someone else started can't connect.
+    const userCode = this.addDetail("The sign-in page will ask for your code.");
+    void this.plugin.getAccountConnectService().pendingUserCode().then((code) => {
+      if (code && this.contentEl.contains(userCode)) {
+        userCode.setText(`Enter this code on the sign-in page: ${code}`);
+        userCode.setAttr("data-testid", "upgrade-plan.user-code");
+      }
+    });
     this.addDetail("Stuck? Paste the code from your browser:");
     const codeInput = this.contentEl.createEl("input", {
       cls: "ss-upgrade-plan__code-input",

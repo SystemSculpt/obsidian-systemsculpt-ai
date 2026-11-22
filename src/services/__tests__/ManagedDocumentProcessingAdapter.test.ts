@@ -588,7 +588,7 @@ describe("managed document processing adapter contract", () => {
       createRequest, dispatchedAt: "2026-07-12T12:00:00.000Z",
     });
     await h.recovery.acknowledgeCreated("document_processing", record.operationId, record.revision, documentId);
-    await expect(h.adapter.resume(record.operationId, { source })).rejects.toThrow(/multipart metadata/);
+    await expect(h.adapter.resume(record.operationId, { source })).rejects.toThrow(/persisted upload metadata is missing/);
     expect(h.admission.acquireLease).not.toHaveBeenCalled();
     expect(h.jobs.create).not.toHaveBeenCalled();
     expect(h.jobs.uploadPart).not.toHaveBeenCalled();

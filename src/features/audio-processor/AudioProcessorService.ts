@@ -1,6 +1,7 @@
 import { TFile } from "obsidian";
 import { managedAbortError } from "../../services/managed/ManagedAbort";
 import { uploadManagedParts } from "../../services/managed/ManagedMultipartUpload";
+import type { ManagedMultipartPart } from "../../services/managed/ManagedTypes";
 import type SystemSculptPlugin from "../../main";
 import type { PendingAudioProcessorUploadSource } from "../../types";
 import {
@@ -326,10 +327,7 @@ export class AudioProcessorService {
           });
           const finalized = await this.completeUploadWithRetry(
             job.id,
-            remoteUploadState.parts.map((part) => ({
-              part_number: part.part_number,
-              etag: part.etag,
-            })),
+            remoteUploadState.parts,
             `${operationId}:complete`,
             options,
           );
@@ -368,11 +366,7 @@ export class AudioProcessorService {
         objectCompleted: false,
         partSizeBytes: checkpoint!.partSizeBytes,
         totalParts: checkpoint!.totalParts,
-        parts: checkpoint!.uploadedParts.map((part) => ({
-          part_number: part.partNumber,
-          etag: part.etag,
-          size_bytes: checkpoint!.partSizeBytes,
-        })),
+        parts: checkpoint!.uploadedParts,
       };
       if (!checkpoint) {
         await this.uploadRecovery.rememberStarted(job.id, source, authoritativeUploadState);
@@ -383,10 +377,7 @@ export class AudioProcessorService {
         authoritativeUploadState.partSizeBytes,
         authoritativeUploadState.totalParts,
         options,
-        authoritativeUploadState.parts.map((part) => ({
-          part_number: part.part_number,
-          etag: part.etag,
-        })),
+        authoritativeUploadState.parts,
       );
       if (options.signal.aborted) throw abortError();
       options.onProgress?.({
@@ -438,25 +429,24 @@ export class AudioProcessorService {
     partSizeBytes: number,
     totalParts: number,
     options: ProcessAudioOptions,
-    recoveredParts: ReadonlyArray<{ part_number: number; etag: string }> = [],
-  ): Promise<Array<{ part_number: number; etag: string }>> {
+    recoveredParts: readonly ManagedMultipartPart[] = [],
+  ): Promise<ManagedMultipartPart[]> {
     let currentPart = 1;
     const parts = await uploadManagedParts({
       source,
       plan: { partSizeBytes, totalParts },
-      completedParts: recoveredParts.map((part) => ({ partNumber: part.part_number, etag: part.etag })),
+      completedParts: recoveredParts,
       signal: options.signal,
       sourceChangedMessage: "The selected audio changed during upload.",
       abortMessage: "Audio processing was cancelled.",
       sendPart: async (partNumber, bytes) => {
         currentPart = partNumber;
         const signed = await this.api.getPartUrl(jobId, partNumber, options.signal);
-        const part = await this.api.uploadPart(signed, bytes, options.signal);
-        return { partNumber: part.part_number, etag: part.etag };
+        return await this.api.uploadPart(signed, bytes, options.signal);
       },
       checkpoint: {
         begin: async () => undefined,
-        acknowledge: (part) => this.uploadRecovery.rememberPart(jobId, { part_number: part.partNumber, etag: part.etag }),
+        acknowledge: (part) => this.uploadRecovery.rememberPart(jobId, part),
       },
       onProgress: (partNumber, state) => {
         if (state === "uploaded") return;
@@ -478,12 +468,12 @@ export class AudioProcessorService {
       },
     });
     options.onProgress?.({ stage: "uploading", progress: 0.35, message: "Audio uploaded" });
-    return parts.map((part) => ({ part_number: part.partNumber, etag: part.etag }));
+    return parts;
   }
 
   private async completeUploadWithRetry(
     jobId: string,
-    parts: ReadonlyArray<{ part_number: number; etag: string }>,
+    parts: readonly ManagedMultipartPart[],
     operationId: string,
     options: ProcessAudioOptions,
   ): Promise<AudioProcessorJob> {

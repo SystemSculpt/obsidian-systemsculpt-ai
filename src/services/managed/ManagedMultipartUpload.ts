@@ -3,7 +3,12 @@ import { throwIfManagedAborted } from "./ManagedAbort";
 import type { ManagedJobDispatch } from "./ManagedJobDispatch";
 import { dispatchManagedJob } from "./ManagedJobObservation";
 import type { ManagedJobRecoveryStore } from "./ManagedJobRecoveryStore";
-import type { ManagedJobRecoveryRecord, ManagedMultipartPart } from "./ManagedTypes";
+import { MANAGED_MULTIPART_PART_LIMITS } from "./ManagedRecoveryRecordDecoder";
+import type {
+  ManagedJobRecoveryRecord,
+  ManagedMultipartCreateRequest,
+  ManagedMultipartPart,
+} from "./ManagedTypes";
 
 type MultipartProgress = (partNumber: number, state: "recovered" | "uploading" | "uploaded") => void;
 type MultipartSource = Pick<FileSource, "sizeBytes" | "readSlice">;
@@ -76,8 +81,164 @@ export async function uploadManagedParts(options: Readonly<{
   return [...parts.values()].sort((left, right) => left.partNumber - right.partNumber);
 }
 
+type LedgerCapability = "transcription" | "document_processing";
+
+/** The upload phases a ledger record passes through before `upload_completed`. */
+export const MANAGED_UPLOAD_PHASES: readonly ManagedJobRecoveryRecord["phase"][] = [
+  "content_ready", "create_dispatching", "created", "part_dispatching", "uploading", "complete_dispatching",
+];
+
+export type ManagedRecoveryUploadProgress =
+  | Readonly<{ stage: "create"; resumed: boolean }>
+  | Readonly<{ stage: "part"; partNumber: number; totalParts: number }>
+  | Readonly<{ stage: "complete"; resumed: boolean }>;
+
+/**
+ * Drives one ledger-backed upload from `content_ready` to `upload_completed`:
+ * create, bounded parts and completion, each persisted before transport so an
+ * interrupted upload resumes from its record. Source bytes are loaded only
+ * while parts remain to send.
+ */
+export async function completeManagedRecoveryUpload<Source extends MultipartSource>(options: Readonly<{
+  record: ManagedJobRecoveryRecord;
+  loadSource: () => Promise<Source>;
+  /** The create request for a record that has not dispatched one yet. */
+  createRequest: (source: Source) => ManagedMultipartCreateRequest;
+  jobs: Readonly<{
+    create: (request: ManagedMultipartCreateRequest, operationId: string, signal: AbortSignal) => Promise<unknown>;
+    uploadPart: (jobId: string, partNumber: number, bytes: ArrayBuffer, signal: AbortSignal) => Promise<ManagedMultipartPart>;
+    complete: (jobId: string, parts: ManagedMultipartPart[], operationId: string, signal: AbortSignal) => Promise<unknown>;
+  }>;
+  dispatch: ManagedJobDispatch;
+  recovery: Pick<ManagedJobRecoveryStore, "acknowledgeCreated" | "acknowledgePart" | "acknowledgeComplete">;
+  signal: AbortSignal;
+  wait: (milliseconds: number, signal: AbortSignal) => Promise<void>;
+  onProgress?: (progress: ManagedRecoveryUploadProgress) => void;
+  sourceChangedMessage: string;
+}>): Promise<ManagedJobRecoveryRecord> {
+  const { signal, wait, dispatch, recovery, jobs } = options;
+  let record = options.record;
+  const capability = ledgerCapability(record);
+  const abortMessage = cancelledMessage(capability);
+  const checkAbort = (): void => throwIfManagedAborted(signal, abortMessage);
+  if (record.phase === "upload_completed") return record;
+  if (!MANAGED_UPLOAD_PHASES.includes(record.phase)) {
+    throw new Error(`The upload cannot continue from ${record.phase}.`);
+  }
+
+  if (record.phase !== "complete_dispatching") {
+    const source = await options.loadSource();
+    checkAbort();
+    const createRequest = record.pendingDispatch?.createRequest
+      ?? record.multipartUpload?.createRequest
+      ?? options.createRequest(source);
+    if (createRequest.contentLengthBytes !== source.sizeBytes) throw new Error(options.sourceChangedMessage);
+
+    if (record.phase === "content_ready" || record.phase === "create_dispatching") {
+      const resumed = record.phase === "create_dispatching";
+      options.onProgress?.({ stage: "create", resumed });
+      if (!resumed) {
+        record = await dispatch.begin(record, "create", undefined, createRequest);
+        checkAbort();
+      }
+      const created = readCreatedUpload(capability, await dispatchManagedJob({
+        send: () => jobs.create(createRequest, record.operationId, signal),
+        signal,
+        wait,
+      }));
+      checkAbort();
+      if (created.totalParts !== Math.ceil(source.sizeBytes / created.partSizeBytes)) {
+        throw new Error("The service returned an inconsistent multipart upload plan.");
+      }
+      record = await recovery.acknowledgeCreated(capability, record.operationId, record.revision, created.jobId, {
+        createRequest,
+        partSizeBytes: created.partSizeBytes,
+        totalParts: created.totalParts,
+      });
+      checkAbort();
+    }
+
+    const jobId = record.jobId;
+    if (!jobId) throw new Error("The managed upload has no acknowledged job ID.");
+    if (!record.multipartUpload) {
+      throw new Error("This upload cannot resume safely because its persisted upload metadata is missing.");
+    }
+    const totalParts = record.multipartUpload.totalParts;
+    record = await uploadManagedRecoveryParts({
+      record,
+      source,
+      dispatch,
+      recovery,
+      sendPart: (partNumber, bytes) => jobs.uploadPart(jobId, partNumber, bytes, signal),
+      signal,
+      wait,
+      sourceChangedMessage: options.sourceChangedMessage,
+      onProgress: (partNumber, state) => {
+        if (state === "uploaded") options.onProgress?.({ stage: "part", partNumber, totalParts });
+      },
+    });
+    checkAbort();
+    record = await dispatch.begin(record, "complete");
+    checkAbort();
+  } else {
+    options.onProgress?.({ stage: "complete", resumed: true });
+  }
+
+  const jobId = record.jobId;
+  const completedParts = record.completedParts;
+  if (!jobId || !completedParts?.length) {
+    throw new Error("The upload cannot be completed without acknowledged parts.");
+  }
+  await dispatchManagedJob({
+    send: () => jobs.complete(jobId, completedParts, record.operationId, signal),
+    signal,
+    wait,
+  });
+  checkAbort();
+  record = await recovery.acknowledgeComplete(capability, record.operationId, record.revision);
+  checkAbort();
+  return record;
+}
+
+function ledgerCapability(record: ManagedJobRecoveryRecord): LedgerCapability {
+  if (record.capability !== "transcription" && record.capability !== "document_processing") {
+    throw new Error("The managed upload has no acknowledged multipart metadata.");
+  }
+  return record.capability;
+}
+
+function cancelledMessage(capability: LedgerCapability): string {
+  return capability === "transcription"
+    ? "Transcription was cancelled locally."
+    : "Document conversion was cancelled locally.";
+}
+
+/** Reads the job identity and part layout from a validated create response. */
+function readCreatedUpload(
+  capability: LedgerCapability,
+  value: unknown,
+): Readonly<{ jobId: string; partSizeBytes: number; totalParts: number }> {
+  const response = value as {
+    job?: { id?: unknown };
+    document?: { id?: unknown };
+    upload?: { part_size_bytes?: unknown; total_parts?: unknown };
+  } | null;
+  const jobId = capability === "transcription" ? response?.job?.id : response?.document?.id;
+  const partSizeBytes = response?.upload?.part_size_bytes;
+  const totalParts = response?.upload?.total_parts;
+  if (typeof jobId !== "string" || !jobId) {
+    throw new Error("The service did not return an upload job ID.");
+  }
+  if (!Number.isSafeInteger(partSizeBytes) || (partSizeBytes as number) < 1
+    || !Number.isSafeInteger(totalParts) || (totalParts as number) < 1
+    || (totalParts as number) > MANAGED_MULTIPART_PART_LIMITS[capability]) {
+    throw new Error("The service returned invalid multipart upload metadata.");
+  }
+  return { jobId, partSizeBytes: partSizeBytes as number, totalParts: totalParts as number };
+}
+
 /** Ledger-backed uploads retain their exact pending dispatch and revision on reconnect. */
-export async function uploadManagedRecoveryParts(options: Readonly<{
+async function uploadManagedRecoveryParts(options: Readonly<{
   record: ManagedJobRecoveryRecord;
   source: MultipartSource;
   dispatch: ManagedJobDispatch;
@@ -90,15 +251,11 @@ export async function uploadManagedRecoveryParts(options: Readonly<{
 }>): Promise<ManagedJobRecoveryRecord> {
   let record = options.record;
   const plan = record.multipartUpload;
-  if (!plan || (record.capability !== "transcription" && record.capability !== "document_processing")) {
-    throw new Error("The managed upload has no acknowledged multipart metadata.");
-  }
-  const capability = record.capability;
+  const capability = ledgerCapability(record);
+  if (!plan) throw new Error("The managed upload has no acknowledged multipart metadata.");
   await uploadManagedParts({
     ...options,
-    abortMessage: capability === "transcription"
-      ? "Transcription was cancelled locally."
-      : "Document conversion was cancelled locally.",
+    abortMessage: cancelledMessage(capability),
     plan,
     completedParts: record.completedParts,
     checkpoint: {

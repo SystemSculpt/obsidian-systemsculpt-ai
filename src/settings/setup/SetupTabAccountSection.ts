@@ -210,6 +210,14 @@ export function renderAccountSection(
   }
 
   if (pendingSignIn) {
+    // The sign-in page asks for this code before it connects (connectUserCode.ts).
+    const userCodeLine = root.createDiv({ cls: "setting-item-description", text: "The sign-in page will ask for your code." });
+    void connectService.pendingUserCode().then((code) => {
+      if (code) {
+        userCodeLine.setText(`Enter this code on the sign-in page: ${code}`);
+        userCodeLine.setAttr("data-testid", "account.user-code");
+      }
+    });
     createCatalogSetting(root, "account.browser-sign-in")
       .addButton((button) => {
         button.setButtonText("Open the sign-in page again").onClick(async () => {
