@@ -8,10 +8,10 @@ import { sha256HexFromBytes } from "../utils/sha256";
  * Keep the context, alphabet and length byte-for-byte equal to the website's
  * src/lib/plugin/connect/userCode.ts.
  */
-export const USER_CODE_CONTEXT = "systemsculpt-connect-user-code-v1\n";
+const USER_CODE_CONTEXT = "systemsculpt-connect-user-code-v1\n";
 /** Crockford base32: no I, L, O or U. */
 const ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
-export const USER_CODE_LENGTH = 8;
+const USER_CODE_LENGTH = 8;
 
 export async function deriveConnectUserCode(challenge: string): Promise<string> {
   const hex = await sha256HexFromBytes(new TextEncoder().encode(USER_CODE_CONTEXT + challenge));
