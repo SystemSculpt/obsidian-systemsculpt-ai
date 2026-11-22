@@ -220,7 +220,7 @@ it('caches results and concurrent probes until invalidated or explicitly detecte
 });
 
 it.each(['claude', 'codex'] as const)('keeps hung %s status unknown without hiding the other usable agent', async agent => {
-  jest.useFakeTimers();
+  jest.useFakeTimers({ now });
   const host = machine({ hang: agent });
   const result = detectLocalAgents();
   await jest.advanceTimersByTimeAsync(3000);
@@ -257,7 +257,7 @@ it.each([
 });
 
 it.each(['claude', 'codex'] as const)('updates cached %s status after one background retry succeeds', async agent => {
-  jest.useFakeTimers();
+  jest.useFakeTimers({ now });
   const host = machine({ installed: [agent] });
   host.execFile.mockImplementationOnce(() => undefined);
   const result = detectLocalAgents();
@@ -271,7 +271,7 @@ it.each(['claude', 'codex'] as const)('updates cached %s status after one backgr
 });
 
 it('replaces recent-session inference with an explicit signed-out result from the retry', async () => {
-  jest.useFakeTimers();
+  jest.useFakeTimers({ now });
   const host = machine({ installed: ['claude'], signedIn: [] });
   host.file('/home/test/.claude/projects/vault/main.jsonl');
   host.execFile.mockImplementationOnce(() => undefined);
@@ -285,7 +285,7 @@ it('replaces recent-session inference with an explicit signed-out result from th
 });
 
 it.each(['lookup', 'usage'] as const)('retains confirmed installation and recent usage when retry %s stalls', async stage => {
-  jest.useFakeTimers();
+  jest.useFakeTimers({ now });
   const host = machine({ installed: ['claude'], hang: 'claude' });
   host.file('/home/test/.claude/projects/vault/main.jsonl');
   const first = detectLocalAgents();
@@ -300,7 +300,7 @@ it.each(['lookup', 'usage'] as const)('retains confirmed installation and recent
 });
 
 it('publishes a definitive Detect again result to views waiting on an invalidated retry', async () => {
-  jest.useFakeTimers();
+  jest.useFakeTimers({ now });
   const host = machine({ installed: ['claude'], hang: 'claude' });
   const current = jest.fn();
   const stop = subscribeLocalAgentDetection('/vault', current);
@@ -318,7 +318,7 @@ it('publishes a definitive Detect again result to views waiting on an invalidate
 });
 
 it('does not let an invalidated background retry overwrite Detect again', async () => {
-  jest.useFakeTimers();
+  jest.useFakeTimers({ now });
   const host = machine({ installed: ['claude'], hang: 'claude' });
   const first = detectLocalAgents();
   await jest.advanceTimersByTimeAsync(3000);
@@ -345,7 +345,7 @@ function migratedBackendSettings(raw: Record<string, unknown>): Parameters<typeo
 }
 
 it.each([DEFAULT_SETTINGS, migratedBackendSettings(migrateSettingsToCurrentSchema({ schemaVersion: 14, textExecutionBackend: 'systemsculpt' }, DEFAULT_SETTINGS).settings)])('defaults a fresh or migrated desktop chat to an installed recently used agent despite slow auth', async settings => {
-  jest.useFakeTimers();
+  jest.useFakeTimers({ now });
   const host = machine({ installed: ['claude'], hang: 'claude' });
   host.file('/home/test/.claude/projects/vault/main.jsonl');
   const balance = jest.fn();
@@ -357,7 +357,7 @@ it.each([DEFAULT_SETTINGS, migratedBackendSettings(migrateSettingsToCurrentSchem
 });
 
 it('notifies only current directory subscribers after retry and respects unsubscribe', async () => {
-  jest.useFakeTimers();
+  jest.useFakeTimers({ now });
   const host = machine({ installed: ['claude'], hang: 'claude' });
   const current = jest.fn(), other = jest.fn(), removed = jest.fn();
   const stopCurrent = subscribeLocalAgentDetection('/vault', current);
@@ -381,7 +381,7 @@ it('notifies only current directory subscribers after retry and respects unsubsc
 });
 
 it('counts launch lookup time in each original 3-second window and aborts both hung status processes', async () => {
-  jest.useFakeTimers();
+  jest.useFakeTimers({ now });
   jest.spyOn(Date, 'now').mockRestore();
   jest.setSystemTime(now);
   const host = machine({ installed: ['claude'], hang: 'claude' });
@@ -405,7 +405,7 @@ it('counts launch lookup time in each original 3-second window and aborts both h
 });
 
 it('does not block authenticated status on a stalled filesystem metadata probe', async () => {
-  jest.useFakeTimers();
+  jest.useFakeTimers({ now });
   const host = machine({ installed: ['claude'] });
   host.fs.readdir.mockImplementation(() => new Promise(() => {}));
   const result = detectLocalAgents();
@@ -428,7 +428,7 @@ it.each([
 });
 
 it('keeps the existing detection deadline when install-directory enumeration stalls', async () => {
-  jest.useFakeTimers();
+  jest.useFakeTimers({ now });
   const host = machine({ installed: [] });
   host.fs.readdir.mockImplementation(() => new Promise(() => {}));
   const result = detectLocalAgents();
@@ -453,7 +453,7 @@ it('probes Windows npm agents without a shell and keeps native credential homes 
 });
 
 it('does not spawn a late Windows status process after shim I/O exceeds the existing deadline', async () => {
-  jest.useFakeTimers();
+  jest.useFakeTimers({ now });
   const { execFile } = machine(), windows = windowsNpmHost(), read = windows.fs.readFile.getMockImplementation()!;
   let release!: () => void;
   const stalled = new Promise<void>(resolve => { release = resolve; });
