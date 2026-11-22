@@ -135,3 +135,43 @@ describe("Chat turn failure receipt ownership", () => {
     expect(host.workspace.resetMessageEditor).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("Chat turn failure follow-up", () => {
+  function failure(status: number, code: string) {
+    return Object.assign(new Error(`SystemSculpt could not start this chat (${status}).`), { code, status });
+  }
+
+  function followUpHarness() {
+    const { turns, host } = receiptHarness();
+    const recheckLicenseAfterRejection = jest.fn();
+    const refreshCreditsBalance = jest.fn(async () => undefined);
+    Object.assign(host.plugin, { recheckLicenseAfterRejection });
+    Object.assign(host, { refreshCreditsBalance });
+    return { turns, recheckLicenseAfterRejection, refreshCreditsBalance };
+  }
+
+  it.each([
+    [401, "license_invalid"],
+    [403, "access_denied"],
+  ])("asks the license manager to re-check a chat refused with %s %s", (status, code) => {
+    const { turns, recheckLicenseAfterRejection, refreshCreditsBalance } = followUpHarness();
+
+    turns.refreshCreditsAfterBillingFailure(failure(status, code));
+
+    expect(recheckLicenseAfterRejection).toHaveBeenCalledTimes(1);
+    expect(refreshCreditsBalance).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [402, "insufficient_credits"],
+    [429, "auth_rate_limited"],
+    [500, "agent_bootstrap_failed"],
+    [503, "auth_unavailable"],
+  ])("leaves the license alone for %s %s", (status, code) => {
+    const { turns, recheckLicenseAfterRejection } = followUpHarness();
+
+    turns.refreshCreditsAfterBillingFailure(failure(status, code));
+
+    expect(recheckLicenseAfterRejection).not.toHaveBeenCalled();
+  });
+});

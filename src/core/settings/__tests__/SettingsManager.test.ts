@@ -316,6 +316,30 @@ describe("SettingsManager managed settings contract", () => {
     expect(manager.settings.phoneCapturesLinked).toBe(false);
   });
 
+  it("keeps why the plugin signed out only until another key or account is saved", async () => {
+    const plugin = createPlugin({ licenseKey: "", licenseSignOutReason: "invalid" });
+    const manager = new SettingsManager(plugin);
+    await manager.loadSettings();
+    expect(manager.settings.licenseSignOutReason).toBe("invalid");
+
+    await manager.updateSettings({ chatFontSize: "large" });
+    expect(manager.settings.licenseSignOutReason).toBe("invalid");
+    await manager.updateSettings({ licenseKey: "license_new" });
+    expect(manager.settings.licenseSignOutReason).toBeUndefined();
+
+    await manager.updateSettings({ licenseKey: "", userEmail: "", licenseSignOutReason: "invalid" });
+    expect(manager.settings.licenseSignOutReason).toBe("invalid");
+    await manager.updateSettings({ userEmail: "user@example.com" });
+    expect(manager.settings.licenseSignOutReason).toBeUndefined();
+  });
+
+  it.each(["expired", 1, null])("drops an unknown sign-out reason (%j)", async (reason) => {
+    const plugin = createPlugin({ licenseSignOutReason: reason });
+    const manager = new SettingsManager(plugin);
+    await manager.loadSettings();
+    expect(manager.settings).not.toHaveProperty("licenseSignOutReason");
+  });
+
   it("checks the current account inside the settings persistence queue", async () => {
     const plugin = createPlugin({ licenseKey: "linked-account" });
     const manager = new SettingsManager(plugin);

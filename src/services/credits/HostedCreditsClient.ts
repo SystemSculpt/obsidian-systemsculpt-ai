@@ -270,6 +270,7 @@ export type CreditsUsageHistoryPage = {
  */
 export class HostedCreditsClient {
   private readonly balances: CreditsBalanceCache;
+  private readonly authorizationRejectedListeners = new Set<() => void>();
 
   constructor(private readonly options: Readonly<{
     baseUrl: string;
@@ -293,6 +294,25 @@ export class HostedCreditsClient {
   /** Hear each newly published balance for the current account, e.g. after a top-up. */
   public subscribe(listener: (balance: CreditsBalanceSnapshot) => void): () => void {
     return this.balances.subscribe(listener);
+  }
+
+  /**
+   * Hear each 401 or 403 a credits read gets for the saved key: the server
+   * refused it, and it may have been replaced from the dashboard.
+   */
+  public onAuthorizationRejected(listener: () => void): () => void {
+    this.authorizationRejectedListeners.add(listener);
+    return () => {
+      this.authorizationRejectedListeners.delete(listener);
+    };
+  }
+
+  private notifyAuthorizationRejected(status: number, licenseKey: string): void {
+    // A late answer for a key that is no longer saved says nothing about the current one.
+    if ((status !== 401 && status !== 403) || licenseKey !== this.options.licenseKey().trim()) return;
+    for (const listener of [...this.authorizationRejectedListeners]) {
+      try { listener(); } catch { /* A listener must not change the read. */ }
+    }
   }
 
   private async fetchBalance(options: Readonly<{
@@ -335,6 +355,7 @@ export class HostedCreditsClient {
     });
 
     if (!response.ok) {
+      this.notifyAuthorizationRejected(response.status, licenseKey);
       await StreamingErrorHandler.handleResponseError(response, {
         endpoint: url,
       });
@@ -406,6 +427,7 @@ export class HostedCreditsClient {
     });
 
     if (!response.ok) {
+      this.notifyAuthorizationRejected(response.status, licenseKey);
       await StreamingErrorHandler.handleResponseError(response, {
         endpoint: requestUrlValue.toString(),
       });

@@ -4,6 +4,7 @@ import { renderAccountSection } from "../settings/setup/SetupTabAccountSection";
 import { renderSupportSection } from "../settings/setup/SetupTabSupportSection";
 import { SystemSculptSettingTab } from "../settings/SystemSculptSettingTab";
 import { App, Notice } from "obsidian";
+import { LICENSE_SIGNED_OUT_LINE } from "../utils/licenseUtils";
 
 jest.mock("obsidian", () => {
   const actual = jest.requireActual("obsidian");
@@ -527,7 +528,8 @@ describe("Setup tab SystemSculpt-only layout", () => {
     await flushSetupSectionRender();
     expect(plugin.getSettingsManager().updateSettings).toHaveBeenCalledWith({ licenseKey: "skss-replacement" });
     expect(plugin.getSettingsManager().updateSettings).toHaveBeenCalledTimes(1);
-    expect(plugin.getLicenseManager().validateLicenseKeyDetailed).toHaveBeenCalledWith();
+    // A key the user typed is checked, never used to sign the account out.
+    expect(plugin.getLicenseManager().validateLicenseKeyDetailed).toHaveBeenCalledWith({ enteredKey: true });
     // The button's "Working..." state is the progress; the re-rendered
     // account row is the result.
     expect(mockedNotice).not.toHaveBeenCalled();
@@ -586,6 +588,53 @@ describe("Setup tab SystemSculpt-only layout", () => {
     ]);
     expect(mockedNotice).toHaveBeenCalledWith("Can't check licenses right now. Try again.");
     expect(input.value).toBe("");
+    expect(tab.refreshAccountSection).toHaveBeenCalledTimes(1);
+  });
+
+  it("says why the plugin signed out, next to Sign in", () => {
+    const plugin = createPluginStub();
+    plugin.settings.licenseSignOutReason = "invalid";
+    const tab = new SystemSculptSettingTab(app, plugin);
+    const container = document.createElement("div");
+    renderAccountSection(container, tab, false);
+
+    expect(container.textContent).toContain(LICENSE_SIGNED_OUT_LINE);
+    expect(container.textContent).not.toContain("Use your own AI.");
+    const labels = Array.from(container.querySelectorAll("button")).map((button) => button.textContent);
+    expect(labels).toEqual(expect.arrayContaining(["Sign in", "Sign up"]));
+    expect(labels).not.toContain("Deactivate");
+    expect(labels).not.toContain("Retry");
+  });
+
+  it.each([
+    { licenseKey: "license_new" },
+    { userEmail: "user@example.com" },
+  ])("drops the sign-out reason once an account is back (%j)", (account) => {
+    const plugin = createPluginStub();
+    Object.assign(plugin.settings, { licenseSignOutReason: "invalid" }, account);
+    const tab = new SystemSculptSettingTab(app, plugin);
+    const container = document.createElement("div");
+    renderAccountSection(container, tab, false);
+
+    expect(container.textContent).not.toContain(LICENSE_SIGNED_OUT_LINE);
+  });
+
+  it("re-renders the signed-out row when Retry finds the saved key replaced", async () => {
+    const plugin = createPluginStub();
+    plugin.settings.licenseKey = "license_old";
+    plugin.getLicenseManager().validateLicenseKeyDetailed.mockResolvedValue({
+      outcome: "rejected", isValid: false, reason: "invalid", signedOut: true,
+    });
+    const tab = new SystemSculptSettingTab(app, plugin);
+    tab.refreshAccountSection = jest.fn();
+    const container = document.createElement("div");
+    renderAccountSection(container, tab, false);
+
+    Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Retry")!.click();
+    await flushSetupSectionRender();
+
+    expect(plugin.getLicenseManager().validateLicenseKeyDetailed).toHaveBeenCalledWith({});
+    expect(mockedNotice).not.toHaveBeenCalled();
     expect(tab.refreshAccountSection).toHaveBeenCalledTimes(1);
   });
 

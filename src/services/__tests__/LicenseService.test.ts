@@ -98,6 +98,7 @@ describe("LicenseService website-owned validation", () => {
   it.each([
     [200, admission("allowed"), false],
     [403, admission("license_rejected", { reason: "revoked" }), true],
+    [403, admission("license_rejected", { reason: "invalid" }), true],
     [200, { status: "success", data: { email: "old@example.com", user_name: "Old account", subscription_status: "active" } }, false],
   ])("does not apply an old account's validation after the key changes (%s, %j)", async (status, payload, currentValidity) => {
     const plugin = createPlugin({ licenseValid: !currentValidity });
@@ -117,6 +118,7 @@ describe("LicenseService website-owned validation", () => {
   it.each([
     [200, admission("allowed")],
     [403, admission("license_rejected", { reason: "revoked" })],
+    [403, admission("license_rejected", { reason: "invalid" })],
     [200, { status: "success", data: { email: "old@example.com", user_name: "Old account", subscription_status: "active" } }],
   ])("checks the account inside a queued settings update for HTTP %s", async (status, payload) => {
     const plugin = createPlugin();
@@ -140,6 +142,7 @@ describe("LicenseService website-owned validation", () => {
     await expect(validation).resolves.toEqual({ outcome: "unavailable", isValid: false });
     expect(plugin.settings.licenseValid).toBe(false);
     expect(plugin.settings.lastValidated).toBe(0);
+    expect(plugin.settings.licenseKey).toBe("replacement_account");
   });
 
   it("uses the plugin's shared admission graph by default", async () => {
@@ -230,10 +233,10 @@ describe("LicenseService website-owned validation", () => {
     });
   });
 
-  it.each(["invalid", "expired", "revoked"] as const)(
-    "invalidates only an exact negotiated license_rejected/%s response",
+  it.each(["expired", "revoked"] as const)(
+    "keeps a license_rejected/%s key, which renewing or fixing payment makes work again",
     async (reason) => {
-      const plugin = createPlugin({ licenseValid: true });
+      const plugin = createPlugin({ licenseValid: true, userEmail: "user@example.com" });
       request.mockResolvedValue(jsonResponse(
         403,
         admission("license_rejected", { reason }),
@@ -244,9 +247,140 @@ describe("LicenseService website-owned validation", () => {
         isValid: false,
         reason,
       });
-      expect(plugin.persistedUpdates).toHaveBeenCalledWith({ licenseValid: false });
+      expect(plugin.persistedUpdates.mock.calls).toEqual([[{ licenseValid: false }]]);
+      expect(plugin.settings).toMatchObject({ licenseKey: "license_test", userEmail: "user@example.com" });
     },
   );
+
+  it("signs out a key the server no longer knows, such as one replaced from the dashboard", async () => {
+    const plugin = createPlugin({
+      licenseValid: true,
+      userEmail: "user@example.com",
+      userName: "User",
+      displayName: "User",
+      subscriptionStatus: "active",
+      lastValidated: 1,
+    });
+    request.mockResolvedValue(jsonResponse(403, admission("license_rejected", { reason: "invalid" })));
+
+    await expect(createLicenseService(plugin).validateLicenseDetailed()).resolves.toEqual({
+      outcome: "rejected",
+      isValid: false,
+      reason: "invalid",
+      signedOut: true,
+    });
+    expect(plugin.persistedUpdates.mock.calls).toEqual([[{
+      licenseKey: "",
+      licenseValid: false,
+      userEmail: "",
+      userName: "",
+      displayName: "",
+      subscriptionStatus: "",
+      lastValidated: 0,
+      licenseSignOutReason: "invalid",
+    }]]);
+  });
+
+  it("only reports an unknown key the user just entered, so the caller can restore the saved one", async () => {
+    const plugin = createPlugin({ licenseValid: false, userEmail: "user@example.com" });
+    request.mockResolvedValue(jsonResponse(403, admission("license_rejected", { reason: "invalid" })));
+
+    await expect(createLicenseService(plugin).validateLicenseDetailed({ enteredKey: true })).resolves.toEqual({
+      outcome: "rejected",
+      isValid: false,
+      reason: "invalid",
+    });
+    expect(plugin.persistedUpdates.mock.calls).toEqual([[{ licenseValid: false }]]);
+    expect(plugin.settings).toMatchObject({ licenseKey: "license_test", userEmail: "user@example.com" });
+  });
+
+  it("signs out an unknown key when a refused request asks", async () => {
+    const plugin = createPlugin({ licenseValid: true, userEmail: "user@example.com" });
+    request.mockResolvedValue(jsonResponse(403, admission("license_rejected", { reason: "invalid" })));
+
+    await expect(createLicenseService(plugin).validateLicenseDetailed({ afterRefusal: true })).resolves.toEqual({
+      outcome: "rejected",
+      isValid: false,
+      reason: "invalid",
+      signedOut: true,
+    });
+    expect(plugin.settings).toMatchObject({ licenseKey: "", userEmail: "", licenseSignOutReason: "invalid" });
+  });
+
+  it.each(["expired", "revoked"] as const)(
+    "leaves a license_rejected/%s key as it was when a refused request asks",
+    async (reason) => {
+      const plugin = createPlugin({ licenseValid: true, userEmail: "user@example.com" });
+      request.mockResolvedValue(jsonResponse(403, admission("license_rejected", { reason })));
+
+      await expect(createLicenseService(plugin).validateLicenseDetailed({ afterRefusal: true })).resolves.toEqual({
+        outcome: "rejected",
+        isValid: false,
+        reason,
+      });
+      expect(plugin.updateSettings).not.toHaveBeenCalled();
+      expect(plugin.settings).toMatchObject({ licenseKey: "license_test", licenseValid: true, userEmail: "user@example.com" });
+    },
+  );
+
+  it("validates and uses the new key after signing in again", async () => {
+    const plugin = createPlugin({ licenseValid: true });
+    const service = createLicenseService(plugin);
+    request.mockResolvedValueOnce(jsonResponse(403, admission("license_rejected", { reason: "invalid" })));
+    await service.validateLicenseDetailed();
+    expect(plugin.settings.licenseKey).toBe("");
+
+    // Signing in stores the account's current key (AccountConnectService).
+    await plugin.updateSettings({ licenseKey: "license_new", userEmail: "user@example.com" });
+    request.mockResolvedValueOnce(jsonResponse(200, admission("allowed")));
+
+    await expect(service.validateLicenseDetailed()).resolves.toEqual({ outcome: "valid", isValid: true });
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(request.mock.calls[1][0]).toMatchObject({ licenseKey: "license_new" });
+    expect(plugin.settings).toMatchObject({ licenseKey: "license_new", licenseValid: true });
+  });
+
+  it.each([
+    [401, admission("license_required")],
+    [401, { error: "License key required", code: "missing_license" }],
+    [401, { error: "Invalid license key", code: "license_invalid" }],
+    [403, { error: "Access denied", code: "access_denied" }],
+    [429, { error: "Too many requests", code: "auth_rate_limited" }],
+    [429, { error: "Daily limit reached", code: "probe_key_capped" }],
+    [429, { error: "Daily limit reached", code: "probe_key_cost_capped" }],
+    [429, admission("rate_limited")],
+    [503, { error: "Authentication unavailable", code: "auth_unavailable" }],
+    [503, admission("temporarily_unavailable", { retryable: true, grace_eligible: true })],
+    [500, { error: "Internal error" }],
+    [502, "<html>Bad gateway</html>"],
+  ])("keeps a working key for HTTP %s %j", async (status, payload) => {
+    const plugin = createPlugin({ licenseValid: true, userEmail: "user@example.com" });
+    request.mockResolvedValue(typeof payload === "string"
+      ? new Response(payload, { status, headers: { "content-type": "text/html" } })
+      : jsonResponse(status, payload));
+
+    await expect(createLicenseService(plugin).validateLicenseDetailed()).resolves.toEqual({
+      outcome: "unavailable",
+      isValid: true,
+    });
+    expect(plugin.updateSettings).not.toHaveBeenCalled();
+    expect(plugin.settings).toMatchObject({ licenseKey: "license_test", licenseValid: true, userEmail: "user@example.com" });
+  });
+
+  it.each([
+    ["a network failure", new Error("offline")],
+    ["a timeout", new PlatformRequestTimeoutError(30_000)],
+  ])("keeps a working key after %s", async (_label, error) => {
+    const plugin = createPlugin({ licenseValid: true });
+    request.mockRejectedValue(error);
+
+    await expect(createLicenseService(plugin).validateLicenseDetailed()).resolves.toEqual({
+      outcome: "unavailable",
+      isValid: true,
+    });
+    expect(plugin.updateSettings).not.toHaveBeenCalled();
+    expect(plugin.settings.licenseKey).toBe("license_test");
+  });
 
   it.each([400, 401, 403, 404])(
     "does not reinterpret raw HTTP %s as an invalid license",
@@ -304,7 +438,7 @@ describe("LicenseService website-owned validation", () => {
       input.signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")));
     }));
 
-    const validation = createLicenseService(plugin).validateLicenseDetailed(controller.signal);
+    const validation = createLicenseService(plugin).validateLicenseDetailed({ signal: controller.signal });
     await Promise.resolve();
     controller.abort();
 

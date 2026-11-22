@@ -560,6 +560,10 @@ export class SettingsManager {
       validatedSettings.licenseValid = defaultSettings.licenseValid;
     }
 
+    if ("licenseSignOutReason" in validatedSettings && validatedSettings.licenseSignOutReason !== "invalid") {
+      delete validatedSettings.licenseSignOutReason;
+    }
+
     if (typeof validatedSettings.autoTranscribeRecordings !== 'boolean') {
       validatedSettings.autoTranscribeRecordings = defaultSettings.autoTranscribeRecordings;
     }
@@ -919,8 +923,15 @@ export class SettingsManager {
     }
     const nextLicenseKey = typeof updatedSettings.licenseKey === "string"
       ? updatedSettings.licenseKey : DEFAULT_SETTINGS.licenseKey;
-    if (nextLicenseKey.trim() !== this.settings.licenseKey.trim()) {
+    const keyChanged = nextLicenseKey.trim() !== this.settings.licenseKey.trim();
+    if (keyChanged) {
       updatedSettings.phoneCapturesLinked = false;
+    }
+    // A sign-out reason describes the account it ended: another key or
+    // account replaces it unless the same update records a new sign-out.
+    const accountChanged = keyChanged || (updatedSettings.userEmail ?? "") !== (this.settings.userEmail ?? "");
+    if (accountChanged && newSettings.licenseSignOutReason === undefined) {
+      delete updatedSettings.licenseSignOutReason;
     }
     // The chats-folder list only grows. Chats stay in the folder they were
     // created in and attachment cleanup scans every listed folder, so neither

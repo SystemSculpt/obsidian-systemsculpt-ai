@@ -165,6 +165,7 @@ export default class SystemSculptPlugin extends Plugin {
           void this.getPhoneCaptureInbox().linkReported();
         }
       }));
+      this.register(this._aiService.credits.onAuthorizationRejected(() => this.recheckLicenseAfterRejection()));
     }
     return this._aiService;
   }
@@ -175,7 +176,10 @@ export default class SystemSculptPlugin extends Plugin {
       const transport = new HostedTransportAdapter({
         baseUrl: new URL(API_BASE_URL).origin, pluginVersion: this.manifest.version, licenseKey,
       });
-      const admission = new ManagedAdmission({ transport, licenseKey });
+      const admission = new ManagedAdmission({
+        transport, licenseKey, onLicenseRejected: () => this.recheckLicenseAfterRejection(),
+      });
+      this.register(transport.onAuthorizationRejected(() => this.recheckLicenseAfterRejection()));
       const textGeneration = new ManagedTextGenerationAdapter({ admission, transport });
       const embeddingsIndex = new ManagedEmbeddingsIndexAdapter(transport);
       const recovery = new ManagedJobRecoveryStore(new ObsidianManagedRecoveryAdapter(this.app));
@@ -1675,6 +1679,16 @@ export default class SystemSculptPlugin extends Plugin {
       throw new Error("License manager has not been initialized.");
     }
     return this.licenseManager;
+  }
+
+  /**
+   * A hosted request refused the stored license key: ask the server whether
+   * it still works, signing out a key it no longer knows (a key replaced from
+   * the dashboard). Managed requests and their license checks, credits reads
+   * and chat turns report here.
+   */
+  recheckLicenseAfterRejection(): void {
+    void this.licenseManager?.recheckAfterRejection();
   }
 
   getAccountConnectService(): AccountConnectService {

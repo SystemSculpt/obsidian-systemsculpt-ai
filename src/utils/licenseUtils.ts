@@ -52,6 +52,28 @@ export function needsPaymentFix(balance: CreditsBalanceSnapshot | null | undefin
 export const PAYMENT_FIX_LEAD = "Your last payment failed.";
 export const PAYMENT_FIX_LINK = "Update your card";
 
+/**
+ * What signing out of SystemSculpt clears: Deactivate in Account settings, and
+ * the plugin itself when the server no longer knows the saved key.
+ */
+export const SIGNED_OUT_LICENSE_SETTINGS: Readonly<Partial<SystemSculptSettings>> = Object.freeze({
+  licenseKey: "",
+  licenseValid: false,
+  userEmail: "",
+  userName: "",
+  displayName: "",
+  subscriptionStatus: "",
+  lastValidated: 0,
+});
+
+/**
+ * Said after the plugin signs itself out of a key the server no longer knows,
+ * such as one replaced from the dashboard: on the Account row, and as a notice
+ * when it happens in the background.
+ */
+export const LICENSE_SIGNED_OUT_LINE = "Your license key was replaced or removed, so you were signed out. Sign in again.";
+export const LICENSE_SIGNED_OUT_NOTICE = "Your SystemSculpt license key was replaced or removed, so you were signed out. Sign in again in Account settings.";
+
 /** Under this many available credits, a starter account is told it is running low (T-4520). */
 const LOW_CREDITS_OFFER_THRESHOLD = 100;
 /**

@@ -7,7 +7,9 @@ import {
   activeAccountLine,
   checkPremiumUserStatus,
   isStarterBalance,
+  LICENSE_SIGNED_OUT_LINE,
   MONTHLY_OFFER_LINE,
+  SIGNED_OUT_LICENSE_SETTINGS,
   PAYMENT_FIX_LEAD,
   PAYMENT_FIX_LINK,
   needsPaymentFix,
@@ -27,7 +29,7 @@ import {
 } from "../../modals/AccountConnectOutcome";
 import type { ConnectOutcome } from "../../services/AccountConnectService";
 import { openExternalUrl } from "../../utils/externalUrl";
-import type { LicenseValidationResult } from "../../services/LicenseService";
+import type { LicenseValidationOptions, LicenseValidationResult } from "../../services/LicenseService";
 import type { CreditsBalanceSnapshot } from "../../services/credits/HostedCreditsClient";
 
 export function renderAccountSection(
@@ -45,6 +47,9 @@ export function renderAccountSection(
   const pendingSignIn = !isProActive && connectService.hasPendingRequest();
   const signedInEmail = (plugin.settings.userEmail || "").trim();
   const signedInWithoutPlan = !isProActive && !hasSavedLicense && signedInEmail.length > 0;
+  // The plugin signed itself out of a key the server no longer knows.
+  const signedOutOfReplacedKey = !isProActive && !hasSavedLicense && !signedInEmail
+    && plugin.settings.licenseSignOutReason === "invalid";
 
   const beginConnect = async (
     button: { setDisabled(disabled: boolean): unknown },
@@ -62,13 +67,16 @@ export function renderAccountSection(
     }
   };
 
-  let validateCurrentLicense: () => Promise<LicenseValidationResult>;
-  validateCurrentLicense = async (): Promise<LicenseValidationResult> => {
+  let validateCurrentLicense: (options?: LicenseValidationOptions) => Promise<LicenseValidationResult>;
+  validateCurrentLicense = async (options: LicenseValidationOptions = {}): Promise<LicenseValidationResult> => {
     // Both callers show "Working..." on their button while this runs.
     try {
-      const result = await plugin.getLicenseManager().validateLicenseKeyDetailed();
+      const result = await plugin.getLicenseManager().validateLicenseKeyDetailed(options);
       if (result.outcome === "rejected") {
-        new Notice("Invalid license key.");
+        // A saved key the server no longer knows signed the account out; the
+        // re-rendered row says why, next to Sign in.
+        if (result.signedOut) tabInstance.refreshAccountSection();
+        else new Notice("Invalid license key.");
         return result;
       }
       if (result.outcome === "unavailable") {
@@ -100,7 +108,9 @@ export function renderAccountSection(
         : userStatus.greeting || "Pro features enabled."
       : signedInWithoutPlan
         ? `Signed in as ${signedInEmail}.`
-        : "Use your own AI. Subscribe for image and video generation, smart search and Studio.";
+        : signedOutOfReplacedKey
+          ? LICENSE_SIGNED_OUT_LINE
+          : "Use your own AI. Subscribe for image and video generation, smart search and Studio.";
     statusSetting.setDesc(`${accountDesc}${hasHostCapability("local-cli", root) ? " Claude Code and Codex stay free on desktop." : ""}${pendingSignIn ? " Waiting for browser sign-in…" : ""}`);
     renderConnectOutcome(statusSetting.descEl, tabInstance.accountConnectOutcome);
   };
@@ -124,15 +134,7 @@ export function renderAccountSection(
           try {
             button.setDisabled(true).setButtonText("Working...");
             connectService.cancelPending();
-            await plugin.getSettingsManager().updateSettings({
-              licenseKey: "",
-              licenseValid: false,
-              userEmail: "",
-              userName: "",
-              displayName: "",
-              subscriptionStatus: "",
-              lastValidated: 0,
-            });
+            await plugin.getSettingsManager().updateSettings({ ...SIGNED_OUT_LICENSE_SETTINGS });
             tabInstance.refreshAccountSection();
           } finally {
             button.setDisabled(false).setButtonText("Deactivate");
@@ -314,7 +316,8 @@ export function renderAccountSection(
         }
 
         await plugin.getSettingsManager().updateSettings({ licenseKey: currentValue });
-        const result = await validateCurrentLicense();
+        // A typed key is checked, never used to sign the saved account out.
+        const result = await validateCurrentLicense({ enteredKey: true });
         if (result.outcome !== "valid" && (priorLicenseState.licenseKey || result.outcome === "rejected")) {
           await plugin.getSettingsManager().updateSettings(priorLicenseState);
         } else if (result.outcome === "unavailable") {
