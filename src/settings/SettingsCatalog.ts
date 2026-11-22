@@ -61,8 +61,8 @@ const SETTINGS_CATALOG = {
   },
   "account.patreon": {
     tabId: "account",
-    title: "Support",
-    description: "Help fund SystemSculpt.",
+    title: "Patreon",
+    description: "Paid patrons get Pro.",
   },
   "feedback.message": {
     tabId: "feedback",

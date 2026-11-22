@@ -34,8 +34,16 @@ export function renderSupportSection(
   });
 
   const supportSetting = createCatalogSetting(root, "account.patreon");
-  createExternalHelpLink(supportSetting.controlEl, {
-    text: "Support us on Patreon",
+  const patreonLinks = supportSetting.controlEl.createDiv({ cls: "ss-help-links" });
+  createExternalHelpLink(patreonLinks, {
+    text: "Activate Pro",
+    href: SYSTEMSCULPT_WEBSITE.PATREON_ACTIVATE_SETTINGS,
+    ariaLabel: "Activate Pro with your Patreon membership (opens in new tab)",
+    datasetTestId: "settings.patreon-activate",
+  });
+  patreonLinks.createSpan({ text: "•", cls: "ss-help-separator" });
+  createExternalHelpLink(patreonLinks, {
+    text: "Join on Patreon",
     href: SYSTEMSCULPT_WEBSITE.PATREON_SETTINGS,
     datasetTestId: "settings.patreon",
   });
