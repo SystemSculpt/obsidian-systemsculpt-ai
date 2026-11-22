@@ -3,6 +3,7 @@
  */
 import { App, Notice } from "obsidian";
 import { LicenseManager } from "../LicenseManager";
+import { LICENSE_SIGNED_OUT_NOTICE } from "../../../utils/licenseUtils";
 
 jest.mock("obsidian", () => {
   const actual = jest.requireActual("obsidian");
@@ -166,10 +167,16 @@ describe("LicenseManager", () => {
       expect(mockSettingsManager.updateSettings).not.toHaveBeenCalled();
     });
 
-    it("delegates to the service without extra arguments", async () => {
+    it("delegates to the service with no options", async () => {
       await manager.validateLicenseKeyDetailed();
 
-      expect(mockPlugin.aiService.validateLicenseDetailed).toHaveBeenCalledWith();
+      expect(mockPlugin.aiService.validateLicenseDetailed).toHaveBeenCalledWith({});
+    });
+
+    it("passes on a key the user just entered", async () => {
+      await manager.validateLicenseKeyDetailed({ enteredKey: true });
+
+      expect(mockPlugin.aiService.validateLicenseDetailed).toHaveBeenCalledWith({ enteredKey: true });
     });
   });
 
@@ -265,6 +272,104 @@ describe("LicenseManager", () => {
         "Couldn't validate your license. Check your account.",
         7000,
       );
+    });
+
+    it("says why when startup validation signs out a replaced key", async () => {
+      mockPlugin.settings.licenseValid = true;
+      mockPlugin.settingsTab = { containerEl: { isConnected: true }, refreshAccountSection: jest.fn() };
+      mockPlugin.aiService.validateLicenseDetailed.mockImplementation(async () => {
+        mockPlugin.settings.licenseKey = "";
+        mockPlugin.settings.licenseValid = false;
+        return { outcome: "rejected", isValid: false, reason: "invalid", signedOut: true };
+      });
+
+      await manager.initializeLicense();
+      await jest.runAllTimersAsync();
+
+      expect(mockedNotice.mock.calls).toEqual([[LICENSE_SIGNED_OUT_NOTICE, 10_000]]);
+      expect(mockPlugin.settingsTab.refreshAccountSection).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("recheckAfterRejection", () => {
+    it("asks the server once per key per minute, however many requests were refused", async () => {
+      mockPlugin.settings.licenseValid = true;
+
+      await Promise.all([manager.recheckAfterRejection(), manager.recheckAfterRejection()]);
+      expect(mockPlugin.aiService.validateLicenseDetailed).toHaveBeenCalledTimes(1);
+      // A refusal only ever signs out an unknown key; it changes nothing else.
+      expect(mockPlugin.aiService.validateLicenseDetailed).toHaveBeenCalledWith({ afterRefusal: true });
+
+      jest.advanceTimersByTime(59_999);
+      await manager.recheckAfterRejection();
+      expect(mockPlugin.aiService.validateLicenseDetailed).toHaveBeenCalledTimes(1);
+
+      jest.advanceTimersByTime(1);
+      await manager.recheckAfterRejection();
+      expect(mockPlugin.aiService.validateLicenseDetailed).toHaveBeenCalledTimes(2);
+
+      mockPlugin.settings.licenseKey = "next-key-456";
+      await manager.recheckAfterRejection();
+      expect(mockPlugin.aiService.validateLicenseDetailed).toHaveBeenCalledTimes(3);
+      expect(mockedNotice).not.toHaveBeenCalled();
+    });
+
+    it("leaves a typed key to its own check, which never signs the account out", async () => {
+      let finish!: (result: unknown) => void;
+      mockPlugin.aiService.validateLicenseDetailed.mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+      const entered = manager.validateLicenseKeyDetailed({ enteredKey: true });
+
+      await manager.recheckAfterRejection();
+      expect(mockPlugin.aiService.validateLicenseDetailed).toHaveBeenCalledTimes(1);
+
+      finish({ outcome: "rejected", isValid: false, reason: "invalid" });
+      await entered;
+      await manager.recheckAfterRejection();
+      expect(mockPlugin.aiService.validateLicenseDetailed).toHaveBeenCalledTimes(2);
+      expect(mockPlugin.aiService.validateLicenseDetailed).toHaveBeenLastCalledWith({ afterRefusal: true });
+    });
+
+    it("does nothing without a stored key", async () => {
+      mockPlugin.settings.licenseKey = " ";
+
+      await manager.recheckAfterRejection();
+
+      expect(mockPlugin.aiService.validateLicenseDetailed).not.toHaveBeenCalled();
+      expect(mockSettingsManager.updateSettings).not.toHaveBeenCalled();
+    });
+
+    it("tells the user and refreshes open settings when the server signed the key out", async () => {
+      mockPlugin.settingsTab = { containerEl: { isConnected: true }, refreshAccountSection: jest.fn() };
+      mockPlugin.aiService.validateLicenseDetailed.mockResolvedValue({ outcome: "rejected", isValid: false, reason: "invalid", signedOut: true });
+
+      await manager.recheckAfterRejection();
+
+      expect(mockedNotice.mock.calls).toEqual([[LICENSE_SIGNED_OUT_NOTICE, 10_000]]);
+      expect(mockPlugin.settingsTab.refreshAccountSection).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+      { outcome: "valid", isValid: true },
+      { outcome: "unavailable", isValid: true },
+      { outcome: "rejected", isValid: false, reason: "expired" },
+      { outcome: "rejected", isValid: false, reason: "revoked" },
+    ])("stays quiet when the re-check keeps the key (%j)", async (result) => {
+      mockPlugin.settingsTab = { containerEl: { isConnected: true }, refreshAccountSection: jest.fn() };
+      mockPlugin.aiService.validateLicenseDetailed.mockResolvedValue(result);
+
+      await manager.recheckAfterRejection();
+
+      expect(mockedNotice).not.toHaveBeenCalled();
+      expect(mockPlugin.settingsTab.refreshAccountSection).not.toHaveBeenCalled();
+    });
+
+    it("settles quietly when the check itself fails", async () => {
+      mockPlugin.settings.licenseValid = true;
+      mockPlugin.aiService.validateLicenseDetailed.mockRejectedValue(new Error("offline"));
+
+      await expect(manager.recheckAfterRejection()).resolves.toBeUndefined();
+      expect(mockSettingsManager.updateSettings).not.toHaveBeenCalled();
+      expect(mockedNotice).not.toHaveBeenCalled();
     });
   });
 });

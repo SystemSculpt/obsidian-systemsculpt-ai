@@ -56,6 +56,8 @@ For hosted chat, mobile chat, or other hosted features:
 4. Review credits and account status. **Manage account** opens billing controls. You can also find **Sign in** and **View plans / buy credits** in the command palette.
 5. Open docs or support links if you need help. If the browser does not return automatically, use **Open the sign-in page again** and paste the connection code. On Obsidian 1.8.7 or newer, a pending sign-in survives an app restart for up to ten minutes on the same device.
 
+If you replace your license key on systemsculpt.com, the plugin signs you out the next time the old key is refused, and Account settings say why. **Sign in** again to use the new key. An expired plan or a failed payment keeps the key: once you renew or fix the payment, the same key works again. If Account settings still show the plan as inactive, choose **Retry**.
+
 ## Start chatting
 
 - Command palette: `SystemSculpt AI: Open chat`

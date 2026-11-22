@@ -126,6 +126,12 @@ export interface SystemSculptSettings {
   displayName?: string;
   userEmail?: string;
   subscriptionStatus?: string;
+  /**
+   * Why the plugin signed itself out, shown on the Account row until another
+   * key or account is saved: "invalid" when the server no longer knows the
+   * stored key, such as one replaced from the dashboard.
+   */
+  licenseSignOutReason?: "invalid";
   chatsDirectory: string;
   /**
    * Every chats folder that has held transcripts: the folder configured when

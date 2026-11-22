@@ -9,7 +9,7 @@ import { SystemSculptEnvironment } from "./api/SystemSculptEnvironment";
 import { SYSTEMSCULPT_API_ENDPOINTS } from "../constants/api";
 
 import { StreamingErrorHandler } from "./StreamingErrorHandler";
-import { LicenseService, type LicenseValidationResult } from "./LicenseService";
+import { LicenseService, type LicenseValidationOptions, type LicenseValidationResult } from "./LicenseService";
 import { FirstPartyToolService } from "../tools/FirstPartyToolService";
 import type { ToolCall, ToolCallRequest, ToolCallResult } from "../types/toolCalls";
 import type { FirstPartyToolChatTarget } from "../tools/types";
@@ -110,8 +110,8 @@ export class SystemSculptService {
   }
 
   // DELEGATE TO LICENSE SERVICE
-  async validateLicenseDetailed(signal?: AbortSignal): Promise<LicenseValidationResult> {
-    return this.licenseService.validateLicenseDetailed(signal);
+  async validateLicenseDetailed(options?: LicenseValidationOptions): Promise<LicenseValidationResult> {
+    return this.licenseService.validateLicenseDetailed(options);
   }
 
   public async executeLocalVaultToolCall(options: {
