@@ -2,8 +2,6 @@
  * Context menus
  * ------------------------------------------------------------------ */
 .ss-studio-simple-context-menu {
-  --ss-studio-simple-context-menu-scale: 1;
-
   position: absolute;
   z-index: 16;
   display: flex;
@@ -13,8 +11,6 @@
   border: 1px solid var(--ss-line);
   border-radius: var(--ss-radius-md);
   box-shadow: var(--ss-elevation-3);
-  transform: scale(var(--ss-studio-simple-context-menu-scale));
-  transform-origin: top left;
   overflow: hidden;
 }
 
@@ -68,8 +64,6 @@
 }
 
 .ss-studio-node-context-menu {
-  --ss-studio-node-context-menu-scale: 1;
-
   position: absolute;
   z-index: 10;
   display: flex;
@@ -81,13 +75,10 @@
   border: 1px solid var(--ss-line);
   border-radius: var(--ss-radius-md);
   box-shadow: var(--ss-elevation-3);
-  transform: scale(var(--ss-studio-node-context-menu-scale));
-  transform-origin: top left;
   overflow: hidden;
   transition:
     left var(--ss-dur-fast) var(--ss-ease),
-    top var(--ss-dur-fast) var(--ss-ease),
-    transform var(--ss-dur-fast) var(--ss-ease);
+    top var(--ss-dur-fast) var(--ss-ease);
 }
 
 .ss-studio-node-context-menu.is-compact-width {

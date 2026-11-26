@@ -1402,11 +1402,10 @@ export class SystemSculptStudioView extends ItemView {
     const viewport = this.graphViewportEl;
     const localX = viewport.clientWidth * 0.5;
     const localY = viewport.clientHeight * 0.5;
-    const zoom = this.graphInteraction.getGraphZoom() || 1;
     const menuX = normalizeGraphCoordinate(viewport.scrollLeft + localX);
     const menuY = normalizeGraphCoordinate(viewport.scrollTop + localY);
     // No pointer anchor: the new node lands beside the selection, else centred.
-    this.openNodeDefinitionMenu({ menuX, menuY, zoom });
+    this.openNodeDefinitionMenu({ menuX, menuY });
   }
 
   private pathBrowseOptions(): StudioNodeConfigPathBrowseOptions {
@@ -2125,7 +2124,6 @@ export class SystemSculptStudioView extends ItemView {
     graphY?: number;
     menuX: number;
     menuY: number;
-    zoom: number;
   }): void {
     if (!this.currentProject || !this.graphViewportEl) {
       return;
@@ -2144,7 +2142,6 @@ export class SystemSculptStudioView extends ItemView {
     this.nodeActionContextMenuOverlay?.hide();
     const contextMenu = this.ensureNodeContextMenuOverlay();
     contextMenu.mount(this.graphViewportEl);
-    contextMenu.setGraphZoom(options.zoom);
     contextMenu.open({
       anchorX: options.menuX,
       anchorY: options.menuY,
@@ -2181,7 +2178,6 @@ export class SystemSculptStudioView extends ItemView {
       return;
     }
 
-    const zoom = this.graphInteraction.getGraphZoom() || 1;
     const world = this.graphInteraction.graphPointFromClient(event.clientX, event.clientY);
     if (!world) {
       return;
@@ -2206,7 +2202,6 @@ export class SystemSculptStudioView extends ItemView {
           graphY,
           menuX,
           menuY,
-          zoom,
         });
         return;
       }
@@ -2214,7 +2209,6 @@ export class SystemSculptStudioView extends ItemView {
         nodeId: contextNodeId,
         menuX,
         menuY,
-        zoom,
       });
       return;
     }
@@ -2223,7 +2217,6 @@ export class SystemSculptStudioView extends ItemView {
       graphY,
       menuX,
       menuY,
-      zoom,
     });
   }
 
@@ -2231,7 +2224,6 @@ export class SystemSculptStudioView extends ItemView {
     nodeId: string;
     menuX: number;
     menuY: number;
-    zoom: number;
   }): void {
     if (!this.currentProject || !this.graphViewportEl) {
       return;
@@ -2254,7 +2246,6 @@ export class SystemSculptStudioView extends ItemView {
     this.nodeContextMenuOverlay?.hide();
     const contextMenu = this.ensureNodeActionContextMenuOverlay();
     contextMenu.mount(this.graphViewportEl);
-    contextMenu.setGraphZoom(options.zoom);
     contextMenu.open({
       anchorX: options.menuX,
       anchorY: options.menuY,
@@ -2447,8 +2438,6 @@ export class SystemSculptStudioView extends ItemView {
     if (context.mode === "overview") {
       return;
     }
-    this.nodeContextMenuOverlay?.setGraphZoom(zoom);
-    this.nodeActionContextMenuOverlay?.setGraphZoom(zoom);
     this.captureGraphViewportState({ zoomOverride: zoom, requestLayoutSave: true });
   }
 
@@ -2783,8 +2772,6 @@ export class SystemSculptStudioView extends ItemView {
     this.syncGraphZoomVisualState();
     const contextMenu = this.ensureNodeContextMenuOverlay();
     const nodeActionMenu = this.ensureNodeActionContextMenuOverlay();
-    contextMenu.setGraphZoom(this.graphInteraction.getGraphZoom());
-    nodeActionMenu.setGraphZoom(this.graphInteraction.getGraphZoom());
     contextMenu.mount(this.graphViewportEl);
     nodeActionMenu.mount(this.graphViewportEl);
   }

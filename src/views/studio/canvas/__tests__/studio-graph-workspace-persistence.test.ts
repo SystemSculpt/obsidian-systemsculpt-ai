@@ -1,7 +1,11 @@
 /** @jest-environment jsdom */
 
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { StudioCanvasGeometry } from "../StudioCanvasGeometry";
+import { StudioCanvasSelection } from "../../StudioCanvasSelection";
 import { StudioGraphInteractionEngine } from "../../StudioGraphInteractionEngine";
+import { StudioShapeController } from "../../shapes/StudioShapeController";
 import type { StudioNodeInstance, StudioProjectV1 } from "../../../../studio/types";
 import { cloneStudioProjectSnapshot } from "../../../../studio/StudioProjectSnapshots";
 import { reconcileStudioProject } from "../../../../studio/StudioProjectReconciliation";
@@ -63,6 +67,106 @@ function options(currentProject: StudioProjectV1): StudioGraphWorkspaceRendererO
 }
 
 describe("persistent Studio graph workspace", () => {
+  it("keeps the selected text outline after a mixed shape drag and its bubbling click", () => {
+    const source: StudioNodeInstance = { ...node("source"), kind: "studio.text", config: { value: "Source notes" } };
+    const peer: StudioNodeInstance = { ...node("peer", 400), kind: "studio.text", config: { value: "Other notes" } };
+    const current = project([source, peer]);
+    current.diagram = {
+      shapes: [{ id: "capture", shape: "rectangle", position: { x: 160, y: 0 }, size: { width: 160, height: 80 }, label: "Capture" }],
+      arrows: [{ id: "context", fromShapeId: "source", toShapeId: "capture", label: "Context" }],
+    };
+    const selection = new StudioCanvasSelection();
+    const commit = (_reason: unknown, mutator: (value: StudioProjectV1) => boolean | void) => mutator(current) !== false;
+    const engine = new StudioGraphInteractionEngine({
+      getCurrentProject: () => current, isBusy: () => false, setError: jest.fn(), requestRender: jest.fn(),
+      commitProjectMutation: commit, getPortType: () => null, portTypeCompatible: () => false,
+    }, selection);
+    const initial = { ...options(current), graphInteraction: engine };
+    const controller = new StudioShapeController({
+      getCurrentProject: () => current, getCanvasEl: () => handle.canvasEl, getGraphZoom: () => engine.getGraphZoom(),
+      isBusy: () => false, commitMutation: commit, requestRender: jest.fn(),
+      beginNodeTranslation: () => engine.beginSelectionTranslation(),
+      translateNodes: (value, delta) => engine.applySelectionTranslation(value, delta),
+      previewNodeTranslation: () => engine.previewSelectionTranslation(),
+      finishNodeTranslation: () => engine.finishSelectionTranslation(),
+    }, selection);
+    initial.shapeLayer = controller.layerOptions();
+    const style = document.createElement("style");
+    style.textContent = ["node-chrome.css", "text-nodes.css"].map(file => readFileSync(resolve(__dirname, "../../../../css/views/studio", file), "utf8")).join("\n");
+    document.head.appendChild(style);
+    document.body.appendChild(initial.root);
+    const handle = renderStudioGraphWorkspace(initial);
+    const pointer = (type: string, x: number, y: number, shiftKey = false): PointerEvent => {
+      const event = new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, shiftKey });
+      Object.defineProperty(event, "pointerId", { value: 1 });
+      return event as PointerEvent;
+    };
+    try {
+      const card = initial.root.querySelector<HTMLElement>('[data-node-id="source"]')!;
+      const shape = initial.root.querySelector<HTMLElement>('[data-shape-id="capture"]')!;
+      const label = shape.querySelector<HTMLElement>(".ss-studio-shape-label")!;
+      card.style.width = "103px"; // Settled intrinsic glyph measurement.
+      expect(getComputedStyle(card).boxShadow).toBe("none");
+      expect(getComputedStyle(card).outline).toBe("");
+      selection.replace("shape", ["capture"]);
+      engine.setSelectedNodeIds(["source"]);
+      expect(getComputedStyle(card).outline).toBe("2px solid var(--ss-accent)");
+
+      label.dispatchEvent(pointer("pointerdown", 180, 20));
+      window.dispatchEvent(pointer("pointermove", 215, 35));
+      window.dispatchEvent(pointer("pointerup", 215, 35));
+      // Browsers dispatch click after pointerup; pointer-only tests missed this deselection.
+      label.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      expect(source.position).toEqual({ x: 35, y: 15 });
+      expect(current.diagram.shapes[0].position).toEqual({ x: 195, y: 15 });
+      expect(handle.refresh(initial)).toBe(true);
+      expect(engine.getSelectedNodeIds()).toEqual(["source"]);
+      expect(controller.getSelectedShapeIds()).toEqual(["capture"]);
+      expect(card.classList.contains("is-selected")).toBe(true);
+      expect(shape.classList.contains("is-selected")).toBe(true);
+      expect(getComputedStyle(card).outline).toBe("2px solid var(--ss-accent)");
+      expect(initial.root.querySelector('[data-node-id="source"]')).toBe(card);
+      expect(card.style.width).toBe("103px");
+
+      // Even two selected nodes must not expose the node-only frame in a mixed selection.
+      engine.setSelectedNodeIds(["source", "peer"]);
+      engine.refreshSelectionResizeFrame();
+      expect(initial.root.querySelector(".ss-studio-selection-resize-frame.is-visible")).toBeNull();
+      expect(handle.canvasEl!.classList.contains("is-multi-select-active")).toBe(false);
+
+      // Arrow hit paths and label descendants also bubble clicks after additive picks.
+      for (const selector of [".ss-studio-shape-arrow-hit", ".ss-studio-shape-arrow-label"]) {
+        controller.clearSelection();
+        const arrow = initial.root.querySelector<Element>(selector)!;
+        const target = selector.endsWith("label") ? arrow.appendChild(document.createElement("span")) : arrow;
+        target.dispatchEvent(pointer("pointerdown", 100, 50, true));
+        target.dispatchEvent(pointer("pointerup", 100, 50, true));
+        target.dispatchEvent(new MouseEvent("click", { bubbles: true, shiftKey: true }));
+        expect(engine.getSelectedNodeIds()).toEqual(["source", "peer"]);
+        expect([...selection.ids("arrow")]).toEqual(["context"]);
+        expect(initial.root.querySelector(".ss-studio-shape-arrow.is-selected")).not.toBeNull();
+        expect(initial.root.querySelector(".ss-studio-shape-arrow-label.is-selected")).not.toBeNull();
+        expect(card.classList.contains("is-selected")).toBe(true);
+        expect(getComputedStyle(card).outline).toBe("2px solid var(--ss-accent)");
+        expect(initial.root.querySelector(".ss-studio-selection-resize-frame.is-visible")).toBeNull();
+        expect(handle.canvasEl!.classList.contains("is-multi-select-active")).toBe(false);
+      }
+
+      handle.canvasEl!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      expect(engine.getSelectedNodeIds()).toEqual([]);
+      expect(card.classList.contains("is-selected")).toBe(false);
+      expect(getComputedStyle(card).outline).toBe("");
+      expect(getComputedStyle(card).boxShadow).toBe("none");
+      expect(card.style.width).toBe("103px");
+    } finally {
+      handle.dispose();
+      controller.registerLayerHandle(null);
+      engine.clearRenderBindings();
+      initial.root.remove();
+      style.remove();
+    }
+  });
+
   it("preserves measured automatic text width on unrelated selection refresh", () => {
     const text: StudioNodeInstance = { ...node("Notes", 40), kind: "studio.text", position: { x: 40, y: 420 }, config: { value: "Research and ideas" } };
     const initial = options(project([text]));
